@@ -1139,6 +1139,7 @@ partial class DataTable {
                     st.dragCol = i;
                     st.dragColStartX = app.mouseX;
                     st.dragColMoved = false;
+                    if (touchUi) { app.ClaimDrag(); }
                 }
             }
 
@@ -1638,6 +1639,7 @@ partial class DataTable {
                         st.dragStartY = app.mouseY;
                         st.dragMoved = false;
                         st.rowGripDrag = true;
+                        if (touchUi) { app.ClaimDrag(); }
                     }
                 }
                 // 主从详情展开箭头，嵌在行号栏左侧，
@@ -2242,6 +2244,7 @@ partial class DataTable {
                 && app.mouseX >= st.fillHX - grabW && app.mouseX < st.fillHX + grabW
                 && app.mouseY >= st.fillHY - grabW && app.mouseY < st.fillHY + grabW) {
                 st.fillDrag = true;
+                if (touchUi) { app.ClaimDrag(); }
                 st.fillSR0 = DataTable.MinI(st.rangeR0, st.rangeR1);
                 st.fillSR1 = DataTable.MaxI(st.rangeR0, st.rangeR1);
                 st.fillSC0 = DataTable.MinI(st.rangeC0, st.rangeC1);

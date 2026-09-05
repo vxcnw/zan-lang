@@ -297,6 +297,7 @@ partial class ChartView {
                 }
             }
             if (Ui.PressedDown(app, panId) && app.window.EventButton() == 0) {
+                if (app.TouchDevice()) { app.ClaimDrag(); }
                 app.StateSet(Chart.MapDragXKey(o.iwid), app.mouseX);
                 app.StateSet(Chart.MapDragYKey(o.iwid), app.mouseY);
                 app.StateSet(Chart.MapDragPanXKey(o.iwid), panX);

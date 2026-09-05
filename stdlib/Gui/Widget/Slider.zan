@@ -627,6 +627,11 @@ class Slider : Control {
                 }
             }
             int pnt = vertical ? app.mouseY : app.mouseX;
+            if (app.TouchDevice()
+                && (app.focus.IsPressed(id) || app.focus.IsPressed(id + 1)
+                    || (range && app.focus.IsPressed(id + 2)))) {
+                app.ClaimDrag();
+            }
             if (app.focus.IsPressed(id + 1)) { dragThumb = 1; }
             else if (range && app.focus.IsPressed(id + 2)) { dragThumb = 2; }
             else if (app.focus.IsPressed(id)) {

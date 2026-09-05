@@ -246,7 +246,8 @@ class Button : Control {
             // 即使之后没有新的 OS 事件到达。
             app.window.Wake();
         }
-        if (Tip != "" && Ui.HoverLevelMsIn(app, wid, 0, x, y, w, h) >= 900) {
+        if (Tip != "" && (Ui.HoverLevelMsIn(app, wid, 0, x, y, w, h) >= 900
+                          || Ui.HoldTipIn(app, wid, x, y, w, h))) {
             Tooltip.RequestBox(app, x, y, w, h, this.TipText(), Tooltip.Bottom(),
                                app.Scale(260));
         }

@@ -91,6 +91,7 @@ class Scrollbar {
         int travel = height - thumbH;
 
         bool active = app.focus.IsPressed(id);
+        if (active && app.TouchDevice()) { app.ClaimDrag(); }
         if (active && travel > 0 && mo > 0) {
             if (grabId != id) {
                 // 首次 active 帧：IsPressed 在按压分发同帧即为真，

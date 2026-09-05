@@ -1101,10 +1101,12 @@ class FilePicker {
             if (FilePicker.Pressed(
                     app, trackX, thumbY, scrollW, thumbH)) {
                 treeDragging = true;
+                if (app.TouchDevice()) { app.ClaimDrag(); }
                 treeDragOffset = app.mouseY - thumbY;
             } else if (FilePicker.Pressed(
                     app, trackX, paneY, scrollW, paneH)) {
                 treeDragging = true;
+                if (app.TouchDevice()) { app.ClaimDrag(); }
                 treeDragOffset = thumbH / 2;
                 if (range > 0) {
                     treeOff = (app.mouseY - paneY - treeDragOffset)
@@ -1266,10 +1268,12 @@ class FilePicker {
             if (FilePicker.Pressed(
                     app, trackX, thumbY, scrollW, thumbH)) {
                 listDragging = true;
+                if (app.TouchDevice()) { app.ClaimDrag(); }
                 listDragOffset = app.mouseY - thumbY;
             } else if (FilePicker.Pressed(
                     app, trackX, paneY, scrollW, paneH)) {
                 listDragging = true;
+                if (app.TouchDevice()) { app.ClaimDrag(); }
                 listDragOffset = thumbH / 2;
                 if (range > 0) {
                     listOff = (app.mouseY - paneY - listDragOffset)

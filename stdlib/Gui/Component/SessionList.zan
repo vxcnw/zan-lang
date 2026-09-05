@@ -309,7 +309,9 @@ class SessionList {
                 takeFocus = true;
                 app.RequestRedraw();
             }
-            if (renHover && renameTip != "") {
+            if ((renHover || Ui.HoldTipIn(app, renId,
+                    x + rowW - delW - arcW - renW, ry, renW, rowH))
+                && renameTip != "") {
                 Tooltip.RequestBox(app, x + rowW - delW - arcW - renW, ry, renW,
                     rowH, renameTip, 0, app.Scale(220));
             }
@@ -323,7 +325,9 @@ class SessionList {
                 act.archived = orig;
                 app.RequestRedraw();
             }
-            if (arcHover && archiveTip != "") {
+            if ((arcHover || Ui.HoldTipIn(app, arcId,
+                    x + rowW - delW - arcW, ry, arcW, rowH))
+                && archiveTip != "") {
                 Tooltip.RequestBox(app, x + rowW - delW - arcW, ry, arcW, rowH,
                     archiveTip, 0, app.Scale(220));
             }
@@ -336,7 +340,9 @@ class SessionList {
                 act.deleted = orig;
                 app.RequestRedraw();
             }
-            if (delHover && deleteTip != "") {
+            if ((delHover || Ui.HoldTipIn(app, delId,
+                    x + rowW - delW, ry, delW, rowH))
+                && deleteTip != "") {
                 Tooltip.RequestBox(app, x + rowW - delW, ry, delW, rowH,
                     deleteTip, 0, app.Scale(220));
             }

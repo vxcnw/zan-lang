@@ -1343,6 +1343,7 @@ partial class ChartView {
             app.StateSet(Chart.TreeDragPanYKey(o.iwid), panY);
             app.StateSet(Chart.TreeDragMovedKey(o.iwid), 0);
             app.StateSet(Chart.TreeDraggingKey(o.iwid), 1);
+            if (app.TouchDevice()) { app.ClaimDrag(); }
         }
         bool treeDragging = app.StateGet(Chart.TreeDraggingKey(o.iwid), 0) == 1;
         if (ChartView.TreeRoamEnabled(o.roam) && treeDragging

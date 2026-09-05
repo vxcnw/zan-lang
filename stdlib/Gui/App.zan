@@ -5709,4 +5709,11 @@ class App {
     /// 上下文菜单据此忽略终结长按的那次释放（否则菜单
     /// 刚打开就被松手当"点击外部"关掉）。
     bool LongPressFired() { return longPressFired; }
+
+    /// 本次按压已持续的毫秒数；无按压时值无意义。
+    /// 触摸上的"长按提示"门控（Ui.HoldTipIn）用它把
+    /// 按住时长当作悬停稳定时长的等价物。
+    int HeldPressMs() {
+        return Window.GetTickMs() - pressStartMs;
+    }
 }

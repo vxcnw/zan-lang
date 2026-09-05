@@ -100,7 +100,7 @@ class ChartToolbox {
             }
             c.DrawGlyphIn(icons[action], bx, by, btn, btn, glyph, icol);
             app.hitTester.RegisterRect(cid, bx, by, btn, btn, 0);
-            if (hot) {
+            if (hot || Ui.HoldTipIn(app, cid, bx, by, btn, btn)) {
                 Tooltip.RequestBox(app, bx, by, btn, btn, tips[action],
                     Tooltip.Bottom(), 0);
             }

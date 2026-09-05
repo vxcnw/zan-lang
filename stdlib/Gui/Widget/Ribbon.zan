@@ -172,7 +172,7 @@ class Ribbon {
 
             if (enabled) {
                 app.hitTester.RegisterRect(id, cx, by, w1, bh, 0);
-                if (hv >= 900) {
+                if (hv >= 900 || Ui.HoldTipIn(app, id, cx, by, w1, bh)) {
                     Tooltip.RequestBox(app, cx, by, w1, bh, cmd.TipText(),
                         Tooltip.Bottom(), app.Scale(260));
                 }
@@ -562,7 +562,7 @@ class Ribbon {
             // 悬停稳定后才显示提示，避免快速划过一排
             // 命令时气泡闪烁。宿主在帧末将其绘制在所有内容之上
             // （Tooltip.Flush）。
-            if (hv >= 900) {
+            if (hv >= 900 || Ui.HoldTipIn(app, id, x, y, w, h)) {
                 int tipY = y + h;
                 if (Ribbon.tipBaseY > 0) { tipY = Ribbon.tipBaseY; }
                 Tooltip.Request(x + w / 2, tipY, it.TipText(), Tooltip.Bottom(),
