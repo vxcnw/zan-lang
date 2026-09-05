@@ -6,7 +6,7 @@ namespace Gui.Component.DataTable;
 
 /// DataTable 的列描述符。
 /// cellType：0 文本，1 链接，2 标签，3 进度，4 徽章，5 图片，
-/// 6 图标，7 按钮，8 迷你图，9 组件
+/// 6 图标，7 按钮，8 图表，9 组件
 /// align：0 左对齐，1 居中，2 右对齐
 class DataColumn {
     string title;
@@ -87,7 +87,7 @@ class DataColumn {
     // ---- 编辑 ----
     bool editable; // 单元格值可内联编辑（需显式开启）
 
-    // ---- 图标 / 按钮 / 迷你图列（cellType 6/7/8）----
+    // ---- 图标 / 按钮 / 图表列（cellType 6/7/8）----
     // 图标列（6）：单元格值即 tabler 图标名（如 "check"），
     //   用 Canvas.DrawGlyph 以 datatable::icon 的前景色绘制；
     //   空值画空。不参与编辑、汇总与 tooltip。
@@ -95,13 +95,19 @@ class DataColumn {
     //   用 btnIcon）；整格热区居中一个 small 按钮，
     //   点击把 hitRow/hitCol 指向本格后 Raise CellClick。
     //   不参与编辑与内联校验。
-    // 迷你图列（8）：单元格值是以逗号分隔的数值序列
-    //   （如 "12,18,9,24"），ParseReal 宽松解析，格内
-    //   画 accent 色迷你柱状图；序列为空画空。
-    //   不参与编辑、汇总与 tooltip。
+    // 图表列（8）：单元格值是以逗号分隔的数值序列（如
+    //   "12,18,9,24"，宽松实数解析），按 sparkKind 画格内
+    //   迷你图：0 柱状（默认，历史行为），1 折线（抗锯齿
+    //   折线 + 末点强调），2 面积（折线 + 基线填充）。含
+    //   负值的序列以零基线分区：正值向上用 sparkColor，
+    //   负值向下用 sparkNegColor（Excel 迷你图惯例）。
+    //   序列为空画空。不参与编辑、汇总与 tooltip。
     string btnIcon; // 按钮列的图标（值为空时的按钮内容）
     string btnClass; // 按钮列的 class（如 "primary"、"danger text"）
-    bool sparkArea; // 迷你图是否在柱下画半透明面积
+    bool sparkArea; // 柱状形态是否在柱下画半透明面积（历史字段）
+    int sparkKind;      // 图表形态：0 柱状，1 折线，2 面积
+    int sparkColor;     // 正值/线条色（0 = 主题 accent 自动）
+    int sparkNegColor;  // 负值色（0 = 主题 danger 自动）
 
     // ---- 组件列（cellType 9）----
     // 单元格值是逗号分隔的数值序列（同迷你图约定），渲染层
@@ -183,6 +189,9 @@ class DataColumn {
         this.btnIcon = "";
         this.btnClass = "";
         this.sparkArea = false;
+        this.sparkKind = 0;
+        this.sparkColor = 0;
+        this.sparkNegColor = 0;
         this.compId = "";
         this.shapeR = 0;
         this.shapeC = 0;
@@ -531,11 +540,15 @@ class DataColumn {
         return c;
     }
 
-    /// 迷你图列：单元格值是以逗号分隔的数值序列
+    /// 图表列：单元格值是以逗号分隔的数值序列
     /// （"12,18,9,24,30"），ParseReal 宽松解析（"¥1,234" 也能读），
-    /// 格内以 accent 色画等槽位迷你柱状图，柱高以序列最大值为比例。
-    /// `area` 为 true 时柱下叠加半透明 accent 面积。
-    /// 不可排序/筛选——序列文本不构成可比较的键。
+    /// 格内画等槽位迷你图。`kind`：0 柱状（默认，柱高以正峰
+    /// 为比例），1 折线（抗锯齿折线 + 末点强调），2 面积
+    /// （折线 + 基线填充）。柱状形态下 `area` 为 true 时柱下
+    /// 叠加半透明面积（历史参数）。含负值的序列以零基线分区，
+    /// 正值用 `posColor`、负值用 `negColor`（0 = 主题自动：
+    /// accent / spark-neg）。不可排序/筛选——序列文本不构成
+    /// 可比较的键。
     static DataColumn SparklineCol(string title, int width, bool area) {
         DataColumn c = new DataColumn(title, width);
         c.cellType = 8;
@@ -543,8 +556,25 @@ class DataColumn {
         c.btnIcon = "";
         c.btnClass = "";
         c.sparkArea = area;
+        c.sparkKind = 0;
+        c.sparkColor = 0;
+        c.sparkNegColor = 0;
         c.sortable = false;
         c.filterable = false;
+        return c;
+    }
+
+    /// 图表列形态：0 柱状，1 折线，2 面积（越界回柱状）。
+    static DataColumn SparkKind(DataColumn c, int kind) {
+        if (kind < 0 || kind > 2) { kind = 0; }
+        c.sparkKind = kind;
+        return c;
+    }
+
+    /// 图表列配色：正值/线条色与负值色（0 = 主题自动）。
+    static DataColumn SparkColors(DataColumn c, int posColor, int negColor) {
+        c.sparkColor = posColor;
+        c.sparkNegColor = negColor;
         return c;
     }
 

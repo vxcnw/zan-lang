@@ -2509,15 +2509,15 @@ class Gallery {
         Gallery.demoTableState.CellClick.Add(Gallery.OnDemoCellClick);
         Gallery.demoRows = new List<DataRow>();
         Gallery.demoRows.Add(Gallery.DtRow11("Alpha", "Zan", "98", "128000", "Engineering", "San Francisco", "143400", "pencil", "Edit", "12,18,9,24,30,22", "3,1,0,4,2,5,1"));
-        Gallery.demoRows.Add(Gallery.DtRow11("Beta", "Lang", "87", "94500", "Sales", "New York", "105800", "trash", "Edit", "20,14,26,16,28,24", "0,2,4,1,3,2,0"));
+        Gallery.demoRows.Add(Gallery.DtRow11("Beta", "Lang", "87", "94500", "Sales", "New York", "105800", "trash", "Edit", "20,-8,26,16,-4,24", "0,2,4,1,3,2,0"));
         Gallery.demoRows.Add(Gallery.DtRow11("Alpha", "Kite", "91", "112300", "Engineering", "Los Angeles", "125800", "download", "Edit", "8,15,12,20,17,26", "5,0,3,2,1,4,2"));
         Gallery.demoRows.Add(Gallery.DtRow11("Beta", "Vale", "82", "88000", "Operations", "New York", "98600", "pencil", "Edit", "30,22,28,18,24,20", "1,4,2,0,5,3,1"));
         Gallery.demoRows.Add(Gallery.DtRow11("Alpha", "Orin", "76", "76400", "Engineering", "Seattle", "85600", "star", "Edit", "10,12,18,15,22,28", "2,3,1,5,0,2,4"));
         Gallery.demoRows.Add(Gallery.DtRow11("Beta", "Nyx", "95", "141200", "Sales", "San Francisco", "158100", "trash", "Edit", "24,30,18,26,20,32", "4,2,5,3,1,0,3"));
         Gallery.demoRows.Add(Gallery.DtRow11("Gamma", "Rune", "88", "99900", "Operations", "Los Angeles", "111900", "pencil", "Edit", "14,10,16,22,18,26", "0,5,2,1,4,3,2"));
         Gallery.demoRows.Add(Gallery.DtRow11("Alpha", "Sol", "69", "65000", "Engineering", "Seattle", "72800", "star", "Edit", "22,26,20,14,18,24", "3,0,4,2,5,1,0"));
-        Gallery.demoRows.Add(Gallery.DtRow11("Gamma", "Wren", "93", "133750", "Sales", "San Francisco", "149800", "download", "Edit", "16,20,28,24,30,26", "1,3,0,4,2,5,4"));
-        Gallery.demoRows.Add(Gallery.DtRow11("Beta", "Iris", "74", "81200", "Operations", "New York", "90900", "pencil", "Edit", "18,14,22,16,26,20", "5,1,3,0,2,4,1"));
+        Gallery.demoRows.Add(Gallery.DtRow11("Gamma", "Wren", "93", "133750", "Sales", "San Francisco", "149800", "download", "Edit", "16,20,-12,24,30,26", "1,3,0,4,2,5,4"));
+        Gallery.demoRows.Add(Gallery.DtRow11("Beta", "Iris", "74", "81200", "Operations", "New York", "90900", "pencil", "Edit", "18,14,-6,16,26,-10", "5,1,3,0,2,4,1"));
         Gallery.demoRows.Add(Gallery.DtRow11("Gamma", "Fox", "81", "90500", "Engineering", "Los Angeles", "101400", "star", "Edit", "26,18,24,30,22,28", "2,4,1,3,0,5,3"));
         Gallery.demoRows.Add(Gallery.DtRow11("Alpha", "Ash", "90", "119000", "Sales", "Seattle", "133300", "trash", "Edit", "12,16,10,20,24,18", "0,3,5,1,4,2,5"));
         Gallery.bigTableState = new DataTableState();
@@ -12592,11 +12592,12 @@ class Gallery {
                 DataColumn.Money(DataColumn.Numeric("Total", app.Scale(110)), "$")), "total"));
             // Inline-embed columns (cellType 6/7/8): a tabler icon, an
             // in-cell button (click routes through CellClick with
-            // HitRow/HitCol pointing at the cell) and a sparkline drawn
-            // from a comma-separated series.
+            // HitRow/HitCol pointing at the cell) and a trend chart
+            // drawn from a comma-separated series (area kind: line +
+            // baseline fill; negative values hang below a zero line).
             cols.Add(DataColumn.Field(DataColumn.IconCol("", app.Scale(52)), "op"));
             cols.Add(DataColumn.Field(DataColumn.ButtonCol("Act", app.Scale(84), "pencil", "text"), "act"));
-            cols.Add(DataColumn.Field(DataColumn.SparklineCol("Trend", app.Scale(110), true), "trend"));
+            cols.Add(DataColumn.Field(DataColumn.SparkKind(DataColumn.SparklineCol("Trend", app.Scale(110), false), 2), "trend"));
             // Declarative comp column (cellType 9): the engine pools a real
             // BandGrid per (row, col) and feeds it the cell's numeric series;
             // shape/heat live on the column, not in the data.
@@ -12607,8 +12608,8 @@ class Gallery {
             // so the tint follows the active theme).
             Gallery.demoStyler.Bind(app, cols);
             Gallery.BoxCaption(app, px, py - app.Scale(20), w - app.Scale(36),
-                Gallery.T("Team/Name frozen left, Total frozen right · Icon/Button/Sparkline inline columns · Plan shows a live BandGrid per cell (declarative CompCol) · right-click a header for freeze/group/aggregate · F2 edits · Ctrl+Z undoes",
-                          "Team/Name 冻结在左、Total 冻结在右 · 图标/按钮/迷你图内嵌列 · Plan 列每格内嵌一个真实 BandGrid（声明式 CompCol）· 右键表头可冻结/分组/汇总 · F2 编辑 · Ctrl+Z 撤销"),
+                Gallery.T("Team/Name frozen left, Total frozen right · Icon/Button/Trend-chart inline columns (line + baseline fill, negatives below the zero line) · Plan shows a live BandGrid per cell (declarative CompCol) · right-click a header for freeze/group/aggregate · F2 edits · Ctrl+Z undoes",
+                          "Team/Name 冻结在左、Total 冻结在右 · 图标/按钮/趋势图内嵌列（折线 + 基线填充，负值悬于零基线下方）· Plan 列每格内嵌一个真实 BandGrid（声明式 CompCol）· 右键表头可冻结/分组/汇总 · F2 编辑 · Ctrl+Z 撤销"),
                 app.theme.fontSizeMedium);
             Gallery.dtDemoCols = cols;
             DataTable.Render(app, px, py, w - app.Scale(36),

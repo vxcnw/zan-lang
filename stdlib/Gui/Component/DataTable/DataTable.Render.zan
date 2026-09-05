@@ -34,6 +34,135 @@ partial class DataTable {
         }
     }
 
+    // ---------- 图表列（cellType 8）几何与绘制 ----------
+
+    /// 迷你图零基线：negMin >= 0（序列无负值）时就是绘图区
+    /// 底边；否则按 posMax:(-negMin) 的比例把零点放进绘图区，
+    /// 正负两段各自归一化——Excel 迷你图惯例。纯函数，
+    /// conformance 测试直接断言其几何。
+    static int SparkZeroY(double negMin, double posMax, int plotY, int plotH) {
+        if (negMin >= 0.0 || posMax <= 0.0) { return plotY + plotH; }
+        return plotY + (int)((double)plotH * posMax / (posMax - negMin));
+    }
+
+    /// 迷你图某值对应的纵坐标：与柱状/折线渲染共用同一套
+    /// 归一化（正值向上压缩到 plotY..zeroY，负值向下压缩到
+    /// zeroY..底边），保证两种形态对同一序列形状一致。
+    static int SparkValueY(double v, double posMax, double negMin,
+                           int plotY, int plotH) {
+        int zeroY = DataTable.SparkZeroY(negMin, posMax, plotY, plotH);
+        if (v >= 0.0 && posMax > 0.0) {
+            return zeroY - (int)(v * (double)(zeroY - plotY) / posMax);
+        }
+        if (v < 0.0 && negMin < 0.0) {
+            return zeroY + (int)((0.0 - v) * (double)(plotY + plotH - zeroY)
+                                 / (0.0 - negMin));
+        }
+        return zeroY;
+    }
+
+    /// 柱状形态：等槽位柱，正值从零基线向上、负值向下，
+    /// 历史的 sparkArea 半透明面积（正区全高）保留。
+    static void DrawSparkBars(App app, DataColumn col, List<string> seq,
+                              int n, int plotX, int plotY, int plotW, int plotH,
+                              double posMax, double negMin, int zeroY,
+                              int spark, int sparkNeg) {
+        Canvas c = app.canvas;
+        int slotW = plotW / n;
+        if (slotW < 1) { slotW = 1; }
+        int barW = slotW * 3 / 5;
+        if (barW < 1) { barW = 1; }
+        int areaTint = DataTable.ColorAlpha(spark, 45);
+        for (int bi = 0; bi < n; bi = bi + 1) {
+            double bv = DataTable.ParseReal(seq[bi]);
+            int bxc = plotX + slotW * bi + (slotW - barW) / 2;
+            if (bv >= 0.0) {
+                int bh = (int)(bv * (double)(zeroY - plotY) / posMax);
+                if (bh < 1 && bv > 0.0) { bh = 1; }
+                if (col.sparkArea && bh >= 1) {
+                    c.FillRect(bxc, plotY, barW, zeroY - plotY, areaTint);
+                }
+                c.FillRect(bxc, zeroY - bh, barW, bh, spark);
+            } else {
+                int bh = (int)((0.0 - bv) * (double)(plotY + plotH - zeroY)
+                               / (0.0 - negMin));
+                if (bh < 1) { bh = 1; }
+                c.FillRect(bxc, zeroY, barW, bh, sparkNeg);
+            }
+        }
+    }
+
+    /// 折线/面积形态：槽位中心的抗锯齿折线（DrawPolyline
+    /// 单笔扫描，拐角无亮缝）。面积形态先按 1px 竖条填充
+    /// 线与零基线之间的区域（正区正色淡染、负区负色淡染，
+    /// 相当于对折线下的形状做逐列采样）。负值游程用
+    /// sparkNeg 覆描——与零线的交点处解析衔接，而不是
+    /// 整条换色。末点画实心圆点强调当前值。
+    static void DrawSparkLine(App app, DataColumn col, List<string> seq,
+                              int n, int plotX, int plotY, int plotW, int plotH,
+                              double posMax, double negMin, int zeroY,
+                              int spark, int sparkNeg) {
+        Canvas c = app.canvas;
+        int slotW = plotW / n;
+        if (slotW < 1) { slotW = 1; }
+        List<int> xs = new List<int>();
+        List<int> ys = new List<int>();
+        for (int i = 0; i < n; i = i + 1) {
+            xs.Add(plotX + slotW * i + slotW / 2);
+            ys.Add(DataTable.SparkValueY(DataTable.ParseReal(seq[i]),
+                                         posMax, negMin, plotY, plotH));
+        }
+        int th = app.Scale(2);
+        if (col.sparkKind == 2) {
+            int tint = DataTable.ColorAlpha(spark, 45);
+            int negTint = DataTable.ColorAlpha(sparkNeg, 45);
+            int x = xs[0];
+            int seg = 1;
+            while (x < xs[n - 1]) {
+                while (seg < n - 1 && xs[seg] <= x) { seg = seg + 1; }
+                double t = 0.0;
+                if (xs[seg] > xs[seg - 1]) {
+                    t = (double)(x - xs[seg - 1]) / (double)(xs[seg] - xs[seg - 1]);
+                }
+                int y = ys[seg - 1] + (int)(t * (double)(ys[seg] - ys[seg - 1]));
+                if (y <= zeroY) {
+                    c.FillRect(x, y, 1, zeroY - y, tint);
+                } else {
+                    c.FillRect(x, zeroY, 1, y - zeroY, negTint);
+                }
+                x = x + 1;
+            }
+        }
+        c.DrawPolyline(xs, ys, spark, th);
+        // 负值游程覆描：从第一个负段开始收集连续负点，
+        // 游程两端以零线交点收口，整段一次 DrawPolyline。
+        int i2 = 0;
+        while (i2 + 1 < n) {
+            if (ys[i2] <= zeroY && ys[i2 + 1] <= zeroY) { i2 = i2 + 1; continue; }
+            int j = i2 + 1;
+            while (j + 1 < n && ys[j + 1] > zeroY) { j = j + 1; }
+            List<int> nx = new List<int>();
+            List<int> ny = new List<int>();
+            if (ys[i2] <= zeroY) {
+                double t = (double)(zeroY - ys[i2]) / (double)(ys[i2 + 1] - ys[i2]);
+                nx.Add(xs[i2] + (int)(t * (double)(xs[i2 + 1] - xs[i2])));
+                ny.Add(zeroY);
+            }
+            for (int k = i2; k <= j; k = k + 1) { nx.Add(xs[k]); ny.Add(ys[k]); }
+            if (ys[j + 1] <= zeroY) {
+                double t = (double)(zeroY - ys[j]) / (double)(ys[j + 1] - ys[j]);
+                nx.Add(xs[j] + (int)(t * (double)(xs[j + 1] - xs[j])));
+                ny.Add(zeroY);
+            }
+            c.DrawPolyline(nx, ny, sparkNeg, th);
+            i2 = j + 1;
+        }
+        int mr = app.Scale(3);
+        int mc = spark;
+        if (ys[n - 1] > zeroY) { mc = sparkNeg; }
+        c.FillRoundRect(xs[n - 1] - mr, ys[n - 1] - mr, mr * 2, mr * 2, mr, mc);
+    }
+
     // ---------- 单元格渲染 ----------
 
     /// `fgOverride` 是 state 的 CellStyler 给出的打包颜色，0 表示
@@ -305,7 +434,13 @@ partial class DataTable {
             return;
         }
 
-        // ---- 迷你图：逗号分隔数值序列 -> 格内等槽位迷你柱状图 ----
+        // ---- 图表：逗号分隔数值序列 -> 格内迷你图 ----
+        // 三种形态（sparkKind）：0 柱状（默认，历史行为）、
+        // 1 折线（抗锯齿折线 + 末点强调）、2 面积（折线 +
+        // 基线填充）。值经 ParseReal 宽松解析，支持小数；
+        // 含负值的序列以零基线上下分区（SparkZeroY），
+        // 正值用 sparkColor、负值用 sparkNegColor——
+        // 0 表示走主题自动色（accent / spark-neg）。
         if (col.cellType == 8) {
             List<string> seq = DataTable.NumSeries(val);
             int n = seq.Count;
@@ -316,32 +451,35 @@ partial class DataTable {
                 if (plotH < app.Scale(4)) { plotH = app.Scale(4); }
                 int plotX = cx + pad;
                 int plotY = cy + app.Scale(4);
-                int mx = 0;
+                double posMax = 0.0;
+                double negMin = 0.0;
                 for (int si = 0; si < n; si = si + 1) {
-                    int av = DataTable.ParseInt(seq[si]);
-                    if (av < 0) { av = 0 - av; }
-                    if (av > mx) { mx = av; }
+                    double sv = DataTable.ParseReal(seq[si]);
+                    if (sv > posMax) { posMax = sv; }
+                    if (sv < negMin) { negMin = sv; }
                 }
-                if (mx < 1) { mx = 1; }
+                if (posMax < 1.0) { posMax = 1.0; }
+                int zeroY = DataTable.SparkZeroY(negMin, posMax, plotY, plotH);
                 int accent = Style.Part(app, "datatable", "accent", "", "", "",
                                         Style.SNormal()).FgOr(0);
-                int slotW = plotW / n;
-                if (slotW < 1) { slotW = 1; }
-                int barW = slotW * 3 / 5;
-                if (barW < 1) { barW = 1; }
-                int areaTint = DataTable.ColorAlpha(accent, 45);
-                for (int bi = 0; bi < n; bi = bi + 1) {
-                    int bv = DataTable.ParseInt(seq[bi]);
-                    if (bv < 0) { bv = 0 - bv; }
-                    int bh = bv * plotH / mx;
-                    if (bh < 1 && bv > 0) { bh = 1; }
-                    int slotL = plotX + slotW * bi;
-                    int bxc = slotL + (slotW - barW) / 2;
-                    int byc = plotY + plotH - bh;
-                    if (col.sparkArea && bv > 0 && bh >= 1) {
-                        c.FillRect(bxc, plotY, barW, plotH, areaTint);
-                    }
-                    c.FillRect(bxc, byc, barW, bh, accent);
+                int spark = accent;
+                if (col.sparkColor != 0) { spark = col.sparkColor; }
+                int sparkNeg = col.sparkNegColor;
+                if (sparkNeg == 0) {
+                    sparkNeg = Style.Part(app, "datatable", "spark-neg", "", "", "",
+                                          Style.SNormal()).FgOr(0);
+                    // 皮肤没给 spark-neg 时退半透明正色，
+                    // 至少保住正负分区可辨。
+                    if (sparkNeg == 0) { sparkNeg = DataTable.ColorAlpha(spark, 150); }
+                }
+                if (col.sparkKind == 1 || col.sparkKind == 2) {
+                    DataTable.DrawSparkLine(app, col, seq, n, plotX, plotY,
+                                            plotW, plotH, posMax, negMin, zeroY,
+                                            spark, sparkNeg);
+                } else {
+                    DataTable.DrawSparkBars(app, col, seq, n, plotX, plotY,
+                                            plotW, plotH, posMax, negMin, zeroY,
+                                            spark, sparkNeg);
                 }
             }
             return;
@@ -677,11 +815,12 @@ partial class DataTable {
         int titleRowH = t.heightMedium;
         int rowH = t.heightMedium;
         int fs = Style.FontFallback(app, "medium");
-        // 紧凑密度：st.rowH 以逻辑像素给出数据行/表头行高，
-        // 0 表示沿用主题的 heightMedium。
+        // 紧凑密度：st.rowH 以逻辑像素给出数据行行高，
+        // 0 表示沿用主题的 heightMedium。表头行恒为默认高度，
+        // 不随数据行密度变化（业务窗的大行高只为容纳主图等
+        // 高单元格，表头跟着变高会浪费纵向空间）。
         if (st.rowH > 0) {
             rowH = app.Scale(st.rowH);
-            titleRowH = rowH;
         }
         // band 行位于列标题上方且略矮——
         // 只带组名，没有排序箭头或筛选图标。`headerH` 保持

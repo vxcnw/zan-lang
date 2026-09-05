@@ -1,0 +1,107 @@
+using System;
+using Gui;
+using Gui.Widget;
+using Gui.Component.DataTable;
+
+namespace DataTableSparkTest;
+
+/// 图表列（cellType 8）增强：sparkKind 三形态（0 柱状 /
+/// 1 折线 / 2 面积）、sparkColor / sparkNegColor 配色
+/// （0 = 主题自动）、宽松实数序列与零基线几何。纯几何
+/// 函数（SparkZeroY / SparkValueY）直接断言数值；三种
+/// 形态各渲一帧真实表格（含负值序列）证明绘制路径畅通。
+class Program {
+    static App app;
+
+    static DataRow Row(string series) {
+        DataRow r = new DataRow();
+        r.Push(series);
+        return r;
+    }
+
+    static List<DataRow> Rows() {
+        List<DataRow> rows = new List<DataRow>();
+        // 小数 + 负数 + 零混合：柱状要正负分区，折线要负值游程。
+        rows.Add(Row("3.5,-8,12,0,-2.25,9"));
+        // 千位分隔/货币/单位也能被 ParseReal 读出。
+        rows.Add(Row("¥1,234.5"));
+        return rows;
+    }
+
+    static List<DataColumn> Cols(int kind) {
+        List<DataColumn> cols = new List<DataColumn>();
+        cols.Add(DataColumn.Field(
+            DataColumn.SparkKind(DataColumn.SparklineCol("T", 200, false), kind), "t"));
+        return cols;
+    }
+
+    static void Frame(int kind) {
+        app.BeginFrame();
+        WidgetId.ResetFrame();
+        DataSource src = new RowListSource(Rows());
+        DataTable.RenderSource(app, 20, 20, 260, 120, Cols(kind), src,
+                               new DataTableState());
+        app.RunOverlays();
+    }
+
+    static void Main() {
+        // ---- 工厂默认：图表列、柱状形态、主题自动色、不可排序/筛选 ----
+        DataColumn c = DataColumn.SparklineCol("T", 110, true);
+        Console.WriteLine("factory=" + (c.cellType == 8 && c.sparkKind == 0
+            && c.sparkColor == 0 && c.sparkNegColor == 0 && c.sparkArea
+            && !c.sortable && !c.filterable));
+
+        // ---- SparkKind 越界回柱状（DataColumn 是引用类型，
+        //      每个断言用新列，避免同一对象被链式改写）----
+        DataColumn k1 = DataColumn.SparkKind(DataColumn.SparklineCol("T", 110, false), 1);
+        DataColumn k5 = DataColumn.SparkKind(DataColumn.SparklineCol("T", 110, false), 5);
+        DataColumn kn = DataColumn.SparkKind(DataColumn.SparklineCol("T", 110, false), 0 - 1);
+        Console.WriteLine("clamp=" + (k1.sparkKind == 1 && k5.sparkKind == 0
+            && kn.sparkKind == 0));
+
+        // ---- SparkColors 显式配色（ARGB 字面量取 int 正域内的值）----
+        DataColumn cc = DataColumn.SparkColors(DataColumn.SparklineCol("T", 110, false),
+                                               0x1F8F4D, 0x7F1010);
+        Console.WriteLine("colors=" + (cc.sparkColor == 0x1F8F4D
+            && cc.sparkNegColor == 0x7F1010));
+
+        // ---- CloneCol 逐字段复制（透视视图复制列时形态/配色不丢）----
+        DataColumn k2 = DataColumn.SparkKind(
+            DataColumn.SparkColors(DataColumn.SparklineCol("T", 90, false),
+                                   2, 0x0090FF), 2);
+        DataColumn cp = DataTable.CloneCol(k2);
+        Console.WriteLine("clone=" + (cp.cellType == 8 && cp.sparkArea == false
+            && cp.sparkKind == 2 && cp.sparkColor == 2
+            && cp.sparkNegColor == 0x0090FF));
+
+        // ---- 零基线几何：无负值 -> 底边；有负值 -> posMax:(-negMin) 分区 ----
+        Console.WriteLine("zeroAllPos=" + (DataTable.SparkZeroY(0.0, 24.0, 10, 100) == 110));
+        Console.WriteLine("zeroMixed=" + (DataTable.SparkZeroY(0.0 - 8.0, 24.0, 10, 100) == 85));
+        Console.WriteLine("zeroAllNeg=" + (DataTable.SparkZeroY(0.0 - 8.0, 0.0, 10, 100) == 110));
+
+        // ---- 值纵坐标：正峰到顶、零在基线、负谷到底、中值按段归一 ----
+        Console.WriteLine("vyTop=" + (DataTable.SparkValueY(24.0, 24.0, 0.0 - 8.0, 10, 100) == 10));
+        Console.WriteLine("vyZero=" + (DataTable.SparkValueY(0.0, 24.0, 0.0 - 8.0, 10, 100) == 85));
+        Console.WriteLine("vyBottom=" + (DataTable.SparkValueY(0.0 - 8.0, 24.0, 0.0 - 8.0, 10, 100) == 110));
+        Console.WriteLine("vyPosMid=" + (DataTable.SparkValueY(12.0, 24.0, 0.0 - 8.0, 10, 100) == 48));
+        Console.WriteLine("vyNegMid=" + (DataTable.SparkValueY(0.0 - 4.0, 24.0, 0.0 - 8.0, 10, 100) == 97));
+
+        // ---- 宽松实数解析（序列元素经 ParseReal）----
+        Console.WriteLine("parse=" + (DataTable.ParseReal("12.5") == 12.5
+            && DataTable.ParseReal("-98%") == 0.0 - 98.0
+            && DataTable.ParseReal("$1,234.50") == 1234.5));
+
+        // ---- 三形态真实帧：含负值序列渲染不炸（柱/折线/面积）----
+        app = new App("dt-spark", 320, 180);
+        app.Show();
+        Frame(0);
+        Frame(1);
+        Frame(2);
+        app.RequestRedraw();
+        for (int i = 0; i < 3; i = i + 1) {
+            app.PumpGuarded();
+            app.FrameGuarded(delegate() { Frame(2); });
+        }
+        Console.WriteLine("frames=true");
+    }
+}
