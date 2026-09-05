@@ -39,6 +39,10 @@
 /* ---------------------------------------------------------------- plumbing */
 
 static zan_gl_api gl;
+/* GL 3.3 core; local to this backend's coverage pass. */
+#define ZGL_MAX 0x8008
+#define ZGL_FUNC_ADD 0x8006
+static void (*zgl_blend_equation)(zgl_enum);
 static int g_gl_state = 0;   /* 0 untried, 1 ready, -1 unusable */
 
 #define ZGL_VF 34            /* floats per vertex, see zgl_push */
@@ -47,7 +51,11 @@ typedef enum {
     ZGL_MODE_NONE = 0,
     ZGL_MODE_BLEND,     /* shapes, source-over */
     ZGL_MODE_REPLACE,   /* shapes, overwrite (clear_rect, opaque gradients) */
-    ZGL_MODE_TEXT       /* glyph runs, per-channel coverage */
+    ZGL_MODE_TEXT,      /* glyph runs, per-channel coverage */
+    ZGL_MODE_UNION      /* capsules into coverage FBO, maximum not source-over */
+    /* ZGL_MODE_COMPOSITE was folded into ZGL_MODE_BLEND: the shape shader's
+     * uComposite path does the straight-alpha source-over itself and is fed by
+     * per-primitive state, not by a distinct pipeline mode. */
 } zgl_mode;
 
 /* Shape kinds, as the fragment shader switches on them. */
@@ -58,6 +66,8 @@ typedef enum {
 #define ZGL_K_CAPSULE 4
 #define ZGL_K_TEXT1   5   /* single-channel coverage tile (FreeType glyph) */
 #define ZGL_K_TEXT4   6   /* per-channel coverage tile (GDI run) */
+#define ZGL_K_UNION   7   /* sample completed polyline coverage */
+#define ZGL_K_SURFACE 8   /* combined rounded fill and border */
 
 /* Tile side for the upload comparison below: 64x64 is 16 KiB of pixels, small
  * enough that a scrolled list or a hovered button touches few tiles, large
@@ -66,6 +76,7 @@ typedef enum {
 
 typedef struct {
     zgl_uint tex, fbo;
+    zgl_uint cov_tex, cov_fbo; /* lazy, surface-sized R8 union scratch */
     int w, h;
     int gpu_ahead;   /* GPU framebuffer holds pixels s->pixels does not */
     int cpu_ahead;   /* s->pixels holds pixels the GPU framebuffer does not */
@@ -81,7 +92,8 @@ static zgl_target g_zgl_targets[64];
  * render target changes, so the batch never spans two framebuffers. */
 static struct {
     zgl_uint prog_shape, prog_text, vao, vbo;
-    zgl_int  u_viewport_shape, u_viewport_text, u_atlas1, u_atlas4;
+    zgl_int  u_viewport_shape, u_viewport_text, u_atlas1, u_atlas4, u_coverage,
+             u_destination;
     zgl_uint atlas1, atlas4;         /* R8 and RGBA8 glyph atlases */
     float   *verts;
     size_t   count, cap;             /* in floats */
@@ -146,6 +158,21 @@ static const char *ZGL_VS =
 static const char *ZGL_FS_SHAPE =
 "#version 330 core\n"
 ZGL_FS_COMMON
+"uniform sampler2D uCoverage;\n"
+"uniform sampler2D uDestination;\n"
+"vec4 over(vec4 src) {\n"
+"    vec4 dst = texelFetch(uDestination, ivec2(gl_FragCoord.xy), 0);\n"
+"    vec4 s = floor(clamp(src, 0.0, 1.0)*255.0 + 0.0001);\n"
+"    vec4 d = floor(dst*255.0 + 0.5);\n"
+"    if (s.a <= 0.0) return dst;\n"
+"    float da = floor(d.a * (255.0-s.a) / 255.0);\n"
+"    float a = s.a + da;\n"
+"    /* blend_over, byte for byte: the stored RGB is normalised by the RESULT\n"
+"     * alpha (straight alpha) and quantised with integer division, so the\n"
+"     * layered present and any CPU readback see the same bytes the CPU path\n"
+"     * would have written for the same geometry. */\n"
+"    return vec4(floor((s.rgb*s.a+d.rgb*da)/a), a)/255.0;\n"
+"}\n"
 "out vec4 o_color;\n"
 /* Rounded-box distance with per-corner radius: a corner whose mask bit is
  * clear is square, which is how welded controls share a straight seam. */
@@ -174,13 +201,10 @@ ZGL_FS_COMMON
 "    vec2 p = zpix();\n"
 "    zclip(p);\n"
 "    int kind = int(v_kind.x + 0.5);\n"
-/* The round shapes measure distance from the pixel's top-left sample, which is
- * where cpu_fill_circle / cpu_draw_circle / cpu_fill_sector / cpu_fill_radial
- * take theirs (they walk integer dx, dy from the centre); everything else
- * measures from the pixel centre. Half a pixel of disagreement here is a
- * visible ring one pixel off its CPU position. */
-"    vec2 lp = (kind >= 1 && kind <= 3) ? (p - 0.5) - v_center\n"
-"                                       : p - v_center;\n"
+/* Circle/sector and capsules use pixel centres. The radial glow alone keeps
+ * the CPU's integer-lattice squared-distance falloff. */
+"    vec2 lp = p - v_center;\n"
+"    if (kind == 2) lp -= vec2(0.5);\n"
 "    float cov = 0.0;\n"
 "    vec4 col = v_col0;\n"
 "    if (kind == 0) {\n"
@@ -237,12 +261,37 @@ ZGL_FS_COMMON
 "            angc = lo * hi;\n"
 "        }\n"
 "        cov = clamp(radc, 0.0, 1.0) * angc;\n"
-"    } else if (kind == 4) {\n"
-"        float sd = sd_seg(p, v_seg.xy, v_seg.zw) - v_shape.z;\n"
-"        cov = clamp(0.5 - sd, 0.0, 1.0);\n"
+    "    } else if (kind == 4) {\n"
+    "        float sd = sd_seg(p, v_seg.xy, v_seg.zw) - v_shape.z;\n"
+    "        cov = clamp(0.5 - sd, 0.0, 1.0);\n"
+    "        if (v_kind.y > 0.5) cov = floor(cov * 255.0) / 255.0;\n"
+    "    }\n"
+    "    if (kind == 7) cov = texelFetch(uCoverage, ivec2(gl_FragCoord.xy), 0).r;\n"
+"    if (kind == 8) {\n"
+"        int mask = int(v_kind.y + 0.5);\n"
+"        float outer = clamp(0.5 - sd_round(lp, v_shape.xy, v_shape.z, mask), 0.0, 1.0);\n"
+"        float inner = outer;\n"
+"        if (v_shape.w > 0.0) {\n"
+"            vec2 h = v_shape.xy - v_shape.w;\n"
+"            inner = (min(h.x, h.y) <= 0.0) ? 0.0 :\n"
+"                clamp(0.5 - sd_round(lp, h, max(v_shape.z-v_shape.w, 0.0), mask), 0.0, outer);\n"
+"        }\n"
+"        float border = v_col1.a * (outer - inner);\n"
+"        float fill = v_col0.a * (outer - border);\n"
+"        float alpha = fill + border;\n"
+"        if (alpha <= 0.0) discard;\n"
+"        o_color = over(vec4((v_col0.rgb * fill + v_col1.rgb * border) / alpha, alpha));\n"
+"        return;\n"
 "    }\n"
 "    if (cov <= 0.0) discard;\n"
-"    o_color = vec4(col.rgb, col.a * cov);\n"
+"    o_color = (kind == 4 && v_kind.y > 0.5) ? vec4(cov)\n"
+"                                          : vec4(col.rgb, col.a * cov);\n"
+"    /* Straight-alpha source-over computed in the shader, byte-faithful to the\n"
+"     * CPU's blend_over: fixed-function blending accumulates RGB without the\n"
+"     * /alpha normalisation, which on transparent destinations (shaped/glass\n"
+"     * windows) fringes every translucent edge. Kinds 7/8 always need it; the\n"
+"     * coverage/destination samplers are bound only for those draws. */\n"
+"    if (kind == 7 || kind == 8) o_color = over(o_color);\n"
 "}\n";
 
 /* Text: two fragment outputs, colour and per-channel coverage, blended as
@@ -357,6 +406,8 @@ static int zgl_init(void) {
      * that will draw claims it (and the last check that it is usable). */
     if (!zan_gl_ctx_make_current()) { zan_gl_ctx_destroy(); return 0; }
     if (!zan_gl_api_load(&gl, zan_gl_ctx_getproc)) { zan_gl_ctx_destroy(); return 0; }
+    zgl_blend_equation = (void (*)(zgl_enum))zan_gl_ctx_getproc("glBlendEquation");
+    if (!zgl_blend_equation) { zan_gl_ctx_destroy(); return 0; }
 
     g_zgl.prog_shape = zgl_link(ZGL_VS, ZGL_FS_SHAPE);
     g_zgl.prog_text = zgl_link(ZGL_VS, ZGL_FS_TEXT);
@@ -370,6 +421,8 @@ static int zgl_init(void) {
 
     g_zgl.u_viewport_shape = gl.GetUniformLocation(g_zgl.prog_shape, "uViewport");
     g_zgl.u_viewport_text = gl.GetUniformLocation(g_zgl.prog_text, "uViewport");
+    g_zgl.u_coverage = gl.GetUniformLocation(g_zgl.prog_shape, "uCoverage");
+    g_zgl.u_destination = gl.GetUniformLocation(g_zgl.prog_shape, "uDestination");
     g_zgl.u_atlas1 = gl.GetUniformLocation(g_zgl.prog_text, "uAtlas1");
     g_zgl.u_atlas4 = gl.GetUniformLocation(g_zgl.prog_text, "uAtlas4");
 
@@ -399,6 +452,8 @@ static zgl_target *zgl_target_of(zan_surface_t *s) {
     if (t->fbo && (t->w != s->width || t->h != s->height)) {
         gl.DeleteFramebuffers(1, &t->fbo);
         gl.DeleteTextures(1, &t->tex);
+        if (t->cov_fbo) gl.DeleteFramebuffers(1, &t->cov_fbo);
+        if (t->cov_tex) gl.DeleteTextures(1, &t->cov_tex);
         free(t->shadow);
         memset(t, 0, sizeof(*t));
     }
@@ -563,12 +618,24 @@ static void zgl_flush(void) {
     if (!t) { g_zgl.count = 0; return; }
 
     gl.BindFramebuffer(ZGL_FRAMEBUFFER, t->fbo);
+    if (g_zgl.mode == ZGL_MODE_UNION)
+        gl.BindFramebuffer(ZGL_FRAMEBUFFER, t->cov_fbo);
+    zgl_blend_equation(g_zgl.mode == ZGL_MODE_UNION ? ZGL_MAX : ZGL_FUNC_ADD);
     gl.Viewport(0, 0, t->w, t->h);
     gl.BindVertexArray(g_zgl.vao);
     gl.BindBuffer(ZGL_ARRAY_BUFFER, g_zgl.vbo);
     gl.BufferData(ZGL_ARRAY_BUFFER,
                   (zgl_sizeiptr)(g_zgl.count * sizeof(float)),
                   g_zgl.verts, ZGL_STREAM_DRAW);
+    /* Kinds 7/8 do their source-over in the shader and need the destination
+     * texels as they sit on the GPU right now; a snapshot that lags the
+     * framebuffer would composite against stale pixels. */
+    int shader_over = 0;
+    for (size_t v = 0; v + 8 <= g_zgl.count; v += ZGL_VF) {
+        int k = (int)(g_zgl.verts[v + 8] + 0.5f);
+        if (k == ZGL_K_UNION || k == ZGL_K_SURFACE) { shader_over = 1; break; }
+    }
+    static zgl_uint snap_tex, snap_fbo; static int snap_w, snap_h;
 
     if (g_zgl.mode == ZGL_MODE_TEXT) {
         gl.UseProgram(g_zgl.prog_text);
@@ -590,7 +657,62 @@ static void zgl_flush(void) {
         gl.UseProgram(g_zgl.prog_shape);
         zgl_bind_attribs(g_zgl.prog_shape);
         gl.Uniform2f(g_zgl.u_viewport_shape, (float)t->w, (float)t->h);
-        if (g_zgl.mode == ZGL_MODE_REPLACE) {
+        gl.ActiveTexture(ZGL_TEXTURE0);
+        /* Union capsules write coverage into the scratch R8 attachment; nothing
+         * is sampled. The shader-over kinds sample the completed coverage and
+         * the destination snapshot below. */
+        if (g_zgl.mode == ZGL_MODE_UNION) {
+            gl.BindTexture(ZGL_TEXTURE_2D, 0);
+        } else if (shader_over) {
+            /* Snapshot the destination at its current state, then draw over
+             * that copy with blending disabled so the shader sees the true
+             * destination and writes the composited result, not a blend of
+             * itself. Snapshot is a process-wide scratch: sized on demand,
+             * copied for each draw batch that needs it, freed with the context. */
+            if (snap_w != t->w || snap_h != t->h) {
+                if (snap_tex) { gl.DeleteTextures(1, &snap_tex); gl.DeleteFramebuffers(1, &snap_fbo); snap_tex = snap_fbo = 0; }
+                snap_w = snap_h = 0;
+                gl.GenTextures(1, &snap_tex);
+                gl.BindTexture(ZGL_TEXTURE_2D, snap_tex);
+                gl.TexParameteri(ZGL_TEXTURE_2D, ZGL_TEXTURE_MIN_FILTER, ZGL_NEAREST);
+                gl.TexParameteri(ZGL_TEXTURE_2D, ZGL_TEXTURE_MAG_FILTER, ZGL_NEAREST);
+                gl.TexParameteri(ZGL_TEXTURE_2D, ZGL_TEXTURE_WRAP_S, ZGL_CLAMP_TO_EDGE);
+                gl.TexParameteri(ZGL_TEXTURE_2D, ZGL_TEXTURE_WRAP_T, ZGL_CLAMP_TO_EDGE);
+                gl.TexImage2D(ZGL_TEXTURE_2D, 0, ZGL_RGBA8, t->w, t->h, 0,
+                              ZGL_BGRA, ZGL_UNSIGNED_BYTE, NULL);
+                gl.GenFramebuffers(1, &snap_fbo);
+                gl.BindFramebuffer(ZGL_FRAMEBUFFER, snap_fbo);
+                gl.FramebufferTexture2D(ZGL_FRAMEBUFFER, ZGL_COLOR_ATTACHMENT0,
+                                        ZGL_TEXTURE_2D, snap_tex, 0);
+                if (gl.CheckFramebufferStatus(ZGL_FRAMEBUFFER) != ZGL_FRAMEBUFFER_COMPLETE) {
+                    gl.DeleteFramebuffers(1, &snap_fbo); gl.DeleteTextures(1, &snap_tex);
+                    snap_tex = snap_fbo = 0; snap_w = snap_h = 0;
+                } else snap_w = t->w, snap_h = t->h;
+            } else {
+                gl.BindTexture(ZGL_TEXTURE_2D, snap_tex);
+            }
+            if (snap_tex) {
+                gl.BindFramebuffer(ZGL_READ_FRAMEBUFFER, t->fbo);
+                gl.BindFramebuffer(ZGL_DRAW_FRAMEBUFFER, snap_fbo);
+                gl.BlitFramebuffer(0, 0, t->w, t->h, 0, 0, t->w, t->h,
+                                   ZGL_COLOR_BUFFER_BIT, ZGL_NEAREST);
+                gl.BindFramebuffer(ZGL_FRAMEBUFFER, t->fbo);
+                gl.ActiveTexture(ZGL_TEXTURE1);
+                gl.BindTexture(ZGL_TEXTURE_2D, snap_tex);
+                gl.Uniform1i(g_zgl.u_destination, 1);
+                gl.ActiveTexture(ZGL_TEXTURE0);
+            } else {
+                /* Snapshot unavailable: skip the shader-over path for this
+                 * batch rather than composite against a missing texture. */
+                shader_over = 0;
+            }
+        }
+        /* Never sample the attachment being written (including union passes). */
+        if (g_zgl.mode != ZGL_MODE_UNION) {
+            gl.BindTexture(ZGL_TEXTURE_2D, t->cov_tex);
+            gl.Uniform1i(g_zgl.u_coverage, 0);
+        }
+        if (g_zgl.mode == ZGL_MODE_REPLACE || shader_over) {
             gl.Disable(ZGL_BLEND);
         } else {
             gl.Enable(ZGL_BLEND);
@@ -605,7 +727,12 @@ static void zgl_flush(void) {
 
     gl.DrawArrays(ZGL_TRIANGLES, 0, (zgl_sizei)(g_zgl.count / ZGL_VF));
     g_zgl.count = 0;
-    t->gpu_ahead = 1;
+    if (g_zgl.mode != ZGL_MODE_UNION) t->gpu_ahead = 1;
+    zgl_blend_equation(ZGL_FUNC_ADD);
+    /* shader-over batches ran with blending disabled; restore the default
+     * enabled state so a later REPLACE batch (which relies on Disable) and the
+     * normal blend path both start from a known state. */
+    gl.Enable(ZGL_BLEND);
 }
 
 /* Start (or continue) a batch for this surface in this mode; returns 0 when the
@@ -751,6 +878,31 @@ static void gl_draw_round(zan_surface_t *s, int x, int y, int w, int h,
     zgl_rect_quad(s, x, y, w, h, radius, corners, thickness, -1, c, c, 0, 0);
 }
 
+static void gl_surface_round(zan_surface_t *s, int x, int y, int w, int h,
+                             int radius, int corners, u32 fill, u32 border, int thickness) {
+    if (w <= 0 || h <= 0) return;
+    if (!zgl_begin(s, ZGL_MODE_BLEND)) {
+        cpu_surface_round(s, x, y, w, h, radius, corners, fill, border, thickness);
+        return;
+    }
+    zgl_quad q;
+    memset(&q, 0, sizeof(q));
+    q.kind = ZGL_K_SURFACE;
+    q.cx = (float)x + (float)w * 0.5f;
+    q.cy = (float)y + (float)h * 0.5f;
+    q.hw = (float)w * 0.5f; q.hh = (float)h * 0.5f;
+    int r = radius < 0 ? 0 : radius;
+    if (r > w / 2) r = w / 2;
+    if (r > h / 2) r = h / 2;
+    q.radius = (float)r;
+    q.stroke = thickness > 0 ? (float)thickness : 0.0f;
+    q.p0 = (float)(corners & 15);
+    zgl_color(q.col0, fill, 0); zgl_color(q.col1, border, 0);
+    zgl_push(s, &q, (float)x, (float)y, (float)x + (float)w, (float)y + (float)h);
+    zgl_flush(); /* shader-over kinds composite against a destination snapshot;
+                    they must not sit in a batch blended a second time */
+}
+
 static void gl_fill_vgrad(zan_surface_t *s, int x, int y, int w, int h,
                           int radius, int corners, u32 top, u32 bottom) {
     /* Overwrites its rect (alpha forced opaque), like the CPU path -- except on
@@ -853,6 +1005,7 @@ static void gl_capsule(zan_surface_t *s, float x0, float y0, float x1, float y1,
     zgl_quad q;
     memset(&q, 0, sizeof(q));
     q.kind = ZGL_K_CAPSULE;
+    q.p0 = g_zgl.mode == ZGL_MODE_UNION ? 1.0f : 0.0f;
     q.radius = half;
     q.seg[0] = x0; q.seg[1] = y0; q.seg[2] = x1; q.seg[3] = y1;
     float lo_x = (x0 < x1 ? x0 : x1) - half - 1.0f;
@@ -873,30 +1026,107 @@ static void gl_draw_line(zan_surface_t *s, int x0, int y0, int x1, int y1,
         cpu_draw_line(s, x0, y0, x1, y1, c, thickness); return;
     }
     float half = (thickness > 1) ? (float)thickness / 2.0f : 0.5f;
-    gl_capsule(s, (float)x0 + 0.5f, (float)y0 + 0.5f,
-               (float)x1 + 0.5f, (float)y1 + 0.5f, half, c);
+    /* Thin Wu lines retain the legacy pixel-index convention. */
+    float offset = thickness > 1 ? 0.0f : 0.5f;
+    gl_capsule(s, (float)x0 + offset, (float)y0 + offset,
+               (float)x1 + offset, (float)y1 + offset, half, c);
+}
+
+/* GL_MAX is idempotent even at fractional AA edges. Accumulate into a
+ * separate R8 attachment, then composite once; never blend capsules directly
+ * into the colour target. Scratch is lazy and follows the target lifetime. */
+static int zgl_union_target(zgl_target *t) {
+    if (t->cov_fbo) return 1;
+    gl.ActiveTexture(ZGL_TEXTURE0);
+    gl.GenTextures(1, &t->cov_tex);
+    gl.BindTexture(ZGL_TEXTURE_2D, t->cov_tex);
+    gl.TexParameteri(ZGL_TEXTURE_2D, ZGL_TEXTURE_MIN_FILTER, ZGL_NEAREST);
+    gl.TexParameteri(ZGL_TEXTURE_2D, ZGL_TEXTURE_MAG_FILTER, ZGL_NEAREST);
+    gl.TexParameteri(ZGL_TEXTURE_2D, ZGL_TEXTURE_WRAP_S, ZGL_CLAMP_TO_EDGE);
+    gl.TexParameteri(ZGL_TEXTURE_2D, ZGL_TEXTURE_WRAP_T, ZGL_CLAMP_TO_EDGE);
+    gl.TexImage2D(ZGL_TEXTURE_2D, 0, ZGL_R8, t->w, t->h, 0,
+                  ZGL_RED, ZGL_UNSIGNED_BYTE, NULL);
+    gl.GenFramebuffers(1, &t->cov_fbo);
+    gl.BindFramebuffer(ZGL_FRAMEBUFFER, t->cov_fbo);
+    gl.FramebufferTexture2D(ZGL_FRAMEBUFFER, ZGL_COLOR_ATTACHMENT0,
+                            ZGL_TEXTURE_2D, t->cov_tex, 0);
+    int ok = t->cov_tex && t->cov_fbo &&
+             gl.CheckFramebufferStatus(ZGL_FRAMEBUFFER) == ZGL_FRAMEBUFFER_COMPLETE;
+    gl.BindFramebuffer(ZGL_FRAMEBUFFER, t->fbo);
+    if (!ok) {
+        gl.DeleteFramebuffers(1, &t->cov_fbo);
+        gl.DeleteTextures(1, &t->cov_tex);
+        t->cov_fbo = t->cov_tex = 0;
+    }
+    return ok;
 }
 
 static void gl_polyline(zan_surface_t *s, const int32_t *pts, int n, u32 c,
                         int thickness, int fx) {
-    if (n < 2) return;
-    /* The CPU path rasterizes the whole path in one coverage pass so a pixel is
-     * blended once; capsules per segment double-blend where they overlap, which
-     * shows on a translucent stroke. Keep those on the CPU. */
-    if (((c >> 24) & 0xFF) != 255 || !zgl_begin(s, ZGL_MODE_BLEND)) {
+    if (!pts || n < 2 || (c >> 24) == 0) return;
+    if (!zgl_begin(s, ZGL_MODE_BLEND)) {
         gl_sync_to_cpu(s);
         cpu_polyline(s, pts, n, c, thickness, fx);
         return;
     }
-    float scale = (fx > 0) ? 1.0f / (float)(1 << fx) : 1.0f;
+    /* Bound clear and composite to this path intersected with the clip. Every
+     * sampled texel is cleared; stale coverage elsewhere is never sampled. */
+    float scale = fx == 0 ? 1.0f : 1.0f / 256.0f;
     float half = (thickness > 1) ? (float)thickness / 2.0f : 0.5f;
+    float lo_x = (float)s->width, lo_y = (float)s->height, hi_x = 0, hi_y = 0;
+    int segments = 0;
     for (int i = 0; i + 1 < n; i++) {
-        float ax = (float)pts[i * 2] * scale + 0.5f;
-        float ay = (float)pts[i * 2 + 1] * scale + 0.5f;
-        float bx = (float)pts[(i + 1) * 2] * scale + 0.5f;
-        float by = (float)pts[(i + 1) * 2 + 1] * scale + 0.5f;
-        gl_capsule(s, ax, ay, bx, by, half, c);
+        float ax = (float)pts[i * 2] * scale, ay = (float)pts[i * 2 + 1] * scale;
+        float bx = (float)pts[i * 2 + 2] * scale, by = (float)pts[i * 2 + 3] * scale;
+        float dx = bx - ax, dy = by - ay;
+        if (dx * dx + dy * dy < 0.0001f) continue;
+        segments++;
+        float pad = half + 1.0f;
+        lo_x = fminf(lo_x, fminf(ax, bx) - pad);
+        lo_y = fminf(lo_y, fminf(ay, by) - pad);
+        hi_x = fmaxf(hi_x, fmaxf(ax, bx) + pad);
+        hi_y = fmaxf(hi_y, fmaxf(ay, by) + pad);
     }
+    lo_x = fmaxf(lo_x, fmaxf(0.0f, (float)s->clip_x0));
+    lo_y = fmaxf(lo_y, fmaxf(0.0f, (float)s->clip_y0));
+    hi_x = fminf(hi_x, fminf((float)s->width, (float)s->clip_x1));
+    hi_y = fminf(hi_y, fminf((float)s->height, (float)s->clip_y1));
+    if (!segments || lo_x >= hi_x || lo_y >= hi_y) return;
+    int clear_x = (int)floorf(lo_x), clear_y = (int)floorf(lo_y);
+    int clear_x1 = (int)ceilf(hi_x), clear_y1 = (int)ceilf(hi_y);
+    zgl_flush(); /* painter order before clearing/reusing scratch */
+    zgl_target *t = zgl_target_of(s);
+    if (!zgl_union_target(t)) {
+        /* Resource failure only, not a rasterization workaround. */
+        fprintf(stderr, "[zan_gui] GL polyline coverage framebuffer unavailable; CPU fallback\n");
+        gl_sync_to_cpu(s);
+        cpu_polyline(s, pts, n, c, thickness, fx);
+        return;
+    }
+    gl.BindFramebuffer(ZGL_FRAMEBUFFER, t->cov_fbo);
+    gl.Enable(ZGL_SCISSOR_TEST);
+    gl.Scissor(clear_x, t->h - clear_y1, clear_x1 - clear_x, clear_y1 - clear_y);
+    gl.ClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    gl.Clear(ZGL_COLOR_BUFFER_BIT);
+    gl.Disable(ZGL_SCISSOR_TEST); /* normal clipping travels in vertices */
+    g_zgl.mode = ZGL_MODE_UNION;
+    for (int i = 0; i + 1 < n; i++) {
+        float ax = (float)pts[i * 2] * scale;
+        float ay = (float)pts[i * 2 + 1] * scale;
+        float bx = (float)pts[i * 2 + 2] * scale;
+        float by = (float)pts[i * 2 + 3] * scale;
+        float dx = bx - ax, dy = by - ay;
+        if (dx * dx + dy * dy < 0.0001f) continue; /* CPU degenerate policy */
+        gl_capsule(s, ax, ay, bx, by, half, 0xFFFFFFFFu);
+    }
+    zgl_flush(); /* includes all segments across allocation-pressure flushes */
+    g_zgl.mode = ZGL_MODE_BLEND;
+    zgl_quad q;
+    memset(&q, 0, sizeof(q));
+    q.kind = ZGL_K_UNION;
+    zgl_color(q.col0, c, 0);
+    zgl_push(s, &q, lo_x, lo_y, hi_x, hi_y);
+    zgl_flush(); /* finish sampling before scratch is overwritten/released */
 }
 
 /* ------------------------------------------------------------------- text */
@@ -1057,6 +1287,8 @@ static void gl_drop_surface(zan_surface_t *s) {
         zan_gl_ctx_make_current();
         gl.DeleteFramebuffers(1, &t->fbo);
         gl.DeleteTextures(1, &t->tex);
+        if (t->cov_fbo) gl.DeleteFramebuffers(1, &t->cov_fbo);
+        if (t->cov_tex) gl.DeleteTextures(1, &t->cov_tex);
     }
     if (g_zgl.target == s) g_zgl.target = NULL;
     free(t->shadow);
@@ -1069,6 +1301,7 @@ static const zan_gui_backend zan_gl_backend = {
     .fill_rect    = gl_fill_rect,
     .fill_round   = gl_fill_round,
     .draw_round   = gl_draw_round,
+    .surface_round = gl_surface_round,
     .fill_vgrad   = gl_fill_vgrad,
     .fill_grad    = gl_fill_grad,
     /* shadow_round, blur, snapshot, restore and blit_image are the CPU's for

@@ -80,10 +80,19 @@ class Canvas {
     static extern void zan_gui_draw_rounded_rect(int surfaceId, int x, int y, int w, int h, int radius, int color, int thickness);
 
     [DllImport("zan_gui")]
+    static extern void zan_gui_surface_rounded_rect(int surfaceId, int x, int y, int w, int h, int radius, int fill, int border, int thickness);
+
+    [DllImport("zan_gui")]
+    static extern void zan_gui_surface_rounded_rect_mask(int surfaceId, int x, int y, int w, int h, int radius, int corners, int fill, int border, int thickness);
+
+    [DllImport("zan_gui")]
     static extern void zan_gui_fill_rounded_rect_mask(int surfaceId, int x, int y, int w, int h, int radius, int corners, int color);
 
     [DllImport("zan_gui")]
     static extern void zan_gui_draw_rounded_rect_mask(int surfaceId, int x, int y, int w, int h, int radius, int corners, int color, int thickness);
+
+    [DllImport("zan_gui")]
+    static extern void zan_gui_shadow_rounded_rect(int surfaceId, int x, int y, int w, int h, int radius, int blur, int color);
 
     [DllImport("zan_gui")]
     static extern void zan_gui_blur_rect(int surfaceId, int x, int y, int w, int h, int radius);
@@ -378,13 +387,29 @@ class Canvas {
     }
 
     /// <summary>一次调用同时填充圆角矩形并描边其轮廓：
-    /// 即 `FillRoundRect(fill)` 紧接 `DrawRoundRect(border)`，
-    /// 几何相同。这是卡片、弹窗、提示框和 chip 等
-    /// 共用的带边框表面惯用法。</summary>
+    /// 边框先与填充色合成，再一次应用圆角覆盖率，避免外沿重复混合。
+    /// 边框向内扩展，厚度小于等于 0 时只填充；透明边框保留填充。
+    /// 这是卡片、弹窗、提示框和 chip 等共用的带边框表面惯用法。
+    /// 此操作不裁剪后续子控件绘制。</summary>
     void SurfaceRoundRect(int x, int y, int w, int h, int radius,
                           int fill, int border, int borderThickness) {
-        zan_gui_fill_rounded_rect(surfaceId, x, y, w, h, radius, fill);
-        zan_gui_draw_rounded_rect(surfaceId, x, y, w, h, radius, border, borderThickness);
+        zan_gui_surface_rounded_rect(surfaceId, x, y, w, h, radius, fill, border, borderThickness);
+    }
+
+    /// <summary>SurfaceRoundRect 的指定圆角版本；覆盖率只合成一次。</summary>
+    void SurfaceRoundRectIn(int x, int y, int w, int h, int radius, int corners,
+                            int fill, int border, int borderThickness) {
+        zan_gui_surface_rounded_rect_mask(surfaceId, x, y, w, h, radius, corners,
+                                          fill, border, borderThickness);
+    }
+
+    /// <summary>圆角矩形的柔和投影：以圆角 SDF（外轮廓到形状的
+    /// 有符号距离）在整个 blur 带上做 smoothstep 衰减，而非逐圈扩张
+    /// 描边。几何连续，角部不会出现楔形缝或同心弧；每个像素只写一次，
+    /// 半透明阴影色合成到标称 alpha，不随层叠变黑。radius <= 0 退化为
+    /// 矩形阴影；blur <= 0 退化为硬填充。</summary>
+    void ShadowRoundRect(int x, int y, int w, int h, int radius, int blur, int color) {
+        zan_gui_shadow_rounded_rect(surfaceId, x, y, w, h, radius, blur, color);
     }
 
     /// <summary>就地盒式模糊一个矩形区域（毛玻璃

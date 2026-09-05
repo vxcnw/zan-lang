@@ -37,6 +37,96 @@ class Host {
     int logicalH;
     int canvasW;         // canvas raster size in native px (see CreateFull)
     int canvasH;
+    int qualityFactor = 1;
+    bool outputQuality;
+    int qualityOutput;
+    bool qualityDirty;
+
+    /// Opt in to physical-output supersampling (1=off/native, 2=4 samples,
+    /// 3=9, 4=16). Clamped to 1..4. Applied at the next Begin(), never mid-frame.
+    /// Existing Create/CreateSs/CreateFull retain their legacy raster policy.
+    public void SetOutputSupersampling(int factor) {
+        if (factor < 1) { factor = 1; }
+        if (factor > 4) { factor = 4; }
+        if (this.outputQuality && this.qualityFactor == factor) { return; }
+        this.outputQuality = true;
+        this.qualityFactor = factor;
+        this.qualityDirty = true;
+        this.RequestRedraw();
+    }
+    public int OutputSupersampling() { return this.qualityFactor; }
+    public int RasterWidth() { return this.canvasW; }
+    public int RasterHeight() { return this.canvasH; }
+
+    // Fit the design aspect into actual physical output, then multiply by
+    // quality. Uniform scaling is essential for text, input and letterboxing.
+    // Bound one RGBA target to 64 MiB and 8192 px/axis, before allocation.
+    static int QualityRasterWidth(int outW, int outH, int w, int h, int factor) {
+        if (outW < 1 || outH < 1 || w < 1 || h < 1) { return 0; }
+        if (factor < 1) { factor = 1; }
+        if (factor > 4) { factor = 4; }
+        double scale = (double)outW / (double)w;
+        double sy = (double)outH / (double)h;
+        if (sy < scale) { scale = sy; }
+        scale = scale * (double)factor;
+        if (scale * (double)w > 8192.0) { scale = 8192.0 / (double)w; }
+        if (scale * (double)h > 8192.0) { scale = 8192.0 / (double)h; }
+        double pixels = scale * (double)w * scale * (double)h;
+        if (pixels > 16777216.0) { scale = scale * Math.Sqrt(16777216.0 / pixels); }
+        int rw = (int)((double)w * scale);
+        if (rw < 1) { rw = 1; }
+        return rw;
+    }
+
+    void ApplyRasterScale() {
+        // SysFont keys contain text/design size, not renderer pixel scale.
+        // Re-bake cached runs after a quality/DPI change rather than stretching.
+        SysFont.Dispose();
+        int num = this.canvasW;
+        int den = this.logicalW;
+        int a = num; int b = den;
+        while (b != 0) { int rem = a % b; a = b; b = rem; }
+        if (a > 1) { num = num / a; den = den / a; }
+        this.r.SetUiScale(num, den);
+        this.r.SetLogicalSize(this.canvasW, this.canvasH, SdlLogicalPresentation.Letterbox());
+    }
+
+    void RefreshQualityTarget() {
+        if (!this.outputQuality) { return; }
+        // OutputSize is queried on the window, not on an offscreen target.
+        this.r.ResetTarget();
+        int packed = this.r.OutputSize();
+        int ow = packed & 65535;
+        int oh = (packed >> 16) & 65535;
+        if (ow < 1 || oh < 1) { return; }
+        if (!this.qualityDirty && packed == this.qualityOutput) { return; }
+        this.qualityOutput = packed;
+        this.qualityDirty = false;
+        int rw = Host.QualityRasterWidth(ow, oh, this.logicalW, this.logicalH, this.qualityFactor);
+        int rh = (int)((double)rw * (double)this.logicalH / (double)this.logicalW);
+        if (rh < 1) { rh = 1; }
+        if (this.canvas != null && this.canvas.IsValid()
+            && rw == this.canvasW && rh == this.canvasH) { return; }
+        // Release before allocation: never hold two full-size AA targets.
+        if (this.canvas != null) { this.canvas.Close(); this.canvas = null; }
+        while (rw > 0 && rh > 0) {
+            SdlTexture next = SdlTexture.CreateTarget(this.r, rw, rh);
+            if (next.IsValid() && next.SetNearest(false) && this.r.SetTarget(next)) {
+                this.r.ResetTarget();
+                this.canvas = next;
+                this.canvasW = rw; this.canvasH = rh;
+                this.ApplyRasterScale();
+                return;
+            }
+            this.r.ResetTarget();
+            next.Close();
+            rw = rw / 2;
+            rh = (int)((double)rw * (double)this.logicalH / (double)this.logicalW);
+        }
+        // Unsupported render targets: direct logical rendering, no retry storm.
+        this.canvasW = this.logicalW; this.canvasH = this.logicalH;
+        this.ApplyRasterScale();
+    }
     bool running;
     bool fullscreen;
     bool ignoreMax;   // swallow the maximize event fired when leaving fullscreen
@@ -127,11 +217,18 @@ class Host {
         h.r.SetLogicalSize(h.canvasW, h.canvasH,
             SdlLogicalPresentation.Letterbox());
         h.r.SetUiScale(num, den);
+        Console.WriteLine("HOST_DEBUG output=" + Convert.ToString(outW) + "x" + Convert.ToString(outH)
+            + " canvas=" + Convert.ToString(h.canvasW) + "x" + Convert.ToString(h.canvasH)
+            + " uiScale=" + Convert.ToString(num) + "/" + Convert.ToString(den));
         // Vector shapes rasterize at canvas resolution: 1:1 windows are
         // razor-sharp, smaller windows are anti-aliased by the linear
         // downsample. (Presentation alone only scales coordinates and
         // leaves jagged edges.)
         h.canvas = SdlTexture.CreateTarget(h.r, h.canvasW, h.canvasH);
+        // canvas→输出的缩放呈现必须走线性过滤: SDL3 纹理默认 NONE(最近邻),
+        // 窗口与画布非 1:1 时(125%/150% DPI 缩放屏、WinFit 收缝后的窗口)
+        // 最近邻降采样每帧丢像素 = 满屏锯齿与走样 —— 用户看到的"毛刺"。
+        h.canvas.SetNearest(false);
         Sprite.Bake(h.r);
         Draw.EnsureRound(h.r);
         h.logicalW = logicalW;
@@ -423,8 +520,14 @@ class Host {
     }
 
     void Begin(int cr, int cg, int cb) {
+        this.RefreshQualityTarget();
         if (this.canvas != null && this.canvas.IsValid()) {
-            this.r.SetTarget(this.canvas);
+            if (!this.r.SetTarget(this.canvas) && this.outputQuality) {
+                this.r.ResetTarget();
+                this.canvas.Close(); this.canvas = null;
+                this.canvasW = this.logicalW; this.canvasH = this.logicalH;
+                this.ApplyRasterScale();
+            }
         }
         this.r.SetColor(cr, cg, cb, 255);
         this.r.Clear();
@@ -463,6 +566,8 @@ class Host {
             this.sprBatch = null;
         }
         SysFont.Dispose();
+        this.r.ResetTarget();
+        if (this.canvas != null) { this.canvas.Close(); this.canvas = null; }
         if (liveHost == this) { liveHost = null; }
         this.window.Close();
         Sdl.Quit();

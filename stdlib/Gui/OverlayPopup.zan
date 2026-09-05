@@ -275,9 +275,19 @@ class OverlayPopup {
         int optionText = optionStyle.FgOr(0);
         int optionSelectedText = optionSelected.FgOr(optionText);
         int scrollbarBg = scrollbarStyle.BgOr(0);
-        // 阴影 + 主体。
+        // 阴影 + 主体。柔和投影用圆角 SDF 一次出图（Canvas.ShadowRoundRect）：
+        // 衰减连续，角部无线状缝，每个像素只写一次（box-shadow
+        // 0 4 10，见 base.css select::popup）。
         app.BlockHitsBelow();
-        c.FillRoundRect(popupX + 1, popupY + 2, popupW, viewH, popupRadius, popupShadow);
+        if (popupShadow != 0) {
+            int sdBlur = popupStyle.shadowBlur > 0
+                ? popupStyle.shadowBlur : 10;
+            int sdDx = popupStyle.shadowDx;
+            int sdDy = popupStyle.shadowDy;
+            c.ShadowRoundRect(popupX + sdDx, popupY + sdDy, popupW, viewH,
+                              popupRadius, app.Scale(sdBlur),
+                              popupStyle.Fade(popupShadow));
+        }
         c.FillRoundRect(popupX, popupY, popupW, viewH, popupRadius, popupBg);
         c.DrawRoundRect(popupX, popupY, popupW, viewH, popupRadius,
                         popupBorder, popupBorderW);
@@ -1227,7 +1237,16 @@ class OverlayPopup {
         int headerFg = headerStyle.FgOr(0);
         int accelFg = accelStyle.FgOr(0);
 
-        c.FillRoundRect(px + 1, py + 3, pw, ph, menuRadius, menuShadow);
+        // 右键/命令菜单柔和投影（box-shadow 0 4 10，同 select::popup）：
+        // 圆角 SDF 一次出图（Canvas.ShadowRoundRect）。
+        if (menuShadow != 0) {
+            int mBlur = menuStyle.shadowBlur > 0 ? menuStyle.shadowBlur : 10;
+            int mDx = menuStyle.shadowDx;
+            int mDy = menuStyle.shadowDy;
+            c.ShadowRoundRect(px + mDx, py + mDy, pw, ph, menuRadius,
+                              app.Scale(mBlur),
+                              menuStyle.Fade(menuShadow));
+        }
         c.FillRoundRect(px, py, pw, ph, menuRadius, menuBg);
         c.DrawRoundRect(px, py, pw, ph, menuRadius, menuBorder, menuBorderW);
         app.BlockHitsRect(px, py, pw, ph);

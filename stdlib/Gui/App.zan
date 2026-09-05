@@ -168,6 +168,13 @@ class App {
     // 清除为透明，并跳过应用内壁纸，使模糊的
     // 桌面从缝隙中透出。
     bool glassNative;
+    // 窗口外轮廓圆角开关（SetWindowRoundCorners）：true 时在
+    // Windows 11 上经 DWMWA_WINDOW_CORNER_PREFERENCE 请求 DWM 圆角
+    // （抗锯齿、含系统投影，零绘制成本）；异形窗口互斥——
+    // SetWindowShape("") 恢复矩形后重新按需应用。旧系统为无操作。
+    bool windowRound;
+    bool windowRoundSet;
+
     // 上次通过 SetWindowOpacity 设置的整窗不透明度百分比（0 = 从未设置，
     // 视为 100/不透明）。
     int windowOpacity;
@@ -1256,6 +1263,9 @@ class App {
             glassNative = false;
         }
         window.SetShape(spec);
+        // 异形窗口轮廓自带圆角（掩码/区域几何），DWM 圆角不参与；
+        // 恢复矩形（spec = ""）时按需恢复上一请求的圆角策略。
+        if (spec.Length == 0) { this.ApplyRoundCorners(); }
         this.NoteRedrawWhy("SetWindowShape");
         needsRedraw = true;
     }
@@ -1400,6 +1410,28 @@ class App {
 
     /// OS 原生半透明玻璃启用时为 true（见 SetNativeGlass）。
     bool NativeGlass() { return glassNative; }
+
+    /// 请求窗口外轮廓圆角（Windows 11 由 DWM 合成：抗锯齿、
+    /// 与系统投影一致、零绘制成本；旧系统安全空操作）。
+    /// 与异形窗口互斥——异形轮廓自带圆角几何，DWM 圆角不参与，
+    /// 关闭异形（SetWindowShape("")）后自动恢复此处请求的策略。
+    void SetWindowRoundCorners(bool on) {
+        windowRound = on;
+        windowRoundSet = true;
+        this.ApplyRoundCorners();
+        this.NoteRedrawWhy("SetWindowRoundCorners");
+        needsRedraw = true;
+    }
+
+    /// 将 windowRound 策略落到 OS 窗口上（幂等）。
+    void ApplyRoundCorners() {
+        if (!windowRoundSet) { return; }
+        if (shapeMode != 0) {
+            // 异形窗口自带轮廓圆角；恢复矩形时重应用。
+            return;
+        }
+        window.SetRoundCorners(windowRound);
+    }
 
     /// 工具窗口：细标题栏、任务栏/Alt-Tab 不显示。
     /// 适合调色板、对话框这类附属窗口。
@@ -1827,12 +1859,11 @@ class App {
 
     /// 将异形轮廓的柔和投影绘制到表面，
     /// 位于控件树之下（由 RenderBackground 调用）。每个非阴影带区域
-    /// 投射同心抗锯齿圆环——软件渲染器没有
-    /// 高斯阴影，因此衰减采用分层，与 StyleBox 自身的阴影一致。
-    /// 每个圆环只描边一次（1px 圆角矩形/圆形轮廓），
-    /// 半透明层不会双重混合成饱和的暗边——
-    /// 这正是重叠填充的问题。类型 3 阴影带区域（由
-    /// formgen 为 winShadow 添加）只扩展 OS 表面，不投射阴影。
+    /// 以圆角 SDF 一次出图（Canvas.ShadowRoundRect）——外轮廓到
+    /// 圆角形状的有符号距离在 blur 带上做 smoothstep 衰减，每个像素
+    /// 只写一次，半透明阴影色合成到标称 alpha，角部衰减连续。
+    /// 类型 3 阴影带区域（由 formgen 为 winShadow 添加）只扩展
+    /// OS 表面，不投射阴影。
     void PaintShapeShadow() {
         if (shapeRects.Count == 0 || shapeShadow <= 0) { return; }
         Canvas c = canvas;
@@ -1861,21 +1892,8 @@ class App {
             int r = this.Scale(shapeRects[i + 5]) - pad;
             if (r < 0) { r = 0; }
             if (w <= 0 || h <= 0) { i = i + 6; continue; }
-            // 每像素扩展一个圆环；相邻圆环无缝拼接
-            // （路径上居中的 1px 描边覆盖 [k-0.5, k+0.5]）。
-            int k = 1;
-            while (k <= blur) {
-                int a = peak * (blur - k + 1) / blur;
-                int col = (a << 24) | rgb;
-                if (t == 2) {
-                    int rad = (w + k * 2) / 2;
-                    c.DrawCircle(x + w / 2, y + h / 2, rad, col, 1);
-                } else {
-                    c.DrawRoundRect(x - k, y - k, w + k * 2, h + k * 2,
-                                    r + k, col, 1);
-                }
-                k = k + 1;
-            }
+            int col = (peak << 24) | rgb;
+            c.ShadowRoundRect(x, y, w, h, r, blur, col);
             i = i + 6;
         }
     }

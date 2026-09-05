@@ -40,7 +40,7 @@
 /* X11 headers back the native Linux window shell; the unified SDL backend
  * (ZAN_GUI_SDL) owns windowing instead, so they are not needed (and the build
  * need not depend on libX11-dev) in that configuration. */
-#if !defined(ZAN_GUI_SDL)
+#if !defined(ZAN_GUI_SDL) && !defined(ZAN_GUI_OHOS)
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
@@ -56,7 +56,7 @@
 #ifdef ZAN_GUI_FREETYPE
 #include <ft2build.h>
 #include FT_FREETYPE_H
-#if !defined(__ANDROID__)
+#if !defined(__ANDROID__) && !defined(ZAN_GUI_OHOS)
 #include <fontconfig/fontconfig.h>
 #endif
 #endif
@@ -2523,6 +2523,80 @@ EXPORT void zan_gui_fill_rounded_rect(i32 surface_id, i32 x, i32 y, i32 w, i32 h
     zan_gui_fill_rounded_rect_mask(surface_id, x, y, w, h, radius, 15, color);
 }
 
+/* Combine materials before coverage: O is outer coverage, B = O - I is
+ * border coverage. In normalized units the source premultiplication is
+ * fill.rgb*af*(O-ab*B) + border.rgb*ab*B. Applying two source-over operations
+ * instead incorrectly counts the same fractional outer edge twice.
+ * All weights below share denominator 255^3; defer quantization until the
+ * combined straight-alpha source is ready for the existing compositor. */
+static u32 surface_round_color(u32 fill, u32 border, int outer, int inner) {
+    uint64_t af = fill >> 24, ab = border >> 24;
+    uint64_t bw = ab * (uint64_t)(outer - inner);
+    uint64_t fw = af * ((uint64_t)outer * 255u - bw);
+    bw *= 255u;
+    uint64_t weight = fw + bw;
+    if (!weight) return 0;
+    u32 alpha = (u32)(weight / (255u * 255u));
+    u32 rgb = 0;
+    for (int shift = 0; shift <= 16; shift += 8) {
+        uint64_t c = ((fill >> shift) & 255u) * fw
+                   + ((border >> shift) & 255u) * bw;
+        rgb |= (u32)(c / weight) << shift;
+    }
+    return (alpha << 24) | rgb;
+}
+
+static void cpu_surface_round(zan_surface_t *s, int x, int y, int w, int h,
+                              int radius, int mask, u32 fill, u32 border,
+                              int thickness) {
+    if (w <= 0 || h <= 0) return;
+    if (thickness <= 0 || (border >> 24) == 0) {
+        cpu_fill_round(s, x, y, w, h, radius, mask, fill);
+        return;
+    }
+    int r = clamp_i(radius, 0, (w < h ? w : h) / 2);
+    /* Clamp before doubling, including INT_MAX thickness. */
+    int t = thickness < (w < h ? w : h) ? thickness : (w < h ? w : h);
+    int iw = w - t - t, ih = h - t - t, ir = r > t ? r - t : 0;
+    int x0 = clamp_i(x, s->clip_x0, s->clip_x1);
+    int y0 = clamp_i(y, s->clip_y0, s->clip_y1);
+    int x1 = (int)((int64_t)x + w < s->clip_x1 ? (int64_t)x + w : s->clip_x1);
+    int y1 = (int)((int64_t)y + h < s->clip_y1 ? (int64_t)y + h : s->clip_y1);
+    if (x1 <= x0 || y1 <= y0) return;
+    ZAN_STAT(g_st_round, (long long)(x1-x0) * (y1-y0));
+    for (int py = y0; py < y1; py++) {
+        u32 *row = s->pixels + py * s->stride;
+        for (int px = x0; px < x1; px++) {
+            int i = px-x, j = py-y;
+            int outer = zan_round_cov(i, j, w, h, r, mask);
+            if (!outer) continue;
+            int inner = 0;
+            if (iw > 0 && ih > 0 && i >= t && j >= t && i-t < iw && j-t < ih)
+                inner = zan_round_cov(i-t, j-t, iw, ih, ir, mask);
+            if (inner > outer) inner = outer;
+            u32 c = inner == outer ? ((fill & 0xFFFFFFu) |
+                    ((u32)((fill >> 24) * outer / 255) << 24))
+                    : surface_round_color(fill, border, outer, inner);
+            row[px] = blend_over(row[px], c);
+        }
+    }
+}
+
+EXPORT void zan_gui_surface_rounded_rect_mask(i32 surface_id, i32 x, i32 y,
+        i32 w, i32 h, i32 radius, i32 mask, i32 fill, i32 border, i32 thickness) {
+    if (surface_id < 0 || surface_id >= g_surface_count) return;
+    zan_surface_t *s = g_surfaces[surface_id];
+    if (!s || w <= 0 || h <= 0) return;
+    ZAN_IMPL(s, surface_round)->surface_round(s, x, y, w, h, radius, mask,
+                                             (u32)fill, (u32)border, thickness);
+}
+
+EXPORT void zan_gui_surface_rounded_rect(i32 surface_id, i32 x, i32 y,
+        i32 w, i32 h, i32 radius, i32 fill, i32 border, i32 thickness) {
+    zan_gui_surface_rounded_rect_mask(surface_id, x, y, w, h, radius, 15,
+                                    fill, border, thickness);
+}
+
 /* Anti-aliased stroked rounded rectangle. Straight edges are crisp (solid
  * fill_rect between the corners); the four corner arcs are anti-aliased rings
  * that share the fill's corner centres/radius so the border hugs a matching
@@ -3095,7 +3169,11 @@ static void cpu_draw_line(zan_surface_t *s, int x0, int y0, int x1, int y1,
         if (minx < s->clip_x0) minx = s->clip_x0;
         if (maxx > s->clip_x1 - 1) maxx = s->clip_x1 - 1;
         for (int py = miny; py <= maxy; py++) {
-            double yc = (double)py;
+            /* Row windows walk the same pixel-centre phase the coverage test
+             * samples (py+0.5); measuring from the bare lattice point cut the
+             * last row of the cap off where the circle test at 14.5 was inside
+             * but the window built at y=14 said it was not. */
+            double yc = (double)py + 0.5;
             double lo = 1e30, hi = -1e30;
             for (int e = 0; e < 2; e++) {
                 double ecx = e ? (double)x1 : (double)x0;
@@ -3896,8 +3974,13 @@ static inline int zan_gui_in_hit_guard(iptr hwnd, int x, int y) {
  */
 #include "gui_runtime_glyph.c"
 #include "gui_runtime_text.c"
+#if defined(ZAN_GUI_SDL)
 #include "gui_runtime_sdl.c"
+#elif defined(ZAN_GUI_OHOS)
+#include "gui_runtime_ohos.c"
+#else
 #include "gui_runtime_x11.c"
+#endif
 #include "gui_runtime_font.c"
 #include "gui_runtime_tray.c"
 #include "gui_runtime_shims.c"
@@ -3980,6 +4063,7 @@ const zan_gui_backend zan_cpu_backend = {
     .fill_rect    = cpu_fill_rect,
     .fill_round   = cpu_fill_round,
     .draw_round   = cpu_draw_round,
+    .surface_round = cpu_surface_round,
     .fill_vgrad   = cpu_fill_vgrad,
     .fill_grad    = cpu_fill_grad,
     .shadow_round = cpu_shadow_round,
@@ -4152,6 +4236,7 @@ EXPORT const char *zan_gui_mem_report(void) {
              (double)surf_bytes / 1048576.0,
              blur_cnt, (double)blur_bytes / 1048576.0,
              snap_cnt, (double)snap_bytes / 1048576.0);
+#endif
 #endif
     size_t n = strlen(buf);
     char *nb = (char *)malloc(n + 1);

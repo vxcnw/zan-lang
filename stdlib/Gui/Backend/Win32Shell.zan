@@ -9,6 +9,10 @@ delegate nint ZanWndProc(nint hwnd, int msg, nint wp, nint lp);
 
 /// SetWindowCompositionAttribute（未文档化的 user32 入口，懒解析）。
 delegate int SetWinCompAttrFn(nint hwnd, nint data);
+/// DwmSetWindowAttribute（dwmapi，Vista+）：Win11 22000+ 认识
+/// DWMWA_WINDOW_CORNER_PREFERENCE(33)，旧系统返回错误码——懒解析
+/// 加调用失败忽略，等价于安全空操作。
+delegate int DwmSetWindowAttrFn(nint hwnd, int attr, nint value, int size);
 /// DwmIsCompositionEnabled（dwmapi，Vista+）：Win7 关闭 DWM 时为 false。
 delegate int DwmIsCompFn(nint outEnabled);
 /// SetProcessDpiAwareness (Shcore) / SetProcessDPIAware (user32) 回退方案。
@@ -1601,6 +1605,27 @@ class Win32Shell {
             if (Win32Shell.toolHwnd[i] == hwnd) { return true; }
         }
         return false;
+    }
+
+    /// DwmSetWindowAttribute（dwmapi，Vista+）：Win11 22000+ 认识
+    /// DWMWA_WINDOW_CORNER_PREFERENCE(33)，旧系统返回错误码——懒解析
+    /// 加调用失败忽略，等价于安全空操作。
+
+    /// 窗口外轮廓圆角。Win11 由 DWM 合成：抗锯齿、与系统投影一致，
+    /// 不吃性能；无边框窗口需保持 1px DWM 框架扩展（创建时已加）。
+    /// `on` 为 false 时写 DWMWCP_DONOTROUND 恢复方角。Win10 及更早
+    /// 系统上属性不存在，调用失败即无操作。
+    static void SetRoundCorners(nint hwnd, bool on) {
+        Win32Shell.Init();
+        if (hwnd == 0) { return; }
+        nint fn = Interop.Entry("dwmapi.dll", "DwmSetWindowAttribute");
+        if (fn == 0) { return; }
+        // DWMWA_WINDOW_CORNER_PREFERENCE = 33; 1 = ROUND, 2 = DONOTROUND
+        nint slot = NativeMemory.Alloc(4);
+        new Span<int>(slot, 1)[0] = on ? 1 : 2;
+        DwmSetWindowAttrFn call = (DwmSetWindowAttrFn)fn;
+        call(hwnd, 33, slot, 4);
+        NativeMemory.Free(slot);
     }
 
     /// 为窗口登记客户区自绘标题按钮数（0..8，越界忽略），

@@ -19,22 +19,12 @@ class IconVector {
         return v;
     }
 
-    /// 用正多边形逼近圆轮廓：当半径足够大、
-    /// 棱面明显时增加分段数。
+    /// 使用后端原生抗锯齿圆轮廓，不在整数坐标上离散成多边形。
     static void Circle(Canvas s, int cx, int cy, int radius,
                        int color, int thickness) {
-        int segments = 16;
-        if (radius > 12) { segments = 24; }
-        int px = cx + radius;
-        int py = cy;
-        for (int i = 1; i <= segments; i = i + 1) {
-            double a = 2.0 * IconVector.Pi() * (double)i / (double)segments;
-            int nx = cx + (int)(Math.Cos(a) * (double)radius);
-            int ny = cy + (int)(Math.Sin(a) * (double)radius);
-            s.DrawLine(px, py, nx, ny, color, thickness);
-            px = nx;
-            py = ny;
-        }
+        // Preserve centerline radius/width/alpha without truncated vertices
+        // or overlapping individual segment caps.
+        s.DrawCircle(cx, cy, radius, color, thickness);
     }
 
     /// 从 (x0,y0) 到 (x1,y1) 的线段，远端带两翼；两翼

@@ -575,7 +575,16 @@ class StyleBox {
 
         int corners = this.Corners();
         int fill = this.Fade(bg);
-        if (bgTo != 0) {
+        // Solid uniform borders share one coverage pass with their fill.
+        // Keep the original ordering when intervening effects paint the surface.
+        bool combined = bgTo == 0 && borderStyle != 1 && sheen <= 0
+            && !(shadow != 0 && shadowInset == 1)
+            && borderTopW <= 0 && borderRightW <= 0
+            && borderBottomW <= 0 && borderLeftW <= 0;
+        if (combined) {
+            c.SurfaceRoundRectIn(rx, ry, rw, rh, r, corners, fill,
+                                  this.Fade(borderColor), this.BorderWOr(0));
+        } else if (bgTo != 0) {
             this.PaintGradient(app, rx, ry, rw, rh, r);
         } else if (fill != 0) {
             if (r > 0) { c.FillRoundRectIn(rx, ry, rw, rh, r, corners, fill); }
@@ -596,76 +605,25 @@ class StyleBox {
             this.PaintSheen(app, rx, ry, rw, rh, r);
         }
 
-        this.PaintBorders(app, rx, ry, rw, rh, r);
+        if (!combined) { this.PaintBorders(app, rx, ry, rw, rh, r); }
         if (specular == 1 && fxId != 0) {
             Fx.Specular(app, fxId, rx, ry, rw, rh, r, (int)4294967295);
         }
         this.PaintAnim(app, rx, ry, rw, rh, r);
     }
 
-    /// 投影：一个偏移的形状，加上数圈逐渐扩张的半透明环，
-    /// 当 `shadowBlur` 需要柔和边缘时（软件渲染器没有
-    /// 高斯阴影，因此衰减用分层实现）。
+    /// 投影：圆角 SDF 一次出图（见 Canvas.ShadowRoundRect）。
+    /// 以外轮廓到圆角形状的有符号距离在 blur 带上做 smoothstep 衰减，
+    /// 半跨带正好落在轮廓上（半个覆盖），与高斯 box-shadow 的观感一致；
+    /// 衰减连续，角部不会留下逐圈扩张描边的楔形缝/同心弧，每个像素
+    /// 只写一次，半透明阴影色合成到标称 alpha。
     void PaintShadow(App app, int x, int y, int w, int h, int r) {
-        Canvas c = app.canvas;
         int col = this.Fade(shadow);
         int dx = x + app.Scale(shadowDx);
         int dy = y + app.Scale(shadowDy);
-        if (shadowBlur <= 0) {
-            if (r > 0) { c.FillRoundRect(dx, dy, w, h, r, col); }
-            else { c.FillRect(dx, dy, w, h, col); }
-            return;
-        }
-        int steps = shadowBlur / 2;
-        if (steps < 1) { steps = 1; }
-        if (steps > 6) { steps = 6; }
-        // 之前每层衰减都会作为整个圆角矩形填充，因此
-        // 柔和阴影每层都要混合一次面板的全部区域（这是玻璃框
-        // 最大的开销）。反复混合同一种颜色
-        // 与顺序无关，所以每层只绘制一次，只覆盖
-        // 它新增的那圈环，alpha 取各重叠层合成的结果——
-        // 像素结果相同，工作量却只有一小部分。最内层区域（盒子
-        // 正下方）一次填充即可获得完整合成后的 alpha。
-        int acc = 0;
-        int i = steps;
-        while (i >= 1) {
-            int spread = app.Scale(shadowBlur) * i / steps;
-            int a = 1000 / (steps + 1) * (steps - i + 1);
-            int layer = StyleBox.AlphaOf(App.ScaleAlpha(col, a * 600 / 1000));
-            acc = acc + layer * (255 - acc) / 255;
-            int inner = app.Scale(shadowBlur) * (i - 1) / steps;
-            this.PaintShadowRing(c, dx - spread, dy - spread, w + spread * 2,
-                                 h + spread * 2, r + spread, spread - inner,
-                                 acc * 16777216 + (col % 16777216));
-            i = i - 1;
-        }
-        if (acc > 0) {
-            c.FillRoundRect(dx, dy, w, h, r, acc * 16777216 + (col % 16777216));
-        }
-    }
-
-    /// 只填充圆角矩形 (x,y,w,h,radius) 的 `t` 宽边框环，
-    /// 通过把填充裁剪到环的四条条带来实现，使圆角轮廓
-    /// 得以保留，且不触碰内部像素。
-    void PaintShadowRing(Canvas c, int x, int y, int w, int h, int radius,
-                         int t, int color) {
-        if (t <= 0 || w <= 0 || h <= 0) { return; }
-        if (t * 2 >= w || t * 2 >= h) {
-            c.FillRoundRect(x, y, w, h, radius, color);
-            return;
-        }
-        c.PushClip(x, y, w, t);
-        c.FillRoundRect(x, y, w, h, radius, color);
-        c.PopClip();
-        c.PushClip(x, y + h - t, w, t);
-        c.FillRoundRect(x, y, w, h, radius, color);
-        c.PopClip();
-        c.PushClip(x, y + t, t, h - t * 2);
-        c.FillRoundRect(x, y, w, h, radius, color);
-        c.PopClip();
-        c.PushClip(x + w - t, y + t, t, h - t * 2);
-        c.FillRoundRect(x, y, w, h, radius, color);
-        c.PopClip();
+        int blur = app.Scale(shadowBlur);
+        if (r < 0) { r = 0; }
+        app.canvas.ShadowRoundRect(dx, dy, w, h, r, blur, col);
     }
 
     /// 玻璃光泽（`-zan-sheen`）：上半部分一道自上而下衰减到透明的

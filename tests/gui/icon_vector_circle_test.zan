@@ -1,0 +1,28 @@
+using System;
+using Gui;
+
+class IconCircleProbe {
+    static void Main() {
+        Canvas icon = new Canvas(192, 192);
+        Canvas native = new Canvas(192, 192);
+        int fails = 0;
+        // Small and large radii, odd/even widths and translucent strokes.
+        for (int radius = 2; radius <= 74; radius = radius + 9) {
+            for (int thick = 1; thick <= 4; thick = thick + 1) {
+                icon.Clear(0xFF102030); native.Clear(0xFF102030);
+                icon.PushClip(30, 20, 120, 140);
+                native.PushClip(30, 20, 120, 140);
+                IconVector.Circle(icon, 96, 96, radius, 0x80E0C060, thick);
+                native.DrawCircle(96, 96, radius, 0x80E0C060, thick);
+                icon.PopClip(); native.PopClip();
+                for (int y = 0; y < 192; y = y + 1) {
+                    for (int x = 0; x < 192; x = x + 1) {
+                        if (icon.GetPixel(x, y) != native.GetPixel(x, y)) { fails = fails + 1; }
+                    }
+                }
+            }
+        }
+        icon.Destroy(); native.Destroy();
+        Console.WriteLine("done fails=" + fails);
+    }
+}

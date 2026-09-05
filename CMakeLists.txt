@@ -1708,6 +1708,20 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
   target_link_libraries(zan_gui_runtime_test PRIVATE zan_gui)
   add_test(NAME runtime_gui COMMAND zan_gui_runtime_test)
 
+  # Combined rounded fill+border coverage (CPU primitive, no window needed).
+  add_executable(zan_gui_surface_round_test tests/runtime/gui_surface_round_test.c)
+  target_link_libraries(zan_gui_surface_round_test PRIVATE zan_gui)
+  add_test(NAME runtime_gui_surface_round COMMAND zan_gui_surface_round_test)
+
+  # Real GL context, not a CPU substitute. Headless/unsupported hosts skip.
+  if(WIN32 OR (UNIX AND NOT APPLE AND NOT ZAN_GUI_SDL))
+    add_executable(zan_gui_gl_aa_test tests/runtime/gui_gl_aa_test.c)
+    target_link_libraries(zan_gui_gl_aa_test PRIVATE ${CMAKE_DL_LIBS})
+    add_dependencies(zan_gui_gl_aa_test zan_gui)
+    add_test(NAME runtime_gui_gl_aa COMMAND zan_gui_gl_aa_test $<TARGET_FILE:zan_gui>)
+    set_tests_properties(runtime_gui_gl_aa PROPERTIES SKIP_RETURN_CODE 77)
+  endif()
+
   # A4: surface dimension validation -- rejects non-positive / oversize dims.
   add_executable(zan_gui_surface_dims_test tests/runtime/gui_surface_dims_test.c)
   target_link_libraries(zan_gui_surface_dims_test PRIVATE zan_gui)

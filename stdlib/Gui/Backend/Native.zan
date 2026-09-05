@@ -764,6 +764,16 @@ class Window {
         #endif
     }
 
+    /// <summary>窗口外轮廓圆角（Windows 11 22000+ 由 DWM 合成：
+    /// 一致、抗锯齿、与系统投影匹配；旧系统安全空操作）。`on`
+    /// 为 false 时恢复系统默认方角/策略。无边框窗口需要保持
+    /// 1px DWM 框架扩展（创建时已加）圆角才可见。</summary>
+    void SetRoundCorners(bool on) {
+        #if WINDOWS
+        Win32Shell.SetRoundCorners((nint)handle, on);
+        #endif
+    }
+
     /// <summary>启用或禁用窗口置顶（topmost）。</summary>
     void SetTopmost(bool on) {
         int v = 0;

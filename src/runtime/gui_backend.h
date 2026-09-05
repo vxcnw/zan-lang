@@ -96,6 +96,12 @@ typedef struct zan_gui_backend_s {
      * thickness of 0 draws nothing (what zan_gui_draw_rect always did). */
     void (*draw_round)(struct zan_surface_s *s, int x, int y, int w, int h,
                        int radius, int corners, uint32_t color, int thickness);
+    /* Fill plus inward border, composed before applying coverage once.
+     * Border is source-over fill material; thickness <= 0 means fill only.
+     * Inner coverage is the inset rounded rect, radius max(radius-thickness,0). */
+    void (*surface_round)(struct zan_surface_s *s, int x, int y, int w, int h,
+                          int radius, int corners, uint32_t fill,
+                          uint32_t border, int thickness);
     /* Opaque two-stop vertical gradient: rows are overwritten (alpha forced
      * opaque), which is what a wallpaper/backdrop fill needs. */
     void (*fill_vgrad)(struct zan_surface_s *s, int x, int y, int w, int h,
