@@ -613,7 +613,7 @@ partial class Charts {
         int listTop = area.y + app.Scale(52);
         int listBottom = area.y + area.height - app.Scale(8);
         // 两行行高：标题 + 参考站副标题（区分同名示例）。
-        int rowH = app.Scale(40);
+        int rowH = app.Scale(48);
         int viewH = listBottom - listTop;
         int contentH = rows.Count * rowH;
 
@@ -622,14 +622,18 @@ partial class Charts {
 
         int sel = Charts.selected.Get();
         bool click = app.window.EventKind() == 3;
+        // 左右留白对称：行块从 pad 到「滚动条前 pad」——滚动条
+        // （barW 8 + inset 2）之外再留 2px 呼吸，两侧视觉等宽。
+        int gut = app.Scale(12);
         int sx = area.x + pad;
-        int swid = sw - pad * 2;
+        int swid = sw - pad * 2 - gut;
+        int bandH = rowH - app.Scale(8);
         for (int idx = 0; idx < rows.Count; idx = idx + 1) {
             int ry = listTop + idx * rowH - dy;
             if (ry + rowH > listTop && ry < listBottom) {
                 ChartsNavRow row = rows[idx];
                 if (row.header) {
-                    c.DrawText(sx, ry + app.Scale(13), row.text,
+                    c.DrawText(sx, ry + app.Scale(17), row.text,
                         t.textTertiary, t.fontSizeSmall);
                 } else {
                     bool selRow = row.demoIndex == sel;
@@ -638,23 +642,21 @@ partial class Charts {
                         && app.mouseY >= listTop && app.mouseY < listBottom
                         && app.mouseY >= ry && app.mouseY < ry + rowH;
                     if (selRow) {
-                        c.FillRoundRect(sx - app.Scale(4), ry,
-                            swid + app.Scale(8), rowH - app.Scale(2),
+                        c.FillRoundRect(sx, ry + app.Scale(4), swid, bandH,
                             app.Scale(4), t.primary);
                     } else if (hot) {
-                        c.FillRoundRect(sx - app.Scale(4), ry,
-                            swid + app.Scale(8), rowH - app.Scale(2),
+                        c.FillRoundRect(sx, ry + app.Scale(4), swid, bandH,
                             app.Scale(4), t.bgHover);
                     }
                     // 标题一行、描述一行；超宽在裁剪区内截断。
-                    c.PushClip(sx, ry, swid, rowH - app.Scale(2));
+                    c.PushClip(sx, ry + app.Scale(4), swid, bandH);
                     int tc = t.textPrimary;
                     int dc = t.textTertiary;
                     if (selRow) { tc = t.textInverse; dc = t.textInverse; }
-                    c.DrawText(sx + app.Scale(8), ry + app.Scale(4),
+                    c.DrawText(sx + app.Scale(8), ry + app.Scale(10),
                         row.text, tc, t.fontSizeSmall);
                     if (row.desc.Length > 0) {
-                        c.DrawText(sx + app.Scale(8), ry + app.Scale(22),
+                        c.DrawText(sx + app.Scale(8), ry + app.Scale(28),
                             row.desc, dc, t.fontSizeTiny);
                     }
                     c.PopClip();
