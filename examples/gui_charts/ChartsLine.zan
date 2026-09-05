@@ -1437,11 +1437,11 @@ partial class Charts {
         dir.color = Chart.Rgb(255, 0, 0);
         dir.itemStyle.normal.lineStyle.width = 2;
         dir.itemStyle.normal.lineStyle.type = "dashed";
-        // 搜索引擎：不堆叠 + emptyCircle + 横向渐变描边（红→黄）
+        // 搜索引擎：不堆叠 + emptyCircle + 横向渐变描边（红→黄），
+        // 系列色走 ECharts 2 默认调色板（参考站未显式指定 color）。
         ChartSeries search = ChartSeries.Line(Charts.T("Search", "搜索引擎"),
             new List<int>{ 620, 732, 791, 734, 890, 930, 820 });
         search.symbol = "emptyCircle";
-        search.color = Chart.Rgb(255, 102, 0);
         search.itemStyle.normal.lineStyle.width = 2;
         search.itemStyle.normal.lineStyle.gradStops = new List<int>{
             Chart.Rgb(255, 0, 0), Chart.Rgb(255, 255, 0) };

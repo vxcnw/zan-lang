@@ -316,7 +316,7 @@ class Chart {
 
     /// 定性调色板第 i 档：优先取皮肤的 --chart-1 .. --chart-8 token
     /// （Theme.chart1..8，0 = 该槽位未定义），缺的槽位回退到
-    /// ECharts 2.2.7 默认调色板前 8 色，因此任何皮肤只需定义想要
+    /// ECharts 2.2 默认调色板前 8 色，因此任何皮肤只需定义想要
     /// 覆盖的色槽。i 自动取模 8 循环。
     static int Palette(Theme t, int i) {
         int m = i % 8;
@@ -330,14 +330,15 @@ class Chart {
             if (m == 6 && t.chart7 != 0) { return t.chart7; }
             if (m == 7 && t.chart8 != 0) { return t.chart8; }
         }
-        if (m == 0) { return Chart.Rgb(255, 127, 80); }   // 珊瑚 #ff7f50
-        if (m == 1) { return Chart.Rgb(135, 206, 250); }  // 天蓝 #87cefa
-        if (m == 2) { return Chart.Rgb(218, 112, 214); }  // 兰紫 #da70d6
-        if (m == 3) { return Chart.Rgb(50, 205, 50); }    // 草绿 #32cd32
-        if (m == 4) { return Chart.Rgb(100, 149, 237); }  // 矢车菊蓝 #6495ed
-        if (m == 5) { return Chart.Rgb(255, 105, 180); }  // 热粉 #ff69b4
-        if (m == 6) { return Chart.Rgb(186, 85, 211); }   // 中兰紫 #ba55d3
-        return Chart.Rgb(205, 92, 92);                     // 印度红 #cd5c5c
+        // ECharts 2.x 默认调色板（theme/default.js）前 8 档。
+        if (m == 0) { return Chart.Rgb(193, 44, 43); }    // #C1232B
+        if (m == 1) { return Chart.Rgb(181, 195, 52); }   // #B5C334
+        if (m == 2) { return Chart.Rgb(252, 206, 16); }   // #FCCE10
+        if (m == 3) { return Chart.Rgb(232, 124, 37); }   // #E87C25
+        if (m == 4) { return Chart.Rgb(39, 114, 123); }   // #27727B
+        if (m == 5) { return Chart.Rgb(254, 132, 99); }   // #FE8463
+        if (m == 6) { return Chart.Rgb(155, 202, 99); }   // #9BCA63
+        return Chart.Rgb(250, 216, 96);                    // #FAD860
     }
 
     /// 系列普通状态的统一颜色回退：显式系列色、normal.color、调色板。

@@ -189,9 +189,11 @@ partial class ChartView {
     /// （区间为空），表现为平滑堆叠面积只剩描边、带间露出大片背景。
     /// 这里改为双指针整列推进：每个像素列在两条边界路径上各找到
     /// 覆盖该列起点的子步，按列起点插值上下边界，一列不漏。
+    /// solidA 是实色区 alpha：堆叠带用 255（ECharts 2 实色）；
+    /// 渐变带传 <255 做半透明衰减。
     static void FillBandFx(Canvas c, List<int> topX, List<int> topY,
                            List<int> botX, List<int> botY, int color,
-                           bool gradient, int topA, int botA) {
+                           bool gradient, int topA, int botA, int solidA) {
         int cnt = topX.Count;
         if (cnt < 2) { return; }
         int bcnt = botX.Count;
@@ -226,7 +228,7 @@ partial class ChartView {
                     / (bAx1 - bAx0);
             }
             ChartView.FillBandColumnAA(c, px, topF, bottomF,
-                color, gradient, topA, botA, 90);
+                color, gradient, topA, botA, solidA);
             px = px + 1;
         }
     }
@@ -733,6 +735,9 @@ partial class ChartView {
             grpBase.Add(offs);
         }
 
+        // 跨组共享的堆叠边界（下一带的底边 = 上一堆叠系列的顶边）
+        // 记录其 smooth 标志；两侧各画各的会在极值处岔开漏白。
+        int boundarySmooth = 0 - 1;
         for (int gi2 = 0; gi2 < ng; gi2 = gi2 + 1) {
             List<int> inCum = new List<int>();
             for (int j2 = 0; j2 < n; j2 = j2 + 1) { inCum.Add(grpBase[gi2][j2]); }
@@ -769,6 +774,11 @@ partial class ChartView {
                 }
                 bool smooth = o.smooth;
                 if (s.smooth == 1) { smooth = true; } else if (s.smooth == 0) { smooth = false; }
+                // 底边沿用下方堆叠系列的 smooth（共享边界同一条折线）。
+                bool botSmooth = smooth;
+                if (stacked && boundarySmooth >= 0) {
+                    botSmooth = boundarySmooth != 0;
+                }
                 // 系列级个性化线样式（多级控制 直接访问：红 + dashed）
                 int strokeCol = s.color;
                 if (s.itemStyle.normal.lineStyle.color != 0) {
@@ -803,10 +813,14 @@ partial class ChartView {
                     List<int> botFx = new List<int>();
                     List<int> botPath = new List<int>();
                     ChartView.BuildPathFx(rxs, rt, smooth, topFx, topPath);
-                    ChartView.BuildPathFx(rxs, rb, smooth, botFx, botPath);
+                    ChartView.BuildPathFx(rxs, rb, botSmooth, botFx, botPath);
                     if (s.areaStyle) {
+                        // ECharts 2 堆积面积 = 实色带（255）；o.gradient
+                        // （邮件营销式纵向渐变）保留半透明衰减。
+                        int fa = o.gradient ? 150 : 255;
+                        int fb = o.gradient ? 40 : 255;
                         ChartView.FillBandFx(c, topFx, topPath, botFx, botPath,
-                            s.color, o.gradient, 150, 40);
+                            s.color, o.gradient, fa, fb, o.gradient ? 90 : 255);
                     }
                     if (rt.Count > 1) {
                         List<int> grad = s.itemStyle.normal.lineStyle.gradStops;
@@ -876,6 +890,7 @@ partial class ChartView {
                     int oi2 = i0 + u;
                     if (oi2 < s.Count()) { inCum[u] = inCum[u] + s.Value(oi2); }
                 }
+                if (stacked) { boundarySmooth = smooth ? 1 : 0; }
             }
         }
         c.PopClip();
