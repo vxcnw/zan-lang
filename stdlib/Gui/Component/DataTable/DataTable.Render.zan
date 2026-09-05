@@ -2842,7 +2842,10 @@ partial class DataTable {
             app.hitTester.RegisterRect(sbId, sbX, trackY, sbW, trackH, 0);
             // 按下发生在滚动条上即置位拖拽标志：随后的帧即使 id
             // 平移也继续拖；主键松开的帧由顶部统一清除。
-            if (st.dragVbar || app.focus.pressedId == sbId) { st.dragVbar = true; }
+            if (st.dragVbar || app.focus.pressedId == sbId) {
+                if (touchUi) { app.ClaimDrag(); }
+                st.dragVbar = true;
+            }
             if (st.dragVbar && maxStart > 0) {
                 int rel = app.mouseY - trackY - thumbH / 2;
                 int denom = trackH - thumbH;
@@ -2874,7 +2877,10 @@ partial class DataTable {
             app.hitTester.RegisterRect(hbId, htrackX, hbY, htrackW, hbH, 0);
             // 按下发生在滚动条上即置位拖拽标志：随后的帧即使 id
             // 平移也继续拖；主键松开的帧由顶部统一清除。
-            if (st.dragHbar || app.focus.pressedId == hbId) { st.dragHbar = true; }
+            if (st.dragHbar || app.focus.pressedId == hbId) {
+                if (touchUi) { app.ClaimDrag(); }
+                st.dragHbar = true;
+            }
             if (st.dragHbar) {
                 int rel = app.mouseX - htrackX - thumbW / 2;
                 int denom = htrackW - thumbW;
@@ -2983,6 +2989,11 @@ partial class DataTable {
         // ---------------- 选区生成图表浮层 ----------------
         if (st.chartOpen) {
             DataTable.RenderChart(app, x, y, viewW, viewH, st);
+        }
+
+        // ---------------- 导出进度弹层（居中模态） ----------------
+        if (st.ExportUiOpen()) {
+            DataTable.RenderExportUi(app, x, y, viewW, viewH, st);
         }
 
         // ---------------- 临时 toast（复制/导出反馈） ----------------

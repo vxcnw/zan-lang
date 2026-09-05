@@ -234,7 +234,10 @@ class LogView {
         bool barVisible = count > maxRows;
         bool overBar = barVisible && Ui.Over(app, barX, y, barW, h);
 
-        if (kind == 2 && app.window.EventButton() == 0 && overBar) { st.barDrag = true; }
+        if (kind == 2 && app.window.EventButton() == 0 && overBar) {
+            if (app.TouchDevice()) { app.ClaimDrag(); }
+            st.barDrag = true;
+        }
         if (st.barDrag && (kind == 1 || kind == 2)) {
             int contentPx = count * rowH;
             int viewPx = maxRows * rowH;

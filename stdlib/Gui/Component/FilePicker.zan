@@ -387,10 +387,11 @@ class FilePicker {
         string dir = "";
         if (initial != "") { dir = FilePicker.ValidDirectory(initial); }
         if (dir == "" && lastDir != "") { dir = FilePicker.ValidDirectory(lastDir); }
-        #if ANDROID
-        // Android 上进程工作目录是 "/"，列根目录被 SELinux 拒绝（空列表）。
-        // 依次尝试：应用私有 files 目录（驱动导出，必可读写）→ 随包解包
-        // 目录 → $HOME。都拿不到就留空，由状态条提示手输路径。
+        #if ANDROID || OHOS
+        // Android/鸿蒙上进程工作目录是 "/"，列根目录被 SELinux 拒绝
+        // （空列表）。依次尝试：应用私有 files 目录（驱动导出，
+        // 必可读写）→ 随包解包目录 → $HOME。都拿不到就留空，
+        // 由状态条提示手输路径。
         if (dir == "" || dir == "." || dir == "/") {
             string filesDir = zan_gui_android_files_dir();
             if (filesDir != null && filesDir != ""
@@ -432,10 +433,12 @@ class FilePicker {
         showHidden.Set(false);
         expanded = new List<string>();
         ExpandAncestors(dir);
-        #if ANDROID
-        // Android 只有一个 activity 窗口：SDL_CreateWindow 第二次调用拿不到
-        // 可显示的原生窗口，对话框永远不出现。降级为宿主窗口内的全屏
-        // 模态（RenderOverlay），事件随宿主走。
+        #if ANDROID || OHOS
+        // Android/鸿蒙只有一个原生窗口（OHOS 驱动的 create_window
+        // 恒返回主窗口句柄，"第二个窗口"与宿主同句柄同表面——popup
+        // 的事件泵会和宿主双消费同一事件流，渲染还互相抢 EGL 表面，
+        // 表现为对话框"打不开"）。降级为宿主窗口内的全屏模态
+        // （RenderOverlay），事件随宿主走。
         inlineMode = true;
         popup = null;
         #else
