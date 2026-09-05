@@ -3,7 +3,8 @@ using Gui;
 using Gui.Widget;
 
 /// 组件画廊里那几个「只有即时接口」的标准库组件的宿主：Alert（通知
-/// 条）、Tooltip、Table / DataTable / PivotTable、Menu、Ribbon、
+/// 条）、Tooltip、Table / DataTable / PivotView（DataTable 的透视视图
+/// 形态）、Menu、Ribbon、
 /// Scrollbar、Chart、Ellipsis、Popover 这些没有保留态控件形态，只有
 /// `X.Render(app, x, y, ...)`。让它们各自占一个声明出来的格子，在自己
 /// 的矩形里绘制，画廊本身就不必再手算任何坐标。
@@ -12,11 +13,11 @@ class GalleryDemoHost : Control {
     string demo;
     /// 这一格希望占的逻辑高度（宽度由所在行/舞台给出）。
     int logHeight;
-    /// PivotTable 演示的保留状态/配置/数据（懒初始化，
+    /// PivotView 演示的保留状态/列/数据源（懒初始化，
     /// 跨帧持有才能保住滚动位置与选中单元格）。
-    PivotState pivotState;
-    PivotConfig pivotCfg;
-    List<DataRow> pivotRows;
+    DataTableState pivotState;
+    List<DataColumn> pivotCols;
+    RowListSource pivotSrc;
 
     GalleryDemoHost(string name, int h) {
         this.InitControl("GalleryDemoHost", 1);
@@ -77,17 +78,21 @@ class GalleryDemoHost : Control {
             row.Push("Zan"); row.Push("98"); rows.Add(row);
             DataTableState state = new DataTableState();
             DataTable.Render(app, bx, by, bw, bh, cols, rows, state);
-        } else if (demo == "PivotTable") {
+        } else if (demo == "PivotView") {
+            // DataTable 的透视视图形态：整表切换为交叉表
+            // （区域 × 季度，求和 Units），带总计行与可循环
+            // 聚合方式的透视芯片。
             if (pivotState == null) {
-                pivotState = new PivotState();
-                pivotRows = PivotDemoRows();
-                pivotCfg = new PivotConfig(0, 1);
-                pivotCfg.measures.Add(new PivotMeasure(2, 0, "Units", 0));
-                pivotCfg.measures.Add(new PivotMeasure(3, 0, "Rev", 3));
-                pivotCfg.groupDigits = true;
-                pivotCfg.heat = true;
+                pivotCols = new List<DataColumn>();
+                pivotCols.Add(DataColumn.Field(new DataColumn("Region", 90), "region"));
+                pivotCols.Add(DataColumn.Field(new DataColumn("Quarter", 70), "quarter"));
+                pivotCols.Add(DataColumn.Field(DataColumn.Numeric("Units", 70), "units"));
+                pivotCols.Add(DataColumn.Field(DataColumn.Numeric("Revenue", 90), "revenue"));
+                pivotSrc = new RowListSource(PivotDemoRows());
+                pivotState = new DataTableState();
+                DataTable.SetPivot(pivotState, pivotCols, pivotSrc, 0, 1, 2, 0);
             }
-            PivotTable.Render(app, bx, by, bw, bh, pivotRows, pivotCfg, pivotState);
+            DataTable.RenderSource(app, bx, by, bw, bh, pivotCols, pivotSrc, pivotState);
         } else if (demo == "Menu") {
             List<string> items = new List<string>{ "Overview", "Settings" };
             SignalInt sel = DocsPreviewHost.DemoInt();
@@ -828,8 +833,8 @@ partial class ComponentGallery {
             inner.dock = 1;
             box.Add(inner);
             stage.Add(box);
-        } else if (name == "PivotTable") {
-            stage.Add(new GalleryDemoHost("PivotTable", 280));
+        } else if (name == "PivotView") {
+            stage.Add(new GalleryDemoHost("PivotView", 280));
         } else if (name == "Popover") {
             stage.Add(new Popover(
                 ZanIDE.T("Details", "详情"),

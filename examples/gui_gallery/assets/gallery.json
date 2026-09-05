@@ -5774,53 +5774,62 @@
     },
     {
       "category": "Data Display",
-      "name": "PivotTable",
+      "name": "PivotView",
       "demos": [],
       "props": [
         {
-          "name": "cfg",
-          "type": "PivotConfig",
+          "name": "rowCol",
+          "type": "int",
           "deflt": "-",
           "desc": {
-            "en": "Row/column fields, measures, rowSort, groupDigits, heat.",
+            "en": "Row dimension source column.",
             "zh": ""
           }
         },
         {
-          "name": "st",
-          "type": "PivotState",
-          "deflt": "-",
+          "name": "colDim",
+          "type": "int",
+          "deflt": "-1",
           "desc": {
-            "en": "Retained scroll/selection/click state (keep across frames).",
+            "en": "Column dimension source column (-1 = single summary column).",
             "zh": ""
           }
         },
         {
-          "name": "rows",
-          "type": "List<DataRow>",
+          "name": "valueCol",
+          "type": "int",
           "deflt": "-",
           "desc": {
-            "en": "Source rows to summarize.",
+            "en": "Value source column to aggregate.",
+            "zh": ""
+          }
+        },
+        {
+          "name": "agg",
+          "type": "int",
+          "deflt": "0",
+          "desc": {
+            "en": "0 sum / 1 average / 2 count / 3 max / 4 min.",
             "zh": ""
           }
         }
       ],
       "events": [
         {
-          "name": "measures",
-          "sig": "List<PivotMeasure>",
+          "name": "SetPivot",
+          "sig": "static bool SetPivot(st, cols, src, rowCol, colDim, valueCol, agg)",
           "desc": {
-            "en": "One or more measures: field + agg (0 sum/1 count/2 avg/3 max/4 min) + showAs (0 abs/1 %row/2 %col/3 %grand) + title.",
-            "zh": ""
+            "en": "Switch the whole table into a cross-tab view; ExitPivot restores the previous view. Aggregation covers rows passing the original filters; a totals row and the pivot chip in the filter panel come along.",
+            "zh": "把整个表格切换为交叉表视图；ExitPivot 还原进入前的视图。聚合范围是通过原始筛选的行；总计行与筛选面板中的透视芯片随视图而来。"
           }
         }
       ],
       "desc": {
-        "en": "Cross-tab with scrolling, pinned totals, full-row hover, click selection, % of row/col/grand measures, heat tinting and adaptive column widths.",
-        "zh": "交叉汇总：可滚动、合计固定、悬停整行高亮、点击选中，度量可显示为占行/列/总计的百分比，支持热力着色与自适应列宽。"
+        "en": "Pivot is a view mode of the DataTable itself: SetPivot rebinds the grid to a cross-tab (row dimension x column dimension, aggregated) with a totals row and an agg-cycling pivot chip — no separate pivot component. Right-click a range for 'Pivot from selection'.",
+        "zh": "透视是 DataTable 自身的视图形态：SetPivot 把网格整体切换为交叉表（行维度 × 列维度聚合），带总计行与可循环聚合方式的透视芯片——没有独立的透视组件。框选后右键「从选区生成透视表」。"
       },
-      "code": "PivotConfig cfg = new PivotConfig(0, 1);\ncfg.measures.Add(new PivotMeasure(2, 0, \"Units\", 0));\ncfg.measures.Add(new PivotMeasure(3, 0, \"Rev\", 3));  // % of grand\ncfg.groupDigits = true;\ncfg.heat = true;\nPivotState st = new PivotState();\nPivotTable.Render(app, 40, 60, 560, 280, rows, cfg, st);\nif (st.TakeClick()) { Use(st.clickRowKey, st.clickColKey); }",
-      "json": "{\n  \"type\": \"PivotTable\",\n  \"name\": \"pivot\",\n  \"rows\": [\n    \"Region\"\n  ],\n  \"cols\": [\n    \"Quarter\"\n  ],\n  \"measure\": \"sales\"\n}"
+      "code": "DataTableState st = new DataTableState();\nDataTable.SetPivot(st, cols, src, 0, 1, 2, 0);   // region x quarter, sum(units)\nDataTable.RenderSource(app, 40, 60, 560, 280, cols, src, st);\n// click the pivot chip to cycle Sum → Average → Count → Max → Min; × exits\n// DataTable.ExitPivot(st);",
+      "json": "{\n  \"type\": \"DataTable\",\n  \"name\": \"grid\",\n  \"pivot\": {\n    \"row\": \"Region\",\n    \"col\": \"Quarter\",\n    \"value\": \"Units\",\n    \"agg\": \"sum\"\n  }\n}"
     },
     {
       "category": "Data Display",

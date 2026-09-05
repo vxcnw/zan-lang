@@ -1157,10 +1157,15 @@ class Gallery {
     // Retained state for the deferred-overlay / interactive demos.
     static string copiedIcon;
     static DataTableState demoTableState;
-    static PivotState demoPivotState;   // pivot scroll/selection survive frames
+    // Pivot view demo: the DataTable itself switched into cross-tab mode
+    // (SetPivot). State/cols/source are retained so scroll and selection
+    // survive frames.
+    static DataTableState demoPivotState;
+    static List<DataColumn> demoPivotCols;
+    static RowListSource demoPivotSrc;
 
-    // PivotTable 演示数据：6 个区域 × 4 个季度，行列都足以溢出
-    // 预览框，展示行/列滚动与固定合计。
+    // PivotView 演示数据：6 个区域 × 4 个季度，行列都足以溢出
+    // 预览框，展示行/列滚动与总计行。
     static List<DataRow> PivotDemoRows() {
         List<string> regions = new List<string>{
             "North", "South", "East", "West", "Central", "Overseas" };
@@ -4615,7 +4620,7 @@ class Gallery {
         // 横向变宽，纵向不变，高度沿用。
         if (name == "DataTable 1M") { return 452; }
         if (name == "DataTable") { return 360; }
-        if (name == "PivotTable") { return 330; }
+        if (name == "PivotView") { return 330; }
         if (name == "Chart") { return 320; }
         if (name == "Alert.types") { return 195; }
         if (name == "Alert.queue") { return 155; }
@@ -8099,22 +8104,31 @@ class Gallery {
             // 第三行以选中态示人：主色浅底 + 左缘强调条。
             Table.RenderRowSel(app, px, ty0 + rh * 3, t2, widths, false, true);
             Table.RenderRow(app, px, ty0 + rh * 4, t3, widths, true);
-        } else if (name == "PivotTable") {
-            // region(0) x quarter(1), two measures: units (absolute) and
-            // revenue (% of grand total). Heat tinting + digit grouping on;
-            // the 6x4 grid overflows the box so the vertical scroll with its
-            // pinned total row is visible. Hover highlights, click selects.
+        } else if (name == "PivotView") {
+            // The pivot demo is a plain DataTable switched into pivot view:
+            // region(0) x quarter(1), sum(units). The whole grid becomes a
+            // cross-tab with a totals row, and the filter panel above the
+            // header shows the resident pivot chip (click cycles the
+            // aggregate, × exits the view). The 6x4 grid overflows the box
+            // so the vertical scroll is visible.
             if (Gallery.demoPivotState == null) {
-                Gallery.demoPivotState = new PivotState();
+                Gallery.demoPivotCols = new List<DataColumn>();
+                Gallery.demoPivotCols.Add(DataColumn.Field(
+                    new DataColumn("Region", 90), "region"));
+                Gallery.demoPivotCols.Add(DataColumn.Field(
+                    new DataColumn("Quarter", 70), "quarter"));
+                Gallery.demoPivotCols.Add(DataColumn.Field(
+                    DataColumn.Numeric("Units", 70), "units"));
+                Gallery.demoPivotCols.Add(DataColumn.Field(
+                    DataColumn.Numeric("Revenue", 90), "revenue"));
+                Gallery.demoPivotSrc = new RowListSource(Gallery.PivotDemoRows());
+                Gallery.demoPivotState = new DataTableState();
+                DataTable.SetPivot(Gallery.demoPivotState, Gallery.demoPivotCols,
+                                   Gallery.demoPivotSrc, 0, 1, 2, 0);
             }
-            PivotConfig cfg = new PivotConfig(0, 1);
-            cfg.measures.Add(new PivotMeasure(2, 0, "Units", 0));
-            cfg.measures.Add(new PivotMeasure(3, 0, "Rev", 3));
-            cfg.groupDigits = true;
-            cfg.heat = true;
-            PivotTable.Render(app, px, py - app.Scale(20), w - app.Scale(36),
-                              app.Scale(290), Gallery.PivotDemoRows(), cfg,
-                              Gallery.demoPivotState);
+            DataTable.RenderSource(app, px, py - app.Scale(20), w - app.Scale(36),
+                                   app.Scale(290), Gallery.demoPivotCols,
+                                   Gallery.demoPivotSrc, Gallery.demoPivotState);
         } else if (name == "TreeView") {
             // Multi-level tree with selection checkboxes: click a folder to
             // expand/collapse, click a row to select, click a box to (de)select
