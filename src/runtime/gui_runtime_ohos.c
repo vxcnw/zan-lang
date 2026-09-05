@@ -346,6 +346,311 @@ EXPORT void zan_gui_ohos_touch(int action, int x, int y) {
     }
 }
 
+/* ---- IME (soft keyboard) ------------------------------------------------
+ * FocusManager flips the IME session as text widgets gain/lose keyboard
+ * focus (zan_gui_set_ime_open). A GUI that paints its own text widgets uses
+ * the custom-editor path of the input method framework: attach registers a
+ * TextEditorProxy whose callbacks (commit / delete / enter / cursor) arrive
+ * on IMF binder threads and are pushed into the event ring as kind-6 char
+ * events (the Win32 WM_CHAR contract the text widgets were built on:
+ * Backspace=8, Enter=13) and kind-4 arrows. Preview text is disabled in
+ * GetTextConfig so IMEs commit directly instead of streaming composing
+ * letters into the widget.
+ *
+ * Like the NativeWindow direct path above, every IMF symbol is resolved
+ * with dlsym: an image without libohinputmethod.so must still load this
+ * library (the feature then degrades to the old no-op). */
+
+/* The IMF headers use char16_t (a C++ keyword) without pulling in the C11
+ * home for it; include uchar.h first or every signature fails to parse. */
+#include <uchar.h>
+#include "inputmethod/inputmethod_controller_capi.h"
+
+typedef InputMethod_ErrorCode (*FnImeProxyCreate)(InputMethod_TextEditorProxy **);
+typedef void (*FnImeProxyDestroy)(InputMethod_TextEditorProxy *);
+#define IME_PROXY_SETTER(name, field) \
+    typedef InputMethod_ErrorCode (*FnImeSet##name)( \
+        InputMethod_TextEditorProxy *, field);
+IME_PROXY_SETTER(GetTextConfig, OH_TextEditorProxy_GetTextConfigFunc)
+IME_PROXY_SETTER(InsertText, OH_TextEditorProxy_InsertTextFunc)
+IME_PROXY_SETTER(DeleteForward, OH_TextEditorProxy_DeleteForwardFunc)
+IME_PROXY_SETTER(DeleteBackward, OH_TextEditorProxy_DeleteBackwardFunc)
+IME_PROXY_SETTER(SendEnterKey, OH_TextEditorProxy_SendEnterKeyFunc)
+IME_PROXY_SETTER(MoveCursor, OH_TextEditorProxy_MoveCursorFunc)
+IME_PROXY_SETTER(SendKeyboardStatus, OH_TextEditorProxy_SendKeyboardStatusFunc)
+IME_PROXY_SETTER(HandleSetSelection, OH_TextEditorProxy_HandleSetSelectionFunc)
+IME_PROXY_SETTER(HandleExtendAction, OH_TextEditorProxy_HandleExtendActionFunc)
+IME_PROXY_SETTER(GetLeftTextOfCursor, OH_TextEditorProxy_GetLeftTextOfCursorFunc)
+IME_PROXY_SETTER(GetRightTextOfCursor, OH_TextEditorProxy_GetRightTextOfCursorFunc)
+IME_PROXY_SETTER(GetTextIndexAtCursor, OH_TextEditorProxy_GetTextIndexAtCursorFunc)
+IME_PROXY_SETTER(ReceivePrivateCommand, OH_TextEditorProxy_ReceivePrivateCommandFunc)
+IME_PROXY_SETTER(SetPreviewText, OH_TextEditorProxy_SetPreviewTextFunc)
+IME_PROXY_SETTER(FinishTextPreview, OH_TextEditorProxy_FinishTextPreviewFunc)
+typedef InputMethod_ErrorCode (*FnImeAttach)(InputMethod_TextEditorProxy *,
+    InputMethod_AttachOptions *, InputMethod_InputMethodProxy **);
+typedef InputMethod_ErrorCode (*FnImeDetach)(InputMethod_InputMethodProxy *);
+typedef InputMethod_AttachOptions *(*FnImeAttachOptsCreate)(bool);
+typedef void (*FnImeAttachOptsDestroy)(InputMethod_AttachOptions *);
+
+static FnImeProxyCreate g_ime_proxy_create;
+static FnImeProxyDestroy g_ime_proxy_destroy;
+static FnImeSetGetTextConfig g_ime_set_cfg;
+static FnImeSetInsertText g_ime_set_insert;
+static FnImeSetDeleteForward g_ime_set_delfwd;
+static FnImeSetDeleteBackward g_ime_set_delbwd;
+static FnImeSetSendEnterKey g_ime_set_enter;
+static FnImeSetMoveCursor g_ime_set_move;
+static FnImeSetSendKeyboardStatus g_ime_set_kbstatus;
+static FnImeSetHandleSetSelection g_ime_setsel;
+static FnImeSetHandleExtendAction g_ime_setext;
+static FnImeSetGetLeftTextOfCursor g_ime_set_left;
+static FnImeSetGetRightTextOfCursor g_ime_set_right;
+static FnImeSetGetTextIndexAtCursor g_ime_set_idx;
+static FnImeSetReceivePrivateCommand g_ime_set_priv;
+static FnImeSetSetPreviewText g_ime_set_prev;
+static FnImeSetFinishTextPreview g_ime_set_finprev;
+static FnImeAttach g_ime_attach;
+static FnImeDetach g_ime_detach;
+static FnImeAttachOptsCreate g_ime_opts_create;
+static FnImeAttachOptsDestroy g_ime_opts_destroy;
+
+static InputMethod_TextEditorProxy *g_ime_proxy = NULL;
+static InputMethod_InputMethodProxy *g_ime_im = NULL;
+static int g_ime_attached = 0;
+
+/* UTF-16 -> one codepoint; surrogate pairs merge. Returns 0 at end. */
+static int ime_utf16_next(const char16_t *s, size_t n, size_t *i) {
+    if (*i >= n) { return 0; }
+    unsigned int u = (unsigned int)s[(*i)++];
+    if (u >= 0xD800 && u <= 0xDBFF && *i < n) {
+        unsigned int lo = (unsigned int)s[*i];
+        if (lo >= 0xDC00 && lo <= 0xDFFF) {
+            (*i)++;
+            return (int)(0x10000u + ((u - 0xD800u) << 10) + (lo - 0xDC00u));
+        }
+    }
+    return (int)u;
+}
+
+/* IMF callbacks run on binder threads: the only shared state they touch is
+ * the event ring, which is why every push happens under g_oq_lock. */
+static void ime_on_insert(InputMethod_TextEditorProxy *proxy,
+                          const char16_t *text, size_t length) {
+    (void)proxy;
+    size_t i = 0;
+    pthread_mutex_lock(&g_oq_lock);
+    for (;;) {
+        int cp = ime_utf16_next(text, length, &i);
+        if (cp <= 0) { break; }
+        if (cp == '\n') { cp = 13; }
+        oq_push_locked(6, 0, 0, 0, cp, 0);
+    }
+    pthread_mutex_unlock(&g_oq_lock);
+}
+
+static void ime_on_delete_backward(InputMethod_TextEditorProxy *proxy,
+                                   int32_t length) {
+    (void)proxy;
+    /* length counts UTF-16 units; a surrogate pair is one Zan codepoint. */
+    int n = (length + 1) / 2;
+    if (n < 1) { n = 1; }
+    pthread_mutex_lock(&g_oq_lock);
+    for (int k = 0; k < n; k++) { oq_push_locked(6, 0, 0, 0, 8, 0); }
+    pthread_mutex_unlock(&g_oq_lock);
+}
+
+static void ime_on_delete_forward(InputMethod_TextEditorProxy *proxy,
+                                  int32_t length) {
+    (void)proxy;
+    if (length < 1) { length = 1; }
+    pthread_mutex_lock(&g_oq_lock);
+    for (int32_t k = 0; k < length; k++) { oq_push_locked(4, 0, 0, 0, 46, 0); }
+    pthread_mutex_unlock(&g_oq_lock);
+}
+
+static void ime_on_enter_key(InputMethod_TextEditorProxy *proxy,
+                             InputMethod_EnterKeyType key) {
+    (void)proxy;
+    (void)key;
+    pthread_mutex_lock(&g_oq_lock);
+    oq_push_locked(6, 0, 0, 0, 13, 0);
+    pthread_mutex_unlock(&g_oq_lock);
+}
+
+static void ime_on_move_cursor(InputMethod_TextEditorProxy *proxy,
+                               InputMethod_Direction dir) {
+    (void)proxy;
+    int vk = 0;
+    switch (dir) {
+    case IME_DIRECTION_LEFT:  vk = 37; break;
+    case IME_DIRECTION_UP:    vk = 38; break;
+    case IME_DIRECTION_RIGHT: vk = 39; break;
+    case IME_DIRECTION_DOWN:  vk = 40; break;
+    default: return;
+    }
+    pthread_mutex_lock(&g_oq_lock);
+    oq_push_locked(4, 0, 0, 0, vk, 0);
+    pthread_mutex_unlock(&g_oq_lock);
+}
+
+/* The shell holds no editor content, so cursor-context queries answer
+ * empty: composition still commits, candidates just see nothing. */
+static void ime_on_get_left_text(InputMethod_TextEditorProxy *proxy,
+                                 int32_t number, char16_t text[], size_t *length) {
+    (void)proxy; (void)number;
+    if (length) { *length = 0; }
+    if (text) { text[0] = 0; }
+}
+static void ime_on_get_right_text(InputMethod_TextEditorProxy *proxy,
+                                  int32_t number, char16_t text[], size_t *length) {
+    (void)proxy; (void)number;
+    if (length) { *length = 0; }
+    if (text) { text[0] = 0; }
+}
+static int32_t ime_on_get_index_at_cursor(InputMethod_TextEditorProxy *proxy) {
+    (void)proxy;
+    return 0;
+}
+static int32_t ime_on_private_command(InputMethod_TextEditorProxy *proxy,
+                                      InputMethod_PrivateCommand *cmd[], size_t size) {
+    (void)proxy; (void)cmd; (void)size;
+    return IME_ERR_OK;
+}
+static int32_t ime_on_set_preview_text(InputMethod_TextEditorProxy *proxy,
+                                       const char16_t text[], size_t length,
+                                       int32_t start, int32_t end) {
+    (void)proxy; (void)text; (void)length; (void)start; (void)end;
+    return IME_ERR_OK; /* preview disabled in the config; never expected */
+}
+
+static void ime_on_keyboard_status(InputMethod_TextEditorProxy *proxy,
+                                   InputMethod_KeyboardStatus status) {
+    (void)proxy; (void)status;
+}
+static void ime_on_set_selection(InputMethod_TextEditorProxy *proxy,
+                                 int32_t start, int32_t end) {
+    (void)proxy; (void)start; (void)end;
+}
+static void ime_on_extend_action(InputMethod_TextEditorProxy *proxy,
+                                 InputMethod_ExtendAction action) {
+    (void)proxy; (void)action;
+}
+static void ime_on_finish_preview(InputMethod_TextEditorProxy *proxy) {
+    (void)proxy;
+}
+
+static void ime_on_get_text_config(InputMethod_TextEditorProxy *proxy,
+                                   InputMethod_TextConfig *config) {
+    (void)proxy;
+    OH_TextConfig_SetInputType(config, IME_TEXT_INPUT_TYPE_TEXT);
+    OH_TextConfig_SetPreviewTextSupport(config, false);
+    OH_TextConfig_SetEnterKeyType(config, IME_ENTER_KEY_UNSPECIFIED);
+}
+
+static void ime_ensure_proxy(void) {
+    if (g_ime_proxy || !g_ime_proxy_create) { return; }
+    InputMethod_TextEditorProxy *p = NULL;
+    if (g_ime_proxy_create(&p) != IME_ERR_OK || !p) { return; }
+#define IME_SET(fn, field, val) \
+    do { if (fn(p, val) != IME_ERR_OK) { goto fail; } } while (0)
+    IME_SET(g_ime_set_cfg, GetTextConfigFunc, ime_on_get_text_config);
+    IME_SET(g_ime_set_insert, InsertTextFunc, ime_on_insert);
+    IME_SET(g_ime_set_delbwd, DeleteBackwardFunc, ime_on_delete_backward);
+    IME_SET(g_ime_set_delfwd, DeleteForwardFunc, ime_on_delete_forward);
+    IME_SET(g_ime_set_enter, SendEnterKeyFunc, ime_on_enter_key);
+    IME_SET(g_ime_set_move, MoveCursorFunc, ime_on_move_cursor);
+    IME_SET(g_ime_set_left, GetLeftTextOfCursorFunc, ime_on_get_left_text);
+    IME_SET(g_ime_set_right, GetRightTextOfCursorFunc, ime_on_get_right_text);
+    IME_SET(g_ime_set_idx, GetTextIndexAtCursorFunc, ime_on_get_index_at_cursor);
+    IME_SET(g_ime_set_priv, ReceivePrivateCommandFunc, ime_on_private_command);
+    IME_SET(g_ime_set_prev, SetPreviewTextFunc, ime_on_set_preview_text);
+    IME_SET(g_ime_set_kbstatus, SendKeyboardStatusFunc, ime_on_keyboard_status);
+    IME_SET(g_ime_setsel, HandleSetSelectionFunc, ime_on_set_selection);
+    IME_SET(g_ime_setext, HandleExtendActionFunc, ime_on_extend_action);
+    IME_SET(g_ime_set_finprev, FinishTextPreviewFunc, ime_on_finish_preview);
+#undef IME_SET
+    g_ime_proxy = p;
+    return;
+fail:
+    g_ime_proxy_destroy(p);
+}
+
+static void ime_feature_detect(void) {
+    static int done = 0;
+    if (done) { return; }
+    done = 1;
+    void *h = dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_Create");
+    if (!h) { return; } /* no IMF NDK on this image: stay a no-op */
+    g_ime_proxy_create = (FnImeProxyCreate)dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_Create");
+    g_ime_proxy_destroy = (FnImeProxyDestroy)dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_Destroy");
+    g_ime_set_cfg = (FnImeSetGetTextConfig)dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_SetGetTextConfigFunc");
+    g_ime_set_insert = (FnImeSetInsertText)dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_SetInsertTextFunc");
+    g_ime_set_delfwd = (FnImeSetDeleteForward)dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_SetDeleteForwardFunc");
+    g_ime_set_delbwd = (FnImeSetDeleteBackward)dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_SetDeleteBackwardFunc");
+    g_ime_set_enter = (FnImeSetSendEnterKey)dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_SetSendEnterKeyFunc");
+    g_ime_set_move = (FnImeSetMoveCursor)dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_SetMoveCursorFunc");
+    g_ime_set_kbstatus = (FnImeSetSendKeyboardStatus)dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_SetSendKeyboardStatusFunc");
+    g_ime_setsel = (FnImeSetHandleSetSelection)dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_SetHandleSetSelectionFunc");
+    g_ime_setext = (FnImeSetHandleExtendAction)dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_SetHandleExtendActionFunc");
+    g_ime_set_left = (FnImeSetGetLeftTextOfCursor)dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_SetGetLeftTextOfCursorFunc");
+    g_ime_set_right = (FnImeSetGetRightTextOfCursor)dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_SetGetRightTextOfCursorFunc");
+    g_ime_set_idx = (FnImeSetGetTextIndexAtCursor)dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_SetGetTextIndexAtCursorFunc");
+    g_ime_set_priv = (FnImeSetReceivePrivateCommand)dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_SetReceivePrivateCommandFunc");
+    g_ime_set_prev = (FnImeSetSetPreviewText)dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_SetPreviewTextFunc");
+    g_ime_set_finprev = (FnImeSetFinishTextPreview)dlsym(RTLD_DEFAULT, "OH_TextEditorProxy_SetFinishTextPreviewFunc");
+    g_ime_attach = (FnImeAttach)dlsym(RTLD_DEFAULT, "OH_InputMethodController_Attach");
+    g_ime_detach = (FnImeDetach)dlsym(RTLD_DEFAULT, "OH_InputMethodController_Detach");
+    g_ime_opts_create = (FnImeAttachOptsCreate)dlsym(RTLD_DEFAULT, "OH_AttachOptions_Create");
+    g_ime_opts_destroy = (FnImeAttachOptsDestroy)dlsym(RTLD_DEFAULT, "OH_AttachOptions_Destroy");
+    if (!g_ime_proxy_destroy || !g_ime_set_cfg || !g_ime_set_insert ||
+        !g_ime_set_delbwd || !g_ime_set_delfwd || !g_ime_set_enter ||
+        !g_ime_set_move || !g_ime_set_left || !g_ime_set_right ||
+        !g_ime_set_idx || !g_ime_set_priv || !g_ime_set_prev ||
+        !g_ime_attach || !g_ime_detach || !g_ime_opts_create ||
+        !g_ime_opts_destroy) {
+        memset(&g_ime_proxy_create, 0, sizeof(g_ime_proxy_create));
+    }
+}
+
+/* Open/close the IME session, driven by text-widget focus exactly like the
+ * SDL shell's SDL_StartTextInput/StopTextInput pairing. Attach with
+ * showKeyboard=true summons the soft keyboard; Detach retires it. Called
+ * on the app (render) thread only. */
+EXPORT void zan_gui_set_ime_open(i32 on) {
+    ime_feature_detect();
+    ime_ensure_proxy();
+    if (!g_ime_proxy) { return; }
+    if (on) {
+        if (g_ime_attached) { return; }
+        InputMethod_AttachOptions *opts = g_ime_opts_create(true);
+        if (!opts) { return; }
+        InputMethod_InputMethodProxy *im = NULL;
+        InputMethod_ErrorCode ec = g_ime_attach(g_ime_proxy, opts, &im);
+        g_ime_opts_destroy(opts);
+        if (ec == IME_ERR_OK && im) {
+            g_ime_im = im;
+            g_ime_attached = 1;
+        }
+    } else {
+        if (!g_ime_attached) { return; }
+        g_ime_detach(g_ime_im);
+        g_ime_im = NULL;
+        g_ime_attached = 0;
+    }
+}
+
+void zan_gui_ohos_ime_shutdown(void) {
+    if (g_ime_attached) {
+        g_ime_detach(g_ime_im);
+        g_ime_im = NULL;
+        g_ime_attached = 0;
+    }
+    if (g_ime_proxy) {
+        g_ime_proxy_destroy(g_ime_proxy);
+        g_ime_proxy = NULL;
+    }
+}
+
 /* ---- present (EGL) ------------------------------------------------------
  * The composed CPU surface goes up as one GL texture and out over the
  * attached native window through a fullscreen quad. Pixel bytes are B,G,R,A
@@ -495,6 +800,7 @@ egl_path:
 
 /* Optional teardown the shell calls after zan_hap_main() returned. */
 EXPORT void zan_gui_ohos_shutdown(void) {
+    zan_gui_ohos_ime_shutdown();
     zan_ohos_win_t *w = &g_owin;
     if (w->egl_dpy != EGL_NO_DISPLAY && w->egl_dpy) {
         eglMakeCurrent(w->egl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE,
@@ -675,7 +981,7 @@ EXPORT const char *zan_gui_get_clipboard(void)     { return ""; }
 EXPORT int  zan_gui_drop_pending(void)             { return 0; }
 EXPORT const char *zan_gui_drop_take(void)         { return ""; }
 EXPORT void zan_gui_set_ime_pos(i32 x, i32 y)      { (void)x; (void)y; }
-EXPORT void zan_gui_set_ime_open(i32 on)           { (void)on; }
+/* zan_gui_set_ime_open is the real IMF implementation above. */
 EXPORT i32 zan_gui_enable_glass(iptr hwnd_val, i32 tint_argb) {
     (void)hwnd_val; (void)tint_argb; return 1; /* unsupported: app keeps CPU bg */
 }
