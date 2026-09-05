@@ -1,0 +1,111 @@
+using System;
+using System.IO;
+using Gui;
+using Gui.Widget;
+using Gui.Component.DataTable;
+
+namespace DataTableExportUiTest;
+
+/// 导出进度弹层（DataTable.ExportUi）：包装入口的状态机语义、
+/// 卡片几何、取消通道。真实帧渲染走一遍弹层绘制路径，小表
+/// 异步导出跑通"运行中 -> 完成"全链。
+class Program {
+    static App app;
+
+    static DataRow Row(params string[] vals) {
+        DataRow r = new DataRow();
+        for (int i = 0; i < vals.Length; i = i + 1) { r.Push(vals[i]); }
+        return r;
+    }
+
+    static List<DataColumn> Cols() {
+        List<DataColumn> cols = new List<DataColumn>();
+        cols.Add(DataColumn.Field(DataColumn.Text("Name", 120), "name"));
+        cols.Add(DataColumn.Field(DataColumn.Numeric("Qty", 80), "qty"));
+        return cols;
+    }
+
+    static List<DataRow> Rows() {
+        List<DataRow> rows = new List<DataRow>();
+        rows.Add(Row("a", "1"));
+        rows.Add(Row("b", "2"));
+        rows.Add(Row("c", "3"));
+        return rows;
+    }
+
+    static List<DataColumn> frameCols;
+    static DataSource frameSrc;
+    static DataTableState frameSt;
+
+    static void Body() {
+        app.BeginFrame();
+        WidgetId.ResetFrame();
+        DataTable.RenderSource(app, 20, 20, 420, 240, frameCols, frameSrc, frameSt);
+        app.RunOverlays();
+    }
+
+    /// 渲染帧直到谓词成立（后台只写静态暂存，渲染前经 SyncUi 拉取）。
+    static bool PumpUntil(Func<bool> done) {
+        for (int i = 0; i < 2000; i = i + 1) {
+            if (done()) { return true; }
+            app.RequestRedraw();
+            app.PumpGuarded();
+            app.FrameGuarded(Body);
+        }
+        return done();
+    }
+
+    static void Main() {
+        app = new App("dt-exportui", 640, 480);
+        app.Show();
+
+        // ---- 卡片几何：水平居中、垂直 40%、视口内夹取 ----
+        int px; int py; int pw; int ph;
+        DataTable.ExportUiRect(app, 0, 0, 640, 480, out px, out py, out pw, out ph);
+        bool geometry = px * 2 + pw == 640 && pw >= app.Scale(180)
+            && py >= app.Scale(8) && py + ph <= 480;
+        Console.WriteLine("geometry=" + (geometry ? 1 : 0));
+
+        // 极小视口：宽度夹到下限、矩形夹回原点
+        DataTable.ExportUiRect(app, 0, 0, 100, 60, out px, out py, out pw, out ph);
+        bool tinyClamp = pw == app.Scale(180) && px == 0 && py == 0;
+        Console.WriteLine("tinyClamp=" + (tinyClamp ? 1 : 0));
+
+        // ---- 取消通道：置位后后台 Cancelled() 必须可见 ----
+        DataTableExportUi cu = new DataTableExportUi();
+        cu.visible = true;
+        DataTableUiExportProgress.Bind(cu);
+        bool unitCancel = !new DataTableUiExportProgress().Cancelled();
+        cu.cancel.Store(1);
+        unitCancel = unitCancel && new DataTableUiExportProgress().Cancelled();
+        Console.WriteLine("unitCancel=" + (unitCancel ? 1 : 0));
+
+        // ---- 无可导内容：弹层直接落失败态 ----
+        DataTableState stE = new DataTableState();
+        List<DataRow> noRows = new List<DataRow>();
+        bool empty = !DataTable.ExportToXlsxAsyncUi(app, stE, Cols(),
+            new RowListSource(noRows), "exportui_empty.xlsx", true);
+        empty = empty && stE.ExportUiOpen() && stE.exportUi.finished
+            && !stE.exportUi.ok;
+        Console.WriteLine("empty=" + (empty ? 1 : 0));
+
+        // ---- 真实导出：3 行小表，弹层推进到完成，文件落盘 ----
+        frameCols = Cols();
+        frameSrc = new RowListSource(Rows());
+        frameSt = new DataTableState();
+        // 快照读 st.order：导出前先初始化列集与行序（宿主通常已
+        // 渲染过表格，测试里显式做等价初始化）。
+        DataTable.EnsureInit(frameSt, frameCols, frameSrc);
+        DataTable.Recompute(frameSt, frameCols, frameSrc);
+        bool started = DataTable.ExportToXlsxAsyncUi(app, frameSt, frameCols,
+            frameSrc, "exportui_case.xlsx", false);
+        bool exported = started && PumpUntil(delegate() {
+            return frameSt.exportUi != null && frameSt.exportUi.finished;
+        });
+        exported = exported && frameSt.exportUi.ok
+            && frameSt.exportUi.total == 4
+            && File.Exists("exportui_case.xlsx");
+        if (File.Exists("exportui_case.xlsx")) { File.Delete("exportui_case.xlsx"); }
+        Console.WriteLine("exported=" + (exported ? 1 : 0));
+    }
+}

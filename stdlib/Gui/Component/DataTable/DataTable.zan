@@ -25,6 +25,14 @@ partial class DataTable {
         return st.rangeR0 >= 0 && st.rangeC0 >= 0;
     }
 
+    /// 当前已有任意选中行（勾选框或范围选中）时为 true。
+    static bool HasSelection(DataTableState st) {
+        for (int i = 0; i < st.selected.Count; i = i + 1) {
+            if (st.selected[i]) { return true; }
+        }
+        return false;
+    }
+
     // 转义单个 CSV 字段（含逗号、引号或换行时加引号）。
     /// 转义单个 CSV 字段（含逗号、引号或换行时加引号，内嵌引号翻倍）。
     static string CsvField(string v) {

@@ -2519,7 +2519,9 @@ partial class DataTable {
                         int ri = DataTable.DispRowOf(st, ptrOi);
                         st.ctxRow = ri;
                         st.ctxOrder = ptrOi;
-                        if (!DataTable.IsSelected(st, src, ri)) {
+                        // 镜像右键行为：已有勾选/选中行时不收窄到本行。
+                        if (!DataTable.HasSelection(st)
+                            && !DataTable.IsSelected(st, src, ri)) {
                             DataTable.SelectAllRows(st, src, false);
                             DataTable.SetSelected(st, src, ri, true);
                             st.selAnchor = ptrOi;
@@ -2608,7 +2610,11 @@ partial class DataTable {
             && app.mouseY >= bodyTop && app.mouseY < bodyTop + bodyH) {
             // 如果右键点击的行不在当前范围/选择内，
             // 就选中该行，让菜单的复制/导出有对象可用。
-            if (ptrOi >= 0 && DataTable.DispKind(st, ptrOi) == 0 && !DataTable.HasRange(st)) {
+            // 但已有勾选/选中行时不收窄——右键只是打开菜单，
+            // 不应清掉用户已勾选的多行（对齐 DevExpress：
+            // 右键在选区外不改变现有选择，菜单仍作用于原选择）。
+            if (ptrOi >= 0 && DataTable.DispKind(st, ptrOi) == 0
+                && !DataTable.HasRange(st) && !DataTable.HasSelection(st)) {
                 int ri = DataTable.DispRowOf(st, ptrOi);
                 if (!DataTable.IsSelected(st, src, ri)) {
                     DataTable.SelectAllRows(st, src, false);

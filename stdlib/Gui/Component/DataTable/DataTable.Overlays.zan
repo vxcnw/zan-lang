@@ -373,6 +373,142 @@ partial class DataTable {
     // 形态（DataTable.PivotView.zan）——右键菜单直接把整表
     // 切换为交叉投影，不再需要独立的透视浮层。
 
+    // ---------- 导出进度弹层（居中模态） ----------
+
+    /// 进度弹层卡片矩形：水平居中，垂直置于视口约 40% 高处
+    /// （视觉重心比正中略稳）。高度由内容令牌推出，纯几何，
+    /// conformance 直接断言。
+    static void ExportUiRect(App app, int x, int y, int viewW, int viewH,
+                             out int px, out int py, out int pw, out int ph) {
+        Theme t = app.theme;
+        int fSmall = Style.FontFallback(app, "small");
+        pw = app.Scale(340);
+        int maxW = viewW - app.Scale(24);
+        if (pw > maxW) { pw = maxW; }
+        if (pw < app.Scale(180)) { pw = app.Scale(180); }
+        ph = app.Scale(16) + t.heightMedium + app.Scale(14) + app.Scale(10)
+            + app.Scale(12) + fSmall + app.Scale(10) + t.heightSmall + app.Scale(16);
+        px = x + (viewW - pw) / 2;
+        if (px < x) { px = x; }
+        py = y + (viewH - ph) * 2 / 5;
+        if (py < y + app.Scale(8)) { py = y + app.Scale(8); }
+        if (py + ph > y + viewH) { py = y + viewH - ph - app.Scale(8); }
+        if (py < y) { py = y; }
+    }
+
+    /// 导出进度模态：遮罩压暗表格，卡片给出进度条、百分比与
+    /// 行数计数；运行中可取消（Escape 等效），结束给出结果与
+    /// 关闭按钮。模态机制与图表浮层一致：CaptureWheel +
+    /// BlockHitsRect 盖住整个表格视口，弹层最后绘制。
+    static void RenderExportUi(App app, int x, int y, int viewW, int viewH,
+                               DataTableState st) {
+        DataTableExportUi ui = st.exportUi;
+        if (ui == null || !ui.visible) { return; }
+        // 后台进度暂存 -> 弹层状态（UI 线程每帧拉取）
+        DataTableUiExportProgress.SyncUi();
+        Canvas c = app.canvas;
+        Theme t = app.theme;
+        StyleBox sMenu = Style.Part(app, "datatable", "menu", "", "", "",
+                                    Style.SNormal());
+        StyleBox sHint = Style.Part(app, "datatable", "hint", "", "", "",
+                                    Style.SNormal());
+        StyleBox sTrack = Style.Part(app, "datatable", "progress-track", "", "", "",
+                                     Style.SNormal());
+        StyleBox sFill = Style.Part(app, "datatable", "progress-fill", "", "", "",
+                                    Style.SNormal());
+        int fMed = Style.FontFallback(app, "medium");
+        int fSmall = Style.FontFallback(app, "small");
+
+        int px; int py; int pw; int ph;
+        DataTable.ExportUiRect(app, x, y, viewW, viewH, out px, out py, out pw, out ph);
+
+        // 遮罩 + 模态
+        c.FillRect(x, y, viewW, viewH, t.overlay);
+        app.CaptureWheel(x, y, viewW, viewH);
+        app.BlockHitsRect(x, y, viewW, viewH);
+        c.FillRoundRect(px, py, pw, ph, t.borderRadiusMedium, sMenu.BgOr(0));
+        c.DrawRoundRect(px, py, pw, ph, t.borderRadiusMedium, sMenu.BorderOr(0), 1);
+
+        int pad = app.Scale(16);
+        int tx = px + pad;
+
+        // 标题 + 右上角状态词（百分比 / 已完成 / 失败）
+        int ty = py + pad;
+        c.DrawText(tx, ty, DataTable.T("Export Excel", "导出 Excel"), sMenu.FgOr(0), fMed);
+        int pct = 0;
+        if (ui.total > 0) {
+            pct = ui.done * 100 / ui.total;
+            if (pct > 100) { pct = 100; }
+        }
+        string state = DataTable.TN("Exporting… {n}%", pct, "正在导出… {n}%");
+        if (ui.finished) {
+            state = ui.ok ? DataTable.T("Done", "已完成") : DataTable.T("Failed", "失败");
+        }
+        int stateW = Canvas.MeasureText(state, fMed);
+        c.DrawText(px + pw - pad - stateW, ty, state, sHint.FgOr(0), fMed);
+        ty = ty + t.heightMedium + app.Scale(14);
+
+        // 进度条：完成后满条（失败空条），运行中随行数推进
+        int barW = pw - pad * 2;
+        int barH = app.Scale(10);
+        c.FillRect(tx, ty, barW, barH, sTrack.BgOr(0));
+        int fillW = ui.finished ? (ui.ok ? barW : 0) : barW * pct / 100;
+        if (fillW > 0) {
+            c.FillRoundRect(tx, ty, fillW, barH, barH / 2, sFill.BgOr(0));
+        }
+        ty = ty + barH + app.Scale(12);
+
+        // 明细：运行中给行数计数，结束给结果（路径或失败原因）
+        string detail;
+        if (ui.finished) {
+            detail = ui.ok
+                ? DataTable.T("Exported: ", "已导出：") + ui.path
+                : DataTable.T("Export failed: ", "导出失败：") + ui.message;
+        } else {
+            detail = Convert.ToString(ui.done) + " / " + Convert.ToString(ui.total)
+                + " " + DataTable.T("rows", "行");
+        }
+        c.DrawText(tx, ty, detail, sHint.FgOr(0), fSmall);
+
+        // 按钮行：运行中=取消，结束=关闭
+        string label = ui.finished ? DataTable.T("Close", "关闭")
+                                   : DataTable.T("Cancel", "取消");
+        string cls = ui.finished ? "small primary" : "small text";
+        int bh = t.heightSmall;
+        int bw = Canvas.MeasureText(label, fSmall) + app.Scale(24);
+        int bxc = px + pw - pad - bw;
+        int byc = py + ph - pad - bh;
+        bool hot = app.mouseX >= bxc && app.mouseX < bxc + bw
+                   && app.mouseY >= byc && app.mouseY < byc + bh;
+        StyleBox bs = Style.Part(app, "datatable", "button", "", cls, "",
+                                 Style.SNormal());
+        if (hot) {
+            bs = Style.Part(app, "datatable", "button", "", cls, "",
+                            Style.SHover());
+        }
+        c.FillRoundRect(bxc, byc, bw, bh, bs.RadiusOr(t.borderRadiusSmall), bs.BgOr(0));
+        c.DrawTextCentered(bxc, byc, bw, bh, label, bs.FgOr(0), fSmall);
+
+        bool clicked = app.EventKind() == 3 && app.window.EventButton() == 0
+                       && app.mouseX >= bxc && app.mouseX < bxc + bw
+                       && app.mouseY >= byc && app.mouseY < byc + bh;
+        if (clicked
+            || (app.EventKind() == 4 && app.window.EventKeyCode() == 27)) {
+            // 运行中：取消/Escape 请求中止（弹层保留到 OnDone 回来
+            // 给出"已取消"）；结束后：关闭/Escape 收起弹层。
+            if (ui.finished) {
+                st.exportUi = null;
+            } else {
+                ui.cancel.Store(1);
+            }
+            app.RequestRedraw();
+            return;
+        }
+        // 运行中自驱重绘：进度条随后台写盘推进（完成后静止，
+        // 等用户关闭）。
+        if (!ui.finished) { app.RequestRedraw(); }
+    }
+
     // ---------- 表头（列）上下文菜单 ----------
     /// 右键点击列表头打开 DevExpress/ag-Grid 风格菜单：
     /// 排序、自动适配宽度、隐藏列、恢复所有列，以及跳转到

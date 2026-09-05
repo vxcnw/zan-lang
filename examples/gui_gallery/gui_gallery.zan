@@ -55,41 +55,6 @@ class BigDataSource : DataSource {
     }
 }
 
-/// Progress hook for the two DataTable demos' "Export Excel" buttons: the
-/// callbacks fire on the export worker thread, so every UI touch is marshalled
-/// back with App.Post as a static method group (delegates can't capture), and
-/// the handler then reads these static mirrors. Both demo panes share one
-/// hook — the library allows a single export job at a time anyway — and the
-/// mirror `slot` says which pane's status line the posted handler updates.
-class GalleryExportProgress : DataTableExportProgress {
-    public static bool running;
-    public static int done;
-    public static int total;
-    public static int slot;
-    public static bool okFlag;
-    public static string message;
-    public static string path;
-
-    override void OnStart(int t) {
-        GalleryExportProgress.total = t;
-        GalleryExportProgress.done = 0;
-        Gallery.app.Post(Gallery.ApplyExportProgress);
-    }
-
-    override void OnProgress(int d, int t) {
-        GalleryExportProgress.done = d;
-        GalleryExportProgress.total = t;
-        Gallery.app.Post(Gallery.ApplyExportProgress);
-    }
-
-    override void OnDone(bool ok, string error) {
-        GalleryExportProgress.running = false;
-        GalleryExportProgress.okFlag = ok;
-        GalleryExportProgress.message = error;
-        Gallery.app.Post(Gallery.ApplyExportDone);
-    }
-}
-
 /// Appearance hook for the DataTable demo. Zan delegates can't capture locals,
 /// so a styler is a subclass rather than a lambda: it reads the row it is asked
 /// about straight from the source. Here, under-performers are tinted, the Score
@@ -1198,13 +1163,11 @@ class Gallery {
     static int bigRowCount;
     static int bigBuildMs;
     // The two DataTable demos' "Export Excel" buttons: retained (built once),
-    // driving the library's async streaming export. Progress lands in the
-    // status line via GalleryExportProgress (see its note about App.Post).
+    // driving the library's async streaming export. Progress shows in the
+    // library's built-in centered modal (DataTable.ExportToXlsxAsyncUi).
     static Button dtExportBtn;
     static Button bigExportBtn;
     static List<DataColumn> dtDemoCols;   // last frame's column list — the demo rebuilds it per frame, the export click takes the latest
-    static string dtExportStatus;
-    static string bigExportStatus;
     static DataRow DtRow7(string a, string b, string cc, string d, string e, string f, string g) {
         DataRow r = new DataRow();
         r.Push(a); r.Push(b); r.Push(cc); r.Push(d); r.Push(e); r.Push(f); r.Push(g);
@@ -1255,11 +1218,6 @@ class Gallery {
     static void OnBigExportClick() { Gallery.StartExport(2); }
 
     static void StartExport(int which) {
-        if (GalleryExportProgress.running) {
-            Gallery.SetExportStatus(which, Gallery.T("An export is already running.", "已有导出在运行。"));
-            Gallery.app.RequestRedraw();
-            return;
-        }
         string path;
         List<DataColumn> cols;
         DataSource src;
@@ -1277,54 +1235,12 @@ class Gallery {
             src = Gallery.bigSource;
             st = Gallery.bigTableState;
         }
-        GalleryExportProgress prog = new GalleryExportProgress();
-        GalleryExportProgress.running = true;
-        GalleryExportProgress.done = 0;
-        GalleryExportProgress.total = 0;
-        GalleryExportProgress.okFlag = false;
-        GalleryExportProgress.message = "";
-        GalleryExportProgress.path = path;
-        GalleryExportProgress.slot = which;
-        if (!DataTable.ExportToXlsxAsync(st, cols, src, path, false, prog)) {
-            // "Nothing to export" returns without a callback; a thread-start
-            // failure does call OnDone and overwrites this status line.
-            GalleryExportProgress.running = false;
-            Gallery.SetExportStatus(which, Gallery.T("Nothing to export.", "没有可导出的内容。"));
-            Gallery.app.RequestRedraw();
-            return;
-        }
-        Gallery.SetExportStatus(which, Gallery.T("Exporting… 0%", "正在导出… 0%"));
+        // DataTable 内置的居中进度弹层（进度条 + 取消/关闭）接管全部
+        // 反馈：无可导内容、已有导出在运行也在弹层里给出原因。
+        DataTable.ExportToXlsxAsyncUi(Gallery.app, st, cols, src, path, false);
         Gallery.app.RequestRedraw();
     }
 
-    static void SetExportStatus(int which, string s) {
-        if (which == 1) { Gallery.dtExportStatus = s; }
-        else { Gallery.bigExportStatus = s; }
-    }
-
-    // The two below run on the UI thread via App.Post and only read the
-    // static mirrors on GalleryExportProgress.
-    static void ApplyExportProgress() {
-        int pct = 0;
-        if (GalleryExportProgress.total > 0) {
-            pct = GalleryExportProgress.done * 100 / GalleryExportProgress.total;
-            if (pct > 100) { pct = 100; }
-        }
-        Gallery.SetExportStatus(GalleryExportProgress.slot,
-            Gallery.T("Exporting… ", "正在导出… ") + Convert.ToString(pct) + "%");
-        Gallery.app.RequestRedraw();
-    }
-
-    static void ApplyExportDone() {
-        if (GalleryExportProgress.okFlag) {
-            Gallery.SetExportStatus(GalleryExportProgress.slot,
-                Gallery.T("Exported: ", "已导出：") + GalleryExportProgress.path);
-        } else {
-            Gallery.SetExportStatus(GalleryExportProgress.slot,
-                Gallery.T("Export failed: ", "导出失败：") + GalleryExportProgress.message);
-        }
-        Gallery.app.RequestRedraw();
-    }
     /// The Dept column's dropdown list, covering every value in the demo rows so
     /// the strict editor accepts what is already there.
     static List<string> DeptChoices() {
@@ -12555,7 +12471,7 @@ class Gallery {
                 app.Scale(336), Gallery.bigCols, Gallery.bigSource,
                 Gallery.bigTableState);
             // Export Excel: streams the whole virtual view to a real .xlsx on a
-            // worker thread; the status line below reports progress/done.
+            // worker thread; the library's centered modal reports progress.
             if (Gallery.bigExportBtn == null) {
                 Gallery.bigExportBtn = new Button { Text = Gallery.T("Export Excel", "导出 Excel") };
                 Gallery.bigExportBtn.Click += Gallery.OnBigExportClick;
@@ -12563,12 +12479,6 @@ class Gallery {
             Gallery.bigExportBtn.Text = Gallery.T("Export Excel", "导出 Excel");
             int gexY = py + app.Scale(356);
             Gallery.bigExportBtn.Render(app, px, gexY, app.Scale(130));
-            if (Gallery.bigExportStatus != null && Gallery.bigExportStatus != "") {
-                app.canvas.DrawStyledText(
-                    Style.Of(app, "label", "secondary", Style.SNormal()),
-                    px + app.Scale(142), gexY + app.Scale(6), Gallery.bigExportStatus,
-                    app.theme.textPrimary, app.theme.fontSizeMedium);
-            }
         } else if (name == "DataTable") {
             List<DataColumn> cols = new List<DataColumn>();
             // Every column is named, so the styler below and any handler can
@@ -12623,12 +12533,6 @@ class Gallery {
             Gallery.dtExportBtn.Text = Gallery.T("Export Excel", "导出 Excel");
             int dexY = py + app.Scale(266);
             Gallery.dtExportBtn.Render(app, px, dexY, app.Scale(130));
-            if (Gallery.dtExportStatus != null && Gallery.dtExportStatus != "") {
-                app.canvas.DrawStyledText(
-                    Style.Of(app, "label", "secondary", Style.SNormal()),
-                    px + app.Scale(142), dexY + app.Scale(6), Gallery.dtExportStatus,
-                    app.theme.textPrimary, app.theme.fontSizeMedium);
-            }
         } else if (name == "Compose") {
             // Fluent retained-mode composition: a titled card holding a column
             // of a label, a progress bar and a row of buttons — all nested with

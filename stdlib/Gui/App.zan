@@ -3393,8 +3393,10 @@ class App {
         if (!isRunning) { return; }
         Dispatcher.Post(handler);
         // 若循环阻塞在 WaitEvent 中则唤醒它，使排队的工作
-        // 及时运行，而非等待下一个输入事件。
-        window.Wake();
+        // 及时运行，而非等待下一个输入事件。无后端窗口的
+        // 宿主（headless 驱动、conformance 探针）只排队，
+        // 排队的工作随后续帧照常排空。
+        if (window != null) { window.Wake(); }
     }
 
     /// <summary>

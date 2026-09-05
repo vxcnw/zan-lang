@@ -1197,6 +1197,9 @@ class DataTableState {
     List<ChartBar> chartBars;  // 每根条 {类别标签, 值}
     int chartMax;              // 最大的条值（>=1），用于缩放
 
+    // ---- 导出进度弹层（居中模态，ExportToXlsxAsyncUi 驱动） ----
+    DataTableExportUi exportUi;  // null = 无弹层；状态类见 DataTable.ExportUi.zan
+
     // ---- 透视视图（ag-Grid 风格：表格整体切换为交叉表） ----
     // 激活后 RenderSource 用 PivotDataSource 包住原源，把
     // “行维度 × 列维度”的交叉聚合当成普通行×列数据交给
@@ -1501,6 +1504,7 @@ class DataTableState {
         this.chartTitle = "";
         this.chartBars = new List<ChartBar>();
         this.chartMax = 1;
+        this.exportUi = null;
         this.pivotView = false;
         this.pvRowCol = -1;
         this.pvColDim = -1;
@@ -1609,6 +1613,14 @@ class DataTableState {
 
     // ---- 事件上下文访问器（方案 A：处理器读取 sender） ----
     int HitRow() { return hitRow; }
+
+    /// 导出进度弹层是否显示中（模态：表体按下/滚轮/按键等
+    /// 事件路径据此抑制，弹层由 RenderExportUi 最后绘制并
+    /// 独占处理自己的按钮）。
+    bool ExportUiOpen() {
+        return this.exportUi != null && this.exportUi.visible;
+    }
+
     int HitOrderIndex() { return hitOrder; }
     int CtxRow() { return ctxRow; }
     int CtxOrder() { return ctxOrder; }
