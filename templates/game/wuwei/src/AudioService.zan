@@ -1,0 +1,38 @@
+using System;
+using SDL3;
+namespace Wuwei;
+
+// SDL's audio callback feeds the loop; no timer, event pumping, SDL video init,
+// or global volume changes. The host must call Dispose at window shutdown.
+class AudioService {
+    SdlAudioClip clip; SdlVoice voice;
+    int volume=60; bool muted=false; string lastError="";
+    double Gain() { if (muted) { return 0.0; } return volume/100.0; }
+    public string Error() { return lastError; }
+    public int Volume() { return volume; }
+    public bool Muted() { return muted; }
+    public bool IsPlaying() { return voice!=null && voice.IsPlaying(); }
+    public void SetVolume(int value) { if (value<0) { value=0; } if (value>100) { value=100; } volume=value; if (voice!=null) { voice.SetGain(Gain()); } }
+    public void SetMuted(bool value) { muted=value; if (voice!=null) { voice.SetGain(Gain()); } }
+    public bool Start(string oggPath) {
+        lastError="";
+        if (!SdlAudio.Open()) { lastError="音频设备不可用："+Sdl.Error(); return false; }
+        SdlAudioClip next;
+        if (File.EmbedExists("assets/audio/bgm_main.ogg")) {
+            byte[] bytes=File.ReadAllBytes("assets/audio/bgm_main.ogg");
+            next=SdlAudioClip.LoadOggFromMem(bytes,bytes.Length);
+        } else {
+            next=SdlAudioClip.LoadOgg(oggPath);
+        }
+        if (!next.IsValid()) { lastError="背景音乐加载失败："+Sdl.Error(); next.Close(); return false; }
+        SdlVoice playing=next.PlayLooping(Gain());
+        if (!playing.IsValid()) { lastError="背景音乐播放失败："+Sdl.Error(); next.Close(); return false; }
+        Dispose(); clip=next; voice=playing; return true;
+    }
+    public void Dispose() {
+        if (voice!=null) { voice.Stop(); voice=null; }
+        if (clip!=null) { clip.Close(); clip=null; }
+        // Device belongs to SDL globally, not this service. Never stop other voices
+        // or close SDL underneath another component (including another service).
+    }
+}

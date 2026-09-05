@@ -128,6 +128,8 @@ class ThemeDoc {
 ///   move &lt;x&gt; &lt;y&gt; — 合成鼠标移动
 ///   click &lt;x&gt; &lt;y&gt; — 在 x,y 处移动+按下+释放（左键）
 ///   clickid &lt;hitId&gt; — 点击指定 id 命中区域的中心
+///   clickid @&lt;name&gt; — 经宿主 probe "id.&lt;name&gt;" 当场解析后点击
+///   （widget id 逐进程分配、跨运行不稳定，脚本应优先用 @name 形式）
 ///   rclick &lt;x&gt; &lt;y&gt; — 在 x,y 处右键点击
 ///   scroll &lt;x&gt; &lt;y&gt; &lt;delta&gt; — 在 x,y 处滚轮滚动
 ///   char &lt;code&gt; — 一个文本输入字符（Tab=9/Enter=13/Esc=27）
@@ -242,6 +244,19 @@ class UiDriver {
         return "";
     }
 
+    /// `clickid @name` 的数值解析：非纯十进制正整数（含空串）
+    /// 一律返回 -1，由调用方记入结果日志。
+    static int ParseProbeId(string s) {
+        if (s.Length == 0 || s.Length > 9) { return -1; }
+        int v = 0;
+        for (int i = 0; i < s.Length; i = i + 1) {
+            int c = s[i];
+            if (c < 48 || c > 57) { return -1; }
+            v = v * 10 + (c - 48);
+        }
+        return v;
+    }
+
     /// 推进脚本。每个事件循环迭代调用一次（从
     /// App.ProcessEvent 和 IDE 的自定义循环）。注入下一个事件
     /// 或跳过即时（dump/assert/log）命令。在注入的批次之间
@@ -338,16 +353,32 @@ class UiDriver {
             return true;
         }
         if (cmd == "clickid") {
-            int id = UiDriver.ArgI(t, 1, -1);
+            // `clickid @name` resolves through the host's "id.<name>" probe at
+            // click time. Widget ids are allocated per process and not stable
+            // across runs, so a numeric id captured by an earlier discovery
+            // run can point at a different widget; only same-run resolution
+            // is exact.
+            string target = t.Count > 1 ? t[1] : "";
+            int id = -1;
+            if (UiDriver.StartsWith(target, "@")) {
+                id = UiDriver.ParseProbeId(UiDriver.GetProbe("id." + UiDriver.Trim(target.Substring(1))));
+                if (id < 0) {
+                    UiDriver.Note("clickid " + target + " -> probe id."
+                        + UiDriver.Trim(target.Substring(1)) + " missing or not a positive integer");
+                    return false;
+                }
+            } else {
+                id = UiDriver.ArgI(t, 1, -1);
+            }
             HitRegion r = UiDriver.FindRegion(id);
             if (r != null) {
                 int cx = r.x + r.width / 2;
                 int cy = r.y + r.height / 2;
                 UiDriver.ClickAt(cx, cy, 0);
-                UiDriver.Note("clickid " + Convert.ToString(id)
-                    + " -> (" + Convert.ToString(cx) + "," + Convert.ToString(cy) + ")");
+                UiDriver.Note("clickid " + target + " -> (" + Convert.ToString(cx)
+                    + "," + Convert.ToString(cy) + ")");
             } else {
-                UiDriver.Note("clickid " + Convert.ToString(id) + " -> NOT FOUND");
+                UiDriver.Note("clickid " + target + " -> NOT FOUND");
                 return false;
             }
             return true;
