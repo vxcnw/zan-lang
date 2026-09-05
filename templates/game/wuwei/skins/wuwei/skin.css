@@ -68,9 +68,10 @@ label.jade { color: var(--primary); font-size: var(--font-size-large); }
 label.gold { color: #b38a42; font-size: var(--font-size-large); }
 label.brand { font-size: 32; color: var(--text-primary); }
 label.notice { color: var(--primary); font-size: var(--font-size-small); }
-stack.card { background: var(--bg-secondary); border: 1 solid var(--border-secondary); border-radius: var(--border-radius-medium); padding: 14; }
-/* CardRow 用 Flex 行实现 [内容][grow 间隔][按钮]；纵向留白交给固定行高 */
-flex.card { background: var(--bg-secondary); border: 1 solid var(--border-secondary); border-radius: var(--border-radius-medium); padding: 6 14; }
+stack.card { background: transparent; border: 0; padding: 14; }
+/* CardRow 用 Flex 行实现 [内容][grow 间隔][按钮]；纵向留白交给固定行高。
+ * 列表行不再用白卡：直接落在宣纸底上，行间用发丝分隔线保持名册节奏。 */
+flex.card { background: transparent; border: 0; border-bottom: 1 var(--divider); padding: 6 14; }
 button.secondary { background: var(--bg-tertiary); color: var(--primary); border: 1 solid var(--border-primary); }
 button.primary { background: var(--primary); color: #ffffff; }
 button.ghost { background: transparent; color: var(--primary); border: 1 solid var(--border-primary); }
