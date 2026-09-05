@@ -294,9 +294,9 @@ partial class ChartView {
         bool inside = mx >= f.plotX && mx < f.plotX + f.plotW
             && my >= f.plotY && my < f.plotY + f.plotH;
         if (inside) {
-            idx = (mx - f.plotX) * n / f.plotW;
-            if (idx < 0) { idx = 0; }
-            if (idx > n - 1) { idx = n - 1; }
+            // 类目反解与 CatLeft/CatX 同一整数分桶：带状取格、
+            // 刻度模式取最近刻度（折半查找），两种 boundaryGap 都对。
+            idx = f.CatIndexAt(mx, n);
         } else if (Chart.legendOpt != null && Chart.legendOpt.iwid != 0
             && Chart.legendOpt.connectGroup != 0) {
             // connect 联动：指针不在本图上时读组共享的悬停类别，
@@ -309,7 +309,7 @@ partial class ChartView {
             return;
         }
 
-        int gx = f.CatMid(idx, n);
+        int gx = f.CatX(idx, n);
         int crossCol = Style.Part(app, "chart", "crosshair", "", "", "",
                                   Style.SNormal()).BgOr(0);
         if (crossCol != 0) {
@@ -815,7 +815,7 @@ partial class ChartView {
         Canvas c = app.canvas;
         Theme t = app.theme;
         int rad = app.Scale(4);
-        int lx = f.CatMid(slot, nWin);
+        int lx = f.CatX(slot, nWin);
         int ly = f.YOf(s.Value(idx), s.axisIndex);
         c.FillCircle(lx, ly, rad, s.color);
         ChartView.RingOutline(c, lx, ly, rad, 4294967295);

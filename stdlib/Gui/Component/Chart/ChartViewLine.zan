@@ -268,7 +268,8 @@ partial class ChartView {
                 int oi = baseIdx + vi;
                 if (oi < 0 || oi >= s.Count()) { continue; }
                 int val = s.Value(oi);
-                int px = f.CatMid(vi, n);
+                int px = s.type == ChartType.Bar ? f.CatMid(vi, n)
+                    : f.CatX(vi, n);
                 int py = f.YOf(val * g / 1000, ax);
                 bool inside = false;
                 int d2 = 0;
@@ -405,7 +406,7 @@ partial class ChartView {
                         int oi = i0 + sp;
                         if (oi >= s.Count()) { continue; }
                         int v = s.Value(oi) * g / 1000;
-                        int px2 = f.CatMid(sp, n);
+                        int px2 = f.CatX(sp, n);
                         int py2 = f.YOf(v, ax);
                         int scol = drawColor;
                         if (oi < s.data.Count && s.data[oi].color != 0) { scol = s.data[oi].color; }
@@ -439,7 +440,7 @@ partial class ChartView {
                             pxs.Add(f.XOfValue(s.Value(oi) * g / 1000));
                             pys.Add(f.CatMidY(j, n));
                         } else {
-                            pxs.Add(f.CatMid(j, n));
+                            pxs.Add(f.CatX(j, n));
                             pys.Add(f.YOf(s.Value(oi) * g / 1000, ax));
                         }
                         gaps.Add(oi < s.data.Count && s.data[oi].gap);
@@ -651,7 +652,7 @@ partial class ChartView {
                 int bot = f.plotY + f.plotH - prev * g * f.plotH / 1000 / maxV;
                 int lo = top < bot ? top : bot;
                 int hi = top > bot ? top : bot;
-                int px = f.CatMid(vi, n);
+                int px = f.CatX(vi, n);
                 int dx = mx - px;
                 int d2 = dx * dx;
                 if (my >= lo && my <= hi && (best == null || d2 < bestD)) {
@@ -770,7 +771,7 @@ partial class ChartView {
                 }
                 List<int> xs = new List<int>();
                 for (int xi = 0; xi < n; xi = xi + 1) {
-                    xs.Add(f.CatMid(xi, n));
+                    xs.Add(f.CatX(xi, n));
                 }
                 bool smooth = o.smooth;
                 if (s.smooth == 1) { smooth = true; } else if (s.smooth == 0) { smooth = false; }

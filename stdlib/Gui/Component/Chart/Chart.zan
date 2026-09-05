@@ -73,6 +73,16 @@ class ChartFrame {
         return this.CatLeft(i, n) + this.CatWidth(i, n) / 2;
     }
 
+    /// 第 i 类目上「数据点」的 x：boundaryGap=true（带状，柱/K 线
+    /// 默认）落格子中线；false（刻度线模式，ECharts 折线/散点的
+    /// 默认轴形态）落刻度本身——首点贴 y 轴、末点贴绘图区右缘。
+    /// 折线/散点/十字线/悬浮提示等点几何一律走这里；柱/K 线继续
+    /// 用带状 CatLeft/CatMid。
+    int CatX(int i, int n) {
+        if (!this.catBoundaryGap && n > 1) { return this.CatLeft(i, n); }
+        return this.CatMid(i, n);
+    }
+
     /// 局部类目窗口内的像素 -> 类目索引反解；返回值与
     /// CatLeft/CatMid 使用同一整数分桶规则。
     int CatIndexAt(int px, int n) {
@@ -1998,12 +2008,17 @@ class Chart {
                 int labelRight = plotX - labelGap;
                 int rot = x0.labelRotate;
                 int ivl = x0.labelInterval;
+                // 刻度线模式（boundaryGap=false）标签以刻度为中心，
+                // 首尾标签允许越出绘图区（与数值轴标签同形态）；
+                // 带状模式居中在格子内、不越左缘。
+                bool tickX = !f.catBoundaryGap && n > 1;
                 for (int ci = 0; ci < n; ci = ci + 1) {
                     int cxs = f.CatLeft(ci, n);
                     int cellW = f.CatWidth(ci, n);
                     int labelW = Canvas.MeasureText(labels[ci], fs);
-                    int labelLeft = cxs + (cellW - labelW) / 2;
-                    if (labelLeft < cxs) { labelLeft = cxs; }
+                    int labelLeft = tickX ? cxs - labelW / 2
+                        : cxs + (cellW - labelW) / 2;
+                    if (!tickX && labelLeft < cxs) { labelLeft = cxs; }
                     bool last = ci == n - 1;
                     bool show;
                     if (ivl >= 0) {
@@ -2013,7 +2028,10 @@ class Chart {
                         // 旋转标签不再贪心防重叠（底栏已按旋转跨度扩过）。
                         show = true;
                     } else {
-                        show = last || labelLeft >= labelRight + labelGap;
+                        // 刻度模式首标签以轴为中心、左半越出绘图区，
+                        // 不参与贪心让位（ECharts 始终画边界刻度）。
+                        show = last || (tickX && ci == 0)
+                            || labelLeft >= labelRight + labelGap;
                     }
                     if (show) {
                         if (rot != 0) {
@@ -2024,6 +2042,10 @@ class Chart {
                             if (rot > 0) { ax = labelLeft; }
                             c.DrawTextRot(ax, plotBot + app.Scale(4), labels[ci],
                                 sAxis.FgOr(0), fs, rot);
+                            labelRight = labelLeft + labelW;
+                        } else if (tickX) {
+                            c.DrawText(cxs - labelW / 2, plotBot + app.Scale(4),
+                                labels[ci], sAxis.FgOr(0), fs);
                             labelRight = labelLeft + labelW;
                         } else {
                             c.DrawTextCentered(cxs, plotBot + app.Scale(4), cellW,
