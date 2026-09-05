@@ -9243,6 +9243,13 @@ static LLVMValueRef emit_lambda_typed(zan_irgen_t *g, zan_ast_node_t *expr,
      * instance/async context of the enclosing method does not carry over; a
      * captured receiver is rebound below from the closure record. */
     LLVMValueRef saved_fn = g->current_fn;
+    /* A lambda literal inside Main's body is emitted right here, mid-Main.
+     * Its `return` must not see the enclosing Main's entry flag, or the
+     * program-exit static-field sweep (emit_release_static_rc_fields) lands
+     * inside the lambda and nulls every static RC field on the lambda's
+     * first return. */
+    bool saved_fn_is_main = g->current_fn_is_main;
+    g->current_fn_is_main = false;
     LLVMTypeRef saved_fn_ret = g->current_fn_ret_type;
     zan_type_t *saved_fn_zan_ret = g->current_fn_zan_ret_type;
     LLVMValueRef saved_this = g->current_this;
@@ -9353,6 +9360,7 @@ static LLVMValueRef emit_lambda_typed(zan_irgen_t *g, zan_ast_node_t *expr,
     }
 
     g->current_fn = saved_fn;
+    g->current_fn_is_main = saved_fn_is_main;
     g->current_fn_ret_type = saved_fn_ret;
     g->current_fn_zan_ret_type = saved_fn_zan_ret;
     g->throw_locals_base = saved_throw_base;

@@ -1,0 +1,51 @@
+using System;
+
+// A lambda literal passed as a delegate argument is emitted inside the
+// calling method, mid-body. A `return` in such a lambda used to inherit
+// the enclosing Main's program-entry flag, so the program-exit
+// static-field sweep ran inside the lambda: the first lambda return
+// released (and nulled) every static RC field of the program. Every
+// static below must survive the loop that drives the lambda, in Main
+// and in a plain method alike, for block- and expression-bodied
+// literals.
+class Gate {
+    public int hits;
+}
+
+class Program {
+    static Gate gate;
+    static string label;
+    static int ticks;
+
+    static bool PumpUntil(Func<bool> done) {
+        for (int i = 0; i < 50; i = i + 1) {
+            if (done()) { return true; }
+            ticks = ticks + 1;
+        }
+        return done();
+    }
+
+    // the same shape away from Main: a helper method drives its own literal
+    static int SumViaLiteral() {
+        gate.hits = gate.hits + 1;
+        bool ok = PumpUntil(delegate() { return gate.hits >= 1; });
+        return ok ? gate.hits : -1;
+    }
+
+    static void Main() {
+        gate = new Gate();
+        label = "g";
+        bool ok = PumpUntil(delegate() {
+            gate.hits = gate.hits + 1;
+            return gate.hits >= 3;
+        });
+        Console.WriteLine(Convert.ToString(ok ? gate.hits : -1));
+        Console.WriteLine(label);
+        Console.WriteLine(Convert.ToString(ticks));
+        // expression-bodied literal as the argument: same emission path
+        bool exprOk = PumpUntil(() => gate.hits >= 3);
+        Console.WriteLine(Convert.ToString(exprOk ? 1 : 0));
+        Console.WriteLine(Convert.ToString(SumViaLiteral()));
+        Console.WriteLine(label + ":" + Convert.ToString(gate.hits));
+    }
+}

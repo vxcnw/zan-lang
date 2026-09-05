@@ -2223,6 +2223,20 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
       -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_datatable_spark${_exe_ext}
       -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
 
+  # Export progress modal (ExportUi): the *AsyncUi wrappers surface a centered
+  # modal card; the worker only writes static staging and the render loop
+  # pulls it via SyncUi. Asserts card geometry, viewport clamping, the cancel
+  # channel, the nothing-to-export state, and a real small-table export
+  # reaching a file on disk.
+  add_test(NAME conformance_gui_datatable_exportui
+    COMMAND ${CMAKE_COMMAND}
+      -DZANC=$<TARGET_FILE:zanc>
+      -DSRC=${CMAKE_SOURCE_DIR}/tests/gui/datatable_exportui_test.zan
+      "-DZANC_ARGS=${CMAKE_SOURCE_DIR}/stdlib/Gui/Component/DataTable/DataTable.zan;--auto-stdlib${_gui_driver_tail}"
+      -DEXPECTED=${CMAKE_SOURCE_DIR}/tests/conformance/gui_datatable_exportui.out
+      -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_datatable_exportui${_exe_ext}
+      -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
+
   # The property protocol (Props() specs -> Control.GetProp/SetProp) is what
   # the designer and the serializer talk to, and it is pure computation.
   # A `"role": "control"` .zform must build an embeddable Control: the designed
