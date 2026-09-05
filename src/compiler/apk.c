@@ -212,10 +212,20 @@ static int zip_finish(zip_t *z) {
  * (chunk type 0x0001, UTF-16LE) holds every attribute value; the package
  * name and application label are ordinary strings inside it. Patching =
  * rebuild the pool with the two strings replaced and fix the offsets, plus
- * every chunk size that depends on the pool length (just the root's). */
+ * every chunk size that depends on the pool length (just the root's).
+ *
+ * Project permissions (zan.proj androidPermissions) are appended as
+ * <uses-permission android:name="..."/> element pairs right before the
+ * manifest close tag: their name strings go on the pool tail (existing
+ * indices stay valid, so the untouched tree chunks need no fixups) and the
+ * two 80-byte element chunks (start + end, one "name" attribute typed as a
+ * string reference into the new pool slot) are spliced in ahead of the
+ * manifest end-element chunk. The resource-id map is keyed by attribute
+ * pool index and "name" already exists, so nothing there changes. */
 
 static int axml_patch(const unsigned char *xml, size_t xml_len,
                       const char *package, const char *label,
+                      int nperms, const char (*perms)[128],
                       unsigned char **out, size_t *out_len) {
     if (xml_len < 40) return -1;
     uint32_t root_size;
@@ -312,20 +322,55 @@ static int axml_patch(const unsigned char *xml, size_t xml_len,
             repl[v][1 + n] = 0;
             repl_len[v] = 1 + n + 1;
         } else {
-            for (size_t c = 0; c < n; c++) {
-                uint16_t ch = (unsigned char)vals[v][c];
-                memcpy(repl[v] + 2 + c * 2, &ch, 2);
+            /* pool is UTF-16: decode UTF-8 input to UTF-16LE code units so
+             * non-ASCII labels (zan.proj is UTF-8) survive the patch */
+            size_t out = 0;
+            for (size_t c = 0; c < n && out + 4 <= sizeof(repl[v]) - 4; ) {
+                unsigned char b0 = (unsigned char)vals[v][c];
+                uint32_t cp = b0;
+                size_t adv = 1;
+                if ((b0 & 0xE0) == 0xC0 && c + 1 < n) {
+                    cp = ((uint32_t)b0 & 0x1F) << 6
+                       | ((unsigned char)vals[v][c + 1] & 0x3F);
+                    adv = 2;
+                } else if ((b0 & 0xF0) == 0xE0 && c + 2 < n) {
+                    cp = ((uint32_t)b0 & 0x0F) << 12
+                       | (((unsigned char)vals[v][c + 1] & 0x3F) << 6)
+                       | ((unsigned char)vals[v][c + 2] & 0x3F);
+                    adv = 3;
+                } else if ((b0 & 0xF8) == 0xF0 && c + 3 < n) {
+                    cp = ((uint32_t)b0 & 0x07) << 18
+                       | (((unsigned char)vals[v][c + 1] & 0x3F) << 12)
+                       | (((unsigned char)vals[v][c + 2] & 0x3F) << 6)
+                       | ((unsigned char)vals[v][c + 3] & 0x3F);
+                    adv = 4;
+                }
+                if (cp >= 0x10000) {
+                    cp -= 0x10000;
+                    uint16_t hi = (uint16_t)(0xD800 + (cp >> 10));
+                    uint16_t lo = (uint16_t)(0xDC00 + (cp & 0x3FF));
+                    memcpy(repl[v] + 2 + out, &hi, 2);
+                    memcpy(repl[v] + 4 + out, &lo, 2);
+                    out += 4;
+                } else {
+                    uint16_t ch = (uint16_t)cp;
+                    memcpy(repl[v] + 2 + out, &ch, 2);
+                    out += 2;
+                }
+                c += adv;
             }
-            uint16_t u16n = (uint16_t)n, zero = 0;
+            uint16_t u16n = (uint16_t)(out / 2), zero = 0;
             memcpy(repl[v], &u16n, 2);
-            memcpy(repl[v] + 2 + n * 2, &zero, 2);
-            repl_len[v] = 2 + n * 2 + 2;
+            memcpy(repl[v] + 2 + out, &zero, 2);
+            repl_len[v] = 2 + out + 2;
         }
     }
 
-    /* rebuild the pool */
+    /* rebuild the pool; new permission strings go on the tail so existing
+     * indices (and therefore the untouched tree chunks) stay valid */
+    uint32_t new_count = str_count + (uint32_t)nperms;
     buf_t nb; buf_init(&nb);
-    uint32_t *new_offs = (uint32_t *)malloc(sizeof(uint32_t) * str_count);
+    uint32_t *new_offs = (uint32_t *)malloc(sizeof(uint32_t) * new_count);
     if (!new_offs) zan_host_oom();
     uint32_t acc = 0;
     for (uint32_t i = 0; i < str_count; i++) {
@@ -337,10 +382,92 @@ static int axml_patch(const unsigned char *xml, size_t xml_len,
         buf_write(&nb, d, dl);
         acc += (uint32_t)dl;
     }
-    uint32_t new_str_start = 28 + str_count * 4;
+    for (int p = 0; p < nperms; p++) {
+        size_t n = strlen(perms[p]);
+        uint16_t u16n = (uint16_t)n, zero = 0;
+        unsigned char entry[2 + 128 * 2 + 2];
+        size_t dl = 0;
+        memcpy(entry + dl, &u16n, 2); dl += 2;
+        for (size_t c = 0; c < n; c++) {
+            uint16_t ch = (unsigned char)perms[p][c];
+            memcpy(entry + dl + c * 2, &ch, 2);
+        }
+        dl += n * 2;
+        memcpy(entry + dl, &zero, 2); dl += 2;
+        new_offs[str_count + (uint32_t)p] = acc;
+        buf_write(&nb, entry, dl);
+        acc += (uint32_t)dl;
+    }
+    uint32_t new_str_start = 28 + new_count * 4;
     uint32_t new_pool_size = new_str_start + (uint32_t)nb.len;
     uint32_t pad = (4 - (new_pool_size % 4)) % 4;
     new_pool_size += pad;
+
+    /* splice <uses-permission> pairs before the manifest end-element chunk.
+     * Tree layout: [resource map][ns][elements...][manifest EL_END][ns_end].
+     * The trailing 24 bytes are the namespace close, NOT the manifest close,
+     * so scan for the last 0x0103 end-element ahead of it and insert there.
+     * Each pair is a 56-byte start element (line numbers zeroed, one
+     * 20-byte string attribute "name" pointing at the permission's pool
+     * slot) plus a 24-byte end element, matching the template's own
+     * uses-permission chunks byte for byte apart from the string index. */
+    buf_t tree; buf_init(&tree);
+    {
+        size_t rest_off = 8 + first_size;
+        const unsigned char *rest = xml + rest_off;
+        size_t rest_len = xml_len - rest_off;
+        size_t splice_off = 0;      /* insert point within rest */
+        if (rest_len >= 48 && nperms > 0) {
+            /* last 0x0103 before the trailing 24-byte ns_end (0x0101). */
+            size_t o = 0;
+            while (o + 8 <= rest_len - 24) {
+                uint16_t ct = (uint16_t)(rest[o] | ((uint16_t)rest[o + 1] << 8));
+                uint32_t cs = (uint32_t)rest[o + 4]
+                            | ((uint32_t)rest[o + 5] << 8)
+                            | ((uint32_t)rest[o + 6] << 16)
+                            | ((uint32_t)rest[o + 7] << 24);
+                if (cs < 8 || o + cs > rest_len - 24) { break; }
+                if (ct == 0x0103) { splice_off = o; }
+                o += cs;
+            }
+        }
+        if (nperms > 0 && splice_off > 0) {
+            buf_write(&tree, rest, splice_off);
+            for (int p = 0; p < nperms; p++) {
+                uint32_t slot = str_count + (uint32_t)p;
+                /* start element: type 0x0102, hdrSize 16, size 56 */
+                buf_u16(&tree, 0x0102); buf_u16(&tree, 16);
+                buf_u32(&tree, 56);
+                buf_u32(&tree, 0); buf_u32(&tree, 0);   /* line, comment */
+                buf_u32(&tree, 0xFFFFFFFFu);            /* ns: none */
+                buf_u32(&tree, 42);                     /* name: uses-permission */
+                uint16_t astart = 20, asize = 20;
+                buf_u16(&tree, astart); buf_u16(&tree, asize);
+                buf_u16(&tree, 1);                      /* attribute count */
+                buf_u16(&tree, 0);                      /* idIndex */
+                buf_u16(&tree, 0);                      /* classIndex */
+                buf_u16(&tree, 0);                      /* styleIndex */
+                /* attribute: ns=android(33), name="name"(3), raw=slot,
+                 * typed value size 8, type STRING(3), data=slot */
+                buf_u32(&tree, 33);
+                buf_u32(&tree, 3);
+                buf_u32(&tree, slot);                   /* raw value index */
+                buf_u16(&tree, 8);                      /* typed value size */
+                buf_u8(&tree, 0);                       /* res */
+                buf_u8(&tree, 3);                       /* dataType: string */
+                buf_u32(&tree, slot);                   /* data */
+                /* end element: type 0x0103, hdrSize 16, size 24 */
+                buf_u16(&tree, 0x0103); buf_u16(&tree, 16);
+                buf_u32(&tree, 24);
+                buf_u32(&tree, 0); buf_u32(&tree, 0);
+                buf_u32(&tree, 0xFFFFFFFFu);
+                buf_u32(&tree, 42);
+            }
+            buf_write(&tree, rest + splice_off, rest_len - splice_off);
+        } else {
+            buf_write(&tree, rest, rest_len);
+        }
+    }
 
     buf_t ob; buf_init(&ob);
     /* root chunk header (8 bytes) then pool then the rest */
@@ -349,21 +476,21 @@ static int axml_patch(const unsigned char *xml, size_t xml_len,
     buf_write(&ob, &pt, 2);
     buf_write(&ob, &ph, 2);
     buf_write(&ob, &new_pool_size, 4);
-    buf_write(&ob, &str_count, 4);
+    buf_write(&ob, &new_count, 4);
     uint32_t zero32 = 0;
     buf_write(&ob, &zero32, 4);            /* style count */
     buf_write(&ob, &flags32, 4);           /* flags */
     buf_write(&ob, &new_str_start, 4);
     buf_write(&ob, &zero32, 4);            /* styles start */
-    buf_write(&ob, new_offs, 4 * str_count);
+    buf_write(&ob, new_offs, 4 * new_count);
     buf_write(&ob, nb.p, nb.len);
     { unsigned char z4[4] = {0,0,0,0}; buf_write(&ob, z4, pad); }
-    /* the remaining chunks, sizes untouched (they carry no pool offsets) */
-    buf_write(&ob, xml + 8 + first_size, xml_len - (8 + first_size));
+    buf_write(&ob, tree.p, tree.len);
     /* fix the root file-size field */
     { uint32_t total = (uint32_t)ob.len; memcpy(ob.p + 4, &total, 4); }
 
     *out = ob.p; *out_len = ob.len;
+    buf_free(&tree);
     for (uint32_t i = 0; i < str_count; i++) free(raw[i]);
     free(raw); free(raw_len); free(text);
     free(new_offs);
@@ -595,7 +722,8 @@ static int run_quiet(const char *cmd) {
 
 int zan_apk_build(const char *apk_path, const char *lib_main,
                   const char *abi, const char *package, const char *label,
-                  const char *shell_dir, char **extra_libs, int extra_count) {
+                  const char *shell_dir, char **extra_libs, int extra_count,
+                  int perm_count, const char (*perms)[128]) {
     char tmp_apk[1400];
     snprintf(tmp_apk, sizeof(tmp_apk), "%s.tmp", apk_path);
 
@@ -619,7 +747,8 @@ int zan_apk_build(const char *apk_path, const char *lib_main,
 
     /* ---- patch the manifest string pool ---- */
     unsigned char *man2 = NULL; size_t man2_len = 0;
-    int prc = axml_patch(manifest, man_len, package, label, &man2, &man2_len);
+    int prc = axml_patch(manifest, man_len, package, label,
+                         perm_count, perms, &man2, &man2_len);
     free(manifest);
     if (prc != 0) { fprintf(stderr, "error: manifest patch failed\n");
         free(arsc); free(dex); free(lib); return 1; }
@@ -753,7 +882,13 @@ int zan_apk_build(const char *apk_path, const char *lib_main,
         fprintf(stderr, "error: APK signing failed (apksigner). Run with the"
                 " same command manually for details:\n  java -jar %s sign "
                 "--ks %s --out %s %s\n", signer, ks, apk_path, tmp_apk);
-        remove(tmp_apk);
+        /* keep the unsigned package around for post-mortem (AXML parsing,
+         * aapt2 dump) instead of deleting the evidence */
+        char keep[1400];
+        snprintf(keep, sizeof(keep), "%s.unsigned", apk_path);
+        remove(keep);
+        rename(tmp_apk, keep);
+        fprintf(stderr, "  (unsigned package kept at %s)\n", keep);
         return 1;
     }
     remove(tmp_apk);

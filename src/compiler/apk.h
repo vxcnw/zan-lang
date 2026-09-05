@@ -33,11 +33,16 @@
  *   extra_libs   extra .so files to pack into lib/<abi>/ (bundled drivers),
  *                each a path; may be NULL
  *   extra_count  number of extra_libs entries
+ *   perms        extra <uses-permission android:name> values to append to
+ *                the manifest (full names or "android.permission.X"); each
+ *                up to 127 chars; may be NULL when perm_count is 0
+ *   perm_count   number of perms entries
  *
  * Returns 0 on success. On failure a diagnostic was printed to stderr and a
  * nonzero code is returned; any partial output file is removed. */
 int zan_apk_build(const char *apk_path, const char *lib_main,
                   const char *abi, const char *package, const char *label,
-                  const char *shell_dir, char **extra_libs, int extra_count);
+                  const char *shell_dir, char **extra_libs, int extra_count,
+                  int perm_count, const char (*perms)[128]);
 
 #endif /* ZAN_APK_H */
