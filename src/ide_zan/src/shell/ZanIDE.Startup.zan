@@ -199,6 +199,13 @@ partial class ZanIDE {
         ZanIDE.uiLang = ZanIDE.ReadUiLang();
         // 键式查找（Lang.Tr）与 lang 信号同侧：空码 = 源语言
         // （内置中文缺省串），其余码走语言包或回退键本身。
+        // 语言包目录：stdlib 组件（DataTable/FilePicker 等）的
+        // en 包，让英文界面下键式组件真的显示英文而不是回退
+        // 内置中文；zh 不需要包（缺省串即中文）。
+        List<string> compLangDirs = new List<string> {
+            "stdlib/Gui/Component/DataTable/lang",
+            "../stdlib/Gui/Component/DataTable/lang" };
+        Lang.LoadDirs(compLangDirs);
         Lang.Set(ZanIDE.uiLang == "zh" ? "" : ZanIDE.uiLang);
         Wizard.lang = ZanIDE.uiLang;
         Designer.lang = ZanIDE.uiLang;
