@@ -40,6 +40,8 @@
 #define remove zan_utf8_remove
 #define rename zan_utf8_rename
 #define system zan_utf8_system
+/* strtok_r is POSIX; the MSVC/MinGW CRT spells it strtok_s. */
+#define strtok_r(str, delim, save) strtok_s((str), (delim), (save))
 #ifndef S_ISDIR
 #define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
 #endif
@@ -560,6 +562,61 @@ static void resolve_package_project_root(const char *input) {
         *last = 0;
     }
     snprintf(package_project_root, sizeof(package_project_root), ".");
+}
+
+/* ---- zan.proj android packaging keys (--emit-apk) ---------------------
+ * Plain "key = value" lines next to the existing name/type/target keys.
+ * androidPermissions is a comma-separated list; bare names are prefixed
+ * with "android.permission." (full names pass through). CLI overrides
+ * (--apk-package/--apk-label) win over the proj file. */
+static char proj_android_package[128];
+static char proj_android_label[128];
+static char proj_android_perms[16][128];
+static int proj_android_perm_count = 0;
+
+static char *proj_trim(char *s) {
+    while (*s == ' ' || *s == '\t') s++;
+    size_t n = strlen(s);
+    while (n > 0 && (s[n - 1] == ' ' || s[n - 1] == '\t'
+                     || s[n - 1] == '\r' || s[n - 1] == '\n')) s[--n] = 0;
+    return s;
+}
+
+static void load_proj_android_keys(void) {
+    char path[1400];
+    snprintf(path, sizeof(path), "%s/zan.proj", package_project_root);
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        char *eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq = 0;
+        char *key = proj_trim(line);
+        char *val = proj_trim(eq + 1);
+        if (strcmp(key, "androidPackage") == 0) {
+            snprintf(proj_android_package, sizeof(proj_android_package), "%s", val);
+        } else if (strcmp(key, "androidLabel") == 0) {
+            snprintf(proj_android_label, sizeof(proj_android_label), "%s", val);
+        } else if (strcmp(key, "androidPermissions") == 0) {
+            char *save = NULL;
+            char *tok = strtok_r(val, ",", &save);
+            while (tok && proj_android_perm_count < 16) {
+                char *p = proj_trim(tok);
+                if (*p) {
+                    char *dst = proj_android_perms[proj_android_perm_count];
+                    if (strncmp(p, "android.permission.", 19) == 0) {
+                        snprintf(dst, 128, "%s", p);
+                    } else {
+                        snprintf(dst, 128, "android.permission.%s", p);
+                    }
+                    proj_android_perm_count++;
+                }
+                tok = strtok_r(NULL, ",", &save);
+            }
+        }
+    }
+    fclose(f);
 }
 
 static void scan_using_tokens(const char *source, size_t len,
@@ -2496,6 +2553,18 @@ int main(int argc, char **argv) {
             fprintf(stderr, "error: --emit-apk requires --target "
                     "android-x64 or android-arm64\n");
             return 1;
+        }
+        /* Pull androidPackage/androidLabel/androidPermissions from the
+         * project's zan.proj so publishing needs no extra CLI flags.
+         * CLI overrides keep precedence. */
+        if (project_root_has_manifest()) {
+            load_proj_android_keys();
+            if (!apk_package && proj_android_package[0]) {
+                apk_package = proj_android_package;
+            }
+            if (!apk_label && proj_android_label[0]) {
+                apk_label = proj_android_label;
+            }
         }
     }
     /* Debug builds carry the ARC diagnostics by default -- a leak or a stale
@@ -5595,7 +5664,8 @@ int main(int argc, char **argv) {
             }
             printf("  packaging APK ? %s\n", apk_path);
             if (zan_apk_build(apk_path, obj_path, abi, pkg, lbl, shell_dir,
-                              extras, nextra) != 0) {
+                              extras, nextra,
+                              proj_android_perm_count, proj_android_perms) != 0) {
                 remove(obj_path);
                 zan_irgen_destroy(&irgen);
                 zan_arena_free(arena);
