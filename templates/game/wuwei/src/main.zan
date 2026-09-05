@@ -78,6 +78,8 @@ class WuweiApp {
     static List<Label> LootLabels=new List<Label>();
     static Progress QiBar; static Progress HpBar; static Progress WorkBar; static Progress QuestBar;
     static Button Claim; static Button PrestigeButton; static Button HealSetting;
+    static Button BreakBtn; static Button CulBtn; static Button RestBtn; static Button BattleStopBtn; static Button CraftStopBtn; static Button SectTrainBtn;
+    static List<Button> SectButtons=new List<Button>(); static List<Button> TalentButtons=new List<Button>(); static List<Button> BagRecycle=new List<Button>();
     static double LastTick=0;
     static Stopwatch Clock;
     static void Heartbeat() { double now=Clock.ElapsedSeconds();if(!InMenu){Model.Tick(now-LastTick);}LastTick=now;Refresh(); }
@@ -101,14 +103,19 @@ class WuweiApp {
     }
     static Flex MakePager(string prevName,string nextName,Label counter,Action prev,Action next) {
         Flex pager=Flex.Row().Center().AlignCenter();pager.Gap(12);
-        pager.With(ActionButton(prevName,"上一页",prev,"ghost"));
-        Size(counter,0,32);pager.With(counter);
-        pager.With(ActionButton(nextName,"下一页",next,"ghost"));
+        pager.With(RowButton(prevName,"上一页",prev,"ghost",96));
+        Size(counter,0,40);pager.With(counter);
+        pager.With(RowButton(nextName,"下一页",next,"ghost",96));
         return pager;
     }
     static List<Button> ProbeButtons=new List<Button>();
     static Button ActionButton(string name,string label,Action action,string cls) {
         Button b=new Button(label);b.name=name;b.Class=cls+" medium";b.OnClick(action);ProbeButtons.Add(b);return b;
+    }
+    // List-row and page-level actions use the large tier (40px, large font) so
+    // they read as clearly clickable instead of thin inline chips.
+    static Button RowButton(string name,string label,Action action,string cls,int width) {
+        Button b=ActionButton(name,label,action,cls);b.Class=cls+" large";Size(b,width,40);return b;
     }
     static void PublishProbes() {
         // Form.Run starts UiDriver after Build; construction-time probes are discarded.
@@ -180,7 +187,7 @@ class WuweiApp {
     static void OpenMenuPage(int page) {MenuPage=page;RefreshProfiles();Refresh();}
     static ScrollColumn MenuPanel(string name,string title) {
         ScrollColumn p=new ScrollColumn();p.name=name;p.Class="menu-panel";p.logGap=12;Place(p,320,56,640,660);Menu.With(p);
-        Panel heading=RowBox();heading.With(Text(title,"title",36).Grow());heading.With(ActionButton(name+"Back","返回菜单",()=>{OpenMenuPage(0);},"secondary"));p.With(heading);return p;
+        Panel heading=RowBox();Size(heading,0,44);heading.With(Text(title,"title",36).Grow());heading.With(RowButton(name+"Back","返回菜单",()=>{OpenMenuPage(0);},"secondary",150));p.With(heading);return p;
     }
     static void BuildMenu() {
         Menu=Panel.Root("menu");Menu.Class="menu";Menu.DockFill();Window.With(Menu);
@@ -194,11 +201,11 @@ class WuweiApp {
         Button exit=ActionButton("menuExit","退出游戏",()=>{Window.GetApp().isRunning=false;},"menu-action");Size(exit,300,60);buttons.With(exit);
         Label version=Text("无为修仙传  v1.0 · Zan 原生版","kicker",24);Place(version,40,716,480,24);Landing.With(version);
         Slots=MenuPanel("slots","选择仙缘");Slots.With(Wrap("五段仙缘，各自珍藏。新旅程只使用空白槽位，绝不覆盖旧存档。","muted",48));
-        Panel actions=RowBox();actions.With(ActionButton("menuContinue","继续仙缘",()=>{OpenSlot(ActiveSlot,false);},"primary"));actions.With(ActionButton("menuNew","开启新仙途",()=>{NewJourney();},"secondary"));Slots.With(actions);
-        for(int i=1;i<=5;i=i+1){int slot=i;Flex row=CardRow(76);Label summary=Text("","section",36);ProfileLabels.Add(summary);row.With(summary);row.With(GrowSpace());row.With(ActionButton("profile"+Number(i),"进入仙缘",()=>{OpenSlot(slot,false);},"secondary"));Slots.With(row);}
+        Panel actions=RowBox();Size(actions,0,44);actions.With(RowButton("menuContinue","继续仙缘",()=>{OpenSlot(ActiveSlot,false);},"primary",180));actions.With(RowButton("menuNew","开启新仙途",()=>{NewJourney();},"secondary",180));Slots.With(actions);
+        for(int i=1;i<=5;i=i+1){int slot=i;Flex row=CardRow(76);Label summary=Text("","section",36);ProfileLabels.Add(summary);row.With(summary);row.With(GrowSpace());row.With(RowButton("profile"+Number(i),"进入仙缘",()=>{OpenSlot(slot,false);},"secondary",150));Slots.With(row);}
         MenuStatus=Wrap("选择一段仙缘，即可启程。","notice",44);Slots.With(MenuStatus);
         MenuSettings=MenuPanel("menuAudio","游戏设置");MenuSettings.With(Text("山中清音","section",36));MenuMusicStatus=Wrap("","jade",72);MenuSettings.With(MenuMusicStatus);
-        Panel audio=RowBox();audio.With(ActionButton("menuVolumeDown","音量 −10",()=>{ChangeVolume(-10);},"secondary"));audio.With(ActionButton("menuMute","静音 / 恢复",()=>{Music.SetMuted(!Music.Muted());SaveMusic();},"secondary"));audio.With(ActionButton("menuVolumeUp","音量 +10",()=>{ChangeVolume(10);},"secondary"));MenuSettings.With(audio);MenuSettings.With(Wrap("音乐设置独立保存。返回菜单不会创建或改写任何仙缘存档。","muted",72));
+        Panel audio=RowBox();Size(audio,0,44);audio.With(RowButton("menuVolumeDown","音量 −10",()=>{ChangeVolume(-10);},"secondary",120));audio.With(RowButton("menuMute","静音 / 恢复",()=>{Music.SetMuted(!Music.Muted());SaveMusic();},"secondary",150));audio.With(RowButton("menuVolumeUp","音量 +10",()=>{ChangeVolume(10);},"secondary",120));MenuSettings.With(audio);MenuSettings.With(Wrap("音乐设置独立保存。返回菜单不会创建或改写任何仙缘存档。","muted",72));
         MenuAchievements=MenuPanel("menuAwards","游戏成就");MenuAchievements.With(Wrap("当前仙缘的修行足迹 · 尚未开始时展示成就目标，不创建存档。","muted",48));
         for(int i=0;i<Model.AchievementCount();i=i+1){Label label=Wrap("","muted",80);MenuAchievementLabels.Add(label);MenuAchievements.With(label);}
         RefreshProfiles();
@@ -231,43 +238,46 @@ class WuweiApp {
     }
     static void BuildCultivate() {
         ScrollColumn p=NewPage();PageHead(p,"闭关","闭关会消耗修为经验并转化为闭关进度；只有闭关进度圆满才能提升层数。");
-        Panel card=Column("card");p.With(card);
+        Panel card=Column("card");Size(card,0,288);p.With(card);
         ActivityText=Text("","jade",28);p.With(ActivityText);
         Image icon=Art("icon_mind_skill.webp",120);icon.Fit="contain";icon.Class="card-art";Size(icon,120,120);card.With(CenterRow(icon,12));
         QiText=Text("","jade",28);card.With(CenterRow(QiText,12));
         QiBar=new Progress(0,1);QiBar.ShowText(false);Size(QiBar,520,24);card.With(CenterRow(QiBar,12));
-        Panel act=Panel.Row();act.logGap=12;
-        Button rest=ActionButton("rest","出关休息",()=>{Model.StopActivity();Model.Say("已出关，静养气血",true);Refresh();},"secondary");Size(rest,150,44);act.With(rest);
-        Button cul=ActionButton("cultivate","开始闭关",()=>{Result(Model.StartCultivation());},"primary");Size(cul,220,44);act.With(cul);
+        Panel act=Panel.Row();act.logGap=12;Size(act,0,44);
+        RestBtn=RowButton("rest","出关休息",()=>{Model.StopActivity();Model.Say("已出关，静养气血",true);Refresh();},"secondary",150);act.With(RestBtn);
+        CulBtn=RowButton("cultivate","开始闭关",()=>{Result(Model.StartCultivation());},"primary",220);act.With(CulBtn);
         card.With(CenterRow(act,12));
     }
     static void BuildSkills() {
         ScrollColumn p=NewPage();PageHead(p,"功法","参悟消耗修为经验并需要一定时间；功法提升后永久生效。");
         Grid g=Grid.Of(3);g.logGap=12;
-        for(int s=0;s<3;s=s+1){int slot=s;Panel card=Column("card");Label title=Text("","section",28);SkillNames.Add(title);card.With(title);Button b=ActionButton("skill"+Number(s),"参悟",()=>{SkillAction(slot);},"secondary");Size(b,0,40);SkillButtons.Add(b);card.With(b);g.With(card);}
+        for(int s=0;s<3;s=s+1){int slot=s;Panel card=Column("card");Size(card,0,112);Label title=Text("","section",28);SkillNames.Add(title);card.With(title);SkillButtons.Add(RowButton("skill"+Number(s),"参悟",()=>{SkillAction(slot);},"secondary",0));card.With(SkillButtons[s]);g.With(card);}
         p.With(g);
         SkillCounter=Text("","muted",32);
         p.With(MakePager("skillsPrev","skillsNext",SkillCounter,()=>{if(SkillPage>0){SkillPage=SkillPage-1;}Refresh();},()=>{if((SkillPage+1)*3<Model.Data.Skills.Count){SkillPage=SkillPage+1;}Refresh();}));
     }
     static void BuildBreakthrough() {
         ScrollColumn p=NewPage();PageHead(p,"破境","本境十二层且闭关进度圆满后，服用对应破境丹突破。");
-        Panel card=Column("card");p.With(card);
+        Panel card=Column("card");Size(card,0,272);p.With(card);
         Image icon=Art("alchemy_breakthrough_pill.webp",110);icon.Fit="contain";icon.Class="card-art";Size(icon,110,110);card.With(CenterRow(icon,12));
         BreakInfo=Text("","jade",28);card.With(CenterRow(BreakInfo,12));
         card.With(CenterRow(Text("每层突破消耗一枚对应破境丹，闭关进度圆满后方可尝试。","muted",24),12));
-        Button brk=ActionButton("breakthrough","尝试破境",()=>{Result(Model.Breakthrough());},"primary");Size(brk,220,44);card.With(CenterRow(brk,12));
+        BreakBtn=RowButton("breakthrough","尝试破境",()=>{Result(Model.Breakthrough());},"primary",220);card.With(CenterRow(BreakBtn,12));
     }
     static void BuildQuests() {
         ScrollColumn p=NewPage();PageHead(p,"主线任务","神秘老人的传音将引导你熟悉修行、历练、杂学与万宝。");
         QuestTitle=Wrap("","gold",48);p.With(QuestTitle);
-        Panel speech=Column("card");p.With(speech);
+        Panel speech=Column("card");Size(speech,0,272);p.With(speech);
         QuestBody=Wrap("","",80);speech.With(QuestBody);
         QuestBar=new Progress(0,1);QuestBar.ShowText(false);Size(QuestBar,0,16);speech.With(QuestBar);
         QuestReward=Wrap("","kicker",44);speech.With(QuestReward);
-        Claim=ActionButton("questClaim","领取仙缘",()=>{Result(Model.ClaimQuest());},"primary");Size(Claim,180,44);speech.With(Claim);
+        Claim=RowButton("questClaim","领取仙缘",()=>{Result(Model.ClaimQuest());},"primary",180);speech.With(Claim);
     }
     static void FillRegionCards(Grid g,List<Image> imgs,List<Label> names,List<Label> details,List<Button> btns,int mode,string pfx) {
-        for(int s=0;s<3;s=s+1){int slot=s;Panel c=Column("card");Image art=Art("qingzhu_ridge.webp",120);art.Fit="cover";art.Class="card-art";imgs.Add(art);c.With(art);Label name=Text("","section",28);names.Add(name);c.With(name);Label detail=Wrap("","muted",124);details.Add(detail);c.With(detail);Button b=ActionButton(pfx+Number(s),"前往历练",()=>{MapAction(mode,slot);},"secondary");Size(b,0,40);btns.Add(b);c.With(b);g.With(c);}
+        // Explicit card/flex heights: text and art measure taller than their
+        // Size() hints, and a Grid cell clamps to the card's measurement —
+        // without headroom the bottom button gets squeezed flat.
+        for(int s=0;s<3;s=s+1){int slot=s;Panel c=Column("card");Size(c,0,380);Image art=Art("qingzhu_ridge.webp",120);art.Fit="cover";art.Class="card-art";imgs.Add(art);Flex iw=CenterRow(art,0);Size(iw,0,120);c.With(iw);Label name=Text("","section",28);names.Add(name);c.With(name);Label detail=Wrap("","muted",124);details.Add(detail);c.With(detail);Button b=RowButton(pfx+Number(s),"前往历练",()=>{MapAction(mode,slot);},"secondary",0);btns.Add(b);c.With(b);g.With(c);}
     }
     static void BuildRegions() {
         ScrollColumn wild=NewPage();PageHead(wild,"野外","选择一处地域，角色将持续战斗并带回装备与材料。");
@@ -277,7 +287,7 @@ class WuweiApp {
         Panel battle=Column("card");battle.With(CombatText=Text("","section",28));
         battle.With(Text("自身气血","kicker",22));HpBar=new Progress(100,1);HpBar.ShowText(false);Size(HpBar,0,16);battle.With(HpBar);
         battle.With(Text("敌人气血","kicker",22));WorkBar=new Progress(0,1);WorkBar.ShowText(false);Size(WorkBar,0,16);battle.With(WorkBar);
-        Button stop=ActionButton("battleStop","收剑归山",()=>{Model.StopActivity();Model.Say("已离开战场，静养气血",true);Refresh();},"secondary");Size(stop,160,40);battle.With(CenterRow(stop,12));wild.With(battle);
+        BattleStopBtn=RowButton("battleStop","收剑归山",()=>{Model.StopActivity();Model.Say("已离开战场，静养气血",true);Refresh();},"secondary",160);battle.With(CenterRow(BattleStopBtn,12));wild.With(battle);
         ScrollColumn danger=NewPage();PageHead(danger,"险地","点击地区查看盘踞的强敌，胜后带回更好的装备。");
         Grid gd=Grid.Of(3);gd.logGap=12;FillRegionCards(gd,MapDImages,MapDNames,MapDDetails,MapDButtons,1,"mapd");danger.With(gd);
         MapDCounter=Text("","muted",32);
@@ -292,11 +302,11 @@ class WuweiApp {
         CraftText=Wrap("","jade",28);p.With(CraftText);
         CraftBar=new Progress(0,1);CraftBar.ShowText(false);Size(CraftBar,0,12);p.With(CraftBar);
         Grid g=Grid.Of(3);g.logGap=12;
-        for(int s=0;s<3;s=s+1){int slot=s;Panel c=Column("card");Image image=Art("herb_dew_grass.webp",100);image.Fit="contain";image.Class="card-art";RecipeImages.Add(image);c.With(CenterRow(image,0));Label name=Text("","section",28);RecipeNames.Add(name);c.With(CenterRow(name,0));Label detail=Wrap("","muted",56);RecipeDetails.Add(detail);c.With(detail);Button b=ActionButton("recipe"+Number(s),"开始制作",()=>{RecipeAction(slot);},"secondary");Size(b,150,40);RecipeButtons.Add(b);c.With(CenterRow(b,0));g.With(c);}
+        for(int s=0;s<3;s=s+1){int slot=s;Panel c=Column("card");Size(c,0,296);Image image=Art("herb_dew_grass.webp",100);image.Fit="contain";image.Class="card-art";RecipeImages.Add(image);Flex iw=CenterRow(image,0);Size(iw,0,100);c.With(iw);Label name=Text("","section",28);RecipeNames.Add(name);c.With(CenterRow(name,0));Label detail=Wrap("","muted",56);RecipeDetails.Add(detail);c.With(detail);RecipeButtons.Add(RowButton("recipe"+Number(s),"开始制作",()=>{RecipeAction(slot);},"secondary",150));c.With(CenterRow(RecipeButtons[s],0));g.With(c);}
         p.With(g);
         RecipeCounter=Text("","muted",32);
         p.With(MakePager("recipesPrev","recipesNext",RecipeCounter,()=>{if(RecipePage>0){RecipePage=RecipePage-1;}Refresh();},()=>{if((RecipePage+1)*3<RecipeCount()){RecipePage=RecipePage+1;}Refresh();}));
-        Button stop=ActionButton("craftStop","停止百艺",()=>{Model.StopActivity();Model.Say("已停下手中事务",true);Refresh();},"secondary");Size(stop,160,40);p.With(CenterRow(stop,12));
+        CraftStopBtn=RowButton("craftStop","停止百艺",()=>{Model.StopActivity();Model.Say("已停下手中事务",true);Refresh();},"secondary",160);p.With(CenterRow(CraftStopBtn,12));
     }
     static void FilterBag(int filter) {BagFilter=filter;BagPage=0;Refresh();}
     static bool BagMatches(Row r) {if(r==null){return BagFilter==0;}string t=r.Text("type");return BagFilter==0 || (BagFilter==1 && t=="equipment") || (BagFilter==2 && (t=="alchemy" || t=="pill" || t=="consumable" || t=="breakthrough")) || (BagFilter==3 && (t=="resource" || t=="material")) || (BagFilter==4 && t!="equipment" && t!="alchemy" && t!="pill" && t!="consumable" && t!="breakthrough" && t!="resource" && t!="material");}
@@ -313,16 +323,16 @@ class WuweiApp {
     static void BuildInventory() {
         ScrollColumn p=NewPage();PageHead(p,"行囊","鼠标悬停查看详情；装备后提升攻防气血。");
         GearText=Wrap("","jade",56);p.With(GearText);
-        Panel filters=RowBox();List<string> names=new List<string>();names.Add("全部");names.Add("装备");names.Add("丹药");names.Add("灵材");names.Add("符阵 / 其他");for(int i=0;i<5;i=i+1){int f=i;Button fb=ActionButton("bagFilter"+Number(i),names[i],()=>{FilterBag(f);},"ghost");Size(fb,0,34);filters.With(fb);}p.With(filters);
+        Panel filters=RowBox();Size(filters,0,44);List<string> names=new List<string>();names.Add("全部");names.Add("装备");names.Add("丹药");names.Add("灵材");names.Add("符阵 / 其他");for(int i=0;i<5;i=i+1){int f=i;Button fb=RowButton("bagFilter"+Number(i),names[i],()=>{FilterBag(f);},"ghost",0);filters.With(fb);}p.With(filters);
         GearSlots.Add("weapon");GearSlots.Add("head");GearSlots.Add("robe");GearSlots.Add("boots");GearSlots.Add("bracers");GearSlots.Add("amulet");GearSlots.Add("ring");
-        for(int i=0;i<GearSlots.Count;i=i+1){string slot=GearSlots[i];Flex row=CardRow(44);Label label=Text("","muted",24);EquippedLabels.Add(label);row.With(label);row.With(GrowSpace());Button remove=ActionButton("unequip"+Number(i),"卸下",()=>{if(!Model.Unequip(slot)){Model.Say("行囊已满或此栏未装备，无法卸下",false);}Refresh();},"ghost");Size(remove,96,34);UnequipButtons.Add(remove);row.With(remove);p.With(row);}
-        for(int s=0;s<3;s=s+1){int slot=s;Panel card=Column("card");Panel row=Panel.Row();row.logGap=12;Image art=Art("alchemy_heal_pill.webp",90);Size(art,90,104);BagImages.Add(art);art.Fit="contain";art.Class="card-art";row.With(art);Panel detail=Column("");detail.Grow();Label name=Text("","section",24);BagNames.Add(name);detail.With(name);Label description=Wrap("","muted",72);BagDetails.Add(description);detail.With(description);row.With(detail);card.With(row);Panel actions=RowBox();Button use=ActionButton("itemUse"+Number(s),"使用 / 装备",()=>{UseAction(slot);},"secondary");Size(use,140,36);BagUse.Add(use);actions.With(use);Button sell=ActionButton("itemSell"+Number(s),"售出一件",()=>{SellAction(slot);},"ghost");Size(sell,120,36);BagSell.Add(sell);actions.With(sell);Button rc=ActionButton("recycle"+Number(s),"分解装备",()=>{if(slot<BagIds.Count){if(!Model.RecycleGear(BagIds[slot])){Model.Say("仅可分解行囊中的装备",false);}Refresh();}},"ghost");Size(rc,120,36);actions.With(rc);card.With(actions);p.With(card);}
+        for(int i=0;i<GearSlots.Count;i=i+1){string slot=GearSlots[i];Flex row=CardRow(52);Label label=Text("","muted",24);EquippedLabels.Add(label);row.With(label);row.With(GrowSpace());UnequipButtons.Add(RowButton("unequip"+Number(i),"卸下",()=>{if(!Model.Unequip(slot)){Model.Say("行囊已满或此栏未装备，无法卸下",false);}Refresh();},"ghost",112));row.With(UnequipButtons[i]);p.With(row);}
+        for(int s=0;s<3;s=s+1){int slot=s;Panel card=Column("card");Panel row=Panel.Row();row.logGap=12;Image art=Art("alchemy_heal_pill.webp",90);Size(art,90,104);BagImages.Add(art);art.Fit="contain";art.Class="card-art";row.With(art);Panel detail=Column("");detail.Grow();Label name=Text("","section",24);BagNames.Add(name);detail.With(name);Label description=Wrap("","muted",72);BagDetails.Add(description);detail.With(description);row.With(detail);card.With(row);Panel actions=RowBox();Size(actions,0,44);BagUse.Add(RowButton("itemUse"+Number(s),"使用 / 装备",()=>{UseAction(slot);},"secondary",160));actions.With(BagUse[s]);BagSell.Add(RowButton("itemSell"+Number(s),"售出一件",()=>{SellAction(slot);},"ghost",132));actions.With(BagSell[s]);BagRecycle.Add(RowButton("recycle"+Number(s),"分解装备",()=>{if(slot<BagIds.Count){if(!Model.RecycleGear(BagIds[slot])){Model.Say("仅可分解行囊中的装备",false);}Refresh();}},"ghost",132));actions.With(BagRecycle[s]);card.With(actions);p.With(card);}
         BagCounter=Text("","muted",32);
         p.With(MakePager("bagPrev","bagNext",BagCounter,()=>{if(BagPage>0){BagPage=BagPage-1;}Refresh();},()=>{if((BagPage+1)*3<BagTotal){BagPage=BagPage+1;}Refresh();}));
     }
     static void BuildMarket() {
         ScrollColumn p=NewPage();PageHead(p,"坊市","坊市每隔一段时间换一批货品，购入修行所需。");
-        for(int s=0;s<3;s=s+1){int slot=s;Flex row=CardRow(48);Label name=Wrap("","",28);MarketNames.Add(name);row.With(name);row.With(GrowSpace());Button buy=ActionButton("buy"+Number(s),"购买",()=>{BuyAction(slot);},"secondary");Size(buy,110,36);MarketBuy.Add(buy);row.With(buy);p.With(row);}
+        for(int s=0;s<3;s=s+1){int slot=s;Flex row=CardRow(60);Label name=Wrap("","",28);MarketNames.Add(name);row.With(name);row.With(GrowSpace());MarketBuy.Add(RowButton("buy"+Number(s),"购买",()=>{BuyAction(slot);},"secondary",124));row.With(MarketBuy[s]);p.With(row);}
         MarketCounter=Text("","muted",32);
         p.With(MakePager("marketPrev","marketNext",MarketCounter,()=>{if(MarketPage>0){MarketPage=MarketPage-1;}Refresh();},()=>{if((MarketPage+1)*3<Model.Data.Market.Count){MarketPage=MarketPage+1;}Refresh();}));
     }
@@ -330,30 +340,30 @@ class WuweiApp {
     static void BuildSect() {
         ScrollColumn affairs=NewPage();PageHead(affairs,"宗门事务","承接宗门差遣，完成后获得贡献点。");
         SectText=Wrap("","muted",48);affairs.With(SectText);
-        for(int s=0;s<Model.Data.Sects.Count;s=s+1){int index=s;Row r=Model.Data.Sects[s];Flex row=CardRow(56);row.With(Text(r.Name,"section",32));row.With(GrowSpace());Button join=ActionButton("sect"+Number(s),"拜入宗门",()=>{Result(Model.JoinSect(index));},"secondary");Size(join,140,36);row.With(join);affairs.With(row);}
-        Button train=ActionButton("sectTrain","研习宗门心法 · 520 贡献",()=>{if(!Model.TrainSect()){Model.Say("请先加入宗门，并积累520贡献",false);}Refresh();},"secondary");Size(train,260,40);affairs.With(train);
+        for(int s=0;s<Model.Data.Sects.Count;s=s+1){int index=s;Row r=Model.Data.Sects[s];Flex row=CardRow(60);row.With(Text(r.Name,"section",32));row.With(GrowSpace());SectButtons.Add(RowButton("sect"+Number(s),"拜入宗门",()=>{Result(Model.JoinSect(index));},"secondary",156));row.With(SectButtons[s]);affairs.With(row);}
+        SectTrainBtn=RowButton("sectTrain","研习宗门心法 · 520 贡献",()=>{if(!Model.TrainSect()){Model.Say("请先加入宗门，并积累520贡献",false);}Refresh();},"secondary",280);affairs.With(SectTrainBtn);
         affairs.With(Text("宗门委托 · 达标后领取，可重复完成","section",32));
-        for(int s=0;s<Model.Data.SectTasks.Count;s=s+1){int index=s;Flex row=CardRow(72);Label detail=Wrap("","muted",48);TaskLabels.Add(detail);row.With(detail);row.With(GrowSpace());Button claim=ActionButton("sectTask"+Number(s),"领取贡献",()=>{Result(Model.ClaimSectTask(index));},"secondary");Size(claim,120,36);TaskButtons.Add(claim);row.With(claim);affairs.With(row);}
+        for(int s=0;s<Model.Data.SectTasks.Count;s=s+1){int index=s;Flex row=CardRow(72);Label detail=Wrap("","muted",48);TaskLabels.Add(detail);row.With(detail);row.With(GrowSpace());TaskButtons.Add(RowButton("sectTask"+Number(s),"领取贡献",()=>{Result(Model.ClaimSectTask(index));},"secondary",140));row.With(TaskButtons[s]);affairs.With(row);}
         ScrollColumn vault=NewPage();PageHead(vault,"宗门宝库","以贡献兑换当前宗门的专属装备、功法与丹药。");
-        for(int i=0;i<MaxSectRows(Model.Data.SectVault);i=i+1){int index=i;Flex row=CardRow(72);Label label=Wrap("","muted",48);VaultLabels.Add(label);row.With(label);row.With(GrowSpace());Button buy=ActionButton("vault"+Number(i),"兑换",()=>{Result(Model.ExchangeSectVault(index));},"secondary");Size(buy,110,36);VaultButtons.Add(buy);row.With(buy);vault.With(row);}
+        for(int i=0;i<MaxSectRows(Model.Data.SectVault);i=i+1){int index=i;Flex row=CardRow(72);Label label=Wrap("","muted",48);VaultLabels.Add(label);row.With(label);row.With(GrowSpace());VaultButtons.Add(RowButton("vault"+Number(i),"兑换",()=>{Result(Model.ExchangeSectVault(index));},"secondary",124));row.With(VaultButtons[i]);vault.With(row);}
         ScrollColumn arena=NewPage();PageHead(arena,"宗门擂台","擂台定期开放五分钟，可挑战宗门内各级高手。");
         ArenaStatus=Wrap("","jade",60);arena.With(ArenaStatus);
-        for(int i=0;i<MaxSectRows(Model.Data.Arena);i=i+1){int index=i;Flex row=CardRow(72);Label label=Wrap("","muted",48);ArenaLabels.Add(label);row.With(label);row.With(GrowSpace());Button fight=ActionButton("arena"+Number(i),"挑战",()=>{Result(Model.ArenaFightOpponent(index));},"secondary");Size(fight,110,36);ArenaButtons.Add(fight);row.With(fight);arena.With(row);}
+        for(int i=0;i<MaxSectRows(Model.Data.Arena);i=i+1){int index=i;Flex row=CardRow(72);Label label=Wrap("","muted",48);ArenaLabels.Add(label);row.With(label);row.With(GrowSpace());ArenaButtons.Add(RowButton("arena"+Number(i),"挑战",()=>{Result(Model.ArenaFightOpponent(index));},"secondary",124));row.With(ArenaButtons[i]);arena.With(row);}
     }
     static void BuildPrestige() {
         ScrollColumn p=NewPage();PageHead(p,"轮回","寿元已尽或飞升之后，可携因果与永久天赋再续一世。");
         EndingText=Wrap("","jade",100);p.With(EndingText);KarmaText=Text("","jade",32);p.With(KarmaText);p.With(Wrap("转生会重置本世境界、物品与宗门。因果和永久天赋保留，下一世走得更远。此操作需再次确认。","muted",52));
-        for(int s=0;s<Model.Data.Talents.Count;s=s+1){int index=s;Panel row=RowBox();Size(row,0,56);row.Class="card";Label talent=Wrap("","section",32);TalentLabels.Add(talent);row.With(talent.Grow());Button up=ActionButton("talent"+Number(s),"以因果升华",()=>{Result(Model.UpgradeTalent(index));},"secondary");Size(up,140,36);row.With(up);p.With(row);}
-        PrestigeButton=ActionButton("prestige","转生 · 再续仙缘",()=>{Rebirth();},"secondary");Size(PrestigeButton,220,44);p.With(PrestigeButton);
+        for(int s=0;s<Model.Data.Talents.Count;s=s+1){int index=s;Flex row=CardRow(60);Label talent=Wrap("","section",32);TalentLabels.Add(talent);row.With(talent);row.With(GrowSpace());TalentButtons.Add(RowButton("talent"+Number(s),"以因果升华",()=>{Result(Model.UpgradeTalent(index));},"secondary",156));row.With(TalentButtons[s]);p.With(row);}
+        PrestigeButton=RowButton("prestige","转生 · 再续仙缘",()=>{Rebirth();},"secondary",220);p.With(PrestigeButton);
     }
     static void BuildSettings() {
         ScrollColumn p=NewPage();PageHead(p,"系统 · 守护这段仙缘","本地存档 · 自动保存 · 离线收益");
-        Panel rename=RowBox();ProfileName=new Input();ProfileName.name="profileName";ProfileName.Grow();rename.With(ProfileName);Button rn=ActionButton("renameProfile","保存仙缘名",()=>{string name=ProfileName.GetText();if(name.Length>0 && name.Length<=40){JourneyName=name;SaveNow();}else{Model.Say("仙缘名请输入1至40个字符",false);Refresh();}},"secondary");Size(rn,140,36);rename.With(rn);p.With(rename);
-        Panel card=Column("card");Size(card,0,220);SaveText=Wrap(SaveStatus,"notice",64);card.With(SaveText);Button sv=ActionButton("save","立即保存",()=>{SaveNow();},"primary");Size(sv,160,40);card.With(sv);card.With(Wrap("每30秒自动保存。离开游戏前可手动保存；离线最多结算八小时，沿用离开时的活动。","muted",64));p.With(card);
-        HealSetting=ActionButton("autoHeal","自动服药：开启",()=>{Model.AutoHeal=!Model.AutoHeal;Refresh();},"secondary");Size(HealSetting,200,40);p.With(HealSetting);
+        Flex rename=Flex.Row().AlignCenter();rename.Gap(12);Size(rename,0,44);ProfileName=new Input();ProfileName.name="profileName";ProfileName.Class="grow";rename.With(ProfileName);rename.With(RowButton("renameProfile","保存仙缘名",()=>{string name=ProfileName.GetText();if(name.Length>0 && name.Length<=40){JourneyName=name;SaveNow();}else{Model.Say("仙缘名请输入1至40个字符",false);Refresh();}},"secondary",150));p.With(rename);
+        Panel card=Column("card");Size(card,0,220);SaveText=Wrap(SaveStatus,"notice",64);card.With(SaveText);card.With(RowButton("save","立即保存",()=>{SaveNow();},"primary",160));card.With(Wrap("每30秒自动保存。离开游戏前可手动保存；离线最多结算八小时，沿用离开时的活动。","muted",64));p.With(card);
+        HealSetting=RowButton("autoHeal","自动服药：开启",()=>{Model.AutoHeal=!Model.AutoHeal;Refresh();},"secondary",200);p.With(HealSetting);
         p.With(Wrap("气血低于35%时自动使用行囊中的回春丹。关闭后需在行囊页手动服药。","muted",48));
-        MusicStatus=Text("","jade",32);p.With(MusicStatus);Panel audio=RowBox();Button vd=ActionButton("volumeDown","音量 −10",()=>{ChangeVolume(-10);},"secondary");Size(vd,120,36);audio.With(vd);Button mu=ActionButton("musicMute","静音 / 恢复",()=>{Music.SetMuted(!Music.Muted());SaveMusic();},"secondary");Size(mu,120,36);audio.With(mu);Button vu=ActionButton("volumeUp","音量 +10",()=>{ChangeVolume(10);},"secondary");Size(vu,120,36);audio.With(vu);p.With(audio);
-        Button pf=ActionButton("profiles","管理五段仙缘",()=>{ShowMenu();},"secondary");Size(pf,180,40);p.With(pf);
+        MusicStatus=Text("","jade",32);p.With(MusicStatus);Panel audio=RowBox();Size(audio,0,44);audio.With(RowButton("volumeDown","音量 −10",()=>{ChangeVolume(-10);},"secondary",120));audio.With(RowButton("musicMute","静音 / 恢复",()=>{Music.SetMuted(!Music.Muted());SaveMusic();},"secondary",120));audio.With(RowButton("volumeUp","音量 +10",()=>{ChangeVolume(10);},"secondary",120));p.With(audio);
+        p.With(RowButton("profiles","管理五段仙缘",()=>{ShowMenu();},"secondary",180));
         p.With(Wrap("无为修仙 · 原生 Zan Gui。慢慢来，山中岁月长。所有修为、物品与任务都在本机运行，无需联网。","muted",48));
     }
     static void BuildCodex() {
@@ -382,10 +392,17 @@ class WuweiApp {
         LifeText.Text="剩余寿元 "+Number(Model.Lifespan()-Model.Age())+"年";
         StonesText.Text="灵石  "+Number(Model.Stones);
         XpText.Text="修为经验  "+Number(Model.Xp);
-        ActivityText.Text=Model.Activity==1?"正在闭关 · 吐纳天地":Model.Activity==2?"正在历练":"正在百艺 · 制作中";
+        ActivityText.Text=Model.Activity==1?"正在闭关 · 吐纳天地":Model.Activity==2?"正在历练":Model.Activity==3?"正在百艺 · 制作中":"静养生息 · 尘缘未扰";
         Notice.Text=Model.LastMessage;
         QiText.Text="境界根基    "+Number(Model.Qi)+" / "+Number(Model.QiNeed())+"     ·     每秒转化 "+Number(Model.CultivationRate());
-        BreakInfo.Text="当前 "+Model.RealmName()+" "+Number(Model.Layer())+"层 · 修为 "+Number(Model.Xp);
+        if(BreakBtn!=null){
+            bool breakReady=!Model.NeedsPrestige&&Model.Layer()==12&&Model.Realm()<8&&Model.Qi>=Model.QiNeed();
+            string pill=Model.Realm()<8?Model.Data.Realms[Model.Realm()].Text("pill"):"";bool hasPill=pill!=""&&Model.ItemCount(pill)>0;
+            BreakBtn.Disabled=!breakReady||!hasPill;
+            BreakBtn.Tip=!breakReady?(Model.Layer()!=12?"需当前境界修至十二层圆满":(Model.Realm()<8?"需闭关进度圆满 · 当前 "+Number(Model.Qi)+" / "+Number(Model.QiNeed()):"此境已至巅峰")):(hasPill?("条件齐备 · 消耗一枚"+ItemName(pill)+"即可破境"):("缺少 "+(pill==""?"破境丹":ItemName(pill))+" · 绝境首领首杀必得"));
+            BreakInfo.Text="当前 "+Model.RealmName()+" "+Number(Model.Layer())+"层 · 修为 "+Number(Model.Xp)+"    ·    "+BreakBtn.Tip;
+        }
+        if(CulBtn!=null){CulBtn.Disabled=Model.NeedsPrestige||Model.Activity==1;CulBtn.Tip=Model.Activity==1?"已在闭关中 · 可出关休息":"将修为经验转化为闭关进度，圆满后可破境";RestBtn.Disabled=Model.Activity==0;RestBtn.Tip=Model.Activity==0?"当前静养，无需出关":"结束当前闭关，静养恢复";BattleStopBtn.Disabled=Model.Activity!=2;CraftStopBtn.Disabled=Model.Activity!=3;}
         QiBar.SetPercent((int)(Model.Qi*100/Model.QiNeed()));HpBar.SetPercent((int)(Model.Hp*100/Model.MaxHp()));
         if(Model.QuestIndex<Model.Data.Quests.Count){Row q=Model.Data.Quests[Model.QuestIndex];QuestTitle.Text=q.Text("chapter")+"\n"+q.Name;QuestBody.Text=q.Text("objective");QuestReward.Text="奖励  灵石 "+q.Text("stones")+" · 修为 "+q.Text("xp");QuestBar.SetPercent((int)(Model.QuestProgress()*100/q.Num("target")));Claim.Disabled=Model.QuestProgress()<q.Num("target");}else{QuestTitle.Text="仙途未尽";QuestBody.Text="传承已收，余路由你。";Claim.Disabled=true;}
         MapPage=ClampPage(MapPage,MapCount(0));MapDPage=ClampPage(MapDPage,MapCount(1));MapEPage=ClampPage(MapEPage,MapCount(2));
@@ -396,10 +413,10 @@ class WuweiApp {
         FillMapSlots(MapDImages,MapDNames,MapDDetails,MapDButtons,1,MapDPage);
         FillMapSlots(MapEImages,MapENames,MapEDetails,MapEButtons,2,MapEPage);
         SkillCounter.Text=Number(SkillPage+1)+" / "+Number((Model.Data.Skills.Count+2)/3);
-        for(int s=0;s<3;s=s+1){int si=SkillPage*3+s;SkillButtons[s].visible=si<Model.Data.Skills.Count;if(si<Model.Data.Skills.Count){Row sk=Model.Data.Skills[si];SkillNames[s].Text=sk.Name+" · "+Number(Model.Skill(sk.Id))+"层";SkillButtons[s].Text="参悟 · "+Number(Model.SkillCost(si))+"修为";SkillButtons[s].Tip=sk.Text("desc");}else{SkillNames[s].Text="万法归一";SkillButtons[s].Text="参悟";SkillButtons[s].Disabled=true;}}
+        for(int s=0;s<3;s=s+1){int si=SkillPage*3+s;SkillButtons[s].visible=si<Model.Data.Skills.Count;if(si<Model.Data.Skills.Count){Row sk=Model.Data.Skills[si];SkillNames[s].Text=sk.Name+" · "+Number(Model.Skill(sk.Id))+"层";SkillButtons[s].Text="参悟 · "+Number(Model.SkillCost(si))+"修为";SkillButtons[s].Tip=sk.Text("desc")+"\n境界需求 "+sk.Text("req")+" 层 · 上限 "+sk.Int("max_level")+" 层 · 消耗 "+Number(Model.SkillCost(si))+" 修为";SkillButtons[s].Disabled=Model.NeedsPrestige||Model.Level<sk.Int("req")||Model.Skill(sk.Id)>=sk.Int("max_level")||Model.Xp<Model.SkillCost(si);}else{SkillNames[s].Text="万法归一";SkillButtons[s].Text="参悟";SkillButtons[s].Disabled=true;}}
         RecipePage=ClampPage(RecipePage,RecipeCount());
         RecipeCounter.Text="第 "+Number(RecipePage+1)+" / "+Number((RecipeCount()+2)/3)+" 页";
-        for(int s=0;s<3;s=s+1){int ri=RecipeRowAt(RecipePage*3+s);RecipeButtons[s].visible=ri>=0;if(ri>=0){Row r=Model.Data.Recipes[ri];RecipeNames[s].Text=r.Name;RecipeImages[s].Src=ArtPath(r.Text("image"));RecipeDetails[s].Text=r.Text("desc")+"\n杂学 "+Number(Model.ArtLevel(r.Text("skill")))+" / 需求 "+r.Text("unlock")+" · "+r.Text("duration")+"秒";RecipeButtons[s].Text=r.Text("kind")=="gather"?"开始采集":"开始制作";}else{RecipeNames[s].Text="百艺尽览";RecipeDetails[s].Text="";}}
+        for(int s=0;s<3;s=s+1){int ri=RecipeRowAt(RecipePage*3+s);RecipeButtons[s].visible=ri>=0;if(ri>=0){Row r=Model.Data.Recipes[ri];RecipeNames[s].Text=r.Name;RecipeImages[s].Src=ArtPath(r.Text("image"));RecipeDetails[s].Text=r.Text("desc")+"\n杂学 "+Number(Model.ArtLevel(r.Text("skill")))+" / 需求 "+r.Text("unlock")+" · "+r.Text("duration")+"秒";RecipeButtons[s].Text=r.Text("kind")=="gather"?"开始采集":"开始制作";RecipeButtons[s].Disabled=Model.NeedsPrestige||!Model.CanCraft(ri);RecipeButtons[s].Tip=RecipeDetail(ri)+(Model.CanCraft(ri)?"":"\n材料或杂学等级不足，暂不可开始");}else{RecipeNames[s].Text="百艺尽览";RecipeDetails[s].Text="";}}
         CraftText.Text=(Model.Activity==3?Model.Data.Recipes[Model.RecipeIndex].Name+" · "+Number(Model.CraftProgress)+" / "+Number(Model.CraftDuration())+"秒":"百艺闲置 · 选择配方后自动继续制作")+"    ·    当前分类 "+CraftLabel(CraftFilter);
         CraftBar.SetPercent(Model.Activity==3?(int)(Model.CraftProgress*100/Model.CraftDuration()):0);
         CombatText.Text=Model.Activity==2?Model.Data.Enemies[Model.EnemyIndex].Name+"    气血 "+Number(Model.EnemyHp)+" / "+Number(Model.EnemyMaxHp):"收剑听风    ·    本世胜场 "+Number(Model.Kills);
@@ -407,9 +424,9 @@ class WuweiApp {
         BagTotal=0;foreach(string id in Model.Inventory.Keys){Row item=Model.ItemRow(id);if(Model.ItemCount(id)>0 && BagMatches(item)){BagTotal=BagTotal+1;}}
         if(BagPage*3>=BagTotal){BagPage=BagTotal>0?(BagTotal-1)/3:0;}
         BagIds.Clear();int offset=0;foreach(string id in Model.Inventory.Keys){Row item=Model.ItemRow(id);if(Model.ItemCount(id)>0 && BagMatches(item)){if(offset>=BagPage*3 && BagIds.Count<3){BagIds.Add(id);}offset=offset+1;}}
-        for(int s=0;s<3;s=s+1){bool exists=s<BagIds.Count;BagUse[s].visible=exists;BagSell[s].visible=exists;BagImages[s].visible=exists;if(exists){string id=BagIds[s];Row item=Model.ItemRow(id);if(item==null){continue;}BagNames[s].Text=ItemName(id)+" × "+Number(Model.ItemCount(id));BagDetails[s].Text=ItemDetail(id);BagUse[s].Tip=ItemDetail(id);BagImages[s].Src=ArtPath(item.Text("image")==""?"herb_dew_grass.png":item.Text("image"));BagUse[s].Disabled=Model.Level<item.Int("req");}else{BagNames[s].Text=s==0?"此分类暂无物品":"空位";BagDetails[s].Text="去历练、采集或坊市取得新的珍藏。";}}
+        for(int s=0;s<3;s=s+1){bool exists=s<BagIds.Count;BagUse[s].visible=exists;BagSell[s].visible=exists;BagImages[s].visible=exists;BagRecycle[s].visible=exists;if(exists){string id=BagIds[s];Row item=Model.ItemRow(id);if(item==null){continue;}BagNames[s].Text=ItemName(id)+" × "+Number(Model.ItemCount(id));BagDetails[s].Text=ItemDetail(id);BagImages[s].Src=ArtPath(item.Text("image")==""?"herb_dew_grass.png":item.Text("image"));bool usable=UsableItem(item,id);BagUse[s].Disabled=Model.NeedsPrestige||Model.Level<item.Int("req")||!usable;BagUse[s].Tip=ItemDetail(id)+(usable?"":"\n此物用于制作或破境，不可直接使用");bool gear=item.Text("slot")!="";BagRecycle[s].Disabled=!gear;BagRecycle[s].Tip=gear?"分解为灵石与淬炼材料":"仅装备可分解";}else{BagNames[s].Text=s==0?"此分类暂无物品":"空位";BagDetails[s].Text="去历练、采集或坊市取得新的珍藏。";}}
         BagCounter.Text="筛选 "+Number(BagTotal)+" / 行囊 "+Number(Model.Inventory.Count)+" 类 · 第 "+Number(BagPage+1)+"页";MarketCounter.Text="第 "+Number(MarketPage+1)+" / "+Number((Model.Data.Market.Count+2)/3)+" 页";
-        for(int s=0;s<3;s=s+1){int market=MarketPage*3+s;MarketBuy[s].visible=market<Model.Data.Market.Count;if(market<Model.Data.Market.Count){Row item=Model.Data.Market[market];MarketNames[s].Text=item.Name+"    ·    "+item.Text("price")+" 灵石";}else{MarketNames[s].Text="";}}
+        for(int s=0;s<3;s=s+1){int market=MarketPage*3+s;MarketBuy[s].visible=market<Model.Data.Market.Count;if(market<Model.Data.Market.Count){Row item=Model.Data.Market[market];MarketNames[s].Text=item.Name+"    ·    "+item.Text("price")+" 灵石";bool canBuy=!Model.NeedsPrestige&&Model.Stones>=item.Num("price")&&Model.Level>=item.Int("req")&&Model.ItemCount(item.Id)<Model.Data.Rule("stack_limit");MarketBuy[s].Disabled=!canBuy;MarketBuy[s].Tip=item.Text("desc")+"\n价格 "+item.Text("price")+" 灵石 · 需境界 "+item.Text("req")+" 层"+(canBuy?"":(Model.Level<item.Int("req")?" · 境界不足":(Model.Stones<item.Num("price")?" · 灵石不足":" · 已达行囊上限")));}else{MarketNames[s].Text="";}}
         for(int i=0;i<GearSlots.Count;i=i+1){string slot=GearSlots[i];bool on=Model.Equipment.ContainsKey(slot);string title=i==0?"兵器":i==1?"法冠":i==2?"法袍":i==3?"灵履":i==4?"护腕":i==5?"护符":"灵戒";EquippedLabels[i].Text=title+" · "+(on?ItemName(Model.Equipment[slot]):"空栏");UnequipButtons[i].visible=on;UnequipButtons[i].Disabled=!on;}
         string gear="攻击 "+Number(Model.Attack())+"   防御 "+Number(Model.Defense())+"   气血 "+Number(Model.Hp)+" / "+Number(Model.MaxHp())+"    阵法："+(Model.Formation==""?"未布置":ItemName(Model.Formation))+" · 灵酒："+(Model.WineSeconds>0?ItemName(Model.Wine)+" "+Number(Model.WineSeconds)+"秒":"未饮用");
         GearText.Text=gear;
@@ -417,17 +434,27 @@ class WuweiApp {
         string loot="";int start=Model.Log.Count-6;if(start<0){start=0;}for(int i=start;i<Model.Log.Count;i=i+1){loot=loot+Model.Log[i];}for(int i=0;i<LootLabels.Count;i=i+1){if(i<Model.Log.Count-start){LootLabels[i].Text="· "+Model.Log[start+i];}else{LootLabels[i].Text="";}}
         MusicStatus.Text="山中清音 · 音量 "+Number(Music.Volume())+"% · "+(Music.Muted()?"已静音":Music.IsPlaying()?"播放中":"未播放")+(Music.Error()!=""?" · "+Music.Error():"");
         for(int i=0;i<TaskLabels.Count;i=i+1){Row t=Model.Data.SectTasks[i];bool own=Model.SectIndex>=0 && t.Text("sect")==Model.Data.Sects[Model.SectIndex].Id;TaskLabels[i].Text=t.Name+"\n进度 "+Number(Model.SectTaskProgress(i))+" / "+t.Text("target")+" · 奖励 "+t.Text("reward")+" 贡献";TaskButtons[i].Disabled=!own || Model.SectTaskProgress(i)<t.Num("target");}
-        for(int i=0;i<TalentLabels.Count;i=i+1){TalentLabels[i].Text=Model.Data.Talents[i].Name+" · "+Number(Model.TalentLevel(i))+"级 · 消耗 "+Number(Model.TalentCost(i))+"因果";}
+        for(int i=0;i<TalentLabels.Count;i=i+1){TalentLabels[i].Text=Model.Data.Talents[i].Name+" · "+Number(Model.TalentLevel(i))+"级 · 消耗 "+Number(Model.TalentCost(i))+"因果";bool canUp=!Model.NeedsPrestige&&Model.TalentLevel(i)<100&&Model.Karma>=Model.TalentCost(i);TalentButtons[i].Disabled=!canUp;TalentButtons[i].Tip="升至 "+Number(Model.TalentLevel(i)+1)+" 级 · 消耗 "+Number(Model.TalentCost(i))+" 因果"+(canUp?"":(Model.TalentLevel(i)>=100?" · 已至百级圆满":" · 因果不足"));}
         EndingText.Text=Model.Ascended?"飞升 · 山海归一\n九重天劫已渡，长生之路终成。仍可巡游万界、完成图鉴，或携因果再续一世。":Model.NeedsPrestige?"寿元已尽 · 此世已成往事\n请在下方确认转生，保留因果与永久天赋，再续仙缘。":"天门未开 · 前往绝境，逐一渡过九重试炼。\n击败最终天劫，即可成就飞升结局。";
         for(int i=0;i<VaultLabels.Count;i=i+1){Row v=Model.SectVaultRow(i);if(v!=null){VaultLabels[i].Text=v.Name+" · "+Number(Model.SectVaultCost(i))+"贡献\n"+v.Text("desc");VaultButtons[i].Disabled=Model.SectIndex<0 || Model.Contribution<Model.SectVaultCost(i) || Model.Level<v.Int("req");}else{VaultLabels[i].Text="拜入宗门后查看本宗宝库";VaultButtons[i].Disabled=true;}}
         ArenaStatus.Text=(Model.ArenaAvailable()?"论剑开放":"论剑尚未开放")+" · 胜场 "+Number(Model.ArenaWins())+" · 战力 "+Number(Model.ArenaPower())+"\n每 "+Number(Model.ArenaCycleSeconds())+"秒开放 "+Number(Model.ArenaWindowSeconds())+"秒 · 距下轮 "+Number(Model.ArenaCycleSeconds()-(Model.PlayedSeconds-Model.ArenaCycle()*Model.ArenaCycleSeconds()))+"秒";
         for(int i=0;i<ArenaLabels.Count;i=i+1){Row a=Model.ArenaOpponent(i);if(a!=null){ArenaLabels[i].Text=a.Name+" · 战力 "+a.Text("power")+" · 奖励 "+a.Text("reward")+"贡献"+(Model.ArenaOpponentWon(i)?" · 已胜":"");ArenaButtons[i].Disabled=!Model.ArenaAvailable() || Model.ArenaOpponentAttempted(i) || Model.Level<a.Int("req");}else{ArenaLabels[i].Text="拜入宗门后解锁同道论剑";ArenaButtons[i].Disabled=true;}}
         RefreshCodex();
         SectText.Text=Model.SectIndex<0?"筑基之后，可择一宗门。正魔殊途，皆可求长生。":"已入 "+Model.Data.Sects[Model.SectIndex].Name+" · 贡献 "+Number(Model.Contribution)+" · 心法 "+Number(Model.SectManual)+"层";
+        for(int i=0;i<SectButtons.Count&&i<Model.Data.Sects.Count;i=i+1){Row r=Model.Data.Sects[i];bool mine=Model.SectIndex==i;bool joined=Model.SectIndex>=0;bool can=!Model.NeedsPrestige&&!joined&&Model.Level>=r.Int("req");SectButtons[i].Disabled=!can;SectButtons[i].Text=mine?"本宗":"拜入宗门";SectButtons[i].Tip=r.Text("desc")+"\n境界需求 "+r.Text("req")+" 层"+(mine?" · 已拜入本宗":(joined?" · 一世只择一宗":""));}
+        if(SectTrainBtn!=null){int trainCost=(Model.SectManual+1)*520;bool canTrain=!Model.NeedsPrestige&&Model.SectIndex>=0&&Model.Contribution>=trainCost&&Model.SectManual<99;SectTrainBtn.Disabled=!canTrain;SectTrainBtn.Text="研习宗门心法 · "+Number(trainCost)+" 贡献";SectTrainBtn.Tip=(Model.SectIndex<0?"需先拜入宗门":(Model.SectManual>=99?"心法已至 99 层圆满":(Model.Contribution<trainCost?"贡献不足 · 尚差 "+Number(trainCost-(int)Model.Contribution):"消耗贡献，精进本宗心法")));}
         KarmaText.Text="因果 "+Number(Model.Karma)+"    ·    已历 "+Number(Model.Rebirths)+"世";HealSetting.Text=Model.AutoHeal?"自动服药：开启":"自动服药：关闭";SaveText.Text=SaveStatus+"\n"+SavePath;
     }
     static void FillMapSlots(List<Image> imgs,List<Label> names,List<Label> details,List<Button> btns,int mode,int page) {
         for(int s=0;s<3;s=s+1){int gi=MapRowAt(mode,page*3+s);btns[s].visible=gi>=0;if(gi>=0){Row m=Model.Data.Maps[gi];names[s].Text=m.Name;details[s].Text=m.Text("desc")+"\n境界要求："+m.Text("req")+"层";imgs[s].Src=ArtPath(m.Text("image"));btns[s].Text=Model.MapUnlocked(gi)?"前往历练":"尚未解锁";btns[s].Disabled=!Model.MapUnlocked(gi);}else{names[s].Text="云深不知处";details[s].Text="前方再无地图";imgs[s].Src=ArtPath("qingzhu_ridge.png");}}
+    }
+    // Mirror of Model.UseItem's branch coverage: only these kinds have a
+    // direct-use effect; everything else is crafting/breakthrough material.
+    static bool UsableItem(Row r,string id) {
+        if(r==null){return false;}
+        if(id=="treasure_box"||id=="blank_jade_slip"){return true;}
+        string t=r.Text("type");
+        return t=="equipment"||t=="manual"||t=="formation"||t=="formations"||t=="talisman"||t=="wine"||t=="consumable"||t=="alchemy"||t=="pill"||r.Text("slot")!="";
     }
     static string RecipeDetail(int index) {
         Row r=Model.Data.Recipes[index];string detail=r.Text("desc")+"\n杂学 "+Number(Model.ArtLevel(r.Text("skill")))+" / 需求 "+r.Text("unlock")+"级 · "+r.Text("duration")+"秒\n熟练度 "+Number(Model.Count(Model.Mastery,r.Id))+" · 产出 "+ItemName(r.Text("result"));
