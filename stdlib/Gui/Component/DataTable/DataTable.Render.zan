@@ -594,10 +594,11 @@ partial class DataTable {
                        Canvas.CenterTextY(chipY, chipH, fs), lbl, lc, fs);
             int rmId = app.focus.AllocId();
             c.DrawGlyphIn("close", rx, ry, rsz, rsz, app.Scale(10), lc);
-            app.hitTester.RegisterRect(rmId, rx, ry, rsz, rsz, 0);
+            app.hitTester.RegisterRectL(rmId, rx, ry, rsz, rsz, 0,
+                cols[col].title + " ×");
             int chipId = app.focus.AllocId();
-            app.hitTester.RegisterRect(chipId, cxp, chipY,
-                                                    rx - cxp, chipH, 0);
+            app.hitTester.RegisterRectL(chipId, cxp, chipY,
+                                        rx - cxp, chipH, 0, cols[col].title);
             if (app.EventKind() == 3 && app.window.EventButton() == 0
                 && app.hitTester.HitTest(app.mouseX, app.mouseY) == rmId) {
                 DataTable.UngroupOne(st, col);
@@ -961,7 +962,8 @@ partial class DataTable {
             int allLvl = 0;
             if (allChecked) { allLvl = 1000; }
             Checkbox.PaintBox(app, bx, by, box, allLvl);
-            app.hitTester.RegisterRect(allId, hx, y, selW, headerH, 0);
+            app.hitTester.RegisterRectL(allId, hx, y, selW, headerH, 0,
+                                        "select-all");
             if (app.EventKind() == 3 && app.window.EventButton() == 0 && app.hitTester.HitTest(app.mouseX, app.mouseY) == allId) {
                 bool target = !allChecked;
                 DataTable.SelectAllRows(st, src, target);
@@ -1173,7 +1175,12 @@ partial class DataTable {
                     if (app.focus.IsHovered(menuId)) { mColor = sIconHover.FgOr(0); }
                     c.DrawGlyphIn("filter", mIx, titleTop, menuIconW, titleRowH, app.Scale(10), mColor);
                     app.hitTester.RegisterRect(menuId, mIx, titleTop, menuIconW, titleRowH, 0);
-                    if (!st.dragColMoved && app.EventKind() == 3 && app.window.EventButton() == 0 && app.hitTester.HitTest(app.mouseX, app.mouseY) == menuId) {
+                    if (!st.dragColMoved && app.EventKind() == 3 && app.window.EventButton() == 0
+                        && !app.LongPressFired()
+                        && app.hitTester.HitTest(app.mouseX, app.mouseY) == menuId) {
+                        // LongPressFired：长按图标开过列菜单的那次
+                        // 收尾释放不再当图标点击——否则触摸长按一
+                        // 松手筛选菜单跟着弹出，一次手势开两个菜单。
                         if (st.openMenu == i) { st.openMenu = -1; } else {
                             DataTable.OpenFilterMenu(st, cols, src, i);
                         }
@@ -1199,7 +1206,8 @@ partial class DataTable {
             int titleX = visX + gripW;
             int titleW = visW - menuIconW - gripW;
             if (titleW < 0) { titleW = 0; }
-            app.hitTester.RegisterRect(titleId, titleX, titleTop, titleW, titleRowH, 0);
+            app.hitTester.RegisterRectL(titleId, titleX, titleTop, titleW, titleRowH, 0,
+                                        DataTable.ColTitle(cols, i));
             if (st.dragCol == i && app.focus.pressedId >= 0) {
                 int dd = app.mouseX - st.dragColStartX;
                 if (dd < 0) { dd = 0 - dd; }
@@ -1664,7 +1672,8 @@ partial class DataTable {
                 if (rSel) { selLvl = 1000; }
                 Checkbox.PaintBox(app, bx, by, box, selLvl);
                 int selId = app.focus.AllocId();
-                app.hitTester.RegisterRect(selId, cx2, ry, selW, rowH, 0);
+                app.hitTester.RegisterRectL(selId, cx2, ry, selW, rowH, 0,
+                                            "select-row");
                 if (app.EventKind() == 3 && app.window.EventButton() == 0 && app.hitTester.HitTest(app.mouseX, app.mouseY) == selId) {
                     DataTable.SetSelected(st, src, rowIdx, !rSel);
                     st.hitRow = rowIdx;
@@ -2591,7 +2600,8 @@ partial class DataTable {
                 int xx = chipX + cw - app.Scale(14);
                 c.DrawTextCentered(xx, sbY + app.Scale(4), app.Scale(12), chipH2,
                                    "×", sChip2.FgOr(0), sbFs);
-                app.hitTester.RegisterRect(chipId, chipX, sbY + app.Scale(4), cw, chipH2, 0);
+                app.hitTester.RegisterRectL(chipId, chipX, sbY + app.Scale(4), cw, chipH2, 0,
+                                            label);
                 if (app.EventKind() == 3 && app.window.EventButton() == 0
                     && app.hitTester.HitTest(app.mouseX, app.mouseY) == chipId) {
                     // 清除该条筛选：组合树条目清树，其余按列清 ColFilter

@@ -798,9 +798,11 @@ partial class DataTable {
                        lc, fs);
             c.DrawGlyphIn("close", rx, ry, rsz, rsz, app.Scale(10), lc);
             int rmId = app.focus.AllocId();
-            app.hitTester.RegisterRect(rmId, rx, ry, rsz, rsz, 0);
+            app.hitTester.RegisterRectL(rmId, rx, ry, rsz, rsz, 0,
+                                        chip.Text() + " ×");
             int chipId = app.focus.AllocId();
-            app.hitTester.RegisterRect(chipId, cx, chipY, rx - cx, chipH, 0);
+            app.hitTester.RegisterRectL(chipId, cx, chipY, rx - cx, chipH, 0,
+                                        chip.Text());
             if (app.EventKind() == 3 && app.window.EventButton() == 0
                 && app.hitTester.HitTest(app.mouseX, app.mouseY) == rmId) {
                 DataTable.RemoveFilterChip(st, chip);

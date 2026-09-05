@@ -5,6 +5,9 @@ namespace Gui;
 
 /// 一个命中矩形：控件 id、屏幕矩形与控件类型
 /// （widgetType == -1 表示阻挡区，见 HitTester.blockers）。
+/// `label` 是可选的语义标签（按钮文字、列名、操作名）：
+/// dump hitregions 投影输出，供无障碍/自动化识别区域用途，
+/// 不参与命中解析；未标注时为空串。
 class HitRegion {
     int id;
     int x;
@@ -12,6 +15,7 @@ class HitRegion {
     int width;
     int height;
     int widgetType;
+    string label;
 
     /// 构造：逐字段赋值（池化复用改走 Set）。
     HitRegion(int id, int x, int y, int w, int h, int wtype) {
@@ -21,6 +25,7 @@ class HitRegion {
         this.width = w;
         this.height = h;
         this.widgetType = wtype;
+        this.label = "";
     }
 
     /// 点 (px, py) 是否落在矩形内（左闭右开）。
@@ -40,6 +45,7 @@ class HitRegion {
         this.width = w;
         this.height = h;
         this.widgetType = wtype;
+        this.label = "";
     }
 }
 
@@ -195,6 +201,12 @@ class HitTester {
 
     /// 注册一个命中区，复用池中的对象（首选形式：不分配）。
     void RegisterRect(int id, int x, int y, int w, int h, int wtype) {
+        this.RegisterRectL(id, x, y, w, h, wtype, "");
+    }
+
+    /// 带语义标签的注册：标签随后写入 HitRegion，dump hitregions
+    /// 原样投影（无障碍/自动化读名，命中解析不用它）。
+    void RegisterRectL(int id, int x, int y, int w, int h, int wtype, string label) {
         HitRegion r;
         if (used < regions.Count) {
             r = regions[used];
@@ -203,6 +215,7 @@ class HitTester {
             r = new HitRegion(id, x, y, w, h, wtype);
             regions.Add(r);
         }
+        r.label = label;
         used = used + 1;
         if (wtype == -1) { blockers.Add(r); }
         // 锚点重绑定必须取「最后一个」匹配而非首匹配：命中区按

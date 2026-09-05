@@ -262,6 +262,13 @@ EXPORT void zan_gui_ohos_touch(int action, int x, int y) {
         g_tg_y = g_tg_ay = (float)y;
         g_tg_hn = 1; g_tg_hi = 1 % OH_TOUCH_HIST;
         g_tg_ht[0] = ohs_tick_ms(); g_tg_hy[0] = g_tg_y;
+        /* Press at finger-down, not at slop-exceed or lift-off: hold
+         * gestures (long-press context menus, press-state feedback on
+         * cells/buttons) need the press while the finger is still down.
+         * A plain move precedes it so hover/enter state settles first.
+         * Mirrors the SDL shell's finger layer. */
+        oq_push_locked(1, (int)g_tg_ax, (int)g_tg_ay, 0, 0, 0);
+        oq_push_locked(2, (int)g_tg_ax, (int)g_tg_ay, 0, 0, 0);
         pthread_mutex_unlock(&g_oq_lock);
         return;
     }
@@ -275,12 +282,10 @@ EXPORT void zan_gui_ohos_touch(int action, int x, int y) {
                 return; /* slop: still a tap */
             }
             g_tg_drag = 1;
-            /* A drag may start on a draggable widget (title bar, slider)
-             * just as well as on scrollable content: synthesize the press
-             * at the anchor so Gui-level hit testing sees it and the
-             * widget can own the gesture, while the wheel stream below
+            /* The press already went out at finger-down (see action 0), so
+             * a drag on a draggable widget (title bar, slider) is owned by
+             * that widget from the start, while the wheel stream below
              * keeps scrolling whatever the finger is over. */
-            oq_push_locked(2, (int)g_tg_ax, (int)g_tg_ay, 0, 0, 0);
         }
         /* Finger travel -> wheel deltas in the ±120 scale Gui/App's /120
          * math expects; dragging up must scroll DOWN (content follows the
@@ -330,11 +335,10 @@ EXPORT void zan_gui_ohos_touch(int action, int x, int y) {
                 fling_start(v, (int)g_tg_x, (int)g_tg_y);
             }
         } else {
-            /* Tap: a full click at the anchor (move so hover/state is
-             * right, then press + release). */
+            /* Tap: press + positioning move already went out at
+             * finger-down; only the release is missing. Unflagged — a tap
+             * that never exceeded slop is a genuine click at the anchor. */
             int ax = (int)g_tg_ax, ay = (int)g_tg_ay;
-            oq_push_locked(1, ax, ay, 0, 0, 0);
-            oq_push_locked(2, ax, ay, 0, 0, 0);
             oq_push_locked(3, ax, ay, 0, 0, 0);
             pthread_mutex_unlock(&g_oq_lock);
         }

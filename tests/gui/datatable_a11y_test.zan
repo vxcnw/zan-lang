@@ -1,0 +1,77 @@
+using System;
+using Gui;
+using Gui.Widget;
+using Gui.Component.DataTable;
+
+namespace DataTableA11yTest;
+
+/// 命中区语义标签（a11y 投影）：控件注册命中区时可携带
+/// 人类可读的用途名（HitTester.RegisterRectL），dump
+/// hitregions 原样投影给无障碍/自动化消费。本测试渲染
+/// 真实表格帧，断言 DataTable 挂标签的控件类别——全选框、
+/// 行勾选框、表头标题——都能按名字找到，未标注区域保持
+/// 空串（附加键，旧消费者不受影响）。
+class Program {
+    static App app;
+    static List<DataColumn> cols;
+    static DataSource src;
+    static DataTableState st;
+
+    static void Body() {
+        app.BeginFrame();
+        WidgetId.ResetFrame();
+        DataTable.RenderSource(app, 20, 20, 440, 200, cols, src, st);
+        app.RunOverlays();
+    }
+
+    /// 渲染若干帧后把当前命中区的全部标签拼成一段文本。
+    static string Collect() {
+        app.RequestRedraw();
+        for (int i = 0; i < 3; i = i + 1) {
+            app.PumpGuarded();
+            app.FrameGuarded(Body);
+        }
+        string s = "";
+        int n = app.hitTester.RegionCount();
+        for (int i = 0; i < n; i = i + 1) {
+            HitRegion r = app.hitTester.RegionAt(i);
+            s = s + r.label + "|";
+        }
+        return s;
+    }
+
+    static int CountOf(string hay, string needle) {
+        int c = 0;
+        int at = 0;
+        while (true) {
+            int hit = hay.IndexOf(needle, at);
+            if (hit < 0) { return c; }
+            c = c + 1;
+            at = hit + needle.Length;
+        }
+    }
+
+    static void Main() {
+        app = new App("dt-a11y", 480, 260);
+        // 单行数据：断言只关心“每个可见行勾选框都带标签”，
+        // 行数与窗口高度、DPI 缩放解耦。
+        List<DataRow> rows = new List<DataRow>();
+        DataRow r0 = new DataRow();
+        r0.Push("item0");
+        r0.Push("10");
+        rows.Add(r0);
+        src = new RowListSource(rows);
+        cols = new List<DataColumn>();
+        cols.Add(DataColumn.Field(new DataColumn("Item", 140), "item"));
+        cols.Add(DataColumn.Field(DataColumn.Numeric("Amount", 90), "amt"));
+        st = new DataTableState();
+        st.showSelect = true;
+        app.Show();
+        string labels = Collect();
+        Console.WriteLine("selectall=" + (CountOf(labels, "select-all|") == 1));
+        Console.WriteLine("selectrow=" + (CountOf(labels, "select-row|") == 1));
+        Console.WriteLine("headers=" + (CountOf(labels, "Item|") == 1
+            && CountOf(labels, "Amount|") == 1));
+        Console.WriteLine("unlabeled=" + (CountOf(labels, "||") >= 1));
+    }
+}

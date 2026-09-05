@@ -90,12 +90,17 @@ is the path the editor's completion-accept logic listens on.
 A JSON array; each region:
 
 ```json
-{ "z": 5, "id": 42, "x": 404, "y": 156, "w": 120, "h": 30, "type": 0 }
+{ "z": 5, "id": 42, "x": 404, "y": 156, "w": 120, "h": 30, "type": 0, "label": "Amount" }
 ```
 
 - `z` = registration order (draw order). Higher `z` is drawn later / on top.
 - `type` = widget type hint; `-1` marks a modal/scrim **hit barrier**
   (`BlockHitsBelow`/`BlockHitsRect`) that swallows clicks to content beneath it.
+- `label` = optional semantic name the widget reported at registration
+  (`HitTester.RegisterRectL`): button text, column title, action name.
+  Empty string when unlabeled. Accessibility/automation tooling should
+  prefer `label` for identifying a region; geometry + type remain the
+  fallback. The key is additive — old strict parsers are unaffected.
 
 Because hit-testing searches regions in reverse `z` order, overlays/popups —
 which register *after* page content each frame — win the pointer.

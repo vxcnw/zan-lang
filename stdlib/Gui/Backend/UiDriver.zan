@@ -7,7 +7,9 @@ using Gui;
 namespace Gui.Backend;
 
 /// 驱动 `dump hitregions` 输出中的一个命中区域。键（z/id/x/y/
-/// w/h/type）与旧版 dump 格式一致，保证现有脚本有效。
+/// w/h/type）与旧版 dump 格式一致，保证现有脚本有效；`label`
+/// 是后加的语义标签（控件自报的按钮文字/列名/操作名，未标注
+/// 为空串）——纯附加键，旧的严格解析方不受影响。
 class HitRegionDoc {
     int z;
     int id;
@@ -16,6 +18,7 @@ class HitRegionDoc {
     int w;
     int h;
     int type;
+    string label;
 }
 
 /// `dump hitregions` 输出的根：区域数量与按注册顺序排列的区域列表。
@@ -561,6 +564,7 @@ class UiDriver {
             doc.w = r.width;
             doc.h = r.height;
             doc.type = r.widgetType;
+            doc.label = r.label;
             o.regions.Add(doc);
         }
         return Json.Serialize<HitRegionsDoc>(o);
