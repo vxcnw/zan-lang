@@ -1615,8 +1615,12 @@ partial class CodeEditor {
             }
         }
 
-        // 左键点击选中菜单项或关闭菜单。
-        if (app.EventKind() == 3 && app.window.EventButton() == 0) {
+        // 左键点击选中菜单项或关闭菜单。长按开菜单的那次
+        // 收尾释放不算：不守卫的话，触摸长按一松手菜单就被
+        // 这次释放原点关闭（本函数读原始事件序，不经
+        // ClickAvailable 的全局守卫）。
+        if (app.EventKind() == 3 && app.window.EventButton() == 0
+            && !app.LongPressFired()) {
             bool inside = app.mouseX >= mX && app.mouseX < mX + mW
                           && app.mouseY >= mY && app.mouseY < mY + mH;
             if (inside) {

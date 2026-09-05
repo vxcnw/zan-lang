@@ -32,6 +32,9 @@ class Ui {
         // 帧绑定与目标 id，从列表行上起手的滚动一松手就打开
         // 了那一行。
         if (app.window.EventFlag() == 1) { return false; }
+        // 长按手势的收尾释放不是点击（与 App.ClickAvailable 同一道
+        // 防线）：长按已经打开过菜单/进入过选择态，松手不当点击。
+        if (app.LongPressFired()) { return false; }
         return app.ClickTarget() == id;
     }
 

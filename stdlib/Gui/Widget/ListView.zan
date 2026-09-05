@@ -350,6 +350,16 @@ class ListView<T> : Control {
         int id = app.focus.AllocId();
         app.hitTester.RegisterRect(id, x, y, w, h, 0);
         if (app.focus.IsHovered(id)) { hover = index; }
+        // 触摸长按等价右键：按住行上不动打开上下文菜单。行是
+        // 真实注册 id，无需哨兵；轮询必须赶在下方 ClickTarget
+        // 早退之前——那个目标在按住期间是上一帧的滞留值，会
+        // 把还没成为点击目标的行挡在长按之外。
+        if (app.TouchDevice() && app.PollLongPress(id)) {
+            sel = index;
+            Context.Post();
+            this.NoteSelfDamage(app);
+            return id;
+        }
         // 点击目标由 App 在事件到达时对着「上一帧完整的」命中区解析，
         // 因此行内的子控件（模板行里的关闭按钮、开关）也在其中。
         // 行若在这里自己再做一次 HitTest，只能看到本帧已经注册的那

@@ -626,6 +626,27 @@ class TreeView : Control {
             ctxY = app.mouseY;
             Context.Post();
             this.NoteSelfDamage(app);
+        } else if (app.TouchDevice() && app.PollLongPress(id)) {
+            // 触摸长按等价右键：按住行上不动打开上下文菜单，
+            // 选择语义与右键一致（针对行不触发 Select，已属
+            // 多选的行保持选择不变）。触摸按下帧已把行记入
+            // 拖拽预备态（pressed/dragRow）——长按意味着这是
+            // 菜单手势而不是行拖拽，就地清掉。
+            if (!(multi && this.IsMarked(index))) {
+                if (multi) { marks = new List<int>(); }
+                sel.Set(index);
+            }
+            ctxRow = index;
+            ctxX = app.mouseX;
+            ctxY = app.mouseY;
+            if (reorder) {
+                pressed = false;
+                dragRow = 0 - 1;
+                dragging = false;
+                dropAt = 0 - 1;
+            }
+            Context.Post();
+            this.NoteSelfDamage(app);
         }
         return id;
     }

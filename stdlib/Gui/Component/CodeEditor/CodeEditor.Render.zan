@@ -545,6 +545,34 @@ partial class CodeEditor {
             }
         }
 
+        // ---- 触摸长按上下文菜单 ----
+        // 与右键同一几何、同一光标落点语义：按住文本区不动
+        // 打开菜单。编辑区是自绘表面，但按压帧命中的正是本
+        // 处注册的 `id`（区域逐帧以相同顺序注册），PollLongPress
+        // 直接比对即可，无需哨兵。ptrFree 与右键一致：查找栏
+        // 等浮层盖住文本时不开菜单。
+        if (app.TouchDevice() && ptrFree && app.PollLongPress(id)) {
+            bool lpOver = app.mouseX >= area.x + gutterW
+                          && app.mouseX < area.x + area.width
+                          && app.mouseY >= area.y
+                          && app.mouseY < area.y + area.height;
+            if (lpOver) {
+                if (!selActive) {
+                    int lpLine = LineAtY(lineH, app.mouseY);
+                    if (lpLine < 0) { lpLine = curLine; }
+                    if (lpLine >= lines.Count) { lpLine = lines.Count - 1; }
+                    if (lpLine < 0) { lpLine = 0; }
+                    curLine = lpLine;
+                    curCol = CodeEditor.ColFromX(lines[curLine], app.mouseX - textX, fontSize);
+                }
+                ctxOpen = true;
+                ctxX = app.mouseX;
+                ctxY = app.mouseY;
+                acActive = false;
+                app.RequestRedraw();
+            }
+        }
+
         app.hitTester.RegisterRect(id, area.x, area.y, area.width, area.height, 1);
 
         // ---- 按下左键：放置光标 / 开始拖选 ----

@@ -156,6 +156,11 @@ class DockHost {
     int menuX;
     int menuY;
     string emptyMenuLabel;
+    /// 触摸长按开菜单的哨兵一次性闸门：EventKind 跨帧滞留
+    /// （动画帧回读旧值），哨兵若每帧都补记会把 longPressFired
+    /// 反复清零，释放帧就再也读不到"刚长按过"。按事件序号
+    /// 只在真正的新按压帧记一次。
+    int stripSentinelSeq;
 
     /// Ribbon 面板开关：它们对应的 id 以及在
     /// 宿主命令列表中的起始位置（见 AddSwitches）。
@@ -195,6 +200,7 @@ class DockHost {
         this.menuX = 0;
         this.menuY = 0;
         this.emptyMenuLabel = "No closed panels";
+        this.stripSentinelSeq = 0;
         this.switchIds = new List<string>();
         this.switchBase = 0 - 1;
         this.switchHideHint = "Click to hide this panel";
@@ -896,7 +902,12 @@ class DockHost {
         if (hasB) {
             int maxB = a.height - hb - app.Scale(120);
             if (bh > maxB) { bh = maxB; bClamped = true; }
-            if (bh < minBottom) { bh = minBottom; bClamped = true; }
+            // minBottom 让位于 maxB：窗口高度不足时两者冲突，
+            // 保中心区可用高度优先——原顺序先压到 maxB 再抬回
+            // minBottom，矮窗口下底栏会把中心区挤成负高溢出。
+            // 冲突时底栏塌到 maxB（可能为负→下一行归零），且
+            // 标记 bClamped 不写回，还原窗口后用户原尺寸仍在。
+            if (bh < minBottom && minBottom <= maxB) { bh = minBottom; bClamped = true; }
             if (bh < 0) { bh = 0; bClamped = true; }
         }
         if (hasL && !lClamped) { leftW = lw; }
@@ -1128,8 +1139,26 @@ class DockHost {
         tsb.Paint(app, b.x, b.y, b.width, hh);
 
         // 右键单击标签条打开面板菜单（恢复已关闭的面板）。
+        // 触摸上以长按等价：按压帧把手势锚点改记为 -3 哨兵，
+        // 按住不动超过阈值即开菜单；拖拽中的按住不算。
+        // 触摸外壳在手指落下时就合成按压（支持按住类手势），
+        // 桌面构建 TouchDevice() 恒为 false，整段无副作用。
+        bool touchUi = app.TouchDevice();
+        if (touchUi && app.EventKind() == 2
+            && app.window.EventSeq() != stripSentinelSeq) {
+            stripSentinelSeq = app.window.EventSeq();
+            if (Ui.Over(app, b.x, b.y, b.width, hh)) {
+                app.NotePressSentinel(0 - 3);
+            }
+        }
         if (app.EventKind() == 2 && app.window.EventButton() == 1
             && Ui.Over(app, b.x, b.y, b.width, hh)) {
+            menuOpen = true;
+            menuX = app.mouseX;
+            menuY = app.mouseY;
+            app.RequestRedraw();
+        }
+        if (touchUi && !dragging && app.PollLongPress(0 - 3)) {
             menuOpen = true;
             menuX = app.mouseX;
             menuY = app.mouseY;
@@ -1183,7 +1212,19 @@ class DockHost {
                         close.RadiusOr(t.borderRadiusSmall), close.BgOr(0));
                 }
                 c.DrawGlyphIn("close", cbx, cby, closeBox, closeBox, closeBox - 3, closeColor);
-                this.RegisterClipped(app, closeId, cbx - 2, cby - 2, closeBox + 4, closeBox + 4, b.x, b.width);
+                // 触摸上放大命中热区：整条标签条高 + 横向加宽，
+                // 桌面维持图标原大小（悬停精确）。
+                int hbw = closeBox + 4;
+                int hbh = closeBox + 4;
+                int hbx = cbx - 2;
+                int hby = cby - 2;
+                if (app.TouchDevice()) {
+                    hbw = closeBox + app.Scale(24);
+                    hbh = hh;
+                    hbx = cbx + closeBox / 2 - hbw / 2;
+                    hby = b.y;
+                }
+                this.RegisterClipped(app, closeId, hbx, hby, hbw, hbh, b.x, b.width);
             }
 
             // 在标签上按下并移动会开始停靠拖拽；从未移动的按下
@@ -1200,7 +1241,10 @@ class DockHost {
                 }
             }
 
-            if (app.EventKind() == 3 && !dragging && !dragArmed) {
+            // 长按开过菜单的那次释放不算点击：菜单已在按住时
+            // 打开，松手再选中/关闭标签等于一次手势双触发。
+            if (app.EventKind() == 3 && !dragging && !dragArmed
+                && !app.LongPressFired()) {
                 int hit = app.ClickTarget();
                 if (p.closable && hit == closeId) {
                     this.Close(p.id);
