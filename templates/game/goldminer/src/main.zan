@@ -496,10 +496,13 @@ class MinerApp {
         int h2 = ch / 2;
         int ex = cx - (int)(Math.Cos(rad) * h2);
         int ey = cy - (int)(Math.Sin(rad) * h2);
-        // 绳:矿工手 → 爪铰点(短线段逐段画,近似摆动弧度)
+        // 绳:绞车卷筒底缘 → 爪铰点(短线段逐段画,近似摆动弧度)。
+        // 锚点取矿工精灵底边(绞车基座正下方,SKY_H+6 与精灵底边同一
+        // 线),绳在 DrawAll 里先于矿工绘制,静止时完全藏在机身之下,
+        // 视觉上从绞车底下钻出——不再横穿矿工手部。
         int segs = 8;
         int sx0 = ox + Data.HOOK_X;
-        int sy0 = oy + Data.HOOK_Y - 26;
+        int sy0 = oy + Data.SKY_H + 6;
         int px = sx0;
         int py = sy0;
         for (int i = 1; i <= segs; i = i + 1) {
@@ -660,11 +663,18 @@ class MinerApp {
         }
         // HUD 合成节拍:GameHud.Frame 是"GPU 回读整帧 + Gui 全画布软件
         // 栅格 + 双全帧纹理上传 + 合成 Present",一次约 6-10ms,跟随游戏
-        // 60fps 常态跑会把一个核吃满。合成与游戏帧解耦:每两帧合成一次
-        // (30fps,顶栏倒计时/摆钩足够顺滑);拆弹/结算切换或有点击按键
-        // 的帧立即合成,反馈不受节拍影响;失焦再降到 ~15fps。
+        // 60fps 常态跑会把一个核吃满。合成与游戏帧解耦:快速阶段
+        // (伸钩/收钩/QTE/拆弹)逐帧合成保手感,其余两帧一拍;状态
+        // 切换/点击按键立即合成。合成节拍即场景呈现节拍——不存在
+        // "只呈现场景不重绘 GUI"的廉价帧(Gui 合成契约:画布 present
+        // 后不保留,凑帧呈现会把空 HUD 贴上屏)。
         int hudFrame = 0;
         int lastState = -99;
+        // MINER_LIVESHOT=1: 实机合成路径自摄——第 120/600 帧各 DumpBmp
+        // 一张合成结果(含 FrameScene 廉价帧),离屏验证 live 合成内容,
+        // 不依赖窗口在前台。
+        bool liveShot = ProcessHost.Env("MINER_LIVESHOT") == "1";
+        int liveFrame = 0;
         while (h.Running()) {
             app.now = World.NowMs();
             int dt = (int)(app.now - app.lastFrameAt);
@@ -724,16 +734,21 @@ class MinerApp {
             app.DrawAll();
             h.End();
             // HUD 层:场景帧作底,Gui 控件树画在上面并合成呈现。
-            // 节拍:每两帧一次(30fps);状态切换(摆钩→伸钩→QTE→
-            // 拆弹/结算)与有点击/按键的帧立即合成;失焦降到 4 帧一拍。
-            // 场景帧在后备缓冲里保留到下一次合成,中间帧不回读。
+            // 门控:伸钩/收钩/收线 QTE/拆弹阶段爪与物品快速移动,逐帧
+            // 合成(60fps,收钩不卡);空闲摆钩与结算静止,两帧一拍
+            // (30fps,失焦 4 帧)。状态切换与点击按键的帧立即合成。
+            // 廉价帧不呈现:Gui 的合成契约是"重绘后才能 present"——
+            // 画布内容在 present 后不保留,拿旧画布凑帧会把空 HUD
+            // 贴上屏(整条顶栏闪烁)。
             if (app.hud != null) {
-                int interval = h.Focused() ? 2 : 4;
                 int st = app.w.state;
                 bool stateChanged = st != lastState;
                 lastState = st;
+                bool fast = st == World.ST_EXTEND || st == World.ST_RETRACT
+                            || st == World.ST_QTE || st == World.ST_BOMB;
+                int interval = h.Focused() ? 2 : 4;
                 bool composite = stateChanged || action || dyn || inputEvent
-                                 || ++hudFrame >= interval;
+                                 || fast || ++hudFrame >= interval;
                 if (composite) { hudFrame = 0; }
                 if (composite
                     && !app.hud.Frame(app.r, h.WindowHandle())) {
@@ -744,6 +759,13 @@ class MinerApp {
                     app.hud = null;
                     app.host.hudMode = false;
                 }
+            }
+            liveFrame = liveFrame + 1;
+            if (liveShot && (liveFrame == 120 || liveFrame == 600)) {
+                MinerApp.DumpBmp(app.r, "miner_live_" + Convert.ToString(liveFrame)
+                                 + ".bmp");
+                Console.WriteLine("=== LIVE SHOT " + Convert.ToString(liveFrame)
+                                  + " ===");
             }
             // 帧尾统一按 LimitFps 预算补睡:hudMode 下 End() 不再 pacing
             // (那时合成还没发生),睡在这可以把 HUD 读回+合成+呈现也算进
@@ -1052,9 +1074,12 @@ class MinerApp {
             int srcRow = (h - 1 - y) * w * 4;
             for (int x = 0; x < w; x = x + 1) {
                 int o = srcRow + x * 4;
-                bmp[dstRow + x * 3] = rgba[o + 2];
+                // ReadPixels 回读为 BGRA 字节序(D3D 后备缓冲),BMP 24 位
+                // 行序恰为 BGR,按原序直拷;此前按 RGBA 假设交叉写,整帧
+                // R/B 互换。
+                bmp[dstRow + x * 3] = rgba[o];
                 bmp[dstRow + x * 3 + 1] = rgba[o + 1];
-                bmp[dstRow + x * 3 + 2] = rgba[o];
+                bmp[dstRow + x * 3 + 2] = rgba[o + 2];
             }
         }
         File.WriteAllBytes(path, bmp);
@@ -1093,8 +1118,16 @@ class HudTop {
     HudTop(MinerApp a) { this.app = a; }
 
     Panel Build() {
-        Panel p = new Panel();
-        p.Class = "hud-panel";
+        // 卡片构造(style 0):面板表面按 CSS 画半透明底,无名构造
+        // (style 3)只布局不画表面,顶栏会整个透底。顶栏用 hud-bar
+        // (通栏方角贴边),不用 hud-panel 的圆角卡片样式——通栏条
+        // 右缘贴窗口边,圆角看起来只有左侧有、右侧像被啃掉。
+        // 卡片不从子控件推首选尺寸(那是 style 3 的 OnMeasure),
+        // Dock.Top 的高度必须显式 Prefer,否则量出 0、顶栏连同
+        // 文字整个消失。
+        Panel p = new Panel("hudTop");
+        p.Class = "hud-bar";
+        p.Prefer(this.app.Ux(Data.W), this.app.Ux(44));
         p.Dock(Dock.Top());
         this.bar = p;
 
@@ -1170,9 +1203,11 @@ class HudOverlay {
 
     Panel BuildResult() {
         // ---- 结算面板(居中) ----
-        // 卡片定尺寸,内部 Flex.Column 三段式:标题/两行数据/提示行,
-        // 间距全部走 Ux(4 的倍数)档位,居中对齐,不再裸排 Label。
-        Panel rp = new Panel();
+        // 卡片构造(style 0)画 CSS 半透明底;无名构造(style 3)只布局
+        // 不画表面,结算面板此前一直透底。卡片定尺寸,内部 Flex.Column
+        // 三段式:标题/两行数据/提示行,间距全部走 Ux(4 的倍数)档位,
+        // 居中对齐,不再裸排 Label。
+        Panel rp = new Panel("hudResult");
         rp.Class = "hud-panel";
         // Panel 默认 dock=5(fill)，Place() 只在 manual 停靠下生效，
         // 不切回 manual 会被 fill 分支撑满整个 HUD 画布。
@@ -1209,7 +1244,8 @@ class HudOverlay {
     Panel BuildBomb() {
         // ---- 拆弹面板(居中) ----
         // 标题/秒数大字/点击计数/进度条四段,同结算面板一套节奏。
-        Panel bp = new Panel();
+        // 卡片构造(style 0)画 CSS 半透明底,同结算面板。
+        Panel bp = new Panel("hudBomb");
         bp.Class = "hud-panel";
         bp.DockManual();
         bp.Prefer(this.app.Ux(360), this.app.Ux(180));
