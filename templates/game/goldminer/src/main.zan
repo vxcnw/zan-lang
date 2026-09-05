@@ -496,30 +496,19 @@ class MinerApp {
         int h2 = ch / 2;
         int ex = cx - (int)(Math.Cos(rad) * h2);
         int ey = cy - (int)(Math.Sin(rad) * h2);
-        // 绳:绞车卷筒底缘 → 爪铰点(短线段逐段画,近似摆动弧度)。
-        // 锚点取矿工精灵底边(绞车基座正下方,SKY_H+6 与精灵底边同一
-        // 线),绳在 DrawAll 里先于矿工绘制,静止时完全藏在机身之下,
-        // 视觉上从绞车底下钻出——不再横穿矿工手部。
-        int segs = 8;
+        // 绳:绞车卷筒(即摆动圆心 HOOK_X,HOOK_Y)→ 爪铰点,一条绷直
+        // 的 2px 线。绳在 DrawAll 里先于矿工绘制,上半段藏在机身后,
+        // 静止垂落时视觉上从绞车底下钻出。摆动的爪绕圆心走圆弧,绳
+        // 只有与爪同圆心才始终对准铰点——此前锚在绞车底(SKY_H+6)
+        // 且分 8 段加下垂偏移,摆动时绳身打弯、与爪的轨迹脱节。
         int sx0 = ox + Data.HOOK_X;
-        int sy0 = oy + Data.SKY_H + 6;
-        int px = sx0;
-        int py = sy0;
-        for (int i = 1; i <= segs; i = i + 1) {
-            double t = (double)i / segs;
-            int nx = sx0 + (int)((ex - sx0) * t);
-            int ny = sy0 + (int)((ey - sy0) * t);
-            // 中段下垂感:前半段向下偏移
-            int sag = i < segs / 2 ? (segs / 2 - i) * 2 : 0;
-            // 两遍 1px 并排成 2px 绳身,深棕+浅棕在土色背景上可读
-            rd.SetColor(74, 56, 38, 255);
-            rd.DrawLine(px, py + sag, nx, ny + (i < segs / 2 ? sag : 0));
-            rd.DrawLine(px, py + sag + 1, nx, ny + (i < segs / 2 ? sag : 0) + 1);
-            rd.SetColor(128, 100, 66, 255);
-            rd.DrawLine(px, py + sag, nx, ny + (i < segs / 2 ? sag : 0));
-            px = nx;
-            py = ny;
-        }
+        int sy0 = oy + Data.HOOK_Y;
+        // 两遍 1px 并排成 2px 绳身,深棕+浅棕在土色背景上可读
+        rd.SetColor(74, 56, 38, 255);
+        rd.DrawLine(sx0, sy0, ex, ey);
+        rd.DrawLine(sx0, sy0 + 1, ex, ey + 1);
+        rd.SetColor(128, 100, 66, 255);
+        rd.DrawLine(sx0, sy0, ex, ey);
         rd.SetColor(0, 0, 0, 255);
         // 爪纹理(旋转对齐摆角:0 度 = 纹理朝下)
         if (this.texClaw != null && this.texClaw.IsValid()) {
