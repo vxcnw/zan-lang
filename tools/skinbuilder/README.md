@@ -8,14 +8,15 @@
 
 ## 构建与运行
 
-```powershell
-powershell -NoProfile -File tools\skinbuilder\build.ps1   # 产出 build\skinbuilder.exe
-build\skinbuilder.exe
+在 ZanIDE 里打开 `SkinBuilder.zan` 一键运行即可；命令行等价形式：
+
+```bash
+build/zanc tools/skinbuilder/SkinBuilder.zan --auto-stdlib -o build/skinbuilder.exe
 ```
 
-构建脚本与 `scripts/build_charts.ps1` 同一配方：clang 编译静态 GUI
-运行时 → `llvm-ar` 归档 → `zanc` 编译 stdlib Gui + Chart + 工具源码
-并链接。
+`--auto-stdlib` 自动拉齐 Gui/Widget/Chart 组件，`[DllImport("zan_gui")]`
+的原生驱动由 zanc 从 `stdlib/Gui/drivers/<平台>/` 自动发现并捆绑到
+输出旁，无需任何手工链接步骤。
 
 ## 界面
 
