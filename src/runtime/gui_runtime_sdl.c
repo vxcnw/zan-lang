@@ -542,6 +542,14 @@ static void sdl_translate(const SDL_Event *e) {
             g_hist_t[0] = SDL_GetTicks();
             g_hist_y[0] = g_touch_y;
             g_hist_n = 1; g_hist_i = 1 % TOUCH_HIST;
+            /* Press at finger-down, not at slop-exceed or lift-off: hold
+             * gestures (long-press context menus, press-state feedback on
+             * cells/buttons) need the press while the finger is still down.
+             * A plain move precedes it so hover/enter state settles first.
+             * Drags already started from this press; the tap path below now
+             * only owes a release. */
+            zq_push(1, (int)g_touch_ax, (int)g_touch_ay, 0, 0, cur_mod_bits(), w);
+            zq_push(2, (int)g_touch_ax, (int)g_touch_ay, 0, 0, cur_mod_bits(), w);
             break;
         }
         case SDL_EVENT_FINGER_MOTION: {
@@ -556,16 +564,13 @@ static void sdl_translate(const SDL_Event *e) {
                 float dx = x - g_touch_ax, dy = y - g_touch_ay;
                 if (dx * dx + dy * dy < 64.0f) break; /* slop: still a tap */
                 g_touch_drag = 1;
-                /* A drag may start on a draggable widget (window title bar,
-                 * resize handle, slider) just as well as on scrollable
-                 * content. Synthesize the mouse press at the touch anchor so
-                 * Gui-level hit testing sees a press and the widget can own
-                 * the gesture; every motion below also reports mouse movement.
-                 * Scrollable areas keep their wheel stream — the two flows
-                 * coexist, and a wheel only scrolls what the finger is over
-                 * (popup blockers already sink it below floating layers). */
-                zq_push(2, (int)g_touch_ax, (int)g_touch_ay, 0, 0,
-                        cur_mod_bits(), w);
+                /* The press already went out at finger-down (see
+                 * FINGER_DOWN), so a drag on a draggable widget (window
+                 * title bar, resize handle, slider) is owned by that widget
+                 * from the start. Scrollable areas keep their wheel stream —
+                 * the two flows coexist, and a wheel only scrolls what the
+                 * finger is over (popup blockers already sink it below
+                 * floating layers). */
             }
             /* Finger travel -> wheel deltas in the ±120 scale Gui/App's
              * /120 math expects: content px per wheel degree is
@@ -662,16 +667,27 @@ static void sdl_translate(const SDL_Event *e) {
                 g_touch_drag = 0;
                 break;
             }
-            if (e->type == SDL_EVENT_FINGER_CANCELED) break;
-            /* Tap: a full click at the anchor (move so hover/state is
-             * right, then press + release). */
+            if (e->type == SDL_EVENT_FINGER_CANCELED) {
+                /* The press went out at finger-down, so the synthetic
+                 * mouse must see a release too or pressed state leaks.
+                 * Flagged: a canceled gesture is never a click. */
+                SDL_Window *cw = SDL_GetWindowFromEvent(e);
+                if (!cw) cw = g_main_win;
+                if (cw) {
+                    zq_push(3, (int)g_touch_ax, (int)g_touch_ay, 0, 0,
+                            cur_mod_bits(), cw);
+                    int ul = (g_zq_tail + ZAN_ZQ_CAP - 1) % ZAN_ZQ_CAP;
+                    g_zq[ul].e[6] = 1;
+                }
+                break;
+            }
+            /* Tap: press + positioning move already went out at
+             * finger-down; only the release is missing. Unflagged — a tap
+             * that never exceeded slop is a genuine click at the anchor. */
             SDL_Window *w = SDL_GetWindowFromEvent(e);
             if (!w) w = g_main_win;
             if (!w) break;
-            int x = (int)g_touch_ax, y = (int)g_touch_ay;
-            zq_push(1, x, y, 0, 0, cur_mod_bits(), w);
-            zq_push(2, x, y, 0, 0, cur_mod_bits(), w);
-            zq_push(3, x, y, 0, 0, cur_mod_bits(), w);
+            zq_push(3, (int)g_touch_ax, (int)g_touch_ay, 0, 0, cur_mod_bits(), w);
             break;
         }
         case SDL_EVENT_KEY_DOWN: {
