@@ -263,12 +263,28 @@ class Skin {
         return rest.Substring(0, slash);
     }
 
-    /// 所有皮肤，按选择器顺序：`--order` 在前（内置包自编号 0..n），
-    /// 未声明顺序的包随后按字母序。这是
-    /// 应用、标题栏选择器和持久化设置共同引用的
-    /// 唯一一份皮肤列表。
+    /// 皮肤包的类别：`--kind` 令牌，缺省 "ui"（整套 UI 皮肤）。
+    /// 组件皮肤——如 SkinBuilder 产出的 Chart 皮肤声明
+    /// `--kind: "chart"`——只贡献单个组件的配色，不是整套 UI
+    /// 皮肤，因此不进标题栏的皮肤选择列表；按名 UseSkin 仍可用。
+    static string KindOf(string name) {
+        Skin s = Skin.Load(name);
+        if (s.sheet == null) { return "ui"; }
+        string v = s.sheet.Var("--kind");
+        if (v == "") { return "ui"; }
+        return Skin.Unquote(v);
+    }
+
+    /// 整套 UI 皮肤，按选择器顺序：`--order` 在前（内置包自编号
+    /// 0..n），未声明顺序的包随后按字母序。组件皮肤（`--kind`
+    /// 非 "ui"，如图表配色）不在此列——皮肤选择器选的是整个
+    /// 界面外观，不该混进单组件的配色方案。这是应用、标题栏
+    /// 选择器和持久化设置共同引用的唯一一份皮肤列表。
     static List<string> Names() {
         List<string> names = Skin.Available();
+        for (int f = names.Count - 1; f >= 0; f = f - 1) {
+            if (Skin.KindOf(names[f]) != "ui") { names.RemoveAt(f); }
+        }
         List<string> outp = new List<string>();
         while (names.Count > 0) {
             int best = 0;
