@@ -1181,7 +1181,11 @@ class DataTableState {
     List<string> pvRowKeys;    // 行键（去重保序）
     List<string> pvColKeys;    // 列键（去重保序；无第二维度时为单个空串）
     List<double> pvCells;      // 聚合值，行优先平铺
-    List<double> pvRowTot;     // 每行总计（仅 Sum 模式物化）
+    List<double> pvRowTot;     // 每行总计（Sum/Max/Min 模式物化）
+    List<double> pvCellSum;    // 每格原始值求和（列总计行的加权平均/求和用）
+    List<int> pvCellCnt;       // 每格计数（列总计行的计数/加权平均用）
+    List<double> pvCellMx;     // 每格最大（列总计行的 Max 聚合用）
+    List<double> pvCellMn;     // 每格最小（列总计行的 Min 聚合用）
     List<DataColumn> pvViewCols; // 透视视图的生成列描述
     DataSource pvInner;        // 原始数据源（物化与 Poll 代理）
     PivotDataSource pvSource;  // 交给渲染管线的包装源
@@ -1475,6 +1479,10 @@ class DataTableState {
         this.pvColKeys = new List<string>();
         this.pvCells = new List<double>();
         this.pvRowTot = new List<double>();
+        this.pvCellSum = new List<double>();
+        this.pvCellCnt = new List<int>();
+        this.pvCellMx = new List<double>();
+        this.pvCellMn = new List<double>();
         this.pvViewCols = new List<DataColumn>();
         this.pvInner = null;
         this.pvSource = null;

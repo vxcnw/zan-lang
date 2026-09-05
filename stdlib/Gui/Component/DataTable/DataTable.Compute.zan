@@ -1285,9 +1285,15 @@ partial class DataTable {
     /// 已完成的基础聚合，所有内容只格式化一次。
     /// 由扁平行扫描路径（ComputeSummary）和分组合并路径
     /// （ComputeSummaryFromGroups）共用，两者生成字节一致的页脚。
+    /// 透视视图例外：总计行由物化聚合精确写出
+    /// （PivotFinalizeSummary），常规扫描看不到格内权重。
     static void FinalizeSummary(DataTableState st, List<DataColumn> cols,
                                 List<double> sumV, List<double> minV,
                                 List<double> maxV, int n) {
+        if (st.pivotView) {
+            DataTable.PivotFinalizeSummary(st, cols);
+            return;
+        }
         int nc = cols.Count;
         st.aggValue.Clear();
         st.aggReal.Clear();

@@ -7,7 +7,7 @@ namespace Gui.Component.DataTable;
 /// 透视视图数据源：把 DataTableState 里物化好的交叉聚合
 /// （pvRowKeys × pvColKeys → pvCells）当成普通行×列源交给
 /// 渲染管线。列 0 是行维度标签，之后每列一个列键的聚合值，
-/// Sum 模式再追加一列“Total”行总计。聚合格是派生结果，
+/// Sum/Max/Min 模式再追加一列“Total”行总计。聚合格是派生结果，
 /// 写入被忽略、不可插入——视图层的所有排序/筛选/汇总
 /// （作用于交叉结果本身）照常工作。
 ///
@@ -29,8 +29,15 @@ class PivotDataSource : DataSource {
         int nC = this.st.pvColKeys.Count;
         if (row < 0 || row >= nR) { return ""; }
         if (col == 0) { return this.st.pvRowKeys[row]; }
-        int dec = this.st.pivotAgg == 1 ? 2 : 0;
-        // Sum 模式在生成列末尾有一列“Total”：读行总计。
+        // 平均值固定两位小数；其余聚合的小数位随原值列
+        // （与 PivotBuildCols 的“格式化随原值列”契约一致）。
+        int dec = 0;
+        if (this.st.pivotAgg == 1) { dec = 2; }
+        else if (this.st.pvOrigColsList != null && this.st.pvValueCol >= 0
+                 && this.st.pvValueCol < this.st.pvOrigColsList.Count) {
+            dec = this.st.pvOrigColsList[this.st.pvValueCol].decimals;
+        }
+        // Sum/Max/Min 模式在生成列末尾有一列“Total”：读行总计。
         if (this.st.pvRowTot.Count == nR && col == nC + 1) {
             return DataTable.FormatReal(this.st.pvRowTot[row], dec);
         }
@@ -109,17 +116,18 @@ partial class DataTable {
 
     /// 把整个表格切换为透视投影：行维度 `rowCol`、列维度
     /// `colDim`（-1 = 无第二维度，退化为按行维度的单值汇总列）、
-    /// 值 `valueCol` 按 `agg`（0 Sum，1 Average，2 Count）聚合。
-    /// 聚合范围是“通过当前筛选的行”——进入视图前的原始
-    /// 逐列筛选、筛选行与组合树在物化时作用于原始列；
-    /// 之后视图层的筛选/排序再作用于交叉结果。返回 false
-    /// 表示参数无效（维度/值列越界或重合）。
+    /// 值 `valueCol` 按 `agg`（0 Sum，1 Average，2 Count，
+    /// 3 Max，4 Min）聚合。聚合范围是“通过当前筛选的行”
+    /// ——进入视图前的原始逐列筛选、筛选行与组合树在物化时
+    /// 作用于原始列；之后视图层的筛选/排序再作用于交叉结果。
+    /// 视图期间强制开启总计行（列总计，语义随 agg），退出时
+    /// 恢复原状。返回 false 表示参数无效（维度/值列越界或重合）。
     static bool SetPivot(DataTableState st, List<DataColumn> cols, DataSource src,
                          int rowCol, int colDim, int valueCol, int agg) {
         if (rowCol < 0 || rowCol >= cols.Count) { return false; }
         if (valueCol < 0 || valueCol >= cols.Count || valueCol == rowCol) { return false; }
         if (colDim == rowCol || colDim == valueCol || colDim >= cols.Count) { colDim = -1; }
-        if (agg < 0 || agg > 2) { agg = 0; }
+        if (agg < 0 || agg > 4) { agg = 0; }
         if (!st.pivotView) {
             // 快照原视图的查询状态，退出时原样恢复。逐列
             // 筛选/筛选行在视图期间换成全新列表：视图层的
@@ -137,6 +145,9 @@ partial class DataTable {
             st.sortKeys = new List<SortKey>();
         }
         st.pivotView = true;
+        // 列总计行随视图开启（退出时经 pvSavedSummary 还原）：
+        // 交叉表本身就是聚合结果，总计行是它的自然收尾。
+        st.showSummary = true;
         st.pvRowCol = rowCol;
         st.pvColDim = colDim;
         st.pvValueCol = valueCol;
@@ -157,7 +168,7 @@ partial class DataTable {
 
     /// 切换聚合模式并立即重建交叉表。
     static void SetPivotAgg(DataTableState st, List<DataColumn> cols, DataSource src, int agg) {
-        if (agg < 0 || agg > 2) { agg = 0; }
+        if (agg < 0 || agg > 4) { agg = 0; }
         st.pivotAgg = agg;
         if (st.pivotView) {
             st.pvDirty = true;
@@ -253,6 +264,10 @@ partial class DataTable {
             st.pvColKeys = new List<string>();
             st.pvCells = new List<double>();
             st.pvRowTot = new List<double>();
+            st.pvCellSum = new List<double>();
+            st.pvCellCnt = new List<int>();
+            st.pvCellMx = new List<double>();
+            st.pvCellMn = new List<double>();
             st.pvViewCols = new List<DataColumn>();
             return;
         }
@@ -330,13 +345,24 @@ partial class DataTable {
         int nc2 = nR * nC;
         List<double> sum = new List<double>();
         List<int> cnt = new List<int>();
+        List<double> mx = new List<double>();
+        List<double> mn = new List<double>();
         int z = 0;
-        while (z < nc2) { sum.Add(0.0); cnt.Add(0); z = z + 1; }
+        while (z < nc2) {
+            sum.Add(0.0); cnt.Add(0); mx.Add(0.0); mn.Add(0.0);
+            z = z + 1;
+        }
         while (t + 2 < raw.Count) {
             int gi2 = (int)raw[t];
             int gj2 = (int)raw[t + 1];
             int ix = gi2 * nC + gj2;
-            sum[ix] = sum[ix] + raw[t + 2];
+            double v = raw[t + 2];
+            sum[ix] = sum[ix] + v;
+            if (cnt[ix] == 0) { mx[ix] = v; mn[ix] = v; }
+            else {
+                if (v > mx[ix]) { mx[ix] = v; }
+                if (v < mn[ix]) { mn[ix] = v; }
+            }
             cnt[ix] = cnt[ix] + 1;
             t = t + 3;
         }
@@ -346,20 +372,44 @@ partial class DataTable {
             double av = 0.0;
             if (st.pivotAgg == 2) { av = (double)cnt[z]; }
             else if (st.pivotAgg == 1) { if (cnt[z] > 0) { av = sum[z] / (double)cnt[z]; } }
+            else if (st.pivotAgg == 3) { if (cnt[z] > 0) { av = mx[z]; } }
+            else if (st.pivotAgg == 4) { if (cnt[z] > 0) { av = mn[z]; } }
             else { av = sum[z]; }
             cells.Add(av);
             z = z + 1;
         }
-        // 行总计只在 Sum 模式下物化（Average 的总计权重
-        // 未知名义，Count 的行总计等于该行各键的计数和——
-        // 同样交给 Sum 视图，保持“总计”一列语义单一）。
+        // 每格基础聚合持久化：列总计行（PivotFinalizeSummary）
+        // 从这里精确算出——含加权平均（Σsum/Σcnt）与跨格
+        // Max/Min，格均值的无权平均会算错加权场景。
+        st.pvCellSum = sum;
+        st.pvCellCnt = cnt;
+        st.pvCellMx = mx;
+        st.pvCellMn = mn;
+        // 行总计在“格间运算与列内一致”的聚合下物化：
+        // Sum 的行合计、Max 的行最大、Min 的行最小都是
+        // 良定义的；Average 的总计权重未知名义，Count 的
+        // 行总计等于该行各键的计数和——两者不物化，保持
+        // “总计”一列语义单一。
         List<double> rowTot = new List<double>();
-        if (st.pivotAgg == 0) {
+        if (st.pivotAgg == 0 || st.pivotAgg == 3 || st.pivotAgg == 4) {
             int gi3 = 0;
             while (gi3 < nR) {
+                // Sum 直接累加；Max/Min 只在非空格上折叠——
+                // 空格聚值恒为 0，混进去会把 Min 拖成 0。
                 double rt = 0.0;
+                bool seen = false;
                 int gj3 = 0;
-                while (gj3 < nC) { rt = rt + cells[gi3 * nC + gj3]; gj3 = gj3 + 1; }
+                while (gj3 < nC) {
+                    int ix3 = gi3 * nC + gj3;
+                    double v = cells[ix3];
+                    if (st.pivotAgg == 0) { rt = rt + v; }
+                    else if (cnt[ix3] > 0) {
+                        if (!seen) { rt = v; seen = true; }
+                        else if (st.pivotAgg == 3) { if (v > rt) { rt = v; } }
+                        else { if (v < rt) { rt = v; } }
+                    }
+                    gj3 = gj3 + 1;
+                }
                 rowTot.Add(rt);
                 gi3 = gi3 + 1;
             }
@@ -372,8 +422,8 @@ partial class DataTable {
     }
 
     /// 生成透视视图的列描述：行维度列（克隆原列但退化为
-    /// 纯文本只读）+ 每个列键一列数值 + Sum 模式的 Total 列。
-    /// 值列的格式化（前缀/后缀/小数位）随原值列。
+    /// 纯文本只读）+ 每个列键一列数值 + Sum/Max/Min 模式的
+    /// Total 列。值列的格式化（前缀/后缀/小数位）随原值列。
     static List<DataColumn> PivotBuildCols(List<DataColumn> cols, DataTableState st, int colDim) {
         List<DataColumn> vc = new List<DataColumn>();
         DataColumn rowc = DataTable.CloneCol(cols[st.pvRowCol]);
@@ -415,7 +465,7 @@ partial class DataTable {
                 j = j + 1;
             }
         }
-        if (st.pivotAgg == 0) {
+        if (st.pivotAgg == 0 || st.pivotAgg == 3 || st.pivotAgg == 4) {
             DataColumn tot = DataTable.CloneCol(tmpl);
             tot.title = DataTable.T("Total", "总计");
             tot.field = "";
@@ -440,6 +490,88 @@ partial class DataTable {
     static DataSource PivotViewSource(DataTableState st, DataSource src) {
         if (st.pvSource == null) { st.pvSource = new PivotDataSource(st, src); }
         return st.pvSource;
+    }
+
+    /// 透视视图的总计行：由物化时的每格基础聚合（pvCellSum/
+    /// pvCellCnt/pvCellMx/pvCellMn）精确写出，替换常规的
+    /// 逐行扫描。常规扫描只看得到交叉格本身——Average 的
+    /// 无权平均在格计数不一时是错的，Count 会数成格数；
+    /// 这里的 Σsum/Σcnt 与 Σcnt 才是原始数据的真总 aggregate。
+    /// FinalizeSummary 在 pivotView 下整体转投到这里。
+    static void PivotFinalizeSummary(DataTableState st, List<DataColumn> cols) {
+        int nc = cols.Count;
+        int nC = st.pvColKeys.Count;
+        st.aggValue.Clear();
+        st.aggReal.Clear();
+        st.summaryText.Clear();
+        int g = 0;
+        while (g < nc) {
+            st.aggValue.Add(0);
+            st.aggReal.Add(0.0);
+            st.summaryText.Add("");
+            g = g + 1;
+        }
+        if (nc > 0) { st.summaryText[0] = DataTable.T("Total", "总计"); }
+        int nR = st.pvRowKeys.Count;
+        int j = 0;
+        while (j < nC && j + 1 < nc) {
+            double s = 0.0;
+            int c = 0;
+            double mx = 0.0;
+            double mn = 0.0;
+            bool seen = false;
+            int r = 0;
+            while (r < nR) {
+                int ix = r * nC + j;
+                s = s + st.pvCellSum[ix];
+                c = c + st.pvCellCnt[ix];
+                if (st.pvCellCnt[ix] > 0) {
+                    if (!seen) { mx = st.pvCellMx[ix]; mn = st.pvCellMn[ix]; seen = true; }
+                    else {
+                        if (st.pvCellMx[ix] > mx) { mx = st.pvCellMx[ix]; }
+                        if (st.pvCellMn[ix] < mn) { mn = st.pvCellMn[ix]; }
+                    }
+                }
+                r = r + 1;
+            }
+            double v = 0.0;
+            if (st.pivotAgg == 1) { if (c > 0) { v = s / (double)c; } }
+            else if (st.pivotAgg == 2) { v = (double)c; }
+            else if (st.pivotAgg == 3) { if (seen) { v = mx; } }
+            else if (st.pivotAgg == 4) { if (seen) { v = mn; } }
+            else { v = s; }
+            st.aggReal[j + 1] = v;
+            st.aggValue[j + 1] = (int)v;
+            st.summaryText[j + 1] = DataTable.PivotTotalText(cols[j + 1], st.pivotAgg, v, c);
+            j = j + 1;
+        }
+        // Total 列（Sum/Max/Min 模式）：总计的总计。
+        int totCol = nC + 1;
+        if (st.pvRowTot.Count == nR && totCol < nc) {
+            double tv = 0.0;
+            bool tseen = false;
+            int r2 = 0;
+            while (r2 < nR) {
+                double v = st.pvRowTot[r2];
+                if (st.pivotAgg == 0) { tv = tv + v; }
+                else if (!tseen) { tv = v; tseen = true; }
+                else if (st.pivotAgg == 3) { if (v > tv) { tv = v; } }
+                else { if (v < tv) { tv = v; } }
+                r2 = r2 + 1;
+            }
+            st.aggReal[totCol] = tv;
+            st.aggValue[totCol] = (int)tv;
+            st.summaryText[totCol] = DataTable.PivotTotalText(cols[totCol], st.pivotAgg, tv, 0);
+        }
+    }
+
+    /// 总计行单元格文本：数值聚合沿用该列的小数位与
+    /// 前后缀格式（平均不足两位补足两位），计数显示整数。
+    static string PivotTotalText(DataColumn col, int agg, double v, int cnt) {
+        if (agg == 2) { return Convert.ToString(cnt); }
+        int dec = col.decimals;
+        if (agg == 1 && dec == 0) { dec = 2; }
+        return DataTable.FormatCell(col, DataTable.FormatReal(v, dec));
     }
 
     /// 按类型把按列状态列表裁剪回 n 项（退出视图时移除
@@ -528,7 +660,9 @@ partial class DataTable {
             string agg = "";
             if (st.pivotAgg == 1) { agg = DataTable.T("Average", "平均"); }
             else if (st.pivotAgg == 2) { agg = DataTable.T("Count", "计数"); }
-            else { agg = DataTable.T("Sum", "求和"); }
+            else if (st.pivotAgg == 3) { agg = DataTable.T("Max", "最大"); }
+            else if (st.pivotAgg == 4) { agg = DataTable.T("Min", "最小"); }
+            else { agg = DataTable.T("Sum", "合计"); }
             string cfg = st.pvRowTitle;
             if (st.pvColTitle.Length > 0) { cfg = cfg + " × " + st.pvColTitle; }
             chips.Add(FilterChip.Make(3, -1, DataTable.T("Pivot", "透视表") + ": " + cfg + " · " + agg));
@@ -715,7 +849,7 @@ partial class DataTable {
 
     /// 芯片主体的语义：直达编辑入口。逐列芯片打开该列的
     /// 筛选菜单；筛选行芯片把焦点交给对应输入框；透视
-    /// 芯片循环切换 Sum → Average → Count。
+    /// 芯片循环切换 Sum → Average → Count → Max → Min。
     static void OpenFilterChip(DataTableState st, List<DataColumn> cols,
                                DataSource src, FilterChip chip) {
         int kind = chip.Kind();
@@ -735,9 +869,9 @@ partial class DataTable {
             // 引用缺失则只标脏，下一帧用新鲜原始列重建。
             List<DataColumn> orig = st.pvOrigColsList;
             if (orig != null && st.pvInner != null) {
-                DataTable.SetPivotAgg(st, orig, st.pvInner, (st.pivotAgg + 1) % 3);
+                DataTable.SetPivotAgg(st, orig, st.pvInner, (st.pivotAgg + 1) % 5);
             } else {
-                st.pivotAgg = (st.pivotAgg + 1) % 3;
+                st.pivotAgg = (st.pivotAgg + 1) % 5;
                 st.pvDirty = true;
                 DataTable.InvalidateQuery(st);
             }

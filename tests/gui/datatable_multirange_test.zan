@@ -234,7 +234,8 @@ class Program {
         pst.filters[0].textQuery = "pears";
         bool pvSet = DataTable.SetPivot(pst, pcols, psrc, 0, 1, 2, 0);
         Console.WriteLine("pivotSet=" + (pvSet && DataTable.IsPivotView(pst)
-            && pst.pvRowKeys.Count == 1 && pst.pvRowKeys[0] == "Pears"));
+            && pst.pvRowKeys.Count == 1 && pst.pvRowKeys[0] == "Pears"
+            && pst.showSummary));
         // 生成列：行维度 + North + South + Total（Sum 模式）
         List<DataColumn> vcols = DataTable.PivotViewCols(pst);
         DataSource pview = DataTable.PivotViewSource(pst, psrc);
@@ -243,10 +244,11 @@ class Program {
         Console.WriteLine("pivotFiltered=" + (pview.CellText(0, 0) == "Pears"
             && pview.CellNum(0, 1) == 5 && pview.CellNum(0, 2) == 15
             && pview.CellNum(0, 3) == 20));
-        // 退出还原：原始行数与进入前的筛选条件原样回来
+        // 退出还原：原始行数与进入前的筛选条件、总计行开关原样回来
         DataTable.ExitPivot(pst);
         Console.WriteLine("pivotExit=" + (!pst.pivotView && psrc.RowCount() == 5
-            && pst.filters[0].textQuery == "pears" && pst.colWidths.Count == 3));
+            && pst.filters[0].textQuery == "pears" && pst.colWidths.Count == 3
+            && !pst.showSummary));
         // 清掉筛选再进入：完整 2×2 交叉表（Apples、Pears 保序）
         pst.filters[0].textQuery = "";
         DataTable.SetPivot(pst, pcols, psrc, 0, 1, 2, 0);
@@ -260,6 +262,33 @@ class Program {
         DataTable.SetPivotAgg(pst, pcols, psrc, 2);
         Console.WriteLine("pivotCount=" + (pview.CellNum(0, 1) == 2
             && pview.CellNum(1, 2) == 1 && DataTable.PivotViewCols(pst).Count == 3));
+        // Max/Min：格值取格内最值（Apples/North = {10,30}），
+        // Total 列（行最值）在 Sum/Max/Min 三种模式下都在
+        DataTable.SetPivotAgg(pst, pcols, psrc, 3);
+        Console.WriteLine("pivotMax=" + (pview.CellNum(0, 1) == 30
+            && pview.CellNum(0, 2) == 20 && pview.CellNum(1, 1) == 5
+            && pview.CellNum(1, 2) == 15 && pview.CellNum(0, 3) == 30
+            && pview.CellNum(1, 3) == 15 && DataTable.PivotViewCols(pst).Count == 4));
+        DataTable.SetPivotAgg(pst, pcols, psrc, 4);
+        Console.WriteLine("pivotMin=" + (pview.CellNum(0, 1) == 10
+            && pview.CellNum(1, 1) == 5 && pview.CellNum(0, 3) == 10
+            && pview.CellNum(1, 3) == 5 && DataTable.PivotViewCols(pst).Count == 4));
+        // 列总计行：由物化的每格基础聚合精确写出。加权平均
+        // North 列 = (10+30+5)/3 = 15——常规扫描只看得到交叉格，
+        // 格均值的无权平均会得出 12.5；Count = Σ格计数而不是格数。
+        DataTable.SetPivotAgg(pst, pcols, psrc, 1);
+        DataTable.PivotFinalizeSummary(pst, DataTable.PivotViewCols(pst));
+        Console.WriteLine("pivotAvgTotal=" + (pst.showSummary
+            && pst.summaryText[0] == "总计"
+            && pst.summaryText[1] == "15.00" && pst.summaryText[2] == "17.50"));
+        DataTable.SetPivotAgg(pst, pcols, psrc, 0);
+        DataTable.PivotFinalizeSummary(pst, DataTable.PivotViewCols(pst));
+        Console.WriteLine("pivotSumTotal=" + (pst.summaryText[1] == "45"
+            && pst.summaryText[2] == "35" && pst.summaryText[3] == "80"));
+        DataTable.SetPivotAgg(pst, pcols, psrc, 2);
+        DataTable.PivotFinalizeSummary(pst, DataTable.PivotViewCols(pst));
+        Console.WriteLine("pivotCntTotal=" + (pst.summaryText[1] == "3"
+            && pst.summaryText[2] == "2"));
 
         // ---- 筛选面板芯片投影：逐列/筛选行/组合树 ----
         DataTable.ExitPivot(pst);
