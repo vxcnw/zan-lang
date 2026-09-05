@@ -362,6 +362,8 @@ partial class Charts {
     }
 
     static void Other4(App app, int x, int y, int w, int h) {
+        // 一级分支至少给 5~6 个，调色盘才能轮起来——只有两个
+        // 分支时整张图只有前两个颜色，看起来像缺了大半。
         ChartNode root = ChartNode.Group("Zan", new List<ChartNode>{
             ChartNode.Group(Charts.T("Engine", "引擎"), new List<ChartNode>{
                 ChartNode.Leaf(Charts.T("Runtime", "运行时"), 40),
@@ -370,7 +372,21 @@ partial class Charts {
             ChartNode.Group("UI", new List<ChartNode>{
                 ChartNode.Leaf(Charts.T("Widgets", "控件"), 30),
                 ChartNode.Leaf("Canvas", 15),
-                ChartNode.Leaf(Charts.T("Themes", "主题"), 10) })
+                ChartNode.Leaf(Charts.T("Themes", "主题"), 10) }),
+            ChartNode.Group(Charts.T("Data", "数据"), new List<ChartNode>{
+                ChartNode.Leaf(Charts.T("Charts", "图表"), 24),
+                ChartNode.Leaf(Charts.T("Tables", "表格"), 16),
+                ChartNode.Leaf(Charts.T("Storage", "存储"), 12) }),
+            ChartNode.Group(Charts.T("Tools", "工具"), new List<ChartNode>{
+                ChartNode.Leaf("LSP", 18),
+                ChartNode.Leaf("DAP", 12),
+                ChartNode.Leaf("CLI", 8) }),
+            ChartNode.Group(Charts.T("Docs", "文档"), new List<ChartNode>{
+                ChartNode.Leaf(Charts.T("Guides", "指南"), 10),
+                ChartNode.Leaf(Charts.T("Examples", "示例"), 8) }),
+            ChartNode.Group(Charts.T("Ecosystem", "生态"), new List<ChartNode>{
+                ChartNode.Leaf(Charts.T("Templates", "模板"), 9),
+                ChartNode.Leaf(Charts.T("Community", "社区"), 6) })
         });
         ChartOption o = ChartOption.Of(Charts.T("Sunburst", "旭日图"),
             null, new List<ChartSeries>{ ChartSeries.SunburstTree("code", root) });
