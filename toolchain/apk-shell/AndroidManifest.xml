@@ -27,6 +27,18 @@
          targetSdk 30+ also requires it for cleartext-notice. HTTPS-only
          traffic stays the runtime default. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- ZanApp (application android:name) asks for these at first activity
+         creation: media-scoped grants on API 33+, legacy external storage
+         below. Without the manifest declarations requestPermissions is
+         auto-denied and the in-app FilePicker sees nothing outside its
+         private files dir. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29"/>
     <application android:label="Zan App"
         android:icon="@mipmap/ic_launcher"
         android:hasCode="true" android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
