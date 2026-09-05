@@ -9,6 +9,30 @@ namespace CssTest;
 /// the resolved StyleBox fields so the parsing math can be diffed against a
 /// golden file - no window, no driver.
 class Program {
+    static void FontSources() {
+        List<string> names = new List<string>();
+        List<string> vals = new List<string>();
+        Css.CollectVars(":root { --font-size-small: 21; }", names, vals);
+        StyleSheet external = Css.ParseWith("label { font-size: var(--font-size-small); }", names, vals);
+        StyleSheet local = Css.Parse(":root { --font-size-small: 14; } label { font-size: var(--font-size-small); }");
+        StyleSheet shadow = Css.ParseWith(":root { --font-size-small: 16; } label { font-size: var(--font-size-small); }", names, vals);
+        StyleSheet alias = Css.ParseWith(":root { --caption: var(--font-size-small); } label { font-size: var(--caption); }", names, vals);
+        StyleSheet cycle = Css.ParseWith(":root { --caption: var(--caption); } label { font-size: var(--caption); }", names, vals);
+        Program.FontSource(external, "external");
+        Program.FontSource(local, "local");
+        Program.FontSource(shadow, "shadow");
+        Program.FontSource(alias, "alias");
+        Program.FontSource(cycle, "cycle");
+        names.Add("--font-size-small"); vals.Add("15");
+        StyleSheet inherited = Css.ParseWithSources("label { font-size: var(--font-size-small); }", names, vals, 1);
+        Program.FontSource(inherited, "inherited");
+    }
+    static void FontSource(StyleSheet sheet, string name) {
+        StyleBox b = new StyleBox(); sheet.ApplyBox(b, "label");
+        int physical = b.IsPrescaled(StyleBox.SourceFont()) ? 1 : 0;
+        Console.WriteLine($"font-source {name} px {b.fontPx} physical {physical}");
+    }
+
     static StyleSheet Sheet() {
         string css = "/* skin */\n"
             + ":root { --accent: #d92b2b; --radius: 12; }\n"
@@ -1720,5 +1744,6 @@ class Program {
 
         Console.WriteLine("--- layout longhands");
         Program.Longhand();
+        Program.FontSources();
     }
 }

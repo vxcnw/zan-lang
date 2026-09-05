@@ -278,6 +278,10 @@ class App {
     int pressStartId;
     bool longPressFired;
     int swipeDir;
+    /// 本次按压认领拖拽的控件 id（ClaimDrag）。触摸手势分扬用：
+    /// 按住期间到达的滚轮只有归认领者（或文本/缩放光标类型的
+    /// 命中区）时才重标为移动，其余放行为滚动。每次按压复位。
+    int dragClaimId;
     // 延迟的浮层弹窗（Select/SelectBox/Dropdown/Menu 选项列表）。
     // 它们在主内容阶段之后运行，因此既绘制在其上方，又
     // 最后注册命中区域（使它们成为最顶层目标）。数据
@@ -1006,13 +1010,15 @@ class App {
         List<string> vn = new List<string>();
         List<string> vv = new List<string>();
         Css.CollectVars(Style.RootFromTheme(theme), vn, vv);
+        int themeVarCount = vn.Count;
         if (sheet.vars != null) {
             for (int i = 0; i < sheet.vars.Count(); i = i + 1) {
                 vn.Add(sheet.vars.KeyAt(i));
                 vv.Add(sheet.vars.ValAt(i).AsString(""));
             }
         }
-        sheet.MergeSheet(Css.ParseWith(appCss, vn, vv));
+        // Theme metrics are physical; inherited skin declarations are logical.
+        sheet.MergeSheet(Css.ParseWithSources(appCss, vn, vv, themeVarCount));
     }
 
     /// 直接安装样式表（应用内编写的 CSS 文本，或以
@@ -4222,10 +4228,12 @@ class App {
             // 滚动把新内容挪到了指针底下：悬停按出帧后的命中区重算
             // （此刻命中区还是上一帧的，只能在 PresentFrame 之后做）。
             this.scrollHoverDirty = true;
-            if (focus.pressedId >= 0) {
+            if (this.PressOwnsWheel()) {
                 // 按住拖拽拥有手势：滑块/滚动条/选区正在跟随指针，
                 // 滚轮此刻只更新指针位置（上面已做），不得再滚动
                 // 任何内容——否则触摸拖滑块时页面还在背后滚。
+                // 触摸上未认领拖拽的按压不进这里（手势分扬，
+                // 见 PressOwnsWheel）：滚轮放行为正常滚动。
                 this.NoteRedrawWhy("wheel-pressed");
                 needsRedraw = true;
             } else if (this.HasOverlays() || blocksInputBelow) {
@@ -5491,9 +5499,30 @@ class App {
     /// 位置，拖拽按同一坐标重算，等于无操作。
     int NormalizedKind() {
         int k = window.EventKind();
-        if (k == 13 && focus.pressedId >= 0) { return 1; }
+        if (k == 13 && this.PressOwnsWheel()) { return 1; }
         return k;
     }
+
+    /// 按住期间到达的滚轮是否归按住的控件所有（拖拽手势）。
+    /// 桌面恒归控件：拖拽中误滚不再滚动任何内容，维持原语义。
+    /// 触摸上手势分扬：只有认领了拖拽（ClaimDrag：滑块/滚动条/
+    /// 分隔条/图表平移这类几何拖拽点）或命中区注册为文本(1)/
+    /// 缩放(4-8)光标类型——类型即"按住拖动"语义——的按压才拦住
+    /// 滚轮；列表行、按钮等普通命中区上，按住拖动就是滚动页面，
+    /// 与移动端惯例一致。
+    bool PressOwnsWheel() {
+        if (focus.pressedId < 0) { return false; }
+        if (!this.TouchDevice()) { return true; }
+        if (this.dragClaimId == focus.pressedId) { return true; }
+        int wt = hitTester.GetWidgetType(focus.pressedId);
+        return wt == 1 || (wt >= 4 && wt <= 8);
+    }
+
+    /// 当前按压的控件认领后续的按住拖动（触摸手势分扬）。
+    /// 拖拽语义不在命中区类型里体现的控件（几何判定的滚动条
+    /// 滑块、分隔手柄、图表平移、专用拖拽把手）在按压帧调用；
+    /// 幂等，重复调用无害。桌面无作用（滚轮本就恒归控件）。
+    void ClaimDrag() { dragClaimId = focus.pressedId; }
 
     /// 正在处理的 OS 事件类型；当事件属于
     /// 其他窗口时为 0（"无事件"）。原生事件状态是
@@ -5598,6 +5627,7 @@ class App {
         pressStartMs = Window.GetTickMs();
         longPressFired = false;
         swipeDir = 0;
+        dragClaimId = 0 - 1;
     }
 
     /// 把本次按下的手势锚点改记为哨兵 id：即时模式表面

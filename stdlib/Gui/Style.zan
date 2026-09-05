@@ -761,8 +761,10 @@ class Style {
         if (css == "") {
             made = new StyleSheet();
         } else {
-            made = StyleSheet.FromCss(
-                Style.RootFromTheme(app.theme) + "\n" + css);
+            List<string> names = new List<string>();
+            List<string> vals = new List<string>();
+            Css.CollectVars(Style.RootFromTheme(app.theme), names, vals);
+            made = Css.ParseWith(css, names, vals);
         }
         Style.baseSheets.Add(scale, made);
         return made;

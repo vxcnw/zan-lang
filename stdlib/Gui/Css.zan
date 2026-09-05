@@ -39,6 +39,14 @@ class Css {
     /// 掺进主题 token 就成了自我喂养）。同名时本身的变量胜出。
     static StyleSheet ParseWith(string src, List<string> extraNames,
                                 List<string> extraVals) {
+        int physicalCount = extraNames == null ? 0 : extraNames.Count;
+        return Css.ParseWithSources(src, extraNames, extraVals, physicalCount);
+    }
+
+    /// External theme tokens precede inherited logical skin variables. Keep
+    /// the boundary explicit so app CSS does not mistake skin sizes for pixels.
+    static StyleSheet ParseWithSources(string src, List<string> extraNames,
+                                       List<string> extraVals, int physicalCount) {
         StyleSheet sheet = new StyleSheet();
         string s = Css.StripComments(src);
         // 第 1 遍：`:root` 自定义属性，便于值引用它们。
@@ -57,6 +65,7 @@ class Css {
                 ei = ei + 1;
             }
         }
+        int externalCount = physicalCount < varNames.Count ? physicalCount : varNames.Count;
         for (int vi = 0; vi < ownNames.Count; vi = vi + 1) {
             sheet.vars.Set(ownNames[vi], JsonValue.NewStr(ownVals[vi]));
             varNames.Add(ownNames[vi]);
@@ -74,7 +83,7 @@ class Css {
             i = close + 1;
             if (selectors.Length == 0) { continue; }
             List<string> sels = Css.SplitTrim(selectors, ",");
-            JsonValue block = Css.ParseBlock(body, varNames, varVals);
+            JsonValue block = Css.ParseBlockWithSources(body, varNames, varVals, externalCount);
             if (block.Count() == 0) { continue; }
             int k = 0;
             while (k < sels.Count) {
@@ -92,6 +101,11 @@ class Css {
     /// 属性被丢弃（它们只用于被引用）。
     static JsonValue ParseBlock(string body, List<string> varNames,
                                 List<string> varVals) {
+        return Css.ParseBlockWithSources(body, varNames, varVals, 0);
+    }
+
+    static JsonValue ParseBlockWithSources(string body, List<string> varNames,
+                                           List<string> varVals, int externalCount) {
         JsonValue block = JsonValue.NewObject();
         JsonValue source = JsonValue.NewObject();
         List<string> decls = Css.SplitTrim(body, ";");
@@ -111,7 +125,7 @@ class Css {
                       JsonValue.NewStr(Css.StripImportant(
                           Css.ExpandVars(val, varNames, varVals))));
             source.Set(lowerKey, JsonValue.NewBool(
-                Css.IsPrescaledVar(val)));
+                Css.IsPrescaledValue(val, varNames, varVals, externalCount)));
         }
         if (source.Count() > 0) {
             block.Set("__zan_prescaled", source);
@@ -119,10 +133,29 @@ class Css {
         return block;
     }
 
-    /// 值是否直接引用 `var(--font-size-*)`：这类值已随主题的
-    /// DPI/密度缩放，记入 `__zan_prescaled`，下游不得再叠加缩放。
-    static bool IsPrescaledVar(string val) {
-        return Css.IndexFrom(val.ToLower(), "var(--font-size-", 0) >= 0;
+    /// Only externally supplied theme font metrics are physical pixels. Local
+    /// :root declarations remain logical, even when they shadow a theme token.
+    /// Follow aliases with the same bounded expansion used by ExpandVars.
+    static bool IsPrescaledValue(string val, List<string> names,
+                                List<string> vals, int externalCount) {
+        string value = val;
+        for (int guard = 0; guard < 8; guard = guard + 1) {
+            int at = Css.IndexFrom(value, "var(", 0);
+            if (at < 0) { return false; }
+            int close = Css.IndexFrom(value, ")", at);
+            if (close < 0) { return false; }
+            string name = Css.Trim(value.Substring(at + 4, close - at - 4));
+            int found = -1;
+            for (int i = 0; i < names.Count; i = i + 1) {
+                if (names[i] == name) { found = i; }
+            }
+            if (found < 0) { return false; }
+            if (found < externalCount && Css.IndexFrom(name, "--font-size-", 0) == 0) {
+                return true;
+            }
+            value = vals[found];
+        }
+        return false;
     }
 
     /// 去掉结尾的 `!important`（此处的级联本就是"后规则
