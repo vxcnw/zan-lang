@@ -212,8 +212,9 @@ partial class Charts {
     }
 
     /// example/line6 面积图（反向数值轴）「雨量流量关系图」：3079 个
-    /// 小时点的实测流量与降雨量（原始小数值），ECharts 把降雨量取负
-    /// 画在零线下方，配第二条 Y 轴。
+    /// 小时点的实测流量与降雨量，降雨量取负画在右轴零线下方，右轴
+    /// 刻度按 -值 显示为正（ECharts axisLabel.formatter）。标题居中
+    /// 带副标题，图例 x:'left'。
     static void Line6(App app, int x, int y, int w, int h) {
         ChartSeries flow = ChartSeries.Named(Charts.T("Flow", "流量"),
             ChartType.Line, FlowData());
@@ -224,8 +225,21 @@ partial class Charts {
         rain.axisIndex = 1;
         ChartOption o = ChartOption.Of(
             Charts.T("Rainfall vs flow", "雨量流量关系图"),
-            HourCats(), new List<ChartSeries>{ flow, rain });
-        o.Y(ChartAxis.Value());
+            null, new List<ChartSeries>{ flow, rain });
+        o.titleAlign = "center";
+        o.titleSub = Charts.T("Data from Xi'an Lant hydropower",
+            "数据来自西安兰特水电测控技术有限公司");
+        o.legendX = "left";
+        o.X(ChartAxis.Category(HourCats()));
+        o.xAxes[0].boundaryGap = false;
+        ChartAxis yl = ChartAxis.ValueTitled(
+            Charts.T("Flow (m^3/s)", "流量(m^3/s)"));
+        yl.max = 500;
+        o.Y(yl);
+        ChartAxis yr = ChartAxis.ValueTitled(
+            Charts.T("Rainfall (mm)", "降雨量(mm)"));
+        yr.labelNegate = true;
+        o.Y(yr);
         o.zoom = true;
         Charts.Show(app, o, x, y, w, h);
     }

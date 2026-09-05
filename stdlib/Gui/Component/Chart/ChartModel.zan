@@ -1558,6 +1558,8 @@ class ChartAxis {
     int labelInterval; // ECharts axisLabel.interval：-1 = 自动防重叠，>=0 = 每 (n+1) 个画一个
     string nameLocation; // ECharts nameLocation："start"|"middle"(默认)|"end"
     string labelFormatter; // ECharts axisLabel.formatter，"{value} °C" 模板
+    bool labelNegate;  // ECharts axisLabel.formatter 为 function(v){return -v}
+                       // 的等价开关：刻度/工具提示按 -值 显示（雨量图负值轴）
     bool boundaryGap;  // ECharts boundaryGap（类目轴默认 true：点落在格中）
     List<string> categories;
 
@@ -1575,6 +1577,7 @@ class ChartAxis {
         a.labelInterval = 0 - 1;
         a.nameLocation = "middle";
         a.labelFormatter = "";
+        a.labelNegate = false;
         a.boundaryGap = true;
         a.categories = cats;
         return a;
@@ -1601,6 +1604,7 @@ class ChartAxis {
         a.labelInterval = 0 - 1;
         a.nameLocation = "middle";
         a.labelFormatter = "";
+        a.labelNegate = false;
         a.boundaryGap = false;
         a.categories = new List<string>();
         return a;
@@ -1650,6 +1654,7 @@ class ChartAxis {
         a.reversed = src.reversed; a.ticks = src.ticks; a.showGrid = src.showGrid;
         a.labelRotate = src.labelRotate; a.labelInterval = src.labelInterval;
         a.nameLocation = src.nameLocation; a.labelFormatter = src.labelFormatter;
+        a.labelNegate = src.labelNegate;
         a.boundaryGap = src.boundaryGap; a.categories = new List<string>();
         if (src.categories != null) {
             for (int i = 0; i < src.categories.Count; i = i + 1) {
@@ -1667,6 +1672,8 @@ class ChartAxis {
 /// ECharts：option.*（全局）< series.*（逐系列）< data[i].*（逐项）。
 class ChartOption {
     string title;
+    string titleSub;   // ECharts title.subtext（标题下的小字副标题）
+    string titleAlign; // ECharts title.x："left"（默认）| "center" | "right"
     List<ChartAxis> xAxes;
     List<ChartAxis> yAxes;
     List<ChartSeries> series;
@@ -1695,6 +1702,7 @@ class ChartOption {
     bool radarSplitArea; // ECharts radar.splitArea.show：环带交替色
     // ---- legend 选项（ECharts legend）----
     string legendOrient;        // "horizontal"（默认）| "vertical"
+    string legendX;             // ECharts legend.x："left"|"center"(默认)|"right"
     string legendSelectedMode;  // ""=multiple | "single" | "false"
     string legendFormatter;     // 标签模板，{name} = 系列名（"" = 原名）
     // ---- dataRange（ECharts 2.x 值域筛选组件）----
@@ -1748,6 +1756,7 @@ class ChartOption {
         if (src == null) { return null; }
         ChartOption o = ChartOption.Create();
         o.title = src.title; o.defaultType = src.defaultType;
+        o.titleSub = src.titleSub; o.titleAlign = src.titleAlign;
         o.showLegend = src.showLegend; o.showTooltip = src.showTooltip;
         o.toolboxShow = src.toolboxShow; o.roam = src.roam; o.mapSelect = src.mapSelect;
         o.roamWheelMode = src.roamWheelMode;
@@ -1757,6 +1766,7 @@ class ChartOption {
         o.pieLabels = src.pieLabels; o.pieRings = src.pieRings;
         o.radarShape = src.radarShape; o.radarSplitArea = src.radarSplitArea;
         o.legendOrient = src.legendOrient; o.legendSelectedMode = src.legendSelectedMode;
+        o.legendX = src.legendX;
         o.legendFormatter = src.legendFormatter; o.dataRangeShow = src.dataRangeShow;
         o.dataRangeLo = src.dataRangeLo; o.dataRangeHi = src.dataRangeHi;
         o.dataRangeCalculable = src.dataRangeCalculable; o.dataRangeSplit = src.dataRangeSplit;
@@ -1818,8 +1828,11 @@ class ChartOption {
         o.radarShape = "circle";
         o.radarSplitArea = false;
         o.legendOrient = "horizontal";
+        o.legendX = "";
         o.legendSelectedMode = "";
         o.legendFormatter = "";
+        o.titleSub = "";
+        o.titleAlign = "";
         o.dataRangeShow = false;
         o.dataRangeLo = ChartOption.Auto();
         o.dataRangeHi = ChartOption.Auto();
@@ -2575,9 +2588,8 @@ class ChartOption {
         JsonValue tj = v.Get("title");
         if (tj != null && tj.IsObject()) {
             o.title = tj.Str("text", "");
-            string sub = tj.Str("subtext", "");
-            if (sub.Length > 0 && o.title.Length > 0) { o.title = o.title + " - " + sub; }
-            else if (sub.Length > 0) { o.title = sub; }
+            o.titleSub = tj.Str("subtext", "");
+            o.titleAlign = tj.Str("x", "");
         } else {
             o.title = v.Str("title", "");
         }
@@ -2592,6 +2604,7 @@ class ChartOption {
             o.showLegend = lg.Bool("show", o.showLegend);
             string ori = lg.Str("orient", o.legendOrient);
             if (ori == "vertical") { o.legendOrient = "vertical"; }
+            o.legendX = lg.Str("x", o.legendX);
             o.legendSelectedMode = ChartKinds.LegendModeSanitize(
                 lg.Str("selectedMode", o.legendSelectedMode));
             o.legendFormatter = lg.Str("formatter", o.legendFormatter);

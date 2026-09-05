@@ -338,7 +338,8 @@ partial class ChartView {
                     if (!series[asi].hidden) { axisIndex = series[asi].axisIndex; break; }
                 }
                 int vAt = f.ValueAtY(my, axisIndex);
-                string lblY = Convert.ToString(vAt);
+                bool yNeg = axisIndex == 0 ? f.leftNegate : f.rightNegate;
+                string lblY = Convert.ToString(yNeg ? 0 - vAt : vAt);
                 int yw = Canvas.MeasureText(lblY, fs);
                 int lxY = f.plotX + app.Scale(2);
                 int lyY = Canvas.CenterTextYAt(my, fs);
@@ -397,8 +398,11 @@ partial class ChartView {
             if (!s.hidden) {
                 int v = 0;
                 if (oi < s.Count()) { v = s.Value(oi); }
+                // 反向显示轴（axisLabel.formatter=-v）上的系列：
+                // 工具提示与刻度同形，按 -值 显示（雨量图 mm）。
+                bool sneg = s.axisIndex == 0 ? f.leftNegate : f.rightNegate;
                 rows.Add(TooltipRow.Of(s.color,
-                    s.name + "  " + Convert.ToString(v)));
+                    s.name + "  " + Convert.ToString(sneg ? 0 - v : v)));
                 if (stackTot != null && s.stackName.Length > 0) {
                     int gi = ChartView.GroupIndex(grp, s.stackName);
                     if (gi >= 0) { stackTot[gi] = stackTot[gi] + v; }

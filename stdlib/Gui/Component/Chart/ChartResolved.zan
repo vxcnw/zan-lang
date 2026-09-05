@@ -226,6 +226,7 @@ class ResolvedChart {
         ChartOption o = ChartOption.Create();
         ChartOption s = this.source;
         o.title = s.title;
+        o.titleSub = s.titleSub; o.titleAlign = s.titleAlign;
         o.xAxes = new List<ChartAxis>();
         for (int xi = 0; xi < s.xAxes.Count; xi = xi + 1) { o.xAxes.Add(ChartAxis.Clone(s.xAxes[xi])); }
         o.yAxes = new List<ChartAxis>();
@@ -253,6 +254,7 @@ class ResolvedChart {
         o.rampLo = s.rampLo; o.rampHi = s.rampHi;
         o.radarShape = s.radarShape; o.radarSplitArea = s.radarSplitArea;
         o.legendOrient = s.legendOrient; o.legendSelectedMode = s.legendSelectedMode;
+        o.legendX = s.legendX;
         o.legendFormatter = s.legendFormatter;
         o.dataRangeShow = s.dataRangeShow; o.dataRangeLo = s.dataRangeLo;
         o.dataRangeHi = s.dataRangeHi; o.dataRangeCalculable = s.dataRangeCalculable;

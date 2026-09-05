@@ -51,6 +51,8 @@ class ChartFrame {
     bool catY;           // Y 轴类目（ECharts 轴互换：数值在 X）
     int xLo;             // X 数值轴范围（catY / 值对折线用）
     int xHi;
+    bool leftNegate;     // 左轴刻度/工具提示按 -值 显示（axisLabel.formatter=-v）
+    bool rightNegate;    // 右轴同上
 
     /// 第 i 类目左缘。用 i*W/n 而不是固定 step，余数摊到末格，
     /// 最后一根柱/最后一个标签贴上绘图区右缘。boundaryGap=false
@@ -879,6 +881,24 @@ class Chart {
         if (lo == null) { return ""; }
         return lo.legendFormatter;
     }
+    /// 本帧标题副标题（ECharts title.subtext；legendOpt 未置 = 空）。
+    static string TitleSubText() {
+        ChartOption lo = Chart.legendOpt;
+        if (lo == null) { return ""; }
+        return lo.titleSub;
+    }
+    /// 本帧标题水平对齐："left"（默认）| "center" | "right"。
+    static string TitleAlignMode() {
+        ChartOption lo = Chart.legendOpt;
+        if (lo == null) { return ""; }
+        return lo.titleAlign;
+    }
+    /// 本帧图例水平对齐："left" | "center"（默认）| "right"。
+    static string LegendAlignX() {
+        ChartOption lo = Chart.legendOpt;
+        if (lo == null) { return ""; }
+        return lo.legendX;
+    }
     /// 本帧图例点击模式：0 = multiple（现状）| 1 = single |
     /// -1 = false（不可点）。
     static int LegendSelMode() {
@@ -933,6 +953,10 @@ class Chart {
         int titleH = 0;
         if (title.Length > 0) {
             titleH = Canvas.FontHeight(Style.FontFallback(app, "large"));
+            if (Chart.TitleSubText().Length > 0) {
+                titleH = titleH + Canvas.FontHeight(Style.FontFallback(app, "small"))
+                    + app.Scale(2);
+            }
         }
         int toolboxH = 0;
         if (Chart.toolReserve > 0) {
@@ -1235,6 +1259,10 @@ class Chart {
                                List<ChartSeries> series, bool showLegend) {
         int pad = app.theme.paddingMedium;
         int titleH = Canvas.FontHeight(Style.FontFallback(app, "large"));
+        if (title.Length > 0 && Chart.TitleSubText().Length > 0) {
+            titleH = titleH + Canvas.FontHeight(Style.FontFallback(app, "small"))
+                + app.Scale(2);
+        }
         int headH = titleH;
         if (Chart.toolReserve > 0) {
             int th = ChartToolbox.Height(app);
@@ -1270,10 +1298,33 @@ class Chart {
         int top = y + pad;
         int titleFs = Style.FontFallback(app, "large");
         int titleH = Canvas.FontHeight(titleFs);
+        string titleSub = Chart.TitleSubText();
+        if (title.Length > 0 && titleSub.Length > 0) {
+            titleH = titleH + Canvas.FontHeight(Style.FontFallback(app, "small"))
+                + app.Scale(2);
+        }
         int titleMax = x + w - pad - Chart.toolReserve - (x + pad) - app.Scale(8);
         if (title.Length > 0 && titleMax > 0) {
+            int tW = Canvas.MeasureText(title, titleFs);
+            string tal = Chart.TitleAlignMode();
+            int tx = x + pad;
+            if (tal == "center") { tx = x + pad + (titleMax - tW) / 2; }
+            else if (tal == "right") { tx = x + pad + titleMax - tW; }
+            if (tx < x + pad) { tx = x + pad; }
             c.PushClip(x + pad, top, titleMax, titleH);
-            c.DrawText(x + pad, top, title, sPanel.FgOr(0), titleFs);
+            c.DrawText(tx, top, title, sPanel.FgOr(0), titleFs);
+            if (titleSub.Length > 0) {
+                int subFs = Style.FontFallback(app, "small");
+                int subW = Canvas.MeasureText(titleSub, subFs);
+                int sx = tx;
+                if (tal == "center") { sx = x + pad + (titleMax - subW) / 2; }
+                else if (tal == "right") { sx = x + pad + titleMax - subW; }
+                if (sx < x + pad) { sx = x + pad; }
+                int subCol = Style.Part(app, "chart", "axis-title", "", "", "",
+                    Style.SNormal()).FgOr(0);
+                c.DrawText(sx, top + Canvas.FontHeight(titleFs), titleSub,
+                    subCol, subFs);
+            }
             c.PopClip();
         }
 
@@ -1310,7 +1361,10 @@ class Chart {
                 }
                 if (series.Count > 0) { totW = totW - app.Scale(14); }
                 if (totW > 0 && totW <= maxX - xCur) {
-                    xCur = xCur + (maxX - xCur - totW) / 2;
+                    int free = maxX - xCur - totW;
+                    string lax = Chart.LegendAlignX();
+                    if (lax == "right") { xCur = xCur + free; }
+                    else if (lax != "left") { xCur = xCur + free / 2; }
                 }
             }
             for (int si = 0; si < series.Count; si = si + 1) {
@@ -1746,9 +1800,12 @@ class Chart {
         return Chart.NiceMin(dataMin);
     }
     /// 数值轴上界：固定覆盖优先，否则 NiceMax；保证 hi > lo。
+    /// 数据全为非正（dataMax <= 0 且有负值）时上界归 0——雨量图
+    /// 这类全负系列的上界不该被 NiceMax(0)=5 顶出一段空白。
     static int AxisHi(int fixedHi, int dataMax, int lo) {
         int hi = Chart.NiceMax(dataMax);
         if (fixedHi != ChartOption.Auto()) { hi = fixedHi; }
+        if (fixedHi == ChartOption.Auto() && dataMax <= 0 && lo < 0) { hi = 0; }
         if (hi <= lo) { hi = lo + 1; }
         return hi;
     }
@@ -1910,6 +1967,8 @@ class Chart {
         f.catY = catY;
         f.xLo = xLo;
         f.xHi = xHi;
+        f.leftNegate = y0.labelNegate;
+        f.rightNegate = y1.labelNegate;
 
         // 网格线 + 左右数值标签（对数轴用 10 的幂刻度）
         StyleBox sGrid = Style.Part(app, "chart", "grid", "", "", "",
@@ -1947,7 +2006,7 @@ class Chart {
                 int lv = leftLo + leftSpan * k / ticks;
                 int gy = f.YOf(lv, 0);
                 if (grid) { c.FillRect(plotX, gy, plotW, 1, sGrid.BgOr(0)); }
-                string ls = Convert.ToString(lv);
+                string ls = Convert.ToString(y0.labelNegate ? 0 - lv : lv);
                 if (y0.labelFormatter.Length > 0) { ls = y0.labelFormatter.Replace("{value}", ls); }
                 int lw = Canvas.MeasureText(ls, fs);
                 c.DrawText(plotX - app.Scale(6) - lw, Canvas.CenterTextYAt(gy, fs),
@@ -1968,7 +2027,7 @@ class Chart {
                 for (int k = 0; k <= ticks; k = k + 1) {
                     int rv = rightLo + rightSpan * k / ticks;
                     int gy = f.YOf(rv, 1);
-                    string rs = Convert.ToString(rv);
+                    string rs = Convert.ToString(y1.labelNegate ? 0 - rv : rv);
                     if (y1.labelFormatter.Length > 0) { rs = y1.labelFormatter.Replace("{value}", rs); }
                     c.DrawText(plotRight + app.Scale(6), Canvas.CenterTextYAt(gy, fs),
                         rs, sAxis.FgOr(0), fs);
@@ -2025,7 +2084,6 @@ class Chart {
                     int labelLeft = tickX ? cxs - labelW / 2
                         : cxs + (cellW - labelW) / 2;
                     if (!tickX && labelLeft < cxs) { labelLeft = cxs; }
-                    bool last = ci == n - 1;
                     bool show;
                     if (ivl >= 0) {
                         // 显式抽稀：每 (interval+1) 个画一个，贪心让位。
@@ -2036,7 +2094,9 @@ class Chart {
                     } else {
                         // 刻度模式首标签以轴为中心、左半越出绘图区，
                         // 不参与贪心让位（ECharts 始终画边界刻度）。
-                        show = last || (tickX && ci == 0)
+                        // 尾标签不豁免：贴右缘的刻度标签会与前一
+                        // 标签重叠（雨量图 3079 点），同走贪心。
+                        show = (tickX && ci == 0)
                             || labelLeft >= labelRight + labelGap;
                     }
                     if (show) {
