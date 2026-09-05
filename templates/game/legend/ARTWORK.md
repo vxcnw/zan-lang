@@ -39,3 +39,17 @@ python tests/templates/legend/test_navigation_layout.py _scratch/legend/horizont
 ```
 
 该检查需要真实运行产生的树文件，不会用模拟坐标冒充运行验证。
+
+## 战斗信息与透明素材验收
+
+`assets/processed/monster.png` 是对现用参考裁块 `assets/reference/monster.png` 去除冷蓝底色及烘焙阴影的临时 RGBA 素材。`tools/prepare_monster.py` 固定输入 SHA-256，针对该图片审核过的色域处理透明通道；不能当成任意图片的通用抠图算法。保留输入用于可复现检查。它不是客户端提取结果，也没有解决不同怪物仍共用占位形象的问题。
+
+```powershell
+python templates/game/legend/tools/prepare_monster.py
+python tests/templates/legend/test_monster_art.py
+python tests/templates/legend/test_game_presentation.py _scratch/legend/presentation-tree.json --pixels _scratch/legend/presentation.pixels
+```
+
+运行布局检查验证：日志及聊天使用自然高度文本、从滚动视口顶部开始；怪物名称、HP 数字、8 逻辑像素的血条与精灵分行；血条与文字之间至少 4 逻辑像素；真实像素中的血条使用皮肤指定的暗底与红色填充。导航另由上一节的布局脚本检查。
+
+可加 `--scrolled <真实滚动后树文件>` 检查长日志移动且聊天不跟随。必须使用溢出视口的真实日志记录；短日志不足以验证滚动。当前复测连续两次滚轮可以滚动，但首次进入视口后第一下滚轮会丢失（`App.CaptureWheel` 前帧认领为空），这是尚未修复的标准库输入问题，不代表交互全部通过。见根目录 TASKS.md 对应记录。
