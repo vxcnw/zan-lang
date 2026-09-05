@@ -535,6 +535,7 @@ partial class ChartView {
         int maxI = 0 - 1;
         int maxV = 0 - 2147483647 - 1;
         for (int j = i0; j <= i1 && j < s.Count(); j = j + 1) {
+            if (j < s.data.Count && s.data[j].gap) { continue; }
             int v = s.Value(j);
             if (v > maxV) { maxV = v; maxI = j; }
         }
@@ -545,6 +546,7 @@ partial class ChartView {
         int minI = 0 - 1;
         int minV = 2147483647;
         for (int j = i0; j <= i1 && j < s.Count(); j = j + 1) {
+            if (j < s.data.Count && s.data[j].gap) { continue; }
             int v = s.Value(j);
             if (v < minV) { minV = v; minI = j; }
         }
@@ -557,6 +559,7 @@ partial class ChartView {
         int sum = 0;
         int cnt = 0;
         for (int j = i0; j <= i1 && j < s.Count(); j = j + 1) {
+            if (j < s.data.Count && s.data[j].gap) { continue; }
             sum = sum + s.Value(j);
             cnt = cnt + 1;
         }
@@ -580,6 +583,97 @@ partial class ChartView {
         return m.yValue;
     }
 
+    /// 值对折线的 x 轴标注线（ECharts markLine data 项
+    /// valueIndex:0）：对窗口内 points.x 取 max/min/average 画
+    /// 竖线 + 顶部标签。线色默认 #1e90ff（ECharts 示例惯例）。
+    static void DrawValueXMarkLines(App app, ChartFrame f, ChartSeries s,
+                                    int i0, int i1) {
+        if (s.markLines.Count < 1) { return; }
+        Canvas c = app.canvas;
+        for (int mi = 0; mi < s.markLines.Count; mi = mi + 1) {
+            ChartMarkLine m = s.markLines[mi];
+            if (m.valueIndex != 0) { continue; }
+            int n = i1 - i0 + 1;
+            if (n < 1) { n = 1; }
+            int sum = 0;
+            int cnt = 0;
+            int ext = m.kind == "min" ? 2147483647 : 0 - 2147483647 - 1;
+            for (int j = i0; j <= i1 && j < s.points.Count; j = j + 1) {
+                int xv = s.points[j].x;
+                sum = sum + xv;
+                cnt = cnt + 1;
+                if (m.kind == "min" && xv < ext) { ext = xv; }
+                if (m.kind == "max" && xv > ext) { ext = xv; }
+            }
+            if (cnt < 1) { continue; }
+            int vx = m.kind.Length > 0 ? ext : m.xValue;
+            if (m.kind == "average") { vx = sum / cnt; }
+            int lx = f.XOfValue(vx);
+            int col = m.color != 0 ? m.color : Chart.Rgb(30, 144, 255);
+            string lt = m.lineType.Length > 0 ? m.lineType : "dashed";
+            int dash = app.Scale(6);
+            int gap = app.Scale(6);
+            if (lt == "dotted") { dash = app.Scale(2); gap = app.Scale(2); }
+            int dy = f.plotY;
+            while (dy < f.plotY + f.plotH) {
+                int seg = dash;
+                if (dy + seg > f.plotY + f.plotH) { seg = f.plotY + f.plotH - dy; }
+                c.FillRect(lx, dy, 1, seg, col);
+                dy = dy + dash + gap;
+            }
+            int fs = Style.FontFallback(app, "small");
+            string lbl = m.label.Length > 0 ? m.label
+                : (m.kind == "average" ? "avg" : m.kind);
+            lbl = lbl.Replace("{value}", Convert.ToString(vx));
+            int lw = Canvas.MeasureText(lbl, fs);
+            int tx = lx - lw / 2;
+            if (tx < f.plotX) { tx = f.plotX; }
+            if (tx + lw > f.plotX + f.plotW) { tx = f.plotX + f.plotW - lw; }
+            c.DrawText(tx, f.plotY + app.Scale(1), lbl, col, fs);
+        }
+    }
+
+    /// 值对折线（points 系列）的悬停：按距离命中最近点并出
+    /// tooltip 卡（ECharts item trigger；行格式 "[ x, y ]"）。
+    static void PointsHover(App app, ChartFrame f, List<ChartSeries> series,
+                            int i0, int i1, int g) {
+        int mx = app.mouseX;
+        int my = app.mouseY;
+        if (mx < f.plotX || mx >= f.plotX + f.plotW
+            || my < f.plotY || my >= f.plotY + f.plotH) { return; }
+        int bestD = 0;
+        ChartHit best = null;
+        int grab = app.Scale(10);
+        for (int si = 0; si < series.Count; si = si + 1) {
+            ChartSeries s = series[si];
+            if (s.hidden || s.points.Count < 1) { continue; }
+            for (int j = i0; j <= i1 && j < s.points.Count; j = j + 1) {
+                int px = f.XOfValue(s.points[j].x);
+                int py = f.YOf(s.points[j].y, s.axisIndex);
+                int dx = mx - px;
+                int dy2 = my - py;
+                int d2 = dx * dx + dy2 * dy2;
+                if (d2 <= grab * grab && (best == null || d2 < bestD)) {
+                    bestD = d2;
+                    best = ChartView.MakeDataHit(s, si, j,
+                        Convert.ToString(s.points[j].x),
+                        ChartElementType.ScatterPoint, px, py, s.points[j].y);
+                    best.xValueSet = true;
+                    best.xValue = (double)s.points[j].x;
+                    best.yValueSet = true;
+                    best.yValue = (double)s.points[j].y;
+                }
+            }
+        }
+        if (best == null) { return; }
+        ChartView.OfferActiveHit(best);
+        List<TooltipRow> rows = new List<TooltipRow>();
+        rows.Add(TooltipRow.Of(best.value,
+            best.seriesName + " : [ " + Convert.ToString((int)best.xValue)
+            + ", " + Convert.ToString(best.value) + " ]"));
+        ChartView.TooltipCard(app, mx, my, 2147483647, rows);
+    }
+
     /// 系列级 markLine（ECharts series.markLine）：窗口水平线 +
     /// 右端标签。kind average/min/max 从窗口推导；显式 yValue。
     /// 线色默认系列色（2.x markLine 用 itemStyle 色，非全局 mark
@@ -592,6 +686,7 @@ partial class ChartView {
         if (nWin < 1) { nWin = 1; }
         for (int mi = 0; mi < s.markLines.Count; mi = mi + 1) {
             ChartMarkLine m = s.markLines[mi];
+            if (m.valueIndex == 0) { continue; }  // x 轴竖线另绘
             int val = ChartView.MarkLineValue(m, s, i0, i1);
             if (val == ChartOption.Auto()) { continue; }
             int ly = f.YOf(val, s.axisIndex);

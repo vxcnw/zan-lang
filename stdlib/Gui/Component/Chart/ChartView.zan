@@ -1064,6 +1064,10 @@ partial class ChartView {
         // ScatterHover 提示 x/y 数值。
         if (leadS != null && leadS.data.Count == 0
             && leadS.points.Count > 0) {
+            // ECharts type:'line' 的值对系列（line7 双数值轴）走折线
+            // 渲染器：连线 + 符号 + markLine/markPoint 全套；
+            // type:'scatter' 的点云仍走散点渲染器（只画点不连线）。
+            if (leadS.type == ChartType.Line) { return "lines"; }
             return "scatter";
         }
         // 折线族：堆叠的引导序列渲染累计填充带，其余绘制折线。

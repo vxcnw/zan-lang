@@ -291,15 +291,33 @@ partial class Charts {
     }
 
     static void Dyn2(App app, int x, int y, int w, int h) {
-        List<ChartPoint> pts = new List<ChartPoint>();
+        // 导航名叫「散点K线」，两块都得在：左动态散点 + 右滚动 K 线
+        // （此前只有散点，K 线半边一直缺席）。
         int tick = Window.GetTickMs() / 80;
+        List<ChartPoint> pts = new List<ChartPoint>();
         for (int i = 0; i < 40; i = i + 1) {
             pts.Add(ChartPoint.Of((i * 9 + tick) % 100, (i * 13 + tick / 2) % 90));
         }
-        ChartOption o = ChartOption.Of(Charts.T("Live scatter", "动态散点"),
+        ChartOption sc = ChartOption.Of(Charts.T("Live scatter", "动态散点"),
             null, new List<ChartSeries>{ ChartSeries.OfPoints("p", pts) });
-        o.animate = false;
-        Charts.Show(app, o, x, y, w, h);
+        sc.animate = false;
+
+        List<Candle> ks = new List<Candle>();
+        List<string> times = new List<string>();
+        for (int i = 0; i < 12; i = i + 1) {
+            int step = tick + i * 7;
+            int open = 2400 + ChartView.SinDeg((step * 11) % 360) * 40 / 1000;
+            int close = 2400 + ChartView.SinDeg((step * 11 + 40) % 360) * 40 / 1000;
+            int hi = open > close ? open : close;
+            int lo = open < close ? open : close;
+            ks.Add(Candle.Of(open, hi + 6 + step % 5, lo - 6 - (step + 3) % 4, close));
+            times.Add(Convert.ToString((tick / 6 + i) % 60));
+        }
+        ChartOption k = ChartOption.Of(Charts.T("Live K", "动态K线"),
+            times, new List<ChartSeries>{ ChartSeries.OfCandles("K", ks) });
+        k.animate = false;
+
+        Charts.Split2(app, sc, k, x, y, w, h);
         app.RequestAnimationFrame(80);
     }
 
@@ -441,5 +459,102 @@ partial class Charts {
             x, y + halfH + app.Scale(12), w, halfH,
             Charts.T("Rolling window (20k)", "滚动窗口（2 万点）"));
         app.RequestAnimationFrame(33);
+    }
+
+    /// example/loading 过渡动画「加载中，Loading」：ECharts
+    /// showLoading 的默认形态——空面板上一圈相位旋转的亮点 + 文案。
+    static void Loading(App app, int x, int y, int w, int h) {
+        Canvas c = app.canvas;
+        Theme t = app.theme;
+        // 空面板自绘（同 DrawEmptyState 的面板样式），避免空态
+        // "(no data)" 文案与加载点环叠字。
+        StyleBox panel = Style.Full(app, "chart", "", "", Style.SNormal());
+        c.SurfaceRoundRect(x, y, w, h, t.borderRadiusMedium,
+            panel.BgOr(0), panel.BorderOr(0), 1);
+        c.DrawText(x + t.paddingMedium, y + t.paddingMedium,
+            Charts.T("Loading", "过渡动画"), panel.FgOr(0),
+            Style.FontFallback(app, "large"));
+        int cx = x + w / 2;
+        int cy = y + h / 2 - app.Scale(14);
+        int tick = Window.GetTickMs();
+        int rr = app.Scale(22);
+        for (int i = 0; i < 12; i = i + 1) {
+            int ang = (i * 30 - tick / 4) % 360;
+            if (ang < 0) { ang = ang + 360; }
+            int phase = ((tick / 4 + i * 30) % 360) / 30;
+            int px = cx + ChartView.SinDeg(ang) * rr / 1000;
+            int py = cy - ChartView.CosDeg(ang) * rr / 1000;
+            c.FillRect(px - app.Scale(2), py - app.Scale(2),
+                app.Scale(4), app.Scale(4),
+                Chart.WithAlpha(t.primary, 40 + phase * 18));
+        }
+        string msg = Charts.T("Loading...", "加载中，Loading...");
+        int mw = Canvas.MeasureText(msg, t.fontSizeSmall);
+        c.DrawText(cx - mw / 2, cy + rr + app.Scale(10), msg,
+            t.textSecondary, t.fontSizeSmall);
+        app.RequestAnimationFrame(33);
+    }
+
+    /// example/event 事件交互：图例点击切换系列（legendselectchanged
+    /// 的交互态，隐藏位经 StateGet(LegendKey) 读回展示）+「刷新数据」
+    /// chip 重生成 series，体现图表与外界的联动。
+    static void EventDemo(App app, int x, int y, int w, int h) {
+        int demo = Charts.selected.Get();
+        int widKey = Charts.KeyOf(demo, 0);
+        int seedKey = Charts.KeyOf(demo, 9);
+        int seed = app.StateGet(seedKey, 1);
+
+        List<int> da = new List<int>();
+        List<int> db = new List<int>();
+        List<int> dc = new List<int>();
+        for (int i = 0; i < 7; i = i + 1) {
+            da.Add(60 + ChartView.SinDeg(i * 47 + seed * 91) * 40 / 1000);
+            db.Add(90 + ChartView.SinDeg(i * 31 + seed * 57) * 60 / 1000);
+            dc.Add(40 + ChartView.SinDeg(i * 73 + seed * 23) * 30 / 1000);
+        }
+        ChartOption o = ChartOption.Of(Charts.T("Events", "事件交互"),
+            Charts.Week(), new List<ChartSeries>{
+                ChartSeries.Bar(Charts.T("Direct", "直接访问"), da),
+                ChartSeries.Bar(Charts.T("Mail", "邮件营销"), db),
+                ChartSeries.Line(Charts.T("Search", "搜索引擎"), dc) });
+        int chartH = h - app.Scale(58);
+        o.toolboxShow = true;
+        ChartView.Keyed(o, widKey).Render(app, x, y, w, chartH);
+
+        Canvas c = app.canvas;
+        Theme t = app.theme;
+        int by = y + chartH + app.Scale(6);
+        string legend = Charts.T("Legend:", "图例：");
+        for (int si = 0; si < o.series.Count; si = si + 1) {
+            bool on = app.StateGet(Chart.LegendKey(widKey, si), 0) == 0;
+            legend = legend + " " + o.series[si].name
+                + (on ? " ●" : " ○");
+        }
+        c.DrawText(x, by, legend, t.textSecondary, t.fontSizeSmall);
+
+        int chipW = app.Scale(88);
+        int chipH = app.Scale(22);
+        int chipX = x + w - chipW;
+        int chipY = by - app.Scale(2);
+        bool hot = !app.PointerCaptured()
+            && app.mouseX >= chipX && app.mouseX < chipX + chipW
+            && app.mouseY >= chipY && app.mouseY < chipY + chipH;
+        int bg = t.bgTertiary;
+        int fg = t.textSecondary;
+        if (hot) { bg = t.bgHover; fg = t.textPrimary; }
+        c.FillRoundRect(chipX, chipY, chipW, chipH, app.Scale(4), bg);
+        string lbl = Charts.T("Refresh data", "刷新数据");
+        int lw = Canvas.MeasureText(lbl, t.fontSizeSmall);
+        c.DrawText(chipX + (chipW - lw) / 2, chipY + app.Scale(3), lbl,
+            fg, t.fontSizeSmall);
+        if (app.window.EventKind() == 3 && hot) {
+            app.StateSet(seedKey, seed + 1);
+            app.RequestRedraw();
+        }
+
+        string hint = Charts.T(
+            "Click legend to toggle series, refresh to regenerate data.",
+            "点击图例切换系列显隐，点击按钮重新生成数据。");
+        c.DrawText(x, by + app.Scale(26), hint, t.textTertiary, t.fontSizeTiny);
     }
 }

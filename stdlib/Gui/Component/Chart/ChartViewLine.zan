@@ -318,11 +318,22 @@ partial class ChartView {
         List<ChartSeries> series = o.series;
         List<string> labels = o.XCategories();
 
-        // dataZoom：锁定窗口索引 [i0,i1]（含端点）并预留底部
-        // 滑块条带。渲染循环直接读原系列（数据索引 = i0+j），
-        // 不做有损的系列克隆；标签按窗口取子列表。
+        // 无类目 X 轴（轴互换 yAxis=category 或 xAxis=value 的值对
+        // 折线）时没有类目标签，数据窗口改取最长序列长度。
+        bool noCatX = o.YAxis0().type == ChartAxisType.Category
+            || o.XAxis0().type == ChartAxisType.Value;
+        int axisN = 0;
+        if (noCatX) {
+            for (int ani = 0; ani < series.Count; ani = ani + 1) {
+                ChartSeries ans = series[ani];
+                if (ans.hidden) { continue; }
+                if (ans.points.Count > axisN) { axisN = ans.points.Count; }
+                if (ans.data.Count > axisN) { axisN = ans.data.Count; }
+            }
+        }
         int zoomH = 0;
         int fullN = labels.Count;
+        if (axisN > fullN) { fullN = axisN; }
         int i0 = 0;
         int i1 = fullN - 1;
         if (o.zoom && o.iwid != 0 && fullN > 1) {
@@ -342,12 +353,12 @@ partial class ChartView {
         Chart.DrawMarkArea(app, f, o);
 
         int n = winLabels.Count;
+        if (n < 1 && axisN > 0) { n = i1 - i0 + 1; }
         if (n < 1) { return; }
         int step = f.plotW / n;
         int half = step / 2;
         int th = app.Scale(2);
         int rad = app.Scale(3);
-        int baseY = f.plotY + f.plotH;
 
         ChartView.PushPlotClip(app, f.plotX, f.plotY, f.plotW, f.plotH);
         for (int si = 0; si < series.Count; si = si + 1) {
@@ -380,7 +391,7 @@ partial class ChartView {
                         if (oi >= s.Count()) { continue; }
                         int v = s.Value(oi) * g / 1000;
                         int by = f.YOf(v, ax);
-                        int bh = baseY - by;
+                        int bh = f.ZeroBase(ax) - by;
                         if (bh < 0) { bh = 0; }
                         int col = s.color;
                         if (oi < s.data.Count && s.data[oi].color != 0) { col = s.data[oi].color; }
@@ -403,14 +414,33 @@ partial class ChartView {
                     }
                 } else {
                     // 一次性收集（增长后的）绘图点，填充与描边复用。
+                    // 坐标模式：0 = 类目 X（默认）；1 = 值对 points（X 按
+                    // 数值轴映射）；2 = 轴互换（类目在 Y，值在 X）。
+                    // '-' 缺数据项断线：不进路径、不画符号、不进极值。
+                    int geoMode = 0;
+                    if (s.points.Count > 0) { geoMode = 1; }
+                    else if (f.catY) { geoMode = 2; }
                     List<int> pxs = new List<int>();
                     List<int> pys = new List<int>();
+                    List<bool> gaps = new List<bool>();
                     for (int j = 0; j < n; j = j + 1) {
                         int oi = i0 + j;
+                        if (geoMode == 1) {
+                            if (oi >= s.points.Count) { continue; }
+                            pxs.Add(f.XOfValue(s.points[oi].x));
+                            pys.Add(f.YOf(s.points[oi].y, ax));
+                            gaps.Add(false);
+                            continue;
+                        }
                         if (oi >= s.Count()) { continue; }
-                        int v = s.Value(oi) * g / 1000;
-                        pxs.Add(f.CatMid(j, n));
-                        pys.Add(f.YOf(v, ax));
+                        if (geoMode == 2) {
+                            pxs.Add(f.XOfValue(s.Value(oi) * g / 1000));
+                            pys.Add(f.CatMidY(j, n));
+                        } else {
+                            pxs.Add(f.CatMid(j, n));
+                            pys.Add(f.YOf(s.Value(oi) * g / 1000, ax));
+                        }
+                        gaps.Add(oi < s.data.Count && s.data[oi].gap);
                     }
 
                     bool smooth = o.smooth;
@@ -426,60 +456,94 @@ partial class ChartView {
                     int gapLen = app.Scale(3);
                     if (ltype == "dotted") { dashLen = app.Scale(2); gapLen = app.Scale(2); }
 
-                    // 只构建一次（可选平滑的）路径；
-                    // 填充与描边共享同一曲线，使填充顶边精确贴合
-                    // 描边并带抗锯齿边缘。描边使用
-                    // 亚像素（16.8）版本，使曲线轮廓
-                    // 按真实几何采样；填充则插值
-                    // 整数路径本身（FillUnder 已按 1/256 工作）。
-                    List<int> pathX = new List<int>();
-                    List<int> pathY = new List<int>();
-                    ChartView.BuildPath(pxs, pys, smooth, pathX, pathY);
-                    List<int> fxX = new List<int>();
-                    List<int> fxY = new List<int>();
-                    ChartView.BuildPathFx(pxs, pys, smooth, fxX, fxY);
+                    // 面积/柱的填充基线取所在轴的零线（ECharts
+                    // 语义：负值区域的填充停在零线上方），0 不在
+                    // 轴范围内时落到绘图区边。轴互换面积横向填充
+                    // 暂不支持（ECharts 轴互换示例不配 areaStyle）。
+                    int fillBase = geoMode == 2 ? f.plotX : f.ZeroBase(ax);
 
-                    if (area) {
-                        ChartView.FillUnder(c, pathX, pathY, baseY, drawColor, o.gradient, 150, 16);
-                    }
+                    // '-' 断线把序列切成连续段：逐段构建（可选平滑）
+                    // 路径，填充与描边共享同一曲线；描边使用亚像素
+                    // (16.8) 版本使曲线轮廓按真实几何采样，填充插值
+                    // 整数路径（FillUnder 已按 1/256 工作）。
+                    int r0 = 0;
+                    while (r0 < pxs.Count) {
+                        if (gaps[r0]) { r0 = r0 + 1; continue; }
+                        int r1 = r0;
+                        while (r1 + 1 < pxs.Count && !gaps[r1 + 1]) { r1 = r1 + 1; }
+                        List<int> rxs = new List<int>();
+                        List<int> rys = new List<int>();
+                        for (int rm = r0; rm <= r1; rm = rm + 1) {
+                            rxs.Add(pxs[rm]); rys.Add(pys[rm]);
+                        }
+                        List<int> pathX = new List<int>();
+                        List<int> pathY = new List<int>();
+                        ChartView.BuildPath(rxs, rys, smooth, pathX, pathY);
+                        List<int> fxX = new List<int>();
+                        List<int> fxY = new List<int>();
+                        ChartView.BuildPathFx(rxs, rys, smooth, fxX, fxY);
 
-                    if (stepped) {
-                        // 阶梯线是一条连续路径（水平步进 +
-                        // 每点垂直跳变）—— 单次描边绘制，
-                        // 拐角干净，而非逐段拼接。
-                        List<int> sx = new List<int>();
-                        List<int> sy = new List<int>();
-                        for (int sp = 0; sp + 1 < pxs.Count; sp = sp + 1) {
-                            sx.Add(pxs[sp]); sy.Add(pys[sp]);
-                            sx.Add(pxs[sp + 1]); sy.Add(pys[sp]);
+                        if (area && geoMode != 2) {
+                            ChartView.FillUnder(c, pathX, pathY, fillBase,
+                                drawColor, o.gradient, 150, 16);
                         }
-                        if (pxs.Count > 0) {
-                            sx.Add(pxs[pxs.Count - 1]); sy.Add(pys[pys.Count - 1]);
-                        }
-                        if (dashed) {
-                            ChartView.DrawDashed(c, sx, sy, drawColor, drawWidth, dashLen, gapLen);
+
+                        if (stepped) {
+                            // 阶梯线：水平步进 + 每点垂直跳变的连续
+                            // 路径，单次描边拐角干净。
+                            List<int> sx = new List<int>();
+                            List<int> sy = new List<int>();
+                            for (int sp = 0; sp + 1 < rxs.Count; sp = sp + 1) {
+                                sx.Add(rxs[sp]); sy.Add(rys[sp]);
+                                sx.Add(rxs[sp + 1]); sy.Add(rys[sp]);
+                            }
+                            if (rxs.Count > 0) {
+                                sx.Add(rxs[rxs.Count - 1]); sy.Add(rys[rys.Count - 1]);
+                            }
+                            if (dashed) {
+                                ChartView.DrawDashed(c, sx, sy, drawColor, drawWidth, dashLen, gapLen);
+                            } else {
+                                c.DrawPolyline(sx, sy, drawColor, drawWidth);
+                            }
+                        } else if (dashed) {
+                            ChartView.DrawDashed(c, pathX, pathY, drawColor, drawWidth, dashLen, gapLen);
                         } else {
-                            c.DrawPolyline(sx, sy, drawColor, drawWidth);
+                            c.DrawPolylineFx(fxX, fxY, drawColor, drawWidth);
                         }
-                    } else if (dashed) {
-                        ChartView.DrawDashed(c, pathX, pathY, drawColor, drawWidth, dashLen, gapLen);
-                    } else {
-                        c.DrawPolylineFx(fxX, fxY, drawColor, drawWidth);
+                        r0 = r1 + 1;
                     }
 
                     // 数据点符号（ECharts showSymbol/symbol/symbolSize）；
-                    // showSymbol=0 整条隐藏，逐项颜色优先。
-                    if (s.showSymbol != 0) {
+                    // 系列级/数据级 symbol:'none' 都跳过该点；showSymbol=0
+                    // 只隐藏默认符号——数据级覆盖（droplet 等）仍画。
+                    // 数值标签与符号解耦：无论符号画否都按 showSeriesValues
+                    // 绘制（与原 if/else 两支行为一致）。
+                    {
                         int nr = Chart.SymbolRadius(s.symbolSize, rad);
                         for (int m2 = 0; m2 < pxs.Count; m2 = m2 + 1) {
+                            if (gaps[m2]) { continue; }
                             int oiN = i0 + m2;
                             int ncol = drawColor;
-                            if (oiN < s.data.Count && s.data[oiN].color != 0) { ncol = s.data[oiN].color; }
-                            Chart.DrawSymbol(c, pxs[m2], pys[m2], nr, s.symbol,
-                                ncol, s.itemStyle.normal.borderColor,
-                                s.itemStyle.normal.borderWidth);
+                            string sym2 = s.symbol;
+                            int pr = nr;
+                            if (oiN < s.data.Count) {
+                                if (s.data[oiN].color != 0) { ncol = s.data[oiN].color; }
+                                if (s.data[oiN].symbol.Length > 0) { sym2 = s.data[oiN].symbol; }
+                                if (s.data[oiN].sizeSet && s.data[oiN].size > 0) {
+                                    pr = s.data[oiN].size / 2;
+                                }
+                            }
+                            bool showSym = sym2 != "none" && sym2 != "pass"
+                                && (sym2.Length > 0 || s.showSymbol != 0);
+                            if (showSym) {
+                                Chart.DrawSymbol(c, pxs[m2], pys[m2], pr, sym2,
+                                    ncol, s.itemStyle.normal.borderColor,
+                                    s.itemStyle.normal.borderWidth);
+                            }
                             if (showSeriesValues) {
-                                string lbl = Convert.ToString(s.Value(i0 + m2));
+                                string lbl = geoMode == 1
+                                    ? Convert.ToString(s.points[i0 + m2].y)
+                                    : Convert.ToString(s.Value(i0 + m2));
                                 int lw = Canvas.MeasureText(lbl, labelFs);
                                 int lx = pxs[m2] - lw / 2;
                                 if (lx < f.plotX) { lx = f.plotX; }
@@ -491,17 +555,6 @@ partial class ChartView {
                                 if (ly < f.plotY) { ly = pys[m2] + app.Scale(2); }
                                 c.DrawText(lx, ly, lbl, labelColor, labelFs);
                             }
-                        }
-                    } else if (showSeriesValues) {
-                        for (int m2 = 0; m2 < pxs.Count; m2 = m2 + 1) {
-                            string lbl = Convert.ToString(s.Value(i0 + m2));
-                            int lw = Canvas.MeasureText(lbl, labelFs);
-                            int lx = pxs[m2] - lw / 2;
-                            if (lx < f.plotX) { lx = f.plotX; }
-                            if (lx + lw > f.plotX + f.plotW) { lx = f.plotX + f.plotW - lw; }
-                            int ly = pys[m2] - Canvas.FontHeight(labelFs) - app.Scale(2);
-                            if (ly < f.plotY) { ly = pys[m2] + app.Scale(2); }
-                            c.DrawText(lx, ly, lbl, labelColor, labelFs);
                         }
                     }
                 }
@@ -522,13 +575,26 @@ partial class ChartView {
             ChartSeries ml = series[mli];
             if (!ml.hidden) { ChartView.DrawSeriesMarkLines(app, f, ml, i0, i1, o); }
         }
+        // 值对折线的 x 轴标注（ECharts valueIndex:0——竖直
+        // max/min/average 线）。
+        for (int mxl = 0; mxl < series.Count; mxl = mxl + 1) {
+            ChartSeries mxs = series[mxl];
+            if (!mxs.hidden && mxs.points.Count > 0) {
+                ChartView.DrawValueXMarkLines(app, f, mxs, i0, i1);
+            }
+        }
         c.PopClip();
         Chart.DrawMarkLine(app, f, o);
-        ChartView.OfferCategoryPointHits(app, f, winLabels, series, i0, g,
-            ChartElementType.LinePoint, false);
-        ChartView.OfferCategoryOverlayHits(app, f, winLabels, series, i0, g);
-        if (o.showTooltip) {
-            ChartView.CartesianTooltip(app, f, winLabels, series, maxV, step, half, i0);
+        if (axisN > 0) {
+            // 值对/轴互换：无类目槽位，按最近点命中 + item tooltip。
+            ChartView.PointsHover(app, f, series, i0, i1, g);
+        } else {
+            ChartView.OfferCategoryPointHits(app, f, winLabels, series, i0, g,
+                ChartElementType.LinePoint, false);
+            ChartView.OfferCategoryOverlayHits(app, f, winLabels, series, i0, g);
+            if (o.showTooltip) {
+                ChartView.CartesianTooltip(app, f, winLabels, series, maxV, step, half, i0);
+            }
         }
     }
 
@@ -673,6 +739,12 @@ partial class ChartView {
             for (int si = 0; si < series.Count; si = si + 1) {
                 ChartSeries s = series[si];
                 if (s.hidden || s.stackName != grp[gi2]) { continue; }
+                // ECharts 语义：stack 非空才参与堆叠（顶 = 底组累计 +
+                // 自值）；完全无堆叠声明的系列（多级控制的搜索引擎，
+                // stack=0 且无 stackName）画绝对值，面积填到零线。
+                // areaStyle 只决定填充——没配的系列只描边（此前一律
+                // 填带，与 ECharts 不符）。
+                bool stacked = s.stackName.Length > 0 || s.stack != 0;
                 List<int> topY = new List<int>();
                 List<int> botY = new List<int>();
                 for (int j = 0; j < n; j = j + 1) {
@@ -680,10 +752,16 @@ partial class ChartView {
                     int prev = inCum[j];
                     int val = 0;
                     if (oi < s.Count()) { val = s.Value(oi); }
-                    int cumG = (prev + val) * g / 1000;
-                    int prevG = prev * g / 1000;
-                    topY.Add(f.plotY + f.plotH - (cumG * f.plotH / maxV));
-                    botY.Add(f.plotY + f.plotH - (prevG * f.plotH / maxV));
+                    if (stacked) {
+                        int cumG = (prev + val) * g / 1000;
+                        int prevG = prev * g / 1000;
+                        topY.Add(f.plotY + f.plotH - (cumG * f.plotH / maxV));
+                        botY.Add(f.plotY + f.plotH - (prevG * f.plotH / maxV));
+                    } else {
+                        int absG = val * g / 1000;
+                        topY.Add(f.plotY + f.plotH - (absG * f.plotH / maxV));
+                        botY.Add(f.plotY + f.plotH);
+                    }
                 }
                 List<int> xs = new List<int>();
                 for (int xi = 0; xi < n; xi = xi + 1) {
@@ -691,15 +769,109 @@ partial class ChartView {
                 }
                 bool smooth = o.smooth;
                 if (s.smooth == 1) { smooth = true; } else if (s.smooth == 0) { smooth = false; }
-                List<int> topX = new List<int>();
-                List<int> topPath = new List<int>();
-                List<int> botX = new List<int>();
-                List<int> botPath = new List<int>();
-                ChartView.BuildPathFx(xs, topY, smooth, topX, topPath);
-                ChartView.BuildPathFx(xs, botY, smooth, botX, botPath);
-                ChartView.FillBandFx(c, topX, topPath, botX, botPath,
-                    s.color, o.gradient, 150, 40);
-                c.DrawPolylineFx(topX, topPath, s.color, app.Scale(2));
+                // 系列级个性化线样式（多级控制 直接访问：红 + dashed）
+                int strokeCol = s.color;
+                if (s.itemStyle.normal.lineStyle.color != 0) {
+                    strokeCol = s.itemStyle.normal.lineStyle.color;
+                }
+                int strokeW = s.itemStyle.normal.lineStyle.width;
+                if (strokeW <= 0) { strokeW = 2; }
+                strokeW = app.Scale(strokeW);
+                string lt = s.itemStyle.normal.lineStyle.type;
+                if (lt.Length == 0) { lt = "solid"; }
+                // '-' 断线：连续非 gap 段各自成路径（gap 项不进路径，
+                // 堆叠累计仍按 0 计）。
+                int r0 = 0;
+                while (r0 < n) {
+                    if (i0 + r0 < s.data.Count && s.data[i0 + r0].gap) {
+                        r0 = r0 + 1;
+                        continue;
+                    }
+                    int r1 = r0;
+                    while (r1 + 1 < n
+                           && !(i0 + r1 + 1 < s.data.Count && s.data[i0 + r1 + 1].gap)) {
+                        r1 = r1 + 1;
+                    }
+                    List<int> rxs = new List<int>();
+                    List<int> rt = new List<int>();
+                    List<int> rb = new List<int>();
+                    for (int rm = r0; rm <= r1; rm = rm + 1) {
+                        rxs.Add(xs[rm]); rt.Add(topY[rm]); rb.Add(botY[rm]);
+                    }
+                    List<int> topFx = new List<int>();
+                    List<int> topPath = new List<int>();
+                    List<int> botFx = new List<int>();
+                    List<int> botPath = new List<int>();
+                    ChartView.BuildPathFx(rxs, rt, smooth, topFx, topPath);
+                    ChartView.BuildPathFx(rxs, rb, smooth, botFx, botPath);
+                    if (s.areaStyle) {
+                        ChartView.FillBandFx(c, topFx, topPath, botFx, botPath,
+                            s.color, o.gradient, 150, 40);
+                    }
+                    if (rt.Count > 1) {
+                        List<int> grad = s.itemStyle.normal.lineStyle.gradStops;
+                        if (grad != null && grad.Count >= 2) {
+                            // 横向渐变描边（zrColor.getLinearGradient 语义）：
+                            // 按密集路径 x 的相对位置逐段取色；与虚线型并存
+                            // 时渐变优先（ECharts 多级控制 搜索引擎线）。
+                            int x0f = topFx[0];
+                            int spanF = topFx[topFx.Count - 1] - x0f;
+                            if (spanF < 1) { spanF = 1; }
+                            for (int gp = 0; gp + 1 < topFx.Count; gp = gp + 1) {
+                                int midF = (topFx[gp] + topFx[gp + 1]) / 2;
+                                int tt = (midF - x0f) * 1000 / spanF;
+                                if (tt < 0) { tt = 0; }
+                                if (tt > 1000) { tt = 1000; }
+                                int segCol = Chart.RampAt(grad, tt);
+                                List<int> sgx = new List<int>();
+                                List<int> sgy = new List<int>();
+                                sgx.Add(topFx[gp]); sgy.Add(topPath[gp]);
+                                sgx.Add(topFx[gp + 1]); sgy.Add(topPath[gp + 1]);
+                                c.DrawPolylineFx(sgx, sgy, segCol, strokeW);
+                            }
+                        } else if (lt == "solid") {
+                            c.DrawPolylineFx(topFx, topPath, strokeCol, strokeW);
+                        } else {
+                            List<int> sx2 = new List<int>();
+                            List<int> sy2 = new List<int>();
+                            ChartView.BuildPath(rxs, rt, smooth, sx2, sy2);
+                            int dash = lt == "dotted" ? app.Scale(2) : app.Scale(5);
+                            int gap2 = lt == "dotted" ? app.Scale(2) : app.Scale(3);
+                            ChartView.DrawDashed(c, sx2, sy2, strokeCol, strokeW,
+                                dash, gap2);
+                        }
+                    }
+                    r0 = r1 + 1;
+                }
+                // 拐点符号（ECharts symbol/symbolSize + 逐项覆盖）。系列级
+                // symbol:'none'（sanitize 归 "" + showSymbol=0）只隐藏默认
+                // 符号——数据级 symbol 覆盖（mail 的 droplet）仍要画。
+                {
+                    int rad = app.Scale(3);
+                    int nr = Chart.SymbolRadius(s.symbolSize, rad);
+                    for (int u = 0; u < n; u = u + 1) {
+                        int oi2 = i0 + u;
+                        if (oi2 >= s.Count()) { continue; }
+                        if (oi2 < s.data.Count && s.data[oi2].gap) { continue; }
+                        string sym2 = s.symbol;
+                        int scol = strokeCol;
+                        int pr = nr;
+                        if (oi2 < s.data.Count) {
+                            if (s.data[oi2].symbol.Length > 0) { sym2 = s.data[oi2].symbol; }
+                            if (s.data[oi2].color != 0) { scol = s.data[oi2].color; }
+                            // ECharts 数据级 symbolSize 覆盖（star 15、
+                            // emptypin 8、star6 20…）
+                            if (s.data[oi2].sizeSet && s.data[oi2].size > 0) {
+                                pr = s.data[oi2].size / 2;
+                            }
+                        }
+                        if (sym2 == "none" || sym2 == "pass") { continue; }
+                        if (sym2.Length == 0 && s.showSymbol == 0) { continue; }
+                        Chart.DrawSymbol(c, xs[u], topY[u], pr, sym2, scol,
+                            s.itemStyle.normal.borderColor,
+                            s.itemStyle.normal.borderWidth);
+                    }
+                }
                 for (int u = 0; u < n; u = u + 1) {
                     int oi2 = i0 + u;
                     if (oi2 < s.Count()) { inCum[u] = inCum[u] + s.Value(oi2); }

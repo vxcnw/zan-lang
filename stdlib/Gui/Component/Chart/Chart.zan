@@ -47,11 +47,21 @@ class ChartFrame {
     bool isTime;         // X 轴时间刻度
     int timeMin;
     int timeMax;
+    bool catBoundaryGap; // X 类目轴 boundaryGap（false：点落在刻度线上）
+    bool catY;           // Y 轴类目（ECharts 轴互换：数值在 X）
+    int xLo;             // X 数值轴范围（catY / 值对折线用）
+    int xHi;
 
     /// 第 i 类目左缘。用 i*W/n 而不是固定 step，余数摊到末格，
-    /// 最后一根柱/最后一个标签贴上绘图区右缘。
+    /// 最后一根柱/最后一个标签贴上绘图区右缘。boundaryGap=false
+    /// （线落在刻度上）时槽位退化为刻度点：第 i 点 = i*W/(n-1)。
     int CatLeft(int i, int n) {
         if (n < 1) { return this.plotX; }
+        if (!this.catBoundaryGap && n > 1) {
+            int px = this.plotX + i * this.plotW / (n - 1);
+            if (px > this.plotX + this.plotW) { px = this.plotX + this.plotW; }
+            return px;
+        }
         return this.plotX + i * this.plotW / n;
     }
     /// 第 i 类目的宽度（相邻左缘之差，余数摊在末格）。
@@ -100,6 +110,35 @@ class ChartFrame {
         int d = (v - lo) * this.plotH / span;
         if (rev) { return this.plotY + d; }
         return this.plotY + this.plotH - d;
+    }
+
+    /// 系列所在轴的零线像素（ECharts 面积/柱的填充基线）：
+    /// 0 在该轴范围内时返回其映射（钳制进绘图区），否则返回
+    /// 绘图区底——与 ECharts「0 不在范围内时填到对侧边缘」一致。
+    int ZeroBase(int axisIndex) {
+        int lo = this.leftMin;
+        int hi = this.leftMax;
+        if (axisIndex == 1) { lo = this.rightMin; hi = this.rightMax; }
+        if (lo > 0 || hi < 0) { return this.plotY + this.plotH; }
+        int zy = this.YOf(0, axisIndex);
+        if (zy < this.plotY) { zy = this.plotY; }
+        if (zy > this.plotY + this.plotH) { zy = this.plotY + this.plotH; }
+        return zy;
+    }
+
+    /// Y 类目轴第 i 槽的垂直中线（轴互换折线的点行）。
+    int CatMidY(int i, int n) {
+        if (n < 1) { return this.plotY + this.plotH / 2; }
+        int band = this.plotH / n;
+        if (band < 1) { band = 1; }
+        int y = this.plotY + i * band + band / 2;
+        if (y > this.plotY + this.plotH) { y = this.plotY + this.plotH; }
+        return y;
+    }
+
+    /// X 数值轴上数值 v 的像素（轴互换折线 / 值对折线）。
+    int XOfValue(int v) {
+        return Chart.ValueX(this.plotX, this.plotW, this.xLo, this.xHi, v);
     }
 
     /// 对数 Y 映射：仅正值（v < 1 钳制到 1），log10 线性化后
@@ -321,6 +360,7 @@ class Chart {
     /// 全部为不透明覆盖、无二次混合，指纹稳定。
     static void DrawSymbol(Canvas c, int cx, int cy, int r, string shape,
                            int color, int borderColor, int borderWidth) {
+        if (shape == "none" || shape == "pass") { return; }
         if (r < 1) { r = 1; }
         if (shape == "rectangle") {
             int d = r * 71 / 100;  // 内接正方形半边（与圆同视觉重量）
@@ -337,6 +377,16 @@ class Chart {
                 if (hw < 0) { hw = 0; }
                 c.FillRect(cx - hw, cy + dy, hw * 2 + 1, 1, color);
             }
+        } else if (shape == "star" || shape == "star6" || shape == "arrow"
+                   || shape == "droplet" || shape == "pin"
+                   || shape == "emptypin") {
+            // ECharts 2.2.x 其余符号形状：顶点多边形扫描线填充
+            // （顶点表见 Chart.PolyVerts1000）。emptypin 原语义是
+            // 空心气球，引擎按实心 pin 近似——描边参数不丢。
+            List<int> vx = new List<int>();
+            List<int> vy = new List<int>();
+            Chart.PolyVerts1000(shape, vx, vy);
+            Chart.FillPoly1000(c, cx, cy, r, vx, vy, color);
         } else if (shape == "emptyCircle") {
             int th = r / 2;
             if (th < 1) { th = 1; }
@@ -378,6 +428,73 @@ class Chart {
     static int SymbolRadius(int symbolSize, int defaultR) {
         if (symbolSize > 0) { return symbolSize / 2; }
         return defaultR;
+    }
+
+    /// 符号形状的顶点表（千分比相对坐标，y 向下为正），由
+    /// FillPoly1000 缩放到像素。star = 五角星（内接比 382），
+    /// star6 = 六角星（内接比 577 ≈ 1/√3），arrow = 上指箭镞，
+    /// droplet = 上尖水滴，pin/emptypin = 地图气球。
+    static void PolyVerts1000(string shape, List<int> vx, List<int> vy) {
+        if (shape == "star") {
+            int[] px = new int[] { 0, 225, 951, 363, 588, 0, -588, -363, -951, -225 };
+            int[] py = new int[] { -1000, -309, -309, 118, 809, 382, 809, 118, -309, -309 };
+            for (int i = 0; i < px.Length; i = i + 1) { vx.Add(px[i]); vy.Add(py[i]); }
+        } else if (shape == "star6") {
+            int[] px = new int[] { 0, 289, 866, 577, 866, 289, 0, -289, -866, -577, -866, -289 };
+            int[] py = new int[] { -1000, -500, -500, 0, 500, 500, 1000, 500, 500, 0, -500, -500 };
+            for (int i = 0; i < px.Length; i = i + 1) { vx.Add(px[i]); vy.Add(py[i]); }
+        } else if (shape == "arrow") {
+            vx.Add(0); vy.Add(-1000);
+            vx.Add(1000); vy.Add(430);
+            vx.Add(0); vy.Add(140);
+            vx.Add(-1000); vy.Add(430);
+        } else if (shape == "droplet") {
+            int[] px = new int[] { 0, -400, -790, -1000, -790, -400, 0, 400, 790, 1000, 790, 400 };
+            int[] py = new int[] { -1000, -500, -180, 150, 480, 730, 820, 730, 480, 150, -180, -500 };
+            for (int i = 0; i < px.Length; i = i + 1) { vx.Add(px[i]); vy.Add(py[i]); }
+        } else {
+            // pin / emptypin：气球头（全径圆） + 下尖尾
+            int[] px = new int[] { 0, -545, -920, -575, 0, 575, 920, 545 };
+            int[] py = new int[] { 1000, 120, -300, -830, -960, -830, -300, 120 };
+            for (int i = 0; i < px.Length; i = i + 1) { vx.Add(px[i]); vy.Add(py[i]); }
+        }
+    }
+
+    /// 顶点多边形扫描线填充（偶奇规则）：顶点为千分比相对坐标，
+    /// 逐行求交点、成对 FillRect。顶点数 ≤ 12，插入排序开销可忽略。
+    static void FillPoly1000(Canvas c, int cx, int cy, int r,
+                             List<int> vx, List<int> vy, int color) {
+        int vn = vx.Count;
+        if (vn < 3 || r < 1) { return; }
+        int ymin = vy[0];
+        int ymax = vy[0];
+        for (int i = 1; i < vn; i = i + 1) {
+            if (vy[i] < ymin) { ymin = vy[i]; }
+            if (vy[i] > ymax) { ymax = vy[i]; }
+        }
+        for (int py = ymin; py <= ymax; py = py + 1) {
+            List<int> xs = new List<int>();
+            for (int i = 0; i < vn; i = i + 1) {
+                int j = i + 1 == vn ? 0 : i + 1;
+                int y1 = vy[i];
+                int y2 = vy[j];
+                if ((y1 <= py && y2 > py) || (y2 <= py && y1 > py)) {
+                    xs.Add(vx[i] + (py - y1) * (vx[j] - vx[i]) / (y2 - y1));
+                }
+            }
+            for (int a = 1; a < xs.Count; a = a + 1) {
+                int key = xs[a];
+                int b = a - 1;
+                while (b >= 0 && xs[b] > key) { xs[b + 1] = xs[b]; b = b - 1; }
+                xs[b + 1] = key;
+            }
+            for (int p = 0; p + 1 < xs.Count; p = p + 2) {
+                int x0 = cx + xs[p] * r / 1000;
+                int x1 = cx + xs[p + 1] * r / 1000;
+                int sy = cy + py * r / 1000;
+                c.FillRect(x0, sy, x1 - x0 + 1, 1, color);
+            }
+        }
     }
 
     /// axisLabel.interval 语义（ECharts）：-1/非整数 = 自动（渲染器
@@ -1512,6 +1629,9 @@ class Chart {
             ChartSeries s = series[i];
             if (!s.hidden && s.axisIndex == axisIndex) {
                 for (int j = 0; j < s.Count(); j = j + 1) { if (s.Value(j) > mx) { mx = s.Value(j); } }
+                for (int j2 = 0; j2 < s.points.Count; j2 = j2 + 1) {
+                    if (s.points[j2].y > mx) { mx = s.points[j2].y; }
+                }
             }
         }
         return mx;
@@ -1525,9 +1645,58 @@ class Chart {
             ChartSeries s = series[i];
             if (!s.hidden && s.axisIndex == axisIndex) {
                 for (int j = 0; j < s.Count(); j = j + 1) { if (s.Value(j) < mn) { mn = s.Value(j); } }
+                for (int j2 = 0; j2 < s.points.Count; j2 = j2 + 1) {
+                    if (s.points[j2].y < mn) { mn = s.points[j2].y; }
+                }
             }
         }
         return mn;
+    }
+
+    /// X 数值轴最小值：值对系列取 points.x，轴互换系列取 values
+    ///（gap 项不计）；固定覆盖在调用方处理。
+    static int XMinFor(List<ChartSeries> series, bool fromValues) {
+        int mn = 0;
+        for (int i = 0; i < series.Count; i = i + 1) {
+            ChartSeries s = series[i];
+            if (s.hidden) { continue; }
+            if (fromValues) {
+                for (int j = 0; j < s.data.Count; j = j + 1) {
+                    if (!s.data[j].gap && s.data[j].val < mn) { mn = s.data[j].val; }
+                }
+            } else {
+                for (int j = 0; j < s.points.Count; j = j + 1) {
+                    if (s.points[j].x < mn) { mn = s.points[j].x; }
+                }
+            }
+        }
+        return mn;
+    }
+    /// X 数值轴最大值（XMinFor 的对偶）。
+    static int XMaxFor(List<ChartSeries> series, bool fromValues) {
+        int mx = 0;
+        for (int i = 0; i < series.Count; i = i + 1) {
+            ChartSeries s = series[i];
+            if (s.hidden) { continue; }
+            if (fromValues) {
+                for (int j = 0; j < s.data.Count; j = j + 1) {
+                    if (!s.data[j].gap && s.data[j].val > mx) { mx = s.data[j].val; }
+                }
+            } else {
+                for (int j = 0; j < s.points.Count; j = j + 1) {
+                    if (s.points[j].x > mx) { mx = s.points[j].x; }
+                }
+            }
+        }
+        return mx;
+    }
+
+    /// 格式化标签比裸数值多占的宽度（axisLabel.formatter 模板，
+    /// 如 "{value} °C"），供轴栏预留。
+    static int FormatterExtraW(string fmt, int v, int fs) {
+        string raw = Convert.ToString(v);
+        string full = fmt.Replace("{value}", raw);
+        return Canvas.MeasureText(full, fs) - Canvas.MeasureText(raw, fs);
     }
 
     /// 是否存在绑定 axisIndex 轴的可见系列。
@@ -1641,11 +1810,38 @@ class Chart {
             if (tMax < tMin + 1) { tMax = tMin + 1; }
         }
 
-        int leftGut = Chart.TickLabelW(leftLo, leftHi, ticks, fs) + app.Scale(12);
+        // 轴互换（ECharts yAxis category + xAxis value）与值对折线：
+        // X 变成数值轴，范围从 x0.min/max 或数据推导。
+        bool catY = y0.type == ChartAxisType.Category;
+        bool xValue = catY || x0.type == ChartAxisType.Value;
+        int xLo = 0;
+        int xHi = 100;
+        if (xValue) {
+            if (x0.min != ChartOption.Auto()) { xLo = x0.min; } else { xLo = Chart.XMinFor(series, catY); }
+            if (x0.max != ChartOption.Auto()) { xHi = x0.max; } else { xHi = Chart.XMaxFor(series, catY); }
+            if (xHi <= xLo) { xHi = xLo + 1; }
+        }
+
+        int leftGut;
+        if (catY && y0.categories.Count > 0) {
+            // 类目 Y：左栏取最宽类目标签。
+            int mw = 0;
+            for (int cgi = 0; cgi < y0.categories.Count; cgi = cgi + 1) {
+                int wgi = Canvas.MeasureText(y0.categories[cgi], fs);
+                if (wgi > mw) { mw = wgi; }
+            }
+            leftGut = mw + app.Scale(12);
+        } else {
+            leftGut = Chart.TickLabelW(leftLo, leftHi, ticks, fs) + app.Scale(12);
+            if (y0.labelFormatter.Length > 0) {
+                leftGut = leftGut + Chart.FormatterExtraW(y0.labelFormatter, leftHi, fs);
+            }
+        }
         int rightGut = pad;
         if (hasRight) { rightGut = Chart.TickLabelW(rightLo, rightHi, ticks, fs) + app.Scale(12); }
         int botGut = fh + app.Scale(12);
         if (x0.title.Length > 0) { botGut = botGut + fh + app.Scale(2); }
+        if (xValue) { botGut = botGut + fh + app.Scale(2); }
         // 旋转分类标签：按最宽标签的旋转后垂直跨度扩底栏（未旋转
         // 与旋转都成立——interval>=0 抽稀时贪心不再兜底防重叠）。
         if (x0.labelRotate != 0 && labels.Count > 0) {
@@ -1693,6 +1889,10 @@ class Chart {
         f.isTime = isTime;
         f.timeMin = tMin;
         f.timeMax = tMax;
+        f.catBoundaryGap = x0.boundaryGap;
+        f.catY = catY;
+        f.xLo = xLo;
+        f.xHi = xHi;
 
         // 网格线 + 左右数值标签（对数轴用 10 的幂刻度）
         StyleBox sGrid = Style.Part(app, "chart", "grid", "", "", "",
@@ -1702,7 +1902,18 @@ class Chart {
         StyleBox sAxisTitle = Style.Part(app, "chart", "axis-title", "", "",
                                          "", Style.SNormal());
         bool grid = o.showGrid && y0.showGrid;
-        if (leftLog) {
+        if (catY) {
+            // 类目 Y（轴互换）：水平网格线 + 槽中类目标签。
+            int cn = y0.categories.Count;
+            for (int ci = 0; ci < cn; ci = ci + 1) {
+                int gy = f.CatMidY(ci, cn);
+                if (grid) { c.FillRect(plotX, gy, plotW, 1, sGrid.BgOr(0)); }
+                string ls = y0.categories[ci];
+                int lw = Canvas.MeasureText(ls, fs);
+                c.DrawText(plotX - app.Scale(6) - lw, Canvas.CenterTextYAt(gy, fs),
+                    ls, sAxis.FgOr(0), fs);
+            }
+        } else if (leftLog) {
             List<int> lts = Chart.LogTicks(leftLo, leftHi);
             for (int li = 0; li < lts.Count; li = li + 1) {
                 int lv = lts[li];
@@ -1720,6 +1931,7 @@ class Chart {
                 int gy = f.YOf(lv, 0);
                 if (grid) { c.FillRect(plotX, gy, plotW, 1, sGrid.BgOr(0)); }
                 string ls = Convert.ToString(lv);
+                if (y0.labelFormatter.Length > 0) { ls = y0.labelFormatter.Replace("{value}", ls); }
                 int lw = Canvas.MeasureText(ls, fs);
                 c.DrawText(plotX - app.Scale(6) - lw, Canvas.CenterTextYAt(gy, fs),
                     ls, sAxis.FgOr(0), fs);
@@ -1739,8 +1951,10 @@ class Chart {
                 for (int k = 0; k <= ticks; k = k + 1) {
                     int rv = rightLo + rightSpan * k / ticks;
                     int gy = f.YOf(rv, 1);
+                    string rs = Convert.ToString(rv);
+                    if (y1.labelFormatter.Length > 0) { rs = y1.labelFormatter.Replace("{value}", rs); }
                     c.DrawText(plotRight + app.Scale(6), Canvas.CenterTextYAt(gy, fs),
-                        Convert.ToString(rv), sAxis.FgOr(0), fs);
+                        rs, sAxis.FgOr(0), fs);
                 }
             }
         }
@@ -1748,9 +1962,24 @@ class Chart {
         c.FillRect(plotX, plotY + plotH, plotW, app.Scale(2), sAxis.BgOr(0));
         if (hasRight) { c.FillRect(plotX + plotW, plotY, 1, plotH, sAxis.BgOr(0)); }
 
-        // x 分类标签（时间轴用 TimeLabel 日期刻度）
+        // x 分类标签（时间轴用 TimeLabel 日期刻度；值轴画数值刻度）
         int n = labels.Count;
-        if (n > 0) {
+        if (catY || xValue) {
+            // 轴互换：类目在 Y（上面已画），X 画数值刻度。
+            int xspan = f.xHi - f.xLo;
+            for (int k = 0; k <= ticks; k = k + 1) {
+                int xv = f.xLo + xspan * k / ticks;
+                int gx = f.XOfValue(xv);
+                string xs2 = Convert.ToString(xv);
+                if (x0.labelFormatter.Length > 0) { xs2 = x0.labelFormatter.Replace("{value}", xs2); }
+                int lw = Canvas.MeasureText(xs2, fs);
+                int lx = gx - lw / 2;
+                if (lx < plotX) { lx = plotX; }
+                if (lx + lw <= plotX + plotW) {
+                    c.DrawText(lx, plotBot + app.Scale(4), xs2, sAxis.FgOr(0), fs);
+                }
+            }
+        } else if (n > 0) {
             if (isTime) {
                 List<int> tts = Chart.TimeTicks(tMin, tMax, 6);
                 for (int ti = 0; ti < tts.Count; ti = ti + 1) {

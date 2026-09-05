@@ -69,12 +69,16 @@ class ChartKinds {
         return "custom";
     }
 
-    /// ECharts series.symbol 形状族规范化：circle/emptyCircle/rectangle/
-    /// diamond/triangle（2.2.x 无 arrow/none——arrow 归 circle，none 由
-    /// showSymbol=0 表达）。未知名返回 ""（渲染器按族默认圆点）。
+    /// ECharts series.symbol 形状族规范化：2.2.x 全部符号形状
+    /// （circle/emptyCircle/rectangle/diamond/triangle/star/star6/
+    /// arrow/droplet/pin/emptypin）+ "none"（该点不画符号，系列级
+    /// 与数据级都合法；渲染器入口统一跳过）。未知名返回 ""
+    /// （渲染器按族默认圆点）。
     static string SymbolSanitize(string s) {
         if (s == "emptyCircle" || s == "rectangle" || s == "diamond"
-            || s == "triangle" || s == "circle") { return s; }
+            || s == "triangle" || s == "circle" || s == "star"
+            || s == "star6" || s == "arrow" || s == "droplet"
+            || s == "pin" || s == "emptypin" || s == "none") { return s; }
         return "";
     }
 
@@ -132,6 +136,8 @@ class ChartData {
     bool selected;  // 饼图扇区静态选中：沿中角外偏 selectedOffset
     int size;       // ECharts symbolSize 逐项覆盖；sizeSet=false 时忽略
     bool sizeSet;
+    bool gap;       // ECharts data 项 '-'（断线）：不画点/不连线/不进极值
+    string symbol;  // ECharts 逐项 symbol 覆盖（"" = 继承系列）
 
     /// 以整数值构造数据点（名称空、继承系列色、不隐藏、无逐项尺寸）。
     static ChartData Of(int v) {
@@ -145,6 +151,15 @@ class ChartData {
         d.selected = false;
         d.size = 0;
         d.sizeSet = false;
+        d.gap = false;
+        d.symbol = "";
+        return d;
+    }
+
+    /// ECharts data 项 '-'：该类目缺数据，折线在此断开。
+    static ChartData Gap() {
+        ChartData d = ChartData.Of(0);
+        d.gap = true;
         return d;
     }
 
@@ -191,6 +206,7 @@ class ChartData {
         d.val = src.val; d.number = src.number; d.numberSet = src.numberSet;
         d.name = src.name; d.color = src.color; d.hidden = src.hidden;
         d.selected = src.selected; d.size = src.size; d.sizeSet = src.sizeSet;
+        d.gap = src.gap; d.symbol = src.symbol;
         return d;
     }
 }
@@ -521,16 +537,18 @@ class ChartMarkPoint {
     int color;   // 0 = 继承系列颜色
 
     /// 构造"最大值"标记点（渲染时从系列窗口数据推导位置）。
+    int valueIndex; // ECharts valueIndex：-1 = 值轴(y)，0 = x 轴标注
+
     static ChartMarkPoint Max() {
-        return new ChartMarkPoint { kind = "max", dataIndex = 0 - 1, xValue = 0, yValue = 0, label = "", color = 0 };
+        return new ChartMarkPoint { kind = "max", dataIndex = 0 - 1, xValue = 0, yValue = 0, label = "", color = 0, valueIndex = 0 - 1 };
     }
     /// 构造"最小值"标记点（渲染时从系列窗口数据推导位置）。
     static ChartMarkPoint Min() {
-        return new ChartMarkPoint { kind = "min", dataIndex = 0 - 1, xValue = 0, yValue = 0, label = "", color = 0 };
+        return new ChartMarkPoint { kind = "min", dataIndex = 0 - 1, xValue = 0, yValue = 0, label = "", color = 0, valueIndex = 0 - 1 };
     }
     /// 构造显式坐标 (xValue,yValue) 的标记点并附标签。
     static ChartMarkPoint Point(int xValue, int yValue, string label) {
-        return new ChartMarkPoint { kind = "point", dataIndex = 0 - 1, xValue = xValue, yValue = yValue, label = label, color = 0 };
+        return new ChartMarkPoint { kind = "point", dataIndex = 0 - 1, xValue = xValue, yValue = yValue, label = label, color = 0, valueIndex = 0 - 1 };
     }
 
     /// 深复制；src 为 null 时返回 null。
@@ -538,7 +556,7 @@ class ChartMarkPoint {
         if (src == null) { return null; }
         return new ChartMarkPoint { kind = src.kind, dataIndex = src.dataIndex,
             xValue = src.xValue, yValue = src.yValue, label = src.label,
-            color = src.color };
+            color = src.color, valueIndex = src.valueIndex };
     }
 }
 
@@ -556,9 +574,12 @@ class ChartMarkLine {
     int color;
 
     /// 按 kind 构造阈值线（"average"/"min"/"max" 或 "" = 显式线）。
+    int valueIndex; // ECharts valueIndex：-1 = 值轴(y 水平线)，0 = x 轴(竖线)
+
     static ChartMarkLine Of(string kind) {
         return new ChartMarkLine { kind = kind, xValue = 0, yValue = 0,
-            hasPoint = false, label = "", lineType = "", color = 0 };
+            hasPoint = false, label = "", lineType = "", color = 0,
+            valueIndex = 0 - 1 };
     }
     /// 平均线：窗口数据的算术平均。
     static ChartMarkLine Average() { return ChartMarkLine.Of("average"); }
@@ -580,6 +601,7 @@ class ChartMarkLine {
         ChartMarkLine m = ChartMarkLine.Of(src.kind);
         m.xValue = src.xValue; m.yValue = src.yValue; m.hasPoint = src.hasPoint;
         m.label = src.label; m.lineType = src.lineType; m.color = src.color;
+        m.valueIndex = src.valueIndex;
         return m;
     }
 }
@@ -655,6 +677,9 @@ class ChartLineStyle {
     string type;
     int shadowColor;
     int shadowBlur;
+    // 横向线性渐变描边色标（zrColor.getLinearGradient 横向渐变的
+    // 颜色序列，等距停靠；≥2 个生效）。null = 纯色。
+    List<int> gradStops;
 
     /// 构造实线样式；type 置 "solid"，阴影关闭。
     static ChartLineStyle Of(int color, int width) {
@@ -668,9 +693,16 @@ class ChartLineStyle {
     /// 深复制；src 为 null 时返回 null。
     static ChartLineStyle Clone(ChartLineStyle src) {
         if (src == null) { return null; }
-        return new ChartLineStyle { color = src.color, color0 = src.color0,
+        ChartLineStyle ls = new ChartLineStyle { color = src.color, color0 = src.color0,
             width = src.width, type = src.type, shadowColor = src.shadowColor,
             shadowBlur = src.shadowBlur };
+        if (src.gradStops != null) {
+            ls.gradStops = new List<int>();
+            for (int i = 0; i < src.gradStops.Count; i = i + 1) {
+                ls.gradStops.Add(src.gradStops[i]);
+            }
+        }
+        return ls;
     }
 }
 
@@ -1279,6 +1311,15 @@ class ChartSeries {
         return s;
     }
 
+    /// 值对折线系列（ECharts series.type='line' 且 data 为
+    /// [[x,y],...]：line7 双数值轴）。与 OfPoints（散点点云）的
+    /// 区别在类型：折线渲染器画连线+符号+markLine 全套。
+    static ChartSeries OfLinePoints(string name, List<ChartPoint> points) {
+        ChartSeries s = ChartSeries.Of(name, ChartType.Line, new List<int>());
+        s.points = points;
+        return s;
+    }
+
     /// 由根节点构建层级系列（Treemap / Tree / Sunburst）。
     /// 系列持有根列表；子节点可任意深度嵌套。
     static ChartSeries OfTree(string name, ChartType type, ChartNode root) {
@@ -1423,14 +1464,24 @@ class ChartSeries {
         return this;
     }
 
-    /// data 项数。
-    int Count() { return this.data.Count; }
+    /// data 项数；纯值对系列（[[x,y],...]，无 data 项）返回
+    /// points 数——极值/均值/markLine 等窗口推导据此看到值对。
+    int Count() {
+        if (this.data.Count > 0) { return this.data.Count; }
+        return this.points.Count;
+    }
 
     /// 第 i 项的 double 值；i 越界返回 0.0，整型项返回其 val。
+    /// 值对系列取第 i 对的 y。
     double Number(int i) {
-        if (i < 0 || i >= this.data.Count) { return 0.0; }
-        if (this.data[i].numberSet) { return this.data[i].number; }
-        return (double)this.data[i].val;
+        if (i < 0) { return 0.0; }
+        if (this.data.Count > 0) {
+            if (i >= this.data.Count) { return 0.0; }
+            if (this.data[i].numberSet) { return this.data[i].number; }
+            return (double)this.data[i].val;
+        }
+        if (i < this.points.Count) { return (double)this.points[i].y; }
+        return 0.0;
     }
 
     /// 第 i 项的值截断为 int（越界同 Number 返回 0）。
@@ -1506,6 +1557,8 @@ class ChartAxis {
     int labelRotate;   // ECharts axisLabel.rotate：度（钳 -90..90），0 = 水平
     int labelInterval; // ECharts axisLabel.interval：-1 = 自动防重叠，>=0 = 每 (n+1) 个画一个
     string nameLocation; // ECharts nameLocation："start"|"middle"(默认)|"end"
+    string labelFormatter; // ECharts axisLabel.formatter，"{value} °C" 模板
+    bool boundaryGap;  // ECharts boundaryGap（类目轴默认 true：点落在格中）
     List<string> categories;
 
     /// 分类轴工厂：携带标签列表，无网格线，标签自动防重叠。
@@ -1521,6 +1574,8 @@ class ChartAxis {
         a.labelRotate = 0;
         a.labelInterval = 0 - 1;
         a.nameLocation = "middle";
+        a.labelFormatter = "";
+        a.boundaryGap = true;
         a.categories = cats;
         return a;
     }
@@ -1545,6 +1600,8 @@ class ChartAxis {
         a.labelRotate = 0;
         a.labelInterval = 0 - 1;
         a.nameLocation = "middle";
+        a.labelFormatter = "";
+        a.boundaryGap = false;
         a.categories = new List<string>();
         return a;
     }
@@ -1592,7 +1649,8 @@ class ChartAxis {
         a.type = src.type; a.title = src.title; a.min = src.min; a.max = src.max;
         a.reversed = src.reversed; a.ticks = src.ticks; a.showGrid = src.showGrid;
         a.labelRotate = src.labelRotate; a.labelInterval = src.labelInterval;
-        a.nameLocation = src.nameLocation; a.categories = new List<string>();
+        a.nameLocation = src.nameLocation; a.labelFormatter = src.labelFormatter;
+        a.boundaryGap = src.boundaryGap; a.categories = new List<string>();
         if (src.categories != null) {
             for (int i = 0; i < src.categories.Count; i = i + 1) {
                 a.categories.Add(src.categories[i]);
@@ -1947,9 +2005,9 @@ class ChartOption {
         if (this.xAxes.Count > 0 && this.xAxes[0].categories.Count > 0) {
             return this.xAxes[0].categories;
         }
-        if (this.series.Count > 0) {
+        if (this.series.Count > 0 && this.series[0].data.Count > 0) {
             List<string> outp = new List<string>();
-            int n = this.series[0].Count();
+            int n = this.series[0].data.Count;
             for (int i = 0; i < n; i = i + 1) {
                 string nm = this.series[0].data[i].name;
                 if (nm.Length > 0) { outp.Add(nm); }
@@ -2171,6 +2229,10 @@ class ChartOption {
     static void ParseSeriesStyle(JsonValue v, ChartSeries s) {
         if (v == null || !v.IsObject()) { return; }
         ChartOption.ParseItemStyle(v.Get("itemStyle"), s.itemStyle);
+        // ECharts itemStyle.normal.color = 系列主色（线/点/扇区）。
+        if (s.color == 0 && s.itemStyle.normal.color != 0) {
+            s.color = s.itemStyle.normal.color;
+        }
         ChartOption.ParseLineStyle(v.Get("lineStyle"), s.itemStyle.normal.lineStyle);
         JsonValue area = v.Get("areaStyle");
         if (area != null && area.IsObject()) {
@@ -2466,6 +2528,14 @@ class ChartOption {
                 JsonValue lc = ls.Get("color");
                 if (lc != null) { m.color = ChartOption.ParseColor(lc, 0); }
             }
+            // ECharts itemStyle.normal.color（2.x 标注线常用色）。
+            JsonValue ist = it.Get("itemStyle");
+            if (ist != null && ist.IsObject()) {
+                JsonValue nrm = ist.Get("normal");
+                JsonValue csrc = nrm != null ? nrm.Get("color") : ist.Get("color");
+                if (csrc != null) { m.color = ChartOption.ParseColor(csrc, m.color); }
+            }
+            m.valueIndex = it.Int("valueIndex", 0 - 1);
             into.Add(m);
         }
     }
@@ -2490,6 +2560,7 @@ class ChartOption {
             }
             if (it.Has("color")) { m.color = ChartOption.ParseColor(it.Get("color"), 0); }
             if (it.Has("label")) { m.label = it.Str("label", it.Str("name", "")); }
+            m.valueIndex = it.Int("valueIndex", 0 - 1);
             into.Add(m);
         }
     }
@@ -2622,6 +2693,10 @@ class ChartOption {
                 } else {
                     cs.barGapPct = s.Int("barGap", cs.barGapPct);
                 }
+                // smooth：系列级平滑覆盖（bool 或 0/1；缺省继承 option）。
+                JsonValue smt = s.Get("smooth");
+                if (smt != null && smt.IsBool()) { cs.smooth = smt.AsBool(false) ? 1 : 0; }
+                else if (smt != null && smt.IsNumber()) { cs.smooth = smt.AsInt(0 - 1); }
                 cs.showBackground = s.Bool("showBackground", cs.showBackground);
                 // symbol 形状族 / 尺寸 / showSymbol（bool 或 int 形式）。
                 cs.symbol = ChartKinds.SymbolSanitize(s.Str("symbol", cs.symbol));
@@ -2701,6 +2776,13 @@ class ChartOption {
                     cs.wcRotateList = rl;
                 }
                 ChartOption.ParseSeriesStyle(s, cs);
+                // ECharts 2.x 把折线面积藏在 itemStyle.normal.areaStyle
+                // （{type:'default'} 即启用）；显式 false/空不启用。
+                if (cs.type == ChartType.Line
+                    && (cs.itemStyle.normal.areaStyle.type.Length > 0
+                        || cs.itemStyle.normal.areaStyle.color != 0)) {
+                    cs.areaStyle = true;
+                }
                 if (cs.type == ChartType.Gauge) { ChartOption.ParseGauge(s, cs.gauge); }
                 // pie radius:[inner,outer] -> innerPct（内/外半径百分比）。
                 JsonValue rad = s.Get("radius");
@@ -2727,7 +2809,10 @@ class ChartOption {
                 if (da != null && da.IsArray()) {
                     for (int j = 0; j < da.Count(); j = j + 1) {
                         JsonValue it = da.At(j);
-                        if (it.IsObject()) {
+                        if (it.IsArray() && it.Count() >= 2) {
+                            // ECharts 数值对 [[x,y],...]：双数值轴折线/散点的点数据。
+                            cs.points.Add(ChartPoint.Of(it.At(0).AsInt(0), it.At(1).AsInt(0)));
+                        } else if (it.IsObject()) {
                             ChartData item = ChartData.NamedNumber(it.Double("value", 0.0), it.Str("name", ""));
                             item.color = it.Int("color", 0);
                             item.hidden = it.Bool("hidden", item.hidden);
@@ -2736,9 +2821,13 @@ class ChartOption {
                                 item.size = it.Int("symbolSize", 0);
                                 item.sizeSet = true;
                             }
+                            item.symbol = ChartKinds.SymbolSanitize(it.Str("symbol", ""));
                             cs.data.Add(item);
                         } else if (it.IsNumber()) {
                             cs.data.Add(ChartData.Numeric(it.AsDouble(0.0)));
+                        } else if (it.AsString("") == "-") {
+                            // '-'：缺数据项，折线断开（ECharts gap 语义）。
+                            cs.data.Add(ChartData.Gap());
                         } else {
                             cs.data.Add(ChartData.Of(it.AsInt(0)));
                         }
@@ -2814,6 +2903,11 @@ class ChartOption {
         a.title = v.Str("name", "");
         a.reversed = v.Bool("inverse", false);
         a.nameLocation = v.Str("nameLocation", a.nameLocation);
+        // boundaryGap：类目轴点/柱落在格子中间（默认）还是刻度线上。
+        if (v.Has("boundaryGap")) {
+            JsonValue bg = v.Get("boundaryGap");
+            if (bg != null && bg.IsBool()) { a.boundaryGap = bg.AsBool(true); }
+        }
         JsonValue al = v.Get("axisLabel");
         if (al != null && al.IsObject()) {
             a.labelRotate = al.Int("rotate", a.labelRotate);
@@ -2821,6 +2915,8 @@ class ChartOption {
             if (a.labelRotate < 0 - 90) { a.labelRotate = 0 - 90; }
             JsonValue iv = al.Get("interval");
             if (iv != null && iv.IsNumber()) { a.labelInterval = iv.AsInt(0 - 1); }
+            // 模板标签："{value} °C"——{value} 替换为刻度值。
+            a.labelFormatter = al.Str("formatter", a.labelFormatter);
         }
         into.Add(a);
     }

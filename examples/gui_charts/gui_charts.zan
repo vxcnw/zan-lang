@@ -5,32 +5,38 @@ using Gui;
 using Gui.Widget;
 using Gui.Component.Chart;
 
-/// One navigation entry: ECharts-style id plus bilingual title.
+/// One navigation entry: ECharts gallery id + bilingual title and
+/// description（参考站每例的副标题，用来区分同名示例）。
 class ChartsDemo {
     string cat;
     string id;
     string en;
     string zh;
+    string den;
+    string zhd;
 }
 
 class ChartsNavRow {
     bool header;
     int demoIndex;
     string text;
+    string desc;
 
     static ChartsNavRow Header(string text) {
         ChartsNavRow row = new ChartsNavRow();
         row.header = true;
         row.demoIndex = 0 - 1;
         row.text = text;
+        row.desc = "";
         return row;
     }
 
-    static ChartsNavRow Entry(int demoIndex, string text) {
+    static ChartsNavRow Entry(int demoIndex, string text, string desc) {
         ChartsNavRow row = new ChartsNavRow();
         row.header = false;
         row.demoIndex = demoIndex;
         row.text = text;
+        row.desc = desc;
         return row;
     }
 }
@@ -96,11 +102,23 @@ partial class Charts {
 
         if (Environment.ArgCount() > 0) {
             string want = Environment.ArgAt(0);
+            bool hit = false;
+            // id 优先：demo id "line" 与类目名 "line" 同名，不能让
+            // 类目匹配把同名词的第一项抢过去。
             for (int i = 0; i < Charts.demos.Count; i = i + 1) {
-                ChartsDemo d = Charts.demos[i];
-                if (want == d.id || want == d.en || want == d.zh || want == d.cat) {
+                if (want == Charts.demos[i].id) {
                     Charts.selected.Set(i);
+                    hit = true;
                     break;
+                }
+            }
+            if (!hit) {
+                for (int i = 0; i < Charts.demos.Count; i = i + 1) {
+                    ChartsDemo d = Charts.demos[i];
+                    if (want == d.en || want == d.zh || want == d.cat) {
+                        Charts.selected.Set(i);
+                        break;
+                    }
                 }
             }
         }
@@ -170,158 +188,300 @@ partial class Charts {
         }
     }
 
-    static void Add(string cat, string id, string en, string zh) {
+    static void Add(string cat, string id, string en, string zh,
+                    string den, string zhd) {
         ChartsDemo d = new ChartsDemo();
         d.cat = cat;
         d.id = id;
         d.en = en;
         d.zh = zh;
+        d.den = den;
+        d.zhd = zhd;
         Charts.demos.Add(d);
     }
 
     static void BuildCatalog() {
         Charts.demos = new List<ChartsDemo>();
-        // 折线（面积）图 — ECharts line1..line10
-        Charts.Add("line", "line1", "Standard line", "标准折线图");
-        Charts.Add("line", "line2", "Stacked line", "堆积折线图");
-        Charts.Add("line", "line3", "Smooth swapped", "平滑折线（轴互换）");
-        Charts.Add("line", "line4", "Standard area", "标准面积图");
-        Charts.Add("line", "line5", "Stacked area", "堆积面积图");
-        Charts.Add("line", "line6", "Value-axis line", "不等距折线（双数值轴）");
-        Charts.Add("line", "line7", "Time-axis line", "时间坐标折线");
-        Charts.Add("line", "line8", "Inverse area", "反向数值轴面积");
-        Charts.Add("line", "line9", "Styled line", "折线多级控制");
-        Charts.Add("line", "line10", "Log axis", "对数轴");
-        Charts.Add("line", "line11", "Average markLine", "平均线 + 目标线");
-        Charts.Add("line", "line12", "Rotated labels", "旋转轴标签");
-        Charts.Add("line", "line13", "Legend options", "图例选项");
-        // 柱状（条形）图 — bar1..bar16
-        Charts.Add("bar", "bar1", "Standard bar", "标准柱状图");
-        Charts.Add("bar", "bar2", "Stacked bar", "堆积柱状图");
-        Charts.Add("bar", "bar3", "Thermometer", "温度计式图表");
-        Charts.Add("bar", "bar4", "Composition waterfall", "组成瀑布图");
-        Charts.Add("bar", "bar5", "Change waterfall", "变化瀑布图");
-        Charts.Add("bar", "bar6", "Stacked groups", "多系列层叠");
-        Charts.Add("bar", "bar7", "Standard h-bar", "标准条形图");
-        Charts.Add("bar", "bar8", "Stacked h-bar", "堆积条形图");
-        Charts.Add("bar", "bar9", "Labeled h-bar", "多维条形图");
-        Charts.Add("bar", "bar10", "Tornado", "旋风条形图");
-        Charts.Add("bar", "bar11", "Tornado staggered", "旋风条形图（交错轴）");
-        Charts.Add("bar", "bar12", "Value-axis bar", "不等距柱形图");
-        Charts.Add("bar", "bar13", "Time-axis bar", "时间轴柱状图");
-        Charts.Add("bar", "bar14", "Rainbow bar", "彩虹柱形图");
-        Charts.Add("bar", "bar15", "Rainbow multi", "多系列彩虹柱");
-        Charts.Add("bar", "bar16", "Styled bar", "柱状图个性化");
-        Charts.Add("bar", "bar17", "H-bar toolkit", "条形图工具箱");
-        // 散点（气泡）图
-        Charts.Add("scatter", "scatter1", "Standard scatter", "标准散点图");
-        Charts.Add("scatter", "scatter2", "Bubble", "标准气泡图");
-        Charts.Add("scatter", "scatter3", "Large scatter", "大规模散点图");
-        Charts.Add("scatter", "scatter4", "Category scatter", "类目散点图");
-        Charts.Add("scatter", "scatter5", "Time scatter", "时间坐标散点");
-        Charts.Add("scatter", "scatter6", "Gapminder", "时间轴气泡（Gapminder）");
-        Charts.Add("scatter", "scatter7", "Range roam", "值域漫游散点");
-        Charts.Add("scatter", "scatter8", "Styled scatter", "散点图个性化");
-        Charts.Add("scatter", "scatter9", "Symbol shapes", "散点形状族");
-        Charts.Add("scatter", "scatter10", "dataRange slider", "值域筛选散点");
-        Charts.Add("scatter", "scatter11", "dataRange splitList", "值域分段筛选");
-        // K 线
-        Charts.Add("k", "k1", "Standard K", "标准K线图");
-        Charts.Add("k", "k2", "Styled K", "K线个性化");
-        // 饼（圆环）图
-        Charts.Add("pie", "pie1", "Standard pie", "标准饼图");
-        Charts.Add("pie", "pie2", "Donut", "标准环形图");
-        Charts.Add("pie", "pie3", "Nested pie", "嵌套饼图");
-        Charts.Add("pie", "pie4", "Nightingale rose", "南丁格尔玫瑰图");
-        Charts.Add("pie", "pie5", "Info donut", "环形信息图");
-        Charts.Add("pie", "pie6", "Info donut extra", "环形信息图（中心）");
-        Charts.Add("pie", "pie7", "Timeline pie", "时间轴饼图");
-        Charts.Add("pie", "pie8", "Lasagna", "千层饼");
-        Charts.Add("pie", "pie9", "Styled pie", "饼图多级控制");
-        // 雷达
-        Charts.Add("radar", "radar1", "Standard radar", "标准雷达图");
-        Charts.Add("radar", "radar2", "Filled radar", "标准填充雷达图");
-        Charts.Add("radar", "radar3", "Multi radar", "多雷达图");
-        Charts.Add("radar", "radar4", "Wormhole", "虫洞雷达");
-        Charts.Add("radar", "radar5", "Styled radar", "雷达图个性化");
-        Charts.Add("radar", "radar6", "Polygon splitArea", "多边形雷达（交替环带）");
-        // 和弦 / 力导向
-        Charts.Add("chord", "chord1", "Standard chord", "标准和弦图");
-        Charts.Add("chord", "chord2", "Multi chord", "多系列和弦图");
-        Charts.Add("chord", "chord3", "Non-ribbon", "非缎带和弦图");
-        Charts.Add("chord", "chord4", "WebKit chord", "复杂关系网络（和弦）");
-        Charts.Add("chord", "chord5", "Styled chord", "和弦图个性化");
-        Charts.Add("chord", "chord6", "Sorted chord", "权重排序和弦");
-        Charts.Add("chord", "chord7", "Path ribbons", "细线缎带和弦");
-        Charts.Add("force", "force1", "Simple force", "简单关系网络");
-        Charts.Add("force", "force2", "Tree force", "树状关系网络");
-        Charts.Add("force", "force3", "Tree force 2", "树状关系网络（二）");
-        Charts.Add("force", "force4", "WebKit force", "WebKit 内核依赖");
-        Charts.Add("force", "force5", "Styled force", "力导向个性化");
-        Charts.Add("force", "force6", "Force params", "力导向参数化");
-        // 地图
-        Charts.Add("map", "map1", "Standard map", "标准地图");
-        Charts.Add("map", "map2", "Map roam", "地图值域漫游");
-        Charts.Add("map", "map3", "Map select", "地图地域选择");
-        Charts.Add("map", "map4", "Map holes", "子区域 / 挖洞");
-        Charts.Add("map", "map5", "Map styled", "地图个性化");
-        // 仪表 / 漏斗
-        Charts.Add("gauge", "gauge1", "Standard gauge", "标准仪表盘");
-        Charts.Add("gauge", "gauge2", "Speed gauge", "车速仪表盘");
-        Charts.Add("gauge", "gauge3", "Progress gauge", "进度仪表盘");
-        Charts.Add("gauge", "gauge4", "Multi gauge", "多仪表盘");
-        Charts.Add("gauge", "gauge5", "Cluster gauge", "多仪表盘（二）");
-        Charts.Add("gauge", "gauge6", "Half gauge", "半圆仪表盘");
-        Charts.Add("funnel", "funnel1", "Standard funnel", "标准漏斗图");
-        Charts.Add("funnel", "funnel2", "Multi funnel", "多漏斗图");
-        Charts.Add("funnel", "funnel3", "Funnel sort", "漏斗图排序");
-        Charts.Add("funnel", "funnel4", "Align funnel", "漏斗水平对齐");
-        Charts.Add("funnel", "funnel5", "Styled funnel", "漏斗图个性化");
-        Charts.Add("funnel", "funnel6", "Left funnel", "左对齐漏斗（含转化率）");
-        // 热力 / 事件河 / 韦恩
-        Charts.Add("heatmap", "heatmap1", "Styled heatmap", "热力图个性化");
-        Charts.Add("heatmap", "heatmap2", "Heatmap", "热力图");
-        Charts.Add("heatmap", "heatmap3", "Calendar heat", "日历热力图");
-        Charts.Add("river", "river1", "Event river", "事件河流图");
-        Charts.Add("river", "river2", "Event river 2", "事件河流图（双带）");
-        Charts.Add("venn", "venn1", "Venn", "韦恩图");
-        // 矩形树 / 树 / 词云
-        Charts.Add("treemap", "treemap1", "Treemap basic", "矩形树图最简配置");
-        Charts.Add("treemap", "treemap2", "Treemap drill", "矩形树图数据下钻");
-        Charts.Add("treemap", "treemap3", "Treemap styled", "矩形树图个性化");
-        Charts.Add("tree", "tree1", "Tree basic", "树图最简配置");
-        Charts.Add("tree", "tree2", "Ice bucket", "树图冰桶挑战");
-        Charts.Add("tree", "tree3", "Tree styled", "树图个性化");
-        Charts.Add("word", "word1", "Word cloud", "字符云");
-        Charts.Add("word", "word2", "Rotated word cloud", "旋转词云");
-        // 混搭
-        Charts.Add("mix", "mix1", "Line + bar", "折柱混搭");
-        Charts.Add("mix", "mix2", "Range mix", "折柱混搭（范围）");
-        Charts.Add("mix", "mix3", "Bar + pie", "柱状饼混搭");
-        Charts.Add("mix", "mix4", "Line + scatter", "折线散点混搭");
-        Charts.Add("mix", "mix5", "Scatter pie", "散饼图");
-        Charts.Add("mix", "mix6", "Line + K", "折线K线混搭");
-        Charts.Add("mix", "mix7", "Line + pie", "折线饼图混搭");
-        Charts.Add("mix", "mix8", "Map + pie", "地图饼图混搭");
-        Charts.Add("mix", "mix9", "Connect", "多图联动");
-        Charts.Add("mix", "mix10", "Cartesian pair", "直角系多图联动");
-        Charts.Add("mix", "mix11", "BI dashboard", "商业BI类图表");
-        // 组件 / 其他
-        Charts.Add("comp", "comp1", "Axis style", "坐标系多级控制");
-        Charts.Add("comp", "comp2", "Legend", "图例个性化");
-        Charts.Add("comp", "comp3", "Data zoom", "数据区域缩放");
-        Charts.Add("comp", "comp4", "Zoom styled", "数据区域控件");
-        Charts.Add("comp", "comp5", "Tooltip", "提示框多级控制");
-        Charts.Add("comp", "comp6", "Visual map", "值域控件");
-        Charts.Add("other", "dyn1", "Dynamic line/bar", "动态数据（折线柱状）");
-        Charts.Add("other", "dyn2", "Dynamic scatter/K", "动态数据（散点K线）");
-        Charts.Add("other", "dyn3", "Dynamic pie/radar", "动态数据（饼雷达）");
-        Charts.Add("other", "other1", "Box plot", "箱线图");
-        Charts.Add("other", "other2", "Error bars", "误差条");
-        Charts.Add("other", "other3", "Sankey", "桑基图");
-        Charts.Add("other", "other4", "Sunburst", "旭日图");
-        Charts.Add("other", "other5", "Radial bars", "径向条形");
-        Charts.Add("other", "other6", "Big data", "大数据");
+        // 目录 1:1 对齐 ECharts 2.2.4 参考站 example.html：类目名、
+        // 条目顺序、id、标题与副标题均取自页面原文。暂未恢复真
+        // option 的条目先指向语义最近的现有实现，随批次逐个对齐。
+        // 折线图 — 10 例全部真 option。
+        Charts.Add("line", "line1", "Standard line", "标准折线图",
+            "markPoint, markLine, styled shadow", "标注，标线，个性化线条阴影");
+        Charts.Add("line", "line2", "Stacked line", "堆积折线图",
+            "multi-dimension stack", "任意系列多维度堆积");
+        Charts.Add("line", "line5", "Standard line", "标准折线图",
+            "swapped axes, smooth", "横纵坐标轴互换，平滑曲线");
+        Charts.Add("line", "line3", "Standard area", "标准面积图",
+            "area fill, smooth", "填充样式，平滑曲线");
+        Charts.Add("line", "line4", "Stacked area", "堆积面积图",
+            "multi-dimension stack", "任意系列多维度堆积");
+        Charts.Add("line", "line7", "Unequal interval", "不等距折线图",
+            "dual value axes", "双数值轴");
+        Charts.Add("line", "line8", "Unequal interval", "不等距折线图",
+            "time axis", "时间坐标轴折线图");
+        Charts.Add("line", "line6", "Area", "面积图",
+            "inverse value axis", "反向数值轴");
+        Charts.Add("line", "line", "Line", "折线图",
+            "multi-level control", "多级控制，个性化，填充、线条、拐点样式等");
+        Charts.Add("line", "line9", "Log axis", "对数轴",
+            "log axis", "log数轴");
+        // 柱状图 — 16 例（内容随批 2 对齐参考 option）。
+        Charts.Add("bar", "bar1", "Standard bar", "标准柱状图",
+            "markPoint, markLine", "标注，标线");
+        Charts.Add("bar", "bar2", "Stacked bar", "堆积柱状图",
+            "markLine, multi-dimension stack", "标线，任意系列多维度堆积");
+        Charts.Add("bar", "bar10", "Thermometer", "温度计式图表",
+            "styled, labels", "个性化样式，文本标签显示");
+        Charts.Add("bar", "bar7", "Composition waterfall", "组成瀑布图",
+            "styled, labels, style by value", "个性化样式，文本标签显示，透明数据驱动样式");
+        Charts.Add("bar", "bar6", "Change waterfall", "变化瀑布图",
+            "styled, labels, style by value", "个性化样式，文本标签显示，透明数据驱动样式");
+        Charts.Add("bar", "bar12", "Layered series", "多系列层叠",
+            "styled", "个性化样式");
+        Charts.Add("bar", "bar3", "Standard bar (h)", "标准条形图",
+            "swapped axes", "横纵坐标轴互换");
+        Charts.Add("bar", "bar4", "Stacked bar (h)", "堆积条形图",
+            "multi-dimension stack", "任意系列多维度堆积");
+        Charts.Add("bar", "bar9", "Multi-dimension", "多维条形图",
+            "styled, labels, style by value", "个性化样式，文本标签显示，透明数据驱动样式");
+        Charts.Add("bar", "bar5", "Tornado", "旋风条形图",
+            "mixed signs", "正负值混合");
+        Charts.Add("bar", "bar8", "Tornado", "旋风条形图",
+            "mixed signs, staggered labels", "正负值混合，交错正负轴标签");
+        Charts.Add("bar", "bar13", "Unequal interval", "不等距柱形图",
+            "dual value axes", "双数值轴");
+        Charts.Add("bar", "bar11", "With timeline", "搭配时间轴",
+            "data over time", "时空维度的数据展现");
+        Charts.Add("bar", "bar14", "Rainbow bar", "彩虹柱形图",
+            "styled", "个性化");
+        Charts.Add("bar", "bar15", "Rainbow multi", "多系列彩虹柱形图",
+            "styled", "个性化");
+        Charts.Add("bar", "bar", "Bar", "柱状图",
+            "styled width, fill, emphasis", "个性化，柱形宽度，填充、高亮、文本样式等");
+        // 散点图 — 8 例。
+        Charts.Add("scatter", "scatter1", "Standard scatter", "标准散点图",
+            "markPoint, markLine", "标注，标线");
+        Charts.Add("scatter", "scatter2", "Bubble", "标准气泡图",
+            "bubble size scale", "气泡大小计算");
+        Charts.Add("scatter", "scatter3", "Large scatter", "大规模散点图",
+            "large scale", "启用设置");
+        Charts.Add("scatter", "scatter5", "Category scatter", "类目散点图",
+            "with data zoom", "搭配数据区域缩放");
+        Charts.Add("scatter", "scatter6", "Time axis", "时间坐标",
+            "time axis", "时间坐标轴");
+        Charts.Add("scatter", "scatter4", "With timeline", "搭配时间轴",
+            "Gapminder", "时空维度数据展现，Gapminder");
+        Charts.Add("scatter", "dataRange1", "With dataRange", "搭配值域漫游",
+            "basic", "基本使用");
+        Charts.Add("scatter", "scatter", "Scatter", "散点图",
+            "multi-level control", "多级控制，个性化图形样式，大小等");
+        // K线图 — 2 例。
+        Charts.Add("k", "k1", "Standard K", "标准K线图",
+            "markPoint, markLine, data zoom", "标注，标线，数据区域缩放");
+        Charts.Add("k", "k", "Candlestick", "K线图",
+            "multi-level control", "多级控制，个性化，柱形阴阳图形样式等");
+        // 饼图 — 9 例。
+        Charts.Add("pie", "pie1", "Standard pie", "标准饼图",
+            "center, radius", "中心，半径设置");
+        Charts.Add("pie", "pie2", "Donut", "标准环形图",
+            "center, radius, labels", "中心，半径设置，文本标签显示");
+        Charts.Add("pie", "pie3", "Nested pie", "嵌套饼图",
+            "nested pies, labels", "多个饼图，中心，半径设置，文本标签显示");
+        Charts.Add("pie", "pie4", "Nightingale rose", "南丁格尔玫瑰图",
+            "rose radius / area", "半径、面积玫瑰图样式");
+        Charts.Add("pie", "pie5", "Donut", "环形图",
+            "infographic style", "信息图样式，文本标签技巧");
+        Charts.Add("pie", "pie6", "Donut", "环形图",
+            "infographic, extras", "信息图样式，额外内容添加，文本标签技巧");
+        Charts.Add("pie", "pie7", "With timeline", "搭配时间轴",
+            "data over time", "时空维度数据展现");
+        Charts.Add("pie", "lasagna", "Lasagna", "千层饼",
+            "nested donut layers", "多层嵌套环形图");
+        Charts.Add("pie", "pie", "Pie", "饼图",
+            "multi-level control", "多级控制，个性化填充、标签文本、视觉引导线样式等");
+        // 雷达图 — 5 例。
+        Charts.Add("radar", "radar1", "Standard radar", "标准雷达图",
+            "polar setup", "极坐标设置");
+        Charts.Add("radar", "radar2", "Filled radar", "标准填充雷达图",
+            "polar setup, fill", "极坐标设置，填充样式");
+        Charts.Add("radar", "radar3", "Multi radar", "多雷达图",
+            "multiple polars", "多个极坐标");
+        Charts.Add("radar", "wormhole", "Wormhole", "虫洞",
+            "nested radar layers", "多层嵌套雷达图");
+        Charts.Add("radar", "radar", "Radar", "雷达图",
+            "multi-level control", "多级控制，个性化线条，拐点，填充样式");
+        // 和弦图 — 6 例。
+        Charts.Add("chord", "chord1", "Standard chord", "标准和弦图",
+            "data format, sort", "数据格式，排序");
+        Charts.Add("chord", "chord2", "Multi-series chord", "多系列和弦图",
+            "multi-dimension legend", "多维图例选择");
+        Charts.Add("chord", "chord3", "Standard chord", "标准和弦图",
+            "data format, sort", "数据格式，排序");
+        Charts.Add("chord", "chord4", "Non-ribbon chord", "非缎带和弦图",
+            "data format, sort", "数据格式，排序");
+        Charts.Add("chord", "webkit-dep2", "Complex network", "复杂关系网络",
+            "Webkit dependency", "Webkit内核依赖");
+        Charts.Add("chord", "chord", "Chord", "和弦图",
+            "multi-level control", "多级控制，个性化填充、标签文本、线条样式等");
+        // 力导向布局图 — 5 例。
+        Charts.Add("force", "force1", "Simple network", "简单关系网络",
+            "data format", "数据格式");
+        Charts.Add("force", "force2", "Tree network", "树状关系网络",
+            "data format", "数据格式");
+        Charts.Add("force", "force4", "Tree network", "树状关系网络",
+            "data format", "数据格式");
+        Charts.Add("force", "webkit-dep", "Complex network", "复杂关系网络",
+            "Webkit dependency", "Webkit内核依赖");
+        Charts.Add("force", "force", "Force layout", "力导向布局",
+            "styled nodes, links", "个性化，节点样式，线条样式");
+        // 地图 — 25 例（内容随批 5 对齐参考 option）。
+        Charts.Add("map", "map1", "Standard map", "标准地图",
+            "China, multi-series, roam", "中国地图，多系列，值域漫游");
+        Charts.Add("map", "map2", "Standard map", "标准地图",
+            "China, selected mode", "中国地图，地域选择器");
+        Charts.Add("map", "map3", "Standard map", "标准地图",
+            "events, province switch", "事件响应，切换，全国34个省市自治区");
+        Charts.Add("map", "map4", "Standard map", "标准地图",
+            "world, roam", "世界地图，值域漫游");
+        Charts.Add("map", "map5", "Standard map", "标准地图",
+            "world, selected mode", "世界地图，地域选择器");
+        Charts.Add("map", "mix5", "Multiple maps", "多地图",
+            "drill-down by province", "数据驱动，省市级下钻");
+        Charts.Add("map", "map20", "Map extension", "地图扩展",
+            "geoJson major cities", "标准geoJson格式扩展地图-全国主要城市");
+        Charts.Add("map", "map6", "Map extension", "地图扩展",
+            "geoJson Hong Kong", "标准geoJson格式扩展地图类型-香港");
+        Charts.Add("map", "map7", "Map extension", "地图扩展",
+            "geoJson USA", "标准geoJson格式扩展地图类型-美国");
+        Charts.Add("map", "map13", "Map extension", "地图扩展",
+            "geoJson continents", "标准geoJson格式扩展地图类型-大洲");
+        Charts.Add("map", "map10", "Map markLine", "地图标线",
+            "markLine multi-series", "markLine多系列");
+        Charts.Add("map", "map9", "Map markPoint", "地图标注",
+            "markPoint, roam", "markPoint值域漫游");
+        Charts.Add("map", "map8", "Sub-region mode", "子区域模式",
+            "sub-region, roam", "子区域模式使用，值域漫游");
+        Charts.Add("map", "map11", "Map markLine", "地图标线",
+            "migration glow", "markLine炫光特效，模拟百度迁徙");
+        Charts.Add("map", "map21", "Map markLine", "地图标线",
+            "arc glow", "markLine炫光特效，不等弧度");
+        Charts.Add("map", "map12", "Map markLine", "地图标线",
+            "railways", "markLine炫光特效，中国铁路干线");
+        Charts.Add("map", "map22", "Map markLine", "地图标线",
+            "bundling", "markLine大规模标线 + 边捆绑");
+        Charts.Add("map", "map15", "Map markPoint", "地图标注",
+            "crowd glow", "大规模炫光特效，百度人气");
+        Charts.Add("map", "map16", "Map extension", "地图扩展",
+            "SVG body", "SVG扩展-人体组成");
+        Charts.Add("map", "map17", "Map extension", "地图扩展",
+            "SVG pitch", "SVG扩展-足球场");
+        Charts.Add("map", "map18", "Map extension", "地图扩展",
+            "SVG indoor", "SVG扩展-室内空间数据分析");
+        Charts.Add("map", "map14", "With timeline", "搭配时间轴",
+            "data over time", "时空维度数据展现");
+        Charts.Add("map", "map19", "Timeline + extension", "搭配时间轴，地图扩展",
+            "2014 World Cup", "2014世界杯进球还原");
+        Charts.Add("map", "map", "Map", "地图",
+            "multi-level control", "多级控制，个性化填充、标签文本、线条样式等");
+        Charts.Add("map", "dataRange2", "dataRange", "值域控件",
+            "custom pieces", "自定义不等距分割");
+        // 仪表盘 — 6 例。
+        Charts.Add("gauge", "gauge1", "Standard gauge", "标准仪表盘",
+            "styled", "个性化");
+        Charts.Add("gauge", "gauge2", "Standard gauge", "标准仪表盘",
+            "styled", "个性化");
+        Charts.Add("gauge", "gauge3", "Standard gauge", "标准仪表盘",
+            "styled", "个性化");
+        Charts.Add("gauge", "gauge4", "Multi gauge", "多仪表盘",
+            "styled", "个性化");
+        Charts.Add("gauge", "gauge5", "Multi gauge", "多仪表盘",
+            "styled", "个性化");
+        Charts.Add("gauge", "gauge", "Standard gauge", "标准仪表盘",
+            "styled", "个性化");
+        // 漏斗图 — 5 例。
+        Charts.Add("funnel", "funnel1", "Standard funnel", "标准漏斗图",
+            "styled", "个性化");
+        Charts.Add("funnel", "funnel2", "Multi funnel", "多漏斗图",
+            "styled", "个性化");
+        Charts.Add("funnel", "funnel3", "Multi funnel", "多漏斗图",
+            "styled, sort", "个性化，排序");
+        Charts.Add("funnel", "funnel4", "Multi funnel", "多漏斗图",
+            "styled, align", "个性化，水平对齐样式");
+        Charts.Add("funnel", "funnel", "Standard funnel", "标准漏斗图",
+            "styled", "个性化");
+        // 事件河流图 — 2 例。
+        Charts.Add("eventRiver", "eventRiver1", "Event river", "事件河流图",
+            "styled", "个性化");
+        Charts.Add("eventRiver", "eventRiver2", "Event river", "事件河流图",
+            "styled", "个性化");
+        // 韦恩图 — 1 例。
+        Charts.Add("venn", "venn", "Venn", "韦恩图",
+            "styled", "个性化");
+        // 矩形树图 — 3 例。
+        Charts.Add("treemap", "treemap", "Treemap", "矩形树图",
+            "minimal", "最简配置");
+        Charts.Add("treemap", "treemap1", "Treemap", "矩形树图",
+            "drill-down", "数据下钻");
+        Charts.Add("treemap", "treemap2", "Treemap", "矩形树图",
+            "styled", "个性化");
+        // 树图 — 3 例。
+        Charts.Add("tree", "tree", "Tree", "树图",
+            "minimal", "最简配置");
+        Charts.Add("tree", "tree2", "Tree", "树图",
+            "ice bucket", "冰桶挑战");
+        Charts.Add("tree", "tree1", "Tree", "树图",
+            "styled", "个性化");
+        // 字符云 — 1 例。
+        Charts.Add("wordCloud", "wordCloud", "Word cloud", "字符云",
+            "", "个性化解法");
+        // 混搭 — 11 例。
+        Charts.Add("mix", "mix1", "Line + bar", "折柱混搭",
+            "dual value axes", "双数值轴");
+        Charts.Add("mix", "mix6", "Line + bar", "折柱混搭",
+            "range band", "数据驱动，模拟范围图");
+        Charts.Add("mix", "mix2", "Bar + pie", "柱状饼混搭",
+            "pie center", "数据驱动，饼图中心定义");
+        Charts.Add("mix", "mix4", "Line + scatter", "折线散点混搭",
+            "axis sync", "数值轴与类目轴坐标同步");
+        Charts.Add("mix", "mix7", "Scatter + pie", "散饼图",
+            "pie as bubble", "用饼图代替气泡图中的散点，多系列");
+        Charts.Add("mix", "mix10", "Line + K", "折线K线混搭",
+            "dual value axes", "双数值轴，多系列");
+        Charts.Add("mix", "mix12", "Line + pie", "折线饼图混搭",
+            "trend, percent", "趋势，百分比高效混合模式");
+        Charts.Add("mix", "mix3", "Map + pie", "地图饼图混搭",
+            "map as selector", "地图作为地域选择器");
+        Charts.Add("mix", "mix9", "Connect", "多图联动",
+            "connect, shared toolbox", "简单connect，图例，工具箱共享，多系列");
+        Charts.Add("mix", "mix8", "Connect", "多图联动",
+            "cartesian connect", "直角系多图联动，多系列");
+        Charts.Add("mix", "mix11", "BI dashboard", "商业BI类图表",
+            "gauge, nested funnel", "仪表盘、嵌套漏斗图");
+        // 组件 — 6 例。
+        Charts.Add("component", "axis", "Axis", "坐标系",
+            "styled labels, splits", "多级控制，个性化标签文字、间隔线样式等");
+        Charts.Add("component", "legend", "Legend", "图例",
+            "styled", "个性化");
+        Charts.Add("component", "dataZoom1", "Data zoom", "数据区域缩放",
+            "basic", "基本使用");
+        Charts.Add("component", "dataZoom", "Data zoom", "数据区域控件",
+            "styled", "个性化布局，数据阴影、背景、拖拽手柄样式等");
+        Charts.Add("component", "tooltip", "Tooltip", "提示框",
+            "styled", "多级控制，个性化文字样式、边框、背景等");
+        Charts.Add("component", "dataRange", "dataRange", "值域控件",
+            "styled", "个性化布局，背景、拖拽手柄样式等");
+        // 其他 — 5 例。
+        Charts.Add("other", "dynamicLineBar", "Dynamic data", "动态数据",
+            "line, bar", "折线图、柱状图");
+        Charts.Add("other", "dynamicScatterK", "Dynamic data", "动态数据",
+            "scatter, K", "散点图、K线图");
+        Charts.Add("other", "dynamicPieRadar", "Dynamic data", "动态数据",
+            "pie, radar", "饼图、雷达图");
+        Charts.Add("other", "loading", "Loading", "过渡动画",
+            "Loading...", "加载中，Loading");
+        Charts.Add("other", "event", "Events", "事件交互",
+            "chart events", "可捕获的用户交互和数据变化事件，实现图表与外界的联动");
     }
 
     static string T(string en, string zh) {
@@ -332,25 +492,25 @@ partial class Charts {
     static string NameOf(ChartsDemo d) { return Charts.T(d.en, d.zh); }
 
     static string CatLabel(string cat) {
-        if (cat == "line") { return Charts.T("Line / Area", "折线（面积）图"); }
-        if (cat == "bar") { return Charts.T("Bar", "柱状（条形）图"); }
-        if (cat == "scatter") { return Charts.T("Scatter / Bubble", "散点（气泡）图"); }
+        // 类目名取自参考站 example.html 的 h3 原文。
+        if (cat == "line") { return Charts.T("Line", "折线图"); }
+        if (cat == "bar") { return Charts.T("Bar", "柱状图"); }
+        if (cat == "scatter") { return Charts.T("Scatter", "散点图"); }
         if (cat == "k") { return Charts.T("Candlestick", "K线图"); }
-        if (cat == "pie") { return Charts.T("Pie / Donut", "饼（圆环）图"); }
-        if (cat == "radar") { return Charts.T("Radar", "雷达（面积）图"); }
+        if (cat == "pie") { return Charts.T("Pie", "饼图"); }
+        if (cat == "radar") { return Charts.T("Radar", "雷达图"); }
         if (cat == "chord") { return Charts.T("Chord", "和弦图"); }
         if (cat == "force") { return Charts.T("Force", "力导向布局图"); }
         if (cat == "map") { return Charts.T("Map", "地图"); }
         if (cat == "gauge") { return Charts.T("Gauge", "仪表盘"); }
         if (cat == "funnel") { return Charts.T("Funnel", "漏斗图"); }
-        if (cat == "heatmap") { return Charts.T("Heatmap", "热力图"); }
-        if (cat == "river") { return Charts.T("Event river", "事件河流图"); }
+        if (cat == "eventRiver") { return Charts.T("Event river", "事件河流图"); }
         if (cat == "venn") { return Charts.T("Venn", "韦恩图"); }
         if (cat == "treemap") { return Charts.T("Treemap", "矩形树图"); }
         if (cat == "tree") { return Charts.T("Tree", "树图"); }
-        if (cat == "word") { return Charts.T("Word cloud", "字符云"); }
+        if (cat == "wordCloud") { return Charts.T("Word cloud", "字符云"); }
         if (cat == "mix") { return Charts.T("Mix", "混搭"); }
-        if (cat == "comp") { return Charts.T("Components", "组件"); }
+        if (cat == "component") { return Charts.T("Component", "组件"); }
         return Charts.T("Other", "其他");
     }
 
@@ -407,7 +567,7 @@ partial class Charts {
         int h = c.Height();
         app.RenderBackground(0, top, w, h - top, 0);
 
-        int sw = app.Scale(228);
+        int sw = app.Scale(260);
         Rect area = new Rect(0, top, w, h - top);
         Charts.RenderNav(app, c, t, area, sw);
         Charts.RenderPreview(app, c, t, area, sw);
@@ -447,12 +607,13 @@ partial class Charts {
                 rows.Add(ChartsNavRow.Header(Charts.CatLabel(d.cat)));
                 lastCat = d.cat;
             }
-            rows.Add(ChartsNavRow.Entry(i, Charts.NameOf(d)));
+            rows.Add(ChartsNavRow.Entry(i, Charts.NameOf(d), Charts.T(d.den, d.zhd)));
         }
 
         int listTop = area.y + app.Scale(52);
         int listBottom = area.y + area.height - app.Scale(8);
-        int rowH = app.Scale(26);
+        // 两行行高：标题 + 参考站副标题（区分同名示例）。
+        int rowH = app.Scale(40);
         int viewH = listBottom - listTop;
         int contentH = rows.Count * rowH;
 
@@ -468,7 +629,7 @@ partial class Charts {
             if (ry + rowH > listTop && ry < listBottom) {
                 ChartsNavRow row = rows[idx];
                 if (row.header) {
-                    c.DrawText(sx, ry + app.Scale(8), row.text,
+                    c.DrawText(sx, ry + app.Scale(13), row.text,
                         t.textTertiary, t.fontSizeSmall);
                 } else {
                     bool selRow = row.demoIndex == sel;
@@ -485,10 +646,18 @@ partial class Charts {
                             swid + app.Scale(8), rowH - app.Scale(2),
                             app.Scale(4), t.bgHover);
                     }
+                    // 标题一行、描述一行；超宽在裁剪区内截断。
+                    c.PushClip(sx, ry, swid, rowH - app.Scale(2));
                     int tc = t.textPrimary;
-                    if (selRow) { tc = t.textInverse; }
-                    c.DrawText(sx + app.Scale(8), ry + app.Scale(5),
+                    int dc = t.textTertiary;
+                    if (selRow) { tc = t.textInverse; dc = t.textInverse; }
+                    c.DrawText(sx + app.Scale(8), ry + app.Scale(4),
                         row.text, tc, t.fontSizeSmall);
+                    if (row.desc.Length > 0) {
+                        c.DrawText(sx + app.Scale(8), ry + app.Scale(22),
+                            row.desc, dc, t.fontSizeTiny);
+                    }
+                    c.PopClip();
                     if (click && hot && !selRow) {
                         Charts.selected.Set(row.demoIndex);
                         app.RequestRedraw();
@@ -527,49 +696,49 @@ partial class Charts {
     }
 
     static void Draw(App app, string id, int x, int y, int w, int h) {
+        // 折线类 10 例已是参考 option 1:1。其余类目先映射到语义
+        // 最近的现有实现占位，随批次 2-5 逐个换成参考站原始 option
+        // （届时未再引用的旧方法一并清理）。
         if (id == "line1") { Charts.Line1(app, x, y, w, h); }
         else if (id == "line2") { Charts.Line2(app, x, y, w, h); }
+        else if (id == "line5") { Charts.Line5(app, x, y, w, h); }
         else if (id == "line3") { Charts.Line3(app, x, y, w, h); }
         else if (id == "line4") { Charts.Line4(app, x, y, w, h); }
-        else if (id == "line5") { Charts.Line5(app, x, y, w, h); }
-        else if (id == "line6") { Charts.Line6(app, x, y, w, h); }
         else if (id == "line7") { Charts.Line7(app, x, y, w, h); }
         else if (id == "line8") { Charts.Line8(app, x, y, w, h); }
+        else if (id == "line6") { Charts.Line6(app, x, y, w, h); }
+        else if (id == "line") { Charts.LineMulti(app, x, y, w, h); }
         else if (id == "line9") { Charts.Line9(app, x, y, w, h); }
-        else if (id == "line10") { Charts.Line10(app, x, y, w, h); }
-        else if (id == "line11") { Charts.Line11(app, x, y, w, h); }
-        else if (id == "line12") { Charts.Line12(app, x, y, w, h); }
-        else if (id == "line13") { Charts.Line13(app, x, y, w, h); }
+        // 柱状图：参考 id → 现有实现（内容批 2 重写）。
         else if (id == "bar1") { Charts.Bar1(app, x, y, w, h); }
         else if (id == "bar2") { Charts.Bar2(app, x, y, w, h); }
-        else if (id == "bar3") { Charts.Bar3(app, x, y, w, h); }
-        else if (id == "bar4") { Charts.Bar4(app, x, y, w, h); }
-        else if (id == "bar5") { Charts.Bar5(app, x, y, w, h); }
-        else if (id == "bar6") { Charts.Bar6(app, x, y, w, h); }
-        else if (id == "bar7") { Charts.Bar7(app, x, y, w, h); }
-        else if (id == "bar8") { Charts.Bar8(app, x, y, w, h); }
+        else if (id == "bar10") { Charts.Bar3(app, x, y, w, h); }
+        else if (id == "bar7") { Charts.Bar4(app, x, y, w, h); }
+        else if (id == "bar6") { Charts.Bar5(app, x, y, w, h); }
+        else if (id == "bar12") { Charts.Bar6(app, x, y, w, h); }
+        else if (id == "bar3") { Charts.Bar7(app, x, y, w, h); }
+        else if (id == "bar4") { Charts.Bar8(app, x, y, w, h); }
         else if (id == "bar9") { Charts.Bar9(app, x, y, w, h); }
-        else if (id == "bar10") { Charts.Bar10(app, x, y, w, h); }
-        else if (id == "bar11") { Charts.Bar11(app, x, y, w, h); }
-        else if (id == "bar12") { Charts.Bar12(app, x, y, w, h); }
-        else if (id == "bar13") { Charts.Bar13(app, x, y, w, h); }
+        else if (id == "bar5") { Charts.Bar10(app, x, y, w, h); }
+        else if (id == "bar8") { Charts.Bar11(app, x, y, w, h); }
+        else if (id == "bar13") { Charts.Bar12(app, x, y, w, h); }
+        else if (id == "bar11") { Charts.Bar13(app, x, y, w, h); }
         else if (id == "bar14") { Charts.Bar14(app, x, y, w, h); }
         else if (id == "bar15") { Charts.Bar15(app, x, y, w, h); }
-        else if (id == "bar16") { Charts.Bar16(app, x, y, w, h); }
-        else if (id == "bar17") { Charts.Bar17(app, x, y, w, h); }
+        else if (id == "bar") { Charts.Bar16(app, x, y, w, h); }
+        // 散点图。
         else if (id == "scatter1") { Charts.Scatter1(app, x, y, w, h); }
         else if (id == "scatter2") { Charts.Scatter2(app, x, y, w, h); }
         else if (id == "scatter3") { Charts.Scatter3(app, x, y, w, h); }
-        else if (id == "scatter4") { Charts.Scatter4(app, x, y, w, h); }
-        else if (id == "scatter5") { Charts.Scatter5(app, x, y, w, h); }
-        else if (id == "scatter6") { Charts.Scatter6(app, x, y, w, h); }
-        else if (id == "scatter7") { Charts.Scatter7(app, x, y, w, h); }
-        else if (id == "scatter8") { Charts.Scatter8(app, x, y, w, h); }
-        else if (id == "scatter9") { Charts.Scatter9(app, x, y, w, h); }
-        else if (id == "scatter10") { Charts.Scatter10(app, x, y, w, h); }
-        else if (id == "scatter11") { Charts.Scatter11(app, x, y, w, h); }
+        else if (id == "scatter5") { Charts.Scatter4(app, x, y, w, h); }
+        else if (id == "scatter6") { Charts.Scatter5(app, x, y, w, h); }
+        else if (id == "scatter4") { Charts.Scatter6(app, x, y, w, h); }
+        else if (id == "dataRange1") { Charts.Scatter7(app, x, y, w, h); }
+        else if (id == "scatter") { Charts.Scatter8(app, x, y, w, h); }
+        // K 线。
         else if (id == "k1") { Charts.K1(app, x, y, w, h); }
-        else if (id == "k2") { Charts.K2(app, x, y, w, h); }
+        else if (id == "k") { Charts.K2(app, x, y, w, h); }
+        // 饼图。
         else if (id == "pie1") { Charts.Pie1(app, x, y, w, h); }
         else if (id == "pie2") { Charts.Pie2(app, x, y, w, h); }
         else if (id == "pie3") { Charts.Pie3(app, x, y, w, h); }
@@ -577,83 +746,101 @@ partial class Charts {
         else if (id == "pie5") { Charts.Pie5(app, x, y, w, h); }
         else if (id == "pie6") { Charts.Pie6(app, x, y, w, h); }
         else if (id == "pie7") { Charts.Pie7(app, x, y, w, h); }
-        else if (id == "pie8") { Charts.Pie8(app, x, y, w, h); }
-        else if (id == "pie9") { Charts.Pie9(app, x, y, w, h); }
+        else if (id == "lasagna") { Charts.Pie8(app, x, y, w, h); }
+        else if (id == "pie") { Charts.Pie9(app, x, y, w, h); }
+        // 雷达。
         else if (id == "radar1") { Charts.Radar1(app, x, y, w, h); }
         else if (id == "radar2") { Charts.Radar2(app, x, y, w, h); }
         else if (id == "radar3") { Charts.Radar3(app, x, y, w, h); }
-        else if (id == "radar4") { Charts.Radar4(app, x, y, w, h); }
-        else if (id == "radar5") { Charts.Radar5(app, x, y, w, h); }
-        else if (id == "radar6") { Charts.Radar6(app, x, y, w, h); }
+        else if (id == "wormhole") { Charts.Radar4(app, x, y, w, h); }
+        else if (id == "radar") { Charts.Radar5(app, x, y, w, h); }
+        // 和弦（webkit-dep2 = WebKit 复杂网络）。
         else if (id == "chord1") { Charts.Chord1(app, x, y, w, h); }
         else if (id == "chord2") { Charts.Chord2(app, x, y, w, h); }
-        else if (id == "chord3") { Charts.Chord3(app, x, y, w, h); }
-        else if (id == "chord4") { Charts.Chord4(app, x, y, w, h); }
-        else if (id == "chord5") { Charts.Chord5(app, x, y, w, h); }
-        else if (id == "chord6") { Charts.Chord6(app, x, y, w, h); }
-        else if (id == "chord7") { Charts.Chord7(app, x, y, w, h); }
+        else if (id == "chord3") { Charts.Chord6(app, x, y, w, h); }
+        else if (id == "chord4") { Charts.Chord3(app, x, y, w, h); }
+        else if (id == "webkit-dep2") { Charts.Chord4(app, x, y, w, h); }
+        else if (id == "chord") { Charts.Chord5(app, x, y, w, h); }
+        // 力导向（webkit-dep = WebKit 复杂网络）。
         else if (id == "force1") { Charts.Force1(app, x, y, w, h); }
         else if (id == "force2") { Charts.Force2(app, x, y, w, h); }
-        else if (id == "force3") { Charts.Force3(app, x, y, w, h); }
-        else if (id == "force4") { Charts.Force4(app, x, y, w, h); }
-        else if (id == "force5") { Charts.Force5(app, x, y, w, h); }
-        else if (id == "force6") { Charts.Force6(app, x, y, w, h); }
+        else if (id == "force4") { Charts.Force3(app, x, y, w, h); }
+        else if (id == "webkit-dep") { Charts.Force4(app, x, y, w, h); }
+        else if (id == "force") { Charts.Force5(app, x, y, w, h); }
+        // 地图（25 例，内容批 5 重写）。
         else if (id == "map1") { Charts.Map1(app, x, y, w, h); }
         else if (id == "map2") { Charts.Map2(app, x, y, w, h); }
         else if (id == "map3") { Charts.Map3(app, x, y, w, h); }
         else if (id == "map4") { Charts.Map4(app, x, y, w, h); }
         else if (id == "map5") { Charts.Map5(app, x, y, w, h); }
+        else if (id == "mix5") { Charts.Mix8(app, x, y, w, h); }
+        else if (id == "map20") { Charts.Map1(app, x, y, w, h); }
+        else if (id == "map6") { Charts.Map3(app, x, y, w, h); }
+        else if (id == "map7") { Charts.Map4(app, x, y, w, h); }
+        else if (id == "map13") { Charts.Map4(app, x, y, w, h); }
+        else if (id == "map10") { Charts.Map2(app, x, y, w, h); }
+        else if (id == "map9") { Charts.Map2(app, x, y, w, h); }
+        else if (id == "map8") { Charts.Map4(app, x, y, w, h); }
+        else if (id == "map11") { Charts.Map3(app, x, y, w, h); }
+        else if (id == "map21") { Charts.Map3(app, x, y, w, h); }
+        else if (id == "map12") { Charts.Map3(app, x, y, w, h); }
+        else if (id == "map22") { Charts.Map3(app, x, y, w, h); }
+        else if (id == "map15") { Charts.Map2(app, x, y, w, h); }
+        else if (id == "map16") { Charts.Map5(app, x, y, w, h); }
+        else if (id == "map17") { Charts.Map5(app, x, y, w, h); }
+        else if (id == "map18") { Charts.Map5(app, x, y, w, h); }
+        else if (id == "map14") { Charts.Map2(app, x, y, w, h); }
+        else if (id == "map19") { Charts.Map3(app, x, y, w, h); }
+        else if (id == "map") { Charts.Map5(app, x, y, w, h); }
+        else if (id == "dataRange2") { Charts.Scatter11(app, x, y, w, h); }
+        // 仪表盘 / 漏斗。
         else if (id == "gauge1") { Charts.Gauge1(app, x, y, w, h); }
         else if (id == "gauge2") { Charts.Gauge2(app, x, y, w, h); }
         else if (id == "gauge3") { Charts.Gauge3(app, x, y, w, h); }
         else if (id == "gauge4") { Charts.Gauge4(app, x, y, w, h); }
         else if (id == "gauge5") { Charts.Gauge5(app, x, y, w, h); }
-        else if (id == "gauge6") { Charts.Gauge6(app, x, y, w, h); }
+        else if (id == "gauge") { Charts.Gauge6(app, x, y, w, h); }
         else if (id == "funnel1") { Charts.Funnel1(app, x, y, w, h); }
         else if (id == "funnel2") { Charts.Funnel2(app, x, y, w, h); }
         else if (id == "funnel3") { Charts.Funnel3(app, x, y, w, h); }
         else if (id == "funnel4") { Charts.Funnel4(app, x, y, w, h); }
-        else if (id == "funnel5") { Charts.Funnel5(app, x, y, w, h); }
-        else if (id == "funnel6") { Charts.Funnel6(app, x, y, w, h); }
-        else if (id == "heatmap1") { Charts.Heat1(app, x, y, w, h); }
-        else if (id == "heatmap2") { Charts.Heat2(app, x, y, w, h); }
-        else if (id == "heatmap3") { Charts.Heat3(app, x, y, w, h); }
-        else if (id == "river1") { Charts.River1(app, x, y, w, h); }
-        else if (id == "river2") { Charts.River2(app, x, y, w, h); }
-        else if (id == "venn1") { Charts.Venn1(app, x, y, w, h); }
-        else if (id == "treemap1") { Charts.Treemap1(app, x, y, w, h); }
-        else if (id == "treemap2") { Charts.Treemap2(app, x, y, w, h); }
-        else if (id == "treemap3") { Charts.Treemap3(app, x, y, w, h); }
-        else if (id == "tree1") { Charts.Tree1(app, x, y, w, h); }
+        else if (id == "funnel") { Charts.Funnel5(app, x, y, w, h); }
+        // 事件河流 / 韦恩 / 矩形树 / 树 / 字符云。
+        else if (id == "eventRiver1") { Charts.River1(app, x, y, w, h); }
+        else if (id == "eventRiver2") { Charts.River2(app, x, y, w, h); }
+        else if (id == "venn") { Charts.Venn1(app, x, y, w, h); }
+        else if (id == "treemap") { Charts.Treemap1(app, x, y, w, h); }
+        else if (id == "treemap1") { Charts.Treemap2(app, x, y, w, h); }
+        else if (id == "treemap2") { Charts.Treemap3(app, x, y, w, h); }
+        else if (id == "tree") { Charts.Tree1(app, x, y, w, h); }
         else if (id == "tree2") { Charts.Tree2(app, x, y, w, h); }
-        else if (id == "tree3") { Charts.Tree3(app, x, y, w, h); }
-        else if (id == "word1") { Charts.Word1(app, x, y, w, h); }
-        else if (id == "word2") { Charts.Word2(app, x, y, w, h); }
+        else if (id == "tree1") { Charts.Tree3(app, x, y, w, h); }
+        else if (id == "wordCloud") { Charts.Word1(app, x, y, w, h); }
+        // 混搭。
         else if (id == "mix1") { Charts.Mix1(app, x, y, w, h); }
-        else if (id == "mix2") { Charts.Mix2(app, x, y, w, h); }
-        else if (id == "mix3") { Charts.Mix3(app, x, y, w, h); }
+        else if (id == "mix6") { Charts.Mix2(app, x, y, w, h); }
+        else if (id == "mix2") { Charts.Mix3(app, x, y, w, h); }
         else if (id == "mix4") { Charts.Mix4(app, x, y, w, h); }
-        else if (id == "mix5") { Charts.Mix5(app, x, y, w, h); }
-        else if (id == "mix6") { Charts.Mix6(app, x, y, w, h); }
-        else if (id == "mix7") { Charts.Mix7(app, x, y, w, h); }
-        else if (id == "mix8") { Charts.Mix8(app, x, y, w, h); }
+        else if (id == "mix7") { Charts.Mix5(app, x, y, w, h); }
+        else if (id == "mix10") { Charts.Mix6(app, x, y, w, h); }
+        else if (id == "mix12") { Charts.Mix7(app, x, y, w, h); }
+        else if (id == "mix3") { Charts.Mix8(app, x, y, w, h); }
         else if (id == "mix9") { Charts.Mix9(app, x, y, w, h); }
-        else if (id == "mix10") { Charts.Mix10(app, x, y, w, h); }
+        else if (id == "mix8") { Charts.Mix10(app, x, y, w, h); }
         else if (id == "mix11") { Charts.Mix11(app, x, y, w, h); }
-        else if (id == "comp1") { Charts.Comp1(app, x, y, w, h); }
-        else if (id == "comp2") { Charts.Comp2(app, x, y, w, h); }
-        else if (id == "comp3") { Charts.Comp3(app, x, y, w, h); }
-        else if (id == "comp4") { Charts.Comp4(app, x, y, w, h); }
-        else if (id == "comp5") { Charts.Comp5(app, x, y, w, h); }
-        else if (id == "comp6") { Charts.Comp6(app, x, y, w, h); }
-        else if (id == "dyn1") { Charts.Dyn1(app, x, y, w, h); }
-        else if (id == "dyn2") { Charts.Dyn2(app, x, y, w, h); }
-        else if (id == "dyn3") { Charts.Dyn3(app, x, y, w, h); }
-        else if (id == "other1") { Charts.Other1(app, x, y, w, h); }
-        else if (id == "other2") { Charts.Other2(app, x, y, w, h); }
-        else if (id == "other3") { Charts.Other3(app, x, y, w, h); }
-        else if (id == "other4") { Charts.Other4(app, x, y, w, h); }
-        else if (id == "other5") { Charts.Other5(app, x, y, w, h); }
-        else { Charts.Other6(app, x, y, w, h); }
+        // 组件。
+        else if (id == "axis") { Charts.Comp1(app, x, y, w, h); }
+        else if (id == "legend") { Charts.Comp2(app, x, y, w, h); }
+        else if (id == "dataZoom1") { Charts.Comp3(app, x, y, w, h); }
+        else if (id == "dataZoom") { Charts.Comp4(app, x, y, w, h); }
+        else if (id == "tooltip") { Charts.Comp5(app, x, y, w, h); }
+        else if (id == "dataRange") { Charts.Comp6(app, x, y, w, h); }
+        // 其他。
+        else if (id == "dynamicLineBar") { Charts.Dyn1(app, x, y, w, h); }
+        else if (id == "dynamicScatterK") { Charts.Dyn2(app, x, y, w, h); }
+        else if (id == "dynamicPieRadar") { Charts.Dyn3(app, x, y, w, h); }
+        else if (id == "loading") { Charts.Loading(app, x, y, w, h); }
+        else if (id == "event") { Charts.EventDemo(app, x, y, w, h); }
+        else { Charts.Line1(app, x, y, w, h); }
     }
 }
