@@ -103,6 +103,11 @@ class Snd {
         s.fail = Data.LoadWav2("assets/fail.wav");
         s.bombtick = Data.LoadWav2("assets/bombtick.wav");
         s.levelup = Data.LoadWav2("assets/levelup.wav");
+        // 预热声卡:zan_audio_play 首次被调时才同步打开物理音频设备
+        // (WASAPI 上实测可达 ~500ms)。不做这一步,设备开启的开销正好
+        // 落在玩家第一次发射的那一帧,表现为"按下第一次发射就很卡"。
+        // 启动期以 0 音量播一声,把设备初始化移出对局;voice 播完自动回收。
+        s.Play(s.swing, 0.0);
         return s;
     }
 
@@ -270,6 +275,29 @@ class MinerApp {
     // ---------------------------------------------------------------
     // 逻辑推进
     // ---------------------------------------------------------------
+    // MINER_PROF=1: 逐段计时走廊。启动后约 1.2s 自动发射一次(触发
+    // "首次发射"的完整路径:swing 声、首个逐帧合成、首个声卡流),
+    // 环绕窗口打印各段耗时。发射本身立即返回,真实开销落在后面
+    // 第一条 fast 帧——所以从发射帧起连续打印 8 帧完整帧账单。
+    bool prof;
+    long profT0;
+    long profActionAt;
+    int profLogCnt;
+    int profAutoFired;
+
+    // 逐帧账单:event/step/scene/hud 各段耗时(ms,含帧尾 pacing)。
+    void ProfFrame(int evMs, int stepMs, int sceneMs, int hudMs, int totalMs) {
+        if (!this.prof || this.profActionAt == 0) { return; }
+        if (this.profLogCnt >= 8) { return; }
+        this.profLogCnt = this.profLogCnt + 1;
+        Console.WriteLine("[prof] frame f" + Convert.ToString(this.profLogCnt)
+                          + " ev=" + Convert.ToString(evMs)
+                          + " step=" + Convert.ToString(stepMs)
+                          + " scene=" + Convert.ToString(sceneMs)
+                          + " hud=" + Convert.ToString(hudMs)
+                          + " total=" + Convert.ToString(totalMs));
+    }
+
     public void StepFrame(int dtMs) {
         this.w.Step(dtMs);
         World w = this.w;
@@ -313,6 +341,10 @@ class MinerApp {
             this.snd.Play(this.snd.grab, 0.35);
         }
         w.Action();
+        if (this.prof && this.profActionAt == 0) {
+            this.profActionAt = 1;
+            Console.WriteLine("[prof] === first-fire OnActionKey done (play+Action) ===");
+        }
     }
 
     public void OnDynamiteKey() {
@@ -664,12 +696,29 @@ class MinerApp {
         // 不依赖窗口在前台。
         bool liveShot = ProcessHost.Env("MINER_LIVESHOT") == "1";
         int liveFrame = 0;
+        bool prof = app.prof = ProcessHost.Env("MINER_PROF") == "1";
+        long f0 = 0;
+        long t1 = 0;
+        long t2 = 0;
+        long t3 = 0;
+        long t4 = 0;
+        if (prof) {
+            app.profT0 = World.NowMs();
+            Console.WriteLine("[prof] MINER_PROF on, auto-fire at ~1200ms");
+        }
         while (h.Running()) {
+            f0 = World.NowMs();
             app.now = World.NowMs();
             int dt = (int)(app.now - app.lastFrameAt);
             if (dt < 0) { dt = 0; }
             if (dt > 100) { dt = 100; }
             app.lastFrameAt = app.now;
+            if (prof && app.profAutoFired == 0
+                    && Sdl.Ticks() - app.profT0 >= 1200) {
+                app.profAutoFired = 1;
+                Console.WriteLine("[prof] === auto-fire ===");
+                app.OnActionKey();
+            }
             bool action = false;
             bool dyn = false;
             bool inputEvent = false;
@@ -710,7 +759,9 @@ class MinerApp {
             }
             if (action) { app.OnActionKey(); }
             if (dyn) { app.OnDynamiteKey(); }
+            t1 = World.NowMs();
             app.StepFrame(dt);
+            t2 = World.NowMs();
             // GameHud.Frame 不走 Form.Run 的 frameHook,顶栏标签须每帧直同步,
             // 否则倒计时/金币/combo 保持初始空串(截图路径 HudShotRun 已直调故正常)。
             app.SyncHud();
@@ -722,6 +773,7 @@ class MinerApp {
             h.Begin(12, 10, 8);
             app.DrawAll();
             h.End();
+            t3 = World.NowMs();
             // HUD 层:场景帧作底,Gui 控件树画在上面并合成呈现。
             // 门控:伸钩/收钩/收线 QTE/拆弹阶段爪与物品快速移动,逐帧
             // 合成(60fps,收钩不卡);空闲摆钩与结算静止,两帧一拍
@@ -756,10 +808,15 @@ class MinerApp {
                 Console.WriteLine("=== LIVE SHOT " + Convert.ToString(liveFrame)
                                   + " ===");
             }
+            t4 = World.NowMs();
             // 帧尾统一按 LimitFps 预算补睡:hudMode 下 End() 不再 pacing
             // (那时合成还没发生),睡在这可以把 HUD 读回+合成+呈现也算进
             // 帧预算,60fps 不再被 HUD 段额外拖慢。
             h.Pace();
+            if (prof) {
+                app.ProfFrame((int)(t1 - f0), (int)(t2 - t1), (int)(t3 - t2),
+                              (int)(t4 - t3), (int)(World.NowMs() - f0));
+            }
         }
         app.w.Save();
         return 0;
