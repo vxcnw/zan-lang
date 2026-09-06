@@ -1367,7 +1367,7 @@ partial class DataTable {
                         // 隐藏/冻结……）。触摸设备没有右键，长按
                         // 是移动端的标准等价手势；只认菜单图标上的
                         // 按住，避免与范围拖拽/滚动打架。
-                        st.hdrCtxOpen = true;
+                        DataTable.OpenHdrMenu(st);
                         st.hdrCtxCol = i;
                         st.hdrCtxX = app.mouseX;
                         st.hdrCtxY = app.mouseY;
@@ -1416,7 +1416,7 @@ partial class DataTable {
                 && st.openMenu < 0
                 && app.mouseX >= hx && app.mouseX < hx + cw
                 && app.mouseY >= titleTop && app.mouseY < titleTop + titleRowH) {
-                st.hdrCtxOpen = true;
+                DataTable.OpenHdrMenu(st);
                 st.hdrCtxCol = i;
                 st.hdrCtxX = app.mouseX;
                 st.hdrCtxY = app.mouseY;
@@ -2578,7 +2578,7 @@ partial class DataTable {
                         }
                     }
                     st.RowContext.Raise();
-                    if (!st.externalRowMenu) { st.ctxOpen = true; }
+                    if (!st.externalRowMenu) { DataTable.OpenRowMenu(st); }
                     st.rangeDrag = false;
                     app.RequestRedraw();
                 }
@@ -2681,7 +2681,7 @@ partial class DataTable {
                 st.ctxOrder = ptrOi;
             }
             st.RowContext.Raise();
-            if (!st.externalRowMenu) { st.ctxOpen = true; }
+            if (!st.externalRowMenu) { DataTable.OpenRowMenu(st); }
             app.RequestRedraw();
         }
 

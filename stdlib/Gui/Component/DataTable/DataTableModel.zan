@@ -1226,10 +1226,23 @@ class DataTableState {
     int hdrCtxCol;             // 表头上下文菜单针对的列
     int hdrCtxX;               // 表头上下文菜单锚点 X
     int hdrCtxY;               // 表头上下文菜单锚点 Y
-    int cfSubOpen;             // 头菜单条件格式子面板：0 收起，1..4 同 cfMode
-    bool aggSubOpen;           // 头菜单合计聚合子面板已展开
     string toast;              // 临时状态消息（复制/导出反馈）
     int toastFrames;           // toast 剩余显示帧数
+
+    // ---- 表头/行右键菜单的 RichMenu（通用弹出菜单组件）状态 ----
+    // 菜单体每帧由 RenderHeaderMenu/RenderContextMenu 声明式构建，
+    // 交给 app.AddOverlay(OverlayPopup.RichMenu(...)) 渲染分发；
+    // 子菜单展开、外部点击关闭、Escape 全部由 RichMenu 自理。
+    int hdrMenuBaseId;         // 表头菜单稳定 id 块（WidgetId.Block(256)）
+    SignalInt hdrMenuResult;   // 表头菜单选中的 action 码（-1 无）
+    SignalBool hdrMenuOpen;    // RichMenu 开关（镜像 hdrCtxOpen）
+    SignalInt hdrMenuSub;      // 表头菜单子菜单展开行（-1 无）
+    SignalInt hdrMenuScroll;   // 表头菜单滚动偏移（跨帧持有）
+    int ctxMenuBaseId;         // 行菜单稳定 id 块
+    SignalInt ctxMenuResult;   // 行菜单选中的 action 码（-1 无）
+    SignalBool ctxMenuOpen;    // RichMenu 开关（镜像 ctxOpen）
+    SignalInt ctxMenuSub;      // 行菜单子菜单展开行（-1 无）
+    SignalInt ctxMenuScroll;   // 行菜单滚动偏移（跨帧持有）
 
     // ---- 筛选行（DevExpress 风格、表头下方的内联快速筛选） ----
     // 每个可见列都有一个文本输入框。在其中输入会实时过滤表格，
@@ -1561,10 +1574,18 @@ class DataTableState {
         this.hdrCtxCol = -1;
         this.hdrCtxX = 0;
         this.hdrCtxY = 0;
-        this.cfSubOpen = 0;
-        this.aggSubOpen = false;
         this.toast = "";
         this.toastFrames = 0;
+        this.hdrMenuBaseId = -1;
+        this.hdrMenuResult = new SignalInt(0 - 1);
+        this.hdrMenuOpen = new SignalBool(false);
+        this.hdrMenuSub = new SignalInt(0 - 1);
+        this.hdrMenuScroll = new SignalInt(0);
+        this.ctxMenuBaseId = -1;
+        this.ctxMenuResult = new SignalInt(0 - 1);
+        this.ctxMenuOpen = new SignalBool(false);
+        this.ctxMenuSub = new SignalInt(0 - 1);
+        this.ctxMenuScroll = new SignalInt(0);
         this.showFilterRow = false;
         this.filterRowText = new List<string>();
         this.filterRowFocusCol = -1;
