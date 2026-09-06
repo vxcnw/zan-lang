@@ -571,6 +571,61 @@ partial class ChartView {
         return sum / cnt;
     }
 
+    /// 窗口均值，千分固定点（不会像整数均值那样把 85/7 抹成 12）：
+    /// whole*1000 + rem*1000/cnt，中间量不超过 sum 的量级。
+    static int SeriesAvg1000(ChartSeries s, int i0, int i1) {
+        int sum = 0;
+        int cnt = 0;
+        for (int j = i0; j <= i1 && j < s.Count(); j = j + 1) {
+            if (j < s.data.Count && s.data[j].gap) { continue; }
+            sum = sum + s.Value(j);
+            cnt = cnt + 1;
+        }
+        if (cnt < 1) { return 0; }
+        int whole = sum / cnt;
+        int rem = sum - whole * cnt;
+        return whole * 1000 + (rem * 1000) / cnt;
+    }
+
+    /// 均值显示串（ECharts markLine 默认标签是具体数值，不是
+    /// "avg" 字样）：千分固定点四舍五入到两位小数，整数均值不加
+    /// 小数点（12142 → "12.14"，12000 → "12"）。
+    static string Avg1000Text(int avg1000) {
+        int whole = avg1000 / 1000;
+        int frac = avg1000 - whole * 1000;
+        if (frac < 0) { frac = 0 - frac; }
+        frac = (frac + 5) / 10;
+        if (frac >= 100) {
+            if (whole < 0) { whole = whole - 1; } else { whole = whole + 1; }
+            frac = frac - 100;
+        }
+        if (frac == 0) { return Convert.ToString(whole); }
+        string fd = Convert.ToString(frac);
+        if (fd.Length < 2) { fd = "0" + fd; }
+        return Convert.ToString(whole) + "." + fd;
+    }
+
+    /// 均值线的 y 像素：均值可带小数，落在两个数据刻度之间。
+    /// YOf 是仿射（y = B + v*C），因此 y(sum/cnt) = y(0) +
+    /// (y(sum) - y(0)) / cnt——把 sum 当横向量外推再除以 cnt，
+    /// 不用浮点也能得到亚数据单位的像素位。
+    static int AverageY(ChartFrame f, ChartSeries s, int i0, int i1) {
+        int sum = 0;
+        int cnt = 0;
+        for (int j = i0; j <= i1 && j < s.Count(); j = j + 1) {
+            if (j < s.data.Count && s.data[j].gap) { continue; }
+            sum = sum + s.Value(j);
+            cnt = cnt + 1;
+        }
+        if (cnt < 1) { return f.YOf(0, s.axisIndex); }
+        int y0 = f.YOf(0, s.axisIndex);
+        int ySum = f.YOf(sum, s.axisIndex);
+        int diff = ySum - y0;
+        int q = diff >= 0 ? (diff + cnt / 2) / cnt
+                          : 0 - ((0 - diff + cnt / 2) / cnt);
+        return y0 + q;
+    }
+
     /// markLine 一条线的实际 y 值（threshold seam）：kind
     /// average/min/max 从窗口推导，显式线用 yValue；窗口无数据
     /// 返回 Auto() 哨兵 = 不画。
@@ -786,9 +841,13 @@ partial class ChartView {
         for (int mi = 0; mi < s.markLines.Count; mi = mi + 1) {
             ChartMarkLine m = s.markLines[mi];
             if (m.valueIndex == 0) { continue; }  // x 轴竖线另绘
+            bool isAvg = m.kind == "average";
             int val = ChartView.MarkLineValue(m, s, i0, i1);
             if (val == ChartOption.Auto()) { continue; }
-            int ly = f.YOf(val, s.axisIndex);
+            // 均值线画在真实均值处（可带小数），min/max/显式线在
+            // 整数数据位上。
+            int ly = isAvg ? ChartView.AverageY(f, s, i0, i1)
+                           : f.YOf(val, s.axisIndex);
             int col = m.color != 0 ? m.color : s.color;
             string lt = m.lineType;
             if (lt.Length == 0) { lt = "dashed"; }
@@ -806,12 +865,17 @@ partial class ChartView {
                     dx = dx + dash + gap;
                 }
             }
+            // 标签默认是具体数值（ECharts 默认 markLine.label 即
+            // {c}），不是 "avg/min/max" 字样；显式 label 仍可带
+            // {value} 占位。
             string lbl = m.label;
             if (lbl.Length == 0) {
-                if (m.kind == "average") { lbl = "avg"; }
-                else if (m.kind == "min") { lbl = "min"; }
-                else if (m.kind == "max") { lbl = "max"; }
-                else { lbl = Convert.ToString(val); }
+                if (isAvg) {
+                    lbl = ChartView.Avg1000Text(
+                        ChartView.SeriesAvg1000(s, i0, i1));
+                } else {
+                    lbl = Convert.ToString(val);
+                }
             } else {
                 lbl = lbl.Replace("{value}", Convert.ToString(val));
             }
@@ -854,10 +918,12 @@ partial class ChartView {
             }
             string lbl = m.label;
             if (lbl.Length == 0) {
-                if (m.kind == "average") { lbl = "avg"; }
-                else if (m.kind == "min") { lbl = "min"; }
-                else if (m.kind == "max") { lbl = "max"; }
-                else { lbl = Convert.ToString(val); }
+                if (m.kind == "average") {
+                    lbl = ChartView.Avg1000Text(
+                        ChartView.SeriesAvg1000(s, i0, i1));
+                } else {
+                    lbl = Convert.ToString(val);
+                }
             } else {
                 lbl = lbl.Replace("{value}", Convert.ToString(val));
             }
@@ -884,8 +950,16 @@ partial class ChartView {
         if (nWin < 1) { nWin = 1; }
         if (o.markPoint) {
             bool below = o.showValues || s.labelShow;
-            if (maxI >= 0) { ChartView.MarkAt(app, f, s, maxI, maxI - i0, nWin, "max", below, 0, "", 0); }
-            if (minI >= 0 && minI != maxI) { ChartView.MarkAt(app, f, s, minI, minI - i0, nWin, "min", below, 0, "", 0); }
+            // 徽标里写具体数值（ECharts markPoint.label 默认 {c}），
+            // 不是 "max/min" 字样。
+            if (maxI >= 0) {
+                ChartView.MarkAt(app, f, s, maxI, maxI - i0, nWin,
+                    Convert.ToString(s.Value(maxI)), below, 0, "", 0);
+            }
+            if (minI >= 0 && minI != maxI) {
+                ChartView.MarkAt(app, f, s, minI, minI - i0, nWin,
+                    Convert.ToString(s.Value(minI)), below, 0, "", 0);
+            }
         }
         for (int mi = 0; mi < s.marks.Count; mi = mi + 1) {
             ChartMarkPoint m = s.marks[mi];
@@ -898,42 +972,66 @@ partial class ChartView {
             }
             if (idx < i0 || idx > i1 || idx >= s.Count()) { continue; }
             string lbl = m.label;
-            if (lbl.Length == 0) {
-                if (m.kind == "max") { lbl = "max"; }
-                else if (m.kind == "min") { lbl = "min"; }
-                else { lbl = Convert.ToString(s.Value(idx)); }
-            }
+            if (lbl.Length == 0) { lbl = Convert.ToString(s.Value(idx)); }
             ChartView.MarkAt(app, f, s, idx, idx - i0, nWin, lbl,
                 o.showValues || s.labelShow, m.color, m.symbol, m.sizeSet ? m.size : 0);
         }
     }
 
     /// 在数据点（类别下标 idx，槽位 slot = idx - i0）上绘制单个
-    /// 标记：系列色实心圆 + 白描边 + 上方小标签。below 为 true 时
-    /// 标签画到点下方——该系列同时显示数值标签时，点上方已被
-    /// 数值占据，"min/max" 文字再画上去就会叠字。
+    /// 标记。无显式 symbol 时画 ECharts 默认的气球徽标（pin）：
+    /// 系列色气球头 + 尾尖搭在符号外缘，**具体数值**白字写在头
+    /// 里——文字住在徽标中，与拐点零重叠。显式 symbol 的标记仍
+    /// 画符号 + 点旁小标签。below 为 true 时徽标翻到点下方——
+    /// 该系列同时显示数值标签时，点上方已被数值占据。
     static void MarkAt(App app, ChartFrame f, ChartSeries s, int idx,
                        int slot, int nWin, string lbl, bool below,
                        int colorOv, string symbolOv, int sizeOv) {
         Canvas c = app.canvas;
-        Theme t = app.theme;
         int rad = sizeOv > 0 ? sizeOv / 2 : app.Scale(4);
         int lx = f.CatX(slot, nWin);
         int ly = f.YOf(s.Value(idx), s.axisIndex);
         int col = colorOv != 0 ? colorOv : s.color;
         if (symbolOv.Length > 0) {
             Chart.DrawSymbol(c, lx, ly, rad, symbolOv, col, 0, 0);
-        } else {
-            c.FillCircle(lx, ly, rad, col);
-            ChartView.RingOutline(c, lx, ly, rad, 4294967295);
+            ChartView.MarkLabelAt(app, c, f, lx, ly, rad, lbl, below);
+            return;
         }
+        int mFs = Style.FontFallback(app, "small");
+        int lw = Canvas.MeasureText(lbl, mFs);
+        // 气球头半径包住文字；尾尖只搭在符号外缘 1px，不盖住拐点。
+        int hr = lw / 2 + app.Scale(5);
+        if (hr < app.Scale(8)) { hr = app.Scale(8); }
+        int tipY = below ? ly + rad + app.Scale(1)
+                         : ly - rad - app.Scale(1);
+        int th = app.Scale(5);
+        int cy = below ? tipY + th + hr : tipY - th - hr;
+        // 尾巴小三角：apex 在尾尖，底边藏进气球头（头后画、盖住
+        // 底边接缝）。FillPoly1000 顶点千分比，r = th，apex 落在
+        // (0, ±1000)，中心取 tipY ∓ th。
+        List<int> vx = new List<int>();
+        List<int> vy = new List<int>();
+        vx.Add(0); vy.Add(below ? 0 - 1000 : 1000);
+        vx.Add(0 - 450); vy.Add(below ? 250 : 0 - 250);
+        vx.Add(450); vy.Add(below ? 250 : 0 - 250);
+        Chart.FillPoly1000(c, lx, below ? tipY + th : tipY - th, th,
+            vx, vy, col);
+        c.FillCircle(lx, cy, hr, col);
+        c.DrawText(lx - lw / 2, Canvas.CenterTextY(cy - hr, hr * 2, mFs),
+            lbl, 4294967295, mFs);
+    }
+
+    /// 符号旁的小标签（显式 symbol 的标记用）：点上方/下方，
+    /// 水平钳制进绘图区。
+    static void MarkLabelAt(App app, Canvas c, ChartFrame f, int lx,
+                            int ly, int rad, string lbl, bool below) {
         int mFs = Style.FontFallback(app, "small");
         int lw = Canvas.MeasureText(lbl, mFs);
         int tx = lx - lw / 2;
         if (tx < f.plotX) { tx = f.plotX; }
         if (tx + lw > f.plotX + f.plotW) { tx = f.plotX + f.plotW - lw; }
-        int ty = ly - Canvas.FontHeight(mFs) - app.Scale(1);
-        if (below) { ty = ly + rad + app.Scale(2); }
+        int ty = below ? ly + rad + app.Scale(2)
+                       : ly - Canvas.FontHeight(mFs) - app.Scale(1);
         c.DrawText(tx, ty, lbl,
             Style.Part(app, "chart", "label", "", "", "", Style.SNormal()).FgOr(0),
             mFs);
