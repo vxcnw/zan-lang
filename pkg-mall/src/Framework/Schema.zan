@@ -65,7 +65,8 @@ class Schema {
         return true;
     }
 
-    /* 官方免费扩展种子：商城"扩展"类商品的样板（IDE 内安全安装）。 */
+    /* 官方商业插件种子：plugin 商品带 plugin_id 与钉住的公钥指纹，
+     * IDE 装前按信任链验签（scripts/pluginkey.ps1 生成侧）。 */
     static async bool SeedOfficialPackage(IDbConnection db) {
         CatalogDao dao = new CatalogDao(db);
         Product p = await dao.ProductBySlug("system-scripting-lua");
@@ -79,7 +80,9 @@ class Schema {
         row.slug = "system-scripting-lua";
         row.name = "System.Scripting.Lua";
         row.description = "Official Lua scripting extension for Zan (in-process Lua 5.4 embedding).";
-        row.productType = "extension";
+        row.productType = "plugin";
+        row.pluginId = "plg_seed_20260907_0001";
+        row.pubkeyFp = "ce56a87387ef7ede7f49297b2ad3f007b1e30ea16d403d472b7508e5ec2d751b";
         row.status = "approved";
         row.createdAt = WebApp.NowSeconds();
         int pid = await dao.InsertProduct(row);
@@ -89,7 +92,7 @@ class Schema {
         v.version = "1.0.0";
         v.majorVersion = 1;
         v.artifactUrl = "packages/System.Scripting.Lua-1.0.0.zpkg";
-        v.artifactSha256 = "70770780a7bf7c37945648c28fd13d83c2d38359799ef99cc724720912c5c77a";
+        v.artifactSha256 = "b4877022ee4b26ca15e677bad800c208bc3673545ac506b7fc4c60bb67648933";
         v.artifactSignature = "";
         v.releaseNotes = "Initial reviewed release.";
         v.status = "approved";

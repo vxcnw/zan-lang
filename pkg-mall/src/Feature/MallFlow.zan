@@ -33,6 +33,8 @@ class MallFlow {
             o.Put("name", JsonValue.NewStr(p.name));
             o.Put("description", JsonValue.NewStr(p.description));
             o.Put("product_type", JsonValue.NewStr(p.productType));
+            if (p.pluginId.Length > 0) { o.Put("plugin_id", JsonValue.NewStr(p.pluginId)); }
+            if (p.pubkeyFp.Length > 0) { o.Put("pubkey_fp", JsonValue.NewStr(p.pubkeyFp)); }
             o.Put("category", JsonValue.NewStr(MallFlow.CategoryName(cats, p.categoryId)));
             o.Put("min_price_points", JsonValue.NewNum(
                 Convert.ToString(await MallFlow.MinPrice(this.db, p.id))));
@@ -77,6 +79,8 @@ class MallFlow {
         o.Put("name", JsonValue.NewStr(p.name));
         o.Put("description", JsonValue.NewStr(p.description));
         o.Put("product_type", JsonValue.NewStr(p.productType));
+        if (p.pluginId.Length > 0) { o.Put("plugin_id", JsonValue.NewStr(p.pluginId)); }
+        if (p.pubkeyFp.Length > 0) { o.Put("pubkey_fp", JsonValue.NewStr(p.pubkeyFp)); }
         JsonValue plans = JsonValue.NewArray();
         List<PricingPlan> ps = await dao.PlansOf(p.id);
         for (int i = 0; i < ps.Count; i = i + 1) {

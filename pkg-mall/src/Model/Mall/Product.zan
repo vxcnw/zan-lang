@@ -25,9 +25,17 @@ class Product {
     [Column(StringLength = 4096)]
     string description;
 
-    /* extension / app */
+    /* extension / app / plugin */
     [Column(StringLength = 24, IsNullable = false)]
     string productType;
+
+    /* 商业插件身份，写进包内 zan.pkg 并钉进商城目录；非 plugin 商品为空。 */
+    [Column(StringLength = 64)]
+    string pluginId;
+
+    /* 商城钉住的插件公钥指纹（SHA-256，64 hex），装前校验防公钥调包。 */
+    [Column(StringLength = 64)]
+    string pubkeyFp;
 
     /* draft / pending / approved / rejected */
     [Column(StringLength = 24, IsNullable = false)]
