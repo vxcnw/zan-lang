@@ -77,6 +77,7 @@ class Game {
     List<Equipment> storage = new List<Equipment>();
     Equipment[] equipped = new Equipment[12];
     int[] collected = new int[12];
+    List<int> codexItems = new List<int>();
     List<string> logs = new List<string>();
 
     int Random(int bound) { seed = (int)(((long)seed * 48271) % 2147483647); return seed % bound; }
@@ -110,6 +111,7 @@ class Game {
         foreach (DataRow inner in GameTables.current.innerPower.rows) { if (inner.Text("stat") == key) { value = value + (long)innerRanks[inner.Int("id")] * inner.Int("value_per_level"); } }
         foreach (DataRow e in GameTables.current.elements.rows) { if (e.Text("stat") == key) { value = value + (long)elementRanks[e.Int("id")] * e.Int("value_per_level"); } }
         foreach (DataRow gem in GameTables.current.gems.rows) { if (gem.Text("stat") == key) { value = value + (long)gemRanks[gem.Int("id")] * gem.Int("value_per_level"); } }
+        value = value + SetBonus(key);
         bool offense = key == AttackSchool() + "_min" || key == AttackSchool() + "_max";
         value = value + (offense ? (long)SkillRank(0) * rule.Int("skill_flat") : 0) + (long)training * rule.Int("training_flat") + (long)collection * rule.Int("collection_flat") + (long)rebirth * rule.Int("rebirth_flat");
         long passive = 0;
@@ -550,14 +552,24 @@ class Game {
         hp = Rules.Clamp(hp, 0, MaxHp()); mp = Rules.Clamp(mp, 0, MaxMp());
         Log(recipe.Text("name") + "成功：" + e.Name());
     }
+    bool CodexHas(int definitionId) { for (int i = 0; i < codexItems.Count; i = i + 1) { if (codexItems[i] == definitionId) { return true; } } return false; }
+    int CodexCount() { return codexItems.Count; }
+    int SetCount(DataRow row) { int count = 0; foreach (string token in row.Text("items").Split("|")) { if (CodexHas(DataTable.Integer(token, "set item"))) { count = count + 1; } } return count; }
+    int SetBonus(string key) { int bonus = 0; foreach (DataRow row in GameTables.current.sets.rows) { if (row.Text("stat") == key && SetCount(row) >= row.Int("required")) { bonus = bonus + row.Int("value"); } } return bonus; }
+    string SetSummary() {
+        string text = "套装收藏（" + Rules.N(CodexCount()) + "件）：";
+        foreach (DataRow row in GameTables.current.sets.rows) { int count = SetCount(row); text = text + "\n" + row.Text("name") + " " + Rules.N(count) + "/" + Rules.N(row.Int("required")) + (count >= row.Int("required") ? " · 已激活：" + GameTables.current.attributes.Get(row.Text("stat")).Text("name") + " +" + Rules.N(row.Int("value")) : " · 未激活"); }
+        return text;
+    }
     void Collect(int index) {
         if (index < 0 || index >= bag.Count) { return; }
         Equipment e = bag[index];
         if (e.locked) { Log("请先解除装备锁定。"); return; }
+        if (CodexHas(e.definitionId)) { Log("此件装备定义已收录，装备未消耗。"); return; }
         int rank = e.tier + 1;
         if (collected[e.slot] >= rank) { Log("此部位已收录同级或更高品质，装备未消耗。"); return; }
         collection = collection + rank - collected[e.slot]; collected[e.slot] = rank;
-        bag.RemoveAt(index); Log("已消耗装备，提升此部位图鉴等级。");
+        codexItems.Add(e.definitionId); bag.RemoveAt(index); Log("已消耗装备，提升此部位图鉴等级。");
     }
     void TrainSkill(int slot) {
         if (job < 0 || slot < 0 || slot >= 8) { return; }

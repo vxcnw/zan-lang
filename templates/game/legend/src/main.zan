@@ -420,9 +420,10 @@ class LegendApp {
         detail = Text("", "secondary", 32); content.With(detail); detail.DockBottom();
     }
     void BuildCodex() {
-        content.With(Text("图鉴 · 在背包中选中装备后放入", "yellow", 28)); Grid grid = Grid.Of(3); grid.Gap(8);
+        content.With(Text("图鉴 · 在背包中选中装备后放入", "yellow", 28)); content.With(Text("已收录定义：" + Rules.N(g.CodexCount()) + " 件 · 槽位品质进度仍用于基础收藏评分", "cyan", 22)); Grid grid = Grid.Of(3); grid.Gap(8);
         for (int i = 0; i < 12; i = i + 1) { Panel cell = Col("frame"); cell.With(Text(Rules.Slots()[i], "cyan", 24)); cell.With(Art("slot-" + Rules.N(i % 10), 0, 48)); cell.With(Text(g.collected[i] == 0 ? "未收录" : Rules.Quality(g.collected[i]), "green", 20)); grid.With(cell); } content.With(grid);
-        Note(content, "当前为十二槽收藏；文档九页套装与最低系数加成尚未迁移。");
+        content.With(Text(g.SetSummary(), "secondary", 22));
+        Note(content, "收录同一物品定义只计一次；套装按已收录的物品定义数量激活，存档会保留明细。");
     }
     void BuildAchievements() {
         content.With(Text("成就与奖励", "yellow strong", 28)); pageInfo = Text("", "green", 100); content.With(pageInfo);

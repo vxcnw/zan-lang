@@ -45,6 +45,10 @@ class InventoryProgressionTests {
         Check(g.equipped[11] == targetBook && targetBook.coefficient == 6 && g.bag.Count == lowCount, "lower tianshu inheritance is rejected atomically");
         Equipment lockedBook = Item(g, 698); lockedBook.coefficient = 10; lockedBook.locked = true; g.bag.Add(lockedBook); int lockedCount = g.bag.Count; g.InheritTianShu(g.bag.Count - 1);
         Check(targetBook.coefficient == 6 && g.bag.Count == lockedCount, "locked tianshu inheritance is rejected atomically");
+        g.bag.Clear(); g.codexItems.Clear(); g.collection = 0; for (int i = 0; i < 12; i = i + 1) { g.collected[i] = 0; }
+        Equipment codexSword = Item(g, 16); Equipment codexDuplicate = Item(g, 16); g.bag.Add(codexSword); g.bag.Add(codexDuplicate); g.Collect(0); Check(g.CodexCount() == 1 && g.bag.Count == 1, "codex stores item definitions"); g.Collect(0); Check(g.CodexCount() == 1 && g.bag.Count == 1, "duplicate codex definition is not consumed");
+        g.bag.Add(Item(g, 41)); g.bag.Add(Item(g, 42)); g.Collect(1); g.Collect(1); Check(g.SetCount(GameTables.current.sets.At(0)) == 3 && g.SetBonus("attack_max") == 12, "codex set activates from collected definitions");
+        int codexAttack = g.Stat("attack_max"); g.savedAt = 1700000000; Game codexLoaded = SaveStore.Decode(SaveStore.Encode(g).ToJson()); Check(codexLoaded.CodexCount() == 3 && codexLoaded.SetBonus("attack_max") == 12 && codexLoaded.Stat("attack_max") == codexAttack, "codex definitions and set bonus save round trip");
         int attack = g.Stat("attack_max"); int magic = g.Stat("magic_max"); g.TrainInner(3);
         Check(g.Stat("magic_max") == magic + 1 && g.Stat("attack_max") == attack, "inner slots have independent attributes");
         g.innerRanks[0] = 100; coins = g.tp; ore = g.iron; g.TrainInner(0); g.TrainInner(-1); g.TrainInner(8);

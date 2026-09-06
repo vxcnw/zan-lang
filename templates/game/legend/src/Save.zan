@@ -16,7 +16,7 @@ class SaveStore {
         return dir + "/hero-v2.json";
     }
     static JsonValue Encode(Game g) {
-        JsonValue j = JsonValue.NewObject(); Rules.Put(j, "version", 5);
+        JsonValue j = JsonValue.NewObject(); Rules.Put(j, "version", 6);
         Rules.Put(j, "job", g.job);
         Rules.Put(j, "level", g.level);
         Rules.Put(j, "xp", g.xp);
@@ -98,11 +98,12 @@ class SaveStore {
         for (int i = 0; i < 12; i = i + 1) { if (g.equipped[i] == null) { gear.Append(JsonValue.NewObject()); } else { gear.Append(g.equipped[i].Encode()); } codex.Append(JsonValue.NewNum(Rules.N(g.collected[i]))); }
         for (int i = 0; i < g.bag.Count; i = i + 1) { bag.Append(g.bag[i].Encode()); }
         for (int i = 0; i < g.storage.Count; i = i + 1) { vault.Append(g.storage[i].Encode()); }
-        j.Put("gear", gear); j.Put("bag", bag); j.Put("storage", vault); j.Put("codex", codex); return j;
+        JsonValue codexItems = JsonValue.NewArray(); for (int i = 0; i < g.codexItems.Count; i = i + 1) { codexItems.Append(JsonValue.NewNum(Rules.N(g.codexItems[i]))); }
+        j.Put("gear", gear); j.Put("bag", bag); j.Put("storage", vault); j.Put("codex", codex); j.Put("codexItems", codexItems); return j;
     }
     static Game Decode(string text) {
         JsonValue j = JsonValue.Parse(text);
-        if (!j.IsObject() || (j.Int("version", 0) != 2 && j.Int("version", 0) != 3 && j.Int("version", 0) != 4 && j.Int("version", 0) != 5) || !j.Has("savedAt") || !j.Has("job")) { throw new Exception("Unsupported or incomplete save"); }
+        if (!j.IsObject() || (j.Int("version", 0) != 2 && j.Int("version", 0) != 3 && j.Int("version", 0) != 4 && j.Int("version", 0) != 5 && j.Int("version", 0) != 6) || !j.Has("savedAt") || !j.Has("job")) { throw new Exception("Unsupported or incomplete save"); }
         Game g = new Game();
         g.job = Rules.Clamp(j.Int("job", g.job), -1, 2);
         g.level = Rules.Clamp(j.Int("level", g.level), 1, GameTables.current.levels.rows.Count);
@@ -213,6 +214,15 @@ class SaveStore {
         for (int i = 0; i < 12; i = i + 1) {
             Equipment e = Equipment.Decode(gear.At(i)); if (e != null && e.slot != i) { throw new Exception("Invalid slot"); } g.equipped[i] = e;
             g.collected[i] = Rules.Clamp(codex.At(i).AsInt(0), 0, GameTables.current.qualities.rows.Count); g.collection = g.collection + g.collected[i];
+        }
+        JsonValue codexItems = j.Get("codexItems");
+        if (codexItems != null) {
+            if (!codexItems.IsArray() || codexItems.Count() > 100000) { throw new Exception("Invalid codex items"); }
+            for (int i = 0; i < codexItems.Count(); i = i + 1) {
+                int definitionId = codexItems.At(i).AsInt(0); DataRow definition = GameTables.current.items.At(definitionId);
+                if (definition.Int("slot") < 0 || g.CodexHas(definitionId)) { throw new Exception("Invalid or duplicate codex item"); }
+                g.codexItems.Add(definitionId);
+            }
         }
         for (int i = 0; i < bag.Count(); i = i + 1) { Equipment e = Equipment.Decode(bag.At(i)); if (e == null) { throw new Exception("Invalid item"); } g.bag.Add(e); }
         for (int i = 0; i < vault.Count(); i = i + 1) { Equipment e = Equipment.Decode(vault.At(i)); if (e == null) { throw new Exception("Invalid stored item"); } g.storage.Add(e); }

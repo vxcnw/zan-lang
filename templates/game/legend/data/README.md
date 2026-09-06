@@ -70,3 +70,8 @@ python templates/game/legend/tools/enrich_attributes.py
 ## 五行突破字段
 
 `elements.csv` 的 `upgrade_iron` / `upgrade_iron_step` 与 `upgrade_yuan` / `upgrade_yuan_step` 定义每次突破的基础材料和随等级增长的材料。客户端升级前先检查金币、黑铁、元宝，材料不足时经验和资源均不改变。
+
+
+## 图鉴套装字段
+
+`sets.csv` 以物品定义 ID 列表配置套装门槛、属性与数值。运行时按图鉴中已收录的定义计数；重复定义不会再次消耗，套装效果会参与角色属性计算并写入存档。
