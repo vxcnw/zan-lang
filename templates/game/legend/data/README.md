@@ -65,3 +65,8 @@ python templates/game/legend/tools/enrich_attributes.py
 `need`、`f1`、`fj`、`ztx` 等原字段保持原样，没有根据缩写猜测并实现吸血、暴击、套装等效果。它们的解释和触发逻辑必须对照原程序验证后再接入。当前完整的是上述十二个基础战斗属性，不是“所有原版特殊词条和所有玩法”。
 
 回归测试位于仓库 `tests/templates/legend/`：86 条 Zan 断言覆盖穿戴、伤害分流、强化、存档和三职业一小时离线模拟；Python 测试逐字段核对全量原始定义，并验证导入幂等和八类错误配置拒绝。
+
+
+## 五行突破字段
+
+`elements.csv` 的 `upgrade_iron` / `upgrade_iron_step` 与 `upgrade_yuan` / `upgrade_yuan_step` 定义每次突破的基础材料和随等级增长的材料。客户端升级前先检查金币、黑铁、元宝，材料不足时经验和资源均不改变。

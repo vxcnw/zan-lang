@@ -420,6 +420,8 @@ class Game {
     }
     void CycleFilterCoefficient() { filterCoefficient = filterCoefficient >= B("equipment_coefficient_max") ? 1 : filterCoefficient + 1; }
     int ElementNeed(int id) { DataRow e = GameTables.current.elements.At(id); return e.Int("xp_base") + elementRanks[id] * e.Int("xp_step"); }
+    int ElementIronCost(int id) { DataRow e = GameTables.current.elements.At(id); return e.Int("upgrade_iron") + elementRanks[id] * e.Int("upgrade_iron_step"); }
+    int ElementYuanCost(int id) { DataRow e = GameTables.current.elements.At(id); return e.Int("upgrade_yuan") + elementRanks[id] * e.Int("upgrade_yuan_step"); }
     void InjectElement(int id) {
         if (job < 0 || id < 0 || id >= 5) { return; }
         if (elementRanks[id] >= GameTables.current.elements.At(id).Int("max_level")) { Log("该五行已满级。"); return; }
@@ -431,8 +433,10 @@ class Game {
         if (job < 0 || id < 0 || id >= 5) { return; }
         DataRow e = GameTables.current.elements.At(id);
         if (elementRanks[id] >= e.Int("max_level") || elementXp[id] < ElementNeed(id)) { Log("经验不足或已满级，请先注入。"); return; }
+        int ironCost = ElementIronCost(id); int yuanCost = ElementYuanCost(id);
+        if (!Pay(0, ironCost, yuanCost)) { Log("突破材料不足，五行经验未消耗。"); return; }
         elementXp[id] = elementXp[id] - ElementNeed(id); elementRanks[id] = elementRanks[id] + 1;
-        Log(e.Text("name") + "行升至 " + Rules.N(elementRanks[id]) + " 级，属性已生效。");
+        Log(e.Text("name") + "行升至 " + Rules.N(elementRanks[id]) + " 级，消耗黑铁 " + Rules.N(ironCost) + " / 元宝 " + Rules.N(yuanCost) + "，属性已生效。");
     }
     void LeaveChallenge() {
         if (mode == 0) { return; } if (recovery > 0) { Log("请等待复活，不能通过退出跳过恢复。"); return; }

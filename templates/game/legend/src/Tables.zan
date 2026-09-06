@@ -139,7 +139,7 @@ class GameTables {
         t.attributes = DataTable.Load(dir + "/attributes.csv", "id,name,score_weight:0:10000,upgrade_pct:0:100,skill_flat:0:1000,training_flat:0:1000,collection_flat:0:1000,rebirth_flat:0:100000,rebirth_pct:0:100,title_pct:0:100");
         t.innerPower = DataTable.Load(dir + "/inner_power.csv", "id:0:7,name,stat,value_per_level:1:1000,max_level:1:100,tp:1:100000,tp_per_level:0:1000,iron:0:100000");
         t.gems = DataTable.Load(dir + "/gems.csv", "id:0:5,name,stat,value_per_level:1:10000,max_level:1:100,gold:0:1000000,iron:0:100000,yuan:0:100000,synthesis_gold:1:1000000,synthesis_iron:1:100000,synthesis_yuan:1:100000,synthesis_max_level:1:100");
-        t.elements = DataTable.Load(dir + "/elements.csv", "id:0:4,name,picture,stat,value_per_level:1:10000,max_level:1:100,xp_base:1:100000,xp_step:0:10000");
+        t.elements = DataTable.Load(dir + "/elements.csv", "id:0:4,name,picture,stat,value_per_level:1:10000,max_level:1:100,xp_base:1:100000,xp_step:0:10000,upgrade_iron:0:100000,upgrade_iron_step:0:100000,upgrade_yuan:0:100000,upgrade_yuan_step:0:100000");
         t.recycle = DataTable.Load(dir + "/recycle.csv", "id:0:6,name,numerator:1:1000000,denominator:1:1000000,cap:1:1000000000");
         t.recyclePrices = DataTable.Load(dir + "/recycle_prices.csv", "id:1:1000000,gold:0:100000000");
         t.Validate(); return t;
@@ -147,7 +147,7 @@ class GameTables {
     void Require(bool condition, string message) { if (!condition) { throw new Exception("Configuration: " + message); } }
     void Validate() {
         Require(elements.rows.Count == 5 && recycle.rows.Count == 7, "five elements and seven recycle currencies required");
-        for (int i = 0; i < 5; i = i + 1) { attributes.Get(elements.At(i).Text("stat")); }
+        for (int i = 0; i < 5; i = i + 1) { DataRow element = elements.At(i); attributes.Get(element.Text("stat")); Require(element.Int("upgrade_iron") >= 0 && element.Int("upgrade_iron_step") >= 0 && element.Int("upgrade_yuan") >= 0 && element.Int("upgrade_yuan_step") >= 0, element.location + ": upgrade costs must be non-negative"); }
         for (int i = 0; i < 7; i = i + 1) { recycle.At(i); }
         foreach (DataRow item in items.rows) { if (item.Int("slot") >= 0) { recyclePrices.At(item.Int("id")); } }
         foreach (DataRow price in recyclePrices.rows) { Require(items.At(price.Int("id")).Int("slot") >= 0, "recycle price requires equipment"); }

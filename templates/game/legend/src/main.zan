@@ -375,7 +375,7 @@ class LegendApp {
         Panel bottom = Col("element-summary"); bottom.Prefer(0, 138); bottom.DockBottom(); formation.Add(bottom);
         pageInfo = Text("", "green", 64); pageInfo.Named("element-pool"); bottom.With(pageInfo);
         elementToggle = Btn("", "element-training", () => { g.elementTraining = !g.elementTraining; Changed(); }); bottom.With(elementToggle);
-        Note(bottom, "经验池满后停止累计；战斗暂停不影响修炼，离线有效。");
+        Note(bottom, "经验池满后停止累计；战斗暂停不影响修炼，离线有效。升级会按五行配置消耗突破材料。");
         detail = Text("", "secondary", 28); content.With(detail); detail.DockBottom();
     }
     void BuildTreasure() {
@@ -504,7 +504,7 @@ class LegendApp {
             elementToggle.Text = g.elementTraining ? "暂停修炼" : "开始修炼"; detail.Text = g.notice;
             for (int i = 0; i < 5; i = i + 1) {
                 DataRow e = GameTables.current.elements.At(i);
-                elementLabels[i].Text = e.Text("name") + " · " + Rules.N(g.elementRanks[i]) + "级 · " + Rules.N(g.elementXp[i]) + "/" + Rules.N(g.ElementNeed(i)) + "\n" + GameTables.current.attributes.Get(e.Text("stat")).Text("name") + " +" + Rules.N(g.elementRanks[i] * e.Int("value_per_level"));
+                elementLabels[i].Text = e.Text("name") + " · " + Rules.N(g.elementRanks[i]) + "级 · " + Rules.N(g.elementXp[i]) + "/" + Rules.N(g.ElementNeed(i)) + "\n" + GameTables.current.attributes.Get(e.Text("stat")).Text("name") + " +" + Rules.N(g.elementRanks[i] * e.Int("value_per_level")) + "\n突破：黑铁 " + Rules.N(g.ElementIronCost(i)) + " / 元宝 " + Rules.N(g.ElementYuanCost(i));
                 elementBars[i].percent = g.elementXp[i] * 100 / g.ElementNeed(i);
             }
         }

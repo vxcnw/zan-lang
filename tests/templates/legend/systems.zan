@@ -48,7 +48,8 @@ class LegendSystemTests {
         int before = g.Stat("attack_max"); int pool = g.elementPool; g.UpgradeElement(0);
         Check(g.elementRanks[0] == 0 && g.elementPool == pool, "upgrade requires injected xp");
         g.InjectElement(0); Check(g.elementPool == 0 && g.elementXp[0] == 60 && g.elementRanks[0] == 0, "inject transfers not upgrades");
-        g.UpgradeElement(0); Check(g.elementRanks[0] == 1 && g.elementXp[0] == 0 && g.Stat("attack_max") == before + 2, "element rank changes actual stat");
+        int ironBeforeElement = g.iron; g.UpgradeElement(0); Check(g.elementRanks[0] == 1 && g.elementXp[0] == 0 && g.iron == ironBeforeElement - 2 && g.Stat("attack_max") == before + 2, "element rank changes stat and consumes configured material");
+        int rankBeforeShortage = g.elementRanks[1]; int xpBeforeShortage = g.elementXp[1]; g.elementXp[1] = g.ElementNeed(1); g.iron = 0; g.gems = 0; g.UpgradeElement(1); Check(g.elementRanks[1] == rankBeforeShortage && g.elementXp[1] == xpBeforeShortage + 60 && g.iron == 0 && g.gems == 0, "element breakthrough shortage is atomic");
         Check(g.ElementNeed(0) == 90 && g.elementRanks[1] == 0, "independent levels and configured scaling");
         g.elementPool = g.B("element_pool_cap") - 1; g.Advance(3,1700000110);
         Check(g.elementPool == g.B("element_pool_cap") && g.elementSeconds == 61, "training cap no overflow/time inflation");
