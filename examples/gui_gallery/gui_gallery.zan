@@ -1204,6 +1204,19 @@ class Gallery {
     // library's built-in centered modal (DataTable.ExportToXlsxAsyncUi).
     static Button dtExportBtn;
     static Button bigExportBtn;
+    static Button dtAddBtn;       // "Add row" demo button (AppendRow + defaults)
+    // Row form window ("改"/"查" segments): a page layer holding a retained
+    // form with one field per editable column; created once, populated per open.
+    static LayerState dtEditWin;
+    static Input dtEdTeam;
+    static Input dtEdName;
+    static Input dtEdScore;
+    static Input dtEdSalary;
+    static SelectBox dtEdDept;
+    static Input dtEdCity;
+    static Input dtEdTotal;
+    static int dtEditRow;
+    static bool dtEditView;
     static List<DataColumn> dtDemoCols;   // last frame's column list — the demo rebuilds it per frame, the export click takes the latest
     static DataRow DtRow7(string a, string b, string cc, string d, string e, string f, string g) {
         DataRow r = new DataRow();
@@ -1233,18 +1246,205 @@ class Gallery {
         return r;
     }
 
-    /// DataTable 演示的 CellClick：按钮列（"act"）点击落到这里——
-    /// 事件上下文由渲染循环填好（HitRow/HitCol），处理器只读。
+    /// DataTable 演示的 CellClick：Ops 按钮组列（Actions 动作列，
+    /// "act"）的段点击落到这里——段号在 st.compC：0增 1删 2改 3查。
+    /// 增/删走引擎行 API（Ctrl+Z 可撤销），改/查打开行表单窗口。
     static void OnDemoCellClick() {
         DataTableState st = Gallery.demoTableState;
-        int actCol = DataTable.Col(Gallery.dtDemoCols, "act");
-        if (actCol >= 0 && st.HitCol() == actCol && st.HitRow() >= 0
-            && st.HitRow() < Gallery.demoRows.Count) {
-            string who = Gallery.demoRows[st.HitRow()].At(DataTable.Col(Gallery.dtDemoCols, "name"));
-            Gallery.Fired(Gallery.app, "DataTable", "Button: " + who);
+        List<DataColumn> cols = Gallery.dtDemoCols;
+        int row = st.HitRow();
+        if (cols == null || row < 0 || row >= Gallery.demoRows.Count) {
+            Gallery.FiredN(Gallery.app, "DataTable", "cell clicked");
+            return;
+        }
+        string who = Gallery.demoRows[row].At(DataTable.Col(cols, "name"));
+        int opsCol = DataTable.Col(cols, "act");
+        if (opsCol >= 0 && st.HitCol() == opsCol && st.compC >= 0 && st.compC < 4) {
+            DataSource src = new RowListSource(Gallery.demoRows);
+            if (st.compC == 0) {
+                // 增：在该行下方插入空行（bool 列引擎自动填 false 文本），
+                // 给个可辨认的名字。
+                int at = DataTable.InsertRow(st, cols, src, row + 1);
+                if (at >= 0) {
+                    int nameCol = DataTable.Col(cols, "name");
+                    if (nameCol >= 0) {
+                        src.SetCell(at, nameCol,
+                            Gallery.T("New row ", "新行 ") + Convert.ToString(at + 1));
+                    }
+                    Gallery.Fired(Gallery.app, "DataTable",
+                        Gallery.T("Inserted below #", "已在第 ")
+                        + Convert.ToString(row + 1)
+                        + Gallery.T(" (Ctrl+Z undoes)", " 行下方插入（Ctrl+Z 撤销）"));
+                }
+            } else if (st.compC == 1) {
+                if (DataTable.DeleteRow(st, cols, src, row)) {
+                    Gallery.Fired(Gallery.app, "DataTable",
+                        Gallery.T("Deleted row: ", "删除行: ") + who
+                        + Gallery.T(" (Ctrl+Z undoes)", "（Ctrl+Z 撤销）"));
+                }
+            } else if (st.compC == 2) {
+                Gallery.DtOpenRowForm(row, false);
+                Gallery.Fired(Gallery.app, "DataTable",
+                    Gallery.T("Edit row: ", "修改行: ") + who
+                    + Gallery.T(" — form window opened", " —— 已打开表单窗口"));
+            } else {
+                Gallery.DtOpenRowForm(row, true);
+                Gallery.Fired(Gallery.app, "DataTable",
+                    Gallery.T("View row: ", "查看行: ") + who);
+            }
             return;
         }
         Gallery.FiredN(Gallery.app, "DataTable", "cell clicked");
+    }
+
+    /// 打开行表单窗口（改/查共用）：窗口和字段控件只建一次
+    ///（控件树包在 Layer.BeginBody()/EndBody() 里领保留段 id），
+    /// 每次打开按当前行灌值。view=true 时标题/按钮文案换成
+    /// 查看，确定不写回。
+    static void DtOpenRowForm(int row, bool view) {
+        List<DataColumn> cols = Gallery.dtDemoCols;
+        if (cols == null || row < 0 || row >= Gallery.demoRows.Count) { return; }
+        App app = Gallery.app;
+        if (Gallery.dtEditWin == null) {
+            Layer.BeginBody();
+            Panel left = Panel.Column().Gap(app.Scale(6));
+            Panel right = Panel.Column().Gap(app.Scale(6));
+            Gallery.dtEdTeam = new Input(Gallery.T("Team", "团队"));
+            Gallery.dtEdName = new Input(Gallery.T("Name", "姓名"));
+            Gallery.dtEdScore = new Input(Gallery.T("Score", "评分"));
+            Gallery.dtEdSalary = new Input(Gallery.T("Salary", "薪水"));
+            Gallery.dtEdDept = SelectBox.FromOptions(Gallery.DeptChoices(), "");
+            Gallery.dtEdCity = new Input(Gallery.T("City", "城市"));
+            Gallery.dtEdTotal = new Input(Gallery.T("Total", "总额"));
+            Gallery.DtFormField(left, Gallery.T("Team", "团队"), Gallery.dtEdTeam);
+            Gallery.DtFormField(left, Gallery.T("Name", "姓名"), Gallery.dtEdName);
+            Gallery.DtFormField(left, Gallery.T("Score", "评分"), Gallery.dtEdScore);
+            Gallery.DtFormField(left, Gallery.T("Salary", "薪水"), Gallery.dtEdSalary);
+            Gallery.DtFormField(right, Gallery.T("Dept", "部门"), null);
+            right.With(Gallery.dtEdDept);
+            Gallery.DtFormField(right, Gallery.T("City", "城市"), Gallery.dtEdCity);
+            Gallery.DtFormField(right, Gallery.T("Total", "总额"), Gallery.dtEdTotal);
+            Panel form = Panel.Row().Gap(app.Scale(18));
+            form.With(left);
+            form.With(right);
+            Layer.EndBody();
+            // 画布居中，贴边夹取（同 SpawnFormWindow）——不定位的
+            // 窗口会落在 (0,0)，被标题栏/导航盖住一截。
+            int fw = app.Scale(430);
+            int fh = app.Scale(340);
+            int fx = (app.canvas.Width() - fw) / 2;
+            int fy = (app.canvas.Height() - fh) / 2;
+            if (fx < app.Scale(8)) { fx = app.Scale(8); }
+            if (fy < app.Scale(8)) { fy = app.Scale(8); }
+            Gallery.dtEditWin = new LayerState("Edit row", fx, fy, fw, fh);
+            Gallery.dtEditWin.SetBody(form);
+            // 挂到全局 Layer 栈：demo 块内联渲染会在代码面板之前
+            // 画窗，页面后画的内容盖掉半截（「弹窗被遮挡」）。
+            Gallery.demoLayers.Add(Gallery.dtEditWin);
+        }
+        Gallery.dtEditRow = row;
+        Gallery.dtEditView = view;
+        DataRow r = Gallery.demoRows[row];
+        Gallery.dtEdTeam.SetText(r.At(DataTable.Col(cols, "team")));
+        Gallery.dtEdName.SetText(r.At(DataTable.Col(cols, "name")));
+        Gallery.dtEdScore.SetText(r.At(DataTable.Col(cols, "score")));
+        Gallery.dtEdSalary.SetText(r.At(DataTable.Col(cols, "salary")));
+        Gallery.dtEdCity.SetText(r.At(DataTable.Col(cols, "city")));
+        Gallery.dtEdTotal.SetText(r.At(DataTable.Col(cols, "total")));
+        string dept = r.At(DataTable.Col(cols, "dept"));
+        int di = 0;
+        List<string> deps = Gallery.DeptChoices();
+        for (int i = 0; i < deps.Count; i = i + 1) {
+            if (deps[i] == dept) { di = i; }
+        }
+        Gallery.dtEdDept.SetIndex(di);
+        Gallery.dtEditWin.title = view ? Gallery.T("View row", "查看行")
+                                       : Gallery.T("Edit row", "修改行");
+        Gallery.dtEditWin.okText = view ? Gallery.T("Close", "关闭")
+                                        : Gallery.T("Save", "保存");
+        Gallery.dtEditWin.Open();
+    }
+
+    /// 表单里加一个"标签 + 字段控件"组。dept 列的字段是
+    /// SelectBox（已在 BeginBody 里建好），传 null 占位由调用方
+    /// 先行插入。
+    static void DtFormField(Panel form, string label, Input inp) {
+        form.With(new Label { Text = label, Class = "secondary" });
+        if (inp != null) { form.With(inp); }
+    }
+
+    /// 表单窗口的确定（非查看模式）：把每个字段与单元格现状
+    /// 比对，变化的走引擎编辑通道（Journal 记撤销 + SetCell），
+    /// 整窗一个撤销组，Ctrl+Z 一次全恢复。
+    static void DtCommitRowForm() {
+        List<DataColumn> cols = Gallery.dtDemoCols;
+        DataTableState st = Gallery.demoTableState;
+        int row = Gallery.dtEditRow;
+        if (cols == null || st == null || row < 0
+            || row >= Gallery.demoRows.Count) { return; }
+        DataSource src = new RowListSource(Gallery.demoRows);
+        DataTable.BeginUndoGroup(st);
+        Gallery.DtFormSetCell(st, cols, src, row, "team", Gallery.dtEdTeam.GetText());
+        Gallery.DtFormSetCell(st, cols, src, row, "name", Gallery.dtEdName.GetText());
+        Gallery.DtFormSetCell(st, cols, src, row, "score", Gallery.dtEdScore.GetText());
+        Gallery.DtFormSetCell(st, cols, src, row, "salary", Gallery.dtEdSalary.GetText());
+        Gallery.DtFormSetCell(st, cols, src, row, "city", Gallery.dtEdCity.GetText());
+        Gallery.DtFormSetCell(st, cols, src, row, "total", Gallery.dtEdTotal.GetText());
+        string dept = Gallery.dtEdDept.SelectedLabel();
+        if (dept != "") { Gallery.DtFormSetCell(st, cols, src, row, "dept", dept); }
+        DataTable.EndUndoGroup(st);
+        string who = Gallery.demoRows[row].At(DataTable.Col(cols, "name"));
+        Gallery.Fired(Gallery.app, "DataTable",
+            Gallery.T("Saved row: ", "已保存行: ") + who
+            + Gallery.T(" (Ctrl+Z undoes)", "（Ctrl+Z 撤销）"));
+    }
+
+    /// 单字段写回：列找不到或值未变就跳过；变化记撤销并写源。
+    static void DtFormSetCell(DataTableState st, List<DataColumn> cols,
+                              DataSource src, int row, string fieldName,
+                              string val) {
+        int cc = DataTable.Col(cols, fieldName);
+        if (cc < 0) { return; }
+        string old = src.CellText(row, cc);
+        if (old == val) { return; }
+        DataTable.Journal(st, RowEdit.Cell(row, cc, old, val));
+        src.SetCell(row, cc, val);
+    }
+
+    /// DataTable 演示的 CellEdit：任何写回（开关列切换、Ops"编辑"段
+    /// 选完部门、F2 行内编辑提交）都到这里，HitRow/HitCol 指向刚
+    /// 写入的格，单元格文本已是新值。
+    static void OnDemoCellEdit() {
+        DataTableState st = Gallery.demoTableState;
+        List<DataColumn> cols = Gallery.dtDemoCols;
+        int row = st.HitRow();
+        int col = st.HitCol();
+        if (cols == null || col < 0 || col >= cols.Count
+            || row < 0 || row >= Gallery.demoRows.Count) { return; }
+        string who = Gallery.demoRows[row].At(DataTable.Col(cols, "name"));
+        Gallery.Fired(Gallery.app, "DataTable",
+            Gallery.T("Edited: ", "修改行: ") + who + " · " + cols[col].title
+            + " = " + Gallery.demoRows[row].At(col));
+    }
+
+    /// "添加行"按钮：走引擎 AppendRow（记撤销、bool 列自动填
+    /// false 文本），再给姓名/城市填默认值让新行可辨认。
+    static void OnDtAddRowClick() {
+        List<DataColumn> cols = Gallery.dtDemoCols;
+        if (cols == null || Gallery.demoRows == null) { return; }
+        DataTableState st = Gallery.demoTableState;
+        DataSource src = new RowListSource(Gallery.demoRows);
+        int at = DataTable.AppendRow(st, cols, src);
+        if (at < 0) { return; }
+        int nameCol = DataTable.Col(cols, "name");
+        int cityCol = DataTable.Col(cols, "city");
+        if (nameCol >= 0) {
+            src.SetCell(at, nameCol,
+                Gallery.T("New member ", "新成员") + Convert.ToString(at + 1));
+        }
+        if (cityCol >= 0) { src.SetCell(at, cityCol, Gallery.T("Hangzhou", "杭州")); }
+        Gallery.Fired(Gallery.app, "DataTable",
+            Gallery.T("Row appended (Ctrl+Z undoes)", "已添加一行（Ctrl+Z 撤销）"));
     }
 
     // ---- The DataTable demos' async Excel export ----
@@ -2464,6 +2664,7 @@ class Gallery {
         Gallery.demoTableState.styler = Gallery.demoStyler;
         Gallery.demoTableState.allowAddRow = true;   // show the "add row" line
         Gallery.demoTableState.CellClick.Add(Gallery.OnDemoCellClick);
+        Gallery.demoTableState.CellEdit.Add(Gallery.OnDemoCellEdit);
         Gallery.demoRows = new List<DataRow>();
         Gallery.demoRows.Add(Gallery.DtRow11("Alpha", "Zan", "98", "128000", "Engineering", "San Francisco", "143400", "pencil", "Edit", "12,18,9,24,30,22", "3,1,0,4,2,5,1"));
         Gallery.demoRows.Add(Gallery.DtRow11("Beta", "Lang", "87", "94500", "Sales", "New York", "105800", "trash", "Edit", "20,-8,26,16,-4,24", "0,2,4,1,3,2,0"));
@@ -3374,6 +3575,18 @@ class Gallery {
         // 与下面的 toast/通知同类：全局状态每帧在页面之上画一次。
         Layer.RenderStack(app, Gallery.demoLayers);
 
+        // 行表单窗口的提交：正文控件树由上面的 RenderStack 画，
+        // 动作检查也放在同一全局 pass（demo 块随选项卡/滚出走线，
+        // 放那里窗口开着也可能没人处理动作）。
+        if (Gallery.dtEditWin != null && Gallery.dtEditWin.open) {
+            int dAct = Gallery.dtEditWin.action;
+            if (dAct != 0) {
+                Gallery.dtEditWin.open = false;
+                if (dAct == 1 && !Gallery.dtEditView) { Gallery.DtCommitRowForm(); }
+                app.RequestRedraw();
+            }
+        }
+
         if (Gallery.dlgAlert.open) {
             Layer.Render(app, Gallery.dlgAlert);
             if (Gallery.dlgAlert.action != 0) {
@@ -3672,7 +3885,16 @@ class Gallery {
         Gallery.RenderLangChip(app, c, t, zhX, lgY, lgW, lgH, "中", curLang == 1);
         // ClickAvailable 而非裸 kind==3：拖拽列表的收尾释放带 EventFlag，
         // 不应当成点击（否则甩动抽屉总会选中释放点下的行）。
+        // 语言片是纯几何热区：必须登记命中矩形，否则按下落在
+        // "空白"（pressOnBlocker）会让释放被 ClickAvailable 拒绝
+        //（5ff8eca5 弹层防穿透的副作用，见导航行同款修复）。
         bool navClick = app.ClickAvailable();
+        {
+            int enId = app.focus.AllocId();
+            int zhId = app.focus.AllocId();
+            app.hitTester.RegisterRect(enId, enX, lgY, lgW, lgH, 0);
+            app.hitTester.RegisterRect(zhId, zhX, lgY, lgW, lgH, 0);
+        }
         if (navClick) {
             if (app.mouseX >= enX && app.mouseX < enX + lgW
                     && app.mouseY >= lgY && app.mouseY < lgY + lgH) {
@@ -3751,6 +3973,12 @@ class Gallery {
                     if (selRow) { tc = t.textInverse; }
                     c.DrawText(sx + app.Scale(8), ry + app.Scale(5),
                         row.text, tc, t.fontSizeSmall);
+                    // 行是纯几何热区：不登记命中矩形时按下落在
+                    // "空白"上（pressOnBlocker，5ff8eca5），释放会被
+                    // ClickAvailable 同源拒绝——导航从此点不动。
+                    // 登记（同 DataTable 行的做法）让按下帧 hitId>=0。
+                    app.hitTester.RegisterRect(app.focus.AllocId(),
+                        area.x, ry, sw, rowH, 0);
                     if (click && hot) {
                         Gallery.selected.Set(row.compIndex);
                         Gallery.codeScroll.Set(0);
@@ -3861,6 +4089,9 @@ class Gallery {
         int by = area.y + app.Scale(10);
         Gallery.RenderLangChip(app, c, t, bx, by, bw, bh,
             Gallery.T("Components", "组件"), false);
+        // 纯几何热区必须登记命中矩形，否则按下算"空白"
+        //（pressOnBlocker），释放被 ClickAvailable 拒绝。
+        app.hitTester.RegisterRect(app.focus.AllocId(), bx, by, bw, bh, 0);
         if (app.ClickAvailable()
                 && app.mouseX >= bx && app.mouseX < bx + bw
                 && app.mouseY >= by && app.mouseY < by + bh) {
@@ -12604,13 +12835,16 @@ class Gallery {
             // readable no matter how far the middle columns are scrolled.
             cols.Add(DataColumn.Field(DataColumn.PinRight(
                 DataColumn.Money(DataColumn.Numeric("Total", app.Scale(110)), "$")), "total"));
-            // Inline-embed columns (cellType 6/7/8): a tabler icon, an
-            // in-cell button (click routes through CellClick with
-            // HitRow/HitCol pointing at the cell) and a trend chart
-            // drawn from a comma-separated series (area kind: line +
-            // baseline fill; negative values hang below a zero line).
+            // Inline-embed columns (cellType 6/7): a tabler icon and a
+            // trend chart drawn from a comma-separated series (area kind:
+            // line + baseline fill; negative values hang below a zero line).
             cols.Add(DataColumn.Field(DataColumn.IconCol("", app.Scale(52)), "op"));
-            cols.Add(DataColumn.Field(DataColumn.ButtonCol("Act", app.Scale(84), "pencil", "text"), "act"));
+            // CRUD 按钮组列：点击是命令不是选格——引擎不落选区/
+            // 描边（Actions），适配器不回写标签；CellClick 带
+            // 段号（0增 1删 2改 3查），处理器见 OnDemoCellClick。
+            cols.Add(DataColumn.Field(DataColumn.Actions(DataColumn.Options(
+                DataColumn.WidgetCol(Gallery.T("Ops", "操作"), app.Scale(152), "buttons"),
+                Gallery.T("Add,Del,Edit,View", "增,删,改,查"))), "act"));
             cols.Add(DataColumn.Field(DataColumn.SparkKind(DataColumn.SparklineCol("Trend", app.Scale(110), false), 2), "trend"));
             // Declarative comp column (cellType 9): the engine pools a real
             // BandGrid per (row, col) and feeds it the cell's numeric series;
@@ -12627,8 +12861,8 @@ class Gallery {
             // so the tint follows the active theme).
             Gallery.demoStyler.Bind(app, cols);
             Gallery.BoxCaption(app, px, py - app.Scale(20), w - app.Scale(36),
-                Gallery.T("Team/Name frozen left, Total frozen right · Icon/Button/Trend-chart inline columns (line + baseline fill, negatives below the zero line) · Plan shows a live BandGrid per cell (declarative CompCol) · right-click a header for freeze/group/aggregate · F2 edits · Ctrl+Z undoes",
-                          "Team/Name 冻结在左、Total 冻结在右 · 图标/按钮/趋势图内嵌列（折线 + 基线填充，负值悬于零基线下方）· Plan 列每格内嵌一个真实 BandGrid（声明式 CompCol）· 右键表头可冻结/分组/汇总 · F2 编辑 · Ctrl+Z 撤销"),
+                Gallery.T("Team/Name frozen left, Total frozen right · Icon/Trend-chart inline columns (line + baseline fill, negatives below the zero line) · Plan shows a live BandGrid per cell (declarative CompCol) · Ops column: Add/Del/Edit/View — Edit/View open a row form window over every editable column · Add row appends one · right-click a header for freeze/group/aggregate · F2 edits · Ctrl+Z undoes",
+                          "Team/Name 冻结在左、Total 冻结在右 · 图标/趋势图内嵌列（折线 + 基线填充，负值悬于零基线下方）· Plan 列每格内嵌一个真实 BandGrid（声明式 CompCol）· Ops 按钮组列：增/删/改/查——改、查打开行表单窗口（覆盖所有可编辑列）· 添加行按钮追加一行 · 右键表头可冻结/分组/汇总 · F2 编辑 · Ctrl+Z 撤销"),
                 app.theme.fontSizeMedium);
             Gallery.dtDemoCols = cols;
             DataTable.Render(app, px, py, w - app.Scale(36),
@@ -12642,6 +12876,16 @@ class Gallery {
             Gallery.dtExportBtn.Text = Gallery.T("Export Excel", "导出 Excel");
             int dexY = py + app.Scale(266);
             Gallery.dtExportBtn.Render(app, px, dexY, app.Scale(130));
+            if (Gallery.dtAddBtn == null) {
+                Gallery.dtAddBtn = new Button { Text = Gallery.T("Add row", "添加行") };
+                Gallery.dtAddBtn.Click += Gallery.OnDtAddRowClick;
+            }
+            Gallery.dtAddBtn.Text = Gallery.T("Add row", "添加行");
+            Gallery.dtAddBtn.Render(app, px + app.Scale(140), dexY, app.Scale(96));
+            // 行表单窗口（Ops"改"/"查"打开）：拖动、缩放、Esc/遮罩
+            // 语义由 Layer 承担；确定时非查看模式把表单写回该行。
+            // 行表单窗口（改/查）挂在全局 Layer 栈渲染，
+            // 动作处理在 RenderStack 之后的统一 pass 里。
         } else if (name == "Compose") {
             // Fluent retained-mode composition: a titled card holding a column
             // of a label, a progress bar and a row of buttons — all nested with

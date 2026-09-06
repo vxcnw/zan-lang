@@ -2028,6 +2028,49 @@ class Program {
         int wbgR = 0 - 1;
         int wbgC = 0 - 1;
         Console.WriteLine(wbgComp.CompPos(wbgCtl, ref wbgR, ref wbgC) == false);
+        // Actions() marks a buttons column as command-only (CRUD): the
+        // adapter stops committing labels, and IsActionCol reports it —
+        // inline ButtonCol (cellType 8) is an action column too, plain
+        // widget columns are not.
+        DataColumn wact = DataColumn.Actions(DataColumn.Options(
+            DataColumn.WidgetCol("Ops", 150, "buttons"), "Add,Del"));
+        Console.WriteLine(wact.actionOnly);
+        List<DataColumn> wactCols = new List<DataColumn>();
+        wactCols.Add(wact);
+        Console.WriteLine(DataTable.IsActionCol(wactCols, 0));
+        wactCols.Clear();
+        wactCols.Add(DataColumn.ButtonCol("Act", 84, "pencil", "text"));
+        Console.WriteLine(DataTable.IsActionCol(wactCols, 0));
+        wactCols.Clear();
+        wactCols.Add(wsw);
+        Console.WriteLine(DataTable.IsActionCol(wactCols, 0) == false);
+        CellComp wacComp = CellComp.Find("buttons");
+        ButtonGroup wacCtl = new ButtonGroup(0);
+        wacComp.FillStr(wacCtl, "", wact, null, 0);
+        wacCtl.SetActiveIndex(1);
+        wacComp.FillStr(wacCtl, "", wact, null, 0);
+        Console.WriteLine(wacCtl.Active() == 0 - 1);
+        string wacOut = "keep";
+        Console.WriteLine(wacComp != null && wacComp.TakeCommit(wacCtl, ref wacOut) == false
+            && wacOut == "keep");
+        // IsWidgetCol covers every interactive-control column (7 and 10):
+        // clicks there are the widget's own — no selection box, no cursor
+        // stroke, and CellClick is raised once from the draw path only.
+        wactCols.Clear();
+        wactCols.Add(DataColumn.Text("Name", 140));
+        Console.WriteLine(DataTable.IsWidgetCol(wactCols, 0) == false);
+        wactCols.Clear();
+        wactCols.Add(wact);
+        Console.WriteLine(DataTable.IsWidgetCol(wactCols, 0));
+        wactCols.Clear();
+        wactCols.Add(DataColumn.ButtonCol("Act", 84, "pencil", "text"));
+        Console.WriteLine(DataTable.IsWidgetCol(wactCols, 0));
+        wactCols.Clear();
+        wactCols.Add(wsw);
+        Console.WriteLine(DataTable.IsWidgetCol(wactCols, 0));
+        // Widget columns center vertically by default; VTop() opts out.
+        Console.WriteLine(wact.vTop == false);
+        Console.WriteLine(DataColumn.VTop(wact) == wact && wact.vTop);
     }
 }
 

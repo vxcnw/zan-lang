@@ -226,6 +226,14 @@ partial class DataTable {
             comp.Fill(ctl, vals, rows, cols, col.heatBand);
         }
         ctl.MeasureTree(app);
+        // 组件默认在格内垂直居中（DataColumn.VTop() 可声明顶对齐）：
+        // 叶子控件都在 Arrange 矩形的顶边作画，行高大于控件自然高度
+        // 时把矩形整体下移半格高差即可居中。矩阵形态（cellType 9，
+        // bandgrid 等）按行列铺满格高，不参与这个默认。
+        if (col.cellType == 10 && !col.vTop) {
+            int natH = ctl.StyleHeight();
+            if (natH > 0 && natH < rowH) { cy = cy + (rowH - natH) / 2; }
+        }
         ctl.Arrange(cx, cy, cw, rowH);
         ctl.RenderTree(app);
         // 写回轮询（WidgetCol 形态）：控件本帧产生了新值则按

@@ -123,6 +123,8 @@ class DataColumn {
     // 部——使用层只见类型化访问器（GridNums<T>/GridText<T>），
     // 不接触控件与绘制。
     string compId;     // CellComp 注册表键（如 "bandgrid"）
+    bool actionOnly;   // 动作按钮组：点击是命令不落选区（不回写标签）
+    bool vTop;         // 组件列排列：默认格内垂直居中，置真改顶对齐
     int shapeR;        // 矩阵形状：行数（shapeC 为列数；<=0 用组件默认）
     int shapeC;
     string heatBand;   // 数值→色带名（"" 关闭；见 HeatBands）
@@ -671,6 +673,23 @@ class DataColumn {
         c.choices.Clear();
         List<string> parts = DataTable.NumSeries(csv);
         for (int i = 0; i < parts.Count; i = i + 1) { c.choices.Add(parts[i]); }
+        return c;
+    }
+
+    /// 动作按钮组列（cellType 10 "buttons"）：点击是命令
+    /// （CellClick，段号在 HitCol/CompPosC），不是数据选择——
+    /// 适配器不回写段标签（单元格文本保持原值），焦点描边
+    /// 与填充柄不停留在这种列上（DataTable.IsActionCol）。
+    /// 与 Options 组合声明段标签。
+    static DataColumn Actions(DataColumn c) {
+        if (c != null) { c.actionOnly = true; }
+        return c;
+    }
+
+    /// 组件列改顶对齐。默认格内垂直居中（行高大于控件自然高度时
+    /// 上下均分留白）；矩阵形态或需要贴住表头的场合才需要这个。
+    static DataColumn VTop(DataColumn c) {
+        if (c != null) { c.vTop = true; }
         return c;
     }
 
