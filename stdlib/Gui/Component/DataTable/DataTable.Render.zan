@@ -280,6 +280,32 @@ partial class DataTable {
             } else if (col.cfMode == 4 && v < (double)col.cfThreshold) {
                 c.FillRect(cx, cy, cw, rowH, DataTable.ColorAlpha(col.cfColor, 38));
                 cfText = col.cfColor;
+            } else if ((col.cfMode == 5 || col.cfMode == 6) && st != null
+                       && rowIdx >= 0 && cc >= 0 && cc * st.order.Count < st.cfRank.Count) {
+                // Top/Bottom：命中判定走 ComputeColStats 缓存的降序
+                // 名次（cfRank 与 min/max 同周期重建，下标是过滤
+                // 集合里的显示序）。N 按项数或百分比解释
+                // （cfRankPct），名次并列全部命中（Excel Top N 语义）。
+                int opos = st.order.IndexOf(rowIdx);
+                if (opos >= 0) {
+                    // cfRank 与 cfMin/cfMax 同布局：按列分段
+                    // （col 段起点 = col * n），段内下标是过滤
+                    // 集合的显示序（st.order 的位置）。
+                    int rank = st.cfRank[cc * st.order.Count + opos];
+                    int n = st.order.Count;
+                    int limit = col.cfThreshold;
+                    if (col.cfRankPct) {
+                        limit = (n * col.cfThreshold + 99) / 100;
+                        if (limit < 1) { limit = 1; }
+                    }
+                    bool hitTop;
+                    if (col.cfMode == 5) { hitTop = rank < limit; }
+                    else { hitTop = rank >= n - limit && limit <= n; }
+                    if (hitTop) {
+                        c.FillRect(cx, cy, cw, rowH, DataTable.ColorAlpha(col.cfColor, 38));
+                        cfText = col.cfColor;
+                    }
+                }
             }
         }
 

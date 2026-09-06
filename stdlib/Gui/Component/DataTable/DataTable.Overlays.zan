@@ -677,6 +677,78 @@ partial class DataTable {
         return (int)(sum / (double)n + 0.5);
     }
 
+    /// Top/Bottom 子面板：前 N 项 / 前 N% / 后 N 项 / 后 N% + 清除。
+    /// 命中写入 cfMode 5/6（TopN 用默认蓝，BottomN 用默认橙）并
+    /// 触发 Recompute 重建名次缓存；当前生效规则带勾选。
+    static bool RenderTopBottomPanel(App app, int ax, int ay, int mw, int ih,
+                                     int sepH, StyleBox sMenu, DataTableState st,
+                                     int col, List<DataColumn> cols, DataSource src) {
+        Canvas c = app.canvas;
+        Theme t = app.theme;
+        string[] labels = new string[5];
+        labels[0] = DataTable.T("Top 10 Items…", "前 10 项…");
+        labels[1] = DataTable.T("Top 10 %…", "前 10 %…");
+        labels[2] = DataTable.T("Bottom 10 Items…", "后 10 项…");
+        labels[3] = DataTable.T("Bottom 10 %…", "后 10 %…");
+        labels[4] = DataTable.T("Clear Rules", "清除规则");
+        int n = 5;
+        int panelW = app.Scale(190);
+        int panelH = ih * n + app.Scale(8);
+        int px = ax + mw + app.Scale(2);
+        int py = ay;
+        if (py + panelH > app.window.GetHeight()) { py = app.window.GetHeight() - panelH - app.Scale(2); }
+        if (py < 0) { py = 0; }
+        app.CaptureWheel(px, py, panelW, panelH);
+        c.FillRoundRect(px, py, panelW, panelH, t.borderRadiusMedium, sMenu.BgOr(0));
+        c.DrawRoundRect(px, py, panelW, panelH, t.borderRadiusMedium, sMenu.BorderOr(0), 1);
+
+        int[] ps = DataTable.CfPresetColors();
+        DataColumn dc = cols[col];
+        int iy = py + app.Scale(4);
+        bool hit = false;
+        for (int i = 0; i < n; i = i + 1) {
+            string mark = "";
+            if (i == 0 && dc.cfMode == 5 && !dc.cfRankPct) { mark = "✓"; }
+            if (i == 1 && dc.cfMode == 5 && dc.cfRankPct) { mark = "✓"; }
+            if (i == 2 && dc.cfMode == 6 && !dc.cfRankPct) { mark = "✓"; }
+            if (i == 3 && dc.cfMode == 6 && dc.cfRankPct) { mark = "✓"; }
+            int id = app.focus.AllocId();
+            ContextMenu.PaintItem(app, px, iy, panelW, ih, labels[i], mark,
+                                  app.focus.IsHovered(id));
+            app.hitTester.RegisterRect(id, px, iy, panelW, ih, 0);
+            if (DataTable.CtxHit(app, px, iy, panelW, ih)) {
+                if (i == 4) {
+                    dc.cfMode = 0;
+                    dc.cfRankPct = false;
+                } else {
+                    if (i == 0) { DataColumn.TopRules(dc, 10, ps[0]); }
+                    else if (i == 1) { DataColumn.TopRules(dc, 0 - 10, ps[0]); }
+                    else if (i == 2) { DataColumn.BottomRules(dc, 10, ps[4]); }
+                    else { DataColumn.BottomRules(dc, 0 - 10, ps[4]); }
+                    // 名次缓存随下一次 Recompute 重建；排名列的
+                    // ComputeColStats 分支由 cfMode 5/6 触发。
+                    st.dirty = true;
+                    DataTable.Recompute(st, cols, src);
+                }
+                st.hitCol = col;
+                hit = true;
+            }
+            iy = iy + ih;
+        }
+        if (hit) {
+            st.hdrCtxOpen = false;
+            st.cfSubOpen = 0;
+            app.RequestRedraw();
+        }
+        if (app.EventKind() == 3 && !app.LongPressFired()
+            && !(app.mouseX >= px && app.mouseX < px + panelW
+                 && app.mouseY >= py && app.mouseY < py + panelH)) {
+            st.cfSubOpen = 0;
+            app.RequestRedraw();
+        }
+        return hit;
+    }
+
     /// 合计聚合子面板：与条件格式面板同一形态（锚点右侧一列
     /// 预设），当前模式带勾选。命中应用 SetAggregate 并关闭整个
     /// 菜单；面板外点击只收面板。
@@ -957,15 +1029,18 @@ partial class DataTable {
             int cfMark = 0;
             if (cols[col].cfMode == 1) { cfMark = 1; }
             else if (cols[col].cfMode == 2) { cfMark = 2; }
-            else if (cols[col].cfMode >= 3) { cfMark = 3; }
+            else if (cols[col].cfMode == 3 || cols[col].cfMode == 4) { cfMark = 3; }
+            else if (cols[col].cfMode == 5 || cols[col].cfMode == 6) { cfMark = 4; }
             string cfLbl = DataTable.T("Conditional Formatting", "条件格式");
             if (cfMark == 1) { cfLbl = cfLbl + " · " + DataTable.T("Data Bars", "数据条"); }
             else if (cfMark == 2) { cfLbl = cfLbl + " · " + DataTable.T("Color Scales", "色阶"); }
             else if (cfMark == 3) { cfLbl = cfLbl + " · " + DataTable.T("Highlight Rules", "高亮规则"); }
+            else if (cfMark == 4) { cfLbl = cfLbl + " · " + DataTable.T("Top / bottom", "前 / 后"); }
             int idCf = app.focus.AllocId();
             ContextMenu.PaintItem(app, mx, cfY, mw, cfH, cfLbl, "▶", app.focus.IsHovered(idCf));
             app.hitTester.RegisterRect(idCf, mx, cfY, mw, cfH, 0);
-            // 点击主项：无子面板则展开对应组，已有子面板再点同组则收起
+            // 点击主项：无子面板则展开对应组（Top/Bottom 规则展开
+            // 其专用面板），已有子面板再点则收起
             if (DataTable.CtxHit(app, mx, cfY, mw, cfH)) {
                 int want = 0;
                 if (st.cfSubOpen == 0) {
@@ -976,7 +1051,10 @@ partial class DataTable {
                 app.RequestRedraw();
             }
             iy = iy + cfH;
-            if (st.cfSubOpen != 0) {
+            if (st.cfSubOpen == 5 || st.cfSubOpen == 6) {
+                DataTable.RenderTopBottomPanel(app, mx, cfY, mw, ih, sepH, sMenu,
+                                               st, col, cols, src);
+            } else if (st.cfSubOpen != 0) {
                 DataTable.RenderCfPanel(app, mx, cfY, mw, ih, sepH, sMenu, st, col,
                                         st.cfSubOpen, cols, src);
             }

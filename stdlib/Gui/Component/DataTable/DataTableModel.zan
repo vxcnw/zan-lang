@@ -39,10 +39,12 @@ class DataColumn {
     int deriveB;
 
     // ---- 条件格式 ----
-    int cfMode;    // 0 无，1 数据条，2 色阶，3 高亮 >，4 高亮 <
+    int cfMode;    // 0 无，1 数据条，2 色阶，3 高亮 >，4 高 <，5 前 N，6 后 N
     int cfColor;   // 数据条/低端/高亮的强调色
     int cfColor2;  // 色阶高端颜色
-    int cfThreshold; // 高亮比较值
+    int cfThreshold; // 高亮比较值；Top/Bottom 规则时为 N（项数或百分比）
+    // Top/Bottom 规则的 N 按百分比解释（cfMode 5/6）。
+    bool cfRankPct;
 
     // ---- 显示格式化（仅影响渲染字符串；排序/过滤
     // 仍看到原始单元格值） ----
@@ -175,6 +177,7 @@ class DataColumn {
         this.cfColor = 0;
         this.cfColor2 = 0;
         this.cfThreshold = 0;
+        this.cfRankPct = false;
         this.fmt = 0;
         this.grouped = false;
         this.prefix = "";
@@ -457,6 +460,18 @@ class DataColumn {
     }
     static DataColumn HighlightLess(DataColumn c, int threshold, int color) {
         c.cfMode = 4; c.cfThreshold = threshold; c.cfColor = color; return c;
+    }
+    /// 前 N 项（`countOrPct > 0`）或前 N%（< 0，N 取绝对值）。
+    static DataColumn TopRules(DataColumn c, int countOrPct, int color) {
+        if (countOrPct < 0) { c.cfMode = 5; c.cfThreshold = 0 - countOrPct; c.cfRankPct = true; }
+        else { c.cfMode = 5; c.cfThreshold = countOrPct; c.cfRankPct = false; }
+        c.cfColor = color; return c;
+    }
+    /// 后 N 项 / 后 N%，语义同上。
+    static DataColumn BottomRules(DataColumn c, int countOrPct, int color) {
+        if (countOrPct < 0) { c.cfMode = 6; c.cfThreshold = 0 - countOrPct; c.cfRankPct = true; }
+        else { c.cfMode = 6; c.cfThreshold = countOrPct; c.cfRankPct = false; }
+        c.cfColor = color; return c;
     }
 
     /// 将列标记为固定宽度：用户不能拖动其右边框，
@@ -1109,6 +1124,10 @@ class DataTableState {
     // 数据条和色阶归一化时不会坍缩为整数桶。
     List<double> cfMinR;
     List<double> cfMaxR;
+    // Top/Bottom 规则（cfMode 5/6）的降序排名缓存：rankDesc[oi]
+    // = 该行在此列过滤集合中的名次（0 起，值相同并列按先见者高）。
+    // 与 min/max 同周期重建（Recompute -> ComputeColStats）。
+    List<int> cfRank;
 
     // ---- 分页 ----
     bool paged;
@@ -1472,6 +1491,7 @@ class DataTableState {
         this.cfMax = new List<int>();
         this.cfMinR = new List<double>();
         this.cfMaxR = new List<double>();
+        this.cfRank = new List<int>();
         this.paged = false;
         this.pageModel = new SignalInt(1);
         this.pageRows = 0;
