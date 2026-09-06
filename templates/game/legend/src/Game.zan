@@ -511,6 +511,17 @@ class Game {
             storage.Add(bag[index]); bag.RemoveAt(index); Log("装备已存入仓库。");
         }
     }
+    string ForgePreview(int slot, int method) {
+        if (slot < 0 || slot >= equipped.Length || equipped[slot] == null) { return "请先穿戴要锻造的装备。"; }
+        if (!GameTables.current.forge.index.ContainsKey(Rules.N(method))) { return "未配置此锻造方式。"; }
+        DataRow recipe = GameTables.current.forge.At(method); Equipment e = equipped[slot];
+        string op = recipe.Text("operation"); int limit = recipe.Int("limit");
+        if ((op == "upgrade" && e.upgrade >= limit) || (op == "improve" && e.coefficient >= limit) || (op == "tier" && e.tier >= limit)) { return "此装备已达该配方上限。"; }
+        int scale = 1; if (recipe.Text("scale") == "upgrade") { scale = e.upgrade + 1; } if (recipe.Text("scale") == "coefficient") { scale = e.coefficient; }
+        int runeCost = recipe.Int("runes") * scale;
+        string failure = recipe.Text("failure") == "downgrade" ? "失败：系数 -1（最低为 1）" : "失败：属性保持不变";
+        return recipe.Text("name") + " · " + e.Name() + "\n费用：金币 " + Rules.N(recipe.Int("gold") * scale) + " / 黑铁 " + Rules.N(recipe.Int("iron") * scale) + " / 元宝 " + Rules.N(recipe.Int("yuan") * scale) + " / 符文 " + Rules.N(runeCost) + "\n成功率：" + Rules.N(recipe.Int("success_pct")) + "% · " + failure;
+    }
     void Forge(int slot, int method) {
         if (slot < 0 || slot >= equipped.Length || equipped[slot] == null) { Log("先穿戴这个部位的装备。"); return; }
         if (!GameTables.current.forge.index.ContainsKey(Rules.N(method))) { Log("未配置此配方。"); return; }
@@ -519,9 +530,15 @@ class Game {
         if ((op == "upgrade" && e.upgrade >= limit) || (op == "improve" && e.coefficient >= limit) || (op == "tier" && e.tier >= limit)) { Log("已达配方上限。"); return; }
         int scale = 1; if (recipe.Text("scale") == "upgrade") { scale = e.upgrade + 1; } if (recipe.Text("scale") == "coefficient") { scale = e.coefficient; }
         int runeCost = recipe.Int("runes") * scale;
-        if (runes < runeCost) { Log("符文不足。"); return; }
+        if (runes < runeCost) { Log("符文不足，本次未扣除其它资源。"); return; }
         if (!Pay(recipe.Int("gold") * scale, recipe.Int("iron") * scale, recipe.Int("yuan") * scale)) { return; }
         runes = runes - runeCost;
+        bool success = recipe.Int("success_pct") >= 100 || Random(100) < recipe.Int("success_pct");
+        if (!success) {
+            if (recipe.Text("failure") == "downgrade") { e.coefficient = Rules.Clamp(e.coefficient - 1, 1, limit); Log(recipe.Text("name") + "失败：" + e.Name() + "系数下降至 " + Rules.N(e.coefficient) + "。材料已消耗。"); }
+            else { Log(recipe.Text("name") + "失败：" + e.Name() + "属性保持不变，材料已消耗。"); }
+            return;
+        }
         if (op == "upgrade") { e.upgrade = e.upgrade + 1; }
         if (op == "reroll") { e.coefficient = 1 + Random(limit); }
         if (op == "improve") { e.coefficient = e.coefficient + 1; }

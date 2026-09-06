@@ -129,7 +129,7 @@ class GameTables {
         t.skills = DataTable.Load(dir + "/skills.csv", "id:1:1000000,name,job:0:2,slot:0:7,kind,target,cooldown:0:3600,mana:0:100000,damage_pct:0:1000,damage_per_level:0:100,heal_pct:0:100,heal_per_level:0:10,passive_damage_pct:0:100,passive_defense_pct:0:100,max_level:1:100,train_gold:0:1000000,train_iron:0:1000000,school");
         t.levels = DataTable.Load(dir + "/levels.csv", "id:1:1500,xp:1:100000000");
         t.drops = DataTable.Load(dir + "/drops.csv", "id:1:1000000,pool:1:1000000,item_id:1:1000000,weight:1:100000");
-        t.forge = DataTable.Load(dir + "/forge.csv", "id:0:100,name,operation,gold:0:1000000,iron:0:1000000,yuan:0:1000000,runes:0:1000000,scale,limit:1:20");
+        t.forge = DataTable.Load(dir + "/forge.csv", "id:0:100,name,operation,gold:0:1000000,iron:0:1000000,yuan:0:1000000,runes:0:1000000,scale,limit:1:20,success_pct:1:100,failure");
         t.shop = DataTable.Load(dir + "/shop.csv", "id:0:1000000,name,reward,quantity:1:1000000,gold:0:1000000,iron:0:1000000,yuan:0:1000000,capacity_gold:0:10000");
         t.balance = DataTable.Load(dir + "/balance.csv", "id,value:0:1000000000");
         t.quests = DataTable.Load(dir + "/quests.csv", "id:0:1000,name,metric,target:1:1000000,gold:0:1000000,yuan:0:1000000,iron:0:1000000");
@@ -210,6 +210,9 @@ class GameTables {
             Require(scale == "upgrade" || scale == "coefficient" || scale == "fixed", r.location + ": unsupported cost scale");
             Require(op != "tier" || r.Int("limit") < qualities.rows.Count, r.location + ": tier limit");
             Require((op != "reroll" && op != "improve") || r.Int("limit") <= 10, r.location + ": coefficient limit");
+            Require(r.Int("success_pct") >= 1 && r.Int("success_pct") <= 100, r.location + ": success percentage");
+            Require(r.Text("failure") == "keep" || r.Text("failure") == "downgrade", r.location + ": unsupported failure result");
+            Require(op != "reroll" || r.Text("failure") == "downgrade", r.location + ": reroll must declare downgrade failure");
         }
         foreach (DataRow r in shop.rows) { string reward = r.Text("reward"); Require(reward == "potions" || reward == "iron" || reward == "capacity" || reward == "runes" || reward == "gold", r.location + ": unsupported reward"); }
         // Limits are validation constraints for safe arithmetic/save layouts, not balancing defaults.

@@ -491,10 +491,9 @@ class LegendApp {
         }
         if (page == 21) {
             Equipment e = g.equipped[forgeSlot]; DataRow recipe = GameTables.current.forge.rows[forgeMode];
-            int scale = 1; if (e != null && recipe.Text("scale") == "upgrade") { scale = e.upgrade + 1; } if (e != null && recipe.Text("scale") == "coefficient") { scale = e.coefficient; }
             detail.Text = "【" + recipe.Text("name") + "】 · " + Rules.Slots()[forgeSlot] + "\n" + (e == null ? "尚未穿戴装备" : e.Name() + "\n" + e.Detail())
-                + "\n本次费用：金币 " + Rules.N(recipe.Int("gold") * scale) + " / 黑铁 " + Rules.N(recipe.Int("iron") * scale) + " / 元宝 " + Rules.N(recipe.Int("yuan") * scale) + " / 符文 " + Rules.N(recipe.Int("runes") * scale)
-                + "\n操作上限 " + Rules.N(recipe.Int("limit")) + " · 洗炼可能降低系数；强化按 attributes.csv 分属性计算。";
+                + "\n" + g.ForgePreview(forgeSlot, recipe.Int("id"))
+                + "\n操作上限 " + Rules.N(recipe.Int("limit")) + " · 点击开始锻造后才会扣除材料。";
         }
         if ((page == 2 || page == 3 || page == 12) && detail != null) { detail.Text = g.notice; }
         if (page == 3 && pageInfo != null) { pageInfo.Text = "BOSS之家 · 剩余 " + Rules.N(g.bossTries) + " 次\n累计胜利 " + Rules.N(g.bossWins) + " 次"; }

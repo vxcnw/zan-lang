@@ -10,6 +10,12 @@ class LegendSystemTests {
         int skillGold = g.gold; int skillIron = g.iron; g.TrainSkill(1);
         Check(g.SkillRank(1) == 2 && g.gold == skillGold - 100 && g.iron == skillIron - 2, "passive skill trains with configured costs");
         g.ToggleSkill(1); Check(!g.IsSkillEquipped(1), "skill can be unequipped"); g.ToggleSkill(1); Check(g.IsSkillEquipped(1), "skill can be re-equipped");
+        Equipment forgeItem = g.CreateItem(16, 1, 1); g.equipped[0] = forgeItem; g.gold = 10000; g.iron = 100; g.runes = 100;
+        string forgePreview = g.ForgePreview(0, 0); Check(forgePreview.Contains("费用：金币 80") && forgePreview.Contains("成功率：100%"), "forge preview exposes scaled cost and success rate");
+        g.Forge(0, 0); Check(forgeItem.upgrade == 1 && g.gold == 9920 && g.iron == 97, "forge success consumes configured resources and mutates once");
+        g.gold = 10000; g.iron = 100; g.runes = 0; int beforeUpgrade = forgeItem.upgrade; g.Forge(0, 3);
+        Check(forgeItem.upgrade == beforeUpgrade && g.gold == 10000 && g.iron == 100, "forge rune shortage is atomic across all currencies");
+        Check(GameTables.current.forge.At(1).Int("success_pct") == 70 && GameTables.current.forge.At(1).Text("failure") == "downgrade", "gold reroll declares probabilistic downgrade failure");
         int floor = g.floor; g.active = false; int wave = g.wave; int tries = g.bossTries;
         g.level = 1; g.Challenge(1, 0); Check(g.mode == 0 && g.bossTries == tries, "boss level gate atomic");
         g.level = 80; g.Challenge(1, -1); Check(g.bossTries == tries, "invalid boss does not consume tries");
