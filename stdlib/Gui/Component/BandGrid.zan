@@ -40,6 +40,7 @@ class BandGrid : Control {
     int actC;
     int barMax;
     int accent;
+    int heatDeep;
     App lastApp;
     UiEvent Changed;
     UiEvent Context;
@@ -67,6 +68,7 @@ class BandGrid : Control {
         actR = 0 - 1;
         actC = 0 - 1;
         barMax = 0;
+        heatDeep = 0;
         // accent 仅作无样式系统环境（测试/裸画）的兜底；有 App 时
         // OnPaint 先经 bandgrid::accent / 主题主色解析覆盖。
         accent = 0xFF378ADD;
@@ -121,6 +123,12 @@ class BandGrid : Control {
 
     /// 单元格级着色回调（返回 0 用默认底色）。
     BandGrid ColorOf(BandGridColorOf d) { colorOf = d; return this; }
+
+    /// 热力色带（深端锚色，0xAARRGGBB）：数值 1..5 映射为
+    /// 表面色→锚色的梯度。浅端在绘制时从当前皮肤的表面色
+    /// 派生（亮色皮肤得粉彩、暗色皮肤得暗色调），深端保留
+    /// 声明色相，换皮肤即换梯度。显式 ColorOf 优先于本接口。
+    BandGrid Heat(int deepColor) { heatDeep = deepColor; return this; }
 
     /// 逻辑像素格尺寸（绘制时按 DPI 缩放）。
     BandGrid CellSize(int w, int h) { cellW = w; cellH = h; return this; }
@@ -295,6 +303,13 @@ class BandGrid : Control {
                                     "", "", Style.SNormal()).BgOr(0);
             accent = themed != 0 ? themed : app.theme.primary;
         }
+        // 热力梯度浅端：每帧从本帧表面色向锚色混 16%，随皮肤
+        // 表面走（亮色皮肤 ≈ 声明锚色对的粉彩浅端，暗色皮肤
+        // 得暗色调）。colorOf 显式回调优先，热力带不生效。
+        int heatLo = 0;
+        if (heatDeep != 0 && colorOf == null) {
+            heatLo = App.LerpColor(bodyBg, heatDeep, 160);
+        }
 
         c.FillRect(bx, by, bw, bh, bodyBg);
         int i;
@@ -331,6 +346,12 @@ class BandGrid : Control {
                     // 契约：0 = 用默认底色。0 直接 FillRect 是透明
                     // 无操作，格底会露出父层（热力图零值格透白）。
                     if (colBg == 0) { colBg = bodyBg; }
+                } else if (heatDeep != 0) {
+                    int hv = nums[idx];
+                    if (hv > 0) {
+                        if (hv > 5) { hv = 5; }
+                        colBg = App.LerpColor(heatLo, heatDeep, hv * 200);
+                    }
                 }
                 // 留 1px 缝出网格感。
                 c.FillRect(x0, y0, cw - 1, ch - 1, colBg);

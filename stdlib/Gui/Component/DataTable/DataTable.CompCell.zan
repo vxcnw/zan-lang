@@ -126,8 +126,15 @@ class BandGridComp : CellComp {
     override void Fill(Control ctl, List<int> vals, int rows, int cols,
                        string heatBand) {
         BandGrid g = (BandGrid)ctl;
+        // 色带只把深端锚色交给 BandGrid：浅端由它绘制时从当前
+        // 皮肤表面色派生（HeatBands 的浅端是亮色皮肤参考值）。
         if (heatBand != "") {
-            g.ColorOf(BandGridComp.HeatOf(heatBand));
+            int lo = 0;
+            int hi = 0;
+            DataColumn.HeatBands(heatBand, ref lo, ref hi);
+            g.Heat(hi);
+        } else {
+            g.Heat(0);
         }
         int n = rows * cols;
         for (int i = 0; i < n; i = i + 1) {
@@ -151,21 +158,6 @@ class BandGridComp : CellComp {
         this.poolKeys.Clear();
         this.poolCtl.Clear();
         this.poolShape.Clear();
-    }
-    /// 命名色带 → BandGrid 单元格着色回调（值域 0..5 固定映射，
-    /// 覆盖排班/热度这类小整数语义；更大值截到顶端）。
-    static BandGridColorOf HeatOf(string band) {
-        int lo = 0;
-        int hi = 0;
-        DataColumn.HeatBands(band, ref lo, ref hi);
-        int vlo = lo;
-        int vhi = hi;
-        return delegate(int row, int col, string text, int num) {
-            if (num <= 0) { return 0; }
-            int p = num;
-            if (p > 5) { p = 5; }
-            return DataTable.LerpColor(vlo, vhi, p * 200, 1000);
-        };
     }
 }
 

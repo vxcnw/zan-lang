@@ -683,7 +683,9 @@ class DataColumn {
 
     /// 命名色带的两端颜色（0xAARRGGBB）。`name` 不识别时返回
     /// false，调用方回退 accent 单色。与文档第 1 节色板一致的
-    /// 内置映射，组件列着色共用。
+    /// 内置映射，组件列着色共用。浅端按亮色（默认）皮肤调的
+    /// 参考值：组件列实际把深端交给 BandGrid.Heat，由其绘制
+    /// 时从当前皮肤表面色派生浅端，暗色皮肤自动得暗色调。
     static bool HeatBands(string name, ref int lo, ref int hi) {
         if (name == "teal") { lo = 0xFFE1F5EE; hi = 0xFF0D6E56; return true; }
         if (name == "amber") { lo = 0xFFFAEEDA; hi = 0xFFBA7517; return true; }
