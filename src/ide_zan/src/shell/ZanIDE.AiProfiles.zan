@@ -1135,6 +1135,11 @@ partial class ZanIDE {
             for (int k = 0; k < nl.Count; k = k + 1) {
                 if (!(k == nl.Count - 1 && nl[k] == "")) { outLog.Add(nl[k]); }
             }
+            // 商业插件使用账目：从构建输出里捞 ZANPKG_USAGE 信号行
+            // （安装/编译命中商业插件时编译器各打一行），去重后异步上报。
+            for (int k = 0; k < nl.Count; k = k + 1) {
+                PluginUsage.Observe(nl[k]);
+            }
             while (outLog.Count > 2000) { outLog.RemoveAt(0); }
             return consumed + last + 1;
         } catch (Exception e) {

@@ -33,6 +33,10 @@ class MarketplaceInstall {
     static int step;
     static string packageName;
     static string productType;
+    /// 商业插件信任链：商城下发的 plugin_id 与钉住的公钥指纹（64 hex）。
+    /// plugin_id 非空 = 本次安装按插件验签流程走。
+    static string pluginId;
+    static string pubkeyFp;
     static string artifactUrl;
     static string artifactSha256;
     /// 全程一次的状态行（轮转追加给状态条）。
@@ -71,6 +75,8 @@ class MarketplaceInstall {
             "该版本没有制品包"); }
         MarketplaceInstall.packageName = package.packageName;
         MarketplaceInstall.productType = package.productType;
+        MarketplaceInstall.pluginId = package.pluginId;
+        MarketplaceInstall.pubkeyFp = package.pubkeyFp;
         MarketplaceInstall.artifactUrl = v.artifactUrl;
         MarketplaceInstall.artifactSha256 = v.artifactSha256;
         MarketplaceInstall.step = 1;
@@ -207,6 +213,14 @@ class MarketplaceInstall {
         if (mname != MarketplaceInstall.packageName) {
             return T("manifest name mismatch: ", "清单名不符：") + mname;
         }
+        // 商业插件：装前验签。商城钉的公钥指纹对不上包里的 plugin.pub，
+        // 或清单/源码被篡改，都拒绝安装（错误信息即返回原因）。
+        if (MarketplaceInstall.pluginId.Length > 0
+            && MarketplaceInstall.pubkeyFp.Length == 64) {
+            string sigErr = MarketplaceInstall.VerifyPluginSignature(stage);
+            if (sigErr.Length > 0) { return sigErr; }
+        }
+        MarketplaceInstall.progress = T("Signature verified.", "签名校验通过。");
 
         MarketplaceInstall.step = 5;
         MarketplaceInstall.progress = T("Installing into package store...",
@@ -223,6 +237,12 @@ class MarketplaceInstall {
                 + "\" --package-scope project";
         }
         ProcessResult r = Process.Capture(cmd);
+        // 编译器安装器会为商业插件在 stderr 打 ZANPKG_USAGE（scope 行），
+        // 这里与构建日志同一条上报链路（PluginUsage 解析 + 去重 + 异步上报）。
+        List<string> installLines = ZanIDE.SplitLinesOf(r.Text());
+        for (int i = 0; i < installLines.Count; i = i + 1) {
+            PluginUsage.Observe(installLines[i]);
+        }
         bool ok = r.Ok();
         if (!ok) {
             string tail = r.Text();
@@ -251,6 +271,96 @@ class MarketplaceInstall {
             }
         }
         return "";
+    }
+
+    /// 商业插件的装前签名校验（信任链：平台钉的 pubkey_fp → 包内
+    /// plugin.pub → 对 payload 哈希清单的 plugin.sig）。清单内容与
+    /// scripts/pluginkey.ps1 sign 生成侧完全一致：对每个文件取
+    /// "sha256(小写hex)  相对路径(/ 分隔)"，按行排序，LF 结尾，排除
+    /// plugin.sig 本身。三处失败都给出明确原因：
+    ///   - 包里没有 plugin.pub/plugin.sig → 未签名
+    ///   - plugin.pub 指纹 ≠ 商城下发的 pubkey_fp → 公钥被调包
+    ///   - 验签不过 → payload（清单/源码）被篡改
+    static string VerifyPluginSignature(string stage) {
+        string pubPath = stage + "/plugin.pub";
+        string sigPath = stage + "/plugin.sig";
+        if (!File.Exists(pubPath) || !File.Exists(sigPath)) {
+            return T("package is not signed (missing plugin.pub/plugin.sig)",
+                "包未签名（缺少 plugin.pub/plugin.sig）");
+        }
+        byte[] pubBytes = File.ReadAllBytes(pubPath);
+        byte[] sigBytes = File.ReadAllBytes(sigPath);
+        if (pubBytes == null || sigBytes == null) {
+            return T("signature files unreadable", "签名文件不可读");
+        }
+        string pubPem = "";
+        for (int i = 0; i < pubBytes.Length; i = i + 1) {
+            pubPem = pubPem + (char)(pubBytes[i] & 255);
+        }
+        // 平台钉的指纹必须与包内公钥一致，否则拒绝（防公钥调包）。
+        string fp = Hex.Encode(Sha256.Hash(pubBytes, pubBytes.Length), 32);
+        if (fp != MarketplaceInstall.pubkeyFp) {
+            return T("plugin public key fingerprint mismatch",
+                "插件公钥指纹与商城记录不符");
+        }
+        RsaKey key = RsaKey.FromPublicPem(pubPem);
+        if (key == null) {
+            return T("plugin public key unreadable", "插件公钥无法解析");
+        }
+        string message = MarketplaceInstall.PayloadManifest(stage);
+        if (message.Length == 0) {
+            return T("package payload is empty", "包内容为空");
+        }
+        // 签名是原始 256 字节，VerifySha256 吃 Base64；清单消息是纯 ASCII
+        // ("hex  path\n" 行)，string 逐字符即字节，无需额外编码。
+        if (!key.VerifySha256(message,
+            Base64.Encode(sigBytes, sigBytes.Length))) {
+            return T("plugin signature verification failed (payload tampered?)",
+                "插件验签失败（包内容可能被篡改）");
+        }
+        return "";
+    }
+
+    /// 对 stage 目录递归生成待签名清单："sha256hex  相对路径"行，
+    /// 按行排序、LF 结尾，排除 plugin.sig 本身。与 pluginkey.ps1 生成侧
+    /// 完全一致，任何字节差异都会导致验签失败。
+    static string PayloadManifest(string stage) {
+        List<string> lines = new List<string>();
+        MarketplaceInstall.PayloadWalk(stage, "", lines);
+        if (lines.Count == 0) { return ""; }
+        lines.Sort();
+        string message = "";
+        for (int i = 0; i < lines.Count; i = i + 1) {
+            message = message + lines[i] + "\n";
+        }
+        return message;
+    }
+
+    static void PayloadWalk(string root, string rel, List<string> lines) {
+        string here = root + (rel.Length > 0 ? "/" + rel : "");
+        List<string> dirs = Directory.GetDirectories(here);
+        for (int i = 0; i < dirs.Count; i = i + 1) {
+            // GetFiles/GetDirectories 返回裸名；读文件须拼回全路径。
+            string baseName = MarketplaceInstall.BaseName(dirs[i]);
+            MarketplaceInstall.PayloadWalk(root,
+                rel.Length > 0 ? rel + "/" + baseName : baseName, lines);
+        }
+        List<string> files = Directory.GetFiles(here);
+        for (int i = 0; i < files.Count; i = i + 1) {
+            string baseName = MarketplaceInstall.BaseName(files[i]);
+            string childRel = rel.Length > 0 ? rel + "/" + baseName : baseName;
+            if (childRel == "plugin.sig") { continue; }
+            byte[] data = File.ReadAllBytes(here + "/" + baseName);
+            if (data == null) { continue; }
+            lines.Add(Hex.Encode(Sha256.Hash(data, data.Length), 32)
+                + "  " + childRel);
+        }
+    }
+
+    static string BaseName(string path) {
+        int slash = path.LastIndexOf("/") >= 0
+            ? path.LastIndexOf("/") : path.LastIndexOf("\\");
+        return slash >= 0 ? path.Substring(slash + 1) : path;
     }
 
     /// UI 每帧调用：完成后取结果。返回 "" = 还在跑或空闲；

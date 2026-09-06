@@ -508,6 +508,8 @@ partial class ZanIDE {
             log.Add(syncLine);
             app.RequestRedraw();
         }
+        // 商业插件使用账目：攒批/到点异步上报一轮（fire-and-forget，失败留队）。
+        PluginUsage.Poll();
         app.PerfMark("sh.children");
 
         // Deferred AI-settings open (see aiCfgPending). Creating a top-level
