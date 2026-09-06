@@ -71,6 +71,8 @@ class Game {
     int secrets;
     int secretFloor = 1; int secretWave; bool secretAutoPush = true;
     bool fieldActive = true; bool bossAutoNext;
+    int travelMap = -1;
+    int homeFloor = 1; int homeWave;
     int[] elementRanks = new int[5]; int[] elementXp = new int[5];
     int elementPool; int elementSeconds; bool elementTraining;
     int reputation; int redPackets; int recyclePoints;
@@ -365,7 +367,8 @@ class Game {
         if (Random(100) < B("potion_chance")) { potions = Rules.Clamp(potions + 1, 0, 9999); }
         if (wave >= B("wave_count")) {
             wave = 0; hp = MaxHp(); mp = MaxMp();
-            if (autoPush && floor < B("max_floor") && CanEnter(GameTables.current.Map(floor + 1))) { floor = floor + 1; if (floor > best) { best = floor; gems = Rules.Clamp(gems + B("first_clear_yuan"), 0, 1000000); Log("突破幻境 " + Rules.N(floor - 1) + "层 · 首通元宝 +" + Rules.N(B("first_clear_yuan"))); } }
+            if (travelMap >= 0) { Log(LocationName() + "驻守：这一轮波次清剿完毕，继续驻守刷怪；幻境推层在返回后继续。"); }
+            else if (autoPush && floor < B("max_floor") && CanEnter(GameTables.current.Map(floor + 1))) { floor = floor + 1; if (floor > best) { best = floor; gems = Rules.Clamp(gems + B("first_clear_yuan"), 0, 1000000); Log("突破幻境 " + Rules.N(floor - 1) + "层 · 首通元宝 +" + Rules.N(B("first_clear_yuan"))); } }
         } else { wave = wave + 1; hp = Rules.Clamp(Rules.Bounded((long)hp + (long)MaxHp() * B("between_wave_heal_pct") / 100), 0, MaxHp()); }
         Spawn();
     }
@@ -695,13 +698,24 @@ class Game {
         fieldActive = active; mode = kind; challenge = kind == 1 ? GameTables.current.bosses.rows[index].Int("id") : 0; active = true; hp = MaxHp(); mp = MaxMp(); Spawn(); Log("挑战开始：" + enemyName + "。逃离不返还次数。");
     }
     bool CanEnter(DataRow map) { return level >= map.Int("min_level") && rebirth >= map.Int("rebirth"); }
+    string LocationName() { return travelMap >= 0 ? GameTables.current.maps.rows[travelMap].Text("name") : "幻境"; }
     void Travel(int map) {
         if (job < 0) { Log("请先创建角色。"); return; }
         if (mode != 0 || recovery > 0) { Log("先结束当前战斗或复活。"); return; }
         if (map < 0 || map >= GameTables.current.maps.rows.Count) { Log("地图不存在。"); return; }
         DataRow destination = GameTables.current.maps.rows[map]; int target = destination.Int("start_floor");
         if (target > best || level < destination.Int("min_level") || rebirth < destination.Int("rebirth")) { Log("无法传送到 " + destination.Text("name") + "：需要等级 " + Rules.N(destination.Int("min_level")) + "、" + Rules.N(destination.Int("rebirth")) + "转、幻境记录 " + Rules.N(target) + "层。"); return; }
-        floor = target; wave = 0; Spawn(); Log("传送到 " + destination.Text("name"));
+        if (travelMap == map) { Log("已驻守在 " + destination.Text("name") + "。"); return; }
+        // 幻境推层轨道只在离开幻境时保存；野外换点不改写它。
+        if (travelMap < 0) { homeFloor = floor; homeWave = wave; }
+        travelMap = map; floor = target; wave = 0; Spawn();
+        Log("传送到 " + destination.Text("name") + "驻守；幻境推层进度保留在第 " + Rules.N(homeFloor) + " 层，可随时返回。");
+    }
+    void ReturnHome() {
+        if (travelMap < 0) { Log("当前就在幻境。"); return; }
+        if (mode != 0 || recovery > 0) { Log("先结束当前战斗或复活。"); return; }
+        travelMap = -1; floor = homeFloor; wave = homeWave; Spawn();
+        Log("已返回幻境第 " + Rules.N(floor) + " 层，推层进度恢复。");
     }
     void Arena(int rival) {
         if (job < 0 || rival < 0 || rival > 2 || arenaTries <= 0) { Log("竞技场每日5次，明日再来。"); return; }

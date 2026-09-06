@@ -83,12 +83,22 @@ def main():
     success = tree('success'); selector(success, range(1,21))
     state = json.loads((OUT/'save/hero-v2.json').read_text(encoding='utf-8-sig'))
     assert state['floor'] == 1 and state['best'] == 10 and state['active'] == 0
+    run(exe, 'station', [click(startup, 'nav-0'), 'dump tree stationed.json'], fresh=False)
+    stationed = tree('stationed'); selector(stationed, range(1,21))
+    node(stationed, 'map-return')
+    state = json.loads((OUT/'save/hero-v2.json').read_text(encoding='utf-8-sig'))
+    assert state['travelMap'] == 0 and state['homeFloor'] == 6 and state['best'] == 10, 'Station and home track must persist'
+    run(exe, 'return', [click(startup, 'nav-0'), click(stationed, 'map-return'), 'dump tree returned-home.json'], fresh=False)
+    returned_home = tree('returned-home'); selector(returned_home, range(1,21))
+    assert not any(n.get('name') == 'map-return' for n in returned_home), 'Return button must hide back home'
+    state = json.loads((OUT/'save/hero-v2.json').read_text(encoding='utf-8-sig'))
+    assert state['travelMap'] == -1 and state['floor'] == 6, 'Return restores the illusion track'
     run(exe, 'navigation', [click(startup, 'nav-0'), click(maps, 'nav-2'), 'dump tree illusion.json', click(maps, 'nav-0'), 'dump tree returned.json', click(maps, 'map-next'), 'dump tree page-two.json'])
     node(tree('illusion'), 'challenge'); assert not any(n.get('name') == 'map-selector' for n in tree('illusion'))
     selector(tree('returned'), range(1,21)); two = tree('page-two'); selector(two, range(21,36))
     run(exe, 'pagination', [click(startup, 'nav-0'), click(maps, 'map-next'), click(two, 'map-prev'), 'dump tree page-one.json'])
     selector(tree('page-one'), range(1,21))
-    print('PASS real map routing: entry, locked destination, successful travel/save, illusion/return, both pages (35 destinations)')
+    print('PASS real map routing: entry, locked destination, successful travel/save, stationed track preservation, return home, illusion/return nav, both pages (35 destinations)')
 
 if __name__ == '__main__':
     main()

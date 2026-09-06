@@ -384,8 +384,8 @@ class LegendApp {
         int total = GameTables.current.maps.rows.Count;
         // The reference map selector is a separate 4 x 5 page, not a combat route.
         content.With(Text("地图传送", "strong", 28));
-        pageInfo = Text("", "cyan", 28); pageInfo.Named("map-location"); content.With(pageInfo);
-        Note(content, "选择目的地后停留在地图页；查看战斗请点击上方“幻境”。");
+        pageInfo = Text(g.travelMap >= 0 ? "当前驻守：" + g.LocationName() + " 第 " + Rules.N(g.floor) + " 层 · 幻境推层进度第 " + Rules.N(g.homeFloor) + " 层" : "当前：幻境 第 " + Rules.N(g.floor) + " 层 · 最高 " + Rules.N(g.best) + " 层", "cyan", 28); pageInfo.Named("map-location"); content.With(pageInfo);
+        Note(content, "选择目的地后停留在地图页；查看战斗请点击上方“幻境”。驻守地图只循环刷怪，不推进幻境层数。");
         ScrollColumn mapScroll = new ScrollColumn(); mapScroll.Named("map-scroll"); mapScroll.Grow(); content.With(mapScroll);
         Grid grid = Grid.Of(4); grid.Named("map-selector"); grid.Class = "map-grid"; grid.Gap(4); mapScroll.With(grid);
         for (int i = mapPage * 20; i < total && i < (mapPage + 1) * 20; i = i + 1) {
@@ -396,6 +396,7 @@ class LegendApp {
             tile.With(Btn(g.CanEnter(map) && g.best >= map.Int("start_floor") ? "传送" : "查看解锁条件", "map-" + Rules.N(map.Int("id")), () => { g.Travel(n); mapNotice = g.notice; Rebuild(); })); grid.With(tile);
         }
         Panel pager = Panel.Row(); pager.Prefer(0, 28); pager.Gap(8);
+        if (g.travelMap >= 0) { pager.With(Btn("返回幻境 · 第 " + Rules.N(g.homeFloor) + " 层", "map-return", () => { g.ReturnHome(); mapNotice = g.notice; Rebuild(); })); }
         Button previous = Btn("上一页", "map-prev", () => { if (mapPage > 0) { mapPage = mapPage - 1; BuildPage(); Refresh(); } }); previous.Disabled = mapPage == 0; pager.With(previous);
         pager.With(Text("地图 " + Rules.N(mapPage + 1) + " / " + Rules.N((total + 19) / 20), "cyan", 24));
         Button next = Btn("下一页", "map-next", () => { if ((mapPage + 1) * 20 < total) { mapPage = mapPage + 1; BuildPage(); Refresh(); } }); next.Disabled = (mapPage + 1) * 20 >= total; pager.With(next); pager.DockBottom(); content.Add(pager);
@@ -597,7 +598,7 @@ class LegendApp {
             if (path != enemySpritePath) { enemySprite.Src = path; enemySpritePath = path; }
             enemySprite.Alt = g.enemyName;
         }
-        if (combatTitle != null) { combatTitle.Text = page == 3 ? "BOSS之家 · " + g.enemyName : (page == 12 ? "秘境 · 第 " + Rules.N(g.secretFloor) + " 层" : "幻境 · 第 " + Rules.N(g.floor) + " 层"); enemyName.Text = g.enemyName; battleStatus.Text = (g.recovery > 0 ? "重伤恢复中" : (g.active ? "自动战斗中" : "战斗已暂停")) + "\n背包 " + Rules.N(g.bag.Count) + " / " + Rules.N(g.capacity) + (g.bag.Count >= g.capacity ? " · 已满，请整理掉落" : ""); foeText.Text = Rules.N(g.enemyHp) + "/" + Rules.N(g.enemyMax); foe.percent = g.enemyMax > 0 ? (int)((long)g.enemyHp * 100 / g.enemyMax) : 0; playerText.Text = Rules.N(g.hp) + "/" + Rules.N(g.MaxHp()); life.percent = (int)((long)g.hp * 100 / g.MaxHp()); pause.Text = g.active ? "☑ 自动" : "☐ 自动"; push.Text = page == 3 ? (g.bossAutoNext ? "☑ 连续挑战" : "☐ 连续挑战") : ((page == 12 ? g.secretAutoPush : g.autoPush) ? "☑ 推层" : "☐ 推层"); if (pageInfo != null) { pageInfo.Text = "最高幻境：" + Rules.N(g.best) + "层\n个人BOSS胜利：" + Rules.N(g.bossWins) + "\n秘境通关：" + Rules.N(g.secrets); } }
+        if (combatTitle != null) { combatTitle.Text = page == 3 ? "BOSS之家 · " + g.enemyName : (page == 12 ? "秘境 · 第 " + Rules.N(g.secretFloor) + " 层" : g.LocationName() + " · 第 " + Rules.N(g.floor) + " 层"); enemyName.Text = g.enemyName; battleStatus.Text = (g.recovery > 0 ? "重伤恢复中" : (g.active ? "自动战斗中" : "战斗已暂停")) + "\n背包 " + Rules.N(g.bag.Count) + " / " + Rules.N(g.capacity) + (g.bag.Count >= g.capacity ? " · 已满，请整理掉落" : ""); foeText.Text = Rules.N(g.enemyHp) + "/" + Rules.N(g.enemyMax); foe.percent = g.enemyMax > 0 ? (int)((long)g.enemyHp * 100 / g.enemyMax) : 0; playerText.Text = Rules.N(g.hp) + "/" + Rules.N(g.MaxHp()); life.percent = (int)((long)g.hp * 100 / g.MaxHp()); pause.Text = g.active ? "☑ 自动" : "☐ 自动"; push.Text = page == 3 ? (g.bossAutoNext ? "☑ 连续挑战" : "☐ 连续挑战") : ((page == 12 ? g.secretAutoPush : g.autoPush) ? "☑ 推层" : "☐ 推层"); if (pageInfo != null) { pageInfo.Text = "最高幻境：" + Rules.N(g.best) + "层\n个人BOSS胜利：" + Rules.N(g.bossWins) + "\n秘境通关：" + Rules.N(g.secrets); } }
         int count = vault ? g.storage.Count : g.bag.Count;
         for (int i = 0; i < 84; i = i + 1) {
             if (cells[i] == null) { continue; }

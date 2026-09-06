@@ -83,6 +83,8 @@ class SaveStore {
         Rules.Put(j, "secrets", g.secrets);
         Rules.Put(j, "secretFloor", g.secretFloor);
         Rules.Put(j, "secretWave", g.secretWave);
+        Rules.Put(j, "travelMap", g.travelMap);
+        Rules.Put(j, "homeFloor", g.homeFloor); Rules.Put(j, "homeWave", g.homeWave);
         Rules.Put(j, "elementPool", g.elementPool);
         Rules.Put(j, "elementSeconds", g.elementSeconds);
         Rules.Put(j, "reputation", g.reputation);
@@ -208,6 +210,9 @@ class SaveStore {
         g.secrets = Rules.Clamp(j.Int("secrets", g.secrets), 0, GameTables.current.encounters.At(4).Int("max_progress"));
         g.secretFloor = Rules.Clamp(j.Int("secretFloor", g.secrets + 1), 1, GameTables.current.encounters.At(4).Int("max_progress"));
         g.secretWave = Rules.Clamp(j.Int("secretWave", 0), 0, g.B("secret_wave_count"));
+        g.travelMap = Rules.Clamp(j.Int("travelMap", -1), -1, GameTables.current.maps.rows.Count - 1);
+        g.homeFloor = Rules.Clamp(j.Int("homeFloor", 1), 1, g.B("max_floor"));
+        g.homeWave = Rules.Clamp(j.Int("homeWave", 0), 0, g.B("wave_count"));
         g.elementPool = Rules.Clamp(j.Int("elementPool", 0), 0, g.B("element_pool_cap"));
         g.elementSeconds = Rules.Clamp(j.Int("elementSeconds", 0), 0, 1000000000);
         g.reputation = Rules.Clamp(j.Int("reputation", 0), 0, 1000000000);

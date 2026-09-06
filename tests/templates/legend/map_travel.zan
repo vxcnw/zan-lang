@@ -19,6 +19,13 @@ class MapTravelTests {
         Check(g.floor == 1 && g.wave == 0 && g.enemyHp == g.enemyMax && g.best == 100, "successful travel changes only current destination not best record");
         Check(!g.active && g.gold == gold, "teleport preserves pause and gold");
         g.Travel(1); Check(g.floor == GameTables.current.maps.rows[1].Int("start_floor") && g.EnemyData().Int("id") == GameTables.current.maps.rows[1].Int("monster_id"), "target monster matches map definition");
+        Check(g.travelMap == 1 && g.homeFloor == 6 && g.homeWave == 2, "travel preserves the illusion track for return");
+        g.wave = g.B("wave_count"); int stationFloor = g.floor; int stationBest = g.best; g.Victory();
+        Check(g.travelMap == 1 && g.floor == stationFloor && g.wave == 0 && g.best == stationBest, "stationed guardian clear loops without pushing floors or best");
+        g.Travel(4); Check(g.travelMap == 4 && g.homeFloor == 6 && g.homeWave == 2 && g.floor == 21, "switching stations keeps the original illusion track");
+        g.savedAt = 1700000000; Game stationedSave = SaveStore.Decode(SaveStore.Encode(g).ToJson());
+        Check(stationedSave.travelMap == 4 && stationedSave.homeFloor == 6 && stationedSave.homeWave == 2 && stationedSave.floor == 21, "station and home track persist together");
+        g.ReturnHome(); Check(g.travelMap == -1 && g.floor == 6 && g.wave == 2 && g.enemyHp == g.enemyMax, "return restores illusion floor and wave");
         g.savedAt = 1700000000; Game restored = SaveStore.Decode(SaveStore.Encode(g).ToJson());
         Check(restored.floor == g.floor && restored.best == g.best && !restored.active, "destination saved and restored");
         Console.WriteLine("PASS map travel checks=" + checks.ToString());
