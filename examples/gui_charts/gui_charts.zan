@@ -140,8 +140,16 @@ partial class Charts {
         }
 
         app.Show();
+        // --nomouse：截图/回归模式——鼠标由自动化宿主管理，帧内
+        // 把鼠标钉到窗口外并整体关闭 tooltip，悬停覆盖层不进画面。
+        bool pin = false;
+        for (int ai = 0; ai < Environment.ArgCount(); ai = ai + 1) {
+            if (Environment.ArgAt(ai) == "--nomouse") { pin = true; }
+        }
+        Charts.nomouse = pin;
         app.SetFrameBody(() => {
             WidgetId.ResetFrame();
+            if (pin) { app.mouseX = 0 - 9999; app.mouseY = 0 - 9999; }
             Charts.Render(app);
             app.RenderChrome("Zan Charts");
         });
@@ -532,13 +540,19 @@ partial class Charts {
 
     static int KeyOf(int demo, int sub) { return 700100 + demo * 16 + sub; }
 
+    /// 截图/回归模式（--nomouse）：悬停 tooltip、轴指示器随宿主
+    /// 光标进画面，整体关掉，截图只含图表本体。
+    static bool nomouse;
+
     static void Show(App app, ChartOption o, int x, int y, int w, int h) {
         o.toolboxShow = true;
+        if (Charts.nomouse) { o.showTooltip = false; }
         ChartView.Keyed(o, Charts.KeyOf(Charts.selected.Get(), 0)).Render(app, x, y, w, h);
     }
 
     static void ShowN(App app, ChartOption o, int sub, int x, int y, int w, int h) {
         o.toolboxShow = true;
+        if (Charts.nomouse) { o.showTooltip = false; }
         ChartView.Keyed(o, Charts.KeyOf(Charts.selected.Get(), sub)).Render(app, x, y, w, h);
     }
 

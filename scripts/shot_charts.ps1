@@ -1,9 +1,16 @@
-param([string]$Demo = "", [string]$Out = "d:\project\zan-lang\build\shot_charts.png")
+﻿param([string]$Demo = "", [string]$Out = "d:\project\zan-lang\build\shot_charts.png")
 $exe = "d:\project\zan-lang\build\charts_test.exe"
 Get-Process charts_test -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 300
 # Quote the argument so two-word demo names ("Nested rings") survive as one argv entry.
-if ($Demo -ne "") { Start-Process $exe -ArgumentList ('"' + $Demo + '"') } else { Start-Process $exe }
+# --nomouse：截图模式（charts_test 把鼠标钉到窗口外，悬停
+# tooltip/轴指示器不再随宿主光标进画面——本机光标归自动化
+# 宿主管理，SetCursorPos/PostMessage 都挪不动它）。
+if ($Demo -ne "") {
+    Start-Process $exe -ArgumentList ('"' + $Demo + '" --nomouse')
+} else {
+    Start-Process $exe -ArgumentList '--nomouse'
+}
 Start-Sleep -Milliseconds 1400
 
 # PowerShell is DPI-unaware by default: on a scaled display GetWindowRect and
@@ -60,4 +67,6 @@ $bmp = New-Object Drawing.Bitmap($w,$ht)
 $g = [Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($r.L,$r.T,0,0,$bmp.Size)
 $bmp.Save($Out)
+# --nomouse 的窗口悬停是禁用的，不能留给用户当交互窗口用：截完即关。
+Get-Process charts_test -ErrorAction SilentlyContinue | Stop-Process -Force
 Write-Output ("ok size=" + $w + "x" + $ht + " -> " + $Out)

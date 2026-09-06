@@ -58,12 +58,14 @@ class Program {
             + ":" + Convert.ToString(lr.slices[3].ring));
         Console.WriteLine("ringTot:" + Convert.ToString(lr.ringTotal[0])
             + ":" + Convert.ToString(lr.ringTotal[1]));
-        // 环 1 的扇区按环 1 自己的 total 分角：20/50 -> 144°，30/50 -> 216°。
+        // 环序内→外（ECharts 嵌套饼）：series[1]=R2 落在环 0（最外，
+        // slices[0..1]），series[0]=R1 落在环 1（slices[2..3]），环 1
+        // 扇区按 R1 自己的 total 分角：10/20 -> 180°，10/20 -> 180°。
         Console.WriteLine("r1angles:" + Convert.ToString(lr.slices[2].a0)
             + ":" + Convert.ToString(lr.slices[2].a1)
             + ":" + Convert.ToString(lr.slices[3].a0)
             + ":" + Convert.ToString(lr.slices[3].a1));
-        // donutPct 默认（innerPct=0 时回落）：两条系列的环内径都是 55。
+        // 多环布局不回落 donutPct：innerPct=0 即实心内环，两环都是 0。
         Console.WriteLine("inner:" + Convert.ToString(lr.ringInner[0])
             + ":" + Convert.ToString(lr.ringInner[1]));
 

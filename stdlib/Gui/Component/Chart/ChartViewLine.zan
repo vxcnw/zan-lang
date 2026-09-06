@@ -770,7 +770,24 @@ partial class ChartView {
         ChartSpan sv = Chart.NiceRange(0, Chart.MaxStackGroupsW(series, n, i0));
         int maxV = sv.hi;
         int plotTop = Chart.DrawPanelI(app, x, y, w, h, o.title, series, o.iwid, o.showLegend);
-        ChartFrame f = Chart.DrawFrameT(app, x, y, w, h - zoomH, plotTop, winLabels, maxV, sv.ticks);
+        // 走 BuildAxesR（旧 DrawFrameT 硬编码 band 模式，不吃
+        // boundaryGap/splitArea/类目竖网格）：堆叠顶经 leftDataMax
+        // 显式传入（AxisMaxFor 不感知堆叠，只取单系列最大）。
+        // 注意 maxV 已是 nice 值，AxisHi 还会对它再取整（3000→5000），
+        // 线走 f.YOf 而带体走手工映射，两套量程会劈叉——期间把
+        // y0.max 钉到 maxV（显式边界尊重不取整）、刻度数经
+        // y0.ticks 带入，调用后一并恢复。demo 未声明 y 轴时
+        // YAxis0() 每次返回临时新轴，钉不住——先实体化一根。
+        if (o.yAxes.Count == 0) { o.Y(ChartAxis.Value()); }
+        ChartAxis y0a = o.YAxis0();
+        int savedTicks = y0a.ticks;
+        int savedMax = y0a.max;
+        if (sv.ticks > 0) { y0a.ticks = sv.ticks; }
+        y0a.max = maxV;
+        ChartFrame f = Chart.BuildAxesR(app, x, y, w, h - zoomH, plotTop,
+            winLabels, o, series, maxV, 0 - 1);
+        y0a.ticks = savedTicks;
+        y0a.max = savedMax;
         if (zoomH > 0) {
             Chart.DrawZoomBar(app, f.plotX, f.plotW, y + h - app.Scale(18),
                 app.Scale(12), o.iwid, fullN);
