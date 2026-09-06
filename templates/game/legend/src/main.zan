@@ -295,8 +295,8 @@ class LegendApp {
         ScrollColumn detailsScroll = new ScrollColumn(); detailsScroll.Named("equipment-details-scroll"); detailsScroll.Grow(); extra.With(detailsScroll);
         if (page == 21) { detailsScroll.With(detail); }
         else {
-            Panel tabs = Panel.Row(); tabs.Gap(4); tabs.Prefer(0, 28); string[] names = new string[] { "天书", "内功", "宝石", "技能" };
-            for (int i = 0; i < 4; i = i + 1) { int n = i; tabs.With(Btn(names[i], "growth-tab-" + Rules.N(i), () => { growthTab = n; Rebuild(); })); } detailsScroll.With(tabs);
+            Panel tabs = Panel.Row(); tabs.Gap(4); tabs.Prefer(0, 28); string[] names = new string[] { "天书", "内功", "宝石", "技能", "符文" };
+            for (int i = 0; i < 5; i = i + 1) { int n = i; tabs.With(Btn(names[i], "growth-tab-" + Rules.N(i), () => { growthTab = n; Rebuild(); })); } detailsScroll.With(tabs);
             if (growthTab == 1) {
                 detailsScroll.With(Text("内功 · TP " + Rules.N(g.tp) + " · 击杀获得 TP，升级消耗黑铁", "yellow small", 24));
                 Grid inner = Grid.Of(2); inner.Gap(4); inner.Prefer(0, 256);
@@ -335,6 +335,19 @@ class LegendApp {
                     skills.With(card);
                 }
                 detailsScroll.With(skills);
+            } else if (growthTab == 4) {
+                detailsScroll.With(Text("符文锻造 · 1#至14#符文；3枚同级合成1枚高阶，降级消耗10黑铁", "yellow small", 24));
+                Grid runeGrid = Grid.Of(2); runeGrid.Gap(4); runeGrid.Prefer(0, 420);
+                for (int i = 0; i < 14; i = i + 1) {
+                    int n = i + 1; Panel card = Col("frame");
+                    card.With(Text(Rules.N(n) + "#符文 · " + Rules.N(g.RuneCount(n)) + "枚", "cyan small", 24));
+                    Button synth = Btn(n >= 12 ? "不可合成" : "合成（3→1）", "rune-synth-" + Rules.N(n), () => { g.SynthesizeRune(n); Rebuild(); });
+                    synth.Disabled = n >= 12 || g.RuneCount(n) < 3; card.With(synth);
+                    Button down = Btn(n <= 1 || n >= 13 ? "不可降级" : "降级（铁10）", "rune-down-" + Rules.N(n), () => { g.DowngradeRune(n); Rebuild(); });
+                    down.Disabled = n <= 1 || n >= 13 || g.RuneCount(n) < 1 || g.iron < 10; card.With(down); runeGrid.With(card);
+                }
+                detailsScroll.With(runeGrid);
+                detailsScroll.With(Text("规则来源：参考配方 1#–11#升级、2#–12#降级。旧版通用符文库存仍保留用于兼容旧存档和既有锻造配方。", "secondary small", 0));
             } else {
                 Equipment book = g.equipped[11]; string bookStatus = "当前未穿戴天书。";
                 if (book != null) { bookStatus = "当前天书：" + book.Name() + "\n" + book.Detail(); }

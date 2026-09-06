@@ -16,7 +16,7 @@ class SaveStore {
         return dir + "/hero-v2.json";
     }
     static JsonValue Encode(Game g) {
-        JsonValue j = JsonValue.NewObject(); Rules.Put(j, "version", 8);
+        JsonValue j = JsonValue.NewObject(); Rules.Put(j, "version", 9);
         Rules.Put(j, "job", g.job);
         Rules.Put(j, "level", g.level);
         Rules.Put(j, "xp", g.xp);
@@ -25,6 +25,7 @@ class SaveStore {
         Rules.Put(j, "gems", g.gems);
         Rules.Put(j, "iron", g.iron);
         Rules.Put(j, "runes", g.runes);
+        JsonValue runeCounts = JsonValue.NewArray(); for (int i = 0; i < 14; i = i + 1) { runeCounts.Append(JsonValue.NewNum(Rules.N(g.runeCounts[i]))); } j.Put("runeCounts", runeCounts);
         Rules.Put(j, "potions", g.potions);
         Rules.Put(j, "floor", g.floor);
         Rules.Put(j, "best", g.best);
@@ -109,7 +110,7 @@ class SaveStore {
     }
     static Game Decode(string text) {
         JsonValue j = JsonValue.Parse(text);
-        if (!j.IsObject() || (j.Int("version", 0) != 2 && j.Int("version", 0) != 3 && j.Int("version", 0) != 4 && j.Int("version", 0) != 5 && j.Int("version", 0) != 6 && j.Int("version", 0) != 7 && j.Int("version", 0) != 8) || !j.Has("savedAt") || !j.Has("job")) { throw new Exception("Unsupported or incomplete save"); }
+        if (!j.IsObject() || (j.Int("version", 0) != 2 && j.Int("version", 0) != 3 && j.Int("version", 0) != 4 && j.Int("version", 0) != 5 && j.Int("version", 0) != 6 && j.Int("version", 0) != 7 && j.Int("version", 0) != 8 && j.Int("version", 0) != 9) || !j.Has("savedAt") || !j.Has("job")) { throw new Exception("Unsupported or incomplete save"); }
         Game g = new Game();
         g.job = Rules.Clamp(j.Int("job", g.job), -1, 2);
         g.level = Rules.Clamp(j.Int("level", g.level), 1, GameTables.current.levels.rows.Count);
@@ -119,6 +120,11 @@ class SaveStore {
         g.gems = Rules.Clamp(j.Int("gems", g.gems), 0, 1000000);
         g.iron = Rules.Clamp(j.Int("iron", g.iron), 0, 1000000);
         g.runes = Rules.Clamp(j.Int("runes", g.runes), 0, 1000000);
+        JsonValue runeCounts = j.Get("runeCounts");
+        if (runeCounts != null) {
+            if (!runeCounts.IsArray() || runeCounts.Count() != 14) { throw new Exception("Invalid rune state"); }
+            for (int i = 0; i < 14; i = i + 1) { g.runeCounts[i] = Rules.Clamp(runeCounts.At(i).AsInt(0), 0, 1000000); }
+        }
         g.potions = Rules.Clamp(j.Int("potions", g.potions), 0, 9999);
         g.floor = Rules.Clamp(j.Int("floor", g.floor), 1, g.B("max_floor"));
         g.best = Rules.Clamp(j.Int("best", g.best), 1, g.B("max_floor"));

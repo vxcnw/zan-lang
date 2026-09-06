@@ -16,6 +16,11 @@ class LegendSystemTests {
         g.gold = 10000; g.iron = 100; g.runes = 0; int beforeUpgrade = forgeItem.upgrade; g.Forge(0, 3);
         Check(forgeItem.upgrade == beforeUpgrade && g.gold == 10000 && g.iron == 100, "forge rune shortage is atomic across all currencies");
         Check(GameTables.current.forge.At(1).Int("success_pct") == 70 && GameTables.current.forge.At(1).Text("failure") == "downgrade", "gold reroll declares probabilistic downgrade failure");
+        g.AddRune(1, 3); Check(g.RuneCount(1) == 3, "rune inventory accepts levelled rune counts");
+        Check(g.SynthesizeRune(1) && g.RuneCount(1) == 0 && g.RuneCount(2) == 1, "three same runes synthesize into the next level");
+        int runeIron = g.iron; g.iron = 0; Check(!g.DowngradeRune(2) && g.RuneCount(2) == 1 && g.iron == 0, "rune downgrade shortage is atomic");
+        g.iron = 10; Check(g.DowngradeRune(2) && g.RuneCount(2) == 0 && g.RuneCount(1) == 1 && g.iron == 0, "rune downgrade consumes one rune and ten iron");
+        g.AddRune(14, 2); Check(!g.SynthesizeRune(14) && g.RuneCount(14) == 2, "highest rune cannot synthesize past 14#");
         int floor = g.floor; g.active = false; int wave = g.wave; int tries = g.bossTries;
         g.level = 1; g.Challenge(1, 0); Check(g.mode == 0 && g.bossTries == tries, "boss level gate atomic");
         g.level = 80; g.Challenge(1, -1); Check(g.bossTries == tries, "invalid boss does not consume tries");
@@ -104,12 +109,14 @@ class LegendSystemTests {
         int dailyMaps = g.treasureMaps; g.Daily();
         Check(g.treasureMaps == dailyMaps + g.B("daily_treasure_maps"), "daily welfare grants configured treasure maps");
         g.filter = 3; g.filterCoefficient = 5; g.filterMinLevel = 40; g.filterJobOnly = true;
+        g.AddRune(3, 4);
         g.savedAt = 1700000120; Game loaded = SaveStore.Decode(SaveStore.Encode(g).ToJson());
         Check(loaded.secretFloor == g.secretFloor && loaded.secrets == g.secrets && !loaded.active, "secret save roundtrip");
         Check(loaded.filter == 3 && loaded.filterCoefficient == 5 && loaded.filterMinLevel == 40 && loaded.filterJobOnly, "pickup filters save roundtrip");
         Check(loaded.elementPool == g.elementPool && loaded.elementSeconds == 61 && loaded.elementRanks[0] == 1 && loaded.elementRanks[4] == 100, "elements save roundtrip");
         Check(loaded.reputation == g.reputation && loaded.redPackets == g.redPackets && loaded.recyclePoints == g.recyclePoints, "recycle wallets persisted");
         Check(loaded.treasureMaps == g.treasureMaps && loaded.treasureDraws == g.treasureDraws, "treasure map state persisted");
+        Check(loaded.RuneCount(1) == 1 && loaded.RuneCount(3) == 4 && loaded.RuneCount(14) == 2, "levelled rune inventory survives save roundtrip");
         Check(loaded.SkillRank(1) == 2 && loaded.IsSkillEquipped(1) && loaded.SkillAtSlot(7).Text("kind") == "passive", "skill ranks and loadout persisted");
         JsonValue broken = SaveStore.Encode(g); broken.Set("elementRanks",JsonValue.NewArray()); bool rejected = false;
         try { SaveStore.Decode(broken.ToJson()); } catch (Exception ex) { rejected = true; } Check(rejected,"malformed elements rejected");

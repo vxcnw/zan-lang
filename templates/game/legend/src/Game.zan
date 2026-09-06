@@ -12,6 +12,7 @@ class Game {
     int gems = GameTables.Value("initial_gems");
     int iron = GameTables.Value("initial_iron");
     int runes;
+    int[] runeCounts = new int[14];
     int potions = GameTables.Value("initial_potions");
     int floor = 1;
     int best = 1;
@@ -163,6 +164,26 @@ class Game {
     bool Pay(int coins, int ore, int yuan) {
         if (coins < 0 || ore < 0 || yuan < 0 || gold < coins || iron < ore || gems < yuan) { Log("资源不足：需要金币 " + Rules.N(coins) + " / 黑铁 " + Rules.N(ore) + " / 元宝 " + Rules.N(yuan)); return false; }
         gold = gold - coins; iron = iron - ore; gems = gems - yuan; return true;
+    }
+    int RuneCount(int level) { return level < 1 || level > 14 ? 0 : runeCounts[level - 1]; }
+    void AddRune(int level, int amount) {
+        if (level < 1 || level > 14 || amount <= 0) { return; }
+        runeCounts[level - 1] = Rules.Clamp((long)runeCounts[level - 1] + amount, 0, 1000000);
+    }
+    bool SynthesizeRune(int level) {
+        if (level < 1 || level > 11) { Log("1#至11#符文才可合成更高等级。"); return false; }
+        if (runeCounts[level - 1] < 3) { Log(Rules.N(level) + "#符文不足，需要3枚同级符文。"); return false; }
+        runeCounts[level - 1] = runeCounts[level - 1] - 3;
+        runeCounts[level] = Rules.Clamp((long)runeCounts[level] + 1, 0, 1000000);
+        Log(Rules.N(level) + "#符文合成成功，获得1枚" + Rules.N(level + 1) + "#符文。"); return true;
+    }
+    bool DowngradeRune(int level) {
+        if (level < 2 || level > 12) { Log("2#至12#符文才可降级。"); return false; }
+        if (runeCounts[level - 1] < 1 || iron < 10) { Log("符文降级需要1枚当前符文和10黑铁。"); return false; }
+        runeCounts[level - 1] = runeCounts[level - 1] - 1;
+        iron = iron - 10;
+        runeCounts[level - 2] = Rules.Clamp((long)runeCounts[level - 2] + 1, 0, 1000000);
+        Log(Rules.N(level) + "#符文降级成功，获得1枚" + Rules.N(level - 1) + "#符文。"); return true;
     }
     Equipment CreateItem(int definitionId, int tier, int atLevel) {
         DataRow d = GameTables.current.items.At(definitionId);
