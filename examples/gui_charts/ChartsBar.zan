@@ -3,218 +3,646 @@ using Gui;
 using Gui.Component.Chart;
 
 partial class Charts {
-    /// ECharts bar1：蒸发量 vs 降水量，标注 + 标线。
+    // ---- 柱状图 16 例：逐例对齐参考站 option（_scratch/ref2210/bar*.opt.js）----
+    // 已知引擎偏差（逐例注释说明）：x 轴 position:'top' 不支持（bar11/bar9
+    // 画在底部）；splitLine dashed 逐轴样式不支持（HBar 网格统一实线）；
+    // 渐变以起止色中间调近似；bar14 的 image:// 标注点（PNG 素材）不画。
+
+    /// bar1 标准柱状图：蒸发量 vs 降水量，12 个月，
+    /// 蒸发量 max/min 标注 + 平均标线；降水量显式「年最高/年最低」。
     static void Bar1(App app, int x, int y, int w, int h) {
-        ChartOption o = ChartOption.Of(Charts.T("Evaporation vs precipitation", "蒸发量与降水量"),
-            Charts.Months(), new List<ChartSeries>{
-                ChartSeries.Bar(Charts.T("Evaporation", "蒸发量"),
-                    new List<int>{ 2, 5, 8, 23, 26, 77, 136, 162, 33, 20, 6, 3 }),
-                ChartSeries.Bar(Charts.T("Precipitation", "降水量"),
-                    new List<int>{ 3, 6, 9, 26, 29, 71, 176, 182, 49, 19, 6, 2 })
-            });
+        ChartSeries ev = ChartSeries.Bar(Charts.T("Evaporation", "蒸发量"),
+            new List<int>{ 2, 5, 7, 23, 26, 77, 136, 162, 33, 20, 6, 3 });
+        ev.MarkPoint(ChartMarkPoint.Max());
+        ev.MarkPoint(ChartMarkPoint.Min());
+        ev.MarkLine(ChartMarkLine.Average());
+        ChartSeries pr = ChartSeries.Bar(Charts.T("Precipitation", "降水量"),
+            new List<int>{ 3, 6, 9, 26, 29, 71, 176, 182, 49, 19, 6, 2 });
+        // ref: {name:'年最高', value:182.2, xAxis:7, symbolSize:18}
+        ChartMarkPoint yhi = ChartMarkPoint.Point(0, 0,
+            Charts.T("Year highest", "年最高"));
+        yhi.dataIndex = 7;
+        yhi.size = 18;
+        yhi.sizeSet = true;
+        ChartMarkPoint ylo = ChartMarkPoint.Point(0, 0,
+            Charts.T("Year lowest", "年最低"));
+        ylo.dataIndex = 11;
+        pr.MarkPoint(yhi);
+        pr.MarkPoint(ylo);
+        pr.MarkLine(ChartMarkLine.Average());
+        ChartOption o = ChartOption.Of(
+            Charts.T("Evaporation and precipitation in some region", "某地区蒸发量和降水量"),
+            Charts.Months(), new List<ChartSeries>{ ev, pr });
+        o.titleSub = Charts.T("Purely fictional", "纯属虚构");
         o.markPoint = true;
-        o.markLine = 42;
-        o.markLabel = Charts.T("avg 42", "蒸发均值 42");
         Charts.Show(app, o, x, y, w, h);
     }
 
+    /// bar2 堆积柱状图：4 组堆叠（广告/搜索引擎）+ 2 条独立系列
+    /// 混排；搜索引擎带 min/max 虚线标线。
+    /// ref 偏差：百度 barWidth:5 —— 竖向堆叠组内逐系列柱宽不支持。
     static void Bar2(App app, int x, int y, int w, int h) {
-        ChartOption o = ChartOption.Of(Charts.T("Stacked weather", "堆积柱状图"),
-            Charts.Months(), new List<ChartSeries>{
-                ChartSeries.StackedBar(Charts.T("Evaporation", "蒸发量"),
-                    new List<int>{ 2, 5, 8, 23, 26, 77, 136, 162, 33, 20, 6, 3 }),
-                ChartSeries.StackedBar(Charts.T("Precipitation", "降水量"),
-                    new List<int>{ 3, 6, 9, 26, 29, 71, 176, 182, 49, 19, 6, 2 })
-            });
-        o.markLine = 200;
-        o.markLabel = Charts.T("200 mm", "200 mm");
+        ChartSeries direct = ChartSeries.Bar(Charts.T("Direct access", "直接访问"),
+            new List<int>{ 320, 332, 301, 334, 390, 330, 320 });
+        ChartSeries mail = ChartSeries.StackedBar(Charts.T("Email marketing", "邮件营销"),
+            new List<int>{ 120, 132, 101, 134, 90, 230, 210 });
+        mail.stackName = "广告";
+        ChartSeries union = ChartSeries.StackedBar(Charts.T("Union ads", "联盟广告"),
+            new List<int>{ 220, 182, 191, 234, 290, 330, 310 });
+        union.stackName = "广告";
+        ChartSeries video = ChartSeries.StackedBar(Charts.T("Video ads", "视频广告"),
+            new List<int>{ 150, 232, 201, 154, 190, 330, 410 });
+        video.stackName = "广告";
+        ChartSeries search = ChartSeries.Bar(Charts.T("Search engine", "搜索引擎"),
+            new List<int>{ 862, 1018, 964, 1026, 1679, 1600, 1570 });
+        search.MarkLine(ChartMarkLine.Min());
+        search.MarkLine(ChartMarkLine.Max());
+        ChartSeries baidu = ChartSeries.StackedBar(Charts.T("Baidu", "百度"),
+            new List<int>{ 620, 732, 701, 734, 1090, 1130, 1120 });
+        baidu.stackName = "搜索引擎";
+        ChartSeries google = ChartSeries.StackedBar(Charts.T("Google", "谷歌"),
+            new List<int>{ 120, 132, 101, 134, 290, 230, 220 });
+        google.stackName = "搜索引擎";
+        ChartSeries bing = ChartSeries.StackedBar(Charts.T("Bing", "必应"),
+            new List<int>{ 60, 72, 71, 74, 190, 130, 110 });
+        bing.stackName = "搜索引擎";
+        ChartSeries other = ChartSeries.StackedBar(Charts.T("Others", "其他"),
+            new List<int>{ 62, 82, 91, 84, 109, 110, 120 });
+        other.stackName = "搜索引擎";
+        ChartOption o = ChartOption.Of(Charts.T("Stacked bar", "堆积柱状图"),
+            Charts.Week(), new List<ChartSeries>{
+                direct, mail, union, video, search,
+                baidu, google, bing, other });
         Charts.Show(app, o, x, y, w, h);
     }
 
-    /// 温度计：底带铺满量程，彩色值段像水银。
+    /// bar10 温度计式图表：Acutal（tomato 实段）+ Forecast（白段
+    /// tomato 描边）堆成水银柱；Forecast 的标签是两系列之和
+    /// （ref 的 label.formatter 逐项返回 Acutal[i]+Forecast[i]，
+    /// 引擎以 data[i].labelText 覆盖文本表达）。
+    /// ref 偏差：yAxis boundaryGap [0,0.1] 顶部留白不支持（自动量程）。
     static void Bar3(App app, int x, int y, int w, int h) {
-        ChartSeries s = ChartSeries.Bar(Charts.T("Score", "得分"),
-            new List<int>{ 70, 82, 91, 64, 88, 75, 59 });
-        s.showBackground = true;
+        int tomato = Chart.Rgb(255, 99, 71);
+        ChartSeries ac = ChartSeries.StackedBar(Charts.T("Acutal", "Acutal"),
+            new List<int>{ 260, 200, 220, 120, 100, 80 });
+        ac.stackName = "sum";
+        ac.color = tomato;
+        ac.itemStyle.normal.borderColor = tomato;
+        ac.itemStyle.normal.borderWidth = 6;
+        ac.labelShow = true;
+        ac.labelPos = "insideTop";
+        List<int> fcv = new List<int>{ 40, 80, 50, 80, 80, 70 };
+        List<int> sums = new List<int>{ 300, 280, 270, 200, 180, 150 };
+        List<ChartData> fd = new List<ChartData>();
+        for (int i = 0; i < fcv.Count; i = i + 1) {
+            ChartData d = ChartData.Of(fcv[i]);
+            d.labelText = Convert.ToString(sums[i]);
+            fd.Add(d);
+        }
+        ChartSeries fc = ChartSeries.Named(Charts.T("Forecast", "Forecast"),
+            ChartType.Bar, fd);
+        fc.stack = 1;
+        fc.stackName = "sum";
+        fc.color = Chart.Rgb(255, 255, 255);
+        fc.itemStyle.normal.borderColor = tomato;
+        fc.itemStyle.normal.borderWidth = 6;
+        fc.labelShow = true;
+        fc.labelPos = "top";
+        fc.label.color = tomato;
         ChartOption o = ChartOption.Of(Charts.T("Thermometer", "温度计式图表"),
-            Charts.Week(), new List<ChartSeries>{ s });
-        o.showValues = true;
-        o.Y(ChartAxis.ValueRange(0, 100));
+            new List<string>{ "Cosco", "CMA", "APL", "OOCL", "Wanhai", "Zim" },
+            new List<ChartSeries>{ ac, fc });
+        o.titleSub = Charts.T("From ExcelHome", "From ExcelHome");
+        o.legendSelectedMode = "false";
         Charts.Show(app, o, x, y, w, h);
     }
 
+    /// bar7 组成瀑布图：透明「辅助」垫底 + 生活费堆叠段，
+    /// 表达各分项在总量中的位置（ECharts 透明数据驱动样式）。
     static void Bar4(App app, int x, int y, int w, int h) {
-        List<ChartData> dta = new List<ChartData>();
-        dta.Add(ChartData.Of(100));
-        dta.Add(ChartData.Of(45));
-        dta.Add(ChartData.Of(30));
-        dta.Add(ChartData.Of(20));
-        dta.Add(ChartData.Of(15));
-        dta.Add(ChartData.Named(0, "total"));
-        ChartOption o = ChartOption.Of(Charts.T("Composition waterfall", "组成瀑布图"),
-            new List<string>{ Charts.T("Total", "总量"), Charts.T("A", "品类A"),
-                Charts.T("B", "品类B"), Charts.T("C", "品类C"),
-                Charts.T("D", "品类D"), Charts.T("Rest", "其他") },
-            new List<ChartSeries>{ ChartSeries.Waterfall(Charts.T("Share", "构成"), dta) });
-        o.showValues = true;
-        Charts.Show(app, o, x, y, w, h);
-    }
-
-    static void Bar5(App app, int x, int y, int w, int h) {
-        List<ChartData> dta = new List<ChartData>();
-        dta.Add(ChartData.Of(100));
-        dta.Add(ChartData.Of(45));
-        dta.Add(ChartData.Of(30));
-        dta.Add(ChartData.Of(0 - 20));
-        dta.Add(ChartData.Of(0 - 35));
-        dta.Add(ChartData.Of(25));
-        dta.Add(ChartData.Of(0 - 12));
-        dta.Add(ChartData.Named(0, "total"));
-        ChartOption o = ChartOption.Of(Charts.T("Cash flow (k$)", "变化瀑布图"),
-            new List<string>{ Charts.T("Open", "期初"), Charts.T("Sales", "销售"),
-                Charts.T("Funding", "融资"), Charts.T("Salaries", "工资"),
-                Charts.T("Cloud", "云服务"), Charts.T("Licenses", "授权"),
-                Charts.T("Ads", "广告"), Charts.T("Net", "净额") },
-            new List<ChartSeries>{ ChartSeries.Waterfall(Charts.T("Flow", "现金流"), dta) });
-        o.showValues = true;
-        Charts.Show(app, o, x, y, w, h);
-    }
-
-    /// 多系列层叠：两组 stackName 并排。
-    static void Bar6(App app, int x, int y, int w, int h) {
-        ChartSeries a1 = ChartSeries.StackedBar(Charts.T("East A", "东区-A"),
-            new List<int>{ 320, 302, 301, 334, 390, 330, 320 });
-        a1.stackName = "east";
-        ChartSeries a2 = ChartSeries.StackedBar(Charts.T("East B", "东区-B"),
-            new List<int>{ 120, 132, 101, 134, 90, 230, 210 });
-        a2.stackName = "east";
-        ChartSeries b1 = ChartSeries.StackedBar(Charts.T("West A", "西区-A"),
-            new List<int>{ 220, 182, 191, 234, 290, 330, 310 });
-        b1.stackName = "west";
-        ChartSeries b2 = ChartSeries.StackedBar(Charts.T("West B", "西区-B"),
-            new List<int>{ 150, 212, 201, 154, 190, 330, 410 });
-        b2.stackName = "west";
-        ChartOption o = ChartOption.Of(Charts.T("Stacked groups", "多系列层叠"),
-            Charts.Week(), new List<ChartSeries>{ a1, a2, b1, b2 });
-        Charts.Show(app, o, x, y, w, h);
-    }
-
-    static void Bar7(App app, int x, int y, int w, int h) {
-        ChartOption o = ChartOption.Of(Charts.T("World population (M)", "世界人口（百万）"),
-            new List<string>{ "Brazil", "Indonesia", "USA", "India", "China" },
-            new List<ChartSeries>{
-                ChartSeries.HBar("2011", new List<int>{ 182, 234, 290, 1047, 1317 })
-            });
-        Charts.Show(app, o, x, y, w, h);
-    }
-
-    static void Bar8(App app, int x, int y, int w, int h) {
-        ChartSeries s1 = ChartSeries.HBar(Charts.T("Search", "搜索引擎"),
-            new List<int>{ 320, 302, 301, 334, 390, 330, 320 });
-        s1.stack = 1;
-        ChartSeries s2 = ChartSeries.HBar(Charts.T("Direct", "直接访问"),
-            new List<int>{ 120, 132, 101, 134, 90, 230, 210 });
-        s2.stack = 1;
-        ChartSeries s3 = ChartSeries.HBar(Charts.T("Mail", "邮件营销"),
-            new List<int>{ 220, 182, 191, 234, 290, 330, 310 });
-        s3.stack = 1;
-        ChartOption o = ChartOption.Of(Charts.T("Stacked h-bar", "堆积条形图"),
-            Charts.Week(), new List<ChartSeries>{ s1, s2, s3 });
-        Charts.Show(app, o, x, y, w, h);
-    }
-
-    static void Bar9(App app, int x, int y, int w, int h) {
-        ChartOption o = ChartOption.Of(Charts.T("Labeled h-bar", "多维条形图"),
-            new List<string>{ "HTML", "CSS", "JS", "Zan", "C" },
-            new List<ChartSeries>{
-                ChartSeries.HBar(Charts.T("2011", "2011"),
-                    new List<int>{ 85, 72, 90, 40, 88 }),
-                ChartSeries.HBar(Charts.T("2012", "2012"),
-                    new List<int>{ 88, 78, 95, 62, 86 })
-            });
-        o.showValues = true;
-        Charts.Show(app, o, x, y, w, h);
-    }
-
-    /// 旋风：正负值混合水平条。
-    static void Bar10(App app, int x, int y, int w, int h) {
-        ChartOption o = ChartOption.Of(Charts.T("Profit / loss", "利润（旋风）"),
-            Charts.Week(), new List<ChartSeries>{
-                ChartSeries.HBar(Charts.T("Profit", "利润"),
-                    new List<int>{ 200, 170, 240, 0 - 20, 0 - 80, 250, 180 })
-            });
-        Charts.Show(app, o, x, y, w, h);
-    }
-
-    static void Bar11(App app, int x, int y, int w, int h) {
-        ChartOption o = ChartOption.Of(Charts.T("Male / female", "男女比例（交错）"),
-            new List<string>{ "0-10", "10-20", "20-30", "30-40", "40-50", "50+" },
-            new List<ChartSeries>{
-                ChartSeries.HBar(Charts.T("Male", "男"),
-                    new List<int>{ 0 - 15, 0 - 28, 0 - 42, 0 - 35, 0 - 22, 0 - 12 }),
-                ChartSeries.HBar(Charts.T("Female", "女"),
-                    new List<int>{ 12, 26, 40, 38, 24, 14 })
-            });
-        Charts.Show(app, o, x, y, w, h);
-    }
-
-    static void Bar12(App app, int x, int y, int w, int h) {
-        ChartOption o = ChartOption.Of(Charts.T("Value-axis bar", "不等距柱形图"),
-            new List<string>{ "10", "25", "40", "60", "85" },
-            new List<ChartSeries>{
-                ChartSeries.Bar(Charts.T("Value", "数值"),
-                    new List<int>{ 40, 80, 55, 95, 70 })
-            });
-        Charts.Show(app, o, x, y, w, h);
-    }
-
-    static void Bar13(App app, int x, int y, int w, int h) {
-        ChartOption o = ChartOption.Of(Charts.T("Daily volume", "日成交量"),
-            new List<string>{ "1/24", "1/25", "1/28", "1/29", "1/30",
-                "1/31", "2/1", "2/4" },
-            new List<ChartSeries>{
-                ChartSeries.Bar(Charts.T("Volume", "成交量"),
-                    new List<int>{ 232, 191, 247, 259, 282, 185, 219, 228 })
-            });
-        Charts.Show(app, o, x, y, w, h);
-    }
-
-    static void Bar14(App app, int x, int y, int w, int h) {
-        List<ChartData> d = new List<ChartData>();
-        d.Add(ChartData.Colored(40, Chart.Palette(app.theme, 0)));
-        d.Add(ChartData.Colored(80, Chart.Palette(app.theme, 1)));
-        d.Add(ChartData.Colored(120, Chart.Palette(app.theme, 2)));
-        d.Add(ChartData.Colored(90, Chart.Palette(app.theme, 3)));
-        d.Add(ChartData.Colored(70, Chart.Palette(app.theme, 4)));
-        d.Add(ChartData.Colored(110, Chart.Palette(app.theme, 5)));
-        d.Add(ChartData.Colored(60, Chart.Palette(app.theme, 6)));
-        ChartOption o = ChartOption.Of(Charts.T("Rainbow", "彩虹柱形图"),
-            Charts.Week(), new List<ChartSeries>{
-                ChartSeries.Named(Charts.T("Score", "得分"), ChartType.Bar, d) });
+        // 透明系列必须带非零 RGB（打包色 0 = 未设置，会回退系列色）。
+        int clear = Chart.WithAlpha(Chart.Rgb(0, 0, 1), 0);
+        ChartSeries aux = ChartSeries.StackedBar(Charts.T("Auxiliary", "辅助"),
+            new List<int>{ 0, 1700, 1400, 1200, 300, 0 });
+        aux.color = clear;
+        ChartSeries life = ChartSeries.StackedBar(Charts.T("Living cost", "生活费"),
+            new List<int>{ 2900, 1200, 300, 200, 900, 300 });
+        life.labelShow = true;
+        ChartOption o = ChartOption.Of(
+            Charts.T("Minimum living expense in Shenzhen (yuan)", "深圳月最低生活费组成（单位：元）"),
+            new List<string>{ Charts.T("Total", "总费用"), Charts.T("Rent", "房租"),
+                Charts.T("Utilities", "水电费"), Charts.T("Transport", "交通费"),
+                Charts.T("Food", "伙食费"), Charts.T("Daily items", "日用品数") },
+            new List<ChartSeries>{ aux, life });
         o.showLegend = false;
-        o.showValues = true;
         Charts.Show(app, o, x, y, w, h);
     }
 
+    /// bar6 变化瀑布图：透明垫底 + 收入（标签在段上方）+ 支出
+    /// （标签在段下方），'-' 缺项以 ChartData.Gap 表达。
+    static void Bar5(App app, int x, int y, int w, int h) {
+        int clear = Chart.WithAlpha(Chart.Rgb(0, 0, 1), 0);
+        List<int> auxV = new List<int>{ 0, 900, 1245, 1530, 1376, 1376,
+            1511, 1689, 1856, 1495, 1292 };
+        List<ChartData> auxD = new List<ChartData>();
+        for (int i = 0; i < auxV.Count; i = i + 1) { auxD.Add(ChartData.Of(auxV[i])); }
+        ChartSeries aux = ChartSeries.Named(Charts.T("Auxiliary", "辅助"),
+            ChartType.Bar, auxD);
+        aux.stack = 1;
+        aux.stackName = "总量";
+        aux.color = clear;
+        List<int> inV = new List<int>{ 900, 345, 393, 0 - 1, 0 - 1, 135,
+            178, 286, 0 - 1, 0 - 1, 0 - 1 };
+        List<ChartData> inD = new List<ChartData>();
+        for (int i = 0; i < inV.Count; i = i + 1) {
+            inD.Add(inV[i] < 0 ? ChartData.Gap() : ChartData.Of(inV[i]));
+        }
+        ChartSeries income = ChartSeries.Named(Charts.T("Income", "收入"),
+            ChartType.Bar, inD);
+        income.stack = 1;
+        income.stackName = "总量";
+        income.labelShow = true;
+        income.labelPos = "top";
+        List<int> outV = new List<int>{ 0 - 1, 0 - 1, 0 - 1, 108, 154, 0 - 1,
+            0 - 1, 0 - 1, 119, 361, 203 };
+        List<ChartData> outD = new List<ChartData>();
+        for (int i = 0; i < outV.Count; i = i + 1) {
+            outD.Add(outV[i] < 0 ? ChartData.Gap() : ChartData.Of(outV[i]));
+        }
+        ChartSeries expense = ChartSeries.Named(Charts.T("Expense", "支出"),
+            ChartType.Bar, outD);
+        expense.stack = 1;
+        expense.stackName = "总量";
+        expense.labelShow = true;
+        expense.labelPos = "bottom";
+        ChartOption o = ChartOption.Of(Charts.T("Change waterfall", "阶梯瀑布图"),
+            new List<string>{ "11月1日", "11月2日", "11月3日", "11月4日",
+                "11月5日", "11月6日", "11月7日", "11月8日", "11月9日",
+                "11月10日", "11月11日" },
+            new List<ChartSeries>{ aux, income, expense });
+        o.titleSub = Charts.T("From ExcelHome", "From ExcelHome");
+        // ref legend.data 只列 收入/支出（辅助不进图例）。
+        o.legendData = new List<string>{
+            Charts.T("Expense", "支出"), Charts.T("Income", "收入") };
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar12 多系列层叠：ECharts2 与 ECharts1 同数据三档规模对比，
+    /// ECharts1 系列半透明；y 轴 '{value} ms'。
+    /// ref 偏差：ECharts1 - 2k 的标签尾随换行、20w 的尾随 '+' 中，
+    /// 换行不表达；标签 0 值不画（段高为 0 自然跳过）。
+    static void Bar6(App app, int x, int y, int w, int h) {
+        ChartSeries e2k = ChartSeries.Bar(Charts.T("ECharts2 - 2k data", "ECharts2 - 2k数据"),
+            new List<int>{ 40, 155, 95, 75, 0 });
+        e2k.color = Chart.Rgb(193, 35, 43);
+        e2k.labelShow = true;
+        ChartSeries e2w = ChartSeries.Bar(Charts.T("ECharts2 - 2w data", "ECharts2 - 2w数据"),
+            new List<int>{ 100, 200, 105, 100, 156 });
+        e2w.color = Chart.Rgb(181, 195, 52);
+        e2w.labelShow = true;
+        e2w.label.color = Chart.Rgb(39, 114, 123);
+        ChartSeries e20w = ChartSeries.Bar(Charts.T("ECharts2 - 20w data", "ECharts2 - 20w数据"),
+            new List<int>{ 906, 911, 908, 778, 0 });
+        e20w.color = Chart.Rgb(252, 206, 16);
+        e20w.labelShow = true;
+        e20w.label.color = Chart.Rgb(232, 124, 37);
+        ChartSeries e1k = ChartSeries.Bar(Charts.T("ECharts1 - 2k data", "ECharts1 - 2k数据"),
+            new List<int>{ 96, 224, 164, 124, 0 });
+        e1k.color = Chart.WithAlpha(Chart.Rgb(193, 35, 43), 128);
+        e1k.labelShow = true;
+        ChartSeries e1w = ChartSeries.Bar(Charts.T("ECharts1 - 2w data", "ECharts1 - 2w数据"),
+            new List<int>{ 491, 2035, 389, 955, 347 });
+        e1w.color = Chart.WithAlpha(Chart.Rgb(181, 195, 52), 128);
+        e1w.labelShow = true;
+        List<int> e10v = new List<int>{ 3000, 3000, 2817, 3000, 0 };
+        List<ChartData> e10d = new List<ChartData>();
+        for (int i = 0; i < e10v.Count; i = i + 1) {
+            ChartData d = ChartData.Of(e10v[i]);
+            if (e10v[i] > 0) { d.labelText = Convert.ToString(e10v[i]) + "+"; }
+            e10d.Add(d);
+        }
+        ChartSeries e10w = ChartSeries.Named(Charts.T("ECharts1 - 20w data", "ECharts1 - 20w数据"),
+            ChartType.Bar, e10d);
+        e10w.color = Chart.WithAlpha(Chart.Rgb(252, 206, 16), 128);
+        e10w.labelShow = true;
+        ChartOption o = ChartOption.Of(Charts.T("ECharts2 vs ECharts1", "ECharts2 vs ECharts1"),
+            new List<string>{ "Line", "Bar", "Scatter", "K", "Map" },
+            new List<ChartSeries>{ e2k, e2w, e20w, e1k, e1w, e10w });
+        o.titleSub = Charts.T("Test data on Chrome", "Chrome下测试数据");
+        o.Y(ChartAxis.Value());
+        o.yAxes[0].labelFormatter = "{value} ms";
+        o.gridTop = 70;
+        // ref legend.data 以 '' 分隔两组，引擎无分隔项，跳过。
+        o.legendData = new List<string>{
+            Charts.T("ECharts1 - 2k data", "ECharts1 - 2k数据"),
+            Charts.T("ECharts1 - 2w data", "ECharts1 - 2w数据"),
+            Charts.T("ECharts1 - 20w data", "ECharts1 - 20w数据"),
+            Charts.T("ECharts2 - 2k data", "ECharts2 - 2k数据"),
+            Charts.T("ECharts2 - 2w data", "ECharts2 - 2w数据"),
+            Charts.T("ECharts2 - 20w data", "ECharts2 - 20w数据") };
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar3 标准条形图（横纵互换）：2011/2012 世界人口。
+    /// ECharts 类目 Y 轴首项在底部 → 参考站顶部是「世界人口(万)」，
+    /// 引擎自上而下画，类目与数据按参考顺序直接喂入（首项在顶）。
+    static void Bar7(App app, int x, int y, int w, int h) {
+        ChartOption o = ChartOption.Of(Charts.T("World population", "世界人口总量"),
+            new List<string>{ Charts.T("World population (10k)", "世界人口(万)"),
+                Charts.T("China", "中国"), Charts.T("India", "印度"),
+                Charts.T("USA", "美国"), Charts.T("Indonesia", "印尼"),
+                Charts.T("Brazil", "巴西") },
+            new List<ChartSeries>{
+                ChartSeries.HBar(Charts.T("2011", "2011年"),
+                    new List<int>{ 630230, 131744, 104970, 29034, 23489, 18203 }),
+                ChartSeries.HBar(Charts.T("2012", "2012年"),
+                    new List<int>{ 681807, 134141, 121594, 31000, 23438, 19325 })
+            });
+        o.titleSub = Charts.T("Data from the Internet", "数据来自网络");
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar4 堆积条形图：5 系列全堆叠，标签 insideRight。
+    /// 参考站类目底部是周一 → 引擎自上而下，倒序喂入。
+    static void Bar8(App app, int x, int y, int w, int h) {
+        ChartSeries s1 = ChartSeries.HStacked(Charts.T("Direct access", "直接访问"),
+            new List<int>{ 320, 330, 390, 334, 301, 302, 320 });
+        ChartSeries s2 = ChartSeries.HStacked(Charts.T("Email marketing", "邮件营销"),
+            new List<int>{ 210, 230, 90, 134, 101, 132, 120 });
+        ChartSeries s3 = ChartSeries.HStacked(Charts.T("Union ads", "联盟广告"),
+            new List<int>{ 310, 330, 290, 234, 191, 182, 220 });
+        ChartSeries s4 = ChartSeries.HStacked(Charts.T("Video ads", "视频广告"),
+            new List<int>{ 410, 330, 190, 154, 201, 212, 150 });
+        ChartSeries s5 = ChartSeries.HStacked(Charts.T("Search engine", "搜索引擎"),
+            new List<int>{ 1320, 1330, 1290, 934, 901, 832, 820 });
+        List<ChartSeries> ss = new List<ChartSeries>{ s1, s2, s3, s4, s5 };
+        for (int i = 0; i < ss.Count; i = i + 1) {
+            ss[i].stackName = "总量";
+            ss[i].labelShow = true;
+            ss[i].labelPos = "insideRight";
+        }
+        ChartOption o = ChartOption.Of(Charts.T("Stacked bar (h)", "堆积条形图"),
+            new List<string>{ Charts.T("Sun", "周日"), Charts.T("Sat", "周六"),
+                Charts.T("Fri", "周五"), Charts.T("Thu", "周四"),
+                Charts.T("Wed", "周三"), Charts.T("Tue", "周二"),
+                Charts.T("Mon", "周一") },
+            ss);
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar9 多维条形图（子弹图）：4 组可见段 + 透明「弹膛」段
+    /// 全部堆在同一 stack 上（首尾相接），同系列名共享一个图例项、
+    /// 点击整组显隐；x 轴隐藏（axis.show=false）。
+    static void Bar9(App app, int x, int y, int w, int h) {
+        int clear = Chart.WithAlpha(Chart.Rgb(0, 0, 1), 0);
+        List<string> names = new List<string>{ "GML", "PYP", "WTC", "ZTW" };
+        List<List<int>> vis = new List<List<int>>{
+            new List<int>{ 72, 33, 50, 38 }, new List<int>{ 30, 42, 41, 61 },
+            new List<int>{ 60, 44, 35, 37 }, new List<int>{ 39, 31, 50, 71 } };
+        List<List<int>> hole = new List<List<int>>{
+            new List<int>{ 28, 67, 50, 62 }, new List<int>{ 70, 58, 59, 39 },
+            new List<int>{ 40, 56, 65, 63 }, new List<int>{ 61, 69, 50, 29 } };
+        List<ChartSeries> ss = new List<ChartSeries>();
+        for (int i = 0; i < 4; i = i + 1) {
+            ChartSeries v = ChartSeries.HStacked(names[i], vis[i]);
+            v.stackName = "总量";
+            v.labelShow = true;
+            v.labelFmt = "{c}%";
+            v.labelPos = "insideLeft";
+            ChartSeries hd = ChartSeries.HStacked(names[i], hole[i]);
+            hd.stackName = "总量";
+            hd.color = clear;
+            ss.Add(v);
+            ss.Add(hd);
+        }
+        ChartOption o = ChartOption.Of(Charts.T("Multi-dimension bar", "多维条形图"),
+            new List<string>{ Charts.T("Beijing", "北京"), Charts.T("Shanghai", "上海"),
+                Charts.T("Tianjin", "天津"), Charts.T("Chongqing", "重庆") },
+            ss);
+        o.titleSub = Charts.T("From ExcelHome", "From ExcelHome");
+        o.showGrid = false;
+        o.xAxes[0].show = false;
+        o.gridBottom = 30;
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar5 旋风条形图：利润独立 + 收入/支出按 总量 堆叠，支出为
+    /// 负值从零轴向左；收入 barWidth:5（ref）。
+    static void Bar10(App app, int x, int y, int w, int h) {
+        ChartSeries profit = ChartSeries.HBar(Charts.T("Profit", "利润"),
+            new List<int>{ 210, 220, 200, 244, 240, 170, 200 });
+        profit.labelShow = true;
+        ChartSeries income = ChartSeries.HStacked(Charts.T("Income", "收入"),
+            new List<int>{ 420, 450, 390, 374, 341, 302, 320 });
+        income.stackName = "总量";
+        income.barWidth = 5;
+        income.labelShow = true;
+        ChartSeries expense = ChartSeries.HStacked(Charts.T("Expense", "支出"),
+            new List<int>{ 0 - 210, 0 - 230, 0 - 190, 0 - 134, 0 - 101, 0 - 132, 0 - 120 });
+        expense.stackName = "总量";
+        expense.labelShow = true;
+        expense.labelPos = "left";
+        ChartOption o = ChartOption.Of(Charts.T("Tornado", "旋风条形图"),
+            new List<string>{ Charts.T("Sun", "周日"), Charts.T("Sat", "周六"),
+                Charts.T("Fri", "周五"), Charts.T("Thu", "周四"),
+                Charts.T("Wed", "周三"), Charts.T("Tue", "周二"),
+                Charts.T("Mon", "周一") },
+            new List<ChartSeries>{ profit, income, expense });
+        // ref legend.data 顺序：利润、支出、收入。
+        o.legendData = new List<string>{
+            Charts.T("Profit", "利润"), Charts.T("Expense", "支出"),
+            Charts.T("Income", "收入") };
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar8 交错正负轴标签：单系列负值向左、正值向右，标签在柱
+    /// 外侧（正负交错 left/right，逐项 labelSide 覆盖）；
+    /// 标签文本 '{b}'（类目名）；类目轴隐藏（axis.show=false）。
+    /// ref 偏差：x 轴 position:'top' 不支持（画在底部）、splitLine
+    /// dashed 不支持；数值 ×100 整数化（引擎数值轴 int 语义）。
+    static void Bar11(App app, int x, int y, int w, int h) {
+        List<int> vals = new List<int>{ 18, 0 - 36, 47, 0 - 17, 8, 0 - 23,
+            44, 20, 0 - 9, 0 - 7 };
+        List<ChartData> d = new List<ChartData>();
+        for (int i = 0; i < vals.Count; i = i + 1) {
+            ChartData di = ChartData.Of(vals[i]);
+            if (vals[i] < 0) { di.labelSide = 2; }
+            d.Add(di);
+        }
+        ChartSeries s = ChartSeries.Named(Charts.T("Living cost", "生活费"),
+            ChartType.Bar, d);
+        s.hbar = true;
+        s.stack = 1;
+        s.stackName = "总量";
+        s.color = Chart.Rgb(255, 165, 0);
+        s.itemStyle.normal.borderRadius = new List<int>{ 5, 5, 5, 5 };
+        s.labelShow = true;
+        s.labelFmt = "{b}";
+        s.labelPos = "left";
+        List<string> cats = new List<string>{ "one", "two", "three", "four",
+            "five", "six", "seven", "eight", "nine", "ten" };
+        ChartOption o = ChartOption.Of(
+            Charts.T("Staggered labels on value axis", "交错正负轴标签"),
+            cats, new List<ChartSeries>{ s });
+        o.titleSub = Charts.T("From ExcelHome", "From ExcelHome");
+        // 类目轴整条隐藏（ECharts yAxis axisLine/axisLabel/axisTick
+        // 全 show:false —— axis.show 语义）。
+        ChartAxis catHidden = ChartAxis.Category(cats);
+        catHidden.show = false;
+        o.Y(catHidden);
+        o.gridTop = 80;
+        o.gridBottom = 30;
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar13 不等距柱形图（双数值轴）：x/y 都是数值轴，柱画在
+    /// x 值处；纵/横两套 max/min markPoint + max/min/average
+    /// markLine（纵 #dc143c、横 #1e90ff）。y 轴线 #dc143c。
+    /// ref 偏差：数据1 首点 x=1.5 取整为 2；数据2 barHeight:10 以
+    /// barWidth 表达（引擎竖柱只有宽度概念）。
+    static void Bar12(App app, int x, int y, int w, int h) {
+        int crimson = Chart.Rgb(220, 20, 60);
+        int dodger = Chart.Rgb(30, 144, 255);
+        ChartPoint p0 = ChartPoint.Of(2, 10);  // ref [1.5, 10]
+        List<ChartPoint> pts1 = new List<ChartPoint>{
+            p0, ChartPoint.Of(5, 7), ChartPoint.Of(8, 8), ChartPoint.Of(12, 6),
+            ChartPoint.Of(11, 12), ChartPoint.Of(16, 9), ChartPoint.Of(14, 6),
+            ChartPoint.Of(17, 4), ChartPoint.Of(19, 9) };
+        ChartSeries s1 = ChartSeries.OfBarPoints(Charts.T("Data 1", "数据1"), pts1);
+        ChartMarkPoint yMax = ChartMarkPoint.Max();
+        yMax.label = Charts.T("Max", "最大值");
+        yMax.symbol = "emptyCircle";
+        yMax.color = crimson;
+        ChartMarkPoint yMin = ChartMarkPoint.Min();
+        yMin.label = Charts.T("Min", "最小值");
+        yMin.symbol = "emptyCircle";
+        yMin.color = crimson;
+        ChartMarkPoint xMax = ChartMarkPoint.Max();
+        xMax.label = Charts.T("Max", "最大值");
+        xMax.symbol = "emptyCircle";
+        xMax.color = dodger;
+        xMax.valueIndex = 0;
+        ChartMarkPoint xMin = ChartMarkPoint.Min();
+        xMin.label = Charts.T("Min", "最小值");
+        xMin.symbol = "emptyCircle";
+        xMin.color = dodger;
+        xMin.valueIndex = 0;
+        s1.MarkPoint(yMax);
+        s1.MarkPoint(yMin);
+        s1.MarkPoint(xMax);
+        s1.MarkPoint(xMin);
+        ChartMarkLine yMaxL = ChartMarkLine.Max();
+        yMaxL.color = crimson;
+        ChartMarkLine yMinL = ChartMarkLine.Min();
+        yMinL.color = crimson;
+        ChartMarkLine yAvgL = ChartMarkLine.Average();
+        yAvgL.color = crimson;
+        ChartMarkLine xMaxL = ChartMarkLine.Max();
+        xMaxL.color = dodger;
+        xMaxL.valueIndex = 0;
+        ChartMarkLine xMinL = ChartMarkLine.Min();
+        xMinL.color = dodger;
+        xMinL.valueIndex = 0;
+        ChartMarkLine xAvgL = ChartMarkLine.Average();
+        xAvgL.color = dodger;
+        xAvgL.valueIndex = 0;
+        s1.MarkLine(yMaxL);
+        s1.MarkLine(yMinL);
+        s1.MarkLine(yAvgL);
+        s1.MarkLine(xMaxL);
+        s1.MarkLine(xMinL);
+        s1.MarkLine(xAvgL);
+        List<ChartPoint> pts2 = new List<ChartPoint>{
+            ChartPoint.Of(1, 2), ChartPoint.Of(2, 3), ChartPoint.Of(4, 4),
+            ChartPoint.Of(7, 5), ChartPoint.Of(11, 11), ChartPoint.Of(18, 15) };
+        ChartSeries s2 = ChartSeries.OfBarPoints(Charts.T("Data 2", "数据2"), pts2);
+        s2.barWidth = 10;
+        ChartOption o = ChartOption.Of(Charts.T("Dual value axes bar", "双数值柱形图"),
+            null, new List<ChartSeries>{ s1, s2 });
+        o.titleSub = Charts.T("Purely fictional", "纯属虚构");
+        o.X(ChartAxis.Value());
+        ChartAxis yv = ChartAxis.Value();
+        yv.axisLineColor = crimson;
+        o.Y(yv);
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar11 搭配时间轴：2002-2011 全国宏观经济指标（国家统计局），
+    /// GDP 走左轴（max 53500，平均标线 orange），其余 5 项右轴；
+    /// 31 省 × 6 指标 × 10 年数据在 ChartsBarTimeline.zan（生成）。
+    /// ref 偏差：x 轴类目标签 interval:0 全显不支持（引擎防重叠
+    /// 抽稀）；类目名带 '\n' 换行不表达。
+    static void Bar13(App app, int x, int y, int w, int h) {
+        List<string> provinces = new List<string>{
+            "北京", "天津", "河北", "山西", "内蒙古", "辽宁", "吉林", "黑龙江",
+            "上海", "江苏", "浙江", "安徽", "福建", "江西", "山东", "河南",
+            "湖北", "湖南", "广东", "广西", "海南", "重庆", "四川", "贵州",
+            "云南", "西藏", "陕西", "甘肃", "青海", "宁夏", "新疆" };
+        ChartOption a = ChartOption.Of(
+            Charts.T("2002 national macro economy", "2002全国宏观经济指标"),
+            provinces, Charts.Bar11Series(0));
+        a.titleSub = Charts.T("Data from National Bureau of Statistics", "数据来自国家统计局");
+        a.legendX = "right";
+        a.legendData = new List<string>{
+            "GDP", Charts.T("Finance", "金融"), Charts.T("Estate", "房地产"),
+            Charts.T("Primary industry", "第一产业"),
+            Charts.T("Secondary industry", "第二产业"),
+            Charts.T("Tertiary industry", "第三产业") };
+        ChartAxis yg = ChartAxis.ValueTitled("GDP（亿元）");
+        yg.max = 53500;
+        a.Y(yg);
+        a.Y(ChartAxis.ValueTitled(Charts.T("Others (100M yuan)", "其他（亿元）")));
+        ChartTimeline tl = ChartTimeline.Of();
+        for (int yi = 0; yi < 10; yi = yi + 1) {
+            ChartOption fr = ChartOption.Of("", null, Charts.Bar11Series(yi));
+            if (yi > 0) {
+                fr.title = Convert.ToString(2002 + yi)
+                    + Charts.T(" national macro economy", "全国宏观经济指标");
+            }
+            tl.Frame(fr);
+        }
+        List<string> years = new List<string>();
+        for (int yi = 2002; yi <= 2011; yi = yi + 1) {
+            years.Add(Convert.ToString(yi));
+        }
+        tl.Labels(years);
+        tl.AutoPlay(1000);
+        int key = Charts.KeyOf(Charts.selected.Get(), 0);
+        int barH = ChartTimeline.Height(app);
+        int idx = ChartTimeline.TimelineIdxOf(app, key, tl.FrameCount());
+        ChartView.KeyedStatic(ChartTimeline.Merge(a, tl.Current(idx)),
+            key).Render(app, x, y, w, h - barH);
+        tl.Draw(app, key, x, y + h - barH, w);
+    }
+
+    /// bar14 彩虹柱形图：逐项 colorList[dataIndex] 着色，双轴隐藏
+    /// （axis.show=false），标签在柱顶。
+    /// ref 偏差：标签 formatter '{b}\n{c}' 的多行不表达（只画数值）；
+    /// image:// PNG 标注点不画。
+    static void Bar14(App app, int x, int y, int w, int h) {
+        List<int> cols = new List<int>{
+            Chart.Rgb(193, 35, 43), Chart.Rgb(181, 195, 52),
+            Chart.Rgb(252, 206, 16), Chart.Rgb(232, 124, 37),
+            Chart.Rgb(39, 114, 123), Chart.Rgb(254, 132, 99),
+            Chart.Rgb(155, 202, 99), Chart.Rgb(250, 216, 96),
+            Chart.Rgb(243, 164, 59), Chart.Rgb(96, 192, 221),
+            Chart.Rgb(215, 80, 75) };
+        List<int> vals = new List<int>{ 12, 21, 10, 4, 12, 5, 6, 5, 25, 23, 7 };
+        List<ChartData> d = new List<ChartData>();
+        for (int i = 0; i < vals.Count; i = i + 1) {
+            d.Add(ChartData.Colored(vals[i], cols[i]));
+        }
+        ChartSeries s = ChartSeries.Named(
+            Charts.T("ECharts example counts", "ECharts例子个数统计"),
+            ChartType.Bar, d);
+        s.labelShow = true;
+        ChartOption o = ChartOption.Of(
+            Charts.T("ECharts example counts", "ECharts例子个数统计"),
+            new List<string>{ "Line", "Bar", "Scatter", "K", "Pie", "Radar",
+                "Chord", "Force", "Map", "Gauge", "Funnel" },
+            new List<ChartSeries>{ s });
+        o.titleAlign = "center";
+        o.titleSub = Charts.T("Rainbow bar example", "Rainbow bar example");
+        o.gridTop = 80;
+        o.gridBottom = 60;
+        o.showGrid = false;
+        o.showLegend = false;
+        o.xAxes[0].show = false;
+        o.Y(ChartAxis.Value());
+        o.yAxes[0].show = false;
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar15 多系列彩虹柱形图：2010-2013 城镇居民消费构成，
+    /// 逐项 colorList[dataIndex] 按 seriesIndex*10% 提亮；
+    /// 图例项着第 10 色（colorList 末色）提亮（ref 的 legend 回退色）。
     static void Bar15(App app, int x, int y, int w, int h) {
-        ChartSeries a = ChartSeries.Bar(Charts.T("A", "系列A"),
-            new List<int>{ 40, 80, 120, 90, 70, 110, 60 });
-        ChartSeries b = ChartSeries.Bar(Charts.T("B", "系列B"),
-            new List<int>{ 30, 50, 90, 70, 50, 80, 40 });
-        ChartOption o = ChartOption.Of(Charts.T("Grouped bars", "分组柱状图"),
-            Charts.Week(), new List<ChartSeries>{ a, b });
+        // ref colorList（前 8 项 = 8 个类目）+ 第 10 项（图例基色）。
+        List<int> cols = new List<int>{
+            Chart.Rgb(255, 127, 80), Chart.Rgb(135, 206, 250),
+            Chart.Rgb(218, 112, 214), Chart.Rgb(50, 205, 50),
+            Chart.Rgb(100, 149, 237), Chart.Rgb(255, 105, 180),
+            Chart.Rgb(186, 85, 211), Chart.Rgb(205, 92, 92) };
+        int legendBase = Chart.Rgb(64, 224, 208);
+        List<string> cats = new List<string>{ Charts.T("Food", "食品"),
+            Charts.T("Clothing", "衣着"), Charts.T("Residence", "居住"),
+            Charts.T("Household facilities", "家庭设备及用品"),
+            Charts.T("Health care", "医疗保健"),
+            Charts.T("Transport & communication", "交通和通信"),
+            Charts.T("Education & recreation", "文教娱乐服务"),
+            Charts.T("Others", "其他") };
+        List<List<int>> years = new List<List<int>>{
+            new List<int>{ 4805, 1444, 1332, 908, 872, 1984, 1628, 499 },
+            new List<int>{ 5506, 1675, 1405, 1023, 969, 2150, 1852, 581 },
+            new List<int>{ 6041, 1823, 1484, 1116, 1064, 2456, 2034, 657 },
+            new List<int>{ 6312, 1902, 1745, 1215, 1118, 2737, 2294, 699 } };
+        List<ChartSeries> ss = new List<ChartSeries>();
+        for (int si = 0; si < years.Count; si = si + 1) {
+            List<ChartData> d = new List<ChartData>();
+            for (int di = 0; di < years[si].Count; di = di + 1) {
+                d.Add(ChartData.Colored(years[si][di],
+                    App.Lighten(cols[di], si * 100)));
+            }
+            ChartSeries s = ChartSeries.Named(Convert.ToString(2010 + si),
+                ChartType.Bar, d);
+            s.color = App.Lighten(legendBase, si * 100);
+            ss.Add(s);
+        }
+        ChartOption o = ChartOption.Of(
+            Charts.T("Urban household consumption 2010-2013 (yuan)",
+                "2010-2013年中国城镇居民家庭人均消费构成（元）"),
+            cats, ss);
+        o.titleSub = Charts.T("Data from National Bureau of Statistics", "数据来自国家统计局");
+        o.legendX = "right";
+        o.gridTop = 80;
+        o.gridBottom = 40;
+        o.gridRight = 40;
         Charts.Show(app, o, x, y, w, h);
     }
 
+    /// bar 柱状图个性化：渐变（中间调近似）、描边、堆叠缺项 '-'
+    /// （Gap）、逐项换色、柱宽/圆角、字号标签 + 三条标线。
     static void Bar16(App app, int x, int y, int w, int h) {
-        ChartSeries s = ChartSeries.Bar(Charts.T("Width", "柱宽"),
-            new List<int>{ 40, 80, 60, 90, 50, 70, 55 });
-        s.barWidth = 18;
-        s.barGapPct = 40;
-        ChartOption o = ChartOption.Of(Charts.T("Styled bars", "柱状图个性化"),
-            Charts.Week(), new List<ChartSeries>{ s });
-        o.rounded = true;
-        o.showValues = true;
+        // ref 纵向渐变 green->yellow，取中间调 #80C000。
+        ChartSeries mail = ChartSeries.Bar(Charts.T("Email marketing", "邮件营销"),
+            new List<int>{ 220, 232, 101, 234, 190, 330, 210 });
+        mail.color = Chart.Rgb(128, 192, 0);
+        mail.itemStyle.normal.borderColor = Chart.Rgb(255, 0, 0);
+        mail.itemStyle.normal.borderWidth = 5;
+        ChartSeries union = ChartSeries.StackedBar(Charts.T("Union ads", "联盟广告"),
+            new List<int>{ 120, 0, 451, 134, 190, 230, 110 });
+        union.stackName = "总量";
+        List<int> uv = new List<int>{ 120, 0 - 1, 451, 134, 190, 230, 110 };
+        List<ChartData> ud = new List<ChartData>();
+        for (int i = 0; i < uv.Count; i = i + 1) {
+            ud.Add(uv[i] < 0 ? ChartData.Gap() : ChartData.Of(uv[i]));
+        }
+        union.data = ud;
+        // ref 横向渐变 rgba(30,144,255,.8)->rgba(138,43,226,.8)，
+        // 取中间调 #545EF0 @ 0.8。
+        ChartSeries search = ChartSeries.Bar(Charts.T("Search engine", "搜索引擎"),
+            new List<int>{ 620, 732, 701, 734, 890, 930, 820 });
+        search.barWidth = 40;
+        search.itemStyle.normal.borderRadius = new List<int>{ 5, 5, 5, 5 };
+        search.color = Chart.WithAlpha(Chart.Rgb(84, 94, 240), 204);
+        search.labelShow = true;
+        search.label.fontSize = 20;
+        search.MarkLine(ChartMarkLine.Average());
+        search.MarkLine(ChartMarkLine.Max());
+        search.MarkLine(ChartMarkLine.Min());
+        ChartSeries direct = ChartSeries.StackedBar(Charts.T("Direct access", "直接访问"),
+            new List<int>{ 320, 332, 100, 334, 390, 330, 320 });
+        direct.stackName = "总量";
+        direct.color = Chart.Rgb(255, 0, 0);
+        direct.itemStyle.normal.borderColor = Chart.Rgb(255, 99, 71);
+        direct.itemStyle.normal.borderWidth = 6;
+        List<int> dv = new List<int>{ 320, 332, 100, 334, 390, 330, 320 };
+        List<ChartData> dd = new List<ChartData>();
+        for (int i = 0; i < dv.Count; i = i + 1) { dd.Add(ChartData.Of(dv[i])); }
+        dd[4].color = Chart.Rgb(0, 255, 0);
+        direct.data = dd;
+        ChartOption o = ChartOption.Of(Charts.T("Bar", "柱状图"),
+            Charts.Week(), new List<ChartSeries>{ mail, union, direct, search });
         Charts.Show(app, o, x, y, w, h);
     }
 

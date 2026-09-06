@@ -2352,12 +2352,17 @@ class Chart {
         StyleBox sAxisTitle = Style.Part(app, "chart", "axis-title", "", "",
                                          "", Style.SNormal());
         bool grid = o.showGrid && y0.showGrid;
+        // ECharts axis.show：false 时整条轴（线/刻度/标签）不画，
+        // 网格线仍随 splitLine 语义保留。
+        bool y0Show = y0.show;
+        bool x0Show = x0.show;
         if (catY) {
             // 类目 Y（轴互换）：水平网格线 + 槽中类目标签。
             int cn = y0.categories.Count;
             for (int ci = 0; ci < cn; ci = ci + 1) {
                 int gy = f.CatMidY(ci, cn);
                 if (grid) { c.FillRect(plotX, gy, plotW, 1, sGrid.BgOr(0)); }
+                if (!y0Show) { continue; }
                 string ls = y0.categories[ci];
                 if (y0.labelFormatter.Length > 0) { ls = y0.labelFormatter.Replace("{value}", ls); }
                 int lw = Canvas.MeasureText(ls, fs);
@@ -2370,6 +2375,7 @@ class Chart {
                 int lv = lts[li];
                 int gy = f.YOfLog(lv, 0);
                 if (grid) { c.FillRect(plotX, gy, plotW, 1, sGrid.BgOr(0)); }
+                if (!y0Show) { continue; }
                 string ls = Convert.ToString(lv);
                 int lw = Canvas.MeasureText(ls, fs);
                 c.DrawText(plotX - app.Scale(6) - lw, Canvas.CenterTextYAt(gy, fs),
@@ -2381,6 +2387,7 @@ class Chart {
                 int lv = leftLo + leftSpan * k / ticks;
                 int gy = f.YOf(lv, 0);
                 if (grid) { c.FillRect(plotX, gy, plotW, 1, sGrid.BgOr(0)); }
+                if (!y0Show) { continue; }
                 string ls = Convert.ToString(y0.labelNegate ? 0 - lv : lv);
                 if (y0.labelFormatter.Length > 0) { ls = y0.labelFormatter.Replace("{value}", ls); }
                 int lw = Canvas.MeasureText(ls, fs);
@@ -2410,8 +2417,8 @@ class Chart {
             }
         }
         c.FillRect(plotX, plotY, app.Scale(2), plotH,
-            y0.axisLineColor != 0 ? y0.axisLineColor : sAxis.BgOr(0));
-        c.FillRect(plotX, plotY + plotH, plotW, app.Scale(2), sAxis.BgOr(0));
+            y0.show && y0.axisLineColor != 0 ? y0.axisLineColor : sAxis.BgOr(0));
+        if (x0.show) { c.FillRect(plotX, plotY + plotH, plotW, app.Scale(2), sAxis.BgOr(0)); }
         if (hasRight) {
             c.FillRect(plotX + plotW, plotY, 1, plotH,
                 y1.axisLineColor != 0 ? y1.axisLineColor : sAxis.BgOr(0));
@@ -2419,7 +2426,7 @@ class Chart {
 
         // x 分类标签（时间轴用 TimeLabel 日期刻度；值轴画数值刻度）
         int n = labels.Count;
-        if (catY || xValue) {
+        if (x0.show && (catY || xValue)) {
             // 轴互换：类目在 Y（上面已画），X 画数值刻度。
             int xspan = f.xHi - f.xLo;
             for (int k = 0; k <= xt; k = k + 1) {
@@ -2433,7 +2440,7 @@ class Chart {
                 if (lx + lw > plotX + plotW) { lx = plotX + plotW - lw; }
                 c.DrawText(lx, plotBot + app.Scale(4), xs2, sAxis.FgOr(0), fs);
             }
-        } else if (n > 0) {
+        } else if (x0.show && n > 0) {
             if (isTime) {
                 List<int> tts = Chart.TimeTicks(tMin, tMax, 6);
                 for (int ti = 0; ti < tts.Count; ti = ti + 1) {

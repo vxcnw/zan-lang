@@ -52,6 +52,18 @@ partial class ChartView {
         // 不做有损的系列克隆；标签按窗口取子列表。
         int zoomH = 0;
         int fullN = labels.Count;
+        // ECharts 双数值轴（xAxis type=value）：柱状族按值对
+        // （points）绘制，不占类目槽位。
+        bool xValBars = o.xAxes.Count > 0
+            && o.xAxes[0].type == ChartAxisType.Value;
+        // 值对柱形没有类目：窗口按点数走。
+        if (xValBars && fullN < 1) {
+            int pn = 0;
+            for (int pv = 0; pv < series.Count; pv = pv + 1) {
+                if (series[pv].points.Count > pn) { pn = series[pv].points.Count; }
+            }
+            fullN = pn;
+        }
         int i0 = 0;
         int i1 = fullN - 1;
         if (o.zoom && o.iwid != 0 && fullN > 1) {
@@ -65,6 +77,8 @@ partial class ChartView {
         int ns = series.Count;
 
         int leftData = 0 - 1;
+        // 值对柱形不依赖类目槽：类目数为 0 也要继续渲染。
+        if (xValBars) { n = 1; }
         if (stacked) { leftData = Chart.MaxStackW(series, n, i0); }
         int plotTop = Chart.DrawPanelI(app, x, y, w, h, o.title, series, o.iwid, o.showLegend);
         ChartFrame f = Chart.BuildAxesR(app, x, y, w, h - zoomH, plotTop, winLabels, o, series, leftData, 0 - 1);
@@ -74,7 +88,7 @@ partial class ChartView {
         }
         Chart.DrawMarkArea(app, f, o);
         int maxV = f.leftMax;
-        if (n < 1 || ns < 1) { return; }
+        if (ns < 1) { return; }
 
         int step = f.plotW / n;
         int rad = app.Scale(3);
@@ -162,7 +176,9 @@ partial class ChartView {
                         bool segGrad = o.gradient && si == topSi[gi];
                         if (si != topSi[gi]) { segRad = 0; }
                         ChartView.BarCell(c, bx, drawTop, barW, segH, segRad, sc.color, segGrad);
-                        // 数值画进段内垂直居中（ECharts 堆叠 label inside）；
+                        // 数值标签（ECharts 堆叠 label position）：
+                        // "top" 在段上方、"bottom" 在段下方、
+                        // "insideTop" 段内顶部，缺省段内垂直居中；
                         // 段高不够放一行时跳过，避免压到相邻段。
                         if (o.showValues || sc.labelShow) {
                             int sgFs = Style.FontFallback(app, "medium");
@@ -170,14 +186,49 @@ partial class ChartView {
                             int sgFh = Canvas.FontHeight(sgFs);
                             int sgH = segY1 - segY0;
                             if (sgH >= sgFh + app.Scale(4)) {
-                                string lbl = Convert.ToString(v);
+                                string lbl = ChartView.LabelText(sc, oi,
+                                    winLabels[i], v);
                                 int lw = Canvas.MeasureText(lbl, sgFs);
                                 int lx = bx + (barW - lw) / 2;
                                 if (lx < bx) { lx = bx; }
                                 if (lx + lw > bx + barW) { lx = bx + barW - lw; }
                                 int sgCol = sc.label.color;
-                                if (sgCol == 0) { sgCol = Chart.ContrastFg(sc.color); }
-                                c.DrawText(lx, segY0 + (sgH - sgFh) / 2, lbl, sgCol, sgFs);
+                                string sgPos = sc.labelPos;
+                                if (sgPos == "top") {
+                                    // 段上方（ECharts position top）：
+                                    // 外部标签用主题墨色或显式 label.color。
+                                    int oInk = sc.label.color;
+                                    if (oInk == 0) {
+                                        oInk = Style.Part(app, "chart", "label",
+                                            "", "", "", Style.SNormal()).FgOr(0);
+                                    }
+                                    int oly = segY0 - sgFh - app.Scale(2);
+                                    if (oly < f.plotY) {
+                                        oly = segY0 + app.Scale(2);
+                                        oInk = Chart.ContrastFg(sc.color);
+                                    }
+                                    c.DrawText(lx, oly, lbl, oInk, sgFs);
+                                } else if (sgPos == "bottom") {
+                                    int oInk2 = sc.label.color;
+                                    if (oInk2 == 0) {
+                                        oInk2 = Style.Part(app, "chart", "label",
+                                            "", "", "", Style.SNormal()).FgOr(0);
+                                    }
+                                    int bly = segY1 + app.Scale(2);
+                                    if (bly + sgFh > f.plotY + f.plotH) {
+                                        bly = segY1 - sgFh - app.Scale(2);
+                                        oInk2 = Chart.ContrastFg(sc.color);
+                                    }
+                                    c.DrawText(lx, bly, lbl, oInk2, sgFs);
+                                } else if (sgPos == "insideTop") {
+                                    int iInk = sc.label.color;
+                                    if (iInk == 0) { iInk = Chart.ContrastFg(sc.color); }
+                                    c.DrawText(lx, segY0 + app.Scale(2), lbl, iInk, sgFs);
+                                } else {
+                                    int sgCol = sc.label.color;
+                                    if (sgCol == 0) { sgCol = Chart.ContrastFg(sc.color); }
+                                    c.DrawText(lx, segY0 + (sgH - sgFh) / 2, lbl, sgCol, sgFs);
+                                }
                             }
                         }
                         accs[gi] = accs[gi] + v;
@@ -306,6 +357,10 @@ partial class ChartView {
                                 s.symbol, scol, s.itemStyle.normal.borderColor,
                                 s.itemStyle.normal.borderWidth);
                         }
+                    } else if (xValBars && s.points.Count > 0) {
+                        // ECharts 双数值轴柱形（bar13）：值对系列，
+                        // 柱画在 x 值处、从零线长到 y。
+                        ChartView.DrawValueXBars(app, f, s, si, i0, i1, g, o);
                     } else {
                         int zeroY = f.YOf(0, ax);
                         for (int i = 0; i < n; i = i + 1) {
@@ -368,7 +423,8 @@ partial class ChartView {
                                         bcol, app.Scale(bwid));
                                 }
                                 if (o.showValues || s.labelShow) {
-                                    string lbl = Convert.ToString(v);
+                                    string lbl = ChartView.LabelText(s, oi,
+                                        winLabels[i], v);
                                     int lw = Canvas.MeasureText(lbl, valFs);
                                     int lx = bx + (barW - lw) / 2;
                                     if (lx < f.plotX) { lx = f.plotX; }
@@ -411,7 +467,8 @@ partial class ChartView {
                                         bcol, app.Scale(bwid));
                                 }
                                 if ((o.showValues || s.labelShow) && v > 0) {
-                                    string lbl = Convert.ToString(v);
+                                    string lbl = ChartView.LabelText(s, oi,
+                                        winLabels[i], v);
                                     int lw = Canvas.MeasureText(lbl, valFs);
                                     int lx = bx + (barW - lw) / 2;
                                     if (lx < f.plotX) { lx = f.plotX; }
@@ -429,7 +486,9 @@ partial class ChartView {
                                 }
                             }
                         }
-                        barSlot = barSlot + 1;
+                        if (!(xValBars && s.points.Count > 0)) {
+                            barSlot = barSlot + 1;
+                        }
                     }
                 }
             }
@@ -457,12 +516,102 @@ partial class ChartView {
                 ChartView.DrawSeriesMarks(app, f, ms, i0, i1, step, step / 2, o);
             }
         }
+        // 值对系列（双数值轴）：横轴标注走 points 路径（bar13 的
+        // 蓝色 x 轴 max/min 标注），悬停按最近点出 tooltip 卡。
+        bool anyPts = false;
+        for (int pchk = 0; pchk < ns; pchk = pchk + 1) {
+            if (!series[pchk].hidden && series[pchk].points.Count > 0) { anyPts = true; }
+        }
+        if (xValBars && anyPts) {
+            ChartView.PushPlotClip(app, f.plotX, f.plotY, f.plotW, f.plotH);
+            for (int pm = 0; pm < ns; pm = pm + 1) {
+                ChartSeries ps = series[pm];
+                if (!ps.hidden && ps.points.Count > 0) {
+                    ChartView.DrawPointsMarkPoints(app, f, ps, i0, i1);
+                }
+            }
+            c.PopClip();
+        }
         if (o.showTooltip) {
-            ChartView.CartesianTooltip(app, f, winLabels, series, maxV, step, step / 2, i0);
+            if (xValBars && anyPts) {
+                ChartView.PointsHover(app, f, series, i0, i1, g);
+            } else {
+                ChartView.CartesianTooltip(app, f, winLabels, series, maxV, step, step / 2, i0);
+            }
         }
     }
 
-    /// 单个柱格，可选垂直渐变（color -> 更浅色）。
+    /// 双数值轴柱形（ECharts bar13）：points[i] = (x, y)，柱画在
+    /// x 值处、从零线长到 y；柱宽自动取相邻 x 间隙或量程 1/4。
+    /// 数值标签在柱顶（v>0）或柱底（v<0）；悬停命中出 tooltip。
+    static void DrawValueXBars(App app, ChartFrame f, ChartSeries s, int si,
+                               int i0, int i1, int g, ChartOption o) {
+        Canvas c = app.canvas;
+        int mx = app.mouseX;
+        int my = app.mouseY;
+        // 柱宽：取窗口内最小相邻 x 间隙的一半，退化时量程的 1/4。
+        int minGap = 0;
+        for (int j = i0; j <= i1 && j < s.points.Count; j = j + 1) {
+            for (int k = j + 1; k <= i1 && k < s.points.Count; k = k + 1) {
+                int gapv = s.points[k].x - s.points[j].x;
+                if (gapv < 0) { gapv = 0 - gapv; }
+                if (gapv > 0 && (minGap == 0 || gapv < minGap)) { minGap = gapv; }
+            }
+        }
+        int halfPlot = (f.plotX + f.plotW - f.plotX) / 4;
+        int bwVal = minGap > 0 ? f.XOfValue(minGap) - f.XOfValue(0) : halfPlot;
+        if (bwVal < 0) { bwVal = 0 - bwVal; }
+        bwVal = bwVal / 2;
+        int bw = bwVal;
+        if (s.barWidth > 0) { bw = app.Scale(s.barWidth); }
+        if (bw > halfPlot) { bw = halfPlot; }
+        if (bw < app.Scale(2)) { bw = app.Scale(2); }
+        int zeroY = f.YOf(0, s.axisIndex);
+        int valFs = Style.FontFallback(app, "medium");
+        if (s.label.fontSize > 0) { valFs = s.label.fontSize; }
+        int valFh = Canvas.FontHeight(valFs);
+        int valCol = Style.Part(app, "chart", "label", "", "", "",
+                                Style.SNormal()).FgOr(0);
+        if (s.label.color != 0) { valCol = s.label.color; }
+        for (int j = i0; j <= i1 && j < s.points.Count; j = j + 1) {
+            int xv = s.points[j].x;
+            int yv = s.points[j].y * g / 1000;
+            int col = s.color;
+            if (s.points[j].color != 0) { col = s.points[j].color; }
+            int px = f.XOfValue(xv);
+            int py = f.YOf(yv, s.axisIndex);
+            int bx = px - bw / 2;
+            int y0 = py < zeroY ? py : zeroY;
+            int bh = py < zeroY ? zeroY - py : py - zeroY;
+            bool hov = mx >= bx && mx < bx + bw && my >= y0 && my < y0 + bh;
+            if (hov && bh > 0) {
+                ChartView.OfferActiveHit(ChartView.MakeDataHit(s, si, j,
+                    "[" + Convert.ToString(xv) + ", "
+                    + Convert.ToString(s.points[j].y) + "]",
+                    ChartElementType.Bar, mx, my, s.points[j].y));
+            }
+            if (bh > 0) {
+                ChartView.BarCellR4(c, bx, y0, bw, bh, null, app.Scale(1),
+                    col, o.gradient);
+            }
+            if (o.showValues || s.labelShow) {
+                string lbl = ChartView.LabelText(s, j, "", s.points[j].y);
+                int lw = Canvas.MeasureText(lbl, valFs);
+                int lx = px - lw / 2;
+                if (lx < f.plotX) { lx = f.plotX; }
+                if (lx + lw > f.plotX + f.plotW) { lx = f.plotX + f.plotW - lw; }
+                int ly = y0 - valFh - app.Scale(2);
+                int ink = valCol;
+                if (ly < f.plotY) {
+                    ly = y0 + bh + app.Scale(2);
+                    ink = Chart.ContrastFg(col);
+                }
+                c.DrawText(lx, ly, lbl, ink, valFs);
+            }
+        }
+    }
+
+    /// 单个柱格，可选垂直渐变（color -> 更浅）。
     static void BarCell(Canvas c, int x, int y, int w, int h, int rad,
                         int color, bool gradient) {
         if (h <= 0 || w <= 0) { return; }
@@ -589,10 +738,14 @@ partial class ChartView {
                                      Style.SNormal());
         int ticks = 5;
         bool grid = o.showGrid;
+        // ECharts axis.show：数值轴（x）/类目轴（y）整条显隐。
+        bool xShow = o.xAxes.Count < 1 || o.xAxes[0].show;
+        bool catShow = o.yAxes.Count < 1 || o.yAxes[0].show;
         for (int k = 0; k <= ticks; k = k + 1) {
             int tv = lo + span * k / ticks;
             int gx = Chart.ValueX(plotX, plotW, lo, hi, tv);
             if (grid) { c.FillRect(gx, plotY, 1, plotH, sGrid.BgOr(0)); }
+            if (!xShow) { continue; }
             string vs = Convert.ToString(tv);
             int tw = Canvas.MeasureText(vs, axisFs);
             int lxT = gx - tw / 2;
@@ -611,10 +764,12 @@ partial class ChartView {
         int mx = app.mouseX;
         int my = app.mouseY;
         ChartHit hbarHit = null;
-        for (int li = 0; li < n; li = li + 1) {
-            int rowY = plotY + li * rowH;
-            c.DrawTextCentered(x + pad, rowY, leftGut - app.Scale(6), rowH,
-                labels[li], sLabel.FgOr(0), axisFs);
+        if (catShow) {
+            for (int li = 0; li < n; li = li + 1) {
+                int rowY = plotY + li * rowH;
+                c.DrawTextCentered(x + pad, rowY, leftGut - app.Scale(6), rowH,
+                    labels[li], sLabel.FgOr(0), axisFs);
+            }
         }
         ChartView.PushPlotClip(app, plotX, plotY, plotW, plotH);
         // markArea：数值轴上的纵向区间带（与纵向柱的横向带互为转置）。
@@ -688,6 +843,34 @@ partial class ChartView {
                         }
                         if (segW > 0) {
                             c.FillRoundRect(drawX, by, segW, barH, segRad, fill);
+                        }
+                        // 段内数值标签（ECharts label.position）：
+                        // "left" 段内左对齐、"right" 段内右对齐、
+                        // "insideLeft"/"insideRight" 同义；缺省段内居中。
+                        // 段宽不够放一行时跳过（与纵向堆叠同一防挤压规则）。
+                        if ((o.showValues || sc.labelShow) && segW > 0) {
+                            int scFs = Style.FontFallback(app, "medium");
+                            if (sc.label.fontSize > 0) { scFs = sc.label.fontSize; }
+                            int scFh = Canvas.FontHeight(scFs);
+                            if (barH >= scFh + app.Scale(2)) {
+                                int rawV = 0;
+                                if (sdi < sc.Count()) { rawV = sc.Value(sdi); }
+                                string lbl = ChartView.LabelText(sc, sdi,
+                                    labels[i], rawV);
+                                int lw = Canvas.MeasureText(lbl, scFs);
+                                if (lw + app.Scale(4) <= segW) {
+                                    int scCol = sc.label.color;
+                                    if (scCol == 0) { scCol = Chart.ContrastFg(fill); }
+                                    int lx2 = drawX + (segW - lw) / 2;
+                                    string sp = sc.labelPos;
+                                    if (sp == "left" || sp == "insideLeft") {
+                                        lx2 = drawX + app.Scale(3);
+                                    } else if (sp == "right" || sp == "insideRight") {
+                                        lx2 = drawX + segW - lw - app.Scale(3);
+                                    }
+                                    c.DrawText(lx2, by + (barH - scFh) / 2, lbl, scCol, scFs);
+                                }
+                            }
                         }
                         accs[gi] = accs[gi] + v;
                     }
@@ -784,14 +967,23 @@ partial class ChartView {
                     if ((o.showValues || series[si].labelShow) && bw > 0) {
                         int hbFs = Style.FontFallback(app, "medium");
                         if (series[si].label.fontSize > 0) { hbFs = series[si].label.fontSize; }
-                        string lbl = Convert.ToString(v);
+                        int hbFh = Canvas.FontHeight(hbFs);
+                        string lbl = ChartView.LabelText(series[si], ndi,
+                            labels[i], series[si].Value(ndi));
                         int lw = Canvas.MeasureText(lbl, hbFs);
+                        // 逐项 labelSide：1 = 段左侧、2 = 段右侧（bar8
+                        // 正负交错标签）；0 = 跟随柱条方向（右正左负）。
+                        int side = 0;
+                        if (ndi < series[si].data.Count) { side = series[si].data[ndi].labelSide; }
+                        if (side == 1) { toRight = false; }
+                        else if (side == 2) { toRight = true; }
+                        int hbCol = sLabel.FgOr(0);
+                        if (series[si].label.color != 0) { hbCol = series[si].label.color; }
                         int tx = bx + bw + app.Scale(4);
                         if (!toRight) { tx = bx - lw - app.Scale(4); }
                         if (tx < plotX) { tx = plotX + app.Scale(2); }
                         if (tx + lw > plotX + plotW) { tx = plotX + plotW - lw - app.Scale(2); }
-                        c.DrawText(tx, by + (barH - Canvas.FontHeight(hbFs)) / 2,
-                            lbl, sLabel.FgOr(0), hbFs);
+                        c.DrawText(tx, by + (barH - hbFh) / 2, lbl, hbCol, hbFs);
                     }
                 }
             }

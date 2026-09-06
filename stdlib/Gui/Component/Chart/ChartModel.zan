@@ -138,6 +138,11 @@ class ChartData {
     bool sizeSet;
     bool gap;       // ECharts data 项 '-'（断线）：不画点/不连线/不进极值
     string symbol;  // ECharts 逐项 symbol 覆盖（"" = 继承系列）
+    string labelText; // ECharts data[i].label.formatter 结果覆盖：非空时数值
+                      //   标签直接显示该文本（bar10 Forecast 的标签是两系
+                      //   列之和，模板无法表达）
+    int labelSide;    // ECharts label.position 逐项覆盖：0 = 继承系列，
+                      //   1 = 左、2 = 右（bar8 正负交错标签）
 
     /// 以整数值构造数据点（名称空、继承系列色、不隐藏、无逐项尺寸）。
     static ChartData Of(int v) {
@@ -153,6 +158,8 @@ class ChartData {
         d.sizeSet = false;
         d.gap = false;
         d.symbol = "";
+        d.labelText = "";
+        d.labelSide = 0;
         return d;
     }
 
@@ -207,6 +214,7 @@ class ChartData {
         d.name = src.name; d.color = src.color; d.hidden = src.hidden;
         d.selected = src.selected; d.size = src.size; d.sizeSet = src.sizeSet;
         d.gap = src.gap; d.symbol = src.symbol;
+        d.labelText = src.labelText; d.labelSide = src.labelSide;
         return d;
     }
 }
@@ -1101,6 +1109,9 @@ class ChartSeries {
     ChartItemStyle itemStyle; // ECharts series.itemStyle：normal / emphasis
     ChartTextStyle label;     // ECharts series.label 的静态样式
     bool labelShow;           // series.label.show；渲染器可选择显示数据值
+    string labelFmt;          // ECharts label.formatter 模板：{a}=系列名 {b}=类目 {c}=值
+    string labelPos;          // ECharts label.position："top"/"bottom"/"insideTop"/
+                              //   "left"/"right"/"insideLeft"/"insideRight"；"" = 渲染器缺省
     List<ChartData> data;
     List<Candle> candles;      // 蜡烛图种类
     List<Bubble> bubbles;      // 气泡图种类
@@ -1167,6 +1178,8 @@ class ChartSeries {
         s.itemStyle = ChartItemStyle.Create();
         s.label = ChartTextStyle.Create();
         s.labelShow = false;
+        s.labelFmt = "";
+        s.labelPos = "";
         s.data = new List<ChartData>();
         for (int i = 0; i < values.Count; i = i + 1) { s.data.Add(ChartData.Of(values[i])); }
         s.candles = new List<Candle>();
@@ -1215,6 +1228,19 @@ class ChartSeries {
     static ChartSeries HBar(string name, List<int> values) {
         ChartSeries s = ChartSeries.Of(name, ChartType.Bar, values);
         s.hbar = true;
+        return s;
+    }
+    /// 水平堆叠条形系列（hbar + stack = 1；同名 stackName 分组）。
+    static ChartSeries HStacked(string name, List<int> values) {
+        ChartSeries s = ChartSeries.HBar(name, values);
+        s.stack = 1;
+        return s;
+    }
+    /// 值对柱状系列（ECharts 双数值轴柱形 bar13）：柱画在 points[i].x
+    /// 处、从零线长到 points[i].y；x/y 都是数值轴。
+    static ChartSeries OfBarPoints(string name, List<ChartPoint> pts) {
+        ChartSeries s = ChartSeries.Of(name, ChartType.Bar, new List<int>());
+        s.points = pts;
         return s;
     }
     /// 阶梯折线系列（step = "middle"）。
@@ -1518,6 +1544,7 @@ class ChartSeries {
         s.wcRotateList = src.wcRotateList;
         s.itemStyle = ChartItemStyle.Clone(src.itemStyle);
         s.label = ChartTextStyle.Clone(src.label); s.labelShow = src.labelShow;
+        s.labelFmt = src.labelFmt; s.labelPos = src.labelPos;
         s.gauge = GaugeOption.Clone(src.gauge);
         s.data = new List<ChartData>();
         for (int i = 0; i < src.data.Count; i = i + 1) { s.data.Add(ChartData.Clone(src.data[i])); }
@@ -1566,6 +1593,7 @@ class ChartAxis {
                        // 的等价开关：刻度/工具提示按 -值 显示（雨量图负值轴）
     bool boundaryGap;  // ECharts boundaryGap（类目轴默认 true：点落在格中）
     int axisLineColor; // ECharts axisLine.lineStyle.color；0 = 主题色
+    bool show;         // ECharts axis.show：false = 整条轴（线/刻度/标签）不画
     List<string> categories;
 
     /// 分类轴工厂：携带标签列表，无网格线，标签自动防重叠。
@@ -1584,6 +1612,7 @@ class ChartAxis {
         a.labelFormatter = "";
         a.labelNegate = false;
         a.axisLineColor = 0;
+        a.show = true;
         a.boundaryGap = true;
         a.categories = cats;
         return a;
@@ -1612,6 +1641,7 @@ class ChartAxis {
         a.labelFormatter = "";
         a.labelNegate = false;
         a.axisLineColor = 0;
+        a.show = true;
         a.boundaryGap = false;
         a.categories = new List<string>();
         return a;
@@ -1663,6 +1693,7 @@ class ChartAxis {
         a.nameLocation = src.nameLocation; a.labelFormatter = src.labelFormatter;
         a.labelNegate = src.labelNegate;
         a.axisLineColor = src.axisLineColor;
+        a.show = src.show;
         a.boundaryGap = src.boundaryGap; a.categories = new List<string>();
         if (src.categories != null) {
             for (int i = 0; i < src.categories.Count; i = i + 1) {
@@ -1713,6 +1744,8 @@ class ChartOption {
     string legendX;             // ECharts legend.x："left"|"center"(默认)|"right"
     string legendSelectedMode;  // ""=multiple | "single" | "false"
     string legendFormatter;     // 标签模板，{name} = 系列名（"" = 原名）
+    List<string> legendData;    // ECharts legend.data：图例项白名单（按此顺序
+                                //   显示；空 = 全部系列）。同名系列共享一项
     // ---- dataRange（ECharts 2.x 值域筛选组件）----
     bool dataRangeShow;
     int dataRangeLo;            // 固定下界（Auto = 数据最小值）
@@ -1775,6 +1808,7 @@ class ChartOption {
         o.radarShape = src.radarShape; o.radarSplitArea = src.radarSplitArea;
         o.legendOrient = src.legendOrient; o.legendSelectedMode = src.legendSelectedMode;
         o.legendX = src.legendX;
+        o.legendData = src.legendData;
         o.legendFormatter = src.legendFormatter; o.dataRangeShow = src.dataRangeShow;
         o.dataRangeLo = src.dataRangeLo; o.dataRangeHi = src.dataRangeHi;
         o.dataRangeCalculable = src.dataRangeCalculable; o.dataRangeSplit = src.dataRangeSplit;
@@ -1839,6 +1873,7 @@ class ChartOption {
         o.legendX = "";
         o.legendSelectedMode = "";
         o.legendFormatter = "";
+        o.legendData = null;
         o.titleSub = "";
         o.titleAlign = "";
         o.dataRangeShow = false;
@@ -2924,6 +2959,8 @@ class ChartOption {
         a.title = v.Str("name", "");
         a.reversed = v.Bool("inverse", false);
         a.nameLocation = v.Str("nameLocation", a.nameLocation);
+        // ECharts axis.show：整条轴（轴线/刻度/标签）显隐。
+        a.show = v.Bool("show", a.show);
         // boundaryGap：类目轴点/柱落在格子中间（默认）还是刻度线上。
         if (v.Has("boundaryGap")) {
             JsonValue bg = v.Get("boundaryGap");
