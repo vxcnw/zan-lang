@@ -139,16 +139,25 @@ partial class Charts {
     /// 气泡直径 = round(z/5)（原版 symbolSize:function(value) 回调，这里
     /// 落成逐点 size），双 value 轴 scale:true + splitNumber:4；图例
     /// scatter1/scatter2，无标题。原版 Math.random 不可复现：符号跟随
-    /// 自身奇偶（r 偶正奇负）照抄，数值走二次 mod 确定性流形。
+    /// 自身奇偶（r 偶正奇负）照抄，数值走二次 mod 确定性流形，
+    /// 两系列系数不同（同 i 空间不重合，防点对点重叠）。
     static void Scatter2(App app, int x, int y, int w, int h) {
         ChartOption o = ChartOption.Of("", null, new List<ChartSeries>());
         for (int r = 0; r < 2; r = r + 1) {
             List<ChartPoint> pts = new List<ChartPoint>();
             for (int i = 0; i < 100; i = i + 1) {
-                int b = r * 100 + i;
-                int xr = (b * b * 3 + b * 73 + 19) % 101;
-                int yr = (b * b * 5 + b * 151 + 53) % 101;
-                int zr = (b * b * 7 + b * 37 + 97) % 101;
+                int xr;
+                int yr;
+                int zr;
+                if (r == 0) {
+                    xr = (i * i * 3 + i * 73 + 19) % 101;
+                    yr = (i * i * 5 + i * 151 + 53) % 101;
+                    zr = (i * i * 7 + i * 37 + 97) % 101;
+                } else {
+                    xr = (i * i * 11 + i * 149 + 71) % 101;
+                    yr = (i * i * 13 + i * 101 + 37) % 101;
+                    zr = (i * i * 17 + i * 59 + 5) % 101;
+                }
                 pts.Add(ChartPoint.Sized(
                     xr % 2 == 0 ? xr : 0 - xr,
                     yr % 2 == 0 ? yr : 0 - yr,

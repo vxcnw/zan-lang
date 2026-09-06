@@ -141,6 +141,8 @@ partial class ChartView {
             int vw = Canvas.MeasureText(vs, axisFs);
             c.DrawText(plotX - app.Scale(6) - vw, Canvas.CenterTextYAt(gy, axisFs), vs, sAxis.FgOr(0), axisFs);
             int gx = plotX + k * plotW / xTicks;
+            // ECharts splitLine 横竖两向都有。
+            c.FillRect(gx, plotY, 1, plotH, sGrid.BgOr(0));
             c.DrawTextCentered(gx - app.Scale(20), plotY + plotH + app.Scale(4), app.Scale(40), botGut, Convert.ToString(xLo + xSpan * k / xTicks), sAxis.FgOr(0), axisFs);
         }
         c.FillRect(plotX, plotY, app.Scale(2), plotH, sAxis.BgOr(0));
@@ -168,20 +170,20 @@ partial class ChartView {
                     List<int> ly = new List<int>();
                     int j0 = i0;
                     while (j0 <= i1 && j0 < s.points.Count) {
-                        lx.Add(Chart.ValueX(plotX, plotW, xLo, maxXN,
-                            Chart.PointV(s.points[j0].x, s.pointG)));
-                        ly.Add(Chart.ValueY(plotY, plotH, yLo, maxYN,
-                            Chart.PointV(s.points[j0].y, s.pointG)));
+                        lx.Add(Chart.ValueXF(plotX, plotW, xLo, maxXN,
+                            s.points[j0].x, s.pointG));
+                        ly.Add(Chart.ValueYF(plotY, plotH, yLo, maxYN,
+                            s.points[j0].y, s.pointG));
                         j0 = j0 + 1;
                     }
                     c.DrawPolyline(lx, ly, s.color, app.Scale(2));
                 } else {
                     int j = i0;
                     while (j <= i1 && j < s.points.Count) {
-                        int px = Chart.ValueX(plotX, plotW, xLo, maxXN,
-                            Chart.PointV(s.points[j].x, s.pointG));
-                        int py = Chart.ValueY(plotY, plotH, yLo, maxYN,
-                            Chart.PointV(s.points[j].y, s.pointG));
+                        int px = Chart.ValueXF(plotX, plotW, xLo, maxXN,
+                            s.points[j].x, s.pointG);
+                        int py = Chart.ValueYF(plotY, plotH, yLo, maxYN,
+                            s.points[j].y, s.pointG);
                         int col = s.color;
                         if (s.points[j].color != 0) { col = s.points[j].color; }
                         if (ramp) {
@@ -323,10 +325,10 @@ partial class ChartView {
                 if (!s2.hidden) {
                     int j2 = i0;
                     while (j2 <= i1 && j2 < s2.points.Count) {
-                        int px2 = Chart.ValueX(plotX, plotW, xLo, maxXN,
-                            Chart.PointV(s2.points[j2].x, s2.pointG));
-                        int py2 = Chart.ValueY(plotY, plotH, yLo, maxYN,
-                            Chart.PointV(s2.points[j2].y, s2.pointG));
+                        int px2 = Chart.ValueXF(plotX, plotW, xLo, maxXN,
+                            s2.points[j2].x, s2.pointG);
+                        int py2 = Chart.ValueYF(plotY, plotH, yLo, maxYN,
+                            s2.points[j2].y, s2.pointG);
                         int ddx = mx - px2;
                         int ddy = my - py2;
                         int d2 = ddx * ddx + ddy * ddy;
@@ -357,10 +359,10 @@ partial class ChartView {
                 if (bestS >= 0) {
                     ChartSeries bs = o.series[bestS];
                 ChartPoint bp = bs.points[bestJ];
-                int pxHit = Chart.ValueX(plotX, plotW, xLo, maxXN,
-                    Chart.PointV(bp.x, bs.pointG));
-                int pyHit = Chart.ValueY(plotY, plotH, yLo, maxYN,
-                    Chart.PointV(bp.y, bs.pointG));
+                int pxHit = Chart.ValueXF(plotX, plotW, xLo, maxXN,
+                    bp.x, bs.pointG);
+                int pyHit = Chart.ValueYF(plotY, plotH, yLo, maxYN,
+                    bp.y, bs.pointG);
                 ChartElementType pointType = bs.type == ChartType.Line
                     ? ChartElementType.LinePoint : ChartElementType.ScatterPoint;
                 string pointName = "#" + Convert.ToString(bestJ + 1);

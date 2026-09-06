@@ -933,6 +933,24 @@ class Chart {
         return plotX + (int)(((long)v - (long)lo) * (long)plotW / span);
     }
 
+    /// 定点数值 → 水平像素：v 以 值×g 承载（PointV 约定），分母按
+    /// span×g 缩放后再除——亚单位像素精度不丢（先 PointV 取整会把
+    /// 小数坐标量化到整数值格点，scatter3 的 3 位小数云会塌成点阵）。
+    static int ValueXF(int plotX, int plotW, int lo, int hi, int v, int g) {
+        if (g <= 1) { return Chart.ValueX(plotX, plotW, lo, hi, v); }
+        long span = ((long)hi - (long)lo) * (long)g;
+        if (span < 1) { span = 1; }
+        return plotX + (int)(((long)v - (long)lo * (long)g) * (long)plotW / span);
+    }
+
+    /// 定点数值 → 垂直像素（ValueXF 的纵轴对偶）。
+    static int ValueYF(int plotY, int plotH, int lo, int hi, int v, int g) {
+        if (g <= 1) { return Chart.ValueY(plotY, plotH, lo, hi, v); }
+        long span = ((long)hi - (long)lo) * (long)g;
+        if (span < 1) { span = 1; }
+        return plotY + plotH - (int)(((long)v - (long)lo * (long)g) * (long)plotH / span);
+    }
+
     /// 数值 → 垂直像素：plotY+plotH 对应 lo，plotY 对应 hi（向上增大）。
     /// 同 ValueX：乘法走 long 防大数值 × plotH 溢出。
     static int ValueY(int plotY, int plotH, int lo, int hi, int v) {
