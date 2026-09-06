@@ -70,7 +70,7 @@ class WuweiApp {
     static List<Label> MarketNames=new List<Label>();
     static List<Button> MarketBuy=new List<Button>();
     static Label NameText; static Label RealmText; static Label StonesText; static Label XpText; static Label AgeText; static Label LifeText;
-    static Label ActivityText; static Label Notice; static Label QiText; static Label CombatText; static Label BreakInfo;
+    static Label ActivityText; static Label Notice; static Label QiText; static Label QiRateText; static Label CombatText; static Label BreakInfo;
     static Label QuestTitle; static Label QuestBody; static Label QuestReward;
     static Label MapCounter; static Label MapDCounter; static Label MapECounter; static Label RecipeCounter; static Label SkillCounter;
     static Label BagCounter; static Label MarketCounter; static Label SectText; static Label KarmaText; static Label SaveText;
@@ -281,15 +281,22 @@ class WuweiApp {
     }
     static void BuildCultivate() {
         ScrollColumn p=NewPage();PageHead(p,"闭关","闭关会消耗修为经验并转化为闭关进度；只有闭关进度圆满才能提升层数。");
-        Panel card=Column("card");Size(card,0,288);p.With(card);
-        ActivityText=Text("","jade",28);p.With(ActivityText);
-        Image icon=Art("icon_mind_skill.webp",120);icon.Fit="contain";icon.Class="card-art";Size(icon,120,120);card.With(CenterRow(icon,12));
-        QiText=Text("","jade",28);card.With(CenterRow(QiText,12));
-        QiBar=new Progress(0,1);QiBar.ShowText(false);Size(QiBar,520,24);card.With(CenterRow(QiBar,12));
-        Panel act=Panel.Row();act.logGap=12;Size(act,0,44);
+        // 左对齐信息列 + 右侧立绘锚点：文本、进度条、按钮共用一条左缘。
+        Flex head=Flex.Row().AlignStart();head.Gap(16);Size(head,0,132);
+        Panel info=Column("");info.logGap=8;info.Grow();
+        ActivityText=Text("","kicker",22);info.With(ActivityText);
+        QiText=Text("","jade",32);info.With(QiText);
+        QiRateText=Text("","muted",22);info.With(QiRateText);
+        head.With(info);
+        Image icon=Art("icon_mind_skill.webp",120);icon.Fit="contain";icon.Class="card-art";Size(icon,120,120);head.With(icon);
+        Panel card=Column("card");Size(card,0,312);card.With(head);
+        QiBar=new Progress(0,1);QiBar.ShowText(false);Size(QiBar,0,24);card.With(QiBar);
+        Flex act=Flex.Row().AlignCenter();act.Gap(12);Size(act,0,40);
         RestBtn=RowButton("rest","出关休息",()=>{Model.StopActivity();Model.Say("已出关，静养气血",true);Refresh();},"secondary",150);act.With(RestBtn);
+        act.With(GrowSpace());
         CulBtn=RowButton("cultivate","开始闭关",()=>{Result(Model.StartCultivation());},"primary",220);act.With(CulBtn);
-        card.With(CenterRow(act,12));
+        card.With(act);
+        p.With(card);
     }
     static void BuildSkills() {
         ScrollColumn p=NewPage();PageHead(p,"功法","参悟消耗修为经验并需要一定时间；功法提升后永久生效。");
@@ -437,13 +444,14 @@ class WuweiApp {
         XpText.Text="修为经验  "+Number(Model.Xp);
         ActivityText.Text=Model.Activity==1?"正在闭关 · 吐纳天地":Model.Activity==2?"正在历练":Model.Activity==3?"正在百艺 · 制作中":"静养生息 · 尘缘未扰";
         Notice.Text=Model.LastMessage;
-        QiText.Text="境界根基    "+Number(Model.Qi)+" / "+Number(Model.QiNeed())+"     ·     每秒转化 "+Number(Model.CultivationRate());
+        QiText.Text="境界根基    "+Number(Model.Qi)+" / "+Number(Model.QiNeed());
+        QiRateText.Text="每秒转化 "+Number(Model.CultivationRate());
         if(BreakBtn!=null){
             bool breakReady=!Model.NeedsPrestige&&Model.Layer()==12&&Model.Realm()<8&&Model.Qi>=Model.QiNeed();
             string pill=Model.Realm()<8?Model.Data.Realms[Model.Realm()].Text("pill"):"";bool hasPill=pill!=""&&Model.ItemCount(pill)>0;
             BreakBtn.Disabled=!breakReady||!hasPill;
             BreakBtn.Tip=!breakReady?(Model.Layer()!=12?"需当前境界修至十二层圆满":(Model.Realm()<8?"需闭关进度圆满 · 当前 "+Number(Model.Qi)+" / "+Number(Model.QiNeed()):"此境已至巅峰")):(hasPill?("条件齐备 · 消耗一枚"+ItemName(pill)+"即可破境"):("缺少 "+(pill==""?"破境丹":ItemName(pill))+" · 绝境首领首杀必得"));
-            BreakInfo.Text="当前 "+Model.RealmName()+" "+Number(Model.Layer())+"层 · 修为 "+Number(Model.Xp)+"    ·    "+BreakBtn.Tip;
+            BreakInfo.Text=Model.RealmName()+" "+Number(Model.Layer())+"层 · "+BreakBtn.Tip;
         }
         if(CulBtn!=null){CulBtn.Disabled=Model.NeedsPrestige||Model.Activity==1;CulBtn.Tip=Model.Activity==1?"已在闭关中 · 可出关休息":"将修为经验转化为闭关进度，圆满后可破境";RestBtn.Disabled=Model.Activity==0;RestBtn.Tip=Model.Activity==0?"当前静养，无需出关":"结束当前闭关，静养恢复";BattleStopBtn.Disabled=Model.Activity!=2;CraftStopBtn.Disabled=Model.Activity!=3;}
         QiBar.SetPercent((int)(Model.Qi*100/Model.QiNeed()));HpBar.SetPercent((int)(Model.Hp*100/Model.MaxHp()));
@@ -474,7 +482,7 @@ class WuweiApp {
         string gear="攻击 "+Number(Model.Attack())+"   防御 "+Number(Model.Defense())+"   气血 "+Number(Model.Hp)+" / "+Number(Model.MaxHp())+"    阵法："+(Model.Formation==""?"未布置":ItemName(Model.Formation))+" · 灵酒："+(Model.WineSeconds>0?ItemName(Model.Wine)+" "+Number(Model.WineSeconds)+"秒":"未饮用");
         GearText.Text=gear;
         if(StatVals.Count>=7){StatVals[0].Text=Model.RealmName()+" "+Number(Model.Layer())+"层";StatVals[1].Text=Number(Model.Hp)+" / "+Number(Model.MaxHp());StatVals[2].Text=Number(Model.Attack());StatVals[3].Text=Number(Model.Defense());StatVals[4].Text=Model.Activity==1?"闭关":Model.Activity==2?"历练":Model.Activity==3?"百艺":"静养";StatVals[5].Text=Model.SectIndex<0?"未加入":Model.Data.Sects[Model.SectIndex].Name;StatVals[6].Text="因果 "+Number(Model.Karma)+" · "+Number(Model.Rebirths)+"世";}
-        string loot="";int start=Model.Log.Count-6;if(start<0){start=0;}for(int i=start;i<Model.Log.Count;i=i+1){loot=loot+Model.Log[i];}for(int i=0;i<LootLabels.Count;i=i+1){if(i<Model.Log.Count-start){LootLabels[i].Text="· "+Model.Log[start+i];}else{LootLabels[i].Text="";}}
+        string loot="";int start=Model.Log.Count-6;if(start<0){start=0;}for(int i=start;i<Model.Log.Count;i=i+1){loot=loot+Model.Log[i];}for(int i=0;i<LootLabels.Count;i=i+1){if(i<Model.Log.Count-start){LootLabels[i].Text=Model.Log[start+i];}else{LootLabels[i].Text="";}}
         MusicStatus.Text="山中清音 · 音量 "+Number(Music.Volume())+"% · "+(Music.Muted()?"已静音":Music.IsPlaying()?"播放中":"未播放")+(Music.Error()!=""?" · "+Music.Error():"");
         for(int i=0;i<TaskLabels.Count;i=i+1){Row t=Model.Data.SectTasks[i];bool own=Model.SectIndex>=0 && t.Text("sect")==Model.Data.Sects[Model.SectIndex].Id;TaskLabels[i].Text=t.Name+"\n进度 "+Number(Model.SectTaskProgress(i))+" / "+t.Text("target")+" · 奖励 "+t.Text("reward")+" 贡献";TaskButtons[i].Disabled=!own || Model.SectTaskProgress(i)<t.Num("target");}
         for(int i=0;i<TalentLabels.Count;i=i+1){TalentLabels[i].Text=Model.Data.Talents[i].Name+" · "+Number(Model.TalentLevel(i))+"级 · 消耗 "+Number(Model.TalentCost(i))+"因果";bool canUp=!Model.NeedsPrestige&&Model.TalentLevel(i)<100&&Model.Karma>=Model.TalentCost(i);TalentButtons[i].Disabled=!canUp;TalentButtons[i].Tip="升至 "+Number(Model.TalentLevel(i)+1)+" 级 · 消耗 "+Number(Model.TalentCost(i))+" 因果"+(canUp?"":(Model.TalentLevel(i)>=100?" · 已至百级圆满":" · 因果不足"));}
@@ -513,21 +521,21 @@ class WuweiApp {
         Shell=Panel.Root("shell");Shell.DockFill();Window.With(Shell);
         Image world=Art("qingzhu_ridge.webp",800);world.name="worldBackground";world.Class="world-bg";world.Fit="cover";world.DockFill();Shell.With(world);
         Panel wash=Panel.Root("wash");wash.Class="bg-wash";wash.DockFill();Shell.With(wash);
-        Flex top=Flex.Row().AlignCenter();top.Class="topbar";Size(top,0,78);top.Gap(18);top.DockTop();wash.With(top);
+        Flex top=Flex.Row().AlignCenter();top.Class="topbar";Size(top,0,78);top.Gap(12);top.DockTop();wash.With(top);
         NameText=Text(JourneyName,"topname",40);Size(NameText,240,40);top.With(NameText);
-        RealmText=Text("","pill-text",24);top.With(Pill("pill-jade",RealmText));
-        AgeText=Text("","pill-text",24);top.With(Pill("pill-cinnabar",AgeText));
-        LifeText=Text("","pill-text",24);top.With(Pill("pill-gold",LifeText));
+        RealmText=Text("","pill-text-ink",24);top.With(Pill("pill-res",RealmText));
+        AgeText=Text("","pill-text-ink",24);top.With(Pill("pill-res",AgeText));
+        LifeText=Text("","pill-text-ink",24);top.With(Pill("pill-res",LifeText));
         top.With(GrowSpace());
-        StonesText=Text("","pill-text-ink",24);top.With(Pill("pill-res",StonesText));
-        XpText=Text("","pill-text-ink",24);top.With(Pill("pill-res",XpText));
+        StonesText=Text("","pill-strong",24);top.With(Pill("pill-strong",StonesText));
+        XpText=Text("","pill-strong",24);top.With(Pill("pill-strong",XpText));
         Panel nav=Column("sidebar");Size(nav,185,0);nav.logGap=10;wash.With(nav);nav.DockLeft();
         Image logo=Art("logo.webp",128);logo.Fit="contain";logo.Class="nav-logo";Size(logo,0,128);nav.With(logo);
         List<string> sections=new List<string>();sections.Add("修行");sections.Add("历练");sections.Add("杂学");sections.Add("万宝");sections.Add("宗门");sections.Add("轮回");sections.Add("系统");
         for(int i=0;i<7;i=i+1){int index=i;Button b=ActionButton("nav"+Number(i),sections[i],()=>{SelectSection(index);},"navsec");Size(b,0,52);Nav.Add(b);nav.With(b);}
         nav.With(Spacer());
         nav.With(Text("版本 v1.0.7","navfoot",22));
-        nav.With(Wrap("Space  开始 / 暂停\nF11       全屏\nEsc        菜单","navfoot",66));
+        nav.With(Wrap("Space 开始 / 暂停\nEsc   系统页","navfoot",44));
         Panel center=Column("center");center.DockFill();center.logGap=12;wash.With(center);
         Panel subnavs=Panel.Root("subnavs");Size(subnavs,0,58);center.With(subnavs);
         Flex bar0=NewSubnav(subnavs);AddTab(bar0,0,"闭关");AddTab(bar0,1,"功法");AddTab(bar0,2,"破境");SectionBars.Add(bar0);
@@ -545,10 +553,10 @@ class WuweiApp {
         Panel statCard=Column("card");aside.With(statCard);
         statCard.With(Text("修士状态","section",30));
         List<string> statKeys=new List<string>();statKeys.Add("境界");statKeys.Add("气血");statKeys.Add("攻击");statKeys.Add("防御");statKeys.Add("行动");statKeys.Add("宗门");statKeys.Add("因果");
-        for(int i=0;i<statKeys.Count;i=i+1){Flex row=Flex.Row().AlignCenter();row.Gap(8);Size(row,0,26);row.With(Text(statKeys[i],"stat-key",22));row.With(GrowSpace());Label val=Wrap("","muted",22);Size(val,150,22);StatVals.Add(val);row.With(val);statCard.With(row);}
+        for(int i=0;i<statKeys.Count;i=i+1){Flex row=Flex.Row().AlignCenter();row.Gap(8);Size(row,0,26);row.With(Text(statKeys[i],"stat-key",22));row.With(GrowSpace());Label val=Text("","stat-val",22);StatVals.Add(val);row.With(val);statCard.With(row);}
         aside.With(Text("最近收获","section",30));
         Panel lootCard=Column("card");aside.With(lootCard);
-        for(int i=0;i<6;i=i+1){Label label=Wrap("","muted",40);LootLabels.Add(label);lootCard.With(label);}
+        for(int i=0;i<6;i=i+1){Label label=Wrap("","loot-line",24);LootLabels.Add(label);lootCard.With(label);}
     }
     static Flex Pill(string cls,Label text) {
         Flex p=Flex.Row().AlignCenter();p.Class="pill "+cls;p.Gap(0);p.With(text);return p;
@@ -567,8 +575,24 @@ class WuweiApp {
         Window.GetApp().UseSkin("wuwei");Window.GetApp().SetChromeButtons(false,false,true,true);
         BuildMenu();BuildShell();Ready=true;Refresh();Clock=Stopwatch.StartNew();Window.Every(250,()=>{Heartbeat();});Window.Every(30000,()=>{SaveGame(false);});Window.OnExit(()=>{SaveGame(false);Music.Dispose();});
     }
+    // 快捷键：Space 开始/暂停当前活动，Esc 打开系统页（侧栏有说明）。
+    // 沿用 IDE 的做法：每帧读 App.EventKind + window.EventKeyCode。
+    // 未实现 F11 全屏——Gui 标准库没有该 API，不为此发明接口。
+    static void PumpKeys() {
+        App app=Window.GetApp();
+        int kind=app.EventKind();
+        if(kind!=4 || !Ready || InMenu){return;}
+        int kc=app.window.EventKeyCode();
+        if(kc==32){
+            if(Model.Activity==0){Result(Model.StartCultivation());}
+            else {Model.StopActivity();Model.Say("已停下手中事务",true);}
+            Refresh();
+        }
+        else if(kc==27){SelectSection(6);}
+    }
     // One completed work unit per rendered frame; no artificial timer or sleep.
     static void LoadFrame() {
+        PumpKeys();
         PublishProbes();if(Ready){return;}
         if(LoadStep==0){LoadStep=1;}
         else if(LoadStep==1){Model.Init(Root+"/data");LoadStep=2;OpeningText.Text="资源加载中 · 修行数据已解密";}

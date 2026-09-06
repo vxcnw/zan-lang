@@ -27,16 +27,16 @@ progress.loading-progress::fill { background: #759783; }
 image.world-bg { }
 stack.bg-wash { background: rgba(245,237,219,0.78); }
 
-/* 顶栏 78px：纸底、下边框；玩家名与三枚彩色 pill 垂直居中 */
+/* 顶栏 78px：纸底、下边框；玩家名与状态 pill 垂直居中。
+ * pill 全部走中性描边款，资源两组（灵石/修为）用主色深一档区分
+ * 层级——单一强调色规则下不再使用三块高饱和彩底。 */
 flex.topbar { background: rgba(242,235,217,0.96); border-bottom: 1 solid rgba(64,64,56,0.38); padding: 0 18 0 24; }
 label.topname { font-size: 28; font-weight: 600; color: var(--text-primary); height: 40; }
 flex.pill { height: 40; padding: 0 14; border-radius: 18; gap: 0; }
-flex.pill-jade { background: #355f56; }
-flex.pill-cinnabar { background: #b64837; }
-flex.pill-gold { background: #b38a42; }
 flex.pill-res { background: rgba(51,51,46,0.07); border: 1 solid #bdb29f; }
-label.pill-text { font-size: 14; color: #ffffff; }
+flex.pill-strong { background: var(--primary); border: 1 solid var(--primary-pressed); }
 label.pill-text-ink { font-size: 14; color: var(--text-primary); }
+label.pill-strong { font-size: 14; color: #ffffff; }
 
 /* 左侧 185px 浅纸导航：与顶栏同一纸底，墨字、玉色当前项 */
 stack.sidebar { background: rgba(242,235,217,0.96); border-right: 1 solid rgba(64,64,56,0.38); padding: 20 14 18 14; }
@@ -55,9 +55,12 @@ button.tab-current { background: #355f56; border-color: #5f8f82; color: #ffffff;
 label.page-title { font-size: 30; font-weight: 700; color: var(--text-primary); }
 label.page-sub { color: var(--text-secondary); font-size: var(--font-size-small); }
 
-/* 右栏 330px：修士状态 + 最近收获 */
+/* 右栏 330px：修士状态 + 最近收获。数值列右对齐，键名列固定宽，
+ * 行与行共用一条基线；收获行用小字弱化，占位时不留大段空白。 */
 stack.rightbar { padding: 14 14 14 14; }
 label.stat-key { color: var(--text-secondary); font-size: var(--font-size-tiny); }
+label.stat-val { color: var(--text-primary); font-size: var(--font-size-small); text-align: right; }
+label.loot-line { color: var(--text-secondary); font-size: var(--font-size-small); }
 
 label { color: var(--text-primary); font-size: var(--font-size-medium); }
 label.title { font-size: var(--font-size-huge); font-weight: 700; }
@@ -65,8 +68,7 @@ label.section { font-size: var(--font-size-large); font-weight: 600; }
 label.muted { color: var(--text-secondary); font-size: var(--font-size-small); }
 label.kicker { color: var(--text-secondary); font-size: var(--font-size-tiny); }
 label.jade { color: var(--primary); font-size: var(--font-size-large); }
-label.gold { color: #b38a42; font-size: var(--font-size-large); }
-label.brand { font-size: 32; color: var(--text-primary); }
+label.gold { color: var(--warning); font-size: var(--font-size-large); }
 label.notice { color: var(--primary); font-size: var(--font-size-small); }
 stack.card { background: transparent; border: 0; padding: 14; }
 /* CardRow 用 Flex 行实现 [内容][grow 间隔][按钮]；纵向留白交给固定行高。
