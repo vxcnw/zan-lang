@@ -112,12 +112,17 @@
 > 下探针即全帧代价）。（c）**垫片分配器 free 不合并**——churn 模式
 > （缓冲每轮 +64 B）让每个刚释放的块都比下一轮请求小 64 B，first-fit
 > 永远复用不上，池在 90% 空闲时碎片化 OOM（40 洞、最大 1200 B、请求
-> 1392 B）；修法：free 改地址序插入 + 前后立即合并。另有一项**照实记录
-> 的观测**（非缺陷）：托管分配首次发生即常驻 ≈48 KiB 异常安全脚手架
-> （EH 状态块 536 B + 两个 8 KiB 处理器槽 chunk + 32 KiB 临时 chunk，
-> live-top 实测），宿主机上无人计量、裸机 64 KiB 池里占 76%——裸机堆池
-> 按"脚手架 48 KiB + 工作集"定容或调大 `ZAN_BARE_HEAP_BYTES`（C3 有
-> 400 KiB）；按目标裁剪 chunk 容量属未来工作。POSIX 文件桩
+> 1392 B）；修法：free 改地址序插入 + 前后立即合并。另一项**已修的硬伤**
+> （2026-09 审计）：裸机 try/catch 曾一触即 OOM——picolibc 没有 `_setjmp`
+> （链接期 undefined reference），且 EH chunk 默认几何（64×1040 B 处理器
+> chunk + 4096×8 B 临时 chunk）首次 try 即申请 ≈97 KiB，超过整个 64 KiB
+> 默认池直接 abort。修法：riscv 裸机发射 `setjmp`，chunk 收窄为 2×1040 B /
+> 64×8 B（chunk 表仍 64 项，只是粒度变细；宿主几何不变）——首次 try 的
+> 常驻降到 ≈3 KiB（状态块 536 B + 处理器 chunk 2080 B + 临时 chunk 512 B）。
+> 裸机 try/catch + await-in-catch 已在 QEMU 实测通过（eh.zan 探针）。
+> `soak` 的常驻 live-top 由 32768+8192+8192+536 降到 8192+8192+536+512。
+> 垫片分配器同批加固：块 magic + 范围校验拒绝野/二次 free（退出报告输出
+> BAD-FREE n）、calloc 溢出检查、零头吸收精确归还。POSIX 文件桩
 > （open/read/write/…、stderr FILE）补齐后，稍宽的程序也能上板验证。
 
 ## 1. 实测：一个 hello world 的成本
