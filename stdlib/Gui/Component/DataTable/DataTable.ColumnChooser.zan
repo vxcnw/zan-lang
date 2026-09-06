@@ -143,9 +143,11 @@ partial class DataTable {
         if (my + menuH > canH) { my = canH - menuH - app.Scale(6); }
         if (my < app.titlebarH) { my = app.titlebarH; }
 
-        // 接管弹层上的滚轮，吞掉整个面板的点击，
-        // 空白区域不穿透到下层页面。
+        // 接管弹层上的滚轮；面板矩形吞掉自身区域的点击。
+        // 弹层外的空白由下方的全视口遮罩挡住，点击外部只关闭
+        // 弹层，不会同时穿透到弹层后面的表格/页面控件。
         app.CaptureWheel(mx, my, menuW, menuH);
+        app.BlockHitsRect(x, y, viewW, viewH);
         app.BlockHitsRect(mx, my, menuW, menuH);
         c.FillRoundRect(mx, my, menuW, menuH, t.borderRadiusMedium, sMenu.BgOr(0));
         c.DrawRoundRect(mx, my, menuW, menuH, t.borderRadiusMedium, sMenu.BorderOr(0), 1);

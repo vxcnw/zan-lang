@@ -259,6 +259,14 @@ class App {
     int clickTargetId;
     int pressTargetId;
     bool pointerDown;    // 按住左键（控件外的拖拽需要移动重绘）
+    // 按下（左键）落点是否为阻挡区/空白（上一帧命中快照里该点
+    // 只被 BlockHitsRect/BlockHitsBelow 的遮罩或什么都没有覆盖）。
+    // 弹层「按外部关闭」正是把这样一下按下当作关闭指令；若随后
+    // 的释放仍照常发布点击目标，新弹层不存在的下一帧里该点解析
+    // 到其下的真实控件——同一次手势先关弹层又点穿到下面的内容。
+    // 释放路径据此抑制点击发布（与触摸拖拽 EventFlag==1 同一道
+    // 防线）。见 ProcessEvent/ApplyEvent 的 kind==3 分支。
+    bool pressOnBlocker;
     // 次要（右键）鼠标按钮目标，解析方式与
     // 主键点击/按下目标相同，但保持独立，这样右键永远不会
     // 触发 Ui.Clicked 或抢占键盘焦点。通过 RightClickTarget()
@@ -676,6 +684,7 @@ class App {
         this.menuBlockPrevious = false;
         this.clickTargetId = -1;
         this.pressTargetId = -1;
+        this.pressOnBlocker = false;
         this.pointerDown = false;
         this.frameSeq = 0;
         this.clickSeenSeq = 0 - 1;
@@ -4182,6 +4191,7 @@ class App {
                 rightPressTargetId = -1;
                 rightClickTargetId = -1;
                 pressTargetId = hitId;
+                pressOnBlocker = hitId < 0;
                 pointerDown = true;
                 NotePressStart(hitId, mouseX, mouseY);
             }
@@ -4214,6 +4224,20 @@ class App {
                 // （MouseReleased 语义、ClearPress），滚动条/滑块/
                 // 窗口拖动不受影响。
                 if (window.EventFlag() == 1) {
+                    clickTargetId = -1;
+                    NoteRelease(mouseX, mouseY);
+                    focus.ClearPress();
+                } else if (pressOnBlocker) {
+                    // 按下落在阻挡区/空白（弹层遮罩、模态变暗层或
+                    // 无命中区的表面）：这是弹层「按外部关闭」的那
+                    // 一下按下。弹层会在本帧渲染时读到 kind==2 并把
+                    // 自己关掉，于是释放帧快照里弹层已经不存在——
+                    // 若仍把释放解析成点击目标，该点恰好落到其下的
+                    // 控件上，同一次手势就先关菜单再点穿到后面的内
+                    // 容（下拉/菜单/抽屉/layer 的“点击穿透”）。
+                    // 发布保持 -1、双击基线不更新，释放本身照常完成
+                    // 拖拽收尾；各弹层自带的 ClaimClick 防线（打开
+                    // 那一帧）与本防线（关闭那一手势）互补。
                     clickTargetId = -1;
                     NoteRelease(mouseX, mouseY);
                     focus.ClearPress();
@@ -4467,6 +4491,7 @@ class App {
                 rightPressTargetId = -1;
                 rightClickTargetId = -1;
                 pressTargetId = hitId;
+                pressOnBlocker = hitId < 0;
                 pointerDown = true;
                 NotePressStart(hitId, mouseX, mouseY);
             }
@@ -4488,6 +4513,20 @@ class App {
                 // 触摸拖拽收尾释放不发布点击目标，只完成拖拽收尾。
                 pointerDown = false;
                 if (window.EventFlag() == 1) {
+                    clickTargetId = -1;
+                    NoteRelease(mouseX, mouseY);
+                    focus.ClearPress();
+                } else if (pressOnBlocker) {
+                    // 按下落在阻挡区/空白（弹层遮罩、模态变暗层或
+                    // 无命中区的表面）：这是弹层「按外部关闭」的那
+                    // 一下按下。弹层会在本帧渲染时读到 kind==2 并把
+                    // 自己关掉，于是释放帧快照里弹层已经不存在——
+                    // 若仍把释放解析成点击目标，该点恰好落到其下的
+                    // 控件上，同一次手势就先关菜单再点穿到后面的内
+                    // 容（下拉/菜单/抽屉/layer 的“点击穿透”）。
+                    // 发布保持 -1、双击基线不更新，释放本身照常完成
+                    // 拖拽收尾；各弹层自带的 ClaimClick 防线（打开
+                    // 那一帧）与本防线（关闭那一手势）互补。
                     clickTargetId = -1;
                     NoteRelease(mouseX, mouseY);
                     focus.ClearPress();
@@ -5298,6 +5337,10 @@ class App {
         menuBlock = false;
         frameSeq = frameSeq + 1;
         clickClaimed = false;
+        // pressOnBlocker 不在此复位：本帧的 BeginFrame 在
+        // ProcessEvent（按下置位）之后、释放帧的 ProcessEvent（读取）
+        // 之前各跑一次，复位会把跨帧手势状态抹掉。写入点只有
+        // kind==2 主键按下分支（每次按下无条件重写）。
         hitTester.Clear();
         glassRects.Clear();
         window.ClearHitGuards();
@@ -5588,6 +5631,16 @@ class App {
         // 响应过了（弹出上下文菜单、进入选择态），松手那一下
         // 只是结束按住，若当点击会在菜单原点再触发一次。
         if (this.longPressFired) { return false; }
+        // 按下落在阻挡区/空白的收尾释放默认不是点击：弹层已在
+        // 按下帧关闭自己，释放帧该点命中其下控件只是快照时序的
+        // 产物（见 ProcessEvent kind==3 的 pressOnBlocker 分支）。
+        // 几何判定的即时模式表面（Context 菜单、DataTable 浮层）
+        // 只走这里，不看 ClickTarget，因此必须同源拦截。
+        // 例外：指针位置本帧仍有阻挡区——弹层还开着、靠释放
+        // 收尾关闭的弹层（下拉等）需要收到这次"点外部"才能
+        // 关闭；此时双帧都有遮挡，其下内容本来就过不了
+        // inputBlockPrevious/PrevBlockerAt 两道防线。
+        if (this.pressOnBlocker && !this.hitTester.BlockerAt(this.mouseX, this.mouseY)) { return false; }
         if (!this.ClickFrameCurrent()) { return false; }
         // 只有主按钮算点击。右键的释放绝不能
         // 被当作点击，否则刚在其上打开上下文菜单的控件

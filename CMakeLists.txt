@@ -1819,6 +1819,22 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
       -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_wheel_route${_exe_ext}
       -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
 
+  # 弹层“按外部关闭”点击穿透回归（用户报告“抽屉/弹出层/下拉/菜单/
+  # layer 都会点击穿透到后面”）：释放解析时序根因——按外部关闭的浮层
+  # 在按下帧把自己关掉，释放帧快照里弹层已不存在，同一次手势的释放
+  # 被解析成其下控件的点击。防线：pressOnBlocker（按下落阻挡区/空白）
+  # 时释放不发布点击目标、ClickAvailable 拒绝（弹层仍开时的释放关闭
+  # 除外——下拉需要它）；悬停在开启弹层下方被 PointerCaptured 收走；
+  # ContextMenu 菜单外释放只返回 -2 且不触发其下控件。
+  add_test(NAME conformance_gui_overlay_penetrate
+    COMMAND ${CMAKE_COMMAND}
+      -DZANC=$<TARGET_FILE:zanc>
+      -DSRC=${CMAKE_SOURCE_DIR}/tests/gui/overlay_penetrate_test.zan
+      "-DZANC_ARGS=--auto-stdlib${_gui_driver_tail}"
+      -DEXPECTED=${CMAKE_SOURCE_DIR}/tests/conformance/gui_overlay_penetrate.out
+      -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_overlay_penetrate${_exe_ext}
+      -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
+
   # ScrollView 拖拽重锚定回归（用户报告“滚动条滚动时界面卡死/页面自
   # 己跑”）：拖拽期间内容高度变化（自动量高、图片加载）时旧锚点公式
   # off = dragOffset0 + dyPix*mo/travel 用新 mo 配旧锚点 —— 按住不动
