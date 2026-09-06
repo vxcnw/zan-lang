@@ -1,0 +1,22 @@
+using System.Data.Orm;
+
+namespace ZanWeb.Model.Game;
+
+/* 区服表。state：0=开放（可登录进入）、1=维护（拒绝 enter/create，
+   客户端列表置灰）。sort 决定客户端列表顺序。区服在本模板里是逻辑
+   分区（同进程按 realmId 隔离广播与角色）；扩多进程时本表加 host/port
+   即可变成路由表，协议不变。 */
+[Table(Name = "game_realm")]
+class Realm {
+    [Column(IsIdentity = true)]
+    int id;
+
+    [Column(StringLength = 64, IsNullable = false)]
+    string name;
+
+    /* 0=开放 1=维护。 */
+    int state;
+
+    int sort;
+    long createdAt;
+}

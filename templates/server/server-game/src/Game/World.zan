@@ -1,20 +1,23 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Json;
 using System.Net;
 
 namespace ZanWeb.Game;
 
 /* 游戏世界：在线会话表 + tick 协程，模板的服务权威所在。
-   - 会话以 cid 为主键、账号 id 为索引；登录在 Gateway，离开在 onClose。
-   - tick 每 tickMs 跳一次：心跳超时踢出、定期把 dirty 会话落库。
-   - 离线结算在登录路径（Gateway 的 login）：按 lastLogoutAt 起算的
-     离线时长发放金币，封顶 offlineCapHours。
-   - GM 写在线玩家必须经这里（Adjust/ApplyEdit/Kick/Broadcast），让
-     内存副本、落库标记与客户端推送保持一致；离线玩家由 GM 页直接改库。
-     所有可变状态只在协程不跨 await 的前提下共享，单线程无需加锁。 */
+   - 会话以 cid 为主键、账号 id 为索引；登录（进区前）与进区都登记在这里，
+     断开统一走 Leave。
+   - 广播按区服收窄：聊天/动向只进本区，公告与 GM 喊话全服可见。
+   - tick 每 tickMs 跳一次：心跳超时踢出、定期把 dirty 角色落库。
+   - 离线结算在进入区服的路径（Gateway 的 enter）：按角色 lastLogoutAt
+     起算的离线时长发放金币，封顶 offlineCapHours。
+   - GM 写在线角色必须经这里（Adjust/ApplyEdit），让内存副本、落库标记
+     与客户端推送保持一致；离线角色由 GM 页直接改库。所有可变状态只在
+     协程不跨 await 的前提下共享，单线程无需加锁。 */
 class World {
-    /* cid → 会话；账号 id → 会话。索引在 Enter/Leave 维护。 */
+    /* cid → 会话；账号 id → 会话（登录即登记）。索引在 Enter/Leave 维护。 */
     static Dictionary<int, Session> byCid = new Dictionary<int, Session>();
     static Dictionary<int, Session> byAccount = new Dictionary<int, Session>();
 
@@ -23,7 +26,30 @@ class World {
 
     static bool running = false;
 
-    static int OnlineCount() { return byCid.Count; }
+    /* 在世界中的会话数（进了区、有角色的）——对玩家展示的"在线"用这个。 */
+    static int OnlineCount() {
+        int n = 0;
+        List<Session> rows = World.All();
+        for (int i = 0; i < rows.Count; i = i + 1) {
+            if (rows[i].row != null) { n = n + 1; }
+        }
+        return n;
+    }
+
+    /* 已登录会话数（含登录了还没进区的）。 */
+    static int SessionCount() { return World.byCid.Count; }
+
+    /* 某区服当前在世界中的角色数；realmId<=0 视为全服。 */
+    static int RealmOnline(int realmId) {
+        int n = 0;
+        List<Session> rows = World.All();
+        for (int i = 0; i < rows.Count; i = i + 1) {
+            if (rows[i].row == null) { continue; }
+            if (realmId > 0 && rows[i].realmId != realmId) { continue; }
+            n = n + 1;
+        }
+        return n;
+    }
 
     static Session ByAccount(int accountId) {
         Session s = null;
@@ -37,42 +63,81 @@ class World {
         return null;
     }
 
+    /* 在线角色快照：按角色 id 找仍在外面的会话（GM 页按角色行操作）。 */
+    static Session ByChar(int playerId) {
+        List<Session> rows = World.All();
+        for (int i = 0; i < rows.Count; i = i + 1) {
+            Session s = rows[i];
+            if (s.row != null && s.row.id == playerId) { return s; }
+        }
+        return null;
+    }
+
     /* 在线会话快照：GM 页与广播使用（Values 返回当前集合的快照列表）。 */
     static List<Session> All() { return World.byCid.Values; }
 
-    /* 注册会话；同账号旧会话被顶号（先推送再关连接，清理走 onClose）。 */
+    /* 登录成功登记会话；同账号旧连接被顶号（先推送再关连接，清理走
+       onClose）。此时 row 为空——进区另有 EnterWorld。 */
     static void Enter(Session s, long now) {
-        Session old = World.ByAccount(s.row.id);
+        Session old = World.ByAccount(s.accountId);
         if (old != null && old.cid != s.cid) {
             old.kicked = true;
             Gateway.Send(old.conn, Gateway.Ev("kick", "该账号在别处登录"));
             old.conn.Close();
         }
         World.byCid.Add(s.cid, s);
-        World.byAccount.Add(s.row.id, s);
-        Console.WriteLine("[world] enter #" + Convert.ToString(s.cid)
-            + " " + s.row.username + " online="
+        World.byAccount.Add(s.accountId, s);
+        Console.WriteLine("[world] login #" + Convert.ToString(s.cid)
+            + " " + s.username + " sessions="
             + Convert.ToString(World.byCid.Count));
     }
 
-    /* 连接关闭后的清理：移除索引，把仍标记 dirty 的行落库并写登出时间。 */
+    /* 进入区服：会话挂上角色，开始参与世界（广播/落库/踢线都看 row）。 */
+    static void EnterWorld(Session s, int realmId,
+                           ZanWeb.Model.Game.Player row, long now) {
+        s.realmId = realmId;
+        s.row = row;
+        s.dirty = false;
+        s.lastSeen = now;
+        Console.WriteLine("[world] enter #" + Convert.ToString(s.cid)
+            + " " + s.username + " realm=" + Convert.ToString(realmId)
+            + " online=" + Convert.ToString(World.OnlineCount()));
+    }
+
+    /* 离开当前区服（换区重进时先走这里）：把角色落库再摘下来，
+       连接与会话保留，账号仍算在线。 */
+    static async void ExitWorld(Session s) {
+        if (s.row == null) { return; }
+        ZanWeb.Model.Game.Player row = s.row;
+        s.row = null;
+        s.realmId = 0;
+        row.lastLogoutAt = WebApp.NowSeconds();
+        await World.PersistRow(row, true);
+        Console.WriteLine("[world] exit #" + Convert.ToString(s.cid)
+            + " " + s.username + " online="
+            + Convert.ToString(World.OnlineCount()));
+    }
+
+    /* 连接关闭后的清理：移除索引，仍在外面的角色落库并写登出时间。 */
     static async void Leave(int cid) {
         Session s = World.ByCid(cid);
         if (s == null) { return; }
         World.byCid.Remove(cid);
-        Session idx = World.ByAccount(s.row.id);
-        if (idx != null && idx.cid == cid) { World.byAccount.Remove(s.row.id); }
-        s.row.lastLogoutAt = WebApp.NowSeconds();
-        await World.PersistRow(s);
+        Session idx = World.ByAccount(s.accountId);
+        if (idx != null && idx.cid == cid) { World.byAccount.Remove(s.accountId); }
+        if (s.row != null) {
+            s.row.lastLogoutAt = WebApp.NowSeconds();
+            await World.PersistRow(s.row, true);
+        }
         Console.WriteLine("[world] leave #" + Convert.ToString(cid)
-            + " " + s.row.username + " online="
+            + " " + s.username + " sessions="
             + Convert.ToString(World.byCid.Count));
     }
 
     /* 发放资源（GM 发奖）：数额可为负（扣回误发），下限 0。返回 false
-       表示该玩家当前不在线——GM 页应转走直接改库的路径。 */
-    static bool Adjust(int accountId, long gold, long gems) {
-        Session s = World.ByAccount(accountId);
+       表示该角色当前不在世界中——GM 页应转走直接改库的路径。 */
+    static bool Adjust(int playerId, long gold, long gems) {
+        Session s = World.ByChar(playerId);
         if (s == null) { return false; }
         s.row.gold = s.row.gold + gold;
         if (s.row.gold < 0) { s.row.gold = 0; }
@@ -83,20 +148,23 @@ class World {
         return true;
     }
 
-    /* GM 改等级/职业/驻地等基本项：只动内存副本，落库随 tick。 */
-    static bool ApplyEdit(int accountId, int level, int job, int mapId) {
-        Session s = World.ByAccount(accountId);
+    /* GM 改等级/职业/驻地/昵称等基本项：只动内存副本，落库随 tick。
+       level<=0 表示不改。返回 false 同 Adjust。 */
+    static bool ApplyEdit(int playerId, int level, int job, int mapId,
+                          string nickname) {
+        Session s = World.ByChar(playerId);
         if (s == null) { return false; }
         if (level > 0) { s.row.level = level; }
         s.row.job = job;
         s.row.mapId = mapId;
+        if (nickname.Length > 0) { s.row.nickname = nickname; }
         s.dirty = true;
         Gateway.PushState(s);
         return true;
     }
 
-    /* 踢出在线玩家；返回 false 表示不在线。推送 kick 事件后关连接，
-       真正的清理与落库在 onClose → Leave。 */
+    /* 踢出账号（封禁/顶号/GM 踢线）；返回 false 表示不在线。推送 kick
+       事件后关连接，真正的清理与落库在 onClose → Leave。 */
     static bool Kick(int accountId, string reason) {
         Session s = World.ByAccount(accountId);
         if (s == null) { return false; }
@@ -106,7 +174,7 @@ class World {
         return true;
     }
 
-    /* 全服聊天广播；返回送达会话数。from 为 GM 名时客户端置灰展示。 */
+    /* 全服 GM 喊话：发给所有已登录会话（含未进区的）。返回送达数。 */
     static int Broadcast(string from, string text) {
         List<Session> rows = World.All();
         for (int i = 0; i < rows.Count; i = i + 1) {
@@ -115,13 +183,32 @@ class World {
         return rows.Count;
     }
 
-    /* 把一条公告推给全部在线会话；返回送达数。 */
+    /* 区服聊天：只进本区。 */
+    static void Chat(ZanWeb.Model.Game.Player from, string text) {
+        JsonValue ev = JsonValue.NewObject();
+        ev.Set("ev", JsonValue.NewStr("chat"));
+        ev.Set("from", JsonValue.NewStr(from.nickname));
+        ev.Set("text", JsonValue.NewStr(text));
+        World.DeliverRealm(from.realmId, ev);
+    }
+
+    /* 把一条公告推给全部已登录会话；返回送达数。 */
     static int PushAnnounce(string title, string body) {
         List<Session> rows = World.All();
         for (int i = 0; i < rows.Count; i = i + 1) {
             Gateway.PushAnnounce(rows[i].conn, title, body);
         }
         return rows.Count;
+    }
+
+    /* 事件只发给本区在世界中的会话。 */
+    static void DeliverRealm(int realmId, JsonValue ev) {
+        List<Session> rows = World.All();
+        for (int i = 0; i < rows.Count; i = i + 1) {
+            Session s = rows[i];
+            if (s.row == null || s.realmId != realmId) { continue; }
+            Gateway.Send(s.conn, ev);
+        }
     }
 
     /* ---- 启动与 tick ---- */
@@ -142,6 +229,7 @@ class World {
             long now = WebApp.NowSeconds();
             elapsed = elapsed + Cfg.Game.tickMs;
             World.Sweep(now);
+            Gateway.SweepIdle(now);
             if (elapsed >= Cfg.Game.flushSeconds * 1000) {
                 elapsed = 0;
                 int n = await World.Flush();
@@ -152,14 +240,17 @@ class World {
         }
     }
 
-    /* 心跳超时：kickSeconds 内没有任何消息（含 hb）的会话按断线处理。 */
+    /* 心跳超时：kickSeconds 内没有任何消息（含 hb）的会话按断线处理。
+       连接收口是懒的（worker 在下一拍才关），kicked 会话等 onClose 清理，
+       这里跳过，别每秒重踢刷屏。 */
     static void Sweep(long now) {
         List<Session> rows = World.All();
         for (int i = 0; i < rows.Count; i = i + 1) {
             Session s = rows[i];
+            if (s.kicked) { continue; }
             if (now - s.lastSeen > Cfg.Game.kickSeconds) {
                 Console.WriteLine("[world] timeout #" + Convert.ToString(s.cid)
-                    + " " + s.row.username);
+                    + " " + s.username);
                 s.kicked = true;
                 Gateway.Send(s.conn, Gateway.Ev("kick", "心跳超时"));
                 s.conn.Close();
@@ -167,7 +258,7 @@ class World {
         }
     }
 
-    /* 把全部 dirty 会话写回数据库；连接按需借还，借不到就留到下一轮。 */
+    /* 把全部 dirty 角色写回数据库；连接按需借还，借不到就留到下一轮。 */
     static async int Flush() {
         if (World.dbctx == null) { return 0; }
         IDbConnection db = await World.dbctx.Acquire();
@@ -177,9 +268,9 @@ class World {
             int n = 0;
             for (int i = 0; i < rows.Count; i = i + 1) {
                 Session s = rows[i];
-                if (!s.dirty) { continue; }
+                if (s.row == null || !s.dirty) { continue; }
                 s.dirty = false;
-                if (await World.WriteRow(db, s)) { n = n + 1; }
+                if (await World.WriteRow(db, s.row)) { n = n + 1; }
             }
             return n;
         } finally {
@@ -187,30 +278,38 @@ class World {
         }
     }
 
-    /* 单行落库（登出路径）：自借连接，尽力而为——失败只留日志，
-       下一轮 Flush 或玩家再次登录仍会覆盖。 */
-    static async bool PersistRow(Session s) {
+    /* 单行落库：自借连接，尽力而为——失败只留日志，下一轮 Flush 或
+       玩家再次进区仍会覆盖。logout 时同时写登出时间。 */
+    static async bool PersistRow(ZanWeb.Model.Game.Player row, bool logout) {
         if (World.dbctx == null) { return false; }
         IDbConnection db = await World.dbctx.Acquire();
         if (db == null) { return false; }
         try {
-            return await World.WriteRow(db, s);
+            int n = await World.WriteRow(db, row);
+            if (logout) {
+                int _t = await db.Update<ZanWeb.Model.Game.Player>()
+                    .Set(a => a.lastLogoutAt, row.lastLogoutAt)
+                    .Where(a => a.id == row.id)
+                    .ExecuteAffrowsAsync();
+            }
+            return n > 0;
         } finally {
             World.dbctx.Release(db);
         }
     }
 
-    static async bool WriteRow(IDbConnection db, Session s) {
+    static async bool WriteRow(IDbConnection db,
+                               ZanWeb.Model.Game.Player row) {
         long now = WebApp.NowSeconds();
         int n = await db.Update<ZanWeb.Model.Game.Player>()
-            .Set(a => a.level, s.row.level)
-            .Set(a => a.gold, s.row.gold)
-            .Set(a => a.gems, s.row.gems)
-            .Set(a => a.mapId, s.row.mapId)
-            .Set(a => a.x, s.row.x)
-            .Set(a => a.y, s.row.y)
+            .Set(a => a.level, row.level)
+            .Set(a => a.gold, row.gold)
+            .Set(a => a.gems, row.gems)
+            .Set(a => a.mapId, row.mapId)
+            .Set(a => a.x, row.x)
+            .Set(a => a.y, row.y)
             .Set(a => a.updatedAt, now)
-            .Where(a => a.id == s.row.id)
+            .Where(a => a.id == row.id)
             .ExecuteAffrowsAsync();
         return n > 0;
     }

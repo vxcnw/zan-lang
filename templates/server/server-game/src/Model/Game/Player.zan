@@ -2,24 +2,25 @@ using System.Data.Orm;
 
 namespace ZanWeb.Model.Game;
 
-/* 玩家账号表。游戏客户端经 TCP 网关 register/login，管理后台经 GM 页编辑；
-   两侧共用同一张表与同一套加盐散列（AuthUser.PasswordHash）。在线玩家的
-   权威状态在内存会话（Game.Session）中，定期与登出时落库；离线玩家直接
-   以本表为准。status=0 封禁：登录被拒，已在线会话被 GM 踢出。 */
+/* 角色表：属于一个区服（realmId），一个账号每区至多一个（应用层唯一，
+   创建时检查）。凭据与封禁在 game_account——账号可登录不等于某区有
+   角色，创建角色才进得了世界。username 是账号名的冗余拷贝，仅供后台
+   列表展示，鉴权永远走账号表。在线角色的权威状态在内存会话
+   （Game.Session）里，定期与登出时落库；离线角色以本表为准。
+   status=1 正常；0=屏蔽（GM 手工下架单个角色，账号封禁在账号表）。 */
 [Table(Name = "game_player")]
 class Player {
     [Column(IsIdentity = true)]
     int id;
 
+    /* 所属账号（game_account.id）。 */
+    int accountId;
+
     [Column(StringLength = 64, IsNullable = false)]
     string username;
 
-    /* 加盐迭代 SHA-256（见 AuthUser.PasswordHash）。不返回、不记录。 */
-    [Column(StringLength = 128, IsNullable = false)]
-    string passwordHash;
-
-    [Column(StringLength = 64, IsNullable = false)]
-    string passwordSalt;
+    /* 所属区服（game_realm.id）。 */
+    int realmId;
 
     [Column(StringLength = 32, IsNullable = false)]
     string nickname;
@@ -37,12 +38,10 @@ class Player {
     int x;
     int y;
 
-    /* 1=正常；0=封禁（banReason 说明原因，GM 页可读改）。 */
+    /* 1=正常；0=屏蔽。 */
     int status;
 
-    [Column(StringLength = 128)]
-    string banReason;
-
+    /* 角色级登录痕迹：离线结算按本角色的 lastLogoutAt 起算。 */
     long lastLoginAt;
     long lastLogoutAt;
 

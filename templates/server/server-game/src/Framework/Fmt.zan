@@ -37,6 +37,37 @@ class Fmt {
         return v;
     }
 
+    /* ---- 玩家可见文本的长度语义 ---- */
+    /* string.Length 数的是 UTF-8 字节（"刀" 是 3），对玩家承诺"几个字"
+       的输入限制一律走 CharCount；超长截断走 SubChar，保证不劈开汉字。 */
+
+    static int CharCount(string s) {
+        int n = 0;
+        for (int i = 0; i < s.Length; i = i + 1) {
+            if ((s[i] & 0xC0) != 0x80) { n = n + 1; }
+        }
+        return n;
+    }
+
+    static string SubChar(string s, int maxChars) {
+        if (Fmt.CharCount(s) <= maxChars) { return s; }
+        string cut = "";
+        int chars = 0;
+        int i = 0;
+        while (i < s.Length && chars < maxChars) {
+            int b0 = s[i] & 255;
+            int w = 1;
+            if ((b0 & 0xE0) == 0xC0) { w = 2; }
+            else if ((b0 & 0xF0) == 0xE0) { w = 3; }
+            else if ((b0 & 0xF8) == 0xF0) { w = 4; }
+            if (i + w > s.Length) { break; }
+            cut = cut + s.Substring(i, w);
+            i = i + w;
+            chars = chars + 1;
+        }
+        return cut;
+    }
+
     /* 第一个完整 UTF-8 字符（用于头像首字）；字符串按字节索引，需按首字节判断字符宽度。*/
     static string FirstChar(string s) {
         if (s == null || s.Length == 0) { return ""; }

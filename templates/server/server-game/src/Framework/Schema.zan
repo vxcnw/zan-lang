@@ -59,7 +59,7 @@ class Schema {
         int _admin = await Schema.AddRole(db, "系统管理员", "admin", 1,
             "除超级管理员外的全部管理权限", DataScope.RoleAll);
         int _gm = await Schema.AddRole(db, "游戏运营", "gm", 10,
-            "只管理游戏域：玩家、在线、公告", DataScope.RoleAll);
+            "只管理游戏域：区服、玩家、在线、公告", DataScope.RoleAll);
         return _admin > 0 && _gm > 0;
     }
 
@@ -207,9 +207,17 @@ class Schema {
     }
 
     /* ---- 游戏域种子 ---- */
-    /* 初始地图与一条欢迎公告；带计数保护，重复启动不变。玩家表不种子化，
-       账号由客户端经 register 协议注册。*/
+    /* 初始区服、地图与一条欢迎公告；带计数保护，重复启动不变。第三区
+       以维护态种子化，让客户端列表与 enter 拒绝路径开箱可验证。账号与
+       角色不种子化：账号经 /register 或 register 协议注册，角色进区时
+       创建。*/
     static async bool SeedGame(IDbConnection db) {
+        int realms = await db.Select<Realm>().CountAsync();
+        if (realms == 0) {
+            if (!await Schema.AddRealm(db, "一区·雷霆之怒", 0, 1)) { return false; }
+            if (!await Schema.AddRealm(db, "二区·烈焰天下", 0, 2)) { return false; }
+            if (!await Schema.AddRealm(db, "三区·战神殿", 1, 3)) { return false; }
+        }
         int maps = await db.Select<GameMap>().CountAsync();
         if (maps == 0) {
             if (!await Schema.AddMap(db, "新手村", 1, 1)) { return false; }
@@ -230,6 +238,17 @@ class Schema {
             if (_id <= 0) { return false; }
         }
         return true;
+    }
+
+    static async bool AddRealm(IDbConnection db, string name, int state,
+                            int sort) {
+        Realm r = new Realm();
+        r.name = name;
+        r.state = state;
+        r.sort = sort;
+        r.createdAt = WebApp.NowSeconds();
+        int _id = await db.Insert<Realm>(r).ExecuteIdentityAsync();
+        return _id > 0;
     }
 
     static async bool AddMap(IDbConnection db, string name, int minLevel,

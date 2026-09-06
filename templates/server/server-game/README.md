@@ -1,24 +1,43 @@
-# {{NAME}} — 传奇类游戏服务端（MVC + GM 管理）
+# {{NAME}} — 传奇类游戏服务端（区服 + MVC 管理 + 网页注册）
 
-权威服务端（authoritative server）骨架：HTTP MVC 管理后台与局域网 TCP
-游戏网关跑在**同一个进程**里，游戏世界是进程内内存态，由固定 tick 驱动，
-落库走脏标记批量回写。适合传奇类 / ARPG 挂机 / 局域网多人等玩法二开。
+权威服务端（authoritative server）骨架：HTTP 站点（玩家注册/找回密码 +
+GM 管理后台）与局域网 TCP 游戏网关跑在**同一个进程**里，游戏世界是进程内
+内存态，由固定 tick 驱动，落库走脏标记批量回写。区服（服务器分区）是
+一等公民：玩家用账号登录，**每个区服一个角色**，聊天/走位/同图查询按区
+收窄。适合传奇类 / ARPG 挂机 / 局域网多人等玩法二开。
 
 框架本身不在模板里：路由、请求上下文、ORM、缓存、会话与 RBAC 都来自
 标准库 `System.Web` / `System.Data.Orm`（`WebApp`、`Router`、`WebServer`、
-`DbContext`、`Worker` …）。模板只保留游戏域与后台页面这些"自己的代码"。
+`DbContext`、`Worker` …）。模板只保留游戏域与页面这些"自己的代码"。
+
+## 账号 / 角色 / 区服
+
+| 表 | 粒度 | 内容 |
+|---|---|---|
+| `game_account` | 全局唯一 | 用户名、密码散列、密保问题+答案散列、错误次数限频、封禁状态 |
+| `game_realm` | 区服 | 名称、state（0=开放 / 1=维护）、排序 |
+| `game_player` | 账号×区服 | 角色（昵称区内唯一、职业、等级、金币元宝、坐标）、离线结算时间戳 |
+
+- 一账号在**每个区服至多一个角色**；换区服先退当前世界（落库），再挂
+  新区的角色，金币/等级随角色走。
+- 封禁是**账号级**：封禁后该账号所有区服都无法登录；在线会话立即踢。
+- 维护中的区服拒绝 `enter` / `create`，GM 在后台一键开放/维护。
 
 ## 架构
 
 ```
                       ┌────────────── 单进程 ──────────────┐
-  浏览器 (GM) ──HTTP──▶ WebApp :8099   MVC 管理后台 + API      │
-                      │   └ AppController 每请求借还连接     │
-  游戏客户端 ──TCP────▶ Gateway :7100  换行 JSON，一行一消息    │
-                      │        └ 未登录只许 register/login/hb│
+  玩家浏览器 ──HTTP──▶ WebApp :8099   / 首页(区服列表)      │
+                      │   · /register 网页注册             │
+                      │   · /forgot 找回密码（三步密保）     │
+                      │   · /admin GM 后台                 │
+  游戏客户端 ──TCP────▶ Gateway :7100  换行 JSON，一行一消息 │
+                      │        └ 流程：register → login →  │
+                      │          realms → create/enter     │
                       │                                     │
-                      │  World（内存权威态）                 │
-                      │   · Session{cid, conn, row, dirty}   │
+                      │  World（内存权威态，按区收窄）        │
+                      │   · Session{cid, conn, accountId,   │
+                      │     realmId, row, dirty}            │
                       │   · tick(1s)：心跳超时踢线           │
                       │   · flush(10s)：脏行回写 SQLite      │
                       │   · 下线/封禁/改值 → 立即落库 + 推送  │
@@ -28,9 +47,12 @@
 - **在线玩家以内存为准**：GM 改值、聊天、走位全部先改 `World` 里的
   `Session.row`（脏标记），由 flush 协程统一回写；GM 页与网关不会互相
   覆盖对方的写入。
-- **离线玩家直改数据库**：下线即结算，登录时按 `offlineGoldPerHour`
-  结算挂机收益（封顶 `offlineCapHours`），一条 UPDATE 折叠完成。
-- **封禁总是立即落库**并踢在线会话（`ev kick` + 断开）。
+- **离线结算发生在进区时**：角色表的 `lastLogoutAt` 起算，按
+  `offlineGoldPerHour` **按秒折算**挂机收益（封顶 `offlineCapHours`），
+  进区回复带 `offline:{seconds, gold}` 摘要，与 `lastLoginAt` 合并为一条
+  UPDATE。
+- **封禁总是立即落库**并踢在线会话（`ev kick`；协议约定客户端收到后
+  自行断开，服务端在该连接下一条消息后收口）。
 - Zan 调度器是协作式单线程：世界状态无需加锁，唯一纪律是**不要跨
   `await` 持有半更新的状态**。
 - `[worker].count` 必须为 1（`main.zan` 会强制并告警）：世界在进程内，
@@ -41,14 +63,17 @@
 ```
 config/app.json         运行时配置（HTTP/TCP 端口、tick、结算参数）— 不参与编译
 src/main.zan            引导：Cfg → 池 → Schema → World.Start + Gateway.Start → Worker.RunAll
-src/Game/Gateway.zan    TCP 网关：协议分发、注册/登录、移动/聊天/同图查询
-src/Game/World.zan      世界：会话表、tick/flush 协程、改值/踢线/广播
-src/Game/Session.zan    在线会话（连接 + 玩家行 + 脏标记）
-src/Model/Game/         [Table] 实体：game_player / game_map / game_announce
-src/Controller/Admin/Game/  GM 页：Players（玩家）/ Online（在线）/ Announces（公告）
-src/Framework/Schema.zan    建表 + 种子（内置角色、5 张地图、欢迎公告）
-views/Admin/Game/       GM 页视图（与控制器一一对应）
-tools/e2e.py            端到端自检：HTTP 后台 + 完整 TCP 协议 + GM 流程（42 项断言）
+src/Game/Gateway.zan    TCP 网关：协议分发、注册/登录/找回、选区建角、世界交互
+src/Game/World.zan      世界：会话表、tick/flush 协程、改值/踢线/按区广播
+src/Game/Session.zan    在线会话（连接 + 账号 + 区服 + 角色行 + 脏标记）
+src/Model/Game/         [Table] 实体：game_account / game_realm / game_player / game_map / game_announce
+src/Dao/Game/AccountDao.zan   账号读写唯一入口：注册/验密/密保散列/限频/封禁（网页与 TCP 共用）
+src/Controller/Account/     玩家网页：Register（注册）/ Forgot（找回密码三步）
+src/Controller/Index/       首页：区服列表（开放/维护、实时在线）+ 注册/找回入口
+src/Controller/Admin/Game/  GM 页：Realms（区服）/ Players（角色）/ Online（在线）/ Announces（公告）
+src/Framework/Schema.zan    建表 + 种子（3 个区服、内置角色、5 张地图、欢迎公告）
+views/                  视图（与控制器一一对应；Account/Index/Admin 三套布局）
+tools/e2e.py            端到端自检：网页注册/找回 + 完整 TCP 协议 + GM 流程（80 项断言）
 ```
 
 ## 快速开始
@@ -63,79 +88,100 @@ zanc src/main.zan src/**/*.zan --auto-stdlib -o server-game.exe
 # http-worker http://0.0.0.0:8099
 ```
 
+- 玩家网页：`http://127.0.0.1:8099/` — 区服列表 + **注册账号** +
+  **找回密码**；注册即建 `game_account`，之后连 TCP 网关进游戏。
 - 管理后台：`http://127.0.0.1:8099/admin`，种子账号 **admin / admin1234**。
 - 数据库默认 SQLite（`data/app.db`），首次启动自动建表与种子；换 MySQL
   改 `[database]` 即可，游戏代码不感知驱动。
-- 客户端**不走网页注册**：游戏账号经 TCP `register` 协议创建。
 
-## 局域网多人
+## 完整玩家流程（前后端都通）
 
-服务端两个监听都默认 `0.0.0.0`：
-
-| 端口 | 用途 | 谁访问 |
-|---|---|---|
-| 8099 | HTTP 管理后台（GM 用浏览器） | 仅内网/运维段，建议防火墙不对公网放行 |
-| 7100 | TCP 游戏网关 | 局域网玩家 |
-
-- Windows 放行：`netsh advfirewall firewall add rule name="zan-game" dir=in action=allow protocol=TCP localport=7100`
-- Linux 放行：`ufw allow 7100/tcp`（或对应 iptables 规则）。
-- 玩家客户端连 `服务器内网IP:7100`；`[game].host` 保持 `0.0.0.0`。
-- 修改端口/参数都在 `config/app.json` 的 `[game]` 段，重启生效。
+1. **注册**：网页 `/register`（用户名 3-32 字、密码 6-64 字、密保问题/
+   答案 2-50 字）或 TCP `register` —— 同一套校验与散列（`AccountDao`）。
+2. **登录**：TCP `login` 拿 `uid` + 区服列表（含各区实时在线数）；同账号
+   重复登录**顶号**（旧连接收 `ev kick`）。封禁账号拒绝并带原因。
+3. **找回密码**：网页 `/forgot` 三步（账号 → 密保问题 → 新密码），TCP 走
+   `forgot` / `reset` 两个 op —— 行为一致；答错 5 次锁 1 小时
+   （`AnswerLimit` / `AnswerWindowSec`），锁定期连正确答案也拒绝。
+4. **创建角色**：TCP `create`（昵称 2-16 字区内唯一、职业 0 战士/1 法师/
+   2 道士）；每区一角色，重复创建答 `该区已有角色`。
+5. **进区游玩**：`enter` 进世界（维护区拒绝）；此后 `say`/`walk`/`who`
+   只在**本区同图**内生效，`move` 过图有 `minLevel` 门槛。
 
 ## 客户端协议（TCP，换行分隔 JSON，UTF-8，单行 ≤ 8KB）
 
+会话分两段：`register/login/forgot/reset/realms/hb` 无需登录；
+`characters/create/enter` 需已登录；`state/maps/move/walk/say/who`
+需已进区（否则答 `请先选择区服进入（enter）`）。
+
 | 客户端 → 服务端 | 服务端 → 客户端 |
 |---|---|
-| `{"op":"register","user","pass","nick"}` | `{"ok":1,"msg"}` / `{"ok":0,"err"}` |
-| `{"op":"login","user","pass"}` | `{"ok":1,"uid","self","maps","announce","offline"}` |
+| `{"op":"register","user","pass","question","answer"}` | `{"ok":1,"msg"}` / `{"ok":0,"err"}` |
+| `{"op":"login","user","pass"}` | `{"ok":1,"uid","realms"}` |
+| `{"op":"forgot","user"}` | `{"ok":1,"question"}` / 与不存在账号同一句错误 |
+| `{"op":"reset","user","answer","newpass"}` | `{"ok":1,"msg"}`（限频内） |
+| `{"op":"realms"}` | `{"ok":1,"realms":[{id,name,state,online}]}` |
+| `{"op":"characters","realm":1}` | `{"ok":1,"rows":[{id,name,level,job}]}` |
+| `{"op":"create","realm":1,"name","job"}` | `{"ok":1,"self","maps","announce"}` |
+| `{"op":"enter","realm":1}` | `{"ok":1,"self","maps","announce"[,"offline"]}`<br>`{"ok":0,"err":"该区还没有角色，请先创建","needCreate":1}` |
 | `{"op":"hb"}` | `{"ok":1,"t","online"}` |
-| `{"op":"state"}` | `{"ok":1,"self"}` |
+| `{"op":"state"}` | `ev state`（见推送） |
 | `{"op":"maps"}` | `{"ok":1,"maps"}` |
-| `{"op":"move","map":2}` | `{"ok":1,"self"}` + 全服 `ev move`（地图有 `minLevel` 门槛） |
-| `{"op":"walk","x","y"}` | `{"ok":1}` + 同图 `ev walk`（坐标钳到 `walkMax`） |
-| `{"op":"say","text"}` | `{"ok":1}` + 全服 `ev chat`（≤200 字） |
-| `{"op":"who"}` | `{"ok":1,"rows":[同图玩家]}` |
+| `{"op":"move","map":2}` | `{"ok":1,"self"}` + 本区 `ev move`（地图有 `minLevel` 门槛） |
+| `{"op":"walk","x","y"}` | `{"ok":1}` + 本区同图 `ev walk`（坐标钳到 `walkMax`） |
+| `{"op":"say","text"}` | `{"ok":1}` + 本区 `ev chat`（≤200 字，超长截断） |
+| `{"op":"who"}` | `{"ok":1,"rows":[同图同区玩家]}` |
 
-服务端主动推送：`ev chat / walk / move / announce / kick`（踢线后断开）、
-`ev online`（tick 每 30 秒在线数）。密码散列与管理后台同一套（`AuthUser`）。
+服务端主动推送：`ev chat / walk / move / announce / kick`（客户端收到
+kick 自行断开）、`ev online`（tick 每 30 秒在线数）、`ev state`（GM 改值
+实时推给在线会话）。密码与密保答案都是盐化散列，网页与 TCP 共用
+`AccountDao`，行为不会漂移。
 
 用 `nc` 就能当客户端试：
 
 ```
 $ nc 127.0.0.1 7100
-{"op":"register","user":"bob","pass":"bob12345","nick":"小明"}
-{"op":"login","user":"bob","pass":"bob12345"}
-{"op":"say","text":"大家好"}
+{"op":"register","user":"bob","pass":"secret1","question":"宠物名字","answer":"旺财"}
+{"op":"login","user":"bob","pass":"secret1"}
+{"op":"create","realm":1,"name":"刀狂","job":0}
+{"op":"say","text":"一区的兄弟们好"}
 {"op":"walk","x":10,"y":10}
 ```
 
 ## GM 管理后台
 
-侧边栏"游戏管理"分节（`MenuBuilder.Section("game", ...)`），三个页面：
+侧边栏"游戏管理"分节（`MenuBuilder.Section("game", ...)`），四个页面：
 
-- **玩家管理** `/admin/game/players`：搜索/状态过滤；编辑金币/元宝/等级/
-  职业/地图/昵称；封禁/解封（填原因）；踢线。在线玩家显示实时值，保存
-  走 `World.ApplyEdit/Adjust` 增量改内存并即时推送；离线玩家直改数据库。
-- **在线管理** `/admin/game/online`：会话快照（账号/等级/地图/空闲时长），
-  按 cid 踢线，全服广播（署名 GM）。
+- **区服管理** `/admin/game/realms`：新增/改名/排序；开放↔维护一键切换
+  （维护区拒绝 enter/create）；有角色的区不允许删除。
+- **角色管理** `/admin/game/players`：按账号搜索、按区过滤；编辑昵称/
+  职业/等级/金币/元宝/驻地；**在线走 `World.ApplyEdit/Adjust` 即时生效并
+  推送，离线直改数据库**；同页封禁/解封**账号**（填原因，在线立即踢）；
+  在线角色换区被拒（先踢下线）。
+- **在线管理** `/admin/game/online`：会话快照（账号/角色/区服/阶段
+  在世界中·未进区/心跳空闲），按 cid 踢线，全服广播（署名 GM，跨区可见）。
 - **公告管理** `/admin/game/announces`：CRUD + 推送（`ev announce` 推给
   所有在线会话，停用状态的公告不允许推）。
 
-权限沿用 RBAC：内置角色 `gm`（游戏运营）只授 `/admin/game/*` 屏，
-`admin` 全量；新 GM 页只要控制器方法带 `[Route]` + `[Custom(IsMenu)]`
-就会出现在侧边栏与授权表里，启动时 `SyncRoleGrants` 自动补发。
+首页仪表盘带游戏 KPI：账号数/封禁数/角色数（跨区）/实时在线。
+
+权限沿用 RBAC：内置角色 `gm`（只管理游戏域：区服、玩家、在线、公告）
+只授 `/admin/game/*` 屏，`admin` 全量；新 GM 页只要控制器方法带
+`[Route]` + `[Custom(IsMenu)]` 就会出现在侧边栏与授权表里，启动时
+`SyncRoleGrants` 自动补发。
 
 ## 持久化模型
 
 | 时机 | 行为 |
 |---|---|
-| 每 `flushSeconds`（默认 10s） | 脏会话回写：level/gold/gems/mapId/x/y/updatedAt |
-| 下线 | 立即回写 + 记 `lastLogoutAt` |
-| 登录 | 按离线时长结算挂机收益，与 `lastLoginAt` 合并为一条 UPDATE |
-| 封禁 | 立即 UPDATE + 在线则 `ev kick` 踢线 |
+| 每 `flushSeconds`（默认 10s） | 脏会话回写：level/gold/gems/mapId/x/y/nickname/updatedAt |
+| 下线 / 换区退出 | 立即回写 + 记角色 `lastLogoutAt` |
+| 进区 | 按角色离线时长结算挂机收益（按秒折算、封顶），与 `lastLoginAt` 合并为一条 UPDATE |
+| 封禁 | 立即 UPDATE 账号表 + 在线则 `ev kick` 踢线 |
 
-`game_player / game_map / game_announce` 三张表由 `Schema.Ensure` 建表，
-种子地图五张（新手村→赤月峡谷，`minLevel` 递增），改玩法先改这里。
+`game_account / game_realm / game_player / game_map / game_announce` 五张
+表由 `Schema.Ensure` 建表；种子三个区服（三区为维护态演示）、五张地图
+（新手村→赤月峡谷，`minLevel` 递增），改玩法先改这里。
 
 ## 配置 `[game]`
 
@@ -152,23 +198,44 @@ $ nc 127.0.0.1 7100
 ```
 
 - `tickMs`：世界 tick 周期（心跳超时检查、定时推送的节拍）。
-- `kickSeconds`：多久没心跳算掉线并踢出。
+- `kickSeconds`：多久没消息（含 hb）算掉线并踢出。
 - `flushSeconds`：脏会话回写数据库的周期。
-- `offlineGoldPerHour` / `offlineCapHours`：挂机结算速率与封顶。
+- `offlineGoldPerHour` / `offlineCapHours`：挂机结算速率（按秒折算）与封顶。
 - `walkMax`：走位坐标上限（服务端钳位，客户端不可信）。
 
 ## 端到端自检
 
 `tools/e2e.py`（标准库 urllib/socket，无第三方依赖）对运行中的服务端跑
-42 项断言：HTTP 后台登录/权限、TCP 注册/登录/心跳/地图/走位/聊天/同图
-查询、GM 加币/升级/封禁/踢线的实时推送、公告推送、tick 回写落库、离线
-结算封顶。在服务端目录里运行（它会读 `data/app.db` 验证落库），跑之前
-删掉 `data/app.db*` 重启服务端，保证注册流程从空表开始；用法详见文件头。
+**80 项断言**：网页注册/重复注册、找回密码三步与 5 次答错锁定、TCP
+注册/登录/选区/建角/进区全流程、维护区拒绝、每区一角色与区内昵称唯一、
+按区收窄的聊天/走位/同图查询、换区后角色状态保持、GM 区服 CRUD（含
+维护门控与删除保护）、GM 发奖/封禁/踢线实时推送、公告推送、tick 回写
+落库（角色挂区、密保散列）、按秒折算的离线结算。在服务端目录里运行
+（它会读 `data/app.db` 验证落库），跑之前删掉 `data/app.db*` 重启服务端，
+保证注册流程从空表开始；用法详见文件头。
+
+## 局域网多人
+
+服务端两个监听都默认 `0.0.0.0`：
+
+| 端口 | 用途 | 谁访问 |
+|---|---|---|
+| 8099 | HTTP 玩家注册/找回 + GM 后台 | 仅内网/运维段，建议防火墙不对公网放行 |
+| 7100 | TCP 游戏网关 | 局域网玩家 |
+
+- Windows 放行：`netsh advfirewall firewall add rule name="zan-game" dir=in action=allow protocol=TCP localport=7100`
+- Linux 放行：`ufw allow 7100/tcp`（或对应 iptables 规则）。
+- 玩家客户端连 `服务器内网IP:7100`；`[game].host` 保持 `0.0.0.0`。
+- 修改端口/参数都在 `config/app.json` 的 `[game]` 段，重启生效。
+- 区服目前是**进程内逻辑分区**（广播按区收窄）；要做成多进程多物理服，
+  给 `game_realm` 加 `host/port` 并按区路由网关连接即可，表结构已留好口。
 
 ## 二次开发
 
-- **加一个协议 op**：`Gateway.Handle` 的 `op == "..."` 分发链上加分支，
-  广播用 `Gateway.Broadcast` / `PushChat`，改值走 `World.Adjust`。
+- **加一个协议 op**：`Gateway.Handle` 的 `op == "..."` 分发链上加分支；
+  全服广播用 `World.Broadcast`，**区服内**播报用 `World.DeliverRealm`，
+  改值走 `World.Adjust`。
+- **加一个区服**：GM 页新增即可；种子区服在 `Schema.SeedGame`。
 - **加一张地图**：`Schema.SeedGame` 加一行（`minLevel` 控制进入门槛），
   客户端 `op:maps` 与 GM 页自动带出。
 - **加一个 GM 页**：拷 `Controller/Admin/Game/Announces.zan` 的骨架，

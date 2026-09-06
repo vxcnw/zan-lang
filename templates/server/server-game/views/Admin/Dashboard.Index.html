@@ -1,10 +1,10 @@
 <div class="grid c6" data-stream="/admin/monitor/stream">
-  <div class="card kpi"><div class="k">注册玩家</div><div class="v">{{players}}</div><div class="s">封禁 {{banned}}</div></div>
-  <div class="card kpi"><div class="k">在线会话</div><div class="v">{{online}}</div><div class="s">世界内存态</div></div>
+  <div class="card kpi"><div class="k">游戏账号</div><div class="v">{{accounts}}</div><div class="s">封禁 {{banned}}</div></div>
+  <div class="card kpi"><div class="k">角色总数</div><div class="v">{{players}}</div><div class="s">区服 {{realms}}</div></div>
+  <div class="card kpi"><div class="k">世界中</div><div class="v">{{online}}</div><div class="s">世界内存态</div></div>
   <div class="card kpi"><div class="k">金币总量</div><div class="v">{{gold}}</div></div>
   <div class="card kpi"><div class="k">元宝总量</div><div class="v">{{gems}}</div></div>
-  <div class="card kpi"><div class="k">请求总数</div><div class="v" data-metric="requests">{{requests}}</div></div>
-  <div class="card kpi"><div class="k">平均耗时</div><div class="v" data-metric="avg_us">{{avg}}</div><div class="s">运行 {{uptime}} · 错误 <span data-metric="errors">{{errors}}</span></div></div>
+  <div class="card kpi"><div class="k">请求总数</div><div class="v" data-metric="requests">{{requests}}</div><div class="s">平均 <span data-metric="avg_us">{{avg}}</span> · 错误 <span data-metric="errors">{{errors}}</span></div></div>
 </div>
 
 {{#if dbDown}}
@@ -15,11 +15,12 @@
   <div class="card">
     <header>在线玩家<div class="right"><a class="btn sm" href="/admin/game/online" data-tab data-title="在线会话">管理</a></div></header>
     <table class="table">
-      <thead><tr><th style="width:120px">账号</th><th class="num" style="width:64px">等级</th><th style="width:110px">地图</th><th>心跳空闲</th></tr></thead>
+      <thead><tr><th style="width:110px">账号</th><th style="width:110px">区服</th><th class="num" style="width:52px">等级</th><th style="width:96px">地图</th><th>心跳空闲</th></tr></thead>
       <tbody>
         {{#each onlineRows}}
         <tr>
           <td>{{username}}</td>
+          <td>{{realm}}</td>
           <td class="num">{{level}}</td>
           <td>{{map}}</td>
           <td class="muted">{{idle}}</td>

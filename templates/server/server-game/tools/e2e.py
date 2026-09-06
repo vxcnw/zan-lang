@@ -1,41 +1,48 @@
-"""End-to-end self-test for the server-game template.
+"""End-to-end self-test for the realm-based server-game template.
 
-Covers: HTTP admin login/permission pages, full TCP game protocol
-(register/login/hb/maps/move/walk/say/who), GM flows with live pushes
-(grant gold, level-up, ban, kick), announce push, tick-flush persistence
-and capped offline settlement -- 42 assertions. Stdlib urllib/socket only.
+Covers the full player flow front to back: web register/forgot (3-step with
+security question, wrong-answer lockout), TCP realms/register/login/
+characters/create/enter, realm-scoped chat/walk/who, realm switch with
+character state kept, GM realm CRUD with maintain gating, account ban +
+kick, online grant pushes, announce push, DB flush persistence and
+pro-rata capped offline settlement -- 80 assertions. Stdlib urllib/socket
+only.
 
 Usage (run from the SERVER directory, so it can open data/app.db):
   1. stop the server, then delete data/app.db* for a fresh database
   2. start the server:  ./server-game.exe   (127.0.0.1:8099 / 7100)
   3. run:               python tools/e2e.py
 
-The probe registers fresh game accounts (alice / bob) over the TCP
-protocol, so it needs the seeded admin (admin/admin1234) and an empty
-game_player table -- rerunning against a used database fails at register.
+Registers fresh accounts (alice / bob / carl / dave / mallory) over web
+and TCP, so it needs the seeded admin (admin/admin1234) and empty
+game_account / game_player tables -- rerunning against a used database
+fails at register.
 """
+import json
+import socket
 import sys
 import time
 import urllib.parse
 import urllib.request
+import urllib.error
 
 BASE = "http://127.0.0.1:8099"
-
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *a, **kw):
-        return None
-
-opener = urllib.request.build_opener(NoRedirect)
 GAME = ("127.0.0.1", 7100)
 checks = 0
 
 def ok(cond, label):
     global checks
     checks += 1
-    mark = "PASS" if cond else "FAIL"
-    print(f"[{mark}] {label}")
+    print(f"[{'PASS' if cond else 'FAIL'}] {label}")
     if not cond:
+        print("ALL FAIL at", checks)
         sys.exit(1)
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **kw):
+        return None
+
+opener = urllib.request.build_opener(NoRedirect)
 
 def http(path, data=None, cookie=None):
     req = urllib.request.Request(BASE + path)
@@ -47,241 +54,422 @@ def http(path, data=None, cookie=None):
         req.add_header("Content-Type", "application/x-www-form-urlencoded")
     try:
         resp = opener.open(req, body, timeout=10)
-        text = resp.read().decode("utf-8", "replace")
-        return resp.status, text, resp.headers.get_all("Set-Cookie") or []
+        return resp.status, resp.read().decode("utf-8", "replace"), \
+            resp.headers.get_all("Set-Cookie") or []
     except urllib.error.HTTPError as e:
-        return e.code, e.read().decode("utf-8", "replace"), e.headers.get_all("Set-Cookie") or []
+        return e.code, e.read().decode("utf-8", "replace"), \
+            e.headers.get_all("Set-Cookie") or []
+
+def gm(path, data, cookie):
+    status, text, _ = http(path, data=data, cookie=cookie)
+    try:
+        return status, json.loads(text), text
+    except Exception:
+        return status, {"raw": text}, text
 
 class Client:
     def __init__(self):
         self.sock = socket.create_connection(GAME, timeout=10)
-        self.buf = ""
+        self.buf = b""
+        self.pending = []
 
     def send(self, obj):
-        self.sock.sendall((json.dumps(obj) + "\n").encode())
+        self.sock.sendall((json.dumps(obj, ensure_ascii=False) + "\n").encode())
 
-    def recv(self, timeout=5.0):
+    def _fill(self, timeout):
         self.sock.settimeout(timeout)
+        try:
+            while True:
+                d = self.sock.recv(4096)
+                if not d:
+                    return False
+                self.buf += d
+                while b"\n" in self.buf:
+                    line, self.buf = self.buf.split(b"\n", 1)
+                    if line.strip():
+                        self.pending.append(json.loads(line))
+        except socket.timeout:
+            pass
+        except OSError:
+            return False
+        return True
+
+    def recv(self, timeout=5):
+        if self.pending:
+            return self.pending.pop(0)
+        self._fill(timeout)
+        return self.pending.pop(0) if self.pending else None
+
+    def reply_for(self, pred, timeout=5):
+        """Next message matching pred; other lines stay queued."""
+        for i, m in enumerate(self.pending):
+            if pred(m):
+                return self.pending.pop(i)
         deadline = time.time() + timeout
-        while "\n" not in self.buf:
-            remain = deadline - time.time()
-            if remain <= 0:
-                return None
-            try:
-                chunk = self.sock.recv(4096)
-            except socket.timeout:
-                return None
-            if not chunk:
-                return None
-            self.buf += chunk.decode("utf-8", "replace")
-        line, self.buf = self.buf.split("\n", 1)
-        return json.loads(line)
-
-    def drain(self, seconds=1.5):
-        out = []
-        while True:
-            m = self.recv(timeout=seconds)
-            if m is None:
-                return out
-            out.append(m)
-
-    def expect_closed(self, seconds=5.0):
-        deadline = time.time() + seconds
         while time.time() < deadline:
-            m = self.recv(timeout=1.0)
-            if m is None:
-                return True
-            if m.get("ev") == "kick":
-                continue
-        return False
-
-def main():
-    # --- HTTP admin surface -------------------------------------------------
-    status, html, _ = http("/")
-    ok(status == 200 and "游戏服务器运行中" in html, "landing page renders")
-    status, html, _ = http("/admin")
-    ok(status in (301, 302, 303) or "登录" in html, "/admin redirects to login")
-    status, html, cookies = http("/admin/login", data={"user": "admin", "pass": "admin1234"})
-    cookie = cookies[0].split(";")[0] if cookies else ""
-    ok(status == 302 and cookie != "", "admin login sets session cookie")
-    for path, marker in [
-        ("/admin", "在线会话"),
-        ("/admin/game/players", "玩家管理"),
-        ("/admin/game/online", "当前在线"),
-        ("/admin/game/announces", "公告管理"),
-        ("/admin/monitor", "运行监控"),
-        ("/admin/system/users", "账号管理"),
-    ]:
-        status, html, _ = http(path, cookie=cookie)
-        ok(status == 200 and marker in html, f"GET {path} shows {marker}")
-
-    # --- TCP game protocol --------------------------------------------------
-    alice = Client()
-    hello = alice.recv()
-    ok(hello and hello.get("ev") == "hello", "gateway greets on connect")
-    alice.send({"op": "register", "user": "alice", "pass": "secret1", "nick": "爱丽丝"})
-    r = alice.recv()
-    ok(r and r.get("ok") == 1, "register alice")
-    alice.send({"op": "register", "user": "alice", "pass": "secret1"})
-    r = alice.recv()
-    ok(r and r.get("ok") == 0, "duplicate register rejected")
-    alice.send({"op": "login", "user": "alice", "pass": "wrongpw"})
-    r = alice.recv()
-    ok(r and r.get("ok") == 0 and "不正确" in r.get("err", ""), "wrong password rejected")
-    alice.send({"op": "login", "user": "alice", "pass": "secret1"})
-    r = alice.recv()
-    ok(r and r.get("ok") == 1 and r.get("self", {}).get("name") == "爱丽丝", "login alice with self state")
-    ok(len(r.get("maps", [])) == 5, "login carries open map list")
-    ok(r.get("announce", {}).get("title", "") != "", "login carries latest announce")
-    uid_alice = r["self"]["uid"]
-
-    alice.send({"op": "hb"})
-    r = alice.recv()
-    ok(r and r.get("ok") == 1 and r.get("online") == 1, "heartbeat reports online count")
-    alice.send({"op": "say", "text": "大家好"})
-    alice.send({"op": "walk", "x": 30, "y": 40})
-    walked = False
-    for m in alice.drain(1.5):
-        if m.get("ev") == "walk" and m.get("x") == 30:
-            walked = True
-    ok(walked, "walk echoes to same-map players")
-
-    bob = Client()
-    bob.recv()
-    bob.send({"op": "register", "user": "bob", "pass": "secret2", "nick": "鲍勃"})
-    bob.recv()
-    bob.send({"op": "login", "user": "bob", "pass": "secret2"})
-    r = bob.recv()
-    ok(r and r.get("ok") == 1, "login bob")
-    uid_bob = r["self"]["uid"]
-
-    bob.send({"op": "say", "text": "你们好"})
-    chat = alice.recv()
-    ok(chat and chat.get("ev") == "chat" and chat.get("from") == "鲍勃", "world chat reaches other sessions")
-    alice.send({"op": "who"})
-    r = alice.recv()
-    names = [row["name"] for row in r.get("rows", [])]
-    ok("鲍勃" in names and "爱丽丝" in names, "who lists same-map players")
-
-    def reply_for(client, send_obj=None, seconds=3.0):
-        if send_obj:
-            client.send(send_obj)
-        deadline = time.time() + seconds
-        while time.time() < deadline:
-            m = client.recv(timeout=1.0)
-            if m is not None and ("ok" in m or "err" in m):
-                return m
+            if not self._fill(max(0.1, deadline - time.time())):
+                break
+            for i, m in enumerate(self.pending):
+                if pred(m):
+                    return self.pending.pop(i)
         return None
 
-    bob.drain(1.0)
-    r = reply_for(bob, {"op": "move", "map": 5})
-    ok(r and r.get("ok") == 0, "level gate blocks high map")
-    r = reply_for(bob, {"op": "move", "map": 2})
-    ok(r and r.get("ok") == 0, "level gate blocks mid map")
-    # GM levels bob up; the online session must see the new level immediately
-    status, html, _ = http("/admin/game/players/save", cookie=cookie, data={
-        "id": str(uid_bob), "nickname": "鲍勃", "job": "1",
-        "level": "8", "gold": "50", "gems": "0",
-        "mapId": "1", "status": "1", "banReason": ""})
-    ok(status == 200, "gm level edit accepted")
-    lvl, gld = None, None
-    for m in bob.drain(2.0):
-        if m.get("ev") == "state":
-            lvl, gld = m["self"]["level"], m["self"]["gold"]
-    ok(lvl == 8 and gld == 50, "gm edit pushes level and gold to the online client")
-    r = reply_for(bob, {"op": "move", "map": 2})
-    ok(r and r.get("ok") == 1 and r["self"]["map"] == 2, "move to allowed map")
-    moved = False
-    for m in alice.drain(2.0):
-        if m.get("ev") == "move" and "沃玛森林" in m.get("text", ""):
-            moved = True
-    ok(moved, "move broadcast reaches other players")
-    alice.send({"op": "who"})
-    r = alice.recv()
-    ok("鲍勃" not in [row["name"] for row in r.get("rows", [])], "who no longer shows bob after map change")
+    def ok_for(self, op_extra=None, timeout=5):
+        def pred(m):
+            return m.get("ok") == 1 and (op_extra is None or op_extra(m))
+        return self.reply_for(pred, timeout)
 
-    # --- GM actions ----------------------------------------------------------
-    status, html, _ = http("/admin/game/online", cookie=cookie)
-    ok(status == 200 and "爱丽丝" in html, "online page lists live sessions")
+    def err_for(self, needle, timeout=5):
+        def pred(m):
+            return m.get("ok") == 0 and needle in (m.get("err") or "")
+        return self.reply_for(pred, timeout)
 
-    # grant gold to online alice (form save applies delta via World and pushes state)
-    status, html, _ = http("/admin/game/players/form?id=%d" % uid_alice, cookie=cookie)
-    ok(status == 200 and "在线" in html, "form marks online player")
-    gold_now = None
-    alice.send({"op": "state"})
-    for m in alice.drain(1.5):
-        if m.get("ev") == "state":
-            gold_now = m["self"]["gold"]
-    status, html, _ = http("/admin/game/players/save", cookie=cookie, data={
-        "id": str(uid_alice), "nickname": "爱丽丝", "job": "0",
-        "level": "8", "gold": str((gold_now or 0) + 777), "gems": "5",
-        "mapId": "1", "status": "1", "banReason": ""})
-    ok(status == 200, "players/save accepts grant")
-    got = None
-    for m in alice.drain(2.0):
-        if m.get("ev") == "state" and m["self"]["gold"] == (gold_now or 0) + 777:
-            got = m["self"]["gold"]
-    ok(got is not None, "online grant pushes new gold to the client")
+    def ev(self, name, timeout=5):
+        def pred(m):
+            return m.get("ev") == name
+        return self.reply_for(pred, timeout)
 
-    # broadcast + announce push
-    status, html, _ = http("/admin/game/online/broadcast", cookie=cookie, data={"text": "全服活动开启"})
-    ok(status == 200, "broadcast accepted")
-    seen = {"alice": False, "bob": False}
-    for m in alice.drain(1.5):
-        if m.get("ev") == "chat" and m.get("text") == "全服活动开启":
-            seen["alice"] = True
-    for m in bob.drain(1.5):
-        if m.get("ev") == "chat" and m.get("text") == "全服活动开启":
-            seen["bob"] = True
-    ok(seen["alice"] and seen["bob"], "broadcast reaches all sessions")
+    def closed(self, timeout=3):
+        return not self._fill(timeout) and not self.pending
 
-    # kick bob via online page (cid)
-    status, html, _ = http("/admin/game/online", cookie=cookie)
-    import re
-    mrow = re.search(r'data-args="cid=(\d+)"', html)
-    cid = int(mrow.group(1)) if mrow else 0
-    ok(cid > 0, "online page exposes session cid")
-    status, html, _ = http("/admin/game/online/kick", cookie=cookie, data={"cid": str(cid)})
-    ok(status == 200, "kick accepted")
-    ok(bob.expect_closed(), "kicked session is closed")
+    def drop(self):
+        try:
+            self.sock.close()
+        except OSError:
+            pass
 
-    # ban alice (must close her session too)
-    status, html, _ = http("/admin/game/players/save", cookie=cookie, data={
-        "id": str(uid_alice), "nickname": "爱丽丝", "job": "0",
-        "level": "8", "gold": "1000", "gems": "5",
-        "mapId": "1", "status": "0", "banReason": "测试封禁"})
-    ok(status == 200, "ban accepted")
-    ok(alice.expect_closed(), "banned online session is closed")
-    banned = Client()
-    banned.recv()
-    banned.send({"op": "login", "user": "alice", "pass": "secret1"})
-    r = banned.recv()
-    ok(r and r.get("ok") == 0 and "封禁" in r.get("err", ""), "banned login refused with reason")
+def tcp():
+    return Client()
 
-    # persistence: gold survived the kick/ban cycle (flush 10s) — check via players page
-    time.sleep(11)
-    status, html, _ = http("/admin/game/players?kw=alice", cookie=cookie)
-    ok(status == 200 and "1000" in html, "grant persisted to the database")
-    # unban for a clean rerun
-    http("/admin/game/players/save", cookie=cookie, data={
-        "id": str(uid_alice), "nickname": "爱丽丝", "job": "0",
-        "level": "8", "gold": "1000", "gems": "5",
-        "mapId": "1", "status": "1", "banReason": ""})
+# ---------- 1. 落地页与公共页面 ----------
+st, html, _ = http("/")
+ok(st == 200 and "一区·雷霆之怒" in html and "三区·战神殿" in html,
+   "landing lists seeded realms")
+ok("开放 2 / 共 3" in html and "维护" in html, "landing shows realm states")
+ok("注册账号" in html and "找回密码" in html, "landing links register/forgot")
+st, html, _ = http("/register")
+ok(st == 200 and 'action="/register"' in html and "密保问题" in html,
+   "register page renders")
+st, html, _ = http("/forgot")
+ok(st == 200 and 'action="/forgot"' in html, "forgot page renders")
 
-    # offline settlement: backdate alice's logout by 2h, relogin, gold +1000 (cap 12h, 500/h)
-    import sqlite3
-    db = sqlite3.connect("data/app.db")
-    db.execute("UPDATE game_player SET \"lastLogoutAt\"=?, gold=100, status=1, \"banReason\"='' WHERE id=?", (int(time.time()) - 7200, uid_alice))
-    db.commit(); db.close()
-    pay = Client()
-    pay.recv()
-    pay.send({"op": "login", "user": "alice", "pass": "secret1"})
-    r = pay.recv()
-    ok(r and r.get("ok") == 1 and r["self"]["gold"] == 1100 and r["offline"]["gold"] == 1000,
-       "offline settlement grants capped gold on login")
-    pay.sock.close()
+# ---------- 2. 网页注册 ----------
+st, html, _ = http("/register", data={
+    "user": "al", "pass": "secret1", "pass2": "secret1",
+    "question": "出生城市", "answer": "北京"})
+ok("账号需 3-32 字" in html, "web register rejects short username")
+st, html, _ = http("/register", data={
+    "user": "alice", "pass": "secret1", "pass2": "different",
+    "question": "出生城市", "answer": "北京"})
+ok("两次输入的密码不一致" in html, "web register rejects mismatched pass")
+st, html, _ = http("/register", data={
+    "user": "alice", "pass": "secret1", "pass2": "secret1",
+    "question": "出生城市", "answer": "北京"})
+ok("注册成功" in html and "alice" in html, "web register creates alice")
+st, html, _ = http("/register", data={
+    "user": "alice", "pass": "secret1", "pass2": "secret1",
+    "question": "出生城市", "answer": "北京"})
+ok("账号已存在" in html, "web register rejects duplicate")
 
-    print(f"ALL PASS checks={checks}")
+# ---------- 3. 网页找回密码 ----------
+st, html, _ = http("/forgot", data={"user": "ghost"})
+ok("账号不存在或未设置密保" in html, "forgot hides unknown accounts")
+st, html, _ = http("/forgot", data={"user": "alice"})
+ok("出生城市" in html and 'name="user"' in html, "forgot step2 shows question")
+st, html, _ = http("/forgot/reset", data={
+    "user": "alice", "answer": "上海", "newpass": "newpass99",
+    "newpass2": "newpass99"})
+ok("密保答案不正确" in html, "forgot rejects wrong answer")
+st, html, _ = http("/forgot/reset", data={
+    "user": "alice", "answer": "北京", "newpass": "newpass99",
+    "newpass2": "newpass99"})
+ok("密码已重置" in html, "forgot resets with correct answer")
 
-if __name__ == "__main__":
-    main()
+# 密保答错限频：mallory 连错 5 次后锁定，正确答案也被拒
+mallory = tcp()
+mallory.send({"op": "register", "user": "mallory", "pass": "mallory1",
+              "question": "小学校名", "answer": "实验小学"})
+ok(mallory.ok_for() is not None, "TCP register mallory")
+mallory.drop()
+for i in range(5):
+    st, html, _ = http("/forgot/reset", data={
+        "user": "mallory", "answer": "错误答案", "newpass": "pass123",
+        "newpass2": "pass123"})
+    ok("密保答案不正确" in html, f"mallory wrong answer #{i+1}")
+# 第 6 次（无论答案对错）都落在锁定窗口内
+st, html, _ = http("/forgot/reset", data={
+    "user": "mallory", "answer": "错误答案", "newpass": "pass123",
+    "newpass2": "pass123"})
+ok("错误次数过多" in html, "forgot locks after 5 wrong answers")
+st, html, _ = http("/forgot/reset", data={
+    "user": "mallory", "answer": "实验小学", "newpass": "pass123",
+    "newpass2": "pass123"})
+ok("错误次数过多" in html, "lockout applies even to correct answer")
+
+# ---------- 4. TCP 账号/选区/建角 ----------
+bob = tcp()
+hello = bob.recv()
+ok(hello and hello.get("ev") == "hello", "gateway greets on connect")
+bob.send({"op": "realms"})
+r = bob.ok_for(lambda m: len(m.get("realms", [])) == 3)
+ok(r and r["realms"][2]["state"] == 1 and r["realms"][0]["name"] == "一区·雷霆之怒",
+   "realms op lists 3 realms with states")
+bob.send({"op": "register", "user": "bob", "pass": "short",
+          "question": "旧手机号", "answer": "8888"})
+ok(bob.err_for("密码需 6-64 字") is not None, "TCP register rejects short pass")
+bob.send({"op": "register", "user": "bob", "pass": "secret1",
+          "question": "宠物名字", "answer": "旺财"})
+ok(bob.ok_for() is not None, "TCP register bob")
+bob.send({"op": "register", "user": "bob", "pass": "secret1",
+          "question": "宠物名字", "answer": "旺财"})
+ok(bob.err_for("账号已存在") is not None, "TCP register rejects duplicate")
+bob.send({"op": "login", "user": "bob", "pass": "wrong!!"})
+ok(bob.err_for("账号或密码不正确") is not None, "login error is uniform")
+bob.send({"op": "login", "user": "bob", "pass": "secret1"})
+r = bob.ok_for(lambda m: "uid" in m and "realms" in m)
+ok(r is not None, "login returns uid + realm list")
+bob.send({"op": "say", "text": "hi"})
+ok(bob.err_for("请先选择区服进入") is not None, "world ops gated before enter")
+bob.send({"op": "enter", "realm": 999})
+ok(bob.err_for("区服不存在或维护中") is not None, "unknown realm refused")
+bob.send({"op": "enter", "realm": 3})
+ok(bob.err_for("区服不存在或维护中") is not None, "maintained realm refused")
+bob.send({"op": "enter", "realm": 1})
+r = bob.reply_for(lambda m: m.get("ok") == 0 and m.get("needCreate") == 1)
+ok(r is not None, "enter without character answers needCreate")
+bob.send({"op": "characters", "realm": 1})
+r = bob.ok_for(lambda m: m.get("rows") == [])
+ok(r is not None, "characters empty before create")
+bob.send({"op": "create", "realm": 1, "name": "刀", "job": 0})
+ok(bob.err_for("角色名需 2-16 字") is not None, "create rejects 1-char name")
+bob.send({"op": "create", "realm": 1, "name": "刀狂", "job": 9})
+ok(bob.err_for("职业不合法") is not None, "create rejects bad job")
+bob.send({"op": "create", "realm": 1, "name": "刀狂", "job": 0})
+r = bob.ok_for(lambda m: m.get("self", {}).get("uid", 0) > 0
+               and m["self"]["realm"] == 1 and "maps" in m)
+ok(r is not None, "create enters world with self+maps")
+bob_uid = r["self"]["uid"]
+ok(bob.reply_for(lambda m: m.get("ev") == "move") is not None,
+   "create broadcasts realm move event")
+
+# alice 用网页重置后的新密码走 TCP，与 bob 同区
+alice = tcp()
+alice.recv()
+alice.send({"op": "login", "user": "alice", "pass": "newpass99"})
+ok(alice.ok_for() is not None, "alice logs in with web-reset password")
+alice.send({"op": "create", "realm": 1, "name": "法萌", "job": 1})
+r = alice.ok_for(lambda m: m.get("self", {}).get("job") == 1)
+ok(r is not None, "alice creates mage in realm 1")
+alice.send({"op": "create", "realm": 1, "name": "法萌二号", "job": 0})
+ok(alice.err_for("该区已有角色") is not None, "one character per realm")
+alice.send({"op": "create", "realm": 1, "name": "刀狂", "job": 0})
+ok(alice.err_for("角色名已被占用") is not None, "character names unique per realm")
+alice.drop()  # alice 下线，让后面 who/在线页的世界状态可预测
+
+# 区服广播收窄：carl 在一区收到，dave 在二区收不到
+carl = tcp()
+carl.recv()
+carl.send({"op": "register", "user": "carl", "pass": "secret1",
+           "question": "旧手机号", "answer": "8888"})
+carl.reply_for(lambda m: m.get("ok") == 1)
+carl.send({"op": "login", "user": "carl", "pass": "secret1"})
+carl.reply_for(lambda m: m.get("ok") == 1)
+carl.send({"op": "create", "realm": 1, "name": "弓长", "job": 2})
+ok(carl.ok_for(lambda m: m.get("self", {}).get("uid", 0) > 0) is not None,
+   "carl creates archer in realm 1")
+
+dave = tcp()
+dave.recv()
+dave.send({"op": "register", "user": "dave", "pass": "secret1",
+           "question": "旧手机号", "answer": "8888"})
+dave.reply_for(lambda m: m.get("ok") == 1)
+dave.send({"op": "login", "user": "dave", "pass": "secret1"})
+dave.reply_for(lambda m: m.get("ok") == 1)
+dave.send({"op": "create", "realm": 2, "name": "二区土著", "job": 0})
+ok(dave.ok_for() is not None, "dave creates character in realm 2")
+
+bob.send({"op": "say", "text": "一区的兄弟们好"})
+c = carl.ev("chat")
+d = dave.ev("chat")
+ok(c and c.get("text") == "一区的兄弟们好" and c.get("from") == "刀狂",
+   "same-realm player receives chat")
+ok(d is None, "other-realm player does not receive chat")
+
+bob.pending.clear()  # 丢弃 bob 自己的 ev 回声与旧回复，保证下面的 ok 对上本条请求
+bob.send({"op": "walk", "x": 999, "y": 3})
+ok(bob.ok_for() is not None, "walk accepts clamped coords")
+w = carl.ev("walk")
+ok(w and w.get("x") == 511 and w.get("y") == 3, "walk clamped to walkMax and broadcast")
+ok(dave.ev("walk") is None, "walk not sent to other realm")
+bob.pending.clear()
+bob.send({"op": "who"})
+r = bob.ok_for()
+ok(r and sorted(x["name"] for x in r["rows"]) == ["刀狂", "弓长"],
+   "who lists same-realm same-map players only")
+
+bob.send({"op": "move", "map": 2})
+ok(bob.err_for("需要 5 级") is not None, "move gated by map minLevel")
+
+# 换区：bob 建二区角色再切回一区，金币保持
+bob.send({"op": "create", "realm": 2, "name": "刀狂二区", "job": 0})
+r = bob.ok_for(lambda m: m.get("self", {}).get("realm") == 2)
+ok(r is not None, "bob creates second character in realm 2")
+bob.send({"op": "enter", "realm": 1})
+r = bob.ok_for(lambda m: m.get("self", {}).get("realm") == 1
+               and m["self"]["name"] == "刀狂")
+ok(r is not None, "bob re-enters realm 1, character state kept")
+
+# ---------- 5. GM 后台 ----------
+st, html, setc = http("/admin/login", data={
+    "user": "admin", "pass": "admin1234"})
+cookie = ""
+for c in setc:
+    if c.startswith("zsession="):
+        cookie = c.split(";")[0]
+ok(st in (200, 302) and cookie, "admin login sets session cookie")
+
+st, html, _ = http("/admin/game/realms", cookie=cookie)
+ok(st == 200 and "一区·雷霆之怒" in html and "维护" in html,
+   "GM realms page lists realms")
+st, j, _ = gm("/admin/game/realms/save", {
+    "name": "四区·测试", "state": "0", "sort": "9"}, cookie)
+ok(j.get("code") == "0000", "GM creates realm 4")
+st, html, _ = http("/admin/game/realms", cookie=cookie)
+ok("四区·测试" in html, "realms page shows new realm")
+b = tcp()
+b.recv()
+b.send({"op": "realms"})
+r = b.ok_for(lambda m: len(m.get("realms", [])) == 4)
+ok(r and r["realms"][3]["name"] == "四区·测试", "TCP realms shows realm 4")
+b.drop()
+
+# 维护中的三区放开后可以 enter（needCreate）
+st, j, _ = gm("/admin/game/realms/save", {
+    "id": "3", "name": "三区·战神殿", "state": "0", "sort": "3"}, cookie)
+ok(j.get("code") == "0000", "GM opens realm 3")
+bob.send({"op": "enter", "realm": 3})
+r = bob.reply_for(lambda m: m.get("ok") == 0 and m.get("needCreate") == 1)
+ok(r is not None, "opened realm accepts enter (needCreate)")
+bob.send({"op": "enter", "realm": 1})
+bob.reply_for(lambda m: m.get("ok") == 1)
+
+# 有角色的区服删除被拒
+st, j, _ = gm("/admin/game/realms/delete", {"id": "1"}, cookie)
+ok(st == 400 and j.get("code") == "0409" and "角色" in j.get("msg", ""),
+   "GM cannot delete realm with characters")
+st, j, _ = gm("/admin/game/realms/delete", {"id": "4"}, cookie)
+ok(j.get("code") == "0000", "GM deletes empty realm 4")
+
+st, html, _ = http("/admin/game/players?kw=alice", cookie=cookie)
+ok(st == 200 and "法萌" in html and "一区·雷霆之怒" in html,
+   "players page shows character + realm")
+st, html, _ = http("/admin/game/players/form?id=" + str(bob_uid), cookie=cookie)
+ok(st == 200 and 'name="realmId"' in html and 'name="accountStatus"' in html,
+   "player form has realm select + account ban")
+
+# 发奖（角色 id 路径，离线直写库）
+st, j, _ = gm("/admin/game/players/save", {
+    "id": str(bob_uid), "nickname": "刀狂", "realmId": "1", "job": "0",
+    "level": "6", "gold": "500", "gems": "10", "mapId": "1",
+    "accountStatus": "1", "banReason": ""}, cookie)
+ok(j.get("code") == "0000", "GM save character")
+bob.send({"op": "state"})
+# GM 保存会连发多条 state（发奖一条、编辑一条、主动查询一条），取到含终值的那条
+r = None
+for _ in range(6):
+    m = bob.reply_for(lambda m: m.get("ev") == "state", timeout=3)
+    if m and m["self"]["gold"] == 500 and m["self"]["level"] == 6:
+        r = m
+        break
+ok(r is not None, "online grant pushed to client")
+
+# 封禁账号：在线的 carl 被踢
+st, j, _ = gm("/admin/game/players/save", {
+    "id": str(bob_uid), "nickname": "刀狂", "realmId": "1", "job": "0",
+    "level": "6", "gold": "500", "gems": "10", "mapId": "1",
+    "accountStatus": "0", "banReason": "作弊"}, cookie)
+ok(j.get("code") == "0000" and "踢下线" in j.get("msg", ""),
+   "GM bans account, kicks online session")
+k = bob.ev("kick")
+ok(k and "封禁" in k.get("text", ""), "banned client receives kick event")
+bob.drop()  # 协议约定：客户端收到 kick 自行断开，服务端在 EOF 后清理会话
+bob.drop()
+bob2 = tcp()
+bob2.recv()
+bob2.send({"op": "login", "user": "bob", "pass": "secret1"})
+ok(bob2.err_for("账号已被封禁：作弊") is not None, "banned login refused with reason")
+st, j, _ = gm("/admin/game/players/save", {
+    "id": str(bob_uid), "nickname": "刀狂", "realmId": "1", "job": "0",
+    "level": "6", "gold": "500", "gems": "10", "mapId": "1",
+    "accountStatus": "1", "banReason": ""}, cookie)
+ok(j.get("code") == "0000", "GM unbans bob")
+
+st, html, _ = http("/admin/game/online", cookie=cookie)
+ok(st == 200 and 'tag off">未进区' not in html and "在世界中" in html
+   and "carl" in html, "online page lists sessions with stage")
+st, j, _ = gm("/admin/game/online/broadcast", {"text": "全体注意，今晚开BOSS"}, cookie)
+ok(j.get("code") == "0000", "GM broadcast accepted")
+c = carl.ev("chat")
+d = dave.ev("chat")
+ok(c and "开BOSS" in c.get("text", "") and d and "开BOSS" in d.get("text", ""),
+   "GM broadcast reaches all realms")
+
+st, j, _ = gm("/admin/game/announces/save", {
+    "title": "维护通知", "body": "今晚 24:00 停机维护 30 分钟。",
+    "enabled": "1"}, cookie)
+ok(j.get("code") == "0000", "GM creates announce")
+st, html, _ = http("/admin/game/announces", cookie=cookie)
+ok("推送" in html, "announces page has push action")
+import re
+m = re.search(r'data-args="id=(\d+)" data-confirm="把这条公告', html)
+push_id = m.group(1) if m else "1"
+st, j, _ = gm("/admin/game/announces/push", {"id": push_id}, cookie)
+ok(j.get("code") == "0000", "GM pushes announce")
+c = carl.ev("announce")
+ok(c and "维护通知" in c.get("title", ""), "announce push reaches client")
+
+st, html, _ = http("/admin", cookie=cookie)
+ok(st == 200 and "游戏账号" in html and "区服" in html,
+   "dashboard shows account/realm KPIs")
+
+# ---------- 6. 持久化与离线结算 ----------
+import sqlite3
+time.sleep(11)  # flush 周期 10s
+db = sqlite3.connect("data/app.db")
+row = db.execute(
+    'SELECT nickname, realmId, gold, level FROM game_player WHERE id=?',
+    (bob_uid,)).fetchone()
+ok(row is not None and row[0] == "刀狂" and row[1] == 1 and row[3] == 6,
+   "character row persisted with realmId")
+acc = db.execute(
+    'SELECT question, answerHash FROM game_account WHERE username=?',
+    ("alice",)).fetchone()
+ok(acc is not None and acc[0] == "出生城市" and acc[1] != "北京",
+   "account stores question + hashed answer")
+db.close()
+
+# 离线结算：carl 登出，回拨 2 小时，重进一区结算 2 小时挂机（500/h）
+carl.drop()
+time.sleep(1)
+db = sqlite3.connect("data/app.db")
+db.execute('UPDATE game_player SET "lastLogoutAt"=? WHERE nickname="弓长"',
+           (int(time.time()) - 7200,))
+db.commit()
+db.close()
+carl2 = tcp()
+carl2.recv()
+carl2.send({"op": "login", "user": "carl", "pass": "secret1"})
+carl2.reply_for(lambda m: m.get("ok") == 1)
+carl2.send({"op": "enter", "realm": 1})
+# 结算按秒折算（500/h 按比例），时长封顶；断言 ≥2h 且收益等于折算值
+def settle_ok(m):
+    o = m.get("offline") or {}
+    return (o.get("seconds", 0) >= 7200
+            and o.get("gold") == o["seconds"] * 500 // 3600)
+r = carl2.ok_for(settle_ok)
+ok(r is not None, "offline settlement grants 2h idle gold on enter")
+carl2.drop()
+dave.drop()
+alice.drop()
+
+print(f"ALL PASS checks={checks}")

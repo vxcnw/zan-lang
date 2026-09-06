@@ -1,10 +1,14 @@
 <form data-submit action="/admin/game/players/save">
   <input type="hidden" name="id" value="{{id}}">
   <div class="card">
-    <header>{{dialogTitle}}{{#if online}}<span class="tag ok" style="margin-left:8px">在线 — 金币/元宝实时生效并推送客户端</span>{{/if}}</header>
+    <header>{{dialogTitle}}{{#if online}}<span class="tag ok" style="margin-left:8px">在线 — 金币/元宝实时生效并推送客户端</span>{{/if}}{{#if banned}}<span class="tag bad" style="margin-left:8px">账号已封禁</span>{{/if}}</header>
     <div class="body form">
       <label>账号</label><input class="input" value="{{username}}" disabled>
-      <label>昵称</label><input class="input" name="nickname" value="{{nickname}}" maxlength="32">
+      <label>角色名</label><input class="input" name="nickname" value="{{nickname}}" maxlength="32">
+      <label>区服</label>
+      <select class="input" name="realmId" {{#if online}}disabled{{/if}}>
+        {{#each realms}}<option value="{{id}}" {{selected}}>{{name}}</option>{{/each}}
+      </select>
       <label>职业</label>
       <select class="input" name="job">
         <option value="0" {{job0}}>战士</option>
@@ -18,8 +22,13 @@
       <select class="input" name="mapId">
         {{#each maps}}<option value="{{id}}" {{selected}}>{{name}}</option>{{/each}}
       </select>
-      <label>状态</label>
-      <select class="input" name="status">
+    </div>
+  </div>
+  <div class="card">
+    <header>账号封禁 <span class="muted" style="font-weight:400">作用于登录，角色本身不受影响</span></header>
+    <div class="body form">
+      <label>账号状态</label>
+      <select class="input" name="accountStatus">
         <option value="1">正常</option>
         <option value="0">封禁</option>
       </select>
@@ -27,7 +36,7 @@
     </div>
   </div>
   <div class="card"><div class="toolbar">
-    <span class="muted">发奖按表单值与当前值的差量生效；封禁会立即踢下线。</span>
+    <span class="muted">发奖按表单值与当前值的差量生效；封禁账号会立即踢下线；在线角色换区服请先踢下线。</span>
     <span class="sp"></span>
     <button class="btn primary" type="submit">保存</button>
   </div></div>

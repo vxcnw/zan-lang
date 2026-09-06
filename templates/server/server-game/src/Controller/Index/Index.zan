@@ -8,8 +8,8 @@ using ZanWeb.Game;
 
 namespace ZanWeb.Index;
 
-/* 落地页：服务器状态 — 在线会话（World 内存态）、开放地图与最新公告
-   （库）。无鉴权，只暴露展示性数字。 */
+/* 落地页：服务器状态 — 区服列表（状态+实时在线）、开放地图与最新公告
+   （库）。无鉴权，只暴露展示性数字；注册与找回密码的入口也在这里。 */
 [Route("[controller]/[action]")]
 [Description("首页")]
 class Index : Controller {
@@ -25,8 +25,12 @@ class Index : Controller {
         d.Set("online", Convert.ToString(World.OnlineCount()));
         d.Set("gamePort", Convert.ToString(Cfg.Game.port));
 
+        d.Set("realmCount", "0");
+        d.Set("openRealms", "0");
+        d.Set("noRealms", "1");
         d.Set("mapCount", "0");
         d.Set("noMaps", "1");
+        List<StrMap> realms = d.AddList("realms");
         List<StrMap> maps = d.AddList("maps");
         d.Set("noAnnounce", "1");
         AppServices svc = AppServices.Current();
@@ -34,6 +38,24 @@ class Index : Controller {
             IDbConnection db = await svc.Db().Acquire();
             if (db != null) {
                 try {
+                    List<Game.Realm> realmRows = await db
+                        .Select<Game.Realm>().OrderBy(a => a.sort)
+                        .ToListAsync();
+                    int open = 0;
+                    for (int i = 0; i < realmRows.Count; i = i + 1) {
+                        Game.Realm realm = realmRows[i];
+                        StrMap row = new StrMap();
+                        row.Set("name", realm.name);
+                        row.Set("stateText", realm.state == 0 ? "开放" : "维护");
+                        row.Set("stateClass", realm.state == 0 ? "ok" : "off");
+                        row.Set("online", Convert.ToString(World.RealmOnline(realm.id)));
+                        realms.Add(row);
+                        if (realm.state == 0) { open = open + 1; }
+                    }
+                    d.Set("realmCount", Convert.ToString(realmRows.Count));
+                    d.Set("openRealms", Convert.ToString(open));
+                    if (realmRows.Count > 0) { d.Set("noRealms", ""); }
+
                     List<GameMap> rows = await db
                         .Select<GameMap>().Where(a => a.status == 1)
                         .OrderBy(a => a.sortOrder).ToListAsync();

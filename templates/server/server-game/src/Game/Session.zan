@@ -3,12 +3,14 @@ using System.Net;
 
 namespace ZanWeb.Game;
 
-/* 一条在线会话 = 一个已通过网关登录的玩家。持有数据库行的内存副本，
-   在线期间的变更（移动、聊天、GM 发奖）都改这份副本并置 dirty，由
-   World 的 tick 定期与登出时落库——在线玩家以内存为权威，避免 GM 页
-   与网关两条写路径互相覆盖。字段与行一样公开可读，但写入请走 World
-   的入口，让 dirty 与推送不漏。Zan 调度器是协作式单线程，会话表无需
-   加锁，只要不跨 await 持有半更新的状态即可。 */
+/* 一条在线会话 = 一条已通过网关登录的连接，生命周期两段：
+   登录成功（accountId>0，realmId=0，row=null）→ 进入区服（row 非空，
+   在世界中）。持有账号行与角色行的内存副本，在线期间的变更（移动、
+   聊天、GM 发奖）都改这份副本并置 dirty，由 World 的 tick 定期与登出
+   时落库——在线角色以内存为权威，避免 GM 页与网关两条写路径互相覆盖。
+   字段公开可读，写入请走 World/Gateway 的入口，让 dirty 与推送不漏。
+   Zan 调度器是协作式单线程，会话表无需加锁，只要不跨 await 持有半更新
+   的状态即可。 */
 class Session {
     /* 网关连接 id（进程内自增，唯一）。 */
     int cid;
@@ -16,7 +18,14 @@ class Session {
     /* 该玩家的 TCP 连接；Kick 走 conn.Close()，onClose 随后清理。 */
     System.Net.Connection conn;
 
-    /* 数据库行的内存副本；落库与读档都经它。 */
+    /* 账号（登录后即有）。 */
+    int accountId;
+    string username;
+
+    /* 已进入的区服（game_realm.id）；0=登录了但还没进区。 */
+    int realmId;
+
+    /* 角色行的内存副本；未进区为 null。落库与读档都经它。 */
     ZanWeb.Model.Game.Player row;
 
     bool dirty;

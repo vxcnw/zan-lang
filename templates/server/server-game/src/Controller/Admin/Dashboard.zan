@@ -33,13 +33,17 @@ class Dashboard : AdminController {
         d.Set("uptime", Fmt.Uptime(m.Long("uptime_ms", 0)));
 
         d.Set("players", "—");
+        d.Set("accounts", "—");
         d.Set("banned", "—");
+        d.Set("realms", "—");
         d.Set("gold", "—");
         d.Set("gems", "—");
         if (this.DbReady()) {
             int players = await this.Player.CountAsync();
-            int banned = await this.Player
+            int accounts = await this.Account.CountAsync();
+            int banned = await this.Account
                 .Where(a => a.status == 0).CountAsync();
+            int realmCount = await this.Realm.CountAsync();
             List<Player> all = await this.Player.ToListAsync();
             long gold = 0;
             long gems = 0;
@@ -48,7 +52,9 @@ class Dashboard : AdminController {
                 gems = gems + all[i].gems;
             }
             d.Set("players", Convert.ToString(players));
+            d.Set("accounts", Convert.ToString(accounts));
             d.Set("banned", Convert.ToString(banned));
+            d.Set("realms", Convert.ToString(realmCount));
             d.Set("gold", Convert.ToString(gold));
             d.Set("gems", Convert.ToString(gems));
 
@@ -73,19 +79,29 @@ class Dashboard : AdminController {
         /* 在线会话来自 World 内存态：与在线页同源，不看库。 */
         List<Session> live = World.All();
         long now = WebApp.NowSeconds();
-        d.Set("online", Convert.ToString(live.Count));
+        d.Set("online", Convert.ToString(World.OnlineCount()));
         List<GameMap> maps = new List<GameMap>();
+        List<Realm> realms = new List<Realm>();
         if (this.DbReady()) {
             maps = await this.GameMap.OrderBy(a => a.sortOrder).ToListAsync();
+            realms = await this.Realm.OrderBy(a => a.sort).ToListAsync();
         }
         List<StrMap> orows = d.AddList("onlineRows");
         for (int i = 0; i < live.Count && i < 10; i = i + 1) {
             Session s = live[i];
             StrMap row = new StrMap();
-            row.Set("username", s.row.username);
-            row.Set("level", Convert.ToString(s.row.level));
-            row.Set("map", Dashboard.MapName(maps, s.row.mapId));
-            row.Set("idle", Fmt.Dur((now - s.lastSeen) * 1000000));
+            row.Set("username", s.username);
+            if (s.row != null) {
+                row.Set("realm", Dashboard.RealmName(realms, s.realmId));
+                row.Set("level", Convert.ToString(s.row.level));
+                row.Set("map", Dashboard.MapName(maps, s.row.mapId));
+                row.Set("idle", Fmt.Dur((now - s.lastSeen) * 1000000));
+            } else {
+                row.Set("realm", "—");
+                row.Set("level", "—");
+                row.Set("map", "选区中");
+                row.Set("idle", Fmt.Dur((now - s.lastSeen) * 1000000));
+            }
             orows.Add(row);
         }
         if (live.Count == 0) { d.Set("noOnline", "1"); }
@@ -105,6 +121,13 @@ class Dashboard : AdminController {
     static string MapName(List<GameMap> maps, int id) {
         for (int i = 0; i < maps.Count; i = i + 1) {
             if (maps[i].id == id) { return maps[i].name; }
+        }
+        return "#" + Convert.ToString(id);
+    }
+
+    static string RealmName(List<Realm> realms, int id) {
+        for (int i = 0; i < realms.Count; i = i + 1) {
+            if (realms[i].id == id) { return realms[i].name; }
         }
         return "#" + Convert.ToString(id);
     }
