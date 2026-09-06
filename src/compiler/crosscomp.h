@@ -11,6 +11,7 @@ typedef enum {
     ZAN_ARCH_X86_64,
     ZAN_ARCH_AARCH64,
     ZAN_ARCH_RISCV64,
+    ZAN_ARCH_RISCV32,
     ZAN_ARCH_WASM32,
 } zan_arch_t;
 

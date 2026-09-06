@@ -2328,6 +2328,8 @@ int main(int argc, char **argv) {
             zan_lexer_define(&lex, "X86_64", "1");
         else if (target.arch == ZAN_ARCH_RISCV64)
             zan_lexer_define(&lex, "RISCV64", "1");
+        else if (target.arch == ZAN_ARCH_RISCV32)
+            zan_lexer_define(&lex, "RISCV32", "1");
         else if (target.arch == ZAN_ARCH_WASM32)
             zan_lexer_define(&lex, "WASM32", "1");
         if (target.os == ZAN_OS_WASI)
@@ -5132,6 +5134,23 @@ int main(int argc, char **argv) {
             { size_t cur = strlen(cmd);
               snprintf(cmd + cur, sizeof(cmd) - cur, " \"%s\"", tbd); }
             link_ret = system(cmd);
+        } else if (cross_compiling && target.os == ZAN_OS_FREESTANDING) {
+            /* Bare-metal freestanding target (riscv32 for ESP32-C3/C6): no
+             * CRT, no sysroot, no bundled linker. The compiler's object file
+             * is the product -- the target SDK (ESP-IDF) owns startup code,
+             * libc and the final link, so undefined zan_timer_ / malloc
+             * symbols in it are expected and resolved there. */
+            remove(obj_path);
+            if (rename(obj_tmp, obj_path) != 0) {
+                fprintf(stderr, "error: cannot write object '%s'\n",
+                        obj_path);
+                remove(obj_tmp);
+                zan_irgen_destroy(&irgen);
+                zan_arena_free(arena);
+                free(source);
+                return 1;
+            }
+            link_ret = 0;
         } else if (cross_compiling) {
             fprintf(stderr,
                     "error: cross-compilation to '%s' is not supported yet "

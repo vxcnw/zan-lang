@@ -85,6 +85,9 @@ foreach(_opt_target ARM WebAssembly RISCV)
         message(STATUS "LLVM target ${_opt_target} not available; cross-compilation to it is disabled")
     endif()
 endforeach()
+# LLVM 23 split the C-API br opcode (LLVMBr) into LLVMCondBr/LLVMUncondBr;
+# sources pick the right symbol by this major (optimizer.c).
+add_compile_definitions(ZAN_LLVM_MAJOR=${LLVM_VERSION_MAJOR})
 llvm_map_components_to_libnames(LLVM_LIBS ${ZAN_LLVM_COMPONENTS})
 
 # ---- Compiler executable ----
@@ -3114,6 +3117,21 @@ foreach(_abi_target win-x64 linux-x64 linux-arm64 macos-arm64)
   set_tests_properties(abi_int_ext_${_abi_target} PROPERTIES TIMEOUT 120)
 endforeach()
 
+# ---- Bare-metal riscv32 (ESP32-C3): object emission ----
+# Registered only when the linked LLVM carries the RISCV backend (same
+# criterion as ZAN_HAVE_LLVM_RISCV above): mozbuild-style distributions omit
+# it, so there the target errors cleanly and the test simply does not exist.
+# Nothing is linked -- the check is the ELF32/RISC-V header of the object.
+if("RISCV" IN_LIST LLVM_TARGETS_TO_BUILD)
+  add_test(NAME cross_riscv32_object COMMAND ${CMAKE_COMMAND}
+    -DZANC=$<TARGET_FILE:zanc>
+    -DSRC=${CMAKE_SOURCE_DIR}/tests/riscv32/bare.zan
+    -DOUT=${CMAKE_BINARY_DIR}/riscv32_bare.o
+    -DWORKDIR=${CMAKE_BINARY_DIR}
+    -P ${CMAKE_SOURCE_DIR}/tests/run_riscv32_object.cmake)
+  set_tests_properties(cross_riscv32_object PROPERTIES TIMEOUT 120)
+endif()
+
 # ---- --publish string de-obfuscation: startup constructor registration ----
 # The constructor that un-scrambles string literals must be registered the way
 # the target's startup path actually walks, or a published binary prints pure
@@ -3290,7 +3308,7 @@ add_test(NAME tool_zandoc
 get_property(_all_tests DIRECTORY PROPERTY TESTS)
 foreach(_t ${_all_tests})
   set(_labels "full")
-  if(_t MATCHES "^(golden_|diag_|abi_|runtime_|tool_|policy_)" OR _t MATCHES "^conformance_gui_")
+  if(_t MATCHES "^(golden_|diag_|abi_|cross_|runtime_|tool_|policy_)" OR _t MATCHES "^conformance_gui_")
     list(APPEND _labels "standard" "smoke")
   elseif(_t MATCHES "^(conformance_|emit_lib_|dap_)")
     list(APPEND _labels "standard")

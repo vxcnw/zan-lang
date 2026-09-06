@@ -2792,6 +2792,15 @@ zan_status_t zan_irgen_write_obj(zan_irgen_t *g, const char *path) {
                           "target-abi", strlen("target-abi"),
                           LLVMValueAsMetadata(LLVMMDStringInContext(
                               g->ctx, "lp64d", 5)));
+    } else if (strncmp(triple, "riscv32", 7) == 0) {
+        /* Bare-metal RV32IMC (ESP32-C3/C6): ilp32 soft-float ABI — those
+         * cores have no FPU, so doubles lower through helper calls. */
+        tm_cpu = "generic-rv32";
+        tm_features = "+m,+c";
+        LLVMAddModuleFlag(g->mod, LLVMModuleFlagBehaviorError,
+                          "target-abi", strlen("target-abi"),
+                          LLVMValueAsMetadata(LLVMMDStringInContext(
+                              g->ctx, "ilp32", 5)));
     }
     /* Machine codegen dominates compile time. Development builds (no
      * --publish / -O) use the fast path (FastISel, no machine-level

@@ -20,6 +20,8 @@ static const zan_target_info_t s_targets[] = {
     { "wasm32",      "wasm32-unknown-wasi",        "WebAssembly 32-bit (WASI)" },
     { "linux-riscv64", "riscv64-unknown-linux-musl", "RISC-V 64-bit Linux (musl static)" },
     { "riscv64",       "riscv64-unknown-linux-musl", "RISC-V 64-bit Linux (alias of linux-riscv64)" },
+    { "riscv32",       "riscv32-unknown-unknown-elf", "RISC-V 32-bit bare-metal (ESP32-C3/C6; object output only)" },
+    { "esp32c3",       "riscv32-unknown-unknown-elf", "ESP32-C3 (rv32imc bare-metal, alias of riscv32)" },
     { "android-x64",   "x86_64-linux-android28",     "Android x86-64 (bionic, API 28+)" },
     { "android-arm64", "aarch64-linux-android28",    "Android ARM64 (bionic, API 28+)" },
     { "ohos-x64",      "x86_64-unknown-linux-ohos",  "OpenHarmony x86-64 (musl static)" },
@@ -38,6 +40,7 @@ int zan_target_list(const zan_target_info_t **out) {
 static zan_arch_t parse_arch(const char *s) {
     if (strncmp(s, "x86_64", 6) == 0 || strncmp(s, "x86-64", 6) == 0) return ZAN_ARCH_X86_64;
     if (strncmp(s, "aarch64", 7) == 0 || strncmp(s, "arm64", 5) == 0) return ZAN_ARCH_AARCH64;
+    if (strncmp(s, "riscv32", 7) == 0) return ZAN_ARCH_RISCV32;
     if (strncmp(s, "riscv64", 7) == 0) return ZAN_ARCH_RISCV64;
     if (strncmp(s, "wasm32", 6) == 0) return ZAN_ARCH_WASM32;
     return ZAN_ARCH_X86_64;
@@ -81,7 +84,8 @@ bool zan_target_parse(const char *triple_str, zan_target_t *out) {
     out->abi = parse_abi(triple_str, out->os);
     snprintf(out->cpu, sizeof(out->cpu), "%s", "generic");
     out->features[0] = 0;
-    out->pointer_size = (out->arch == ZAN_ARCH_WASM32) ? 4 : 8;
+    out->pointer_size = (out->arch == ZAN_ARCH_WASM32 ||
+                         out->arch == ZAN_ARCH_RISCV32) ? 4 : 8;
     out->pic = (out->os == ZAN_OS_LINUX || out->os == ZAN_OS_MACOS);
 
     return true;

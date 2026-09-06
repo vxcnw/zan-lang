@@ -229,7 +229,13 @@ zan_constfold_stats_t zan_opt_const_fold(zan_irgen_t *g) {
                 }
 
                 /* Detect dead conditional branches */
+#if ZAN_LLVM_MAJOR >= 23
+                /* 23 split the br opcode: the 3-operand conditional form is
+                 * its own LLVMCondBr now. */
+                if (opcode == LLVMCondBr && LLVMGetNumOperands(inst) == 3) {
+#else
                 if (opcode == LLVMBr && LLVMGetNumOperands(inst) == 3) {
+#endif
                     LLVMValueRef cond = LLVMGetCondition(inst);
                     if (cond && LLVMIsAConstantInt(cond)) {
                         stats.branches_eliminated++;

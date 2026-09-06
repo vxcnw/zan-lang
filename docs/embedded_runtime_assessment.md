@@ -18,6 +18,24 @@
 > （需 CI 重出提交对象，另案）。防回退：新增 `size_budget_publish_host` /
 > `size_budget_publish_linux_x64` 两条 ctest（tests/run_size_budget.cmake，
 > ~1.5× 基线余量），固定大表回归或交叉链接丢 `--gc-sections` 都会在此爆掉。
+>
+> **2026-09-07 更新 3：第 3 步的 riscv32 裸机对象发射已落地**。`--target riscv32`
+> / `--target esp32c3`（均映射 `riscv32-unknown-unknown-elf`，rv32imc + ilp32 软浮点，
+> 对应 C3/C6 无 FPU 核）现在产出 ELF32 RISC-V **目标文件**（freestanding：无 CRT、
+> 无 sysroot、不链接——ESP-IDF 拥有启动代码与最终链接，`.o` 里的 malloc/printf/
+> `zan_timer_*` 未解析符号正是它的适配面）。实现：`crosscomp` 增加
+> `ZAN_ARCH_RISCV32`（指针 4 字节）；`irgen_emit.c` 加 rv32 分支（generic-rv32、
+> `+m,+c`、target-abi=ilp32 模块旗标）；`main.c` FREESTANDING 分支只做
+> obj_tmp→obj_path 改名；程序侧新增 `RISCV32` 预定义宏。后端可用性仍由
+> `ZAN_HAVE_LLVM_RISCV` 门控（CMake 按 `LLVM_TARGETS_TO_BUILD` 自动探测；
+> mozbuild clang 不带 RISCV，这台机器用官方 LLVM 23.1.0 win64 发行版在
+> _scratch 单独构建验证——LLVM 23 把 C-API `LLVMBr` 拆成 `LLVMCondBr`/`LLVMUncondBr`，
+> 现以 `ZAN_LLVM_MAJOR` 编译定义分流，20/23 都能编）。防回退：`cross_riscv32_object`
+> ctest（tests/run_riscv32_object.cmake）在校验 ELF32/EM_RISCV 头，且只在 LLVM 带
+> RISCV 后端时注册（无后端的发行版上该测试不存在，其余目标不受影响）。
+> 尚余：裸机适配层（UART/heap/timer/单线程协程驱动，原第 3 步后半）与 64 位原子
+> （rv32 上 `__atomic_*_8` 需要 libatomic 或 IDF builtins）是 ESP-IDF 样例（第 4 步）前
+> 的最后两块。
 
 ## 1. 实测：一个 hello world 的成本
 
