@@ -336,6 +336,27 @@ zan_inline_stats_t zan_opt_inline(zan_irgen_t *g, zan_opt_level_t level) {
 
 /* ---- LLVM pass pipeline configuration ---- */
 
+#if ZAN_LLVM_MAJOR >= 23
+/* LLVM 23 removed the Os/Oz optimization levels: run the O2 pipeline and
+ * mark every defined function with the size attributes instead, which is
+ * how clang -Os/-Oz are encoded now. */
+static void zan_opt_mark_size(zan_irgen_t *g, bool min_size) {
+    LLVMContextRef ctx = LLVMGetModuleContext(g->mod);
+    LLVMAttributeRef opt = LLVMCreateEnumAttribute(ctx,
+        LLVMGetEnumAttributeKindForName("optsize", 7), 0);
+    LLVMAttributeRef mins = min_size
+        ? LLVMCreateEnumAttribute(ctx,
+              LLVMGetEnumAttributeKindForName("minsize", 7), 0)
+        : NULL;
+    for (LLVMValueRef fn = LLVMGetFirstFunction(g->mod); fn;
+         fn = LLVMGetNextFunction(fn)) {
+        if (LLVMIsDeclaration(fn)) continue;
+        LLVMAddAttributeAtIndex(fn, (LLVMAttributeIndex)(-1), opt);
+        if (mins) LLVMAddAttributeAtIndex(fn, (LLVMAttributeIndex)(-1), mins);
+    }
+}
+#endif
+
 void zan_opt_configure_llvm_passes(zan_irgen_t *g, zan_opt_level_t level) {
     if (level == ZAN_OPT_NONE) return;
 
@@ -344,9 +365,20 @@ void zan_opt_configure_llvm_passes(zan_irgen_t *g, zan_opt_level_t level) {
     switch (level) {
     case ZAN_OPT_BASIC: passes = "default<O1>"; break;
     case ZAN_OPT_FULL: passes = "default<O2>"; break;
+#if ZAN_LLVM_MAJOR >= 23
+    case ZAN_OPT_SIZE:
+        zan_opt_mark_size(g, false);
+        passes = "default<O2>";
+        break;
+    case ZAN_OPT_SIZE_MIN:
+        zan_opt_mark_size(g, true);
+        passes = "default<O2>";
+        break;
+#else
     case ZAN_OPT_SIZE: passes = "default<Os>"; break;
-    case ZAN_OPT_AGGRESSIVE: passes = "default<O3>"; break;
     case ZAN_OPT_SIZE_MIN: passes = "default<Oz>"; break;
+#endif
+    case ZAN_OPT_AGGRESSIVE: passes = "default<O3>"; break;
     default: return;
     }
 
