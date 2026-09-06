@@ -453,6 +453,12 @@ class Game {
         if (currency == 0) { return gold; } if (currency == 1) { return xp; } if (currency == 2) { return merit; }
         if (currency == 3) { return reputation; } if (currency == 4) { return redPackets; } if (currency == 5) { return gems; } return recyclePoints;
     }
+    int RecycleEligibleCount(int currency) {
+        if (currency < 0 || currency > 6) { return 0; }
+        int count = 0;
+        for (int i = 0; i < bag.Count; i = i + 1) { if (!bag[i].locked && RecyclePrice(bag[i], currency) > 0) { count = count + 1; } }
+        return count;
+    }
     void RecycleAs(Equipment target, int currency) {
         if (job < 0 || target == null || currency < 0 || currency > 6) { return; }
         int index = -1; for (int i = 0; i < bag.Count; i = i + 1) { if (bag[i] == target) { index = i; } }

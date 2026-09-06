@@ -390,6 +390,14 @@ class LegendApp {
         if (e != null && !e.locked && g.RecyclePrice(e, recycleCurrency) > 0) { recycleTargets.Add(e); }
     }
     int RecycleSelectedValue() { int total = 0; for (int i = 0; i < recycleTargets.Count; i = i + 1) { total = Rules.Bounded((long)total + g.RecyclePrice(recycleTargets[i], recycleCurrency)); } return total; }
+    void ToggleAllRecycle() {
+        int eligible = g.RecycleEligibleCount(recycleCurrency);
+        if (eligible > 0 && recycleTargets.Count == eligible) { recycleTargets.Clear(); return; }
+        recycleTargets.Clear();
+        for (int i = 0; i < g.bag.Count; i = i + 1) {
+            Equipment e = g.bag[i]; if (!e.locked && g.RecyclePrice(e, recycleCurrency) > 0) { recycleTargets.Add(e); }
+        }
+    }
     void BuildRecycle() {
         content.With(Text("回收系统 · 装备兑换", "yellow strong", 32));
         Panel split = Panel.Row(); split.Gap(8); split.Grow(); content.With(split);
@@ -401,6 +409,10 @@ class LegendApp {
         Panel body = Col("recycle-list"); body.Grow(); split.With(body);
         DataRow currency = GameTables.current.recycle.At(recycleCurrency);
         pageInfo = Text("", "cyan", 28); body.With(pageInfo);
+        int eligible = g.RecycleEligibleCount(recycleCurrency);
+        Panel selectBar = Panel.Row(); selectBar.Gap(8); selectBar.Prefer(0, 32);
+        Button selectAll = Btn(recycleTargets.Count == eligible && eligible > 0 ? "取消全选" : "一键全选", "recycle-select-all", () => { ToggleAllRecycle(); Rebuild(); }); selectAll.Prefer(96, 28); selectBar.With(selectAll);
+        selectBar.With(Text("可选 " + Rules.N(eligible) + " 件 · 已选 " + Rules.N(recycleTargets.Count), "secondary", 28)); body.With(selectBar);
         ScrollColumn rows = new ScrollColumn(); rows.Named("recycle-scroll"); rows.Grow(); body.With(rows);
         int total = g.bag.Count; if (recyclePage * 6 >= total) { recyclePage = total > 0 ? (total - 1) / 6 : 0; }
         for (int i = recyclePage * 6; i < total && i < (recyclePage + 1) * 6; i = i + 1) {
