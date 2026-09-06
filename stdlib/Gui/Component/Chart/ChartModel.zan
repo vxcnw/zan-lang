@@ -1744,7 +1744,7 @@ class ChartOption {
     bool showGrid;    // 数值网格线
     bool showValues;  // 点/柱顶上的数值标签
     bool animate;     // 首次渲染时的增长入场动画
-    bool smooth;      // 全局平滑；系列的 smooth 字段覆盖它
+    bool smooth;      // 全局平滑（默认 true：ECharts 2.2.x 折线不写 smooth 也渲染曲线）；系列的 smooth 字段覆盖它
     bool gradient;    // 垂直渐变填充（面积 / 柱状）
     bool rounded;     // 圆角柱帽
     int animMs;       // 入场动画时长（毫秒）
@@ -1874,8 +1874,11 @@ class ChartOption {
         o.showGrid = true;
         o.showValues = false;
         o.animate = true;
-        o.smooth = false;
-        o.gradient = true;
+        // ECharts 2.2.x 折线默认平滑：官方 line2/line4 参考不写
+        // smooth 也渲染曲线。要直线的调用方显式置 false，或系列级
+        // smooth:0 / smooth:false 覆盖。
+        o.smooth = true;
+        o.gradient = false;
         o.rounded = true;
         o.animMs = 650;
         o.donutPct = 55;

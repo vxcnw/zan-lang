@@ -70,39 +70,47 @@ partial class ChartView {
                               bool inFx, List<int> ox, List<int> oy) {
         int n = px.Count;
         if (n < 1) { return; }
-        if (!smooth || n < 3) {
-            if (inFx) {
-                for (int i = 0; i < n; i = i + 1) { ox.Add(px[i]); oy.Add(py[i]); }
-            } else {
-                for (int i = 0; i < n; i = i + 1) { ox.Add(px[i] * 256); oy.Add(py[i] * 256); }
+        // 统一升 16.8 定点：inFx 输入已是定点（堆积路径的 x/y 都按
+        // 16.8 传入），整数输入在此乘 256。平滑分支必须用同一基准，
+        // 否则定点输入再乘 256 会把曲线放大 256 倍甩出绘图区。
+        List<int> fx = px;
+        List<int> fy = py;
+        if (!inFx) {
+            fx = new List<int>();
+            fy = new List<int>();
+            for (int i = 0; i < n; i = i + 1) {
+                fx.Add(px[i] * 256);
+                fy.Add(py[i] * 256);
             }
+        }
+        if (!smooth || n < 3) {
+            for (int i = 0; i < n; i = i + 1) { ox.Add(fx[i]); oy.Add(fy[i]); }
             return;
         }
-        int mul = inFx ? 1 : 256;
-        ox.Add(px[0] * mul); oy.Add(py[0] * mul);
+        ox.Add(fx[0]); oy.Add(fy[0]);
         for (int seg = 0; seg + 1 < n; seg = seg + 1) {
             int p0 = seg - 1; if (p0 < 0) { p0 = 0; }
             int p3 = seg + 2; if (p3 > n - 1) { p3 = n - 1; }
-            long x0 = px[p0]; long y0 = py[p0];
-            long x1 = px[seg]; long y1 = py[seg];
-            long x2 = px[seg + 1]; long y2 = py[seg + 1];
-            long x3 = px[p3]; long y3 = py[p3];
+            long x0 = fx[p0]; long y0 = fy[p0];
+            long x1 = fx[seg]; long y1 = fy[seg];
+            long x2 = fx[seg + 1]; long y2 = fy[seg + 1];
+            long x3 = fx[p3]; long y3 = fy[p3];
             int steps = 48;
             int s = 1;
             while (s <= steps) {
                 int tt = s * 1000 / steps;
                 int tt2 = tt * tt / 1000;
                 int tt3 = tt2 * tt / 1000;
-                // 64 位中间值全程保持 1/256 精度；
-                // 最后的 /2 舍入到精确的亚像素顶点位置。
-                long qx = (2 * x1 * 256
-                    + (x2 - x0) * tt * 256 / 1000
-                    + (2 * x0 - 5 * x1 + 4 * x2 - x3) * tt2 * 256 / 1000
-                    + (0 - x0 + 3 * x1 - 3 * x2 + x3) * tt3 * 256 / 1000) / 2;
-                long qy = (2 * y1 * 256
-                    + (y2 - y0) * tt * 256 / 1000
-                    + (2 * y0 - 5 * y1 + 4 * y2 - y3) * tt2 * 256 / 1000
-                    + (0 - y0 + 3 * y1 - 3 * y2 + y3) * tt3 * 256 / 1000) / 2;
+                // 64 位中间值全程保持 1/256 精度（输入已是 16.8，
+                // 不再二次乘 256）；最后的 /2 舍入到亚像素顶点。
+                long qx = (2 * x1
+                    + (x2 - x0) * tt / 1000
+                    + (2 * x0 - 5 * x1 + 4 * x2 - x3) * tt2 / 1000
+                    + (0 - x0 + 3 * x1 - 3 * x2 + x3) * tt3 / 1000) / 2;
+                long qy = (2 * y1
+                    + (y2 - y0) * tt / 1000
+                    + (2 * y0 - 5 * y1 + 4 * y2 - y3) * tt2 / 1000
+                    + (0 - y0 + 3 * y1 - 3 * y2 + y3) * tt3 / 1000) / 2;
                 ox.Add((int)qx); oy.Add((int)qy);
                 s = s + 1;
             }
@@ -555,7 +563,10 @@ partial class ChartView {
                             if (gaps[m2]) { continue; }
                             int oiN = i0 + m2;
                             int ncol = drawColor;
+                            // ECharts 2.2.x 折线系列 symbol 默认 emptyCircle
+                            // （空心环）；显式 symbol/showSymbol 仍按配置。
                             string sym2 = s.symbol;
+                            if (sym2.Length == 0) { sym2 = "emptyCircle"; }
                             int pr = nr;
                             if (oiN < s.data.Count) {
                                 if (s.data[oiN].color != 0) { ncol = s.data[oiN].color; }
@@ -565,7 +576,7 @@ partial class ChartView {
                                 }
                             }
                             bool showSym = sym2 != "none" && sym2 != "pass"
-                                && (sym2.Length > 0 || s.showSymbol != 0);
+                                && (s.symbol.Length > 0 || s.showSymbol != 0);
                             if (showSym) {
                                 Chart.DrawSymbol(c, pxs[m2], pys[m2], pr, sym2,
                                     ncol, s.itemStyle.normal.borderColor,
@@ -918,6 +929,8 @@ partial class ChartView {
                         if (oi2 >= s.Count()) { continue; }
                         if (oi2 < s.data.Count && s.data[oi2].gap) { continue; }
                         string sym2 = s.symbol;
+                        // ECharts 2.2.x 折线系列 symbol 默认 emptyCircle。
+                        if (sym2.Length == 0) { sym2 = "emptyCircle"; }
                         int scol = strokeCol;
                         int pr = nr;
                         if (oi2 < s.data.Count) {
@@ -930,7 +943,7 @@ partial class ChartView {
                             }
                         }
                         if (sym2 == "none" || sym2 == "pass") { continue; }
-                        if (sym2.Length == 0 && s.showSymbol == 0) { continue; }
+                        if (s.symbol.Length == 0 && s.showSymbol == 0) { continue; }
                         Chart.DrawSymbol(c, xs[u], topY[u], pr, sym2, scol,
                             s.itemStyle.normal.borderColor,
                             s.itemStyle.normal.borderWidth);
