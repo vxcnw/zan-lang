@@ -94,6 +94,7 @@ class Players : AdminController {
             .ToListAsync();
         List<Realm> realms = await this.Realm.OrderBy(a => a.sort)
             .ToListAsync();
+        List<Item> items = await this.Item.OrderBy(a => a.id).ToListAsync();
         Account acc = await this.Account.Where(a => a.id == p.accountId)
             .FirstAsync();
 
@@ -131,7 +132,22 @@ class Players : AdminController {
             if (maps[i].id == curMap) { o.Set("selected", "selected"); }
             opts.Add(o);
         }
+        List<StrMap> iopts = d.AddList("gifts");
+        for (int i = 0; i < items.Count; i = i + 1) {
+            StrMap o = new StrMap();
+            o.Set("id", Convert.ToString(items[i].id));
+            o.Set("name", items[i].name + "（"
+                + Players.KindText(items[i].kind) + "）");
+            iopts.Add(o);
+        }
         this.Dialog(d);
+    }
+
+    static string KindText(int kind) {
+        if (kind == 0) { return "消耗品"; }
+        if (kind == 1) { return "武器"; }
+        if (kind == 2) { return "防具"; }
+        return "材料";
     }
 
     /* 保存：角色字段在线经 World（差量发奖 + 基本项），离线直写库；
@@ -165,6 +181,13 @@ class Players : AdminController {
         string curNick = live != null ? live.row.nickname : p.nickname;
         string changed = "";
 
+        /* GM 送物品：随本次保存一起发放（giftItem=0 表示不发）。 */
+        int giftItem = this.InInt("giftItem", 0);
+        int giftCount = this.InInt("giftCount", 1);
+        if (giftCount < 1) { giftCount = 1; }
+        if (giftCount > 999) { giftCount = 999; }
+        string gifted = "";
+
         if (live != null) {
             /* 发奖差量走 World：内存即时生效、推送客户端、随 tick 落库。 */
             if (gold != curGold || gems != curGems) {
@@ -173,6 +196,10 @@ class Players : AdminController {
             }
             World.ApplyEdit(id, level, job, mapId, nickname);
             if (changed.Length == 0) { changed = "已应用到在线会话"; }
+            if (giftItem > 0) {
+                Fight.Gift(live, giftItem, giftCount);
+                gifted = "已发放物品并推送";
+            }
         } else {
             int n = await this.Player.Update()
                 .Set(a => a.nickname, nickname)
@@ -186,7 +213,13 @@ class Players : AdminController {
                 .Where(a => a.id == id)
                 .ExecuteAffrowsAsync();
             changed = n > 0 ? "已保存" : "无改动";
+            if (giftItem > 0) {
+                if (await Fight.GrantOffline(this.Held(), id, giftItem, giftCount)) {
+                    gifted = "物品已写入背包（下次进区生效）";
+                }
+            }
         }
+        if (gifted.Length > 0) { changed = changed + "；" + gifted; }
 
         /* 账号封禁：写账号表（拦下次登录），在线则踢出。 */
         int accStatus = this.InInt("accountStatus", 1);

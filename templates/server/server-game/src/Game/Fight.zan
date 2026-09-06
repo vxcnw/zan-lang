@@ -1,0 +1,568 @@
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Data.Orm;
+using System.Json;
+using ZanWeb.Model.Game;
+
+namespace ZanWeb.Game;
+
+/* 战斗闭环：怪物模板/物品模板装载、刷怪实例、一轮战斗（hunt 与
+   自动挂机共用）、经验升级、掉落入包、背包与商店结算。
+   模板与刷怪实例是进程内只读/运行态，不落库；背包走会话内存副本
+   （bagDirty 整包回写），与角色行同一条纪律：在线改内存，落库交
+   flush/登出。伤害不掷骰（atk-def 下限 1），随机只用于金币区间与
+   掉落判定，方便测试与复现。 */
+class Fight {
+    /* 模板（启动装载）。tplById/tplMobById 为 O(1) 查找。 */
+    static List<ZanWeb.Model.Game.Item> items = new List<ZanWeb.Model.Game.Item>();
+    static Dictionary<int, ZanWeb.Model.Game.Item> itemById =
+        new Dictionary<int, ZanWeb.Model.Game.Item>();
+    static List<ZanWeb.Model.Game.Mob> mobs = new List<ZanWeb.Model.Game.Mob>();
+    static Dictionary<int, ZanWeb.Model.Game.Mob> mobById =
+        new Dictionary<int, ZanWeb.Model.Game.Mob>();
+
+    /* 刷怪实例（运行态）：id 自增；hp/alive/respawnAt 随战斗变化。
+       平行列表按实例下标访问，tplOf 存模板 id。 */
+    static List<int> instId = new List<int>();
+    static List<int> instTpl = new List<int>();
+    static List<int> instHp = new List<int>();
+    static List<bool> instAlive = new List<bool>();
+    static List<long> instRespawnAt = new List<long>();
+    static int nextInst = 1;
+
+    static Random rng = new Random();
+
+    /* 数值曲线：升级所需经验 = 15*level；血量/攻防由等级、职业与装备推出。 */
+    static long ExpNext(int level) {
+        return 15 * level;
+    }
+
+    static int JobAtk(int job) {
+        if (job == 0) { return 5; }
+        if (job == 1) { return 3; }
+        return 2;
+    }
+
+    static int JobHp(int job) {
+        if (job == 0) { return 20; }
+        if (job == 1) { return 8; }
+        return 12;
+    }
+
+    static ZanWeb.Model.Game.Item Equipped(int itemId) {
+        if (itemId <= 0) { return null; }
+        return Fight.ById(itemId);
+    }
+
+    /* 攻击 = 基础 + 职业 + 武器；防御 = 基础 + 防具；血量上限 = 基础
+       + 职业 + 等级成长。全服统一公式，客户端 state 可复算。 */
+    static int Atk(ZanWeb.Model.Game.Player row) {
+        ZanWeb.Model.Game.Item weapon = Fight.Equipped(row.weaponId);
+        int bonus = weapon != null ? weapon.atk : 0;
+        return 6 + row.level * 2 + Fight.JobAtk(row.job) + bonus;
+    }
+
+    static int Def(ZanWeb.Model.Game.Player row) {
+        ZanWeb.Model.Game.Item armor = Fight.Equipped(row.armorId);
+        int bonus = armor != null ? armor.def : 0;
+        return 1 + row.level + bonus;
+    }
+
+    static int MaxHp(ZanWeb.Model.Game.Player row) {
+        return 40 + row.level * 20 + Fight.JobHp(row.job);
+    }
+
+    static ZanWeb.Model.Game.Item ById(int id) {
+        ZanWeb.Model.Game.Item it = null;
+        if (Fight.itemById.TryGetValue(id, out it)) { return it; }
+        return null;
+    }
+
+    static ZanWeb.Model.Game.Mob Tpl(int id) {
+        ZanWeb.Model.Game.Mob m = null;
+        if (Fight.mobById.TryGetValue(id, out m)) { return m; }
+        return null;
+    }
+
+    /* ---- 启动：装载模板 + 按模板铺怪 ---- */
+
+    static async void Bootstrap(DbContext ctx) {
+        if (Fight.items.Count > 0) { return; }
+        IDbConnection db = await ctx.Acquire();
+        if (db == null) {
+            Console.WriteLine("[fight] 数据库不可用，战斗系统未装载");
+            return;
+        }
+        try {
+            Fight.items = await db.Select<ZanWeb.Model.Game.Item>()
+                .Where(a => a.status == 1).OrderBy(a => a.id).ToListAsync();
+            for (int i = 0; i < Fight.items.Count; i = i + 1) {
+                Fight.itemById.Add(Fight.items[i].id, Fight.items[i]);
+            }
+            List<ZanWeb.Model.Game.Mob> rows = await db
+                .Select<ZanWeb.Model.Game.Mob>()
+                .Where(a => a.status == 1).OrderBy(a => a.id).ToListAsync();
+            long now = WebApp.NowSeconds();
+            for (int i = 0; i < rows.Count; i = i + 1) {
+                ZanWeb.Model.Game.Mob t = rows[i];
+                Fight.mobs.Add(t);
+                Fight.mobById.Add(t.id, t);
+                for (int n = 0; n < t.count; n = n + 1) {
+                    Fight.Spawn(t, now);
+                }
+            }
+            Console.WriteLine("[fight] 怪物 " + Convert.ToString(Fight.instId.Count)
+                + " 只 / 物品 " + Convert.ToString(Fight.items.Count) + " 种");
+        } finally {
+            ctx.Release(db);
+        }
+    }
+
+    static void Spawn(ZanWeb.Model.Game.Mob t, long now) {
+        Fight.instId.Add(Fight.nextInst);
+        Fight.nextInst = Fight.nextInst + 1;
+        Fight.instTpl.Add(t.id);
+        Fight.instHp.Add(t.hp);
+        Fight.instAlive.Add(true);
+        Fight.instRespawnAt.Add(0);
+    }
+
+    /* ---- tick：重生 + 自动挂机 ---- */
+
+    static void Tick(long now) {
+        for (int i = 0; i < Fight.instAlive.Count; i = i + 1) {
+            if (Fight.instAlive[i]) { continue; }
+            if (now >= Fight.instRespawnAt[i]) {
+                ZanWeb.Model.Game.Mob t = Fight.Tpl(Fight.instTpl[i]);
+                if (t == null) { continue; }
+                Fight.instAlive[i] = true;
+                Fight.instHp[i] = t.hp;
+            }
+        }
+        List<Session> rows = World.All();
+        for (int i = 0; i < rows.Count; i = i + 1) {
+            Session s = rows[i];
+            if (s.row == null || s.kicked || s.autoMobId <= 0) { continue; }
+            Fight.PushFight(s, now);
+        }
+    }
+
+    /* 在某地图找一只指定模板的活怪；没有返回 -1。 */
+    static int FindAlive(int tplId, int mapId) {
+        ZanWeb.Model.Game.Mob t = Fight.Tpl(tplId);
+        if (t == null) { return -1; }
+        for (int i = 0; i < Fight.instTpl.Count; i = i + 1) {
+            if (!Fight.instAlive[i]) { continue; }
+            if (Fight.instTpl[i] != tplId) { continue; }
+            if (t.mapId != mapId) { continue; }
+            return i;
+        }
+        return -1;
+    }
+
+    /* 一轮战斗：自动挂机入口（结果 ev fight 推送）。 */
+    static void PushFight(Session s, long now) {
+        ZanWeb.Model.Game.Mob t = Fight.Tpl(s.autoMobId);
+        if (t == null) { return; }
+        JsonValue f = Fight.Round(s, s.autoMobId, now);
+        if (f == null) { return; }
+        f.Set("ev", JsonValue.NewStr("fight"));
+        f.Set("mob", JsonValue.NewStr(t.name));
+        Gateway.Send(s.conn, f);
+    }
+
+    /* 一轮战斗核心：玩家先手，怪死结算经验/金币/掉落，怪活则还手；
+       玩家血量见底按死亡处理。返回给客户端的 fight 对象（自动挂机
+       也会复用），null 表示打不了（模板/地图/存活都不满足）。 */
+    static JsonValue Round(Session s, int tplId, long now) {
+        ZanWeb.Model.Game.Mob t = Fight.Tpl(tplId);
+        if (t == null || s.row == null) { return null; }
+        if (t.mapId != s.row.mapId) { return null; }
+        int at = Fight.FindAlive(tplId, s.row.mapId);
+        if (at < 0) { return null; }
+
+        JsonValue f = JsonValue.NewObject();
+        int dmg = Fight.Damage(Fight.Atk(s.row), t.def);
+        int left = Fight.instHp[at] - dmg;
+        f.Set("dmg", JsonValue.NewNum(Convert.ToString(dmg)));
+        f.Set("killed", JsonValue.NewNum("0"));
+        if (left <= 0) {
+            Fight.instAlive[at] = false;
+            Fight.instHp[at] = 0;
+            Fight.instRespawnAt[at] = now + t.respawnSec;
+            f.Set("killed", JsonValue.NewNum("1"));
+            f.Set("exp", JsonValue.NewNum(Convert.ToString(t.exp)));
+            f.Set("mobhp", JsonValue.NewNum("0"));
+            Fight.OnKill(s, t, f);
+            return f;
+        }
+        Fight.instHp[at] = left;
+        f.Set("mobhp", JsonValue.NewNum(Convert.ToString(left)));
+
+        /* 怪物还手：玩家防住一部分，血量见底按死亡结算。 */
+        int mdmg = Fight.Damage(t.atk, Fight.Def(s.row));
+        s.row.hp = s.row.hp - mdmg;
+        f.Set("mdmg", JsonValue.NewNum(Convert.ToString(mdmg)));
+        if (s.row.hp <= 0) {
+            Fight.Die(s);
+            f.Set("die", JsonValue.NewNum("1"));
+        }
+        f.Set("hp", JsonValue.NewNum(Convert.ToString(s.row.hp)));
+        s.dirty = true;
+        return f;
+    }
+
+    /* 伤害 = atk - def，下限 1；不掷骰，战斗可复现。 */
+    static int Damage(int atk, int def) {
+        int d = atk - def;
+        if (d < 1) { d = 1; }
+        return d;
+    }
+
+    /* 击杀结算：经验（连升）、金币（区间随机）、掉落（万分比）。 */
+    static void OnKill(Session s, ZanWeb.Model.Game.Mob t, JsonValue f) {
+        s.row.exp = s.row.exp + t.exp;
+        long gold = Fight.rng.Between((int)t.goldMin, (int)t.goldMax + 1);
+        s.row.gold = s.row.gold + gold;
+        f.Set("gold", JsonValue.NewNum(Convert.ToString(gold)));
+        int ups = 0;
+        while (s.row.exp >= Fight.ExpNext(s.row.level)) {
+            s.row.exp = s.row.exp - Fight.ExpNext(s.row.level);
+            s.row.level = s.row.level + 1;
+            s.row.hp = Fight.MaxHp(s.row);
+            ups = ups + 1;
+        }
+        if (ups > 0) {
+            f.Set("levelup", JsonValue.NewNum(Convert.ToString(s.row.level)));
+            JsonValue up = Gateway.Ev("levelup",
+                "升到 " + Convert.ToString(s.row.level) + " 级！");
+            up.Set("level", JsonValue.NewNum(Convert.ToString(s.row.level)));
+            Gateway.Send(s.conn, up);
+        }
+        if (t.dropItemId > 0 && Fight.rng.NextBelow(10000) < t.dropRate) {
+            ZanWeb.Model.Game.Item it = Fight.ById(t.dropItemId);
+            if (it != null) {
+                Fight.BagAdd(s, it.id, 1);
+                JsonValue drop = Gateway.Ev("drop",
+                    "获得了 " + it.name);
+                drop.Set("item", JsonValue.NewStr(it.name));
+                drop.Set("count", JsonValue.NewNum("1"));
+                Gateway.Send(s.conn, drop);
+                f.Set("drop", JsonValue.NewStr(it.name));
+            }
+        }
+        s.dirty = true;
+    }
+
+    /* 死亡：回城满状态（血量一半）继续玩，自动挂机关闭；不掉经验，
+       模板取向是休闲挂机，惩罚留给二开自己加。 */
+    static void Die(Session s) {
+        s.row.hp = Fight.MaxHp(s.row) / 2;
+        if (s.row.hp < 1) { s.row.hp = 1; }
+        s.row.mapId = 1;
+        s.row.x = 5;
+        s.row.y = 5;
+        s.autoMobId = 0;
+        s.dirty = true;
+        JsonValue ev = Gateway.Ev("die", "你倒下了，被送回新手村休整。");
+        Gateway.Send(s.conn, ev);
+    }
+
+    /* ---- 背包 ---- */
+
+    /* 装载进会话（进区时调用；同物品合并）。返回合成包数（诊断用）。 */
+    static async int LoadBag(IDbConnection db, Session s) {
+        s.bagIds.Clear();
+        s.bagCounts.Clear();
+        List<ZanWeb.Model.Game.Bag> rows = await db
+            .Select<ZanWeb.Model.Game.Bag>()
+            .Where(a => a.playerId == s.row.id).ToListAsync();
+        for (int i = 0; i < rows.Count; i = i + 1) {
+            Fight.BagAdd(s, rows[i].itemId, rows[i].count);
+        }
+        s.bagDirty = false;
+        return rows.Count;
+    }
+
+    static int BagIndexOf(Session s, int itemId) {
+        return s.bagIds.IndexOf(itemId);
+    }
+
+    /* 内存加放物品；调用人负责置 bagDirty（本方法统一置）。 */
+    static void BagAdd(Session s, int itemId, int count) {
+        int at = Fight.BagIndexOf(s, itemId);
+        if (at >= 0) {
+            s.bagCounts[at] = s.bagCounts[at] + count;
+        } else {
+            s.bagIds.Add(itemId);
+            s.bagCounts.Add(count);
+        }
+        s.bagDirty = true;
+    }
+
+    /* 扣减；数量不足返回 false。 */
+    static bool BagTake(Session s, int itemId, int count) {
+        int at = Fight.BagIndexOf(s, itemId);
+        if (at < 0 || s.bagCounts[at] < count) { return false; }
+        if (s.bagCounts[at] == count) {
+            s.bagIds.RemoveAt(at);
+            s.bagCounts.RemoveAt(at);
+        } else {
+            s.bagCounts[at] = s.bagCounts[at] - count;
+        }
+        s.bagDirty = true;
+        return true;
+    }
+
+    /* 背包整包回写：删掉该玩家旧行再按内存副本插入。行数少（模板
+       物品几十种），比逐行 diff 简单可靠。 */
+    static async int PersistBag(IDbConnection db, Session s) {
+        int pid = s.row.id;
+        await db.Delete<ZanWeb.Model.Game.Bag>()
+            .Where(a => a.playerId == pid).ExecuteAffrowsAsync();
+        for (int i = 0; i < s.bagIds.Count; i = i + 1) {
+            if (s.bagCounts[i] <= 0) { continue; }
+            ZanWeb.Model.Game.Bag b = new ZanWeb.Model.Game.Bag();
+            b.playerId = pid;
+            b.itemId = s.bagIds[i];
+            b.count = s.bagCounts[i];
+            await db.Insert<ZanWeb.Model.Game.Bag>(b).ExecuteAffrowsAsync();
+        }
+        return s.bagIds.Count;
+    }
+
+    /* 登出/换区时的立即回写（自借连接）。 */
+    static async void PersistBagNow(Session s) {
+        if (!s.bagDirty || s.row == null || World.dbctx == null) { return; }
+        IDbConnection db = await World.dbctx.Acquire();
+        if (db == null) { return; }
+        try {
+            await Fight.PersistBag(db, s);
+            s.bagDirty = false;
+        } finally {
+            World.dbctx.Release(db);
+        }
+    }
+
+    /* flush 周期调用：脏背包回写（调用方已持有连接）。 */
+    static async int FlushBag(IDbConnection db, Session s) {
+        if (!s.bagDirty) { return 0; }
+        int n = await Fight.PersistBag(db, s);
+        s.bagDirty = false;
+        return 1;
+    }
+
+    /* GM 给在线角色发物品：入包 + ev drop 推送（离线路径见 GrantOffline）。 */
+    static void Gift(Session s, int itemId, int count) {
+        if (itemId <= 0 || count < 1) { return; }
+        ZanWeb.Model.Game.Item it = Fight.ById(itemId);
+        if (it == null) { return; }
+        Fight.BagAdd(s, itemId, count);
+        JsonValue ev = Gateway.Ev("drop", "GM 送来了 " + it.name
+            + " ×" + Convert.ToString(count));
+        ev.Set("item", JsonValue.NewStr(it.name));
+        ev.Set("count", JsonValue.NewNum(Convert.ToString(count)));
+        Gateway.Send(s.conn, ev);
+        Gateway.PushState(s);
+    }
+
+    /* GM 给离线角色发物品：直写 game_bag，同物品合并进已有行。 */
+    static async bool GrantOffline(IDbConnection db, int playerId,
+                                   int itemId, int count) {
+        ZanWeb.Model.Game.Bag row = await db
+            .Select<ZanWeb.Model.Game.Bag>()
+            .Where(a => a.playerId == playerId && a.itemId == itemId)
+            .FirstAsync();
+        if (row != null) {
+            int _n = await db.Update<ZanWeb.Model.Game.Bag>()
+                .Set(a => a.count, row.count + count)
+                .Where(a => a.id == row.id).ExecuteAffrowsAsync();
+            return true;
+        }
+        ZanWeb.Model.Game.Bag b = new ZanWeb.Model.Game.Bag();
+        b.playerId = playerId;
+        b.itemId = itemId;
+        b.count = count;
+        int _id = await db.Insert<ZanWeb.Model.Game.Bag>(b)
+            .ExecuteIdentityAsync();
+        return _id > 0;
+    }
+
+    /* ---- 协议帮手（Gateway 调用） ---- */
+
+    /* 当前地图的怪物列表（含未重生的，带剩余秒数）。 */
+    static JsonValue MobList(Session s, long now) {
+        JsonValue arr = JsonValue.NewArray();
+        for (int i = 0; i < Fight.instTpl.Count; i = i + 1) {
+            ZanWeb.Model.Game.Mob t = Fight.Tpl(Fight.instTpl[i]);
+            if (t == null) { continue; }
+            if (t.mapId != s.row.mapId) { continue; }
+            JsonValue o = JsonValue.NewObject();
+            o.Set("inst", JsonValue.NewNum(Convert.ToString(Fight.instId[i])));
+            o.Set("tpl", JsonValue.NewNum(Convert.ToString(t.id)));
+            o.Set("name", JsonValue.NewStr(t.name));
+            o.Set("level", JsonValue.NewNum(Convert.ToString(t.level)));
+            o.Set("alive", JsonValue.NewNum(Fight.instAlive[i] ? "1" : "0"));
+            if (Fight.instAlive[i]) {
+                o.Set("hp", JsonValue.NewNum(Convert.ToString(Fight.instHp[i])));
+                o.Set("maxhp", JsonValue.NewNum(Convert.ToString(t.hp)));
+            } else {
+                long left = Fight.instRespawnAt[i] - now;
+                if (left < 0) { left = 0; }
+                o.Set("respawnIn", JsonValue.NewNum(Convert.ToString(left)));
+            }
+            arr.Append(o);
+        }
+        return arr;
+    }
+
+    /* 手动打一轮：给 hunt op 的回复（含 fight 详情与新状态）。 */
+    static void Hunt(Connection conn, Session s, JsonValue m, long now) {
+        int tplId = m.Int("mob", 0);
+        JsonValue f = Fight.Round(s, tplId, now);
+        if (f == null) {
+            Gateway.Send(conn, Gateway.Err("这里没有这种怪物（先 move 到它的地图）"));
+            return;
+        }
+        JsonValue r = Gateway.Ok();
+        r.Set("fight", f);
+        Gateway.SelfInto(r, s);
+        Gateway.Send(conn, r);
+    }
+
+    /* 自动挂机开关：mob=模板 id，on 缺省为开。 */
+    static string Auto(Session s, JsonValue m) {
+        int tplId = m.Int("mob", 0);
+        bool on = m.Bool("on", true);
+        if (!on) {
+            s.autoMobId = 0;
+            return "";
+        }
+        ZanWeb.Model.Game.Mob t = Fight.Tpl(tplId);
+        if (t == null) { return "没有这种怪物"; }
+        if (t.mapId != s.row.mapId) { return "先 move 到它的地图"; }
+        s.autoMobId = tplId;
+        return "";
+    }
+
+    /* 背包列表：物品模板信息内联，客户端不用二次查询。 */
+    static JsonValue BagJson(Session s) {
+        JsonValue arr = JsonValue.NewArray();
+        for (int i = 0; i < s.bagIds.Count; i = i + 1) {
+            ZanWeb.Model.Game.Item it = Fight.ById(s.bagIds[i]);
+            if (it == null) { continue; }
+            JsonValue o = JsonValue.NewObject();
+            o.Set("id", JsonValue.NewNum(Convert.ToString(it.id)));
+            o.Set("name", JsonValue.NewStr(it.name));
+            o.Set("kind", JsonValue.NewNum(Convert.ToString(it.kind)));
+            o.Set("count", JsonValue.NewNum(Convert.ToString(s.bagCounts[i])));
+            o.Set("atk", JsonValue.NewNum(Convert.ToString(it.atk)));
+            o.Set("def", JsonValue.NewNum(Convert.ToString(it.def)));
+            o.Set("heal", JsonValue.NewNum(Convert.ToString(it.hp)));
+            o.Set("price", JsonValue.NewNum(Convert.ToString(it.price)));
+            o.Set("minLevel", JsonValue.NewNum(Convert.ToString(it.minLevel)));
+            arr.Append(o);
+        }
+        return arr;
+    }
+
+    /* 使用消耗品：回血不超上限。返回错误串，空串成功。 */
+    static string Use(Session s, int itemId) {
+        ZanWeb.Model.Game.Item it = Fight.ById(itemId);
+        if (it == null || it.kind != 0) { return "这不是可使用的物品"; }
+        if (!Fight.BagTake(s, itemId, 1)) { return "背包里没有这件物品"; }
+        s.row.hp = s.row.hp + it.hp;
+        int max = Fight.MaxHp(s.row);
+        if (s.row.hp > max) { s.row.hp = max; }
+        s.dirty = true;
+        return "";
+    }
+
+    /* 穿戴：kind 1→武器 2→防具；原装备回到背包；minLevel 门槛。 */
+    static string Equip(Session s, int itemId) {
+        ZanWeb.Model.Game.Item it = Fight.ById(itemId);
+        if (it == null || (it.kind != 1 && it.kind != 2)) {
+            return "这不是可穿戴的装备";
+        }
+        if (s.row.level < it.minLevel) {
+            return "需要 " + Convert.ToString(it.minLevel) + " 级";
+        }
+        if (!Fight.BagTake(s, itemId, 1)) { return "背包里没有这件物品"; }
+        int slot = it.kind == 1 ? s.row.weaponId : s.row.armorId;
+        if (slot > 0) { Fight.BagAdd(s, slot, 1); }
+        if (it.kind == 1) { s.row.weaponId = it.id; }
+        else { s.row.armorId = it.id; }
+        s.row.hp = Fight.ClampHp(s.row);
+        s.dirty = true;
+        return "";
+    }
+
+    /* 卸下：slot "weapon"/"armor"，装备回背包。 */
+    static string TakeOff(Session s, string slot) {
+        int cur = slot == "weapon" ? s.row.weaponId
+            : slot == "armor" ? s.row.armorId : -1;
+        if (cur <= 0) { return "这个位置本来就没穿"; }
+        if (slot == "weapon") { s.row.weaponId = 0; }
+        else { s.row.armorId = 0; }
+        Fight.BagAdd(s, cur, 1);
+        s.row.hp = Fight.ClampHp(s.row);
+        s.dirty = true;
+        return "";
+    }
+
+    static int ClampHp(ZanWeb.Model.Game.Player row) {
+        int max = Fight.MaxHp(row);
+        if (row.hp > max) { return max; }
+        return row.hp;
+    }
+
+    /* 商店可购列表：kind 1/2/0 且 price>0（材料只能卖）。 */
+    static JsonValue ShopJson() {
+        JsonValue arr = JsonValue.NewArray();
+        for (int i = 0; i < Fight.items.Count; i = i + 1) {
+            ZanWeb.Model.Game.Item it = Fight.items[i];
+            if (it.kind == 3 || it.price <= 0) { continue; }
+            JsonValue o = JsonValue.NewObject();
+            o.Set("id", JsonValue.NewNum(Convert.ToString(it.id)));
+            o.Set("name", JsonValue.NewStr(it.name));
+            o.Set("kind", JsonValue.NewNum(Convert.ToString(it.kind)));
+            o.Set("price", JsonValue.NewNum(Convert.ToString(it.price)));
+            o.Set("atk", JsonValue.NewNum(Convert.ToString(it.atk)));
+            o.Set("def", JsonValue.NewNum(Convert.ToString(it.def)));
+            o.Set("heal", JsonValue.NewNum(Convert.ToString(it.hp)));
+            o.Set("minLevel", JsonValue.NewNum(Convert.ToString(it.minLevel)));
+            arr.Append(o);
+        }
+        return arr;
+    }
+
+    /* 购买：材料不卖；金币现结。返回错误串，空串成功。 */
+    static string Buy(Session s, int itemId, int count) {
+        if (count < 1) { count = 1; }
+        if (count > 99) { count = 99; }
+        ZanWeb.Model.Game.Item it = Fight.ById(itemId);
+        if (it == null || it.kind == 3 || it.price <= 0) {
+            return "商店不卖这件物品";
+        }
+        long cost = it.price * count;
+        if (s.row.gold < cost) { return "金币不够（需 " + Convert.ToString(cost) + "）"; }
+        s.row.gold = s.row.gold - cost;
+        Fight.BagAdd(s, itemId, count);
+        s.dirty = true;
+        return "";
+    }
+
+    /* 出售：卖价 = 售价一半（材料同理），下限 1。 */
+    static string Sell(Session s, int itemId, int count) {
+        if (count < 1) { count = 1; }
+        ZanWeb.Model.Game.Item it = Fight.ById(itemId);
+        if (it == null) { return "没有这种物品"; }
+        if (!Fight.BagTake(s, itemId, count)) { return "背包里数量不够"; }
+        long gain = it.price / 2 * count;
+        if (gain < 1) { gain = 1; }
+        s.row.gold = s.row.gold + gain;
+        s.dirty = true;
+        return "";
+    }
+}

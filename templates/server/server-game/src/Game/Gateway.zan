@@ -31,10 +31,23 @@ namespace ZanWeb.Game;
      {"op":"walk","x","y"}                   {"ok":1} + 本区同图 ev walk
      {"op":"say","text"}                     {"ok":1} + 本区 ev chat
      {"op":"who"}                            {"ok":1,"rows":[同图同区玩家]}
+     {"op":"mobs"}                           {"ok":1,"rows":[本地图怪物]}
+     {"op":"hunt","mob":模板id}              {"ok":1,"fight","self"}（打一轮）
+     {"op":"auto","mob":模板id,"on":1}       {"ok":1,"auto"}（开关挂机，
+                                             每拍 ev fight 推回战况）
+     {"op":"bag"}                            {"ok":1,"items","self"}
+     {"op":"use","item":id}                  {"ok":1,"self"} / {"ok":0,"err"}
+     {"op":"equip","item":id}                {"ok":1,"self"}（武器/防具）
+     {"op":"takeoff","slot":"weapon"}        {"ok":1,"self"}
+     {"op":"shop"}                           {"ok":1,"shop"}
+     {"op":"buy","item":id,"count":2}        {"ok":1,"self"}（金币现结）
+     {"op":"sell","item":id,"count":1}       {"ok":1,"self"}（半价回收）
 
      推送：{"ev":"chat","from","text"} {"ev":"walk",...} {"ev":"move",...}
            {"ev":"announce","title","body"} {"ev":"kick","reason"}（客户端收到后自行断开；
            服务端连接已在 kicked 名单，下一条消息后 worker 收口）
+           {"ev":"fight",...}（挂机战况）{"ev":"levelup","level"}
+           {"ev":"drop","item","count"} {"ev":"die"}
      聊天/动向按区服收窄；公告与 GM 喊话全服可见。
 
    Worker 的 TCP 回调按 recv 分块交付，此处按连接缓冲、按行拆分。
@@ -183,7 +196,73 @@ class Gateway {
         if (op == "walk") { Gateway.Walk(conn, s, m); return; }
         if (op == "say") { Gateway.Say(conn, s, m.Str("text", "")); return; }
         if (op == "who") { await Gateway.Who(conn, s); return; }
+
+        /* 战斗闭环：刷怪/打怪/挂机/背包/商店（Fight 模块实现）。 */
+        if (op == "mobs") {
+            JsonValue r0 = Gateway.Ok();
+            r0.Set("rows", Fight.MobList(s, now));
+            Gateway.Send(conn, r0);
+            return;
+        }
+        if (op == "hunt") { Fight.Hunt(conn, s, m, now); return; }
+        if (op == "auto") {
+            string autoErr = Fight.Auto(s, m);
+            if (autoErr.Length > 0) {
+                Gateway.Send(conn, Gateway.Err(autoErr));
+                return;
+            }
+            JsonValue r1 = Gateway.Ok();
+            r1.Set("auto", JsonValue.NewNum(Convert.ToString(s.autoMobId)));
+            Gateway.Send(conn, r1);
+            return;
+        }
+        if (op == "bag") {
+            JsonValue r2 = Gateway.Ok();
+            r2.Set("items", Fight.BagJson(s));
+            Gateway.SelfInto(r2, s);
+            Gateway.Send(conn, r2);
+            return;
+        }
+        if (op == "use") {
+            Gateway.ItemChange(conn, s, Fight.Use(s, m.Int("item", 0)));
+            return;
+        }
+        if (op == "equip") {
+            Gateway.ItemChange(conn, s, Fight.Equip(s, m.Int("item", 0)));
+            return;
+        }
+        if (op == "takeoff") {
+            Gateway.ItemChange(conn, s, Fight.TakeOff(s, m.Str("slot", "")));
+            return;
+        }
+        if (op == "shop") {
+            JsonValue r3 = Gateway.Ok();
+            r3.Set("shop", Fight.ShopJson());
+            Gateway.Send(conn, r3);
+            return;
+        }
+        if (op == "buy") {
+            Gateway.ItemChange(conn, s,
+                Fight.Buy(s, m.Int("item", 0), m.Int("count", 1)));
+            return;
+        }
+        if (op == "sell") {
+            Gateway.ItemChange(conn, s,
+                Fight.Sell(s, m.Int("item", 0), m.Int("count", 1)));
+            return;
+        }
         Gateway.Send(conn, Gateway.Err("未知 op: " + op));
+    }
+
+    /* 背包/商店类 op 的统一收尾：err 非空答错误，否则 ok + 新状态。 */
+    static void ItemChange(Connection conn, Session s, string err) {
+        if (err.Length > 0) {
+            Gateway.Send(conn, Gateway.Err(err));
+            return;
+        }
+        JsonValue r = Gateway.Ok();
+        Gateway.SelfInto(r, s);
+        Gateway.Send(conn, r);
     }
 
     /* ---- 账号：注册 / 登录 ---- */
@@ -448,6 +527,11 @@ class Gateway {
             row.mapId = 1;
             row.x = 5;
             row.y = 5;
+            row.level = 1;
+            row.exp = 0;
+            row.weaponId = 0;
+            row.armorId = 0;
+            row.hp = Fight.MaxHp(row);
             row.status = 1;
             row.lastLoginAt = now;
             row.lastLogoutAt = 0;
@@ -524,13 +608,14 @@ class Gateway {
         }
     }
 
-    /* enter/create 的共同收尾：挂角色进世界、向本区播报动向，
+    /* enter/create 的共同收尾：挂角色进世界、装载背包、向本区播报动向，
        答 self+maps+announce；offline 非空时附带离线结算摘要。 */
     static async void IntoWorld(Connection conn, Session s, IDbConnection db,
                                 ZanWeb.Model.Game.Realm realm,
                                 ZanWeb.Model.Game.Player row, long now,
                                 JsonValue offline) {
         World.EnterWorld(s, realm.id, row, now);
+        await Fight.LoadBag(db, s);
         JsonValue r = Gateway.Ok();
         r.Set("self", Gateway.SelfJson(s));
         await Gateway.MapsInto(r, db);
@@ -704,7 +789,22 @@ class Gateway {
         o.Set("map", JsonValue.NewNum(Convert.ToString(s.row.mapId)));
         o.Set("x", JsonValue.NewNum(Convert.ToString(s.row.x)));
         o.Set("y", JsonValue.NewNum(Convert.ToString(s.row.y)));
+        /* 战斗态：血量/经验/攻防/装备位。数值公式在 Fight，客户端可复算。 */
+        o.Set("hp", JsonValue.NewNum(Convert.ToString(s.row.hp)));
+        o.Set("maxhp", JsonValue.NewNum(Convert.ToString(Fight.MaxHp(s.row))));
+        o.Set("exp", JsonValue.NewNum(Convert.ToString(s.row.exp)));
+        o.Set("expnext", JsonValue.NewNum(Convert.ToString(Fight.ExpNext(s.row.level))));
+        o.Set("atk", JsonValue.NewNum(Convert.ToString(Fight.Atk(s.row))));
+        o.Set("def", JsonValue.NewNum(Convert.ToString(Fight.Def(s.row))));
+        o.Set("weapon", JsonValue.NewNum(Convert.ToString(s.row.weaponId)));
+        o.Set("armor", JsonValue.NewNum(Convert.ToString(s.row.armorId)));
+        o.Set("auto", JsonValue.NewNum(Convert.ToString(s.autoMobId)));
         return o;
+    }
+
+    /* 把最新 self 挂到回复上（bag/use/equip/buy/sell 等状态变化类 op）。 */
+    static void SelfInto(JsonValue r, Session s) {
+        r.Set("self", Gateway.SelfJson(s));
     }
 
     static async void SendMaps(Connection conn, int realmId) {

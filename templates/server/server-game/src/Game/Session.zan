@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net;
 
 namespace ZanWeb.Game;
@@ -27,6 +28,16 @@ class Session {
 
     /* 角色行的内存副本；未进区为 null。落库与读档都经它。 */
     ZanWeb.Model.Game.Player row;
+
+    /* 背包内存副本（物品 id 与数量平行列表，同物品合并一项）。
+       变更置 bagDirty，随 flush/登出整包回写 game_bag。 */
+    List<int> bagIds = new List<int>();
+    List<int> bagCounts = new List<int>();
+    bool bagDirty;
+
+    /* 自动挂机：正在打击的怪物模板 id（game_mob.id），0=关闭。
+       每个 tick 由 Fight.AutoTick 打一轮并把结果 ev fight 推回。 */
+    int autoMobId;
 
     bool dirty;
     long lastSeen;

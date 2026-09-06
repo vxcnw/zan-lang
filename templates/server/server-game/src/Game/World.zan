@@ -104,10 +104,11 @@ class World {
             + " online=" + Convert.ToString(World.OnlineCount()));
     }
 
-    /* 离开当前区服（换区重进时先走这里）：把角色落库再摘下来，
+    /* 离开当前区服（换区重进时先走这里）：把角色与背包落库再摘下来，
        连接与会话保留，账号仍算在线。 */
     static async void ExitWorld(Session s) {
         if (s.row == null) { return; }
+        Fight.PersistBagNow(s);
         ZanWeb.Model.Game.Player row = s.row;
         s.row = null;
         s.realmId = 0;
@@ -127,6 +128,7 @@ class World {
         if (idx != null && idx.cid == cid) { World.byAccount.Remove(s.accountId); }
         if (s.row != null) {
             s.row.lastLogoutAt = WebApp.NowSeconds();
+            Fight.PersistBagNow(s);
             await World.PersistRow(s.row, true);
         }
         Console.WriteLine("[world] leave #" + Convert.ToString(cid)
@@ -217,6 +219,7 @@ class World {
         if (World.running) { return; }
         World.running = true;
         World.dbctx = ctx;
+        Task.Spawn(Fight.Bootstrap(ctx));
         Task.Spawn(World.Loop());
         Console.WriteLine("[world] tick " + Convert.ToString(Cfg.Game.tickMs)
             + "ms flush=" + Convert.ToString(Cfg.Game.flushSeconds) + "s");
@@ -230,6 +233,7 @@ class World {
             elapsed = elapsed + Cfg.Game.tickMs;
             World.Sweep(now);
             Gateway.SweepIdle(now);
+            Fight.Tick(now);
             if (elapsed >= Cfg.Game.flushSeconds * 1000) {
                 elapsed = 0;
                 int n = await World.Flush();
@@ -250,7 +254,8 @@ class World {
             if (s.kicked) { continue; }
             if (now - s.lastSeen > Cfg.Game.kickSeconds) {
                 Console.WriteLine("[world] timeout #" + Convert.ToString(s.cid)
-                    + " " + s.username);
+                    + " " + s.username + " idle="
+                    + Convert.ToString(now - s.lastSeen) + "s");
                 s.kicked = true;
                 Gateway.Send(s.conn, Gateway.Ev("kick", "心跳超时"));
                 s.conn.Close();
@@ -268,9 +273,12 @@ class World {
             int n = 0;
             for (int i = 0; i < rows.Count; i = i + 1) {
                 Session s = rows[i];
-                if (s.row == null || !s.dirty) { continue; }
-                s.dirty = false;
-                if (await World.WriteRow(db, s.row)) { n = n + 1; }
+                if (s.row == null) { continue; }
+                if (s.dirty) {
+                    s.dirty = false;
+                    if (await World.WriteRow(db, s.row)) { n = n + 1; }
+                }
+                n = n + await Fight.FlushBag(db, s);
             }
             return n;
         } finally {
@@ -303,6 +311,10 @@ class World {
         long now = WebApp.NowSeconds();
         int n = await db.Update<ZanWeb.Model.Game.Player>()
             .Set(a => a.level, row.level)
+            .Set(a => a.hp, row.hp)
+            .Set(a => a.exp, row.exp)
+            .Set(a => a.weaponId, row.weaponId)
+            .Set(a => a.armorId, row.armorId)
             .Set(a => a.gold, row.gold)
             .Set(a => a.gems, row.gems)
             .Set(a => a.mapId, row.mapId)

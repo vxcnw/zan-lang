@@ -237,7 +237,86 @@ class Schema {
             int _id = await db.Insert<Announce>(row).ExecuteIdentityAsync();
             if (_id <= 0) { return false; }
         }
-        return true;
+        if (!await Schema.SeedItems(db)) { return false; }
+        return await Schema.SeedMobs(db);
+    }
+
+    /* 物品目录：消耗品/武器/防具可直接购买，材料（kind=3）只掉落+卖店
+       ——打金换药的循环出水口。id 由插入顺序决定，怪物种子的掉落引用它。 */
+    static async bool SeedItems(IDbConnection db) {
+        int n = await db.Select<Item>().CountAsync();
+        if (n > 0) { return true; }
+        /* 消耗品 */
+        if (!await Schema.AddItem(db, "金创药(小)", 0, 0, 0, 60, 20, 1)) { return false; }
+        if (!await Schema.AddItem(db, "金创药(大)", 0, 0, 0, 200, 80, 1)) { return false; }
+        /* 武器 */
+        if (!await Schema.AddItem(db, "木剑", 1, 5, 0, 0, 50, 1)) { return false; }
+        if (!await Schema.AddItem(db, "铁剑", 1, 15, 0, 0, 400, 5)) { return false; }
+        if (!await Schema.AddItem(db, "修罗", 1, 35, 0, 0, 2000, 12)) { return false; }
+        if (!await Schema.AddItem(db, "屠龙", 1, 70, 0, 0, 9000, 20)) { return false; }
+        /* 防具 */
+        if (!await Schema.AddItem(db, "布衣", 2, 0, 3, 0, 40, 1)) { return false; }
+        if (!await Schema.AddItem(db, "轻盔", 2, 0, 10, 0, 350, 5)) { return false; }
+        if (!await Schema.AddItem(db, "战神盔甲", 2, 0, 25, 0, 1800, 12)) { return false; }
+        /* 材料（只卖店） */
+        if (!await Schema.AddItem(db, "兽皮", 3, 0, 0, 0, 30, 1)) { return false; }
+        if (!await Schema.AddItem(db, "蝎子壳", 3, 0, 0, 0, 60, 1)) { return false; }
+        if (!await Schema.AddItem(db, "祖玛头像", 3, 0, 0, 0, 200, 1)) { return false; }
+        return await Schema.AddItem(db, "赤月精华", 3, 0, 0, 0, 500, 1);
+    }
+
+    static async bool AddItem(IDbConnection db, string name, int kind, int atk,
+                           int def, int heal, long price, int minLevel) {
+        Item it = new Item();
+        it.name = name;
+        it.kind = kind;
+        it.atk = atk;
+        it.def = def;
+        it.hp = heal;
+        it.price = price;
+        it.minLevel = minLevel;
+        it.status = 1;
+        int _id = await db.Insert<Item>(it).ExecuteIdentityAsync();
+        return _id > 0;
+    }
+
+    /* 刷怪点：每行 count 只同名怪；新手怪必掉兽皮（卖店买药的保底循环），
+       高级图掉装备与贵材料。掉落按物品名解析成 id，不依赖自增序号。
+       数值面向模板演示，平衡留给二开。 */
+    static async bool SeedMobs(IDbConnection db) {
+        int n = await db.Select<Mob>().CountAsync();
+        if (n > 0) { return true; }
+        if (!await Schema.AddMob(db, "稻草人", 1, 1, 30, 5, 0, 15, 3, 8, 8, 3, "兽皮", 10000)) { return false; }
+        if (!await Schema.AddMob(db, "多钩猫", 2, 5, 120, 18, 5, 45, 15, 30, 10, 3, "蝎子壳", 3000)) { return false; }
+        if (!await Schema.AddMob(db, "沃玛战士", 2, 6, 180, 25, 8, 70, 20, 45, 12, 2, "修罗", 1500)) { return false; }
+        if (!await Schema.AddMob(db, "僵尸", 3, 12, 500, 55, 20, 220, 60, 120, 15, 3, "金创药(大)", 2500)) { return false; }
+        if (!await Schema.AddMob(db, "祖玛卫士", 4, 20, 1600, 120, 45, 800, 200, 400, 20, 2, "祖玛头像", 2000)) { return false; }
+        return await Schema.AddMob(db, "赤月恶魔", 5, 30, 6000, 300, 90, 3000, 800, 1500, 60, 1, "赤月精华", 1000);
+    }
+
+    static async bool AddMob(IDbConnection db, string name, int mapId, int level,
+                          int hp, int atk, int def, int exp, long goldMin,
+                          long goldMax, int respawnSec, int count,
+                          string dropItem, int dropRate) {
+        Item drop = await db.Select<Item>()
+            .Where(a => a.name == dropItem).FirstAsync();
+        Mob m = new Mob();
+        m.name = name;
+        m.mapId = mapId;
+        m.level = level;
+        m.hp = hp;
+        m.atk = atk;
+        m.def = def;
+        m.exp = exp;
+        m.goldMin = goldMin;
+        m.goldMax = goldMax;
+        m.respawnSec = respawnSec;
+        m.count = count;
+        m.dropItemId = drop != null ? drop.id : 0;
+        m.dropRate = dropRate;
+        m.status = 1;
+        int _id = await db.Insert<Mob>(m).ExecuteIdentityAsync();
+        return _id > 0;
     }
 
     static async bool AddRealm(IDbConnection db, string name, int state,

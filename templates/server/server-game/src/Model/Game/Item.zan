@@ -1,0 +1,30 @@
+using System.Data.Orm;
+
+namespace ZanWeb.Model.Game;
+
+/* 物品模板：kind 0=消耗品（hp=回复量）1=武器（atk）2=防具（def）
+   3=材料（只能卖店）。price 是商店售价；卖给商店按 price/2 结算，
+   材料（kind=3）不可购买只能掉落+出售——这是打金闭环的出水口。
+   minLevel 是穿戴门槛；status=1 上架/可掉落。 */
+[Table(Name = "game_item")]
+class Item {
+    [Column(IsIdentity = true)]
+    int id;
+
+    [Column(StringLength = 32, IsNullable = false)]
+    string name;
+
+    int kind;
+
+    /* 数值：武器加攻、防具加防、消耗品回血；其余为 0。 */
+    int atk;
+    int def;
+    int hp;
+
+    /* 商店售价（金币）；0=非卖品。 */
+    long price;
+
+    int minLevel;
+
+    int status;
+}

@@ -1,0 +1,41 @@
+using System.Data.Orm;
+
+namespace ZanWeb.Model.Game;
+
+/* 怪物模板 = 一个刷怪点：每行在同一地图刷 count 只同名怪，杀死后
+   respawnSec 秒重生。实例态（当前血量、存活、重生时刻）在世界内存
+   （Game.Fight），不落库——重启即满血重刷。dropItemId/dropRate(万分比)
+   描述掉落：命中概率时把一件 game_item 放进背包。status=1 启用。 */
+[Table(Name = "game_mob")]
+class Mob {
+    [Column(IsIdentity = true)]
+    int id;
+
+    [Column(StringLength = 32, IsNullable = false)]
+    string name;
+
+    /* 所在地图（game_map.id）：玩家必须先 move 过去才能打。 */
+    int mapId;
+
+    int level;
+
+    int hp;
+    int atk;
+    int def;
+
+    /* 击杀奖励：固定经验；金币在 [goldMin, goldMax] 内随机。 */
+    int exp;
+    long goldMin;
+    long goldMax;
+
+    /* 重生等待（秒）与同点数量。 */
+    int respawnSec;
+    int count;
+
+    /* 掉落：game_item.id + 万分比概率（0=不掉）。 */
+    int dropItemId;
+    int dropRate;
+
+    /* 1=启用；0=停用（停用点不再重生，重启后不刷）。 */
+    int status;
+}

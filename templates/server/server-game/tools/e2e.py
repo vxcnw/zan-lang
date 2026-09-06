@@ -1,22 +1,19 @@
 """End-to-end self-test for the realm-based server-game template.
 
-Covers the full player flow front to back: web register/forgot (3-step with
-security question, wrong-answer lockout), TCP realms/register/login/
+Covers the full player flow AND the combat loop: web register/forgot (3-step
+with security question, wrong-answer lockout), TCP realms/register/login/
 characters/create/enter, realm-scoped chat/walk/who, realm switch with
 character state kept, GM realm CRUD with maintain gating, account ban +
-kick, online grant pushes, announce push, DB flush persistence and
-pro-rata capped offline settlement -- 80 assertions. Stdlib urllib/socket
-only.
+kick, online grant pushes, announce push, pro-rata capped offline
+settlement, then the full hunt loop -- mob list, manual hunt with
+exp/levelup/gold/drops, shop buy/sell, potion use, weapon equip/takeoff,
+per-tick auto-hunt events, death respawn in town, GM item gift (online
+push + offline grant) and DB persistence of hp/exp/equipped weapon/bag --
+106 assertions. Stdlib urllib/socket only.
 
-Usage (run from the SERVER directory, so it can open data/app.db):
-  1. stop the server, then delete data/app.db* for a fresh database
-  2. start the server:  ./server-game.exe   (127.0.0.1:8099 / 7100)
-  3. run:               python tools/e2e.py
-
-Registers fresh accounts (alice / bob / carl / dave / mallory) over web
-and TCP, so it needs the seeded admin (admin/admin1234) and empty
-game_account / game_player tables -- rerunning against a used database
-fails at register.
+Run from the SERVER directory against a FRESH data/app.db:
+  1. stop server, delete data/app.db*, start server
+  2. python tools/e2e.py
 """
 import json
 import socket
@@ -30,10 +27,12 @@ BASE = "http://127.0.0.1:8099"
 GAME = ("127.0.0.1", 7100)
 checks = 0
 
+T0 = time.time()
+
 def ok(cond, label):
     global checks
     checks += 1
-    print(f"[{'PASS' if cond else 'FAIL'}] {label}")
+    print(f"[{time.time()-T0:7.1f}s] [{'PASS' if cond else 'FAIL'}] {label}")
     if not cond:
         print("ALL FAIL at", checks)
         sys.exit(1)
@@ -72,12 +71,14 @@ class Client:
         self.sock = socket.create_connection(GAME, timeout=10)
         self.buf = b""
         self.pending = []
+        self.verbose = False
 
     def send(self, obj):
         self.sock.sendall((json.dumps(obj, ensure_ascii=False) + "\n").encode())
 
     def _fill(self, timeout):
         self.sock.settimeout(timeout)
+        got = False
         try:
             while True:
                 d = self.sock.recv(4096)
@@ -87,7 +88,13 @@ class Client:
                 while b"\n" in self.buf:
                     line, self.buf = self.buf.split(b"\n", 1)
                     if line.strip():
-                        self.pending.append(json.loads(line))
+                        m = json.loads(line)
+                        self.pending.append(m)
+                        got = True
+                        if self.verbose:
+                            print(f"[{time.time()-T0:7.1f}s] RX {json.dumps(m, ensure_ascii=False)[:220]}")
+                if got:
+                    return True
         except socket.timeout:
             pass
         except OSError:
@@ -297,13 +304,13 @@ ok(d is None, "other-realm player does not receive chat")
 
 bob.pending.clear()  # 丢弃 bob 自己的 ev 回声与旧回复，保证下面的 ok 对上本条请求
 bob.send({"op": "walk", "x": 999, "y": 3})
-ok(bob.ok_for() is not None, "walk accepts clamped coords")
+ok(bob.ev("walk") is not None, "walk accepts clamped coords")
 w = carl.ev("walk")
 ok(w and w.get("x") == 511 and w.get("y") == 3, "walk clamped to walkMax and broadcast")
 ok(dave.ev("walk") is None, "walk not sent to other realm")
 bob.pending.clear()
 bob.send({"op": "who"})
-r = bob.ok_for()
+r = bob.ok_for(lambda m: "rows" in m)
 ok(r and sorted(x["name"] for x in r["rows"]) == ["刀狂", "弓长"],
    "who lists same-realm same-map players only")
 
@@ -471,5 +478,173 @@ ok(r is not None, "offline settlement grants 2h idle gold on enter")
 carl2.drop()
 dave.drop()
 alice.drop()
+
+# ---------- 7. 战斗闭环：打怪/升级/掉落/背包/商店/挂机/死亡 ----------
+h = tcp()
+h.verbose = True
+h.recv()
+h.send({"op": "register", "user": "hunter", "pass": "secret1",
+        "question": "旧手机号", "answer": "8888"})
+h.reply_for(lambda m: m.get("ok") == 1)
+h.send({"op": "login", "user": "hunter", "pass": "secret1"})
+h.reply_for(lambda m: m.get("ok") == 1)
+h.send({"op": "create", "realm": 1, "name": "小猎手", "job": 0})
+r = h.ok_for(lambda m: "self" in m)
+ok(r is not None, "hunter creates fighter")
+hunter_uid = r["self"]["uid"]
+s0 = r["self"]
+ok(s0["hp"] == s0["maxhp"] and s0["level"] == 1,
+   "create starts with full hp at level 1")
+
+h.send({"op": "mobs"})
+r = h.ok_for(lambda m: "rows" in m)
+scare = [x for x in r["rows"] if x["name"] == "稻草人"]
+ok(len(r["rows"]) >= 3 and len(scare) == len(r["rows"])
+   and all(x["alive"] == 1 for x in scare),
+   "mobs lists alive scarecrows on newbie map")
+
+# 打到升级：稻草人 exp 15 = ExpNext(1)，首杀必升级
+for _ in range(4):
+    h.send({"op": "hunt", "mob": scare[0]["tpl"]})
+    r = h.ok_for(lambda m: "fight" in m)
+    if r["self"]["level"] >= 2:
+        break
+ok(r is not None and r["self"]["level"] == 2 and r["self"]["maxhp"] == 100,
+   "first kill levels up and raises max hp")
+h.send({"op": "bag"})
+r = h.ok_for(lambda m: "items" in m)
+pelts = [i for i in r["items"] if i["name"] == "兽皮"]
+ok(len(pelts) == 1 and pelts[0]["count"] >= 1,
+   "scarecrow drop lands in bag")
+
+# 商店：查目录拿物品 id，买药用金币，卖皮回收
+h.send({"op": "shop"})
+r = h.ok_for(lambda m: "shop" in m)
+shop = {i["name"]: i["id"] for i in r["shop"]}
+ok("金创药(小)" in shop and "铁剑" in shop and "兽皮" not in shop,
+   "shop sells potions and gear, not materials")
+st, j, _ = gm("/admin/game/players/save", {
+    "id": str(hunter_uid), "nickname": "小猎手", "realmId": "1", "job": "0",
+    "level": "5", "gold": "1000", "gems": "0", "mapId": "1",
+    "accountStatus": "1", "banReason": ""}, cookie)
+ok(j.get("code") == "0000", "GM tops up gold for shop test")
+h.send({"op": "state"})
+r = h.reply_for(lambda m: m.get("ev") == "state")
+gold0 = r["self"]["gold"]
+ok(gold0 == 1000, "GM gold lands in session state")
+h.send({"op": "buy", "item": shop["金创药(小)"], "count": 2})
+r = h.ok_for(lambda m: "self" in m)
+ok(r is not None and r["self"]["gold"] == gold0 - 40, "buy charges gold")
+
+# 换图打怪掉血，再用药回
+h.send({"op": "move", "map": 2})
+r = h.ok_for(lambda m: "self" in m and m["self"]["map"] == 2)
+ok(r is not None, "move to wildcat map (level gate ok)")
+cat = None
+h.send({"op": "mobs"})
+r = h.ok_for(lambda m: "rows" in m)
+for x in r["rows"]:
+    if x["name"] == "多钩猫" and x["alive"] == 1:
+        cat = x["tpl"]
+        break
+ok(cat is not None, "wildcat mob lives on map 2")
+hurt = 0
+for _ in range(3):
+    h.send({"op": "hunt", "mob": cat})
+    r = h.ok_for(lambda m: "fight" in m)
+    if r["fight"].get("mdmg", 0) > 0:
+        hurt = r["self"]["hp"]
+ok(hurt > 0 and hurt < r["self"]["maxhp"], "mob retaliates and hurts player")
+h.send({"op": "use", "item": shop["金创药(小)"]})
+r = h.ok_for(lambda m: "self" in m)
+ok(r["self"]["hp"] > hurt, "potion heals player")
+
+# GM 设 5 级 + 送铁剑 → ev drop 到达 → 穿上加攻
+st, j, _ = gm("/admin/game/players/save", {
+    "id": str(hunter_uid), "nickname": "小猎手", "realmId": "1", "job": "0",
+    "level": "5", "gold": str(gold0), "gems": "0", "mapId": "2",
+    "accountStatus": "1", "banReason": "",
+    "giftItem": str(shop["铁剑"]), "giftCount": "1"}, cookie)
+ok(j.get("code") == "0000", "GM gifts sword")
+k = h.reply_for(lambda m: m.get("ev") == "drop"
+                and "铁剑" in (m.get("item") or ""))
+ok(k is not None, "gift drop event reaches client")
+h.send({"op": "equip", "item": shop["铁剑"]})
+r = h.ok_for(lambda m: "self" in m)
+ok(r["self"]["weapon"] == shop["铁剑"]
+   and r["self"]["atk"] >= 6 + 5 * 2 + 5 + 15,
+   "equipping sword raises attack")
+h.send({"op": "takeoff", "slot": "weapon"})
+r = h.ok_for(lambda m: "self" in m)
+ok(r["self"]["weapon"] == 0, "takeoff clears weapon slot")
+h.send({"op": "equip", "item": shop["铁剑"]})
+h.ok_for(lambda m: "self" in m)
+
+# 卖兽皮换钱（材料不可买只能卖——打金闭环）
+h.send({"op": "bag"})
+r = h.ok_for(lambda m: "items" in m)
+pelts = [i for i in r["items"] if i["name"] == "兽皮"]
+pelt_n = pelts[0]["count"] if pelts else 0
+pelt_id = pelts[0]["id"] if pelts else 0
+gold1 = r["self"]["gold"] if pelts else 0
+h.send({"op": "sell", "item": pelt_id, "count": pelt_n})
+r = h.ok_for(lambda m: "self" in m)
+ok(pelt_n > 0 and r["self"]["gold"] == gold1 + pelt_n * 15,
+   "selling pelts pays half price")
+
+# 自动挂机：开 → 每拍 ev fight → 关
+h.send({"op": "auto", "mob": cat, "on": 1})
+r = h.ok_for(lambda m: "auto" in m)
+ok(r["auto"] == cat, "auto-hunt toggles on")
+time.sleep(4)
+h.send({"op": "auto", "mob": cat, "on": 0})
+r = h.ok_for(lambda m: "auto" in m)
+ok(r["auto"] == 0, "auto-hunt toggles off")
+fights = 0
+while True:
+    m = h.reply_for(lambda m: m.get("ev") in ("fight", "levelup", "drop"),
+                    timeout=3)
+    if m is None:
+        break
+    if m.get("ev") == "fight":
+        fights += 1
+ok(fights >= 2, "auto-hunt pushes fight events each tick")
+
+# 死亡：GM 送到 30 级赤月峡谷，auto 打 BOSS 三回合内倒下回城
+st, j, _ = gm("/admin/game/players/save", {
+    "id": str(hunter_uid), "nickname": "小猎手", "realmId": "1", "job": "0",
+    "level": "30", "gold": str(gold0), "gems": "0", "mapId": "5",
+    "accountStatus": "1", "banReason": ""}, cookie)
+ok(j.get("code") == "0000", "GM moves hunter to boss map")
+h.send({"op": "auto", "mob": 6, "on": 1})
+r = h.ok_for(lambda m: "auto" in m)
+ok(r["auto"] == 6, "auto-hunt targets boss")
+died = False
+for _ in range(10):
+    m = h.reply_for(lambda m: m.get("ev") == "die", timeout=3)
+    if m is not None:
+        died = True
+        break
+h.pending.clear()
+h.send({"op": "state"})
+r = h.reply_for(lambda m: m.get("ev") == "state")
+ok(died and r["self"]["map"] == 1 and r["self"]["auto"] == 0
+   and r["self"]["hp"] == r["self"]["maxhp"] // 2,
+   "death respawns player in town with half hp, auto off")
+
+# 落库：背包/装备/血量随 flush 写入
+time.sleep(11)
+db = sqlite3.connect("data/app.db")
+row = db.execute(
+    'SELECT hp, weaponId FROM game_player WHERE id=?',
+    (hunter_uid,)).fetchone()
+ok(row is not None and row[1] == shop["铁剑"] and row[0] > 0,
+   "combat state persisted with equipped weapon")
+bags = db.execute(
+    'SELECT itemId, count FROM game_bag WHERE playerId=?',
+    (hunter_uid,)).fetchall()
+ok(any(b[1] >= 1 for b in bags), "bag rows persisted")
+db.close()
+h.drop()
 
 print(f"ALL PASS checks={checks}")
