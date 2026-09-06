@@ -4485,9 +4485,13 @@ int main(int argc, char **argv) {
             snprintf(sys, sizeof(sys), "%s/%s", exe_dir, sub);
 
             char cmd[4096];
+            /* --gc-sections pairs with the per-function .text sections the
+             * program object carries in publish mode (irgen_emit.c): without
+             * it a cross publish ships every reachable-from-vtable function
+             * the stdlib emission happened to define, ~20 KB on hello world. */
             snprintf(cmd, sizeof(cmd),
                      "ld.lld -static%s -o \"%s\" \"%s/crt1.o\" \"%s/crti.o\" \"%s\"",
-                     publish_mode ? " -s" : "", obj_path, sys, sys, obj_tmp);
+                     publish_mode ? " -s --gc-sections" : "", obj_path, sys, sys, obj_tmp);
             for (int di = 0; di < zan_lib_ndirs; di++) {
                 size_t cur = strlen(cmd);
                 snprintf(cmd + cur, sizeof(cmd) - cur, " -L\"%s\"",
@@ -4591,7 +4595,7 @@ int main(int argc, char **argv) {
             snprintf(cmd, sizeof(cmd),
                      "ld.lld -static%s -o \"%s\" \"%s/crt1.o\" \"%s/crti.o\""
                      " \"%s/clang_rt.crtbegin.o\" \"%s\"",
-                     publish_mode ? " -s" : "", obj_path, sys, sys, sys, obj_tmp);
+                     publish_mode ? " -s --gc-sections" : "", obj_path, sys, sys, sys, obj_tmp);
             for (int di = 0; di < zan_lib_ndirs; di++) {
                 size_t cur = strlen(cmd);
                 snprintf(cmd + cur, sizeof(cmd) - cur, " -L\"%s\"",
@@ -4707,12 +4711,12 @@ int main(int argc, char **argv) {
                 snprintf(cmd, sizeof(cmd),
                          "ld.lld -pie%s -o \"%s\" \"%s/crtbegin_dynamic.o\""
                          " \"%s\"",
-                         publish_mode ? " -s" : "", obj_path, sys, obj_tmp);
+                         publish_mode ? " -s --gc-sections" : "", obj_path, sys, obj_tmp);
             } else {
                 snprintf(cmd, sizeof(cmd),
                          "ld.lld -static%s -o \"%s\" \"%s/crtbegin_static.o\""
                          " \"%s\"",
-                         publish_mode ? " -s" : "", obj_path, sys, obj_tmp);
+                         publish_mode ? " -s --gc-sections" : "", obj_path, sys, obj_tmp);
             }
             for (int di = 0; di < zan_lib_ndirs; di++) {
                 size_t cur = strlen(cmd);
@@ -4860,7 +4864,7 @@ int main(int argc, char **argv) {
                      "ld.lld -m %s --stack 268435456%s%s -o \"%s\" "
                      "\"%s/crt2.o\" \"%s/crtbegin.o\"",
                      (target.arch == ZAN_ARCH_AARCH64) ? "arm64pe" : "i386pep",
-                     publish_mode ? " -s" : "",
+                     publish_mode ? " -s --gc-sections" : "",
                      (link_subsystem && strcmp(link_subsystem, "windows") == 0)
                          ? " --subsystem windows" : "",
                      obj_path, syslib, syslib);
@@ -4982,7 +4986,7 @@ int main(int argc, char **argv) {
             char cmd[8192];
             snprintf(cmd, sizeof(cmd),
                      "wasm-ld%s -o \"%s\" \"%s/crt1.o\" \"%s\"",
-                     publish_mode ? " -s" : "", obj_path, sys, obj_tmp);
+                     publish_mode ? " -s --gc-sections" : "", obj_path, sys, obj_tmp);
             for (int ei = 0; ei < extra_link_input_count; ei++) {
                 size_t cur = strlen(cmd);
                 snprintf(cmd + cur, sizeof(cmd) - cur, " \"%s\"",

@@ -3134,6 +3134,41 @@ foreach(_obf_case linux-x64:init_array linux-arm64:init_array
   set_tests_properties(publish_obf_ctor_${_obf_target} PROPERTIES TIMEOUT 180)
 endforeach()
 
+# ---- Published-size budgets (docs/embedded_runtime_assessment.md) ----
+# A minimal --publish build must stay small: a reintroduced fixed static
+# table or a cross link that lost --gc-sections trips these. Ceilings are
+# ~1.5x the measured baselines (host win-x64 publish: text 44.3 KB / file
+# 89 KB; linux-x64 cross publish: text 60.5 KB / file 73 KB) so LLVM-version
+# drift does not false-fail; raise a budget only alongside the doc.
+set(_size_src ${CMAKE_SOURCE_DIR}/tests/size/hello_budget.zan)
+set(_size_dir ${CMAKE_BINARY_DIR}/size_budget)
+file(MAKE_DIRECTORY ${_size_dir})
+set(_size_tool "")
+if(LLVM_TOOLS_BINARY_DIR AND EXISTS ${LLVM_TOOLS_BINARY_DIR}/llvm-size${CMAKE_EXECUTABLE_SUFFIX})
+  set(_size_tool ${LLVM_TOOLS_BINARY_DIR}/llvm-size${CMAKE_EXECUTABLE_SUFFIX})
+endif()
+if(_size_tool)
+  add_test(NAME size_budget_publish_host COMMAND ${CMAKE_COMMAND}
+    -DZANC=$<TARGET_FILE:zanc> -DSRC=${_size_src}
+    -DOUT=${_size_dir}/hello_host
+    -DSIZE_TOOL=${_size_tool}
+    -DMAX_TEXT=72000 -DMAX_FILE=150000
+    -DWORKDIR=${_size_dir}
+    -P ${CMAKE_SOURCE_DIR}/tests/run_size_budget.cmake)
+  set_tests_properties(size_budget_publish_host PROPERTIES TIMEOUT 240 LABELS "full;standard;smoke")
+  add_test(NAME size_budget_publish_linux_x64 COMMAND ${CMAKE_COMMAND}
+    -DZANC=$<TARGET_FILE:zanc> -DSRC=${_size_src}
+    -DOUT=${_size_dir}/hello_linux_x64
+    -DTARGET=linux-x64
+    -DSIZE_TOOL=${_size_tool}
+    -DMAX_TEXT=96000 -DMAX_FILE=120000
+    -DWORKDIR=${_size_dir}
+    -P ${CMAKE_SOURCE_DIR}/tests/run_size_budget.cmake)
+  set_tests_properties(size_budget_publish_linux_x64 PROPERTIES TIMEOUT 240 LABELS "full;standard;smoke")
+else()
+  message(STATUS "llvm-size not found beside LLVM; published-size budget tests skipped")
+endif()
+
 # ---- DAP integration test (real gdb-backed debug session) ----
 add_executable(dap_integration_test
     tests/dap/dap_integration_test.c

@@ -6,6 +6,18 @@
 > **2026-09-07 更新：第 1 步（消灭固定大表）已落地**，见文末「落地记录」。原文的符号表
 > 有两处过时：异常表当时已是动态增长；`__zan_site_dtors` 只在 `-leaks` 构建里存在，
 > 默认 descriptor 模式从不生成。
+>
+> **2026-09-07 更新 2：第 2 步的交叉 publish `--gc-sections` 已补齐**——linux/OHOS/
+> Android（pie+static）/Windows 交叉 PE/wasm 五处 ld.lld 链接在 publish 模式下现在
+> 与 native MinGW 路径一样传 `--gc-sections`（macOS 路径本就有 `-dead_strip`）。
+> 与 irgen_emit.c 已有的「publish 模式每函数一个 `.text.<fn>` 段」配合，交叉产物
+> 不再原样携带全部函数段。hello world（linux-x64 静态）file 78,728 → 74,728 B、
+> text 64,034 → 60,482 B；类多的程序收益更大。与 native publish text 44 KB 的
+> 差值主要是 musl 静态 printf 进 text（Windows 上 printf 在系统 DLL，不入 text），
+> 属预期。剩余的交叉/native 差值收口依赖运行时对象补 `-ffunction-sections`
+> （需 CI 重出提交对象，另案）。防回退：新增 `size_budget_publish_host` /
+> `size_budget_publish_linux_x64` 两条 ctest（tests/run_size_budget.cmake，
+> ~1.5× 基线余量），固定大表回归或交叉链接丢 `--gc-sections` 都会在此爆掉。
 
 ## 1. 实测：一个 hello world 的成本
 
