@@ -379,10 +379,17 @@ class LegendApp {
         detail = Text("", "secondary", 28); content.With(detail); detail.DockBottom();
     }
     void BuildTreasure() {
-        content.With(Text("寻宝", "yellow strong", 28)); Grid ring = Grid.Of(6); ring.Gap(8);
-        for (int i = 0; i < 18; i = i + 1) { Panel tile = Col("item-cell"); tile.With(Art(i % 3 == 0 ? "rune" : (i % 3 == 1 ? "reward" : "horn"), 0, 48)); ring.With(tile); } content.With(ring);
-        content.With(Btn("开启现有宝匣 / " + Rules.N(g.B("treasure_yuan")) + "元宝", "treasure", () => { g.Treasure(); Changed(); }));
-        Note(content, "当前为旧版宝匣规则，尚非文档藏宝图轮盘。普通抽次最低精良，保底次数来自配置表。文档规则迁移未完成。");
+        content.With(Text("藏宝图", "yellow strong", 28));
+        content.With(Text("现有藏宝图：" + Rules.N(g.treasureMaps) + " · 今日已抽：" + Rules.N(g.treasureDraws), "cyan", 28));
+        Grid ring = Grid.Of(3); ring.Gap(8);
+        for (int i = 0; i < 6; i = i + 1) {
+            Panel tile = Col("item-cell"); tile.Named("treasure-slot-" + Rules.N(i));
+            tile.With(Art(i == 0 ? "reward" : (i == 1 ? "reward" : (i == 2 ? "ore" : (i == 3 ? "rune" : (i == 4 ? "horn" : "sword")))), 0, 44));
+            tile.With(Text(g.TreasureSlot(i), "secondary", 32)); ring.With(tile);
+        }
+        content.With(ring);
+        content.With(Btn("使用藏宝图（消耗 1 张）", "treasure", () => { g.Treasure(); Changed(); }));
+        Note(content, "六格奖励池按配置结算：金币、元宝、黑铁、符文、药水或精良装备。每日福利补充藏宝图，装备奖励遇到满包时不消耗。");
     }
     bool IsRecycleSelected(Equipment e) { for (int i = 0; i < recycleTargets.Count; i = i + 1) { if (recycleTargets[i] == e) { return true; } } return false; }
     void ToggleRecycle(Equipment e) {

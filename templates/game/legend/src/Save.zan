@@ -16,7 +16,7 @@ class SaveStore {
         return dir + "/hero-v2.json";
     }
     static JsonValue Encode(Game g) {
-        JsonValue j = JsonValue.NewObject(); Rules.Put(j, "version", 6);
+        JsonValue j = JsonValue.NewObject(); Rules.Put(j, "version", 7);
         Rules.Put(j, "job", g.job);
         Rules.Put(j, "level", g.level);
         Rules.Put(j, "xp", g.xp);
@@ -74,6 +74,8 @@ class SaveStore {
         Rules.Put(j, "escortLeft", g.escortLeft);
         Rules.Put(j, "escortReward", g.escortReward);
         Rules.Put(j, "treasurePity", g.treasurePity);
+        Rules.Put(j, "treasureMaps", g.treasureMaps);
+        Rules.Put(j, "treasureDraws", g.treasureDraws);
         Rules.Put(j, "bossWins", g.bossWins);
         Rules.Put(j, "secrets", g.secrets);
         Rules.Put(j, "secretFloor", g.secretFloor);
@@ -103,7 +105,7 @@ class SaveStore {
     }
     static Game Decode(string text) {
         JsonValue j = JsonValue.Parse(text);
-        if (!j.IsObject() || (j.Int("version", 0) != 2 && j.Int("version", 0) != 3 && j.Int("version", 0) != 4 && j.Int("version", 0) != 5 && j.Int("version", 0) != 6) || !j.Has("savedAt") || !j.Has("job")) { throw new Exception("Unsupported or incomplete save"); }
+        if (!j.IsObject() || (j.Int("version", 0) != 2 && j.Int("version", 0) != 3 && j.Int("version", 0) != 4 && j.Int("version", 0) != 5 && j.Int("version", 0) != 6 && j.Int("version", 0) != 7) || !j.Has("savedAt") || !j.Has("job")) { throw new Exception("Unsupported or incomplete save"); }
         Game g = new Game();
         g.job = Rules.Clamp(j.Int("job", g.job), -1, 2);
         g.level = Rules.Clamp(j.Int("level", g.level), 1, GameTables.current.levels.rows.Count);
@@ -182,6 +184,8 @@ class SaveStore {
         g.escortLeft = Rules.Clamp(j.Int("escortLeft", g.escortLeft), 0, g.B("escort_seconds"));
         g.escortReward = Rules.Clamp(j.Int("escortReward", g.escortReward), 0, 1000000000);
         g.treasurePity = Rules.Clamp(j.Int("treasurePity", g.treasurePity), 0, g.B("treasure_pity") - 1);
+        g.treasureMaps = Rules.Clamp(j.Int("treasureMaps", g.treasureMaps), 0, 9999);
+        g.treasureDraws = Rules.Clamp(j.Int("treasureDraws", g.treasureDraws), 0, 1000000000);
         g.bossWins = Rules.Clamp(j.Int("bossWins", g.bossWins), 0, 1000000000);
         g.secrets = Rules.Clamp(j.Int("secrets", g.secrets), 0, GameTables.current.encounters.At(4).Int("max_progress"));
         g.secretFloor = Rules.Clamp(j.Int("secretFloor", g.secrets + 1), 1, GameTables.current.encounters.At(4).Int("max_progress"));

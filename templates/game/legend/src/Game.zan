@@ -62,6 +62,8 @@ class Game {
     int escortLeft;
     int escortReward;
     int treasurePity;
+    int treasureMaps = GameTables.Value("initial_treasure_maps");
+    int treasureDraws;
     int bossWins;
     int secrets;
     int secretFloor = 1; int secretWave; bool secretAutoPush = true;
@@ -192,7 +194,7 @@ class Game {
         long d = now / 86400;
         if (d <= day) { return; }
         day = d; dailyClaim = 0; bountyClaim = 0; dailyKills = 0;
-        bossTries = B("boss_tries"); arenaTries = B("arena_tries"); worldTries = B("world_tries"); escortTries = B("escort_tries");
+        bossTries = B("boss_tries"); arenaTries = B("arena_tries"); worldTries = B("world_tries"); escortTries = B("escort_tries"); treasureDraws = 0;
     }
     void Spawn() {
         round = 0;
@@ -632,7 +634,7 @@ class Game {
         if (reward == "capacity") { capacity = capacity + quantity; } if (reward == "runes") { runes = runes + quantity; }
         if (reward == "gold") { Gold(quantity); } Log("购买成功：" + offer.Text("name"));
     }
-    void Daily() { if (dailyClaim != 0) { Log("今日福利已领取。"); return; } dailyClaim = 1; Gold(B("daily_gold")); gems = Rules.Clamp(gems + B("daily_yuan"), 0, 1000000); potions = Rules.Clamp(potions + B("daily_potions"), 0, 9999); Log("今日福利已按配置发放。"); }
+    void Daily() { if (dailyClaim != 0) { Log("今日福利已领取。"); return; } dailyClaim = 1; Gold(B("daily_gold")); gems = Rules.Clamp(gems + B("daily_yuan"), 0, 1000000); potions = Rules.Clamp(potions + B("daily_potions"), 0, 9999); treasureMaps = Rules.Clamp(treasureMaps + B("daily_treasure_maps"), 0, 9999); Log("今日福利已按配置发放，藏宝图 +" + Rules.N(B("daily_treasure_maps")) + "。"); }
     void Bounty() { if (dailyKills < B("bounty_kills") || bountyClaim != 0) { Log("未达到每日悬赏目标，或奖励已领取。"); return; } bountyClaim = 1; Gold(B("bounty_gold")); runes = Rules.Clamp(runes + B("bounty_runes"), 0, 1000000); Log("每日悬赏奖励已发放。"); }
     string QuestText() { if (quest >= GameTables.current.quests.rows.Count) { return "配置主线已完成"; } DataRow q = GameTables.current.quests.At(quest); return q.Text("name") + " · " + q.Text("metric") + " / " + Rules.N(q.Int("target")); }
     int Metric(string name) { if (name == "kills") { return kills; } if (name == "level") { return level; } if (name == "best") { return best; } if (name == "recycled") { return recycled; } if (name == "skill") { return skill; } if (name == "bossWins") { return bossWins; } return rebirth; }
@@ -642,11 +644,26 @@ class Game {
         if (escortLeft > 0 || escortTries <= 0) { Log("镖车仍在路上或今日次数已用完。"); return; }
         if (!Pay(B("escort_gold"), 0, 0)) { return; } escortTries = escortTries - 1; escortLeft = B("escort_seconds"); escortReward = Rules.Bounded((long)B("escort_reward") + (long)level * B("escort_level_gold") + (long)guild * B("escort_guild_gold")); Log("镖车出发，" + Rules.N(escortLeft) + "秒后自动结算，离线同样有效。");
     }
+    string TreasureSlot(int slot) {
+        if (slot == 0) { return "金币 · " + Rules.N(B("treasure_gold")); }
+        if (slot == 1) { return "元宝 · " + Rules.N(B("treasure_gems")); }
+        if (slot == 2) { return "黑铁 · " + Rules.N(B("treasure_iron")); }
+        if (slot == 3) { return "符文 · " + Rules.N(B("treasure_runes")); }
+        if (slot == 4) { return "药水 · " + Rules.N(B("treasure_potions")); }
+        return "装备 · 精良";
+    }
     void Treasure() {
-        if (bag.Count >= capacity) { Log("背包已满，未扣费。请先整理。"); return; }
-        if (!Pay(0, 0, B("treasure_yuan"))) { return; } treasurePity = treasurePity + 1;
-        if (treasurePity >= B("treasure_pity")) { LootPool(4, GameTables.current.Map(floor).Int("drop_pool"), false); treasurePity = 0; Log("寻宝达到保底：传说装备。"); }
-        else { LootPool(1, GameTables.current.Map(floor).Int("drop_pool"), false); Log("寻宝获得装备，保底计数已更新。"); }
+        if (treasureMaps <= 0) { Log("藏宝图不足，请通过每日福利或玩法获取。"); return; }
+        int slot = Random(6);
+        if (slot == 5 && bag.Count >= capacity) { Log("本次藏宝图指向装备，但背包已满，未消耗藏宝图。"); return; }
+        treasureMaps = treasureMaps - 1; treasureDraws = treasureDraws + 1;
+        if (slot == 0) { Gold(B("treasure_gold")); }
+        if (slot == 1) { gems = Rules.Clamp(gems + B("treasure_gems"), 0, 1000000); }
+        if (slot == 2) { iron = Rules.Clamp(iron + B("treasure_iron"), 0, 1000000); }
+        if (slot == 3) { runes = Rules.Clamp(runes + B("treasure_runes"), 0, 1000000); }
+        if (slot == 4) { potions = Rules.Clamp(potions + B("treasure_potions"), 0, 9999); }
+        if (slot == 5) { LootPool(1, GameTables.current.Map(floor).Int("drop_pool"), false); }
+        Log("藏宝图寻宝：" + TreasureSlot(slot) + "；今日已抽 " + Rules.N(treasureDraws) + " 次。");
     }
     void Rebirth() {
         if (rebirth >= B("max_rebirth")) { Log("已达配置转生上限。"); return; }

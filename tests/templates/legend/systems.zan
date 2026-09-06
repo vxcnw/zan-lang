@@ -99,12 +99,17 @@ class LegendSystemTests {
         g.bag.Add(batchOne); g.bag.Add(batchTwo); Check(g.RecycleEligibleCount(0) == 1, "recycle eligible count excludes locked equipment");
         selected.Clear(); selected.Add(batchTwo); selected.Add(batchOne); int oldBatchBalance = g.RecycleBalance(0); int oldBatchBag = g.bag.Count;
         Check(!g.RecycleBatch(selected, 0) && g.bag.Count == oldBatchBag && g.RecycleBalance(0) == oldBatchBalance, "batch recycle validates all selections atomically");
+        int treasureMaps = g.treasureMaps; g.Treasure();
+        Check(g.treasureMaps == treasureMaps - 1 && g.treasureDraws == 1, "treasure map draw consumes one map and records today's draw");
+        int dailyMaps = g.treasureMaps; g.Daily();
+        Check(g.treasureMaps == dailyMaps + g.B("daily_treasure_maps"), "daily welfare grants configured treasure maps");
         g.filter = 3; g.filterCoefficient = 5; g.filterMinLevel = 40; g.filterJobOnly = true;
         g.savedAt = 1700000120; Game loaded = SaveStore.Decode(SaveStore.Encode(g).ToJson());
         Check(loaded.secretFloor == g.secretFloor && loaded.secrets == g.secrets && !loaded.active, "secret save roundtrip");
         Check(loaded.filter == 3 && loaded.filterCoefficient == 5 && loaded.filterMinLevel == 40 && loaded.filterJobOnly, "pickup filters save roundtrip");
         Check(loaded.elementPool == g.elementPool && loaded.elementSeconds == 61 && loaded.elementRanks[0] == 1 && loaded.elementRanks[4] == 100, "elements save roundtrip");
         Check(loaded.reputation == g.reputation && loaded.redPackets == g.redPackets && loaded.recyclePoints == g.recyclePoints, "recycle wallets persisted");
+        Check(loaded.treasureMaps == g.treasureMaps && loaded.treasureDraws == g.treasureDraws, "treasure map state persisted");
         Check(loaded.SkillRank(1) == 2 && loaded.IsSkillEquipped(1) && loaded.SkillAtSlot(7).Text("kind") == "passive", "skill ranks and loadout persisted");
         JsonValue broken = SaveStore.Encode(g); broken.Set("elementRanks",JsonValue.NewArray()); bool rejected = false;
         try { SaveStore.Decode(broken.ToJson()); } catch (Exception ex) { rejected = true; } Check(rejected,"malformed elements rejected");
