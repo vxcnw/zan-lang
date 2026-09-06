@@ -327,6 +327,18 @@ class Game {
     int GemGoldCost(int id) { DataRow r = GemData(id); return r.Int("gold") + gemRanks[id] * r.Int("gold") / 2; }
     int GemIronCost(int id) { return GemData(id).Int("iron") + gemRanks[id]; }
     int GemYuanCost(int id) { return GemData(id).Int("yuan") + gemRanks[id]; }
+    int GemSynthesisGoldCost(int id) { DataRow r = GemData(id); return r.Int("synthesis_gold") + gemRanks[id] * r.Int("synthesis_gold") / 2; }
+    int GemSynthesisIronCost(int id) { DataRow r = GemData(id); return r.Int("synthesis_iron") + gemRanks[id]; }
+    int GemSynthesisYuanCost(int id) { DataRow r = GemData(id); return r.Int("synthesis_yuan") + gemRanks[id]; }
+    void SynthesizeGem(int id) {
+        if (job < 0 || id < 0 || id >= 6) { return; }
+        DataRow r = GemData(id); int rank = gemRanks[id];
+        if (rank >= r.Int("synthesis_max_level")) { Log("该宝石已达到合成上限，请使用普通升级。"); return; }
+        int goldCost = GemSynthesisGoldCost(id); int ironCost = GemSynthesisIronCost(id); int yuanCost = GemSynthesisYuanCost(id);
+        if (!Pay(goldCost, ironCost, yuanCost)) { return; }
+        gemRanks[id] = rank + 1;
+        Log(r.Text("name") + "合成至 " + Rules.N(gemRanks[id]) + "级，属性已生效。");
+    }
     void UpgradeGem(int id) {
         if (job < 0 || id < 0 || id >= 6) { return; }
         DataRow r = GemData(id);

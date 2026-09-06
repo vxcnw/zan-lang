@@ -138,7 +138,7 @@ class GameTables {
         t.encounters = DataTable.Load(dir + "/encounters.csv", "id:2:4,name,progress,min_level:1:1500,min_rebirth:0:10,max_progress:1:100,hp_base:1:10000000,hp_linear:0:100000,hp_square:0:10000,attack_base:0:100000,attack_linear:0:10000,defense_base:0:100000,defense_linear:0:10000,gold:0:1000000,gold_linear:0:100000,xp:0:1000000,xp_floor:0:10000,iron:0:1000000,yuan:0:1000000,runes:0:1000000,quality:0:4,drop_pool:1:1000000,attack_school,attack_min_pct:0:100,defense_min_pct:0:100,magic_defense_base:0:1000000,magic_defense_linear:0:1000000,magic_defense_min_pct:0:100");
         t.attributes = DataTable.Load(dir + "/attributes.csv", "id,name,score_weight:0:10000,upgrade_pct:0:100,skill_flat:0:1000,training_flat:0:1000,collection_flat:0:1000,rebirth_flat:0:100000,rebirth_pct:0:100,title_pct:0:100");
         t.innerPower = DataTable.Load(dir + "/inner_power.csv", "id:0:7,name,stat,value_per_level:1:1000,max_level:1:100,tp:1:100000,tp_per_level:0:1000,iron:0:100000");
-        t.gems = DataTable.Load(dir + "/gems.csv", "id:0:5,name,stat,value_per_level:1:10000,max_level:1:100,gold:0:1000000,iron:0:100000,yuan:0:100000");
+        t.gems = DataTable.Load(dir + "/gems.csv", "id:0:5,name,stat,value_per_level:1:10000,max_level:1:100,gold:0:1000000,iron:0:100000,yuan:0:100000,synthesis_gold:1:1000000,synthesis_iron:1:100000,synthesis_yuan:1:100000,synthesis_max_level:1:100");
         t.elements = DataTable.Load(dir + "/elements.csv", "id:0:4,name,picture,stat,value_per_level:1:10000,max_level:1:100,xp_base:1:100000,xp_step:0:10000");
         t.recycle = DataTable.Load(dir + "/recycle.csv", "id:0:6,name,numerator:1:1000000,denominator:1:1000000,cap:1:1000000000");
         t.recyclePrices = DataTable.Load(dir + "/recycle_prices.csv", "id:1:1000000,gold:0:100000000");
@@ -155,7 +155,7 @@ class GameTables {
         Require(Rule("secret_wave_count") > 0 && Rule("secret_mob_hp_pct") > 0 && Rule("secret_mob_hp_pct") <= 100, "secret wave configuration invalid");
         Require(innerPower.rows.Count == 8, "inner power requires eight slots");
         Require(gems.rows.Count == 6, "gem system requires six slots");
-        for (int i = 0; i < 6; i = i + 1) { attributes.Get(gems.At(i).Text("stat")); }
+        for (int i = 0; i < 6; i = i + 1) { DataRow gem = gems.At(i); attributes.Get(gem.Text("stat")); Require(gem.Int("synthesis_max_level") < gem.Int("max_level"), gem.location + ": synthesis must stop before ordinary upgrade cap"); }
         for (int i = 0; i < 8; i = i + 1) { attributes.Get(innerPower.At(i).Text("stat")); }
         Require(Rule("inner_tp_cap") > 0, "inner TP cap must be positive"); Rule("inner_tp_per_kill");
         List<string> attributeIds = "hp,mp,attack_min,attack_max,magic_min,magic_max,tao_min,tao_max,defense_min,defense_max,magic_defense_min,magic_defense_max".Split(",");

@@ -287,7 +287,7 @@ class LegendApp {
                 }
                 detailsScroll.With(inner);
             } else if (growthTab == 2) {
-                detailsScroll.With(Text("宝石 · 金币 / 黑铁 / 元宝升级，属性永久生效", "yellow small", 24));
+                detailsScroll.With(Text("宝石 · 普通升级 / 低阶合成，属性永久生效", "yellow small", 24));
                 Grid gems = Grid.Of(2); gems.Gap(4); gems.Prefer(0, 256);
                 for (int i = 0; i < 6; i = i + 1) {
                     int n = i; DataRow gem = GameTables.current.gems.At(i); Panel card = Col("frame");
@@ -295,6 +295,7 @@ class LegendApp {
                     card.With(Text(gem.Text("name") + " " + Rules.N(rank) + "/" + Rules.N(gem.Int("max_level")), "cyan small", 24));
                     card.With(Text(GameTables.current.attributes.Get(gem.Text("stat")).Text("name") + " +" + Rules.N(amount), "secondary small", 24));
                     card.With(Btn(rank >= gem.Int("max_level") ? "已满级" : "升级 · 金 " + Rules.N(g.GemGoldCost(n)) + " / 铁 " + Rules.N(g.GemIronCost(n)) + " / 元 " + Rules.N(g.GemYuanCost(n)), "gem-up-" + Rules.N(n), () => { g.UpgradeGem(n); Rebuild(); }));
+                    card.With(Btn(rank >= gem.Int("synthesis_max_level") ? "合成上限" : "合成 · 金 " + Rules.N(g.GemSynthesisGoldCost(n)) + " / 铁 " + Rules.N(g.GemSynthesisIronCost(n)) + " / 元 " + Rules.N(g.GemSynthesisYuanCost(n)), "gem-synth-" + Rules.N(n), () => { g.SynthesizeGem(n); Rebuild(); }));
                     gems.With(card);
                 }
                 detailsScroll.With(gems);

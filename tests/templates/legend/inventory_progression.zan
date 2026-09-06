@@ -33,6 +33,11 @@ class InventoryProgressionTests {
         g.gemRanks[0] = 20; g.gold = 100000; g.iron = 100000; g.gems = 100000; gemCurrency = g.gems; g.UpgradeGem(0); Check(g.gemRanks[0] == 20 && g.gems == gemCurrency, "capped gem does not charge");
         GameTables.current.innerPower.At(0).fields["value_per_level"] = "9";
         Check(g.MaxHp() == hp + 9, "inner stat is table driven"); GameTables.current.innerPower.At(0).fields["value_per_level"] = "5";
+        g.gemRanks[1] = 0; g.gold = 10000; g.iron = 100; g.gems = 100; int synthHp = g.Stat("hp"); int synthGold = g.GemSynthesisGoldCost(1); int synthIron = g.GemSynthesisIronCost(1); int synthYuan = g.GemSynthesisYuanCost(1);
+        g.SynthesizeGem(1);
+        Check(g.gemRanks[1] == 1 && g.gold == 10000 - synthGold && g.iron == 100 - synthIron && g.gems == 100 - synthYuan && g.Stat("hp") == synthHp + 12, "gem synthesis cost and stat");
+        int synthRank = g.gemRanks[1]; int synthCurrency = g.gems; g.gold = 0; g.SynthesizeGem(1); Check(g.gemRanks[1] == synthRank && g.gems == synthCurrency, "gem synthesis is atomic when resources are insufficient");
+        g.gemRanks[1] = 5; g.gold = 100000; g.iron = 100000; g.gems = 100000; synthCurrency = g.gems; g.SynthesizeGem(1); Check(g.gemRanks[1] == 5 && g.gems == synthCurrency, "gem synthesis cap does not charge");
         Equipment targetBook = Item(g, 698); targetBook.coefficient = 2; Equipment sourceBook = Item(g, 698); sourceBook.coefficient = 6;
         g.equipped[11] = targetBook; g.bag.Add(sourceBook); int beforeBooks = g.bag.Count; int beforeBookHp = g.MaxHp(); g.InheritTianShu(g.bag.Count - 1);
         Check(g.equipped[11] == targetBook && targetBook.coefficient == 6 && g.bag.Count == beforeBooks - 1 && g.MaxHp() > beforeBookHp, "tianshu inheritance transfers coefficient and recalculates stats");
@@ -45,7 +50,7 @@ class InventoryProgressionTests {
         g.innerRanks[0] = 100; coins = g.tp; ore = g.iron; g.TrainInner(0); g.TrainInner(-1); g.TrainInner(8);
         Check(g.tp == coins && g.iron == ore && g.innerRanks[0] == 100, "capped or invalid upgrades do not charge");
         g.savedAt = 1700000000; Game loaded = SaveStore.Decode(SaveStore.Encode(g).ToJson());
-        Check(loaded.tp == g.tp && loaded.innerRanks[0] == 100 && loaded.innerRanks[3] == 1 && loaded.gemRanks[0] == 20 && loaded.equipped[11] != null && loaded.equipped[11].coefficient == 6 && loaded.MaxHp() == g.MaxHp(), "inner gem and tianshu save round trip");
+        Check(loaded.tp == g.tp && loaded.innerRanks[0] == 100 && loaded.innerRanks[3] == 1 && loaded.gemRanks[0] == 20 && loaded.equipped[11] != null && loaded.equipped[11].coefficient == 6 && loaded.gemRanks[1] == 5 && loaded.MaxHp() == g.MaxHp(), "inner gem and tianshu save round trip");
         Game legacy = SaveStore.Decode("{\"version\":2,\"savedAt\":1700000000,\"job\":0,\"gear\":[{},{},{},{},{},{},{},{},{},{},{},{}],\"bag\":[],\"storage\":[],\"codex\":[0,0,0,0,0,0,0,0,0,0,0,0]}");
         Check(legacy.tp == 0 && legacy.innerRanks[0] == 0 && legacy.innerRanks[7] == 0, "legacy save without cultivation fields");
         JsonValue broken = SaveStore.Encode(g); broken.Set("innerRanks", JsonValue.NewArray()); bool rejected = false;
