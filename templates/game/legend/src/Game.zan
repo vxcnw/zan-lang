@@ -433,6 +433,29 @@ class Game {
         else if (currency == 5) { gems = gems + amount; } else { recyclePoints = recyclePoints + amount; }
         Log("回收 " + target.Name() + " ×1 → " + r.Text("name") + " +" + Rules.N(amount));
     }
+    void AddRecycleBalance(int currency, int amount) {
+        if (currency == 0) { Gold(amount); } else if (currency == 1) { GainXp(amount); } else if (currency == 2) { merit = Rules.Bounded((long)merit + amount); }
+        else if (currency == 3) { reputation = Rules.Bounded((long)reputation + amount); } else if (currency == 4) { redPackets = Rules.Bounded((long)redPackets + amount); }
+        else if (currency == 5) { gems = Rules.Clamp(gems + amount, 0, 1000000); } else { recyclePoints = Rules.Bounded((long)recyclePoints + amount); }
+    }
+    bool RecycleBatch(List<Equipment> targets, int currency) {
+        if (job < 0 || targets == null || targets.Count == 0 || currency < 0 || currency > 6) { return false; }
+        DataRow r = GameTables.current.recycle.At(currency); long reward = 0;
+        for (int t = 0; t < targets.Count; t = t + 1) {
+            Equipment target = targets[t]; int index = -1;
+            for (int i = 0; i < bag.Count; i = i + 1) { if (bag[i] == target) { index = i; } }
+            if (index < 0 || target.locked || RecyclePrice(target, currency) <= 0) { Log("选中的装备已移动、锁定或不能兑换，未消耗任何装备。"); return false; }
+            for (int prior = 0; prior < t; prior = prior + 1) { if (targets[prior] == target) { Log("批量回收列表存在重复装备，未消耗任何装备。"); return false; } }
+            reward = reward + RecyclePrice(target, currency);
+        }
+        if (reward <= 0 || (long)RecycleBalance(currency) + reward > r.Int("cap") || (currency == 1 && level >= GameTables.current.levels.rows.Count)) { Log("余额或等级已达上限，未消耗任何装备。"); return false; }
+        for (int removed = 0; removed < targets.Count; removed = removed + 1) {
+            int removeIndex = -1;
+            for (int i = 0; i < bag.Count; i = i + 1) { if (bag[i] == targets[removed]) { removeIndex = i; break; } }
+            if (removeIndex >= 0) { bag.RemoveAt(removeIndex); recycled = Rules.Bounded((long)recycled + 1); }
+        }
+        AddRecycleBalance(currency, (int)reward); Log("批量回收 " + Rules.N(targets.Count) + " 件 → " + r.Text("name") + " +" + Rules.N((int)reward)); return true;
+    }
     void Recycle(int index) { if (index >= 0 && index < bag.Count) { RecycleAs(bag[index], 0); } }
     bool IsRecycleWeak(Equipment e) {
         if (e == null || e.locked || e.tier > 1 || e.slot < 0 || e.slot >= 12) { return false; }

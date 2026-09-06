@@ -17,7 +17,7 @@ class LegendApp {
     Panel[] cells = new Panel[84]; Image[] cellImages = new Image[84]; Label[] cellLabels = new Label[84];
     Button pause; Button push;
     int bossSelected; int renderedMode = -1; int renderedChallenge = -1;
-    int recycleCurrency; int recyclePage; Equipment recycleTarget;
+    int recycleCurrency; int recyclePage; List<Equipment> recycleTargets = new List<Equipment>();
     Label[] elementLabels = new Label[5]; Progress[] elementBars = new Progress[5]; Button elementToggle;
     int mapPage; int bossPage; int shopPage; string mapNotice = "";
     int page = 2; int selected = -1; int forgeSlot; int forgeMode; int growthTab = 3; bool vault; bool inspectWorn;
@@ -373,12 +373,18 @@ class LegendApp {
         content.With(Btn("开启现有宝匣 / " + Rules.N(g.B("treasure_yuan")) + "元宝", "treasure", () => { g.Treasure(); Changed(); }));
         Note(content, "当前为旧版宝匣规则，尚非文档藏宝图轮盘。普通抽次最低精良，保底次数来自配置表。文档规则迁移未完成。");
     }
+    bool IsRecycleSelected(Equipment e) { for (int i = 0; i < recycleTargets.Count; i = i + 1) { if (recycleTargets[i] == e) { return true; } } return false; }
+    void ToggleRecycle(Equipment e) {
+        for (int i = 0; i < recycleTargets.Count; i = i + 1) { if (recycleTargets[i] == e) { recycleTargets.RemoveAt(i); return; } }
+        if (e != null && !e.locked && g.RecyclePrice(e, recycleCurrency) > 0) { recycleTargets.Add(e); }
+    }
+    int RecycleSelectedValue() { int total = 0; for (int i = 0; i < recycleTargets.Count; i = i + 1) { total = Rules.Bounded((long)total + g.RecyclePrice(recycleTargets[i], recycleCurrency)); } return total; }
     void BuildRecycle() {
         content.With(Text("回收系统 · 装备兑换", "yellow strong", 32));
         Panel split = Panel.Row(); split.Gap(8); split.Grow(); content.With(split);
         Panel categories = Col("frame"); categories.Prefer(88, 0); split.With(categories);
         foreach (DataRow category in GameTables.current.recycle.rows) {
-            int id = category.Int("id"); Button tab = Btn(category.Text("name"), "recycle-tab-" + Rules.N(id), () => { recycleCurrency = id; recyclePage = 0; recycleTarget = null; Rebuild(); });
+            int id = category.Int("id"); Button tab = Btn(category.Text("name"), "recycle-tab-" + Rules.N(id), () => { recycleCurrency = id; recyclePage = 0; recycleTargets.Clear(); Rebuild(); });
             tab.Prefer(0, 38); tab.Disabled = recycleCurrency == id; categories.With(tab);
         }
         Panel body = Col("recycle-list"); body.Grow(); split.With(body);
@@ -390,7 +396,7 @@ class LegendApp {
             Equipment e = g.bag[i]; Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 76);
             Image icon = new Image(EquipmentArtPath(e), e.Name(), "contain"); icon.Prefer(48, 48); row.With(icon);
             Label name = Text(e.Name() + (e.locked ? " · 已锁定" : "") + "\n单件兑换：" + Rules.N(g.RecyclePrice(e, recycleCurrency)) + " " + currency.Text("name"), "yellow", 56); name.Grow(); row.With(name);
-            Button select = Btn("选择 ×1", "recycle-row-" + Rules.N(i), () => { recycleTarget = e; Rebuild(); }); select.Disabled = e.locked || g.RecyclePrice(e, recycleCurrency) <= 0; select.Prefer(80, 32); select.DockRight(); row.Add(select); rows.With(row);
+            bool chosen = IsRecycleSelected(e); Button select = Btn(chosen ? "取消选择" : "选择", "recycle-row-" + Rules.N(i), () => { ToggleRecycle(e); Rebuild(); }); select.Disabled = e.locked || g.RecyclePrice(e, recycleCurrency) <= 0; select.Prefer(80, 32); select.DockRight(); row.Add(select); rows.With(row);
         }
         if (total == 0) { rows.With(Text("背包没有可回收装备。穿戴和仓库中的装备不会列入。", "secondary", 64)); }
         Panel footer = Col("frame"); footer.Prefer(0, 150); footer.DockBottom(); body.Add(footer);
@@ -398,8 +404,8 @@ class LegendApp {
         Button prev = Btn("上一页", "recycle-prev", () => { recyclePage = recyclePage - 1; Rebuild(); }); prev.Disabled = recyclePage == 0; pager.With(prev);
         pager.With(Text(Rules.N(recyclePage + 1) + " / " + Rules.N(total == 0 ? 1 : (total + 5) / 6), "secondary", 28));
         Button next = Btn("下一页", "recycle-next", () => { recyclePage = recyclePage + 1; Rebuild(); }); next.Disabled = (recyclePage + 1) * 6 >= total; pager.With(next); footer.With(pager);
-        footer.With(Text(recycleTarget == null ? "请选择装备；只兑换当前分类，不附送其它货币。" : "将消耗 " + recycleTarget.Name() + " ×1\n获得 " + Rules.N(g.RecyclePrice(recycleTarget, recycleCurrency)) + " " + currency.Text("name"), "secondary", 56));
-        Button confirm = Btn("确认回收选中的1件", "recycle-confirm", () => { g.RecycleAs(recycleTarget, recycleCurrency); recycleTarget = null; Rebuild(); }); confirm.Disabled = recycleTarget == null; footer.With(confirm);
+        footer.With(Text(recycleTargets.Count == 0 ? "请选择一件或多件装备；只兑换当前分类，不附送其它货币。" : "将消耗 " + Rules.N(recycleTargets.Count) + " 件\n获得 " + Rules.N(RecycleSelectedValue()) + " " + currency.Text("name"), "secondary", 56));
+        Button confirm = Btn("确认回收选中的" + Rules.N(recycleTargets.Count) + "件", "recycle-confirm", () => { if (g.RecycleBatch(recycleTargets, recycleCurrency)) { recycleTargets.Clear(); } Rebuild(); }); confirm.Disabled = recycleTargets.Count == 0; footer.With(confirm);
         detail = Text("", "secondary", 32); content.With(detail); detail.DockBottom();
     }
     void BuildCodex() {

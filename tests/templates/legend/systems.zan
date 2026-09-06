@@ -79,6 +79,14 @@ class LegendSystemTests {
         g.bag.Add(weakOne); g.bag.Add(weakTwo); int beforeGold = g.gold; int beforeRecycled = g.recycled;
         Check(g.RecycleWeakCount() == 1 && g.RecycleWeakGold() == g.RecyclePrice(weakOne, 0), "batch recycle previews eligible count and merged reward");
         g.RecycleWeak(); Check(g.bag.Count == 1 && g.bag[0] == weakTwo && g.gold == beforeGold + g.RecyclePrice(weakOne, 0) && g.recycled == beforeRecycled + 1, "batch recycle consumes only eligible items and merges reward");
+        g.bag.Clear(); Equipment batchOne = g.CreateItem(dragon, 0, 1); Equipment batchTwo = g.CreateItem(dragon, 1, 1);
+        g.bag.Add(batchOne); g.bag.Add(batchTwo); List<Equipment> selected = new List<Equipment>(); selected.Add(batchTwo); selected.Add(batchOne);
+        int oldGems = g.gems; int oldGoldForBatch = g.gold; int oldIronForBatch = g.iron; int batchReward = g.RecyclePrice(batchOne, 5) + g.RecyclePrice(batchTwo, 5);
+        Check(g.RecycleBatch(selected, 5), "batch recycle selected currency succeeds");
+        Check(g.bag.Count == 0 && g.gems == oldGems + batchReward && g.gold == oldGoldForBatch && g.iron == oldIronForBatch, "batch recycle removes selected items in any order and does not grant other currencies");
+        g.bag.Clear(); batchOne = g.CreateItem(dragon, 0, 1); batchTwo = g.CreateItem(dragon, 1, 1); batchTwo.locked = true;
+        g.bag.Add(batchOne); g.bag.Add(batchTwo); selected.Clear(); selected.Add(batchTwo); selected.Add(batchOne); int oldBatchBalance = g.RecycleBalance(0); int oldBatchBag = g.bag.Count;
+        Check(!g.RecycleBatch(selected, 0) && g.bag.Count == oldBatchBag && g.RecycleBalance(0) == oldBatchBalance, "batch recycle validates all selections atomically");
         g.filter = 3; g.filterCoefficient = 5; g.filterMinLevel = 40; g.filterJobOnly = true;
         g.savedAt = 1700000120; Game loaded = SaveStore.Decode(SaveStore.Encode(g).ToJson());
         Check(loaded.secretFloor == g.secretFloor && loaded.secrets == g.secrets && !loaded.active, "secret save roundtrip");
