@@ -897,6 +897,10 @@ static LLVMValueRef eh_add_global(zan_irgen_t *g, LLVMTypeRef ty,
  * the table:
  *   - WASM has one thread and no TLS, so the table probe is already the whole
  *     cost of a lookup;
+ *   - bare-metal riscv32 (ESP32-C3/C6) runs the same single-thread contract
+ *     with no TLS block and no tp register: a GOT-slot load for the
+ *     initial-exec thread-local answers 0 and the `add a0,a0,tp` turns it
+ *     into a wild pointer that traps;
  *   - on Windows the bundled linker (GNU ld 2.36.1, i386pep) emits a base
  *     relocation over the section-relative displacement of a COFF TLS access
  *     (`mov 0x8(%rax),%rax` after the %gs:0x58 / _tls_index pair), so ASLR
@@ -904,7 +908,9 @@ static LLVMValueRef eh_add_global(zan_irgen_t *g, LLVMTypeRef ty,
  *     address. Emitting no thread-local at all is the only way to keep both
  *     the relocation section and a working binary. */
 static LLVMValueRef get_eh_self_slot(zan_irgen_t *g) {
-    if (g->target_is_windows || strstr(g->target_triple, "wasm")) return NULL;
+    if (g->target_is_windows ||
+        strstr(g->target_triple, "wasm") ||
+        strncmp(g->target_triple, "riscv32", 7) == 0) return NULL;
     LLVMValueRef v = LLVMGetNamedGlobal(g->mod, "__zan_eh_self");
     if (v) return v;
     LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);

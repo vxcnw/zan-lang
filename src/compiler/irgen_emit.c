@@ -2534,6 +2534,149 @@ static LLVMValueRef w32_build_adapter(zan_irgen_t *g, const char *name,
     return fn;
 }
 
+/* Initialize every target family the build links (see CMakeLists.txt), so
+ * zanc can emit code for the host regardless of architecture (e.g. arm64
+ * macOS) as well as cross-compile to the advertised targets. */
+static void zan_init_llvm_targets(void) {
+    LLVMInitializeX86TargetInfo();
+    LLVMInitializeX86Target();
+    LLVMInitializeX86TargetMC();
+    LLVMInitializeX86AsmParser();
+    LLVMInitializeX86AsmPrinter();
+
+    LLVMInitializeAArch64TargetInfo();
+    LLVMInitializeAArch64Target();
+    LLVMInitializeAArch64TargetMC();
+    LLVMInitializeAArch64AsmParser();
+    LLVMInitializeAArch64AsmPrinter();
+
+#ifdef ZAN_HAVE_LLVM_ARM
+    LLVMInitializeARMTargetInfo();
+    LLVMInitializeARMTarget();
+    LLVMInitializeARMTargetMC();
+    LLVMInitializeARMAsmParser();
+    LLVMInitializeARMAsmPrinter();
+#endif
+
+#ifdef ZAN_HAVE_LLVM_WEBASSEMBLY
+    LLVMInitializeWebAssemblyTargetInfo();
+    LLVMInitializeWebAssemblyTarget();
+    LLVMInitializeWebAssemblyTargetMC();
+    LLVMInitializeWebAssemblyAsmParser();
+    LLVMInitializeWebAssemblyAsmPrinter();
+#endif
+
+#ifdef ZAN_HAVE_LLVM_RISCV
+    LLVMInitializeRISCVTargetInfo();
+    LLVMInitializeRISCVTarget();
+    LLVMInitializeRISCVTargetMC();
+    LLVMInitializeRISCVAsmParser();
+    LLVMInitializeRISCVAsmPrinter();
+#endif
+}
+
+/* Bind the target triple + data layout to the module, creating (and
+ * optionally handing back) the target machine. Callers that optimize the
+ * module afterwards MUST run this first: with the layout still unset LLVM
+ * assumes its generic default (64-bit pointers) and bakes 8-byte pointer
+ * strides into the IR, which then misreads data laid out at the target's
+ * real pointer size (rv32 --publish: the string-decode tables read NULL and
+ * trap; x86-64/arm64 only got away with it because the default layout
+ * equals their real one). */
+static zan_status_t zan_bind_target_layout(zan_irgen_t *g,
+                                           LLVMTargetMachineRef *out_tm) {
+    char *triple;
+    if (g->target_triple[0]) {
+        /* Cross-compilation: emit for the requested target triple verbatim
+         * (e.g. x86_64-unknown-linux-musl). The X86/AArch64 backends produce
+         * the right object format (ELF/Mach-O/COFF) from the triple's OS. */
+        triple = LLVMCreateMessage(g->target_triple);
+    } else {
+        triple = LLVMGetDefaultTargetTriple();
+#ifdef _WIN32
+        /* Emit GNU-ABI (MinGW) objects so the produced code links against the
+         * bundled ld.lld + mingw-w64 runtime, keeping zanc self-contained:
+         * building an .exe needs only zan, no external clang / MSVC / Windows
+         * SDK. Preserve the host architecture prefix and swap the vendor/abi. */
+        {
+            const char *dash = strchr(triple, '-');
+            size_t archlen = dash ? (size_t)(dash - triple) : strlen(triple);
+            char gnu[128];
+            if (archlen > sizeof(gnu) - 20) archlen = sizeof(gnu) - 20;
+            memcpy(gnu, triple, archlen);
+            snprintf(gnu + archlen, sizeof(gnu) - archlen, "-w64-windows-gnu");
+            LLVMDisposeMessage(triple);
+            triple = LLVMCreateMessage(gnu);
+        }
+#endif
+    }
+
+    LLVMTargetRef target;
+    char *error = NULL;
+
+    if (LLVMGetTargetFromTriple(triple, &target, &error)) {
+        zan_diag_emit(g->diag, DIAG_ERROR, zan_loc(0, 0, 0, 0),
+                      "failed to get target: %s", error);
+        LLVMDisposeMessage(error);
+        LLVMDisposeMessage(triple);
+        return ZAN_ERROR;
+    }
+
+    /* RISC-V: match the RV64GC / lp64d ABI the bundled musl sysroot uses
+     * (the ABI must be recorded as a module flag for the backend to lower
+     * doubles into FP registers). */
+    const char *tm_cpu = "generic";
+    const char *tm_features = "";
+    if (strncmp(triple, "wasm", 4) == 0) {
+        /* WebAssembly EH: try/throw lower onto the exception-handling
+         * proposal; reference-types is a prerequisite of the backend's EH
+         * pipeline. Codegen also needs the --wasm-enable-eh option flag,
+         * parsed once in main() (LLVMParseCommandLineOptions). */
+        tm_features = "+exception-handling,+reference-types";
+    } else if (strncmp(triple, "riscv64", 7) == 0) {
+        tm_cpu = "generic-rv64";
+        tm_features = "+m,+a,+f,+d,+c";
+        LLVMAddModuleFlag(g->mod, LLVMModuleFlagBehaviorError,
+                          "target-abi", strlen("target-abi"),
+                          LLVMValueAsMetadata(LLVMMDStringInContext(
+                              g->ctx, "lp64d", 5)));
+    } else if (strncmp(triple, "riscv32", 7) == 0) {
+        /* Bare-metal RV32IMC (ESP32-C3/C6): ilp32 soft-float ABI — those
+         * cores have no FPU, so doubles lower through helper calls. */
+        tm_cpu = "generic-rv32";
+        tm_features = "+m,+c";
+        LLVMAddModuleFlag(g->mod, LLVMModuleFlagBehaviorError,
+                          "target-abi", strlen("target-abi"),
+                          LLVMValueAsMetadata(LLVMMDStringInContext(
+                              g->ctx, "ilp32", 5)));
+    }
+    /* Machine codegen dominates compile time. Development builds (no
+     * --publish / -O) use the fast path (FastISel, no machine-level
+     * optimization); release builds keep the optimizing selector. */
+    LLVMCodeGenOptLevel cg = g->fast_codegen ? LLVMCodeGenLevelNone
+                                             : LLVMCodeGenLevelDefault;
+    LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
+        target, triple, tm_cpu, tm_features,
+        cg, LLVMRelocPIC, LLVMCodeModelDefault);
+
+    LLVMSetTarget(g->mod, triple);
+    LLVMTargetDataRef dl = LLVMCreateTargetDataLayout(tm);
+    char *dl_str = LLVMCopyStringRepOfTargetData(dl);
+    LLVMSetDataLayout(g->mod, dl_str);
+    LLVMDisposeMessage(dl_str);
+    LLVMDisposeTargetData(dl);
+    LLVMDisposeMessage(triple);
+
+    if (out_tm) *out_tm = tm;
+    else LLVMDisposeTargetMachine(tm);
+    return ZAN_OK;
+}
+
+void zan_irgen_bind_target(zan_irgen_t *g) {
+    zan_init_llvm_targets();
+    zan_bind_target_layout(g, NULL);
+}
+
 zan_status_t zan_irgen_write_obj(zan_irgen_t *g, const char *path) {
     /* wasm32 / riscv32: libc size_t/long are 32-bit but the IR declares these
      * libc functions with i64 sizes (Zan int). Redirect the declarations to
@@ -2688,70 +2831,11 @@ zan_status_t zan_irgen_write_obj(zan_irgen_t *g, const char *path) {
             }
         }
     }
-    /* Initialize every target family the build links (see CMakeLists.txt), so
-     * zanc can emit code for the host regardless of architecture (e.g. arm64
-     * macOS) as well as cross-compile to the advertised targets. */
-    LLVMInitializeX86TargetInfo();
-    LLVMInitializeX86Target();
-    LLVMInitializeX86TargetMC();
-    LLVMInitializeX86AsmParser();
-    LLVMInitializeX86AsmPrinter();
-
-    LLVMInitializeAArch64TargetInfo();
-    LLVMInitializeAArch64Target();
-    LLVMInitializeAArch64TargetMC();
-    LLVMInitializeAArch64AsmParser();
-    LLVMInitializeAArch64AsmPrinter();
-
-#ifdef ZAN_HAVE_LLVM_ARM
-    LLVMInitializeARMTargetInfo();
-    LLVMInitializeARMTarget();
-    LLVMInitializeARMTargetMC();
-    LLVMInitializeARMAsmParser();
-    LLVMInitializeARMAsmPrinter();
-#endif
-
-#ifdef ZAN_HAVE_LLVM_WEBASSEMBLY
-    LLVMInitializeWebAssemblyTargetInfo();
-    LLVMInitializeWebAssemblyTarget();
-    LLVMInitializeWebAssemblyTargetMC();
-    LLVMInitializeWebAssemblyAsmParser();
-    LLVMInitializeWebAssemblyAsmPrinter();
-#endif
-
-#ifdef ZAN_HAVE_LLVM_RISCV
-    LLVMInitializeRISCVTargetInfo();
-    LLVMInitializeRISCVTarget();
-    LLVMInitializeRISCVTargetMC();
-    LLVMInitializeRISCVAsmParser();
-    LLVMInitializeRISCVAsmPrinter();
-#endif
-
-    char *triple;
-    if (g->target_triple[0]) {
-        /* Cross-compilation: emit for the requested target triple verbatim
-         * (e.g. x86_64-unknown-linux-musl). The X86/AArch64 backends produce
-         * the right object format (ELF/Mach-O/COFF) from the triple's OS. */
-        triple = LLVMCreateMessage(g->target_triple);
-    } else {
-        triple = LLVMGetDefaultTargetTriple();
-#ifdef _WIN32
-        /* Emit GNU-ABI (MinGW) objects so the produced code links against the
-         * bundled ld.lld + mingw-w64 runtime, keeping zanc self-contained:
-         * building an .exe needs only zan, no external clang / MSVC / Windows
-         * SDK. Preserve the host architecture prefix and swap the vendor/abi. */
-        {
-            const char *dash = strchr(triple, '-');
-            size_t archlen = dash ? (size_t)(dash - triple) : strlen(triple);
-            char gnu[128];
-            if (archlen > sizeof(gnu) - 20) archlen = sizeof(gnu) - 20;
-            memcpy(gnu, triple, archlen);
-            snprintf(gnu + archlen, sizeof(gnu) - archlen, "-w64-windows-gnu");
-            LLVMDisposeMessage(triple);
-            triple = LLVMCreateMessage(gnu);
-        }
-#endif
-    }
+    /* Target init + triple/layout binding: see zan_bind_target_layout. The
+     * layout must be on the module before --publish's optimizer runs
+     * (main.c binds it there too; write_obj re-binding is idempotent and
+     * covers emit-only paths). */
+    zan_init_llvm_targets();
 
     /* Function-sections for size builds: give every defined function its own
      * ".text.<name>" COFF section so the linker's --gc-sections can drop
@@ -2773,72 +2857,19 @@ zan_status_t zan_irgen_write_obj(zan_irgen_t *g, const char *path) {
         }
     }
 
-    LLVMTargetRef target;
+    LLVMTargetMachineRef tm;
+    if (zan_bind_target_layout(g, &tm) != ZAN_OK) return ZAN_ERROR;
+
     char *error = NULL;
-
-    if (LLVMGetTargetFromTriple(triple, &target, &error)) {
-        zan_diag_emit(g->diag, DIAG_ERROR, zan_loc(0, 0, 0, 0),
-                      "failed to get target: %s", error);
-        LLVMDisposeMessage(error);
-        LLVMDisposeMessage(triple);
-        return ZAN_ERROR;
-    }
-
-    /* RISC-V: match the RV64GC / lp64d ABI the bundled musl sysroot uses
-     * (the ABI must be recorded as a module flag for the backend to lower
-     * doubles into FP registers). */
-    const char *tm_cpu = "generic";
-    const char *tm_features = "";
-    if (strncmp(triple, "wasm", 4) == 0) {
-        /* WebAssembly EH: try/throw lower onto the exception-handling
-         * proposal; reference-types is a prerequisite of the backend's EH
-         * pipeline. Codegen also needs the --wasm-enable-eh option flag,
-         * parsed once in main() (LLVMParseCommandLineOptions). */
-        tm_features = "+exception-handling,+reference-types";
-    } else if (strncmp(triple, "riscv64", 7) == 0) {
-        tm_cpu = "generic-rv64";
-        tm_features = "+m,+a,+f,+d,+c";
-        LLVMAddModuleFlag(g->mod, LLVMModuleFlagBehaviorError,
-                          "target-abi", strlen("target-abi"),
-                          LLVMValueAsMetadata(LLVMMDStringInContext(
-                              g->ctx, "lp64d", 5)));
-    } else if (strncmp(triple, "riscv32", 7) == 0) {
-        /* Bare-metal RV32IMC (ESP32-C3/C6): ilp32 soft-float ABI — those
-         * cores have no FPU, so doubles lower through helper calls. */
-        tm_cpu = "generic-rv32";
-        tm_features = "+m,+c";
-        LLVMAddModuleFlag(g->mod, LLVMModuleFlagBehaviorError,
-                          "target-abi", strlen("target-abi"),
-                          LLVMValueAsMetadata(LLVMMDStringInContext(
-                              g->ctx, "ilp32", 5)));
-    }
-    /* Machine codegen dominates compile time. Development builds (no
-     * --publish / -O) use the fast path (FastISel, no machine-level
-     * optimization); release builds keep the optimizing selector. */
-    LLVMCodeGenOptLevel cg = g->fast_codegen ? LLVMCodeGenLevelNone
-                                             : LLVMCodeGenLevelDefault;
-    LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
-        target, triple, tm_cpu, tm_features,
-        cg, LLVMRelocPIC, LLVMCodeModelDefault);
-
-    LLVMSetTarget(g->mod, triple);
-    LLVMTargetDataRef dl = LLVMCreateTargetDataLayout(tm);
-    char *dl_str = LLVMCopyStringRepOfTargetData(dl);
-    LLVMSetDataLayout(g->mod, dl_str);
-    LLVMDisposeMessage(dl_str);
-    LLVMDisposeTargetData(dl);
-
     if (LLVMTargetMachineEmitToFile(tm, g->mod, (char *)path,
                                      LLVMObjectFile, &error)) {
         zan_diag_emit(g->diag, DIAG_ERROR, zan_loc(0, 0, 0, 0),
                       "failed to emit object file: %s", error);
         LLVMDisposeMessage(error);
         LLVMDisposeTargetMachine(tm);
-        LLVMDisposeMessage(triple);
         return ZAN_ERROR;
     }
 
     LLVMDisposeTargetMachine(tm);
-    LLVMDisposeMessage(triple);
     return ZAN_OK;
 }

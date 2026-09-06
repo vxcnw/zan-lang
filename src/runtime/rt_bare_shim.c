@@ -80,6 +80,73 @@ static unsigned char zan_shim_pool[ZAN_BARE_HEAP_BYTES]
     __attribute__((aligned(8)));
 static union zan_shim_block *zan_shim_free = NULL;
 static int zan_shim_pool_ready;
+/* Watermarks for the board's exit report (soak evidence): live payload
+ * bytes, the all-time peak, and OOM hits. Constant-time updates. */
+static size_t zan_shim_live_bytes;
+static size_t zan_shim_live_peak;
+static unsigned zan_shim_oom;
+static size_t zan_shim_oom_size;   /* request size of the latest OOM */
+static unsigned zan_shim_frees;
+static unsigned zan_shim_allocs;
+/* last-N request sizes, dumped by the board's exit report when a soak
+ * behaves oddly (rv32 brought-up the need: allocs were far fewer than
+ * string operations and the live bytes made no sense) */
+#define ZAN_SHIM_TRACE 16
+static size_t zan_shim_alloc_trace[ZAN_SHIM_TRACE];
+static size_t zan_shim_free_trace[ZAN_SHIM_TRACE];
+static unsigned zan_shim_alloc_trace_n;
+static unsigned zan_shim_free_trace_n;
+
+void zan_shim_pool_stats(size_t *live, size_t *peak, unsigned *oom) {
+    if (live) *live = zan_shim_live_bytes;
+    if (peak) *peak = zan_shim_live_peak;
+    if (oom) *oom = zan_shim_oom;
+}
+
+size_t zan_shim_oom_request(void) { return zan_shim_oom_size; }
+unsigned zan_shim_free_count(void) { return zan_shim_frees; }
+unsigned zan_shim_alloc_count(void) { return zan_shim_allocs; }
+
+void zan_shim_trace(const size_t **allocs, const size_t **frees,
+    unsigned *an, unsigned *fn) {
+    *allocs = zan_shim_alloc_trace;
+    *frees = zan_shim_free_trace;
+    *an = zan_shim_alloc_trace_n;
+    *fn = zan_shim_free_trace_n;
+}
+
+/* Outstanding-block census: (ptr,size) pairs recorded at malloc, cleared at
+ * free; the board report prints the largest live sizes so a leak names
+ * itself instead of hiding inside the live-bytes watermark. */
+#define ZAN_SHIM_LIVE_N 64
+static struct { void *p; size_t n; } zan_shim_live[ZAN_SHIM_LIVE_N];
+static unsigned zan_shim_live_over;   /* live table overflows stop recording */
+
+static void zan_shim_live_add(void *p, size_t n) {
+    if (zan_shim_live_over) return;
+    for (unsigned i = 0; i < ZAN_SHIM_LIVE_N; i++) {
+        if (!zan_shim_live[i].p) { zan_shim_live[i].p = p; zan_shim_live[i].n = n; return; }
+    }
+    zan_shim_live_over = 1;
+}
+static void zan_shim_live_del(void *p) {
+    for (unsigned i = 0; i < ZAN_SHIM_LIVE_N; i++) {
+        if (zan_shim_live[i].p == p) { zan_shim_live[i].p = 0; return; }
+    }
+}
+/* top-8 live sizes, descending */
+unsigned zan_shim_live_top(size_t *out, unsigned max) {
+    unsigned found = 0;
+    for (unsigned i = 0; i < ZAN_SHIM_LIVE_N && found < max; i++) {
+        if (!zan_shim_live[i].p) continue;
+        size_t n = zan_shim_live[i].n;
+        unsigned j = found;
+        while (j > 0 && out[j - 1] < n) { out[j] = out[j - 1]; j--; }
+        out[j] = n;
+        found++;
+    }
+    return found;
+}
 
 static void zan_shim_pool_init(void) {
     union zan_shim_block *b = (union zan_shim_block *)zan_shim_pool;
@@ -110,17 +177,69 @@ void *malloc(size_t n) {
             *prev = b->hdr.next;
         }
         b->hdr.size = n;         /* free() reads this back */
+        zan_shim_allocs++;
+        zan_shim_alloc_trace[zan_shim_alloc_trace_n++ % ZAN_SHIM_TRACE] = n;
+        zan_shim_live_bytes += n;
+        if (zan_shim_live_bytes > zan_shim_live_peak)
+            zan_shim_live_peak = zan_shim_live_bytes;
+        zan_shim_live_add((unsigned char *)b + sizeof(*b), n);
         return (unsigned char *)b + sizeof(*b);
     }
+    zan_shim_oom++;
+    zan_shim_oom_size = n;
     return NULL;
+}
+
+/* Free-list census for the board report: total free payload, largest
+ * contiguous hole, hole count. Distinguishes "out of bytes" from
+ * "bytes present but fragmented" in one line. */
+void zan_shim_free_walk(size_t *total, size_t *maxhole, unsigned *holes) {
+    size_t sum = 0, best = 0;
+    unsigned count = 0;
+    for (union zan_shim_block *b = zan_shim_free; b; b = b->hdr.next) {
+        sum += b->hdr.size;
+        if (b->hdr.size > best) best = b->hdr.size;
+        count++;
+    }
+    if (total) *total = sum;
+    if (maxhole) *maxhole = best;
+    if (holes) *holes = count;
 }
 
 void free(void *p) {
     if (!p) return;
     union zan_shim_block *b =
         (union zan_shim_block *)((unsigned char *)p - sizeof(*b));
-    b->hdr.next = zan_shim_free;
-    zan_shim_free = b;
+    zan_shim_frees++;
+    zan_shim_free_trace[zan_shim_free_trace_n++ % ZAN_SHIM_TRACE] =
+        b->hdr.size;
+    zan_shim_live_del(p);
+    if (b->hdr.size <= zan_shim_live_bytes)
+        zan_shim_live_bytes -= b->hdr.size;
+    /* Address-ordered insert + immediate coalescing. The rv32 soak's string
+     * churn (a buffer growing 64B per iteration) shatters an unordered list:
+     * every freed buffer is 64B smaller than the next request, so first-fit
+     * never reuses it and the pool OOMs at 90% free (40 holes, largest 1200,
+     * request 1392). Merging neighbours keeps largest-hole ~= total-free. */
+    union zan_shim_block **link = &zan_shim_free;
+    union zan_shim_block *pv = NULL;
+    while (*link && (uintptr_t)*link < (uintptr_t)b) {
+        pv = *link;
+        link = &(*link)->hdr.next;
+    }
+    b->hdr.next = *link;
+    *link = b;
+    union zan_shim_block *nx = b->hdr.next;
+    if (nx && (unsigned char *)b + sizeof(*b) + b->hdr.size ==
+              (unsigned char *)nx) {
+        b->hdr.size += sizeof(*b) + nx->hdr.size;
+        b->hdr.next = nx->hdr.next;
+    }
+    if (pv && (unsigned char *)pv + sizeof(*b) + pv->hdr.size ==
+              (unsigned char *)b) {
+        pv->hdr.size += sizeof(*b) + b->hdr.size;
+        pv->hdr.next = b->hdr.next;
+    }
 }
 
 void *calloc(size_t count, size_t size) {

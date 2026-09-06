@@ -13,6 +13,7 @@
  */
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include <sys/stat.h>
 #if defined(__has_include)
 #if __has_include(<stdio.h>)
@@ -64,6 +65,11 @@ static int zan_stdout_putc(char c, FILE *f) {
 static FILE zan_stdout_file = FDEV_SETUP_STREAM(zan_stdout_putc, 0, 0,
                                                 _FDEV_SETUP_WRITE);
 FILE *const stdout = &zan_stdout_file;
+static FILE zan_stderr_file = FDEV_SETUP_STREAM(zan_stdout_putc, 0, 0,
+                                                _FDEV_SETUP_WRITE);
+FILE *const stderr = &zan_stderr_file;   /* same UART; both consoles exist
+                                            so stderr-referred soft-log
+                                            notices still reach the host */
 #endif
 #endif
 
@@ -133,10 +139,41 @@ uint64_t __atomic_fetch_sub_8(void *p, uint64_t v, int m) {
     return old;
 }
 
+bool __atomic_compare_exchange_8(void *p, void *expected, uint64_t desired,
+                                 bool weak, int succ, int fail) {
+    (void)weak; (void)succ; (void)fail;
+    unsigned long f = zan_irq_lock();
+    volatile uint64_t *q = (volatile uint64_t *)p;
+    uint64_t old = *q;
+    uint64_t exp = *(uint64_t *)expected;
+    if (old == exp) *q = desired;
+    else *(uint64_t *)expected = old;
+    zan_irq_unlock(f);
+    return old == exp;
+}
+
 /* ---- awaits sleep: arm the comparator, wfi, timer irq wakes us ------ */
+
+/* Runtime stack guard: poll() checks one painted word every scheduler
+ * pass, so growth past the budget is caught long before the 32 KiB guard
+ * at the far end -- one load per await, no MPU needed. */
+#define ZAN_STACK_BUDGET (28u * 1024u)   /* 4 KiB headroom under 32 KiB */
+static int stack_over_budget(void) {
+    return *(volatile uint32_t *)(__stack_top - ZAN_STACK_BUDGET)
+        != 0xABABABABu;
+}
+
+static void __attribute__((noreturn)) zan_stop_fail(unsigned code) {
+    *(volatile uint32_t *)TEST_FINISHER = FINISHER_FAIL | (code << 16);
+    for (;;) { asm volatile ("wfi"); }
+}
 
 int poll(void *fds, unsigned long nfds, int timeout) {
     (void)fds; (void)nfds;
+    if (stack_over_budget()) {
+        uart_write("\n[zan] STACK OVERFLOW: past 28K of 32K budget\n", 45);
+        zan_stop_fail(139);                /* 128 + SIGSEGV convention */
+    }
     if (timeout == 0) return 0;            /* nothing to wait for */
     uint64_t slice = (timeout < 0) ? 10u   /* no deadline: short slice */
                                    : (uint64_t)timeout;
@@ -151,26 +188,51 @@ int poll(void *fds, unsigned long nfds, int timeout) {
     return 0;   /* scheduler dispatches due timers, then calls again */
 }
 
-/* ---- newlib syscalls ------------------------------------------------- */
+/* ---- POSIX-ish syscalls (picolibc's file/time layer) ----------------- */
 
-int _write(int fd, const char *buf, unsigned len) {
-    if (fd == 1 || fd == 2) { uart_write(buf, len); return (int)len; }
-    return -1;
+#if defined(__has_include)
+#if __has_include(<unistd.h>)
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/time.h>
+int open(const char *path, int flags, ...) {
+    (void)path; (void)flags;
+    return -1;   /* no filesystem: the soft-log fopen degrades by design */
 }
-
-int _read(int fd, char *buf, unsigned len) {
-    (void)buf; (void)len; (void)fd;
+int close(int fd) { (void)fd; return -1; }
+int unlink(const char *p) { (void)p; return -1; }
+int rmdir(const char *p) { (void)p; return -1; }
+int mkdir(const char *p, mode_t mode) { (void)p; (void)mode; return -1; }
+ssize_t read(int fd, void *buf, size_t len) {
+    (void)fd; (void)buf; (void)len;
     return -1;                             /* no stdin on the board */
 }
-
-int _open(const char *path, int flags, int mode) {
-    (void)path; (void)flags; (void)mode;
-    return -1;   /* no filesystem: rt_timer's soft-log fopen degrades to
-                    a single stderr line, by design */
+ssize_t write(int fd, const void *buf, size_t len) {
+    if (fd == 1 || fd == 2) {
+        uart_write((const char *)buf, (unsigned)len);
+        return (ssize_t)len;
+    }
+    return -1;
 }
-int _close(int fd) { (void)fd; return -1; }
-int _lseek(int fd, int off, int whence) { (void)fd; (void)off; (void)whence; return 0; }
-int _unlink(const char *p) { (void)p; return -1; }
+off_t lseek(int fd, off_t off, int whence) {
+    (void)fd; (void)off; (void)whence;
+    return 0;
+}
+ssize_t readlink(const char *path, char *buf, size_t len) {
+    (void)path; (void)buf; (void)len;
+    return -1;
+}
+int gettimeofday(struct timeval *tv, void *tz) {
+    (void)tz;
+    if (tv) {
+        uint64_t us = mtime_read() / (TIMEBASE_HZ / 1000000ull);
+        tv->tv_sec = (time_t)(us / 1000000ull);
+        tv->tv_usec = (suseconds_t)(us % 1000000ull);
+    }
+    return 0;
+}
+#endif
+#endif
 
 int _fstat(int fd, struct stat *st) {
     (void)fd;
@@ -196,6 +258,29 @@ static void uart_print_dec(long long v) {
     while (i) uart_putc(buf[--i]);
 }
 
+static void uart_print_hex(unsigned long v) {
+    static const char digits[] = "0123456789abcdef";
+    uart_putc('0'); uart_putc('x');
+    for (int i = 28; i >= 0; i -= 4) uart_putc(digits[(v >> i) & 0xF]);
+}
+
+/* Landing pad for crt0's zan_trap on anything that is not the machine
+ * timer interrupt: report the fault and stop QEMU instead of hanging
+ * silently. 139 = 128 + SIGSEGV convention. */
+void __attribute__((noreturn))
+zan_fault_report(long mcause, long mepc, long mtval, long ra) {
+    uart_write("\n[zan] TRAP mcause=", 19);
+    uart_print_hex((unsigned long)mcause);
+    uart_write(" mepc=", 6);
+    uart_print_hex((unsigned long)mepc);
+    uart_write(" mtval=", 7);
+    uart_print_hex((unsigned long)mtval);
+    uart_write(" ra=", 4);
+    uart_print_hex((unsigned long)ra);
+    uart_write("\n", 1);
+    zan_stop_fail(139);
+}
+
 void __attribute__((noreturn)) exit(int code) {
     /* stdout is a write-through UART stream, so there is nothing to
      * flush; the report below goes straight out the same line. */
@@ -212,6 +297,80 @@ void __attribute__((noreturn)) exit(int code) {
     uart_write(" of ", 4);
     uart_print_dec((long long)(__stack_top - __stack_bottom));
     uart_write(" bytes\n", 7);
+
+    /* allocator watermarks: live back near the program's baseline while
+     * peak >> live means the churn was survived without leaking */
+    {
+        extern void zan_shim_pool_stats(size_t *live, size_t *peak,
+                                        unsigned *oom);
+        size_t live = 0, peak = 0;
+        unsigned oom = 0;
+        zan_shim_pool_stats(&live, &peak, &oom);
+        uart_write("[zan] pool: live ", 17);
+        uart_print_dec((long long)live);
+        uart_write(" / peak ", 8);
+        uart_print_dec((long long)peak);
+        uart_write(" / oom ", 7);
+        uart_print_dec((long long)oom);
+        if (oom) {
+            extern size_t zan_shim_oom_request(void);
+            uart_write(" (last ", 7);
+            uart_print_dec((long long)zan_shim_oom_request());
+            uart_write("B)", 2);
+        }
+        {
+            extern unsigned zan_shim_free_count(void);
+            extern unsigned zan_shim_alloc_count(void);
+            uart_write(" / frees ", 9);
+            uart_print_dec((long long)zan_shim_free_count());
+            uart_write("/", 1);
+            uart_print_dec((long long)zan_shim_alloc_count());
+        }
+        {
+            extern void zan_shim_free_walk(size_t *total, size_t *maxhole,
+                                           unsigned *holes);
+            size_t ftotal = 0, fmax = 0;
+            unsigned holes = 0;
+            zan_shim_free_walk(&ftotal, &fmax, &holes);
+            uart_write("\n[zan] free-walk: total ", 24);
+            uart_print_dec((long long)ftotal);
+            uart_write(" / maxhole ", 11);
+            uart_print_dec((long long)fmax);
+            uart_write(" / holes ", 9);
+            uart_print_dec((long long)holes);
+        }
+        {
+            extern unsigned zan_shim_live_top(size_t *out, unsigned max);
+            size_t top[8] = {0};
+            unsigned n = zan_shim_live_top(top, 8);
+            uart_write("\n[zan] live-top:", 16);
+            for (unsigned k = 0; k < n; k++) {
+                uart_putc(' ');
+                uart_print_dec((long long)top[k]);
+            }
+        }
+        if (oom) {
+            /* churn went wrong: dump the last request sizes for diagnosis */
+            extern void zan_shim_trace(const size_t **allocs,
+                                       const size_t **frees,
+                                       unsigned *an, unsigned *fn);
+            const size_t *at, *ft;
+            unsigned an, fn;
+            zan_shim_trace(&at, &ft, &an, &fn);
+            uart_write("\n[zan] allocs:", 14);
+            for (unsigned k = 0; k < an && k < 16; k++) {
+                uart_putc(' ');
+                uart_print_dec((long long)at[k]);
+            }
+            uart_write("\n[zan] frees: ", 14);
+            for (unsigned k = 0; k < fn && k < 16; k++) {
+                uart_putc(' ');
+                uart_print_dec((long long)ft[k]);
+            }
+            uart_write("\n", 1);
+        }
+        uart_write("\n", 1);
+    }
 
     uint32_t finisher = code ? (FINISHER_FAIL | ((uint32_t)code << 16))
                              : FINISHER_PASS;

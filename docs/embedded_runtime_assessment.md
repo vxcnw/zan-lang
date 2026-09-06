@@ -86,6 +86,40 @@
 > ESP-IDF 工具链，第 4 步样例的验证边界不变）；原子只实现了本探针引用的
 > 4 个，宽程序按符号契约表补齐。
 
+> **2026-09-07 更新 6：可靠性三件套上机——trap 向量、栈哨兵、分配器水位 +
+> 8000 轮浸泡全绿，顺带抓出并修掉三个真缺陷**。①**统一 trap 向量**
+> （crt0.S `zan_trap`）：mcause 位 31 = 中断且码 7（MTIP）走两寄存器快路径
+> （清比较器 + mret），其余同步异常保存现场调 `zan_fault_report` 打印
+> `mcause/mepc/mtval/ra` 后 FAIL 停机（QEMU 退出码 139）——裸机不再有
+> "未装 mtvec 一切异常 = 静默跑飞"；对象里埋非法指令实测：
+> `TRAP mcause=0x2 mepc=0x80000574 mtval=0x0 ra=0x8000056c`。②**栈哨兵**：
+> crt0 涂写卫兵之外，poll() 每轮检查 28 KiB 预算线卫兵字，越线当场打印
+> STACK OVERFLOW 停机，而不是静默踩内存；exit() 全扫描报高水位
+> （hello 128 B、soak 216 B / 32 KiB 预留）。③**垫片池水位 + 实勘**：
+> malloc/free 记 live/peak/oom/frees，exit 报告加 free-list 巡检
+> （total/maxhole/holes）与常驻块 top（live-top）。**浸泡**（soak.zan，
+> 8000 轮混合尺寸字符串 churn + 变长延时，全程 `--publish`）：exit 0、
+> **oom 0、frees 24040/24044 平衡、live 稳定不漂移、自由表始终一整块**
+> （maxhole = total）。浸泡抓出的三个缺陷都修在根上：
+> （a）**--publish 优化在 datalayout 绑定前运行**——LLVM 用默认 64 位指针
+> 布局烘焙 8 字节指针步长进 IR，rv32 实际 32 位布局导致去混淆字面量表
+> 读 NULL 即 trap（x86-64/arm64 默认布局恰好等于真实布局所以无症状）；
+> 修法：main.c 在优化前调 `zan_irgen_bind_target`（irgen_emit.c 拆出
+> 目标三件套绑定），wasm32 同样带此隐患一并消掉。（b）**EH 自指针 TLS 在
+> 裸机 rv32 必然野指针**——`__zan_eh_self` 以 InitialExec 发射，裸机没有
+> tp 寄存器与 TLS 块，GOT 槽读 0 再 `add tp` 即野指针 trap；修法与
+> wasm/Windows 同例：riscv32 不发射线程局部，回落线程表探针（单线程契约
+> 下探针即全帧代价）。（c）**垫片分配器 free 不合并**——churn 模式
+> （缓冲每轮 +64 B）让每个刚释放的块都比下一轮请求小 64 B，first-fit
+> 永远复用不上，池在 90% 空闲时碎片化 OOM（40 洞、最大 1200 B、请求
+> 1392 B）；修法：free 改地址序插入 + 前后立即合并。另有一项**照实记录
+> 的观测**（非缺陷）：托管分配首次发生即常驻 ≈48 KiB 异常安全脚手架
+> （EH 状态块 536 B + 两个 8 KiB 处理器槽 chunk + 32 KiB 临时 chunk，
+> live-top 实测），宿主机上无人计量、裸机 64 KiB 池里占 76%——裸机堆池
+> 按"脚手架 48 KiB + 工作集"定容或调大 `ZAN_BARE_HEAP_BYTES`（C3 有
+> 400 KiB）；按目标裁剪 chunk 容量属未来工作。POSIX 文件桩
+> （open/read/write/…、stderr FILE）补齐后，稍宽的程序也能上板验证。
+
 ## 1. 实测：一个 hello world 的成本
 
 | 段 | 大小 | 说明 |

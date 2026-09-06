@@ -33,7 +33,7 @@ _start:
     j    3b
 
     /* trap vector + CLINT comparator disarm (write hi word first) */
-4:  la   t0, zan_irq_timer
+4:  la   t0, zan_trap
     csrw mtvec, t0
     li   t0, -1
     li   t1, 0x2004
@@ -49,21 +49,44 @@ _start:
 5:  wfi
     j    5b
 
-/* The only interrupt ever enabled is the machine timer (MTIE), so the
- * handler just pushes the comparator deadline to +infinity (clears MTIP)
- * and resumes. Poll() re-arms it for the next await. */
+/* Single trap vector. The only expected trap is the machine-timer
+ * interrupt (the await sleep) -- a two-register fast path that pushes the
+ * comparator deadline to +infinity (clears MTIP); poll() re-arms it for
+ * the next await. Everything else -- synchronous faults and interrupts we
+ * never enabled -- goes to zan_fault_report in bsp.c: report and stop
+ * QEMU instead of hanging silently. */
     .balign 4
-    .globl zan_irq_timer
-zan_irq_timer:
+    .globl zan_trap
+zan_trap:
     addi sp, sp, -16
     sw   t0, 0(sp)
     sw   t1, 4(sp)
+    sw   a0, 8(sp)
+    sw   a1, 12(sp)
+    csrr t0, mcause
+    bgez t0, .Lfault          /* positive mcause = synchronous exception */
+    slli t0, t0, 1
+    srli t0, t0, 1            /* mask the interrupt bit */
+    li   t1, 7                /* machine timer interrupt cause code */
+    bne  t0, t1, .Lfault
     li   t0, -1
     li   t1, 0x2004
-    slli t1, t1, 12
+    slli t1, t1, 12           /* mtimecmp @ 0x2004000 */
     sw   t0, 4(t1)
     sw   t0, 0(t1)
+    lw   a1, 12(sp)
+    lw   a0, 8(sp)
     lw   t1, 4(sp)
     lw   t0, 0(sp)
     addi sp, sp, 16
     mret
+
+.Lfault:
+    /* original sp is sp+16; a0-a3 carry the report */
+    csrr a0, mcause
+    csrr a1, mepc
+    csrr a2, mtval
+    mv   a3, ra
+    call zan_fault_report
+1:  wfi
+    j    1b

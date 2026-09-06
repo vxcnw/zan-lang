@@ -773,6 +773,13 @@ void zan_irgen_emit_string_deobf(zan_irgen_t *g);
 zan_status_t zan_irgen_write_ir(zan_irgen_t *g, const char *path);
 zan_status_t zan_irgen_write_obj(zan_irgen_t *g, const char *path);
 
+/* Binds the target triple + data layout to the module early. --publish must
+ * call this BEFORE the optimizer runs: with the layout still unset LLVM
+ * assumes its generic default (64-bit pointers) and bakes 8-byte pointer
+ * strides into the IR, which then misreads data laid out at the target's
+ * real pointer size (rv32: literal-decode tables then read NULL and trap). */
+void zan_irgen_bind_target(zan_irgen_t *g);
+
 /* Turns every bodyless [DllImport] declaration owned by `lib` into a strong
  * definition returning -1/null/0. Used before write_obj when cross-linking a
  * static Linux binary and no static archive for the lib is bundled: the

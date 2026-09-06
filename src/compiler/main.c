@@ -2630,6 +2630,11 @@ int main(int argc, char **argv) {
         fprintf(stderr, "note: -g forces -O0 (debug info is emitted unoptimized)\n");
         effective_opt = ZAN_OPT_NONE;
     }
+    /* Bind target + layout before any pass runs: the optimizer must see the
+     * target's real pointer size. With the layout still unset it assumed
+     * 64-bit pointers and baked 8-byte pointer strides into the IR (deobf's
+     * literal table then read NULLs on rv32, whose real layout is 32-bit). */
+    zan_irgen_bind_target(&irgen);
     if (effective_opt > ZAN_OPT_NONE) {
         zan_opt_report_t opt_report = zan_optimize(&irgen, &binder, effective_opt);
         zan_opt_report_print(&opt_report);
