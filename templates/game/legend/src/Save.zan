@@ -16,7 +16,7 @@ class SaveStore {
         return dir + "/hero-v2.json";
     }
     static JsonValue Encode(Game g) {
-        JsonValue j = JsonValue.NewObject(); Rules.Put(j, "version", 7);
+        JsonValue j = JsonValue.NewObject(); Rules.Put(j, "version", 8);
         Rules.Put(j, "job", g.job);
         Rules.Put(j, "level", g.level);
         Rules.Put(j, "xp", g.xp);
@@ -85,6 +85,10 @@ class SaveStore {
         Rules.Put(j, "reputation", g.reputation);
         Rules.Put(j, "redPackets", g.redPackets);
         Rules.Put(j, "recyclePoints", g.recyclePoints);
+        Rules.Put(j, "altarPersonal", g.altarPersonal);
+        Rules.Put(j, "altarWorld", g.altarWorld);
+        Rules.Put(j, "altarJackpots", g.altarJackpots);
+        Rules.Put(j, "altarDonations", g.altarDonations);
         Rules.Put(j, "secretAutoPush", g.secretAutoPush ? 1 : 0);
         Rules.Put(j, "fieldActive", g.fieldActive ? 1 : 0);
         Rules.Put(j, "bossAutoNext", g.bossAutoNext ? 1 : 0);
@@ -105,7 +109,7 @@ class SaveStore {
     }
     static Game Decode(string text) {
         JsonValue j = JsonValue.Parse(text);
-        if (!j.IsObject() || (j.Int("version", 0) != 2 && j.Int("version", 0) != 3 && j.Int("version", 0) != 4 && j.Int("version", 0) != 5 && j.Int("version", 0) != 6 && j.Int("version", 0) != 7) || !j.Has("savedAt") || !j.Has("job")) { throw new Exception("Unsupported or incomplete save"); }
+        if (!j.IsObject() || (j.Int("version", 0) != 2 && j.Int("version", 0) != 3 && j.Int("version", 0) != 4 && j.Int("version", 0) != 5 && j.Int("version", 0) != 6 && j.Int("version", 0) != 7 && j.Int("version", 0) != 8) || !j.Has("savedAt") || !j.Has("job")) { throw new Exception("Unsupported or incomplete save"); }
         Game g = new Game();
         g.job = Rules.Clamp(j.Int("job", g.job), -1, 2);
         g.level = Rules.Clamp(j.Int("level", g.level), 1, GameTables.current.levels.rows.Count);
@@ -195,6 +199,10 @@ class SaveStore {
         g.reputation = Rules.Clamp(j.Int("reputation", 0), 0, 1000000000);
         g.redPackets = Rules.Clamp(j.Int("redPackets", 0), 0, 1000000000);
         g.recyclePoints = Rules.Clamp(j.Int("recyclePoints", 0), 0, 1000000000);
+        g.altarPersonal = Rules.Clamp(j.Int("altarPersonal", 0), 0, 1000000000);
+        g.altarWorld = Rules.Clamp(j.Int("altarWorld", 0), 0, 1000000000);
+        g.altarJackpots = Rules.Clamp(j.Int("altarJackpots", 0), 0, 1000000000);
+        g.altarDonations = Rules.Clamp(j.Int("altarDonations", 0), 0, 1000000000);
         g.secretAutoPush = j.Int("secretAutoPush", 1) == 1;
         g.fieldActive = j.Int("fieldActive", 1) == 1;
         g.bossAutoNext = j.Int("bossAutoNext", 0) == 1;

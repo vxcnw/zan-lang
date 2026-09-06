@@ -71,6 +71,7 @@ class Game {
     int[] elementRanks = new int[5]; int[] elementXp = new int[5];
     int elementPool; int elementSeconds; bool elementTraining;
     int reputation; int redPackets; int recyclePoints;
+    int altarPersonal; int altarWorld; int altarJackpots; int altarDonations;
     int recycled;
     int earned;
     int offlineSeconds;
@@ -624,6 +625,33 @@ class Game {
         bool win = (long)Power() * (B("incoming_random_min") + Random(B("incoming_random_range"))) / 100 >= opponent;
         if (win) { arenaWins = arenaWins + 1; merit = Rules.Bounded((long)merit + B("arena_win_merit")); Gold(B("arena_win_gold")); Log("击败本地 NPC！已按配置发放奖励。"); }
         else { merit = Rules.Bounded((long)merit + B("arena_lose_merit")); Log("本地 NPC 挑战失败，已按配置发放参与声望。"); }
+    }
+    int AltarPersonalCap() { return B("altar_personal_cap"); }
+    int AltarWorldCap() { return B("altar_world_cap"); }
+    string AltarSummary() { return "个人进度 " + Rules.N(altarPersonal) + "/" + Rules.N(AltarPersonalCap()) + " · 本地共建 " + Rules.N(altarWorld) + "/" + Rules.N(AltarWorldCap()) + " · 已触发共建奖励 " + Rules.N(altarJackpots) + "次"; }
+    void ResolveAltarWorld() {
+        while (altarWorld >= AltarWorldCap()) {
+            altarWorld = altarWorld - AltarWorldCap(); altarJackpots = Rules.Bounded((long)altarJackpots + 1);
+            Gold(B("altar_world_reward_gold")); gems = Rules.Clamp(gems + B("altar_world_reward_yuan"), 0, 1000000); merit = Rules.Bounded((long)merit + B("altar_world_reward_merit"));
+            Log("本地祭坛共建达成，已发放共建奖励；真实全服排行仍需服务端。");
+        }
+    }
+    void DonateAltar(int kind) {
+        if (job < 0) { Log("请先创建角色。"); return; }
+        int points = 0; bool paid = false;
+        if (kind == 0) { paid = Pay(B("altar_gold_cost"), 0, 0); points = B("altar_gold_gain"); }
+        else if (kind == 1) { paid = Pay(0, 0, B("altar_yuan_cost")); points = B("altar_yuan_gain"); }
+        else if (kind == 2) { paid = Pay(0, 0, B("altar_yuan_large_cost")); points = B("altar_yuan_large_gain"); }
+        else if (kind == 3) { paid = Pay(0, B("altar_iron_cost"), 0); points = B("altar_iron_gain"); }
+        else { return; }
+        if (!paid) { return; }
+        altarPersonal = Rules.Bounded((long)altarPersonal + points); altarWorld = Rules.Bounded((long)altarWorld + points); altarDonations = Rules.Bounded((long)altarDonations + 1);
+        ResolveAltarWorld(); Log("祭坛捐献成功：个人与本地共建进度 +" + Rules.N(points) + "。");
+    }
+    void ClaimAltarPersonal() {
+        if (altarPersonal < AltarPersonalCap()) { Log("个人祭坛进度尚未达到领取线。"); return; }
+        altarPersonal = altarPersonal - AltarPersonalCap(); Gold(B("altar_personal_reward_gold")); gems = Rules.Clamp(gems + B("altar_personal_reward_yuan"), 0, 1000000); reputation = Rules.Bounded((long)reputation + B("altar_personal_reward_reputation"));
+        Log("个人祭坛奖励已领取；溢出进度保留。");
     }
     void Shop(int item) {
         if (!GameTables.current.shop.index.ContainsKey(Rules.N(item))) { return; }

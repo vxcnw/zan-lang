@@ -155,6 +155,7 @@ class LegendApp {
         else if (page == 20 || page == 21) { BuildInventory(); }
         else if (page == 10) { BuildElements(); }
         else if (page == 15) { BuildTreasure(); }
+        else if (page == 14) { BuildAltar(); }
         else if (page == 17) { BuildRecycle(); }
         else if (page == 23) { BuildCodex(); }
         else if (page == 26) { BuildAchievements(); }
@@ -394,6 +395,22 @@ class LegendApp {
         content.With(Btn("使用藏宝图（消耗 1 张）", "treasure", () => { g.Treasure(); Changed(); }));
         Note(content, "六格奖励池按配置结算：金币、元宝、黑铁、符文、药水或精良装备。每日福利补充藏宝图，装备奖励遇到满包时不消耗。");
     }
+    void BuildAltar() {
+        content.With(Text("祭坛 · 本地共建", "yellow strong", 32));
+        pageInfo = Text("", "cyan", 52); pageInfo.Named("altar-status"); content.With(pageInfo);
+        Panel card = Col("frame"); card.With(Art("reward", 72, 72));
+        card.With(Text("个人捐献会同步推进个人祭坛与本地共建进度。达到领取线后可领取个人奖励；共建进度达到目标会触发一次本地共建奖励。", "secondary", 64));
+        Grid actions = Grid.Of(2); actions.Gap(8);
+        Button gold = Btn("捐献金币 · " + Rules.N(g.B("altar_gold_cost")) + " → +" + Rules.N(g.B("altar_gold_gain")), "altar-gold", () => { g.DonateAltar(0); Rebuild(); }); actions.With(gold);
+        Button yuan = Btn("捐献元宝 · " + Rules.N(g.B("altar_yuan_cost")) + " → +" + Rules.N(g.B("altar_yuan_gain")), "altar-yuan", () => { g.DonateAltar(1); Rebuild(); }); actions.With(yuan);
+        Button large = Btn("大额捐献 · " + Rules.N(g.B("altar_yuan_large_cost")) + "元宝 → +" + Rules.N(g.B("altar_yuan_large_gain")), "altar-yuan-large", () => { g.DonateAltar(2); Rebuild(); }); actions.With(large);
+        Button iron = Btn("捐献黑铁 · " + Rules.N(g.B("altar_iron_cost")) + " → +" + Rules.N(g.B("altar_iron_gain")), "altar-iron", () => { g.DonateAltar(3); Rebuild(); }); actions.With(iron);
+        card.With(actions);
+        Button claim = Btn("领取个人祭坛奖励 · " + Rules.N(g.B("altar_personal_reward_gold")) + "金币 / " + Rules.N(g.B("altar_personal_reward_yuan")) + "元宝", "altar-claim", () => { g.ClaimAltarPersonal(); Rebuild(); }); claim.Disabled = g.altarPersonal < g.AltarPersonalCap(); card.With(claim);
+        content.With(card);
+        Note(content, "当前为可验证的本地玩法闭环；全服排行、昨日补领与跨玩家共建必须连接真实服务端，暂不伪造玩家数据。个人进度超出领取线的部分会保留。\n祭坛换算：金币×1=+1、100元宝=+5、1000元宝=+50、黑铁500=+4。");
+        detail = Text("", "secondary", 0); detail.Named("altar-notice"); content.With(detail);
+    }
     bool IsRecycleSelected(Equipment e) { for (int i = 0; i < recycleTargets.Count; i = i + 1) { if (recycleTargets[i] == e) { return true; } } return false; }
     void ToggleRecycle(Equipment e) {
         for (int i = 0; i < recycleTargets.Count; i = i + 1) { if (recycleTargets[i] == e) { recycleTargets.RemoveAt(i); return; } }
@@ -548,6 +565,7 @@ class LegendApp {
         for (int i = 0; i < 12; i = i + 1) { if (gearLabels[i] != null) { Equipment e = g.equipped[i]; gearLabels[i].Text = e == null ? Rules.Slots()[i] : (e.locked ? "锁 " : "") + "×" + Rules.N(e.coefficient); gearImages[i].SetShown(e != null); if (e != null) { gearImages[i].Src = EquipmentArtPath(e); } } }
         if (page == 1 && pageInfo != null) { pageInfo.Text = "今日剩余次数：" + Rules.N(g.arenaTries) + "\n累计胜场：" + Rules.N(g.arenaWins) + " · 当前战功：" + Rules.N(g.merit); detail.Text = g.notice; }
         if (page == 4 && pageInfo != null) { pageInfo.Text = "今日剩余次数：" + Rules.N(g.escortTries) + "\n" + (g.escortLeft > 0 ? "运输中 · 剩余 " + Rules.N(g.escortLeft) + " 秒\n预计金币：" + Rules.N(g.escortReward) : "当前没有运输中的镖车"); detail.Text = g.notice; }
+        if (page == 14 && pageInfo != null) { pageInfo.Text = g.AltarSummary() + "\n累计捐献 " + Rules.N(g.altarDonations) + " 次"; detail.Text = g.notice; }
         if ((page == 24 || page == 25) && pageInfo != null) { pageInfo.Text = "当前称谓/爵位等级：" + Rules.N(g.title) + "\n战斗属性称谓加成：" + Rules.N(g.title) + " × 配置比例"; detail.Text = g.notice; }
         if (page == 0 && pageInfo != null) { pageInfo.Text = "当前地点：" + GameTables.current.Map(g.floor).Text("name") + " · " + (g.mode != 0 ? "正在挑战，暂不可传送" : (g.active ? "自动战斗中" : "战斗已暂停")); }
         if (page == 20) {

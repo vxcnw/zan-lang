@@ -20,6 +20,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Systems test compilation failed' }
     & "$root/build/legend-systems-test.exe"
     if ($LASTEXITCODE -ne 0) { throw 'Systems gameplay regression failed' }
+    & "$root/build/zanc.exe" "$root/tests/templates/legend/altar.zan" "$source/Tables.zan" "$source/Data.zan" "$source/Game.zan" "$source/Save.zan" --auto-stdlib -o "$root/build/legend-altar-test.exe"
+    if ($LASTEXITCODE -ne 0) { throw 'Altar test compilation failed' }
+    & "$root/build/legend-altar-test.exe"
+    if ($LASTEXITCODE -ne 0) { throw 'Altar gameplay regression failed' }
     & $Python "$root/tests/templates/legend/test_equipment_art.py"
     if ($LASTEXITCODE -ne 0) { throw 'Equipment artwork regression failed' }
     & $Python "$root/tests/templates/legend/test_definitions.py"
