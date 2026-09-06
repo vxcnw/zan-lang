@@ -1,12 +1,18 @@
 # Bare-metal riscv32 (ESP32-C3) object emission check.
 #
 # Invoked by ctest as:
-#   cmake -DZANC=<zanc> -DSRC=<case.zan> -DOUT=<case.o> -P run_riscv32_object.cmake
+#   cmake -DZANC=<zanc> -DSRC=<case.zan> -DOUT=<case.o> [-DMAX_OBJECT_BYTES=<n>] \
+#         -P run_riscv32_object.cmake
 #
 # The compiler's job for a freestanding target ends at the object file -- the
-# target SDK owns startup code and linking. So the check is: zanc --target
+# target SDK owns startup code and linking. So the checks are: zanc --target
 # riscv32 produces an ELF32 little-endian RISC-V object (e_machine = EM_RISCV
-# = 243 = 0xF3). Read as raw hex so the test needs nothing but cmake.
+# = 243 = 0xF3) within a hard size budget. Read as raw hex so the test needs
+# nothing but cmake.
+
+if(NOT DEFINED MAX_OBJECT_BYTES)
+  set(MAX_OBJECT_BYTES 32768)
+endif()
 
 execute_process(
   COMMAND "${ZANC}" "${SRC}" --target riscv32 -o "${OUT}"
@@ -20,6 +26,14 @@ endif()
 
 if(NOT EXISTS "${OUT}")
   message(FATAL_ERROR "run_riscv32_object: no object written to ${OUT}")
+endif()
+
+file(SIZE "${OUT}" _bytes)
+if(_bytes GREATER ${MAX_OBJECT_BYTES})
+  message(FATAL_ERROR
+    "run_riscv32_object: ${OUT} is ${_bytes} bytes, over the "
+    "${MAX_OBJECT_BYTES} budget -- a fixed table or an unpruned stdlib "
+    "surface leaked into the bare-metal emission")
 endif()
 
 file(READ "${OUT}" _hex HEX)

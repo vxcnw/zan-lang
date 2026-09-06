@@ -28,7 +28,7 @@
  * in the header is static and installation is idempotent, so the runtimes that
  * also include it stay correct. The wasm sysroot has no signals or process
  * paths, so it keeps the previous behaviour. */
-#if !defined(__wasm__)
+#if !defined(__wasm__) && !defined(ZAN_BARE_METAL)
 #include "rt_crash.h"
 #endif
 
@@ -58,6 +58,16 @@ static void timer_unlock(void) { LeaveCriticalSection(&g_lock); }
  * declare clock_gettime; declare it -- libc.a provides the implementation
  * as a WASI host-import wrapper. */
 int clock_gettime(clockid_t, struct timespec *);
+static void timer_lock(void) {}
+static void timer_unlock(void) {}
+#elif defined(ZAN_BARE_METAL)
+/* Bare-metal / MCU (ESP-IDF's newlib, picolibc, a freestanding libc of the
+ * target SDK): one thread, so the heap needs no mutex. Time comes from the
+ * libc's clock_gettime (ESP-IDF maps CLOCK_MONOTONIC onto esp_timer); a
+ * target whose libc lacks it overrides the (weak) zan_timer_now_ms. No
+ * signal-based crash logging -- signals either do not exist or belong to
+ * the MCU's own panic handler. */
+#include <time.h>
 static void timer_lock(void) {}
 static void timer_unlock(void) {}
 #else
@@ -470,6 +480,12 @@ static zan_timer_entry *g_dispatching;
  * made the timer lock the pool's hottest contention point. */
 static volatile long long g_live;
 
+/* Weak on bare metal so a target with no usable CLOCK_MONOTONIC (or that
+ * wants esp_timer ticks directly) overrides the clock wholesale. Everywhere
+ * else the runtime object owns the symbol like before. */
+#if defined(ZAN_BARE_METAL)
+__attribute__((weak))
+#endif
 long long zan_timer_now_ms(void) {
 #if defined(_WIN32)
     return (long long)GetTickCount64();

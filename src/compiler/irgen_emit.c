@@ -2535,20 +2535,31 @@ static LLVMValueRef w32_build_adapter(zan_irgen_t *g, const char *name,
 }
 
 zan_status_t zan_irgen_write_obj(zan_irgen_t *g, const char *path) {
-    /* wasm32: libc size_t/long are 32-bit but the IR declares these libc
-     * functions with i64 sizes (Zan int). Redirect the declarations to the
-     * zan_w32_* wrappers (src/runtime/rt_wasm.c, shipped pre-compiled in the
-     * wasm32 sysroot) whose signatures take i64 and forward to the real
-     * 32-bit libc, so wasm's strict signature checking is satisfied. */
-    if (strncmp(g->target_triple, "wasm32", 6) == 0) {
-        /* wasi-libc's _start calls __main_argc_argv (the name clang gives a
-         * two-argument main on wasm), not "main". */
-        LLVMValueRef mainf = LLVMGetNamedFunction(g->mod, "main");
-        if (mainf && LLVMCountBasicBlocks(mainf) > 0)
-            LLVMSetValueName2(mainf, "__main_argc_argv",
-                              strlen("__main_argc_argv"));
+    /* wasm32 / riscv32: libc size_t/long are 32-bit but the IR declares these
+     * libc functions with i64 sizes (Zan int). Redirect the declarations to
+     * per-call-site adapters that truncate/extend and forward to the real
+     * 32-bit libc. wasm enforces exact call signatures at link time, and rv32
+     * (ilp32) misroutes the calls silently: an i64 argument occupies an
+     * even-aligned register pair, so a trailing i64 size happens to land its
+     * low word correctly but a size_t in the middle of the list shifts every
+     * argument after it. Both targets need the same adaptation. */
+    bool w32_triple = strncmp(g->target_triple, "wasm32", 6) == 0;
+    bool rv32_triple = strncmp(g->target_triple, "riscv32", 7) == 0;
+    if (w32_triple || rv32_triple) {
+        bool wasi = w32_triple;
+        if (wasi) {
+            /* wasi-libc's _start calls __main_argc_argv (the name clang gives
+             * a two-argument main on wasm), not "main". */
+            LLVMValueRef mainf = LLVMGetNamedFunction(g->mod, "main");
+            if (mainf && LLVMCountBasicBlocks(mainf) > 0)
+                LLVMSetValueName2(mainf, "__main_argc_argv",
+                                  strlen("__main_argc_argv"));
+        }
         /* Variadic snprintf cannot be adapted in IR (varargs cannot be
-         * forwarded); route it to the C wrapper in rt_wasm.c instead. */
+         * forwarded); route it to a C wrapper whose size_t/long-long second
+         * parameter restores the ABI before the varargs. wasm ships the
+         * wrapper in rt_wasm.c; freestanding targets get it from the target
+         * side (rt_bare_shim.c / the ESP-IDF adapter). */
         {
             LLVMValueRef f = LLVMGetNamedFunction(g->mod, "snprintf");
             if (f && LLVMCountBasicBlocks(f) == 0)
@@ -2557,10 +2568,9 @@ zan_status_t zan_irgen_write_obj(zan_irgen_t *g, const char *path) {
         }
         /* Zan IR declares libc functions with 64-bit ints (Zan int is i64,
          * and pointers passed through Zan `int` handles are i64 too), but
-         * wasm32's size_t/long/pointers are 32-bit and wasm enforces exact
-         * call signatures. For each such declaration, turn it into a thin
-         * adapter that truncates/extends the values and calls the real
-         * 32-bit libc function.
+         * wasm32/riscv32 size_t/long/pointers are 32-bit. For each such
+         * declaration, turn it into a thin adapter that truncates/extends
+         * the values and calls the real 32-bit libc function.
          * Signature codes: p=pointer, i=i32, j=i64, s=size_t(i32),
          * v=void; first char is the return, the rest are the params. */
         static const struct { const char *name; const char *sig; } w32adapt[] = {

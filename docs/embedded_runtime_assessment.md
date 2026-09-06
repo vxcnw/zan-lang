@@ -36,6 +36,29 @@
 > 尚余：裸机适配层（UART/heap/timer/单线程协程驱动，原第 3 步后半）与 64 位原子
 > （rv32 上 `__atomic_*_8` 需要 libatomic 或 IDF builtins）是 ESP-IDF 样例（第 4 步）前
 > 的最后两块。
+>
+> **2026-09-07 更新 4：裸机适配层与 ESP-IDF 样例已落地（第 3 步收口 + 第 4 步样例）**。
+> 先做了符号面审计（bare/hello/string/async 四探针的全量 `nm -u` 并集）：rv32 产物
+> 的未解析面 = libc/libgcc（printf 族、堆、setjmp/longjmp、`__atomic_*`，ESP-IDF
+> 自带）+ poll/pthread 三件（IDF vfs/pthread 自带）+ **6 个 `zan_timer_*` 与 2 个
+> `zan_rt_soft_*`**——这正是唯一需要适配的部分。落地四件：
+> ① `rt_timer.c` 新增 `ZAN_BARE_METAL` 分支（照 wasm 先例：空锁单线程、不装信号
+> crash 日志、`zan_timer_now_ms` 在裸机下为 weak 可被目标覆盖；IDF 的
+> clock_gettime(CLOCK_MONOTONIC) 直接映射 esp_timer，软日志 fopen 失败本就静默
+> 降级为 stderr 一行）；
+> ② 修了一个真 ILP32 ABI bug：IR 用 i64 声明 libc 的 size_t 参数，rv32 的寄存器
+> 配对规则会让中段 i64 之后的所有实参错位（wasm 有严格签名检查暴露了同一问题，
+> ELF 不查所以静默）——把 wasm32 的 32 位 libc 适配器门控扩到 riscv32
+> （`__zan_w32ir_*` 按调用点类型生成包装），snprintf 仍路由 `zan_w32_snprintf`；
+> ③ `src/runtime/rt_bare_shim.c`：无 SDK 场景的通用垫片（确定性 64KB 池分配器、
+> poll/pthread/getenv 桩、snprintf 包装，主机端十万次级 churn 实测通过）；
+> ④ `examples/esp32_hello/`：`zanc --target riscv32` 出对象 → ESP-IDF 工程
+> （main/CMakeLists.txt 自动重编 .zan、`rt_timer.c -DZAN_BARE_METAL`、
+> zan_adapter.c 提供 app_main 与 snprintf 包装）+ 符号契约表 README。
+> `cross_riscv32_object` ctest 顺手加了对象体积硬预算（默认 32 KB，防固定表回归）。
+> 本机验证：适配器确实接进 rv32 对象（nm 见 4 个 `__zan_w32ir_*.v0` 本地包装）、
+> bare 分支主机编译导出全部 8 契约符号、smoke 除并行会话两个 gui AA 用例外全绿；
+> `idf.py build` 与上真机需要带 ESP-IDF 的机器，README 的状态节写明了这一边界。
 
 ## 1. 实测：一个 hello world 的成本
 
