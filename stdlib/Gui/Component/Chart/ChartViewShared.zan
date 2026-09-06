@@ -634,6 +634,7 @@ partial class ChartView {
             if (tx < f.plotX) { tx = f.plotX; }
             if (tx + lw > f.plotX + f.plotW) { tx = f.plotX + f.plotW - lw; }
             c.DrawText(tx, f.plotY + app.Scale(1), lbl, col, fs);
+            ChartView.DrawMarkArrow(app, c, lx, f.plotY + f.plotH, col, false);
         }
     }
 
@@ -749,6 +750,29 @@ partial class ChartView {
         ChartView.TooltipCard(app, mx, my, 2147483647, rows);
     }
 
+    /// markLine 末端箭头（ECharts markLine 默认
+    /// symbol:['none','arrow']）：horizontal 时在 (ex,ey) 画右向
+    /// 箭镞，否则画下向箭镞。箭头属线色，尺寸随刻度；终点在
+    /// 绘图区边上，clip 放行 1px 防整箭头被裁。
+    static void DrawMarkArrow(App app, Canvas c, int ex, int ey, int col,
+                              bool horizontal) {
+        List<int> vx = new List<int>();
+        List<int> vy = new List<int>();
+        Chart.PolyVerts1000("arrow", vx, vy);
+        if (!horizontal) {
+            // 上指箭镞旋转 90°（顺时针）为右向：x' = -y, y' = x。
+            for (int i = 0; i < vx.Count; i = i + 1) {
+                int nx = 0 - vy[i];
+                vy[i] = vx[i];
+                vx[i] = nx;
+            }
+        }
+        c.PushClip(ex - app.Scale(6), ey - app.Scale(6),
+            app.Scale(13), app.Scale(13));
+        Chart.FillPoly1000(c, ex, ey, app.Scale(4), vx, vy, col);
+        c.PopClip();
+    }
+
     /// 系列级 markLine（ECharts series.markLine）：窗口水平线 +
     /// 右端标签。kind average/min/max 从窗口推导；显式 yValue。
     /// 线色默认系列色（2.x markLine 用 itemStyle 色，非全局 mark
@@ -796,6 +820,7 @@ partial class ChartView {
             int lx = f.plotX + f.plotW - lw;
             if (lx < f.plotX) { lx = f.plotX; }
             c.DrawText(lx, ly - Canvas.FontHeight(fs) - app.Scale(1), lbl, col, fs);
+            ChartView.DrawMarkArrow(app, c, f.plotX + f.plotW, ly, col, true);
         }
     }
 
@@ -842,6 +867,7 @@ partial class ChartView {
             if (tx < plotX) { tx = plotX; }
             if (tx + lw > plotX + plotW) { tx = plotX + plotW - lw; }
             c.DrawText(tx, plotY - Canvas.FontHeight(fs) - app.Scale(1), lbl, col, fs);
+            ChartView.DrawMarkArrow(app, c, lx, plotY + plotH, col, false);
         }
     }
 
