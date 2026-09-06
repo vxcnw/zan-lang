@@ -15,6 +15,9 @@ description: Zan GUI (stdlib/Gui) 的审美与排版规范——对齐、间距�
 - 复杂窗口的迭代过程纪律(先问框架要、加高标题栏三处同步、动效帧调度、
   弹窗层序、截图驱动的小步收口):`references/layout-iteration.md`
   (标题栏+导航+内容+弹窗+动效的窗口,动手前先读——每条都是真实返工换来的)
+- 把老程序迁移/复刻到 Zan、或参照现有产品做同族工具:先读 `app-migration`
+  skill(复刻不创造、映射账本、行为/体验保真、验证闭环)——本文件管"好看",
+  还原度纪律在那里。
 - 立即模式心智模型/控件目录:`docs/agent-kb/gui-development.md`
 - 样式解析规则:`docs/GUI_STYLE_RESOLUTION.md`;Tailwind 原子类全集:`docs/GUI_TAILWIND.md`
 
