@@ -58,6 +58,11 @@ typedef struct {
      * app thread that later calls zan_gui_present. */
     EGLDisplay egl_dpy;
     EGLSurface egl_surf;
+    void      *surf_nw;   /* native window egl_surf was created for: a
+                           * rotation hands the shell a fresh window, so a
+                           * present against a surf_nw != nw must rebuild
+                           * the surface (context, program and texture
+                           * outlive it) */
     EGLContext egl_ctx;
     GLuint     gl_prog;
     GLuint     gl_tex;
@@ -148,12 +153,13 @@ EXPORT void zan_gui_ohos_attach(void *nw, int w, int h) {
             RTLD_DEFAULT, "OH_NativeWindow_GetBufferHandleFromNative");
         g_nw_handleopt = (FnNWHandleOpt)dlsym(
             RTLD_DEFAULT, "OH_NativeWindow_NativeWindowHandleOpt");
-        if (g_nw_handleopt && g_owin.nw) {
-            int32_t fmt = 2; /* NATIVEBUFFER_PIXEL_FMT_BGRA_8888: what the
-                              * software rasterizer's little-endian ARGB
-                              * bytes already are */
-            g_nw_handleopt((OHNativeWindow *)g_owin.nw, SET_FORMAT, fmt);
-        }
+    }
+    if (g_nw_request && g_nw_handleopt) {
+        /* Every (re)attach: the format lives on the window, and a rotation
+         * hands the shell a fresh one. BGRA_8888 is what the software
+         * rasterizer's little-endian ARGB bytes already are. */
+        int32_t fmt = 2; /* NATIVEBUFFER_PIXEL_FMT_BGRA_8888 */
+        g_nw_handleopt((OHNativeWindow *)nw, SET_FORMAT, fmt);
     }
 }
 
@@ -391,6 +397,12 @@ typedef InputMethod_ErrorCode (*FnImeAttach)(InputMethod_TextEditorProxy *,
 typedef InputMethod_ErrorCode (*FnImeDetach)(InputMethod_InputMethodProxy *);
 typedef InputMethod_AttachOptions *(*FnImeAttachOptsCreate)(bool);
 typedef void (*FnImeAttachOptsDestroy)(InputMethod_AttachOptions *);
+typedef InputMethod_ErrorCode (*FnImeCfgSetInputType)(InputMethod_TextConfig *,
+    InputMethod_TextInputType);
+typedef InputMethod_ErrorCode (*FnImeCfgSetEnterKeyType)(InputMethod_TextConfig *,
+    InputMethod_EnterKeyType);
+typedef InputMethod_ErrorCode (*FnImeCfgSetPreviewSupport)(InputMethod_TextConfig *,
+    bool);
 
 static FnImeProxyCreate g_ime_proxy_create;
 static FnImeProxyDestroy g_ime_proxy_destroy;
@@ -413,6 +425,9 @@ static FnImeAttach g_ime_attach;
 static FnImeDetach g_ime_detach;
 static FnImeAttachOptsCreate g_ime_opts_create;
 static FnImeAttachOptsDestroy g_ime_opts_destroy;
+static FnImeCfgSetInputType g_ime_cfg_input;
+static FnImeCfgSetEnterKeyType g_ime_cfg_enter;
+static FnImeCfgSetPreviewSupport g_ime_cfg_preview;
 
 static InputMethod_TextEditorProxy *g_ime_proxy = NULL;
 static InputMethod_InputMethodProxy *g_ime_im = NULL;
@@ -542,9 +557,13 @@ static void ime_on_finish_preview(InputMethod_TextEditorProxy *proxy) {
 static void ime_on_get_text_config(InputMethod_TextEditorProxy *proxy,
                                    InputMethod_TextConfig *config) {
     (void)proxy;
-    OH_TextConfig_SetInputType(config, IME_TEXT_INPUT_TYPE_TEXT);
-    OH_TextConfig_SetPreviewTextSupport(config, false);
-    OH_TextConfig_SetEnterKeyType(config, IME_ENTER_KEY_UNSPECIFIED);
+    /* Same dlsym discipline as everywhere else in this file: the three
+     * TextConfig setters live in libohinputmethod.so, and a single hard
+     * reference here would fail the whole .so's load-time relocation on
+     * images that don't ship it. */
+    if (g_ime_cfg_input) { g_ime_cfg_input(config, IME_TEXT_INPUT_TYPE_TEXT); }
+    if (g_ime_cfg_preview) { g_ime_cfg_preview(config, false); }
+    if (g_ime_cfg_enter) { g_ime_cfg_enter(config, IME_ENTER_KEY_UNSPECIFIED); }
 }
 
 static void ime_ensure_proxy(void) {
@@ -602,6 +621,11 @@ static void ime_feature_detect(void) {
     g_ime_detach = (FnImeDetach)dlsym(RTLD_DEFAULT, "OH_InputMethodController_Detach");
     g_ime_opts_create = (FnImeAttachOptsCreate)dlsym(RTLD_DEFAULT, "OH_AttachOptions_Create");
     g_ime_opts_destroy = (FnImeAttachOptsDestroy)dlsym(RTLD_DEFAULT, "OH_AttachOptions_Destroy");
+    /* TextConfig setters are optional: GetTextConfig degrades to "no
+     * preferences" when the image lacks them, which the IME accepts. */
+    g_ime_cfg_input = (FnImeCfgSetInputType)dlsym(RTLD_DEFAULT, "OH_TextConfig_SetInputType");
+    g_ime_cfg_enter = (FnImeCfgSetEnterKeyType)dlsym(RTLD_DEFAULT, "OH_TextConfig_SetEnterKeyType");
+    g_ime_cfg_preview = (FnImeCfgSetPreviewSupport)dlsym(RTLD_DEFAULT, "OH_TextConfig_SetPreviewTextSupport");
     if (!g_ime_proxy_destroy || !g_ime_set_cfg || !g_ime_set_insert ||
         !g_ime_set_delbwd || !g_ime_set_delfwd || !g_ime_set_enter ||
         !g_ime_set_move || !g_ime_set_left || !g_ime_set_right ||
@@ -682,7 +706,10 @@ static GLuint ohos_compile(GLenum type, const char *src) {
     return sh;
 }
 
-static int ohos_gl_init(zan_ohos_win_t *w) {
+/* Display/config/surface/context for the current w->nw, idempotent: a
+ * rotation hands the shell a fresh native window and the caller drops the
+ * dead surface before calling this again (see zan_gui_present). */
+static int ohos_gl_surface(zan_ohos_win_t *w) {
     if (!w->egl_dpy) {
         w->egl_dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
         if (w->egl_dpy == EGL_NO_DISPLAY || !eglInitialize(w->egl_dpy, NULL, NULL))
@@ -702,6 +729,7 @@ static int ohos_gl_init(zan_ohos_win_t *w) {
         w->egl_surf = eglCreateWindowSurface(w->egl_dpy, cfg,
                                              (EGLNativeWindowType)w->nw, NULL);
         if (w->egl_surf == EGL_NO_SURFACE) return 1;
+        w->surf_nw = w->nw;
     }
     if (!w->egl_ctx) {
         const EGLint ctx_attrs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
@@ -710,6 +738,13 @@ static int ohos_gl_init(zan_ohos_win_t *w) {
     }
     if (!eglMakeCurrent(w->egl_dpy, w->egl_surf, w->egl_surf, w->egl_ctx))
         return 1;
+    return 0;
+}
+
+/* The quad program + texture; only the surface depends on the native
+ * window, so this runs exactly once per process. */
+static int ohos_gl_program(zan_ohos_win_t *w) {
+    if (w->gl_prog) { return 0; }
 
     GLuint vs = ohos_compile(GL_VERTEX_SHADER, k_ohos_vs);
     GLuint fs = ohos_compile(GL_FRAGMENT_SHADER, k_ohos_fs);
@@ -736,19 +771,73 @@ static int ohos_gl_init(zan_ohos_win_t *w) {
     return 0;
 }
 
+static int ohos_gl_init(zan_ohos_win_t *w) {
+    if (ohos_gl_surface(w) != 0) { return 1; }
+    return ohos_gl_program(w);
+}
+
+/* Dirty rects announced by the app (Window.PresentDirty): a partial-band or
+ * effect-tick frame has no reason to re-upload the whole multi-MB surface on
+ * the EGL path -- the texture persists across frames, so uploading just the
+ * changed subrects keeps the rest of the texture. The list is emptied by
+ * every present; a present with no announcement (or an overflow) falls back
+ * to the full upload. The NativeWindow fast path still copies the whole
+ * frame: the BufferQueue rotates several buffers, so rect damage would have
+ * to be tracked per buffer to be safe. */
+#define ZAN_OHOS_DIRTY_MAX 512
+static i32 g_dirty[ZAN_OHOS_DIRTY_MAX * 4];
+static int g_dirty_count;
+static int g_dirty_overflow;
+
+EXPORT i32 zan_gui_present_dirty_add(i32 x, i32 y, i32 w, i32 h) {
+    if (w <= 0 || h <= 0) return 0;
+    if (g_dirty_count >= ZAN_OHOS_DIRTY_MAX) { g_dirty_overflow = 1; return 0; }
+    g_dirty[g_dirty_count * 4 + 0] = x;
+    g_dirty[g_dirty_count * 4 + 1] = y;
+    g_dirty[g_dirty_count * 4 + 2] = w;
+    g_dirty[g_dirty_count * 4 + 3] = h;
+    g_dirty_count++;
+    return 0;
+}
+
+static void ohos_dirty_reset(void) { g_dirty_count = 0; g_dirty_overflow = 0; }
+
 static void ohos_texture(zan_ohos_win_t *w, const zan_surface_t *s) {
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, w->gl_tex);
     if (w->tex_w != s->width || w->tex_h != s->height) {
+        /* New/resize: whole-surface (re)seed, dirty rects from the frame
+         * that resized are already included in the pixels. */
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, s->width, s->height, 0,
                      GL_RGBA, GL_UNSIGNED_BYTE, NULL);
         w->tex_w = s->width;
         w->tex_h = s->height;
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, s->stride);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, s->width, s->height,
+                        GL_RGBA, GL_UNSIGNED_BYTE, s->pixels);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    } else if (g_dirty_count > 0 && !g_dirty_overflow) {
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, s->stride);
+        for (int i = 0; i < g_dirty_count; i++) {
+            i32 x = g_dirty[i * 4 + 0], y = g_dirty[i * 4 + 1];
+            i32 cw = g_dirty[i * 4 + 2], ch = g_dirty[i * 4 + 3];
+            if (x < 0) { cw += x; x = 0; }
+            if (y < 0) { ch += y; y = 0; }
+            if (x + cw > s->width) { cw = s->width - x; }
+            if (y + ch > s->height) { ch = s->height - y; }
+            if (cw <= 0 || ch <= 0) continue;
+            glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, cw, ch,
+                            GL_RGBA, GL_UNSIGNED_BYTE,
+                            (const uint8_t *)s->pixels
+                                + ((size_t)y * (size_t)s->stride + (size_t)x) * 4);
+        }
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    } else {
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, s->stride);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, s->width, s->height,
+                        GL_RGBA, GL_UNSIGNED_BYTE, s->pixels);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     }
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, s->stride);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, s->width, s->height,
-                    GL_RGBA, GL_UNSIGNED_BYTE, s->pixels);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -764,7 +853,8 @@ EXPORT i32 zan_gui_present(iptr hwnd_val, i32 surface_id) {
     g_last_surface = surface_id;
 
     /* Fast path: real device with the NDK window library -- write the
-     * BufferQueue buffer directly. */
+     * BufferQueue buffer directly. Announced dirty rects are consumed
+     * (cleared) without use: this path copies the whole frame anyway. */
     if (g_nw_request && g_nw_flush && g_nw_getbh) {
         OHNativeWindowBuffer *buf = NULL;
         int fence = -1;
@@ -786,13 +876,32 @@ EXPORT i32 zan_gui_present(iptr hwnd_val, i32 surface_id) {
             region.rects = NULL;   /* header default: whole buffer dirty */
             region.rectNumber = 0;
             g_nw_flush((OHNativeWindow *)g_owin.nw, buf, -1, &region);
+            ohos_dirty_reset();
             return 0;
         }
     }
 egl_path:
-    /* Fallback: EGL texture upload + fullscreen quad. */
-    if (!g_owin.gl_prog && ohos_gl_init(&g_owin) != 0) return 1;
+    /* Fallback: EGL texture upload + fullscreen quad. The texture persists
+     * across frames, so a frame that announced damage uploads only those
+     * subrects (the HUD band / fx patches on idle ticks) instead of the
+     * whole surface. */
+    if (g_owin.egl_surf && g_owin.surf_nw != g_owin.nw) {
+        /* Rotation handed the shell a fresh native window; the surface
+         * made from the old one is dead. Drop it here -- on the app
+         * thread, never racing a present -- and let ohos_gl_init rebuild
+         * against the new window. Context/program/texture survive. */
+        eglMakeCurrent(g_owin.egl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE,
+                       EGL_NO_CONTEXT);
+        eglDestroySurface(g_owin.egl_dpy, g_owin.egl_surf);
+        g_owin.egl_surf = EGL_NO_SURFACE;
+        g_owin.surf_nw = NULL;
+    }
+    if ((!g_owin.gl_prog || !g_owin.egl_surf) && ohos_gl_init(&g_owin) != 0) {
+        ohos_dirty_reset();
+        return 1;
+    }
     ohos_texture(&g_owin, s);
+    ohos_dirty_reset();
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     eglSwapBuffers(g_owin.egl_dpy, g_owin.egl_surf);
     return 0;
@@ -816,11 +925,6 @@ EXPORT void zan_gui_ohos_shutdown(void) {
     w->egl_dpy = EGL_NO_DISPLAY;
     w->gl_prog = 0;
     w->tex_w = w->tex_h = 0;
-}
-
-EXPORT i32 zan_gui_present_dirty_add(i32 x, i32 y, i32 w, i32 h) {
-    (void)x; (void)y; (void)w; (void)h;
-    return 0; /* accepted; present copies the whole frame regardless */
 }
 
 /* ---- window management (phone: no chrome) ----------------------------- */

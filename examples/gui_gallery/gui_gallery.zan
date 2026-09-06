@@ -2684,6 +2684,12 @@ class Gallery {
             // 永远等不到下一圈。驱动结束后 Tick 不再置位，循环回到阻塞。
             bool driverPoll = app.pollPending;
             app.pollPending = false;
+            // 到期的帧截止时间在这一圈先兑现（与 App.ProcessEvent 的
+            // 先 pump 后等待同序）。此前轮询那一路完全绕过截止时间，
+            // 只挂 wake 帧的机制（DataTable 长按菜单的 500ms 计时靠
+            // RequestWakeFrameIn 推进）在驱动/弹窗轮询期间一帧不出，
+            // 按住再久菜单也弹不出来。
+            if (!app.needsRedraw) { app.PumpDueFrame(); }
             // Upload 内建弹窗与 filePicker 同待遇：弹窗要重绘走快轮询；
             // 任一弹窗开着时不得阻塞在 WaitEvent 上。
             bool uploadOpen = Gallery.AnyUploadDialogOpen();
@@ -2708,9 +2714,12 @@ class Gallery {
                     r = app.window.WaitEventTimeout(16);
                 }
             } else if (!Gallery.filePicker.WindowModeOpen() && !uploadOpen
-                       && (app.animNextMs >= 0 || app.fxNextMs >= 0)) {
-                // A throttled animation (spinner/skeleton) and/or the skin
-                // effect layer wants its next frame; idle until the earliest
+                       && (app.animNextMs >= 0 || app.fxNextMs >= 0
+                           || app.wakeNextMs >= 0
+                           || app.wakeFrameNextMs >= 0)) {
+                // A throttled animation (spinner/skeleton), the skin effect
+                // layer, or a pending wake frame (PollLongPress's 500ms
+                // timer) wants its next frame; idle until the earliest
                 // deadline, but poll in slices so input still wakes the loop
                 // promptly. An effect-only tick is served in place by
                 // App.FxPresent (frame-snapshot restore + re-composite).
@@ -2722,6 +2731,15 @@ class Gallery {
                     if (deadline < 0
                         || (app.fxNextMs >= 0 && app.fxNextMs < deadline)) {
                         deadline = app.fxNextMs;
+                    }
+                    if (deadline < 0
+                        || (app.wakeNextMs >= 0 && app.wakeNextMs < deadline)) {
+                        deadline = app.wakeNextMs;
+                    }
+                    if (deadline < 0
+                        || (app.wakeFrameNextMs >= 0
+                            && app.wakeFrameNextMs < deadline)) {
+                        deadline = app.wakeFrameNextMs;
                     }
                     if (deadline < 0) { waiting = false; }
                     else if (now >= deadline) {
@@ -3539,6 +3557,13 @@ class Gallery {
         UiDriver.SetProbe("click.delivered",
             Gallery.drvClickDelivered ? "true" : "false");
         UiDriver.SetProbe("click.relSeq", Convert.ToString(evSeq));
+        // 长按回归：按住期间按下锚（AnchorAt 快照解析）与焦点
+        // pressedId 是否落在同一控件上——PollLongPress 的两个 id
+        // 门。不落在同一控件时唤醒帧不会排上，按住期间零渲染。
+        UiDriver.SetProbe("press.target",
+            Convert.ToString(app.PressTarget()));
+        UiDriver.SetProbe("press.pressedId",
+            Convert.ToString(app.focus.pressedId));
         // 滚动回归探针：详情页滚动偏移与内容高度，滚轮平滑性验证用。
         UiDriver.SetProbe("detail.offset",
             Convert.ToString(Gallery.detailView.Offset()));

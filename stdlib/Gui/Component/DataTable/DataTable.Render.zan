@@ -1398,6 +1398,20 @@ partial class DataTable {
             int rzPad = touchUi ? app.Scale(6) : 0;
             int rzX = hx + cw - rzW / 2 - rzPad;
             int rzHitW = rzW + rzPad * 2;
+            // 触摸下加宽的调整热区原本与常显的筛选菜单图标完全
+            // 重叠（图标注册在前，热区注册在后命中优先），图标
+            // 会永远点不到，长按开列菜单也无从谈起。把热区右缘
+            // 钳到图标左缘、列右缘（下一列的拖动手柄从那里开
+            // 始）之内；桌面不加宽，维持原半列宽的贴边热区。
+            if (rzPad > 0 && menuId >= 0) {
+                int rzR = rzX + rzHitW;
+                int iconL = hx + cw - menuIconW - app.Scale(1);
+                if (rzR > iconL) { rzR = iconL; }
+                if (rzR > hx + cw) { rzR = hx + cw; }
+                rzX = rzR - rzHitW;
+                if (rzX < visX) { rzX = visX; }
+                rzHitW = rzR - rzX;
+            }
             int rzCursor = 4;
             if (!col.resizable) { rzCursor = 6; }
             app.hitTester.RegisterRect(rzId, rzX, titleTop, rzHitW, titleRowH, rzCursor);
