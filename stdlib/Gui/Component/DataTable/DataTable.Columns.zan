@@ -149,6 +149,36 @@ partial class DataTable {
         if (changed) { DataTable.InvalidateView(st); }
     }
 
+    /// 重置全部列状态（AG Grid 的 resetColumns）：排序、逐列筛选、
+    /// 分组与折叠、冻结、隐藏、页脚聚合、菜单条件格式槽全部清空，
+    /// 列宽回到列声明的默认值。不动数据、勾选与撤销日志——重置
+    /// 是视图操作，不是编辑。条件格式槽清 0 后工厂预设自然恢复
+    /// （EnsureColumnSlots 只回写非零槽，与单列"清除规则"同语义）。
+    static void ResetColumns(DataTableState st, List<DataColumn> cols) {
+        DataTable.ClearSort(st);
+        for (int i = 0; i < st.filters.Count; i = i + 1) {
+            st.filters[i] = new ColFilter();
+        }
+        DataTable.Ungroup(st);
+        for (int i = 0; i < st.colFreeze.Count; i = i + 1) { st.colFreeze[i] = 0; }
+        DataTable.ShowAllColumns(st);
+        for (int i = 0; i < st.aggMode.Count; i = i + 1) { st.aggMode[i] = 0; }
+        st.showSummary = false;
+        for (int i = 0; i < st.menuCfMode.Count; i = i + 1) {
+            st.menuCfMode[i] = 0;
+            st.menuCfRankPct[i] = false;
+        }
+        if (cols != null) {
+            for (int i = 0; i < st.colWidths.Count && i < cols.Count; i = i + 1) {
+                st.colWidths[i] = cols[i].width;
+            }
+        }
+        // 筛选/分组变了要走完整查询管线；条件格式与名次缓存
+        // 依赖 st.dirty 由菜单分发处的 Recompute 收口。
+        DataTable.InvalidateQuery(st);
+        st.dirty = true;
+    }
+
     // ---------- 页脚聚合 ----------
     /// 设置列的合计行聚合（0 无，1 求和，2 平均，3 最小，4 最大，5 计数）
     /// 并根据是否仍有列在聚合自动切换页脚。

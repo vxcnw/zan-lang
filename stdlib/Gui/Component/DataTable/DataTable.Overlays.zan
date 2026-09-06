@@ -13,14 +13,15 @@ namespace Gui.Component.DataTable;
 /// 选中项的 action 码下一帧统一 dispatch。
 partial class DataTable {
     // ---------- 行菜单 action 码 ----------
-    // 0 复制，1 带表头复制，2 粘贴，3 清空单元格，4 导出 csv，
-    // 5 选区生成图表，6/7 透视（退出/生成），8 插入行，9 删除行，
-    // 10 撤销，11 全选，12 清除选择
+    // 0 复制，1 带表头复制，2 粘贴，3 清空单元格，5 选区生成图表，
+    // 6/7 透视（退出/生成），8 插入行，9 删除行，
+    // 10 撤销，11 全选，12 清除选择，
+    // 13 剪切，14/15 分组展开/折叠全部，16/17 异步导出 CSV/Excel
+    // （对照 AG Grid getContextMenuItems 的默认项集）
     static readonly int RowActCopy = 0;
     static readonly int RowActCopyHdr = 1;
     static readonly int RowActPaste = 2;
     static readonly int RowActClear = 3;
-    static readonly int RowActExport = 4;
     static readonly int RowActChart = 5;
     static readonly int RowActPivotExit = 6;
     static readonly int RowActPivot = 7;
@@ -29,6 +30,11 @@ partial class DataTable {
     static readonly int RowActUndo = 10;
     static readonly int RowActSelAll = 11;
     static readonly int RowActSelNone = 12;
+    static readonly int RowActCut = 13;
+    static readonly int RowActExpandGroups = 14;
+    static readonly int RowActContractGroups = 15;
+    static readonly int RowActExportCsv = 16;
+    static readonly int RowActExportXlsx = 17;
 
     // ---------- 表头菜单 action 码 ----------
     // 0 升序，1 降序，2 清除排序，3 自动列宽，4 自动全部列宽，
@@ -51,6 +57,7 @@ partial class DataTable {
     static readonly int HdrActShowAll = 10;
     static readonly int HdrActChooser = 11;
     static readonly int HdrActFilter = 12;
+    static readonly int HdrActResetCols = 13;
     static readonly int HdrActAgg0 = 20;          // 20+aggMode
     static readonly int HdrActCfGreater = 32;
     static readonly int HdrActCfLess = 33;
@@ -96,9 +103,14 @@ partial class DataTable {
 
     // ---------- 右键行上下文菜单 ----------
 
-    /// 构建行右键菜单的 MenuItem 列表：复制/带表头复制/粘贴/
-    /// 清空/导出 CSV/选区图表；数据源可增删行时追加插入行、
-    /// 删除行、撤销组，末尾恒有全选与清除选择。
+    /// 构建行右键菜单的 MenuItem 列表（项集对照 AG Grid
+    /// getContextMenuItems 默认值）：剪贴板组（复制/含表头/剪切/
+    /// 粘贴/清空）、导出子菜单（CSV/Excel，带进度与取消）、选区
+    /// 图表、透视；分组时追加展开/折叠全部分组（expandAll/
+    /// contractAll 的显隐条件同 AG Grid——仅分组时出现）；数据源
+    /// 可增删行时追加插入行、删除行；撤销日志非空时出现撤销
+    /// （撤销是编辑能力，不依赖数据源可增删行——固定行数的源
+    /// 一样能编辑单元格）；末尾恒有全选与清除选择。
     static List<MenuItem> BuildRowMenuItems(DataTableState st, List<DataColumn> cols,
                                             DataSource src) {
         List<MenuItem> items = new List<MenuItem>();
@@ -109,13 +121,19 @@ partial class DataTable {
                                     DataTable.RowActCopy));
         items.Add(MenuItem.Item(DataTable.T("Copy with headers", "复制（含表头）"),
                                 "copy", DataTable.RowActCopyHdr));
+        items.Add(MenuItem.Shortcut(DataTable.T("Cut", "剪切"), "cut", "Ctrl+X",
+                                    DataTable.RowActCut));
         items.Add(MenuItem.Shortcut(DataTable.T("Paste", "粘贴"), "clipboard", "Ctrl+V",
                                     DataTable.RowActPaste));
         items.Add(MenuItem.Shortcut(DataTable.T("Clear selected cells", "清空所选单元格"),
                                     "close", "Delete", DataTable.RowActClear));
         items.Add(MenuItem.Separator());
-        items.Add(MenuItem.Item(DataTable.T("Export CSV", "导出 CSV"), "download",
-                                DataTable.RowActExport));
+        List<MenuItem> exportKids = new List<MenuItem>();
+        exportKids.Add(MenuItem.Item(DataTable.T("CSV Export", "导出 CSV"), "download",
+                                     DataTable.RowActExportCsv));
+        exportKids.Add(MenuItem.Item(DataTable.T("Excel Export", "导出 Excel"), "download",
+                                     DataTable.RowActExportXlsx));
+        items.Add(MenuItem.Submenu(DataTable.T("Export", "导出"), "download", exportKids));
         items.Add(MenuItem.Item(DataTable.T("Chart from selection", "从选区生成图表"),
                                 "chart", DataTable.RowActChart));
         if (st.pivotView) {
@@ -125,6 +143,12 @@ partial class DataTable {
             items.Add(MenuItem.Item(DataTable.T("Pivot from selection", "从选区生成透视表"),
                                     "table", DataTable.RowActPivot));
         }
+        if (DataTable.IsGrouped(st)) {
+            items.Add(MenuItem.Item(DataTable.T("Expand All Groups", "展开全部分组"),
+                                    "", DataTable.RowActExpandGroups));
+            items.Add(MenuItem.Item(DataTable.T("Collapse All Groups", "折叠全部分组"),
+                                    "", DataTable.RowActContractGroups));
+        }
         bool canRows = src.CanInsert();
         if (canRows) {
             items.Add(MenuItem.Separator());
@@ -132,6 +156,8 @@ partial class DataTable {
                                         "Ctrl+Ins", DataTable.RowActInsert));
             items.Add(MenuItem.Shortcut(DataTable.T("Delete rows", "删除行"), "minus",
                                         "Ctrl+Del", DataTable.RowActDelete));
+        }
+        if (undoN > 0) {
             items.Add(MenuItem.Shortcut(undoLbl, "undo", "Ctrl+Z", DataTable.RowActUndo));
         }
         items.Add(MenuItem.Separator());
@@ -160,10 +186,24 @@ partial class DataTable {
             int dn = DataTable.ClearRangeCells(st, cols, src);
             if (dn > 0) { DataTable.Flash(st, DataTable.TN("Cleared {n} cells", dn, "已清空 {n} 个单元格")); }
             else { DataTable.Flash(st, DataTable.T("No editable cells in selection", "所选区域没有可编辑单元格")); }
-        } else if (act == DataTable.RowActExport) {
-            bool ok = SysFile.Write("datatable_export.csv", DataTable.BuildText(st, cols, src, true, true));
-            if (ok) { DataTable.Flash(st, DataTable.T("Exported datatable_export.csv", "已导出 datatable_export.csv")); }
-            else { DataTable.Flash(st, DataTable.T("Export failed", "导出失败")); }
+        } else if (act == DataTable.RowActCut) {
+            // 与 Ctrl+X 同一通道：复制选区文本，再清空可编辑单元格。
+            Clipboard.SetText(DataTable.CopyText(st, cols, src));
+            int cut = DataTable.ClearRangeCells(st, cols, src);
+            if (cut > 0) { DataTable.Flash(st, DataTable.TN("Cut {n} cells", cut, "已剪切 {n} 个单元格")); }
+            else { DataTable.Flash(st, DataTable.T("Copied to clipboard", "已复制到剪贴板")); }
+        } else if (act == DataTable.RowActExpandGroups) {
+            DataTable.ExpandAll(st);
+        } else if (act == DataTable.RowActContractGroups) {
+            DataTable.CollapseAll(st);
+        } else if (act == DataTable.RowActExportCsv) {
+            // 异步流式导出 + 进度/取消弹层（与画廊 Excel 导出同一
+            // 通道），取代旧的同步整写——大表导出不再冻结 UI。
+            DataTable.ExportToCsvAsyncUi(app, st, cols, src,
+                                         "datatable_export.csv", false);
+        } else if (act == DataTable.RowActExportXlsx) {
+            DataTable.ExportToXlsxAsyncUi(app, st, cols, src,
+                                          "datatable_export.xlsx", false);
         } else if (act == DataTable.RowActChart) {
             if (DataTable.BuildChartFromRange(st, cols, src)) {
                 st.chartOpen = true;
@@ -706,6 +746,8 @@ partial class DataTable {
             DataTable.SetColumnChooser(st, true);
         } else if (act == DataTable.HdrActFilter) {
             DataTable.OpenFilterMenu(st, cols, src, col);
+        } else if (act == DataTable.HdrActResetCols) {
+            DataTable.ResetColumns(st, cols);
         } else if (act >= DataTable.HdrActAgg0 && act < DataTable.HdrActAgg0 + 6) {
             DataTable.SetAggregate(st, col, act - DataTable.HdrActAgg0);
             st.hitCol = col; st.ColumnResize.Raise();
@@ -858,6 +900,9 @@ partial class DataTable {
             items.Add(MenuItem.Submenu(DataTable.T("Conditional Formatting", "条件格式"),
                                        "flag", DataTable.BuildCfChildren(cols[col], st, col)));
         }
+        items.Add(MenuItem.Separator());
+        items.Add(MenuItem.Item(DataTable.T("Reset Columns", "重置所有列"), "undo",
+                                DataTable.HdrActResetCols));
 
         app.AddOverlay(OverlayPopup.RichMenu(st.hdrCtxX, st.hdrCtxY, items,
             st.hdrMenuBaseId, st.hdrMenuResult, st.hdrMenuOpen, st.hdrMenuSub,

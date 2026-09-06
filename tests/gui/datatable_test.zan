@@ -2093,6 +2093,100 @@ class Program {
         DataTableState pstA = new DataTableState();
         DataTableState pstB = new DataTableState();
         Console.WriteLine(DataTable.CompPoolKeyDistinctProbe(pstA, pstB));
+        // Row context menu mirrors AG Grid's default getContextMenuItems
+        // set: clipboard group with Cut, an Export submenu holding CSV +
+        // Excel entries, and expand/collapse-all-groups items that appear
+        // only while grouped. Undo shows whenever the journal is
+        // non-empty — even for sources refusing row insertion (undo is
+        // an edit capability, not a row-management one).
+        DataTableState mst = new DataTableState();
+        List<DataColumn> mcols = new List<DataColumn>();
+        mcols.Add(DataColumn.Text("Name", 120));
+        mcols.Add(DataColumn.Text("Qty", 90));
+        List<DataRow> mrows = new List<DataRow>();
+        mrows.Add(Row("a", "1", ""));
+        mrows.Add(Row("b", "2", ""));
+        DataSource msrc = new RowListSource(mrows);
+        DataTable.EnsureInit(mst, mcols, msrc);
+        List<MenuItem> rmi = DataTable.BuildRowMenuItems(mst, mcols, msrc);
+        Console.WriteLine(rmi[0].action == DataTable.RowActCopy
+            && rmi[0].shortcut == "Ctrl+C");
+        bool hasCut = false;
+        bool hasCsv = false;
+        bool hasXlsx = false;
+        int subCount = 0;
+        for (int i = 0; i < rmi.Count; i = i + 1) {
+            if (rmi[i].action == DataTable.RowActCut) { hasCut = rmi[i].shortcut == "Ctrl+X"; }
+            if (rmi[i].children.Count == 2) {
+                subCount = subCount + 1;
+                hasCsv = rmi[i].children[0].action == DataTable.RowActExportCsv;
+                hasXlsx = rmi[i].children[1].action == DataTable.RowActExportXlsx;
+            }
+        }
+        Console.WriteLine(hasCut && hasCsv && hasXlsx && subCount == 1);
+        bool noGroupItems = true;
+        for (int i = 0; i < rmi.Count; i = i + 1) {
+            if (rmi[i].action == DataTable.RowActExpandGroups
+                || rmi[i].action == DataTable.RowActContractGroups) { noGroupItems = false; }
+        }
+        Console.WriteLine(noGroupItems);
+        DataTable.GroupBy(mst, 0);
+        rmi = DataTable.BuildRowMenuItems(mst, mcols, msrc);
+        bool hasExp = false;
+        bool hasCol = false;
+        for (int i = 0; i < rmi.Count; i = i + 1) {
+            if (rmi[i].action == DataTable.RowActExpandGroups) { hasExp = true; }
+            if (rmi[i].action == DataTable.RowActContractGroups) { hasCol = true; }
+        }
+        Console.WriteLine(hasExp && hasCol);
+        DataTable.Ungroup(mst);
+        RoSource roSrc = new RoSource();
+        DataTableState rst = new DataTableState();
+        List<DataColumn> rcols = new List<DataColumn>();
+        rcols.Add(DataColumn.Text("A", 80));
+        DataTable.EnsureInit(rst, rcols, roSrc);
+        rmi = DataTable.BuildRowMenuItems(rst, rcols, roSrc);
+        bool noUndo = true;
+        for (int i = 0; i < rmi.Count; i = i + 1) {
+            if (rmi[i].action == DataTable.RowActUndo) { noUndo = false; }
+        }
+        Console.WriteLine(roSrc.CanInsert() == false && noUndo);
+        DataTable.Journal(rst, RowEdit.Cell(0, 0, "ro", "edited"));
+        rmi = DataTable.BuildRowMenuItems(rst, rcols, roSrc);
+        bool hasUndo = false;
+        for (int i = 0; i < rmi.Count; i = i + 1) {
+            if (rmi[i].action == DataTable.RowActUndo) { hasUndo = true; }
+        }
+        Console.WriteLine(hasUndo);
+        // ResetColumns returns every column dimension to factory state:
+        // sort, per-column filter stages, grouping, freeze, visibility,
+        // footer aggregation, menu conditional-format slots and widths.
+        DataTableState qst = new DataTableState();
+        List<DataColumn> qcols = new List<DataColumn>();
+        qcols.Add(DataColumn.Text("A", 80));
+        qcols.Add(DataColumn.Text("B", 120));
+        List<DataRow> qrows = new List<DataRow>();
+        qrows.Add(Row("x", "1", ""));
+        qrows.Add(Row("y", "2", ""));
+        DataSource qsrc = new RowListSource(qrows);
+        DataTable.EnsureInit(qst, qcols, qsrc);
+        DataTable.SortBy(qst, 0, 2);
+        qst.filters[1].topMode = 1;
+        qst.filters[1].topN = 1;
+        DataTable.GroupBy(qst, 1);
+        DataTable.PinColumn(qst, 0);
+        qst.colHidden[1] = true;
+        DataTable.SetAggregate(qst, 1, 1);
+        qst.menuCfMode[0] = 1;
+        qst.colWidths[0] = 555;
+        DataTable.ResetColumns(qst, qcols);
+        DataTable.Recompute(qst, qcols, qsrc);
+        Console.WriteLine(qst.sortKeys.Count == 0 && DataTable.IsGrouped(qst) == false);
+        Console.WriteLine(qst.filters[1].Active() == false
+            && DataTable.FreezeOf(qst, 0) == 0);
+        Console.WriteLine(qst.colHidden[1] == false && qst.aggMode[1] == 0
+            && qst.showSummary == false);
+        Console.WriteLine(qst.menuCfMode[0] == 0 && qst.colWidths[0] == 80);
     }
 }
 
