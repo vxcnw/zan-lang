@@ -54,7 +54,7 @@ class PieLayout {
     int ringCount;      // 环数（非环模式 = 1）
     List<int> ringTotal; // 兼容字段：每环总和饱和
     List<long> ringTotalWide; // 每环各自可见值之和（环模式角度分母）
-    List<int> ringInner; // 每环有效内径百分比（innerPct>0 ? innerPct : donutPct）
+    List<int> ringInner; // 每环有效内径百分比（多环 = 逐环 innerPct；单环回落 donutPct）
     int rot;            // 起始边顺时针偏移（度）：90 - series.startAngle
 
     /// 归一化布局入口：收集可见 Pie 系列的全部正值非隐藏数据项；
@@ -89,12 +89,18 @@ class PieLayout {
         l.rot = ((90 - pies[0].startAngle) % 360 + 360) % 360;
 
         if (o.pieRings) {
-            // 每条可见系列 = 一环，各自 total。
+            // 每条可见系列 = 一环，各自 total。ECharts 嵌套饼的系列
+            // 按内→外排列（series[0] 是最内实心饼，后续依次向外），
+            // 而环号 0 = 最外，故系列 si 落在环 ringCount-1-si
+            // （pie3：来源实心内饼 + 细分外环）。
             l.ringCount = pies.Count;
-            for (int r = 0; r < pies.Count; r = r + 1) {
-                ChartSeries s = pies[r];
+            for (int si = pies.Count - 1; si >= 0; si = si - 1) {
+                ChartSeries s = pies[si];
                 int inner = s.innerPct;
-                if (inner <= 0) { inner = o.donutPct; }
+                // 多环的内外径是逐环布局语义，没有全局 donut 回退：
+                // innerPct=0 即从圆心画起的实心饼（ECharts
+                // radius [0, x%]）；单环保留 donutPct 回退。
+                if (inner <= 0 && pies.Count == 1) { inner = o.donutPct; }
                 if (inner < 0) { inner = 0; }
                 if (inner > 95) { inner = 95; }
                 l.ringInner.Add(inner);
@@ -117,8 +123,9 @@ class PieLayout {
                     if (v <= 0) { continue; }
                     int a0 = (int)(acc * 360 / rt);
                     int a1 = (int)((acc + v) * 360 / rt);
-                    l.slices.Add(PieSlice.Of(v, PieLayout.SliceColor(t, s, di2, origIdx[r] * 16 + di2),
-                        PieLayout.SliceName(s, di2), origIdx[r], di2, a0, a1, r));
+                    l.slices.Add(PieSlice.Of(v, PieLayout.SliceColor(t, s, di2, origIdx[si] * 16 + di2),
+                        PieLayout.SliceName(s, di2), origIdx[si], di2, a0, a1,
+                        pies.Count - 1 - si));
                     l.slices[l.slices.Count - 1].selected = d.selected;
                     acc = acc + v;
                 }
@@ -221,8 +228,11 @@ partial class ChartView {
         ro = rOuter - ring * band;
         ri = rOuter - (ring + 1) * band;
         if (ring == ringCount - 1 && layout.ringInner.Count > ring) {
+            // 内孔 = ringInner% × 本环外径（单环时 ro = rOuter，与
+            // 旧的全局百分比一致；多环的环带只有 rOuter/ringCount，
+            // 按全局算孔会大于环本身，把内环挤成 1px 细条）。
             // inner=0 是合法的实心饼配置，不能落回 ri=ro-1。
-            int hole = rOuter * layout.ringInner[ring] / 100;
+            int hole = ro * layout.ringInner[ring] / 100;
             int holeMax = ro - minGap;
             if (holeMax < 0) { holeMax = 0; }
             if (hole > holeMax) { hole = holeMax; }

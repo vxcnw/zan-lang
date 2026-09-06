@@ -33,6 +33,10 @@ partial class Charts {
         Charts.Show(app, o, x, y, w, h);
     }
 
+    /// pie3 嵌套环形图（ECharts2 radius [0,40%] + [55%,70%]）：
+    /// 系列按内→外排列，内环 innerPct=0 画成从圆心起的实心饼。
+    /// ref 偏差：环带宽度不支持逐环 radius 百分比，按环数均分
+    /// （内饼 0..50%、外环 50..100%）。
     static void Pie3(App app, int x, int y, int w, int h) {
         List<ChartData> inner = Charts.PieTraffic();
         List<ChartData> outer = new List<ChartData>{
@@ -179,8 +183,11 @@ partial class Charts {
                 ChartData.Named(335, Charts.T("Hardware", "硬件")),
                 ChartData.Named(310, Charts.T("Software", "软件")),
                 ChartData.Named(330, Charts.T("Service", "服务")) });
+        // ECharts 嵌套饼系列按内→外排列：内环孔径显式给 55
+        // （多环布局不再回落全局 donutPct）。
+        inner.innerPct = 55;
         ChartOption o = ChartOption.OfRings(Charts.T("Sales lasagna", "销售千层饼"),
-            new List<ChartSeries>{ outer, mid, inner });
+            new List<ChartSeries>{ inner, mid, outer });
         o.showLegend = false;
         Charts.Show(app, o, x, y, w, h);
     }

@@ -680,8 +680,20 @@ partial class ChartView {
             }
             if (cnt < 1) { continue; }
             int vx = m.kind.Length > 0 ? ext : m.xValue;
-            if (m.kind == "average") { vx = sum / cnt; }
-            int lx = f.XOfValue(vx);
+            // 均值可带小数（104/9=11.56），整数 sum/cnt 会把线打在
+            // 11 上、与标签对不上。XOfValue 仿射：x(sum/cnt) = x(0)
+            // + (x(sum)-x(0))/cnt，四舍五入得亚数据单位的像素位。
+            int lx = 0;
+            if (m.kind == "average") {
+                int x0v = f.XOfValue(0);
+                int xSv = f.XOfValue(sum);
+                int diff = xSv - x0v;
+                int q = diff >= 0 ? (diff + cnt / 2) / cnt
+                                  : 0 - ((0 - diff + cnt / 2) / cnt);
+                lx = x0v + q;
+            } else {
+                lx = f.XOfValue(vx);
+            }
             int col = m.color != 0 ? m.color : Chart.Rgb(30, 144, 255);
             string lt = m.lineType.Length > 0 ? m.lineType : "dashed";
             int dash = app.Scale(6);
@@ -750,14 +762,17 @@ partial class ChartView {
                 c.FillCircle(lx, ly, rad, col);
                 ChartView.RingOutline(c, lx, ly, rad, 4294967295);
             }
-            // 值对/points 系列的标注：默认 "max"/"min" 字样补上数值
-            // （ECharts markPoint.label 默认 {c}），显式 label 支持
-            // {value} 占位。
+            // 值对/points 系列的标注：默认 "max/min" 字样补上数值
+            // （ECharts markPoint.label 默认 {c}）；显式 label 组合
+            // "name: value"（与类目系 DrawSeriesMarks 同形，bar13
+            // 的"最大值"不能吞掉数值），{value} 占位仍原样替换。
             string lbl = m.label;
             if (lbl.Length == 0) {
                 lbl = m.kind + ": " + Convert.ToString(ext);
             } else if (lbl.IndexOf("{value}") >= 0) {
                 lbl = lbl.Replace("{value}", Convert.ToString(ext));
+            } else {
+                lbl = lbl + ": " + Convert.ToString(ext);
             }
             int fs = Style.FontFallback(app, "small");
             int lw = Canvas.MeasureText(lbl, fs);

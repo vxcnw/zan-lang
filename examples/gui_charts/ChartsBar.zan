@@ -80,7 +80,8 @@ partial class Charts {
     /// tomato 描边）堆成水银柱；Forecast 的标签是两系列之和
     /// （ref 的 label.formatter 逐项返回 Acutal[i]+Forecast[i]，
     /// 引擎以 data[i].labelText 覆盖文本表达）。
-    /// ref 偏差：yAxis boundaryGap [0,0.1] 顶部留白不支持（自动量程）。
+    /// ref 偏差：yAxis boundaryGap [0,0.1] 不解析——nice 量程
+    /// 本身已留出顶部空间（数据顶 300、轴顶 500），视觉近似。
     static void Bar3(App app, int x, int y, int w, int h) {
         int tomato = Chart.Rgb(255, 99, 71);
         ChartSeries ac = ChartSeries.StackedBar(Charts.T("Acutal", "Acutal"),

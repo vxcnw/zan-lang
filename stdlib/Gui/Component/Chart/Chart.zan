@@ -128,9 +128,9 @@ class ChartFrame {
         int hi = this.leftMax;
         bool rev = this.reversed;
         if (axisIndex == 1) { lo = this.rightMin; hi = this.rightMax; rev = this.rightReversed; }
-        int span = hi - lo;
+        long span = (long)hi - (long)lo;
         if (span == 0) { span = 1; }
-        int d = (v - lo) * this.plotH / span;
+        int d = (int)(((long)v - (long)lo) * (long)this.plotH / span);
         if (rev) { return this.plotY + d; }
         return this.plotY + this.plotH - d;
     }
@@ -143,9 +143,10 @@ class ChartFrame {
         int hi = this.leftMax;
         bool rev = this.reversed;
         if (axisIndex == 1) { lo = this.rightMin; hi = this.rightMax; rev = this.rightReversed; }
-        int span = hi - lo;
+        long span = (long)hi - (long)lo;
         if (span == 0) { span = 1; }
-        int d = (v - lo) * this.plotH * 256 / span;
+        // ×256 定点：大数值时乘积必超 int32（10万×1500×256≈3.8e10）。
+        int d = (int)(((long)v - (long)lo) * ((long)this.plotH * 256) / span);
         if (rev) { return (this.plotY + this.plotH) * 256 - d; }
         return this.plotY * 256 + this.plotH * 256 - d;
     }
@@ -233,18 +234,19 @@ class ChartFrame {
             return v;
         }
         int d = rev ? q : this.plotH - q;
-        int span = hi - lo;
+        long span = (long)hi - (long)lo;
         if (span == 0) { span = 1; }
-        return lo + d * span / this.plotH;
+        return lo + (int)((long)d * span / (long)this.plotH);
     }
 
     /// 时间 X 映射：整数时间值 → 像素 x，钳制在绘图区内。
+    /// 时间跨度（秒/毫秒）× plotW 轻易超 int32，乘法走 long。
     int XOfTime(int t) {
         int lo = this.timeMin;
         int hi = this.timeMax;
-        int span = hi - lo;
+        long span = (long)hi - (long)lo;
         if (span == 0) { span = 1; }
-        int d = (t - lo) * this.plotW / span;
+        int d = (int)(((long)t - (long)lo) * (long)this.plotW / span);
         if (d < 0) { d = 0; }
         if (d > this.plotW) { d = this.plotW; }
         return this.plotX + d;
@@ -877,17 +879,20 @@ class Chart {
     }
 
     /// 数值 → 水平像素：plotX 对应 lo，plotX+plotW 对应 hi。
+    /// 大数值 × plotW 会超 int32（bar3 Population 到百万：
+    /// 1000000×2601≈2.6e9），乘法走 long。
     static int ValueX(int plotX, int plotW, int lo, int hi, int v) {
-        int span = hi - lo;
+        long span = (long)hi - (long)lo;
         if (span < 1) { span = 1; }
-        return plotX + (v - lo) * plotW / span;
+        return plotX + (int)(((long)v - (long)lo) * (long)plotW / span);
     }
 
     /// 数值 → 垂直像素：plotY+plotH 对应 lo，plotY 对应 hi（向上增大）。
+    /// 同 ValueX：乘法走 long 防大数值 × plotH 溢出。
     static int ValueY(int plotY, int plotH, int lo, int hi, int v) {
-        int span = hi - lo;
+        long span = (long)hi - (long)lo;
         if (span < 1) { span = 1; }
-        return plotY + plotH - (v - lo) * plotH / span;
+        return plotY + plotH - (int)(((long)v - (long)lo) * (long)plotH / span);
     }
 
     /// 仅索引窗口 [i0,i1]（含端点）内的最大值，供 dataZoom
@@ -1035,6 +1040,77 @@ class Chart {
             }
         }
         return mx;
+    }
+
+    /// 堆叠柱（ECharts 2.2.x 负向堆积）的正侧组顶：各组正值
+    /// 依序累计，未堆叠系列按绝对值计入；负值不进正向累加
+    /// （bar.js 正负独立累加器，bar5：收入向右、支出向左）。
+    static int MaxBarStackGroupsW(List<ChartSeries> series, int n, int i0) {
+        int mx = 0;
+        for (int i = 0; i < n; i = i + 1) {
+            int oi = i0 + i;
+            List<string> grp = new List<string>();
+            List<int> sums = new List<int>();
+            List<int> absMx = new List<int>();
+            for (int s = 0; s < series.Count; s = s + 1) {
+                ChartSeries cs = series[s];
+                if (cs.hidden || oi >= cs.Count()) { continue; }
+                bool stackedOne = cs.stackName.Length > 0 || cs.stack != 0;
+                int gi = 0 - 1;
+                for (int g2 = 0; g2 < grp.Count; g2 = g2 + 1) {
+                    if (grp[g2] == cs.stackName) { gi = g2; break; }
+                }
+                if (gi < 0) {
+                    grp.Add(cs.stackName);
+                    sums.Add(0);
+                    absMx.Add(0);
+                    gi = grp.Count - 1;
+                }
+                int v = cs.Value(oi);
+                if (v > absMx[gi]) { absMx[gi] = v; }
+                if (stackedOne && v > 0) { sums[gi] = sums[gi] + v; }
+            }
+            for (int g3 = 0; g3 < sums.Count; g3 = g3 + 1) {
+                int top = sums[g3] > absMx[g3] ? sums[g3] : absMx[g3];
+                if (top > mx) { mx = top; }
+            }
+        }
+        return mx;
+    }
+
+    /// MaxBarStackGroupsW 的负侧对偶：各组负值依序累计出组底
+    /// （未堆叠系列只取自身的负值），返回值 ≤ 0。
+    static int MinBarStackGroupsW(List<ChartSeries> series, int n, int i0) {
+        int mn = 0;
+        for (int i = 0; i < n; i = i + 1) {
+            int oi = i0 + i;
+            List<string> grp = new List<string>();
+            List<int> sums = new List<int>();
+            List<int> absMn = new List<int>();
+            for (int s = 0; s < series.Count; s = s + 1) {
+                ChartSeries cs = series[s];
+                if (cs.hidden || oi >= cs.Count()) { continue; }
+                bool stackedOne = cs.stackName.Length > 0 || cs.stack != 0;
+                int gi = 0 - 1;
+                for (int g2 = 0; g2 < grp.Count; g2 = g2 + 1) {
+                    if (grp[g2] == cs.stackName) { gi = g2; break; }
+                }
+                if (gi < 0) {
+                    grp.Add(cs.stackName);
+                    sums.Add(0);
+                    absMn.Add(0);
+                    gi = grp.Count - 1;
+                }
+                int v = cs.Value(oi);
+                if (v < absMn[gi]) { absMn[gi] = v; }
+                if (stackedOne && v < 0) { sums[gi] = sums[gi] + v; }
+            }
+            for (int g3 = 0; g3 < sums.Count; g3 = g3 + 1) {
+                int bot = sums[g3] < absMn[g3] ? sums[g3] : absMn[g3];
+                if (bot < mn) { mn = bot; }
+            }
+        }
+        return mn;
     }
 
     /// 列表最大值，下界 0（无负值语义）。
@@ -1548,10 +1624,27 @@ class Chart {
 
     /// 图例占用的行数：有工具箱时整排下移到标题行之下（至少 1 行）；
     /// 否则与标题同行，仅统计放不下而换出的行。
+    /// 图例项 = 唯一系列名（ECharts2 图例按名字去重：bar9 同名的
+    /// 可见段与透明孔段共用一个图例项）。返回每个名字首个系列
+    /// 的下标；DrawPanelI 与 LegendRowCount 必须同用本函数，
+    /// 两边的行高/换行才能对齐。
+    static List<int> LegendPrimIdx(List<ChartSeries> series) {
+        List<int> prim = new List<int>();
+        for (int ui = 0; ui < series.Count; ui = ui + 1) {
+            bool dup = false;
+            for (int uj = 0; uj < prim.Count; uj = uj + 1) {
+                if (series[prim[uj]].name == series[ui].name) { dup = true; break; }
+            }
+            if (!dup) { prim.Add(ui); }
+        }
+        return prim;
+    }
+
     static int LegendRowCount(App app, int x, int w, string title,
                               List<ChartSeries> series) {
         if (series == null || series.Count < 1) { return 0; }
-        if (Chart.LegendVertical()) { return series.Count; }
+        List<int> prim = Chart.LegendPrimIdx(series);
+        if (Chart.LegendVertical()) { return prim.Count; }
         string fmt = Chart.LegendFmt();
         int pad = app.theme.paddingMedium;
         int lgFs = Style.FontFallback(app, "small");
@@ -1562,9 +1655,9 @@ class Chart {
             extra = 1;
             int xCur = x + pad;
             int maxX = x + w - pad;
-            for (int si = 0; si < series.Count; si = si + 1) {
+            for (int pi = 0; pi < prim.Count; pi = pi + 1) {
                 int chipW = sw + app.Scale(6)
-                    + Canvas.MeasureText(Chart.LegendLabel(fmt, series[si].name), lgFs);
+                    + Canvas.MeasureText(Chart.LegendLabel(fmt, series[prim[pi]].name), lgFs);
                 if (xCur > x + pad && xCur + chipW > maxX) {
                     extra = extra + 1;
                     xCur = x + pad;
@@ -1580,9 +1673,9 @@ class Chart {
                 + Canvas.MeasureText(title, Style.FontFallback(app, "large"))
                 + app.Scale(14);
         }
-        int si = series.Count - 1;
-        while (si >= 0) {
-            int tw = Canvas.MeasureText(Chart.LegendLabel(fmt, series[si].name), lgFs);
+        int pi2 = prim.Count - 1;
+        while (pi2 >= 0) {
+            int tw = Canvas.MeasureText(Chart.LegendLabel(fmt, series[prim[pi2]].name), lgFs);
             int rowLeft = lx - tw - app.Scale(6) - sw;
             if (rowLeft < leftLimit) {
                 extra = extra + 1;
@@ -1592,7 +1685,7 @@ class Chart {
                 if (rowLeft < leftLimit) { rowLeft = leftLimit; }
             }
             lx = rowLeft - app.Scale(14);
-            si = si - 1;
+            pi2 = pi2 - 1;
         }
         return extra;
     }
@@ -1673,6 +1766,17 @@ class Chart {
         }
 
         if (showLegend) {
+        // 图例项按系列名去重（LegendPrimIdx）；先把全部系列的
+        // 隐藏态从状态映射同步进来——同名非主系列没有自己的
+        // 色块，靠这一步跟随主项显隐。
+        List<int> prim = Chart.LegendPrimIdx(series);
+        for (int hsi = 0; hsi < series.Count; hsi = hsi + 1) {
+            bool hs0 = series[hsi].hidden;
+            if (wid != 0) {
+                hs0 = app.StateGet(Chart.LegendKey(wid, hsi), hs0 ? 1 : 0) == 1;
+            }
+            series[hsi].hidden = hs0;
+        }
         // 有工具箱或 orient=vertical：图例整排下移到标题/工具箱行之下。
         // vertical 时每个色块独占一行（左对齐）；否则从右往左排，放不下换行。
         StyleBox sLegend = Style.Part(app, "chart", "legend", "", "", "",
@@ -1698,12 +1802,12 @@ class Chart {
             int maxX = x + w - pad;
             if (!vert) {
                 int totW = 0;
-                for (int sm = 0; sm < series.Count; sm = sm + 1) {
+                for (int sm = 0; sm < prim.Count; sm = sm + 1) {
                     totW = totW + sw + app.Scale(6)
-                        + Canvas.MeasureText(Chart.LegendLabel(fmt, series[sm].name), lgFs)
+                        + Canvas.MeasureText(Chart.LegendLabel(fmt, series[prim[sm]].name), lgFs)
                         + app.Scale(14);
                 }
-                if (series.Count > 0) { totW = totW - app.Scale(14); }
+                if (prim.Count > 0) { totW = totW - app.Scale(14); }
                 if (totW > 0 && totW <= maxX - xCur) {
                     int free = maxX - xCur - totW;
                     string lax = Chart.LegendAlignX();
@@ -1711,12 +1815,10 @@ class Chart {
                     else if (lax != "left") { xCur = xCur + free / 2; }
                 }
             }
-            for (int si = 0; si < series.Count; si = si + 1) {
-                bool hid = series[si].hidden;
-                if (wid != 0) {
-                    hid = app.StateGet(Chart.LegendKey(wid, si), hid ? 1 : 0) == 1;
-                }
-                string nm = Chart.LegendLabel(fmt, series[si].name);
+            for (int pi = 0; pi < prim.Count; pi = pi + 1) {
+                int p = prim[pi];
+                bool hid = series[p].hidden;
+                string nm = Chart.LegendLabel(fmt, series[p].name);
                 int tw = Canvas.MeasureText(nm, lgFs);
                 int chipW = sw + app.Scale(6) + tw;
                 if (xCur > x + pad && (vert || xCur + chipW > maxX)) {
@@ -1724,7 +1826,7 @@ class Chart {
                     lgY = lgY + rowH;
                 }
                 int txtCol = sLegend.FgOr(0);
-                int swCol = Chart.SeriesPaintColor(series[si], t, si);
+                int swCol = Chart.SeriesPaintColor(series[p], t, p);
                 if (hid) { txtCol = sLegendOff.FgOr(0); swCol = sLegendOff.BgOr(0); }
                 c.FillRoundRect(xCur, lgY + app.Scale(3), sw, sw, t.borderRadiusSmall, swCol);
                 c.DrawText(xCur + sw + app.Scale(6), lgY + app.Scale(2), nm, txtCol, lgFs);
@@ -1736,10 +1838,17 @@ class Chart {
                     int hitId = app.focus.AllocId();
                     app.hitTester.RegisterRect(hitId, xCur, lgY, chipW, rowH, 3);
                     if (Ui.Clicked(app, hitId)) {
-                        hid = Chart.LegendClick(app, wid, series, si, hid, lmode);
+                        hid = Chart.LegendClick(app, wid, series, p, hid, lmode);
+                        // 同名系列随主项一起开关（single 模式下
+                        // LegendClick 先全隐藏，这里把本组改回来）。
+                        for (int gm = 0; gm < series.Count; gm = gm + 1) {
+                            if (gm != p && series[gm].name == series[p].name) {
+                                app.StateSet(Chart.LegendKey(wid, gm), hid ? 1 : 0);
+                            }
+                        }
                     }
                 }
-                series[si].hidden = hid;
+                series[p].hidden = hid;
                 xCur = xCur + chipW + app.Scale(14);
             }
         } else {
@@ -1750,14 +1859,12 @@ class Chart {
                 + Canvas.MeasureText(title, titleFs)
                 + app.Scale(14);
         }
-        int si = series.Count - 1;
-        while (si >= 0) {
-            bool hid = series[si].hidden;
-            if (wid != 0) {
-                hid = app.StateGet(Chart.LegendKey(wid, si), hid ? 1 : 0) == 1;
-            }
+        int pi = prim.Count - 1;
+        while (pi >= 0) {
+            int p = prim[pi];
+            bool hid = series[p].hidden;
 
-            string nm = Chart.LegendLabel(fmt, series[si].name);
+            string nm = Chart.LegendLabel(fmt, series[p].name);
             int tw = Canvas.MeasureText(nm, lgFs);
             int rowLeft = lx - tw - app.Scale(6) - sw;
             if (rowLeft < leftLimit) {
@@ -1770,7 +1877,7 @@ class Chart {
             int swatchX = rowLeft;
 
             int txtCol = sLegend.FgOr(0);
-            int swCol = Chart.SeriesPaintColor(series[si], t, si);
+            int swCol = Chart.SeriesPaintColor(series[p], t, p);
             if (hid) { txtCol = sLegendOff.FgOr(0); swCol = sLegendOff.BgOr(0); }
 
             c.DrawText(lx - tw, lgY + app.Scale(2), nm, txtCol, lgFs);
@@ -1785,13 +1892,20 @@ class Chart {
                 app.hitTester.RegisterRect(hitId, rowLeft,
                     lgY, (lx) - rowLeft, sw + app.Scale(4), 3);
                 if (Ui.Clicked(app, hitId)) {
-                    hid = Chart.LegendClick(app, wid, series, si, hid, lmode);
+                    hid = Chart.LegendClick(app, wid, series, p, hid, lmode);
+                    // 同名系列随主项一起开关（single 模式下
+                    // LegendClick 先全隐藏，这里把本组改回来）。
+                    for (int gm = 0; gm < series.Count; gm = gm + 1) {
+                        if (gm != p && series[gm].name == series[p].name) {
+                            app.StateSet(Chart.LegendKey(wid, gm), hid ? 1 : 0);
+                        }
+                    }
                 }
             }
 
-            series[si].hidden = hid;
+            series[p].hidden = hid;
             lx = rowLeft - app.Scale(14);
-            si = si - 1;
+            pi = pi - 1;
         }
         }
         }
@@ -2335,10 +2449,25 @@ class Chart {
         // 映射范围向外扩，顶点符号与 min/max 徽标不再被绘图区
         // 裁切；网格/刻度仍取 nice 端点（Tick 副本），端格线悬在
         // 绘图区内侧。0 基线不外扩——面积/柱的填充锚在零线。
+        // ECharts 本身从不外扩：只有真的要画 markPoint 徽标
+        // （o.markPoint 或显式 marks）才留白，否则 line5 这类
+        // 无标注图的量程与原版对不齐。
+        bool anyYMark0 = false;
+        bool anyYMark1 = false;
+        bool anyXMark = false;
+        for (int msc = 0; msc < series.Count; msc = msc + 1) {
+            ChartSeries msp = series[msc];
+            if (msp.hidden) { continue; }
+            if (!(o.markPoint || msp.marks.Count > 0)) { continue; }
+            if (msp.axisIndex == 1) { anyYMark1 = true; } else { anyYMark0 = true; }
+            for (int mkc = 0; mkc < msp.marks.Count; mkc = mkc + 1) {
+                if (msp.marks[mkc].valueIndex == 0) { anyXMark = true; }
+            }
+        }
         int pxPad = app.Scale(16);
         int leftTickLo = leftLo;
         int leftTickHi = leftHi;
-        if (!leftLog && y0.min == ChartOption.Auto()
+        if (anyYMark0 && !leftLog && y0.min == ChartOption.Auto()
             && y0.max == ChartOption.Auto()) {
             int lpad = ((leftHi - leftLo) * pxPad + plotH - 1) / plotH;
             int lDataMin = Chart.AxisMinFor(series, 0);
@@ -2352,7 +2481,7 @@ class Chart {
         }
         int rightTickLo = rightLo;
         int rightTickHi = rightHi;
-        if (hasRight && !rightLog && y1.min == ChartOption.Auto()
+        if (anyYMark1 && hasRight && !rightLog && y1.min == ChartOption.Auto()
             && y1.max == ChartOption.Auto()) {
             int rpad = ((rightHi - rightLo) * pxPad + plotH - 1) / plotH;
             int rDataMax = rightDataMax;
@@ -2368,7 +2497,7 @@ class Chart {
         }
         int xTickLo = xLo;
         int xTickHi = xHi;
-        if (xValue && !isTime && x0.min == ChartOption.Auto()
+        if (anyXMark && xValue && !isTime && x0.min == ChartOption.Auto()
             && x0.max == ChartOption.Auto()) {
             int xpad = ((xHi - xLo) * pxPad + plotW - 1) / plotW;
             int xDataMin = Chart.XMinFor(series, catY);

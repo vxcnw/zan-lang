@@ -250,13 +250,15 @@ class ChartBig {
                 int px = plotX + cc * plotW / cn;
                 int vTop = mx[cc] * g / 1000;
                 int vBot = mn[cc] * g / 1000;
-                int yTop = plotY + plotH - (vTop - st.axisLo) * plotH / span;
-                int yBot = plotY + plotH - (vBot - st.axisLo) * plotH / span;
+                // 大数据量程大，(v - lo) × plotH 会超 int32，乘法走 long。
+                int yTop = plotY + plotH - (int)(((long)vTop - (long)st.axisLo) * (long)plotH / (long)span);
+                int yBot = plotY + plotH - (int)(((long)vBot - (long)st.axisLo) * (long)plotH / (long)span);
                 if (ChartView.HasArea(o)) {
                     if (o.gradient) {
                         c.FillVGrad(px, yTop, 1, baseY - yTop, fillTop, fillBot);
                     } else {
-                        c.FillRect(px, yTop, 1, baseY - yTop, Chart.WithAlpha(color, 56));
+                        c.FillRect(px, yTop, 1, baseY - yTop,
+                            Chart.WithAlpha(color, 128));
                     }
                 }
                 c.FillRect(px, yTop, 1, yBot - yTop + 1, color);

@@ -258,8 +258,9 @@ class EventRiverLayout {
             int es = events[e].start;
             int ee = events[e].end;
             if (es > ee) { int sw = es; es = ee; ee = sw; }
-            int x0 = plotX + (es - t0) * plotW / span;
-            int x1 = plotX + (ee - t0) * plotW / span;
+            // 事件时间跨度 × plotW 轻易超 int32，乘法走 long。
+            int x0 = plotX + (int)(((long)es - (long)t0) * (long)plotW / (long)span);
+            int x1 = plotX + (int)(((long)ee - (long)t0) * (long)plotW / (long)span);
             if (x1 <= x0) { x1 = x0 + 1; }
             int v = events[e].value;
             if (v < 0) { v = 0; }

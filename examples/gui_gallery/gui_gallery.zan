@@ -9939,13 +9939,14 @@ class Gallery {
             ChartOption cnm = ChartOption.OfRings(
                 Gallery.T("访问来源（嵌套）", "访问来源（嵌套）"),
                 new List<ChartSeries>{
-                    // 环序从外到内：细分（8 项）在外环，来源（5 类）在内环。
-                    ChartSeries.Named(Gallery.T("细分", "细分"), ChartType.Pie, outerD),
-                    ChartSeries.Named(Gallery.T("来源", "来源"), ChartType.Pie, innerD)
+                    // ECharts 嵌套饼系列按内→外排列：来源（5 类）在
+                    // 内环，细分（8 项）在外环。
+                    ChartSeries.Named(Gallery.T("来源", "来源"), ChartType.Pie, innerD),
+                    ChartSeries.Named(Gallery.T("细分", "细分"), ChartType.Pie, outerD)
                 });
             cnm.showLegend = false;
             // 内环小孔（千层饼观感）；渲染器会把过大的孔钳回环带内。
-            cnm.series[1].innerPct = 22;
+            cnm.series[0].innerPct = 22;
             ChartView.KeyedStatic(cnm, 8404).Render(
                 app, x + app.Scale(14), y + app.Scale(30), w - app.Scale(28), app.Scale(420));
         } else if (name == "Chart.chord_web") {
