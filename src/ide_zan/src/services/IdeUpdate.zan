@@ -233,11 +233,10 @@ class IdeUpdate {
         return "";
     }
 
-    /* ---- 增量同步面（清单比对，供"要装什么"的决策与展示） ----
+    /* ---- 增量同步面（清单比对，IdeFileSync 执行面在其上落盘） ----
      * 客户端把 {path: md5} 发给 /api/channel/sync，服务端回
      * {total, match, download:[{path,md5,size}]}；本地不在服务端清单
-     * 的文件（服务端已移除）由客户端对照 files 全集自行删除。
-     * 比对是纯展示/决策信息：真正的下载落盘走安装管线（后续任务）。 */
+     * 的文件（服务端已移除）由客户端对照 files 全集自行删除。 */
     static IdeSyncPlan syncPlan;
 
     /// 最近一次增量比对的计划（null = 尚未比对或远端无清单）。
@@ -251,6 +250,7 @@ class IdeUpdate {
         if (IdeUpdate.sink != null && IdeUpdate.sink.Done() == "") {
             return "another channel request is running";
         }
+        IdeUpdate.ResetSyncState();
         JsonValue body = JsonValue.NewObject();
         body.Put("channel", JsonValue.NewStr("ide"));
         body.Put("platform", JsonValue.NewStr(IdeUpdate.Platform()));
@@ -305,12 +305,63 @@ class IdeUpdate {
     static void PollSync(string done) {
         IdeSyncPlan plan = IdeSyncPlan.Parse(done);
         IdeUpdate.syncPlan = plan;
+        IdeUpdate.syncDone = true;
+    }
+
+    /// 增量比对的执行状态（IdeFileSync 轮询用）：syncDone = 请求已结束
+    /// （成功或失败都算），syncPlan 里看结果。
+    static bool syncDone;
+
+    static bool SyncDone() { return IdeUpdate.syncDone; }
+
+    /// 比对前清一次状态（BeginSync 里调用）。
+    static void ResetSyncState() {
+        IdeUpdate.syncPlan = null;
+        IdeUpdate.syncDone = false;
+    }
+
+    /// 单文件下载用的预算（比 JSON 响应宽松：可能上百 MB 的发布文件）。
+    static ExternalCallPolicy FilePolicy(string host) {
+        ExternalCallPolicy policy = ExternalCallPolicy.Default()
+            .TotalTimeout(120000)
+            .ResponseLimit(256 * 1024 * 1024)
+            .StreamLimit(256 * 1024 * 1024)
+            .Redirects(0)
+            .RetryNetwork(false)
+            .RetryAttempts(0);
+        if (ExternalTargetPolicy.IsLoopback(host)) { policy.AllowLocalHttp(); }
+        return policy;
+    }
+
+    /// /api/channel/file 的 platform 参数值（与 Check() 的 Platform 一致）。
+    static string PlatformOf() { return IdeUpdate.Platform(); }
+
+    /// 查询串里百分号编码一个 UTF-8 路径（服务端 In() 会 UrlDecode）。
+    static string UrlEncode(string s) {
+        string hex = "0123456789ABCDEF";
+        string outp = "";
+        for (int i = 0; i < s.Length; i = i + 1) {
+            int c = s[i] & 255;
+            bool safe = (c >= 48 && c <= 57) || (c >= 65 && c <= 90)
+                || (c >= 97 && c <= 122) || c == 45 || c == 46
+                || c == 47 || c == 95;
+            if (safe) {
+                outp = outp + s.Substring(i, 1);
+            } else if (c < 128) {
+                outp = outp + "%" + hex.Substring(c >> 4, 1)
+                    + hex.Substring(c & 15, 1);
+            } else {
+                outp = outp + "%3F"; // 非 ASCII：清单位置用 ? 占位并跳过
+            }
+        }
+        return outp;
     }
 }
 
 /// 增量比对的产物：要下载哪些文件、合计字节。
 class IdeSyncPlan {
     List<string> downloadPaths;
+    List<string> downloadMd5s;
     long downloadBytes;
     int matchCount;
     string error;
@@ -318,6 +369,7 @@ class IdeSyncPlan {
     static IdeSyncPlan Parse(string done) {
         IdeSyncPlan plan = new IdeSyncPlan();
         plan.downloadPaths = new List<string>();
+        plan.downloadMd5s = new List<string>();
         plan.error = "";
         if (done.Length > 4 && done.Substring(0, 4) == "err:") {
             plan.error = done.Substring(4, done.Length - 4);
@@ -344,6 +396,7 @@ class IdeSyncPlan {
             for (int i = 0; i < downloads.Count(); i = i + 1) {
                 JsonValue f = downloads.At(i);
                 plan.downloadPaths.Add(f.Str("path", ""));
+                plan.downloadMd5s.Add(f.Str("md5", ""));
                 plan.downloadBytes = plan.downloadBytes
                     + IdeSyncPlan.ParseLong(f.Str("size", "0"));
             }
@@ -365,6 +418,7 @@ class IdeSyncPlan {
     }
 
     List<string> DownloadPaths() { return downloadPaths; }
+    List<string> DownloadMd5s() { return downloadMd5s; }
     long DownloadBytes() { return downloadBytes; }
     int MatchCount() { return matchCount; }
     string Error() { return error; }

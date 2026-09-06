@@ -1,0 +1,300 @@
+using System;
+using System.IO;
+using System.Json;
+using System.Net.Http.Client;
+using System.Net.External;
+using System.Net.Sockets;
+using System.Security.Cryptography;
+
+/// <summary>IDE 工具链的增量更新执行面：把 IdeUpdate 的"比对"变成
+/// "落盘"。老版本 IDE 的可执行文件可能正被占用（Windows 锁着运行中的
+/// exe），所以所有新文件先下进待应用目录 <UserConfigDir>/pending-sync/，
+/// 下一次启动时再原子替换进安装目录——本进程启动早期文件还没被打开，
+/// 可以安全覆盖；zanc.exe 这类也会在下一拍构建时重新生成。
+///
+/// 流程（IdeFileSync.Start 发起，后台线程执行，IdeFileSync.Poll 收）：
+///   1. 扫描安装目录（BaseDir）全部文件，逐个 md5，得到本地清单；
+///   2. IdeUpdate.BeginSync 上报，服务端按快照比对回 download 列表；
+///   3. 逐个 GET /api/channel/file 下载到 pending-sync/<rel>，
+///      落盘前复验 md5 == 服务端清单值；
+///   4. 计划写好后提示"重启应用更新"。
+/// 启动侧（ApplyPending，由 Startup 在主窗出现前调用）：把 pending-sync
+/// 的文件按相对路径覆盖到安装目录，清空 pending 目录。
+///
+/// 与 MarketplaceInstall / IdeUpdate 同一形态：静态状态 + 非捕获
+/// Worker 线程 + SseSink 回传 + UI 每帧 Poll。</summary>
+class IdeFileSync {
+    static SseSink sink;
+    static SseSink workerSink;
+    /// "" = 空闲；否则当前正在做的事（用于状态条）。
+    static string progress;
+    /// 上一轮比对的计划（下载了哪些文件）。
+    static IdeSyncPlan plan;
+    /// 扫描+比对+下载阶段的状态标记：0 空闲，1 进行中，9 已落计划。
+    static int phase;
+    static string basePath;
+
+    static string T(string en, string zh) { return Lang.Tr(en, zh); }
+
+    static bool Busy() { return IdeFileSync.phase == 1; }
+
+    static string Progress() { return IdeFileSync.progress; }
+
+    /// <summary>待应用目录（UserConfigDir/pending-sync）。</summary>
+    static string PendingDir() {
+        return ZanIDE.UserConfigDir() + "/pending-sync";
+    }
+
+    /// <summary>发起一次增量同步。返回 "" = 已发起；非空 = 原因。</summary>
+    static string Start() {
+        if (IdeFileSync.Busy()) { return T("sync already running", "同步已在进行中"); }
+        // 上一次同步暂存的文件还没应用（等重启），再扫一遍也是同样的差异。
+        if (Directory.Exists(IdeFileSync.PendingDir())
+            && Directory.GetFiles(IdeFileSync.PendingDir()).Count > 0) {
+            return T("update already staged, restart to apply", "更新已暂存，重启后应用");
+        }
+        IdeFileSync.basePath = ZanIDE.BaseDir();
+        IdeFileSync.plan = null;
+        IdeFileSync.phase = 1;
+        IdeFileSync.progress = T("Scanning local files...", "正在扫描本地文件...");
+        IdeFileSync.sink = SseSink.ToMemory();
+        IdeFileSync.workerSink = IdeFileSync.sink;
+        if (!Thread.Start(IdeFileSync.ScanWorker)) {
+            IdeFileSync.phase = 0;
+            IdeFileSync.progress = "";
+            return "could not start sync scan";
+        }
+        return "";
+    }
+
+    /// IdeUpdate.poll 一次只有一个请求在飞；扫描先在单独线程里做
+    /// （几百个文件的 md5 不该卡 UI），扫完立刻接上 BeginSync。
+    static void ScanWorker() {
+        List<string> paths = new List<string>();
+        List<string> md5s = new List<string>();
+        IdeFileSync.Walk(IdeFileSync.basePath, "", paths, md5s);
+        IdeFileSync.progress = T("Comparing with server...", "正在与服务端比对...");
+        string err = IdeUpdate.BeginSync(paths, md5s);
+        if (err.Length > 0) {
+            IdeFileSync.workerSink.Publish("err:" + err);
+            return;
+        }
+        IdeFileSync.workerSink.Publish("ok:sent");
+    }
+
+    /// 递归收集相对路径与内容 md5（平行列表）。目录读不到就跳过。
+    static void Walk(string absDir, string relPrefix, List<string> paths,
+                     List<string> md5s) {
+        if (!Directory.Exists(absDir)) { return; }
+        List<string> files = Directory.GetFiles(absDir);
+        for (int i = 0; i < files.Count; i = i + 1) {
+            string name = files[i];
+            int cut = 0 - 1;
+            for (int k = 0; k < name.Length; k = k + 1) {
+                string ch = name.Substring(k, 1);
+                if (ch == "/" || ch == "\\") { cut = k; }
+            }
+            if (cut >= 0) { name = name.Substring(cut + 1); }
+            string rel = relPrefix.Length > 0 ? relPrefix + "/" + name : name;
+            // 配置/缓存不属于发布树，同步会覆盖用户数据。
+            if (rel == "config/config.cfg" || rel.StartsWith("config/")) { continue; }
+            string full = absDir + "/" + name;
+            if (rel == "zanc.exe" || rel == "zanc") { continue; }
+            byte[] data = File.ReadAllBytes(full);
+            if (data == null) { continue; }
+            paths.Add(rel);
+            md5s.Add(Hex.Encode(Md5.Hash(data, data.Length), 16));
+        }
+        List<string> dirs = Directory.GetDirectories(absDir);
+        for (int j = 0; j < dirs.Count; j = j + 1) {
+            string name = dirs[j];
+            int cut = 0 - 1;
+            for (int k = 0; k < name.Length; k = k + 1) {
+                string ch = name.Substring(k, 1);
+                if (ch == "/" || ch == "\\") { cut = k; }
+            }
+            if (cut >= 0) { name = name.Substring(cut + 1); }
+            if (name == "config" || name == "cache" || name == ".zan-packages"
+                || name == "build" || name == "publish") { continue; }
+            string rel = relPrefix.Length > 0 ? relPrefix + "/" + name : name;
+            IdeFileSync.Walk(absDir + "/" + name, rel, paths, md5s);
+        }
+    }
+
+    /// <summary>UI 每帧调用。返回 "" = 无事；非空 = 给日志的一行。
+    /// BeginSync 的结果由 IdeUpdate.Poll 落进 IdeSyncPlan；这里看到
+    /// 计划出现就接管下载。</summary>
+    static string Poll() {
+        if (IdeFileSync.phase == 0) { return ""; }
+        // 阶段 1：等 IdeUpdate 的比对计划落地。
+        IdeSyncPlan p = IdeUpdate.SyncPlan();
+        if (p == null) {
+            if (!IdeUpdate.SyncDone()) { return ""; }
+            IdeFileSync.phase = 0;
+            IdeFileSync.progress = "";
+            return T("> Incremental sync: server unreachable.", "> 增量同步：服务端不可达。");
+        }
+        if (!p.Ok()) {
+            IdeFileSync.phase = 0;
+            IdeFileSync.progress = "";
+            return T("> Incremental sync failed: ", "> 增量同步失败：") + p.Error();
+        }
+        if (p.DownloadPaths().Count == 0) {
+            IdeFileSync.phase = 0;
+            IdeFileSync.progress = "";
+            return T("> Already up to date (", "> 已是最新（")
+                + Convert.ToString(p.MatchCount())
+                + T(" files verified).", " 个文件与服务器一致）。");
+        }
+        IdeFileSync.plan = p;
+        IdeFileSync.phase = 2;
+        IdeFileSync.progress = T("Downloading ", "正在下载 ")
+            + Convert.ToString(p.DownloadPaths().Count) + T(" files...", " 个文件...");
+        IdeFileSync.sink = SseSink.ToMemory();
+        IdeFileSync.workerSink = IdeFileSync.sink;
+        if (!Thread.Start(IdeFileSync.DownloadWorker)) {
+            IdeFileSync.phase = 0;
+            IdeFileSync.progress = "";
+            return "> could not start download worker";
+        }
+        return "";
+    }
+
+    static void DownloadWorker() {
+        string err = IdeFileSync.DownloadAll();
+        if (err.Length > 0) {
+            IdeFileSync.workerSink.Publish("err:" + err);
+        } else {
+            IdeFileSync.workerSink.Publish("ok:staged");
+        }
+    }
+
+    static string DownloadAll() {
+        IdeSyncPlan p = IdeFileSync.plan;
+        List<string> rels = p.DownloadPaths();
+        List<string> md5s = p.DownloadMd5s();
+        string pend = IdeFileSync.PendingDir();
+        Directory.CreateDirectoryRecursive(pend);
+        string url = IdeUpdate.BaseUrl() + "/api/channel/file?channel=ide"
+            + "&platform=" + IdeUpdate.PlatformOf() + "&path=";
+        for (int i = 0; i < rels.Count; i = i + 1) {
+            string rel = rels[i];
+            if (!IdeFileSync.PathSafe(rel)) { return "unsafe path in plan: " + rel; }
+            IdeFileSync.progress = T("Downloading ", "正在下载 ")
+                + Convert.ToString(i + 1) + "/" + Convert.ToString(rels.Count)
+                + ": " + rel;
+            string err = IdeFileSync.FetchOne(url + IdeUpdate.UrlEncode(rel),
+                md5s[i], pend + "/" + rel);
+            if (err.Length > 0) { return err; }
+        }
+        return "";
+    }
+
+    /// 下载单个文件并复验 md5，然后落盘到 pending 目录（先建父目录）。
+    static string FetchOne(string url, string expectMd5, string target) {
+        ExternalTarget t = ExternalTarget.Parse(url);
+        if (t == null) { return "bad file url"; }
+        HttpClient cli;
+        if (t.scheme == "https") {
+            cli = HttpClient.CreateHttps(t.Host(), t.Port());
+        } else {
+            cli = new HttpClient(t.Host(), t.Port());
+        }
+        cli.SetCallPolicy(IdeUpdate.FilePolicy(t.Host()));
+        cli.SetTimeout(60000);
+        HttpResponse resp = await cli.SendBytesAsync("GET",
+            t.Path() + t.Query(), "");
+        if (resp.statusCode != 200) {
+            return "HTTP " + Convert.ToString(resp.statusCode) + " for " + t.Path();
+        }
+        byte[] data;
+        int len;
+        if (resp.IsBinary()) {
+            data = resp.bodyBytes;
+            len = resp.BodyLength();
+        } else {
+            data = new byte[resp.body.Length];
+            for (int i = 0; i < resp.body.Length; i = i + 1) {
+                data[i] = resp.body[i] & 255;
+            }
+            len = resp.body.Length;
+        }
+        if (len <= 0) { return "empty file: " + t.Path(); }
+        string got = Hex.Encode(Md5.Hash(data, len), 16);
+        if (got != expectMd5) {
+            return T("md5 mismatch: ", "md5 不符：") + t.Path();
+        }
+        int cut = 0 - 1;
+        for (int i = 0; i < target.Length; i = i + 1) {
+            string ch = target.Substring(i, 1);
+            if (ch == "/" || ch == "\\") { cut = i; }
+        }
+        if (cut > 0) {
+            Directory.CreateDirectoryRecursive(target.Substring(0, cut));
+        }
+        File.WriteAllBytes(target, data);
+        return "";
+    }
+
+    static bool PathSafe(string rel) {
+        if (rel.Length == 0 || rel.StartsWith("/")) { return false; }
+        if (rel.Contains("..") || rel.Contains("\\")) { return false; }
+        return true;
+    }
+
+    /// <summary>启动时把 pending-sync 应用进安装目录（Startup 在主窗
+    /// 出现前调用，此刻本进程没锁任何发布文件）。返回应用的文件数。</summary>
+    static int ApplyPending() {
+        string pend = IdeFileSync.PendingDir();
+        if (!Directory.Exists(pend)) { return 0; }
+        int applied = 0;
+        List<string> files = new List<string>();
+        List<string> rels = new List<string>();
+        IdeFileSync.Collect(pend, "", files, rels);
+        for (int i = 0; i < files.Count; i = i + 1) {
+            string dest = IdeFileSync.basePathFor() + "/" + rels[i];
+            int cut = 0 - 1;
+            for (int k = 0; k < dest.Length; k = k + 1) {
+                string ch = dest.Substring(k, 1);
+                if (ch == "/" || ch == "\\") { cut = k; }
+            }
+            if (cut > 0) {
+                Directory.CreateDirectoryRecursive(dest.Substring(0, cut));
+            }
+            File.Copy(files[i], dest);
+            applied = applied + 1;
+        }
+        Directory.DeleteRecursive(pend);
+        return applied;
+    }
+
+    static string basePathFor() { return ZanIDE.BaseDir(); }
+
+    static void Collect(string absDir, string relPrefix, List<string> files,
+                        List<string> rels) {
+        List<string> fs = Directory.GetFiles(absDir);
+        for (int i = 0; i < fs.Count; i = i + 1) {
+            string name = fs[i];
+            int cut = 0 - 1;
+            for (int k = 0; k < name.Length; k = k + 1) {
+                string ch = name.Substring(k, 1);
+                if (ch == "/" || ch == "\\") { cut = k; }
+            }
+            if (cut >= 0) { name = name.Substring(cut + 1); }
+            files.Add(absDir + "/" + name);
+            rels.Add(relPrefix.Length > 0 ? relPrefix + "/" + name : name);
+        }
+        List<string> subs = Directory.GetDirectories(absDir);
+        for (int j = 0; j < subs.Count; j = j + 1) {
+            string name = subs[j];
+            int cut = 0 - 1;
+            for (int k = 0; k < name.Length; k = k + 1) {
+                string ch = name.Substring(k, 1);
+                if (ch == "/" || ch == "\\") { cut = k; }
+            }
+            if (cut >= 0) { name = name.Substring(cut + 1); }
+            string rel = relPrefix.Length > 0 ? relPrefix + "/" + name : name;
+            IdeFileSync.Collect(absDir + "/" + name, rel, files, rels);
+        }
+    }
+}

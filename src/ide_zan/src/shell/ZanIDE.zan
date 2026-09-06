@@ -496,6 +496,18 @@ partial class ZanIDE {
         this.PumpSettingsWindows();
         this.PumpFilePicker();
         IdeUpdate.Poll();
+        // 商城安装执行器的结果（成败一行），接到输出面板。
+        string installDone = MarketplaceInstall.Poll();
+        if (installDone.Length > 0) {
+            log.Add(installDone);
+            app.RequestRedraw();
+        }
+        // 增量更新执行面：比对计划落地后接管下载/暂存，结果一行进日志。
+        string syncLine = IdeFileSync.Poll();
+        if (syncLine.Length > 0) {
+            log.Add(syncLine);
+            app.RequestRedraw();
+        }
         app.PerfMark("sh.children");
 
         // Deferred AI-settings open (see aiCfgPending). Creating a top-level

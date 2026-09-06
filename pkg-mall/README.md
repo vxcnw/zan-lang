@@ -12,7 +12,27 @@ Zan 语言生态的**扩展（extension / 库）与程序（app / 成品）**一
 | `extension`（库） | 程序员 | stdlib 布局包（`.zpkg`） | IDE 内商城：浏览、安全安装、缺库自动定位并重试 |
 | `app`（成品） | C 端用户 | 可执行文件 + 许可证 | Web 商城：购买后签发许可证，授权 SDK 校验 |
 
-官方免费扩展示例：`System.Scripting.Lua 1.0.0`（seed 内置，once、0 积分、approved）。
+官方免费扩展示例：`System.Scripting.Lua 1.0.0`（seed 内置，once、0 积分、approved，
+zip 内含 `zan.pkg` 清单 + `stdlib/System.Scripting/` 源码布局）。
+
+IDE 侧的**商城安装执行器**（`MarketplaceInstall`）把"确认安装"变成落地动作：
+
+```
+目录里选扩展 → 安装（二次确认）→ MarketplaceInstall 后台线程:
+  1. GET artifact_url（二进制安全通道）→ 缓存临时 zip
+  2. sha256 校验（服务端审核记录的 artifact_sha256；空摘要跳过）
+  3. zip 解包到暂存目录（Zip.ExtractToDirectory 内建穿越防护）
+  4. 校验 zan.pkg：name 必须与商品 slug 一致，且声明了 version
+  5. 调 zanc --package-install <暂存目录> --package-name <slug>
+     --package-project <当前工程> --package-scope project
+     → 编译器自己的安装器拷进 <project>/.zan-packages/<name>/，
+       之后 --auto-stdlib 按 stdlib/<namespace>/ 布局自动发现，
+       重新构建即可解析 `using <命名空间>;`
+```
+
+`app` 类商品没有 zan.pkg：只做 1-2 步，zip 落到用户 Downloads 目录提示
+自行运行。缺库闭环不变：构建失败的 `ZANPKG_MISSING` 提示 → 扩展面板
+按名定位 → 安装 → 重试构建。
 
 ## Web 页面（面向 C 端用户与开发者）
 
@@ -117,9 +137,24 @@ zanc src/main.zan src/Controller/*.zan src/Controller/Api/*.zan \
      自行删除
 ```
 
-IDE 侧（`IdeUpdate.BeginSync`）把本地安装目录的平行 `path/md5` 清单
-发给 sync，得到 `IdeSyncPlan`（要下载哪些文件、合计字节），状态面据此
-展示"这次更新要下多少"。真正的下载落盘由安装管线消费该计划。
+IDE 侧（`IdeUpdate.BeginSync` + `IdeFileSync`）已经把整条管线接通：
+
+```
+「检查更新」（工具链 ribbon 按钮，或安装目录比对）
+  1. IdeFileSync 后台扫描安装目录（跳过 config/cache/.zan-packages/build/publish），
+     逐文件 md5，得本地平行清单
+  2. IdeUpdate.BeginSync 上报 → IdeSyncPlan（要下载哪些文件、合计字节）
+  3. 逐个 GET /api/channel/file 下载到 <UserConfigDir>/pending-sync/<rel>，
+     落盘前复验 md5 == 清单值
+  4. 日志提示"重启应用更新"
+重启:
+  5. IdeFileSync.ApplyPending（主窗出现前）把 pending-sync 按相对路径
+     覆盖进安装目录（此刻运行中的进程没锁发布文件），清空暂存目录，
+     日志显示"更新已应用 N 个文件"
+```
+
+运行中的 IDE（Windows）锁着自己正在执行的 exe，所以采用**暂存 + 下次启动
+应用**的两段式，绝不热替换正在运行的文件。
 
 ## 数据层约定
 

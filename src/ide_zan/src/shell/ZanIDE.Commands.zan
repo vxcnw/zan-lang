@@ -185,6 +185,16 @@ partial class ZanIDE {
             }
             lastActive = 0 - 1;
             app.RequestRedraw();
+        } else if (rc == 18) {
+            // 手动触发一次 IDE 增量更新（扫本地 → 比对 → 暂存 → 提示重启）。
+            string err = IdeFileSync.Start();
+            if (err.Length > 0) {
+                log.Add(ZanIDE.T("> Cannot start update: ", "> 无法开始更新：") + err);
+            } else {
+                log.Add(ZanIDE.T("> Checking for toolchain updates...",
+                    "> 正在检查工具链更新..."));
+            }
+            app.RequestRedraw();
         }
     }
 }

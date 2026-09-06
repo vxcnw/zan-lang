@@ -125,6 +125,11 @@ partial class ZanIDE {
             ZanIDE.T("Language documentation, shortcuts and version info.",
                 "语言文档、快捷键和版本信息。")));
         actions.Add(14);
+        shell.Add(RibbonItem.Large("refresh", ZanIDE.T("Update", "检查更新")).SetTip(
+            ZanIDE.T("Compare local files with ide.zanlang.top by md5 and stage"
+                + " the differences (applied on next start).",
+                "按文件 md5 与 ide.zanlang.top 比对并暂存差异（下次启动时应用）。")));
+        actions.Add(18);
         groups.Add(shell);
 
         // The assistant lives in its own window, so its entry must be

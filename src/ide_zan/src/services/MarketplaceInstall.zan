@@ -1,0 +1,283 @@
+using System;
+using System.IO;
+using System.IO.Compression;
+using System.Json;
+using System.Net.Http.Client;
+using System.Net.External;
+using System.Net.Sockets;
+using System.Security.Cryptography;
+
+/// <summary>商城扩展的安装执行器：把"确认安装"的意图变成落地的包。
+///
+/// 管线（Install() 发起，后台线程执行，Poll() 每帧收结果）：
+///   1. GET /api/mall/product?id= 已由目录完成，这里只消费
+///      MarketplacePackage.LatestVersion() 的 artifact_url/sha256；
+///   2. 下载制品（二进制安全通道，NUL 不截断）到缓存临时文件；
+///   3. sha256 校验（服务端审核时记录的摘要，空摘要跳过——种子包）；
+///   4. 解 zip 到暂存目录（Zip.ExtractToDirectory 内建路径穿越防护）；
+///   5. 读暂存目录的 zan.pkg，要求 name 一致且声明了版本；
+///   6. 调 zanc --package-install <dir> --package-name <name> 走编译器
+///      自己的安装器（拷进 <project>/.zan-packages/<name>/ 或全局仓库，
+///      编译器通过 stdlib/<namespace>/ 布局发现它们）。
+///
+/// app 类商品（product_type=app）没有 zan.pkg，只做 2-3 步：下载到
+/// 下载目录并提示用户自行运行，不进包仓库。
+///
+/// 形态与 MarketplaceClient / IdeUpdate 一致：静态状态 + Thread.Start
+/// 非捕获 Worker + SseSink 回传 + UI 每帧 Poll。所有步骤的失败都变成
+/// 一条 "err:..." 结果，不会把线程静默吞掉。</summary>
+class MarketplaceInstall {
+    static SseSink sink;
+    static SseSink workerSink;
+    /// 0 = 空闲；1..5 = 步骤（下载/校验/解压/检查清单/安装）；9 = 完成。
+    static int step;
+    static string packageName;
+    static string productType;
+    static string artifactUrl;
+    static string artifactSha256;
+    /// 全程一次的状态行（轮转追加给状态条）。
+    static string progress;
+    /// 成功 / 失败后的最终一句话；"" = 未结束。
+    static string outcome;
+
+    static string T(string en, string zh) { return Lang.Tr(en, zh); }
+
+    /// 是否有安装流程在跑（UI 据此禁用按钮）。
+    static bool Busy() { return MarketplaceInstall.sink != null
+        && MarketplaceInstall.sink.Done() == ""; }
+
+    static string Progress() { return MarketplaceInstall.progress; }
+
+    /// 已结束的最终结果并复位状态（"" = 还没结束）。UI 只读一次。
+    static string TakeOutcome() {
+        string s = MarketplaceInstall.outcome;
+        MarketplaceInstall.outcome = "";
+        if (s.Length > 0) {
+            MarketplaceInstall.step = 0;
+            MarketplaceInstall.progress = "";
+            MarketplaceInstall.sink = null;
+        }
+        return s;
+    }
+
+    /// <summary>发起安装。package 是目录里已选中的（详情已加载）。
+    /// 返回 "" = 已发起；非空 = 未发起的原因。</summary>
+    static string Start(MarketplacePackage package) {
+        if (MarketplaceInstall.Busy()) { return T("install already running",
+            "已有安装在进行中"); }
+        MarketplaceVersion v = package.LatestVersion();
+        if (v == null) { return T("no installable version", "没有可安装的版本"); }
+        if (v.artifactUrl.Length == 0) { return T("no artifact for this version",
+            "该版本没有制品包"); }
+        MarketplaceInstall.packageName = package.packageName;
+        MarketplaceInstall.productType = package.productType;
+        MarketplaceInstall.artifactUrl = v.artifactUrl;
+        MarketplaceInstall.artifactSha256 = v.artifactSha256;
+        MarketplaceInstall.step = 1;
+        MarketplaceInstall.progress = T("Downloading ", "正在下载 ")
+            + v.artifactUrl;
+        MarketplaceInstall.outcome = "";
+        MarketplaceInstall.sink = SseSink.ToMemory();
+        MarketplaceInstall.workerSink = MarketplaceInstall.sink;
+        if (!Thread.Start(MarketplaceInstall.Worker)) {
+            MarketplaceInstall.sink = null;
+            MarketplaceInstall.step = 0;
+            return "could not start install worker";
+        }
+        return "";
+    }
+
+    /// 与 MarketplaceClient.CallPolicy 同款预算；制品可能几十 MB，
+    /// 上限放到 256 MB。HTTPS-only（loopback 明文例外）。
+    static ExternalCallPolicy CallPolicy(string host) {
+        ExternalCallPolicy policy = ExternalCallPolicy.Default()
+            .TotalTimeout(120000)
+            .ResponseLimit(256 * 1024 * 1024)
+            .StreamLimit(256 * 1024 * 1024)
+            .Redirects(0)
+            .RetryNetwork(false)
+            .RetryAttempts(0);
+        if (ExternalTargetPolicy.IsLoopback(host)) { policy.AllowLocalHttp(); }
+        return policy;
+    }
+
+    /// 真实 URL（商城的 artifact_url 可能是 "packages/..." 相对路径）。
+    static string AbsoluteUrl(string url) {
+        if (url.Length == 0) { return url; }
+        if (url.Substring(0, 1) == "/") { return MarketplaceClient.BaseUrl() + url; }
+        return MarketplaceClient.BaseUrl() + "/" + url;
+    }
+
+    /// 下载暂存文件：缓存目录下 mall-<slug>-<ver>.zip。返回错误或 ""。
+    static string DownloadArtifact(string target) {
+        string url = MarketplaceInstall.AbsoluteUrl(MarketplaceInstall.artifactUrl);
+        ExternalTarget t = ExternalTarget.Parse(url);
+        if (t == null) { return T("bad artifact url", "制品地址无效"); }
+        HttpClient cli;
+        if (t.scheme == "https") {
+            cli = HttpClient.CreateHttps(t.Host(), t.Port());
+        } else {
+            cli = new HttpClient(t.Host(), t.Port());
+        }
+        cli.SetCallPolicy(MarketplaceInstall.CallPolicy(t.Host()));
+        cli.SetTimeout(120000);
+        // 二进制安全通道：zip 里的 NUL 不能截断响应。
+        HttpResponse resp = await cli.SendBytesAsync("GET",
+            t.Path() + t.Query(), "");
+        if (resp.statusCode != 200) {
+            return "HTTP " + Convert.ToString(resp.statusCode);
+        }
+        byte[] data;
+        int len;
+        if (resp.IsBinary()) {
+            data = resp.bodyBytes;
+            len = resp.BodyLength();
+        } else {
+            data = new byte[resp.body.Length];
+            for (int i = 0; i < resp.body.Length; i = i + 1) {
+                data[i] = resp.body[i] & 255;
+            }
+            len = resp.body.Length;
+        }
+        if (len <= 0) { return T("empty artifact", "制品为空"); }
+        File.WriteAllBytes(target, data);
+        return "";
+    }
+
+    static void Worker() {
+        Socket.Initialize();
+        string err = MarketplaceInstall.Pipeline();
+        if (err.Length > 0) {
+            MarketplaceInstall.workerSink.Publish("err:" + err);
+        } else {
+            MarketplaceInstall.workerSink.Publish("ok:installed");
+        }
+    }
+
+    /// 顺序执行 1..5 步；任何一步失败返回原因（后续不再执行）。
+    static string Pipeline() {
+        ZanIDE.EnsureCacheDir();
+        string cache = ZanIDE.CacheDir() + "/mall";
+        Directory.CreateDirectoryRecursive(cache);
+        string zip = cache + "/mall-" + MarketplaceInstall.packageName + ".zip";
+        string stage = cache + "/stage-" + MarketplaceInstall.packageName;
+
+        MarketplaceInstall.step = 1;
+        string err = MarketplaceInstall.DownloadArtifact(zip);
+        if (err.Length > 0) { return T("download failed: ", "下载失败：") + err; }
+
+        MarketplaceInstall.step = 2;
+        if (MarketplaceInstall.artifactSha256.Length == 64) {
+            byte[] data = File.ReadAllBytes(zip);
+            if (data == null) { return T("downloaded file unreadable", "下载文件不可读"); }
+            string got = Hex.Encode(Sha256.Hash(data, data.Length), 32);
+            if (got != MarketplaceInstall.artifactSha256) {
+                File.Delete(zip);
+                return T("sha256 mismatch (expected ", "sha256 不符（期望 ")
+                    + MarketplaceInstall.artifactSha256.Substring(0, 12)
+                    + "..., got " + got.Substring(0, 12) + "...)";
+            }
+        }
+        MarketplaceInstall.progress = T("Verified.", "校验通过。");
+
+        bool isApp = MarketplaceInstall.productType == "app";
+        if (isApp) {
+            // app 类：没有 zan.pkg，落进用户下载目录由用户自行运行。
+            string downloads = ZanIDE.HomeDir() + "/Downloads";
+            Directory.CreateDirectoryRecursive(downloads);
+            string dest = downloads + "/" + MarketplaceInstall.packageName
+                + ".zip";
+            File.Copy(zip, dest);
+            MarketplaceInstall.step = 9;
+            return "";
+        }
+
+        MarketplaceInstall.step = 3;
+        if (Directory.Exists(stage)) { Directory.DeleteRecursive(stage); }
+        int n = Zip.ExtractToDirectory(zip, stage);
+        if (n < 0) { return T("bad package archive", "包归档损坏"); }
+
+        MarketplaceInstall.step = 4;
+        string manifest = stage + "/zan.pkg";
+        if (!File.Exists(manifest)) {
+            return T("package has no zan.pkg manifest", "包缺少 zan.pkg 清单");
+        }
+        string mtext = File.ReadAllText(manifest);
+        string mname = MarketplaceInstall.ManifestField(mtext, "name");
+        if (mname != MarketplaceInstall.packageName) {
+            return T("manifest name mismatch: ", "清单名不符：") + mname;
+        }
+
+        MarketplaceInstall.step = 5;
+        MarketplaceInstall.progress = T("Installing into package store...",
+            "正在装进包仓库...");
+        // 项目根：当前打开的工程；没有工程时装进全局仓库。
+        string projectRoot = "";
+        ZanIDE ide = ZanIDE.current;
+        if (ide != null && ide.haveProject) { projectRoot = ide.root; }
+        string cmd = "\"" + ZanIDE.Zanc() + "\" --stdlib-path \""
+            + ZanIDE.StdlibDir() + "\" --package-install \"" + stage
+            + "\" --package-name " + MarketplaceInstall.packageName;
+        if (projectRoot.Length > 0) {
+            cmd = cmd + " --package-project \"" + projectRoot
+                + "\" --package-scope project";
+        }
+        ProcessResult r = Process.Capture(cmd);
+        bool ok = r.Ok();
+        if (!ok) {
+            string tail = r.Text();
+            int cut = tail.Length - 160;
+            if (cut > 0) { tail = tail.Substring(cut, 160); }
+            return T("install refused: ", "安装被拒：") + tail;
+        }
+        MarketplaceInstall.step = 9;
+        return "";
+    }
+
+    /// zan.pkg 顶层 `key = "value"` 的取值（清单格式见 package.c 的解析器）。
+    static string ManifestField(string text, string key) {
+        List<string> lines = ZanIDE.SplitLinesOf(text);
+        for (int i = 0; i < lines.Count; i = i + 1) {
+            string ln = lines[i].Trim();
+            if (ln.Length > key.Length + 2
+                && ln.Substring(0, key.Length) == key
+                && ln.Substring(key.Length, 1) == "=") {
+                string v = ln.Substring(key.Length + 1).Trim();
+                if (v.Length >= 2 && v.Substring(0, 1) == "\""
+                    && v.Substring(v.Length - 1, 1) == "\"") {
+                    return v.Substring(1, v.Length - 2);
+                }
+                return v;
+            }
+        }
+        return "";
+    }
+
+    /// UI 每帧调用：完成后取结果。返回 "" = 还在跑或空闲；
+    /// 非空 = 本次安装的最终一句话（含成败），内部已复位。
+    static string Poll() {
+        if (MarketplaceInstall.sink == null) { return ""; }
+        string done = MarketplaceInstall.sink.Done();
+        if (done == "") { return ""; }
+        MarketplaceInstall.sink = null;
+        if (done.Length > 4 && done.Substring(0, 4) == "err:") {
+            string why = done.Substring(4, done.Length - 4);
+            MarketplaceInstall.outcome = T("Install failed: ", "安装失败：") + why;
+            MarketplaceInstall.step = 0;
+            MarketplaceInstall.progress = "";
+            return MarketplaceInstall.outcome;
+        }
+        string line;
+        if (MarketplaceInstall.productType == "app") {
+            line = T("Downloaded to Downloads/", "已下载到 Downloads/")
+                + MarketplaceInstall.packageName + ".zip";
+        } else {
+            line = T("Installed ", "已安装 ") + MarketplaceInstall.packageName
+                + T(". Rebuild to resolve it.", "。重新构建即可解析。");
+        }
+        MarketplaceInstall.outcome = "";
+        MarketplaceInstall.step = 0;
+        MarketplaceInstall.progress = "";
+        return line;
+    }
+}

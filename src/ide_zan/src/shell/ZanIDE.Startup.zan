@@ -25,6 +25,11 @@ partial class ZanIDE {
         // Restore the last-used window / panel sizes (see SaveSettings).
         string cfg = "";
         if (File.Exists(ZanIDE.CfgPath())) { cfg = File.ReadAllText(ZanIDE.CfgPath()); }
+        // 增量更新的落盘：上一轮同步暂存的文件此刻替换进安装目录——
+        // 必须在主窗出现前做，运行中的进程正锁着自己那批文件。
+        // 应用数量先记在静态上，日志列表建好后再展示。
+        int appliedSync = IdeFileSync.ApplyPending();
+        ZanIDE.pendingSyncNote = appliedSync;
         InitWindowAndProject(form, cfg);
         // The IDE's own stylesheet: page layout (flex, widths, gaps) lives in
         // ide.css, layered over whichever skin is active.
@@ -180,6 +185,12 @@ partial class ZanIDE {
         activeTab.Set(0);
 
         log = new List<string>();
+        if (ZanIDE.pendingSyncNote > 0) {
+            log.Add("> " + ZanIDE.T("Update applied: ", "更新已应用：")
+                + Convert.ToString(ZanIDE.pendingSyncNote)
+                + ZanIDE.T(" file(s) from the last sync.", " 个文件（来自上次同步）。"));
+            ZanIDE.pendingSyncNote = 0;
+        }
         if (haveProject) {
             log.Add("> " + IdeVersion.Product() + " ready. Workspace: " + root);
         } else {
@@ -381,7 +392,6 @@ partial class ZanIDE {
         cfgWin = null;
         // Asset Manager child window (browse/import/organize assets/ recursively).
         marketplaceWin = null;
-        marketplaceInstall = null;
         marketplaceRetryBuild = false;
         edThemeIdx = ZanIDE.ReadEditorTheme();
         edFontPx = ZanIDE.ReadEditorFont();

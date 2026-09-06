@@ -102,7 +102,11 @@ partial class MarketplaceView {
         this.Ns.SetShown(has);
         this.Ver.SetShown(has && version != null);
         this.Paid.SetShown(has && !sel.IsFree());
-        this.InstallBtn.SetShown(has && sel.IsFree() && version != null);
+        this.InstallBtn.SetShown(has && sel.IsFree() && version != null
+            && !MarketplaceInstall.Busy());
+        if (MarketplaceInstall.Busy() && MarketplaceInstall.Progress().Length > 0) {
+            this.Status.Text = MarketplaceInstall.Progress();
+        }
         if (has) {
             this.Name.Text = sel.displayName;
             this.Ns.Text = sel.packageName;

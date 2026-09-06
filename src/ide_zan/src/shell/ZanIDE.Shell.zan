@@ -92,9 +92,15 @@ partial class ZanIDE {
         if (marketplaceWin == null) { return; }
         MarketplacePackage package = marketplaceWin.TakeInstall();
         if (package != null) {
-            marketplaceInstall = package;
-            log.Add(ZanIDE.T("> Package install confirmed: ", "> 已确认安装库：")
-                + package.packageName);
+            // 真正的安装交给执行器（下载→校验→解包→入包仓库），在
+            // 后台线程里跑；这里只把意图交出去并展示"已在安装"。
+            string err = MarketplaceInstall.Start(package);
+            if (err.Length > 0) {
+                log.Add(ZanIDE.T("> Cannot install ", "> 无法安装：") + err);
+            } else {
+                log.Add(ZanIDE.T("> Installing ", "> 正在安装：")
+                    + package.packageName + "...");
+            }
             marketplaceWin.RequestRedraw();
             app.RequestRedraw();
         } else if (marketplaceWin.TakeClose() || !marketplaceWin.IsOpen()) {
