@@ -86,6 +86,12 @@ class Rate : Control {
         InitRate(new SignalInt(0), stars);
     }
 
+    /// 设置星星总数（流式写法：`new Rate().Max(5)`）。
+    Rate Max(int stars) {
+        maxStars = stars;
+        return this;
+    }
+
     /// 控件类型标识（序列化/设计器用）。
     override string Kind() { return "Rate"; }
     /// 覆写：返回 Size 绑定字段（设计器经它发现尺寸档位绑定）。
@@ -131,6 +137,15 @@ class Rate : Control {
 
     /// 当前评分（allowHalf 时按 *2 编码）。
     int Value() { return model.Get(); }
+
+    /// 程序化设置评分（整星档；超出星数截断）。不触发 Change——
+    /// 与 Switch.SetOn 同一约定：程序赋值不算用户交互。
+    void SetStars(int v) {
+        if (v < 0) { v = 0; }
+        if (v > maxStars) { v = maxStars; }
+        model.Set(v);
+        if (data != null) { data.Set(v); }
+    }
 
     /// 当前悬停预览值（`HoverChange` 报告的同一个数）：
     /// 整星模式 = 将点亮的星数；半星模式按 *2 编码（3 = 1.5 星）；

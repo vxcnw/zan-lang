@@ -1908,6 +1908,65 @@ class Program {
         // Unknown compId is a data-only descriptor; the render path fails soft.
         DataColumn ghostCol = DataColumn.CompCol("Ghost", 90, "nope");
         Console.WriteLine(ghostCol.compId == "nope");
+
+        // WidgetCol (cellType 10): descriptor defaults + Options configurator,
+        // and the string-value widget adapters assembling with the registry.
+        DataColumn wsw = DataColumn.WidgetCol("On", 70, "switch");
+        Console.WriteLine(wsw.cellType == 10);
+        Console.WriteLine(wsw.align == 1);
+        Console.WriteLine(wsw.compId == "switch");
+        Console.WriteLine(wsw.sortable == false);
+        Console.WriteLine(wsw.filterable == false);
+        Console.WriteLine(wsw.editable == false);
+        DataColumn wsel = DataColumn.Options(
+            DataColumn.WidgetCol("St", 90, "select"), "Draft,Review,Done");
+        Console.WriteLine(wsel.choices.Count == 3);
+        Console.WriteLine(wsel.choices[2] == "Done");
+        DataColumn wrt = DataColumn.Shape(
+            DataColumn.WidgetCol("R", 100, "rate"), 0, 7);
+        Console.WriteLine(wrt.shapeC == 7);
+        Console.WriteLine(CellComp.Find("switch") != null);
+        Console.WriteLine(CellComp.Find("checkbox") != null);
+        Console.WriteLine(CellComp.Find("rate") != null);
+        Console.WriteLine(CellComp.Find("select") != null);
+        Console.WriteLine(CellComp.Find("buttons") != null);
+        // Switch adapter round-trip: FillStr parses the stored text,
+        // TakeCommit reports the control state back.
+        Switch wswCtl = new Switch();
+        CellComp wswComp = CellComp.Find("switch");
+        wswComp.FillStr(wswCtl, "true", wsw, null, 0);
+        string wswOut = "";
+        Console.WriteLine(wswComp != null && wswComp.TakeCommit(wswCtl, ref wswOut) && wswOut == "1");
+        wswComp.FillStr(wswCtl, "false", wsw, null, 0);
+        wswOut = "";
+        Console.WriteLine(wswComp.TakeCommit(wswCtl, ref wswOut) && wswOut == "0");
+        // Checkbox adapter round-trip.
+        Checkbox wcbCtl = new Checkbox();
+        CellComp wcbComp = CellComp.Find("checkbox");
+        wcbComp.FillStr(wcbCtl, "1", wsw, null, 0);
+        string wcbOut = "";
+        Console.WriteLine(wcbComp != null && wcbComp.TakeCommit(wcbCtl, ref wcbOut) && wcbOut == "1");
+        // Rate adapter: numeric text in, integer stars out; shape caps max.
+        Rate wrtCtl = new Rate(5);
+        CellComp wrtComp = CellComp.Find("rate");
+        wrtComp.FillStr(wrtCtl, "4", wrt, null, 0);
+        string wrtOut = "";
+        Console.WriteLine(wrtComp != null && wrtComp.TakeCommit(wrtCtl, ref wrtOut) && wrtOut == "4");
+        // Select adapter: value is the chosen label; unknown text maps to -1.
+        SelectBox wselCtl = new SelectBox();
+        CellComp wselComp = CellComp.Find("select");
+        wselComp.FillStr(wselCtl, "Review", wsel, null, 0);
+        string wselOut = "";
+        Console.WriteLine(wselComp != null && wselComp.TakeCommit(wselCtl, ref wselOut) && wselOut == "Review");
+        // Buttons adapter: active label commits; click normalizes via CompPos.
+        ButtonGroup wbgCtl = new ButtonGroup(0);
+        CellComp wbgComp = CellComp.Find("buttons");
+        wbgComp.FillStr(wbgCtl, "Draft", wsel, null, 0);
+        string wbgOut = "";
+        Console.WriteLine(wbgComp != null && wbgComp.TakeCommit(wbgCtl, ref wbgOut) && wbgOut == "Draft");
+        int wbgR = 0 - 1;
+        int wbgC = 0 - 1;
+        Console.WriteLine(wbgComp.CompPos(wbgCtl, ref wbgR, ref wbgC) == false);
     }
 }
 

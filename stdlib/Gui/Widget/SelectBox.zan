@@ -716,6 +716,16 @@ class SelectBox : Control {
         return selected;
     }
 
+    /// 选项总数（程序化灌入/对账用）。
+    int SelectCount() {
+        return opts.Count;
+    }
+
+    /// 当前选中项的标签（未选中返回空串）。
+    string SelectedLabel() {
+        return this.OptionLabel(selected);
+    }
+
     /// 多选模式下第 i 项是否被勾选。
     bool IsChosen(int i) {
         if (i < 0 || i >= opts.Count) { return false; }

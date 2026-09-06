@@ -512,9 +512,19 @@ partial class DataTable {
         }
 
         // ---- 组件：值序列灌进池化真控件（见 CellComp）----
-        if (col.cellType == 9 && st != null) {
+        if ((col.cellType == 9 || col.cellType == 10) && st != null) {
             DataTable.DrawCompCell(app, col, val, cx, cy, cw, rowH,
                                    rowIdx, cc, src, st);
+            return;
+        }
+        if (col.cellType == 10 && st == null) {
+            // 独立渲染入口（无 state）：字符串值组件画极简占位
+            // （与未注册 compId 的 fail-soft 块同语义）。
+            StyleBox ph = Style.Part(app, "datatable", "progress-track",
+                                     "", "", "", Style.SNormal());
+            c.FillRoundRect(cx + pad, cy + app.Scale(4),
+                            innerW, rowH - app.Scale(8),
+                            t.borderRadiusSmall, ph.BgOr(0));
             return;
         }
         if (col.cellType == 9 && st == null) {

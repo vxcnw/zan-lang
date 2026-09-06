@@ -109,6 +109,10 @@ class GridColumn<T> {
     GridColumn<T> Min() { DataColumn.Min(this.desc); return this; }
     GridColumn<T> Max() { DataColumn.Max(this.desc); return this; }
     GridColumn<T> Count() { DataColumn.Count(this.desc); return this; }
+    /// 组件列（cellType 10 select/buttons / 下拉编辑器）选项，逗号分隔。
+    GridColumn<T> Options(string csv) { DataColumn.Options(this.desc, csv); return this; }
+    /// 组件列矩阵形状（cellType 9）/ rate 显数（cellType 10）。
+    GridColumn<T> Shape(int rows, int cols) { DataColumn.Shape(this.desc, rows, cols); return this; }
 
     /// 引擎用于显示、排序
     /// 键和导出的原始（未格式化）单元格字符串。引擎在此基础上应用列的显示格式
@@ -352,6 +356,18 @@ class DataGrid<T> : Control {
     GridColumn<T> CompCol(string title, int width, string compId, GridNums<T> read) {
         GridColumn<T> c = new GridColumn<T>(DataColumn.CompCol(title, width, compId));
         c.nums = read;
+        return this.Add(c);
+    }
+
+    /// 组件列（字符串值形态）：`read` 从实体取原始单元格文本
+    /// （"true"/"1"/"3"/"已发布"……），`compId` 指定组件适配器
+    /// （"switch"/"checkbox"/"rate"/"select"/"buttons"，或自注册的
+    /// CellComp）。控件改动走编辑通道写回，需要可回写访问器。
+    /// 链式 `.Options("A,B,C")` 给 select/buttons 选项、
+    /// `.Shape(0,N)` 给 rate 显数。
+    GridColumn<T> WidgetCol(string title, int width, string compId, GridText<T> read) {
+        GridColumn<T> c = new GridColumn<T>(DataColumn.WidgetCol(title, width, compId));
+        c.text = read;
         return this.Add(c);
     }
 

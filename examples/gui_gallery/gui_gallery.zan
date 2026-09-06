@@ -12542,6 +12542,11 @@ class Gallery {
             // shape/heat live on the column, not in the data.
             cols.Add(DataColumn.Field(DataColumn.Shape(DataColumn.Heat(
                 DataColumn.CompCol("Plan", app.Scale(168), "bandgrid"), "teal"), 1, 7), "plan"));
+            // Declarative widget column (cellType 10): every cell hosts a real
+            // Switch fed by the cell text; toggling writes back through the
+            // engine's edit channel (undo journal + CellEdit event).
+            cols.Add(DataColumn.WidgetCol(
+                Gallery.T("Ok", "启用"), app.Scale(64), "switch"));
             // The demo rebuilds its columns every frame, so the styler
             // re-resolves the ones it needs by name (and the theme colours,
             // so the tint follows the active theme).

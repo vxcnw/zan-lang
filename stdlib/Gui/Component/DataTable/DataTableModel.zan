@@ -115,12 +115,13 @@ class DataColumn {
     int sparkColor;     // 正值/线条色（0 = 主题 accent 自动）
     int sparkNegColor;  // 负值色（0 = 主题 danger 自动）
 
-    // ---- 组件列（cellType 9）----
-    // 单元格值是逗号分隔的数值序列（同迷你图约定），渲染层
-    // 按 compId 从 CellComp 注册表取适配器，把序列灌进一个
-    // 池化的真控件（BandGrid 等），控件按格矩形渲染、事件
-    // 归一为 CellClick。序列化边界在引擎内部——使用层只见
-    // 类型化访问器（GridNums<T>），不接触控件与绘制。
+    // ---- 组件列（cellType 9 数值序列 / cellType 10 字符串值）----
+    // 渲染层按 compId 从 CellComp 注册表取适配器，把单元格值
+    // 灌进一个池化的真控件（BandGrid、Switch、SelectBox 等），
+    // 控件按格矩形渲染、事件归一为 CellClick；WidgetCol 形态
+    // 的改动经 TakeCommit 走编辑通道写回。序列化边界在引擎内
+    // 部——使用层只见类型化访问器（GridNums<T>/GridText<T>），
+    // 不接触控件与绘制。
     string compId;     // CellComp 注册表键（如 "bandgrid"）
     int shapeR;        // 矩阵形状：行数（shapeC 为列数；<=0 用组件默认）
     int shapeC;
@@ -625,6 +626,34 @@ class DataColumn {
     static DataColumn Shape(DataColumn c, int rows, int cols) {
         c.shapeR = rows;
         c.shapeC = cols;
+        return c;
+    }
+
+    /// 组件列（字符串值形态，cellType 10）：单元格文本灌进
+    /// `compId` 标识的池化真控件。内置 compId："switch"/"checkbox"
+    /// （布尔文本）、"rate"（0..N 星数，Shape 的 shapeC 为显数）、
+    /// "select"/"buttons"（选项取 `choices`，经 Options 声明）。
+    /// 用户控件实现 CellComp（FillStr/TakeCommit）Register 一次
+    /// 即可用自己的 id。控件改动经 TakeCommit 走编辑通道写回
+    /// （撤销/SetCell/CellEdit），排序筛选关闭，导出用原始文本。
+    static DataColumn WidgetCol(string title, int width, string compId) {
+        DataColumn c = new DataColumn(title, width);
+        c.cellType = 10;
+        c.align = 1;
+        c.compId = compId;
+        c.sortable = false;
+        c.filterable = false;
+        c.editable = false;
+        return c;
+    }
+
+    /// 组件列（cellType 10 select/buttons）或下拉编辑器的选项，
+    /// 逗号分隔一次给全（如 "草稿,审核中,已发布"）。
+    static DataColumn Options(DataColumn c, string csv) {
+        if (c.choices == null) { c.choices = new List<string>(); }
+        c.choices.Clear();
+        List<string> parts = DataTable.NumSeries(csv);
+        for (int i = 0; i < parts.Count; i = i + 1) { c.choices.Add(parts[i]); }
         return c;
     }
 
