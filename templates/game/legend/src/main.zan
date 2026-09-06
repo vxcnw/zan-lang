@@ -74,6 +74,22 @@ class LegendApp {
     Label Text(string value, string cls, int height) { Label l = new Label(value); l.Class = cls; l.wrap = true; l.Prefer(0, height); return l; }
     Button Btn(string text, string id, Action action) { Button b = new Button(text); b.Named(id); b.Class = "small"; b.Prefer(0, 28); b.Click += action; return b; }
     Image Art(string name, int w, int h) { Image i = new Image(ArtPath(name), "", "contain"); i.Prefer(w, h); return i; }
+    Panel PaperDollCanvas() {
+        // The reference body stays as a backdrop; equipped artwork is layered
+        // at stable body anchors so wearing/unequipping is visible immediately.
+        Panel canvas = new Panel(); canvas.Class = "paperdoll-canvas"; canvas.Pad(0); canvas.Prefer(100, 176); canvas.Grow();
+        Image body = Art("paperdoll", 100, 176); body.DockManual(); body.Prefer(100, 176); body.Place(0, 0); canvas.With(body);
+        int[] xs = new int[] { 32, 32, 8, 56, 32, 32, 8, 56, 21, 55, 21, 55 };
+        int[] ys = new int[] { 2, 38, 60, 60, 82, 104, 136, 136, 148, 148, 104, 104 };
+        for (int i = 0; i < 12; i = i + 1) {
+            Equipment e = g.equipped[i];
+            if (e != null) {
+                Image layer = new Image(EquipmentArtPath(e), e.Name(), "contain"); layer.Class = "paperdoll-layer";
+                layer.DockManual(); layer.Prefer(36, 36); layer.Place(xs[i], ys[i]); canvas.With(layer);
+            }
+        }
+        return canvas;
+    }
     Panel Col(string cls) { Panel p = Panel.Column(); p.Class = cls; p.Pad(4); p.Gap(4); return p; }
     void Note(Panel p, string text) { p.With(Text(text, "secondary", 0)); }
     void Save() { saveState = saves.Write(g, DateTime.UtcNow().epoch) ? "已保存" : saves.error; lastSave = DateTime.UtcNow().epoch; }
@@ -253,7 +269,7 @@ class LegendApp {
         Panel dollBody = Panel.Row(); dollBody.Gap(0); dollBody.Grow(); doll.With(dollBody);
         Panel slotsLeft = Panel.Column(); slotsLeft.Prefer(44, 0); slotsLeft.Gap(4); dollBody.With(slotsLeft);
         Panel slotsRight = Panel.Column(); slotsRight.Prefer(44, 0); slotsRight.Gap(4); slotsRight.DockRight(); dollBody.Add(slotsRight);
-        Image dollImage = Art("paperdoll", 0, 176); dollImage.Grow(); dollBody.With(dollImage);
+        Panel dollImage = PaperDollCanvas(); dollBody.With(dollImage);
         for (int i = 0; i < 8; i = i + 1) { Panel slot = GearCell(i); if (i % 2 == 0) { slotsLeft.With(slot); } else { slotsRight.With(slot); } }
         Grid feet = Grid.Of(4); feet.Gap(4); feet.Prefer(0, 44); feet.DockBottom(); for (int i = 8; i < 12; i = i + 1) { feet.With(GearCell(i)); } doll.Add(feet);
         Panel tools = Panel.Column(); tools.Prefer(80, 0); tools.Gap(4); top.With(tools);
