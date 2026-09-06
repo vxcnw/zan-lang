@@ -1307,6 +1307,14 @@ partial class DataTable {
             else if (m == 3) { st.aggReal[col] = minV[col]; }
             else if (m == 4) { st.aggReal[col] = maxV[col]; }
             else if (m == 5) { st.aggReal[col] = (double)n; }
+            else if (m == 7) {
+                // 勾选行数（DevExpress Selection 汇总等位）。
+                int selN = 0;
+                for (int si = 0; si < st.selected.Count; si = si + 1) {
+                    if (st.selected[si]) { selN = selN + 1; }
+                }
+                st.aggReal[col] = (double)selN;
+            }
             st.aggValue[col] = (int)st.aggReal[col];
             col = col + 1;
         }
@@ -1335,6 +1343,7 @@ partial class DataTable {
             string txt = "";
             if (m >= 1 && m <= 4) { txt = val; }
             else if (m == 5) { txt = Convert.ToString(n); }
+            else if (m == 7) { txt = Convert.ToString(st.aggValue[col]); }
             else if (m == 6) {
                 int ddec = dec;
                 if (cols[col].deriveOp == 0 || cols[col].deriveOp == 1) {
@@ -1342,6 +1351,13 @@ partial class DataTable {
                 }
                 txt = DataTable.FormatReal(st.aggReal[col], ddec);
                 if (cols[col].deriveOp == 0) { txt = txt + "%"; }
+            }
+            // 聚合文案模板（老 DevExpress DisplayFormat）：{0} 替换为
+            // 默认渲染的聚合文本，{0:0.##} 等带格式说明的占位符按
+            // 说明渲染聚合值（ApplySummaryTemplate，未识别回退默认）。
+            if (txt.Length > 0 && cols[col].summaryFmt.Length > 0) {
+                txt = DataTable.ApplySummaryTemplate(cols[col].summaryFmt, txt,
+                    st.aggReal[col]);
             }
             st.summaryText.Add(txt);
             col = col + 1;

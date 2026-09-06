@@ -132,6 +132,110 @@ partial class DataTable {
         return s;
     }
 
+    /// 按 .NET 自定义数字格式说明渲染数值——合计行模板
+    /// `{0:spec}` 里的 spec。支持 `0`（固定数字位，不足补零）、
+    /// `#`（可选数字位，末尾零剪除）、`.`（小数点）、`,`（千位
+    /// 分组），如 `0.##`、`#,##0.00`、`0.0`、`00`。说明串含其他
+    /// 字符（N/C/P/E 等标准格式名、前缀文字）时返回 ""，调用方
+    /// 回退为该列的默认渲染文本。
+    static string FormatSpecNum(double v, string spec) {
+        int n = spec.Length;
+        if (n == 0) { return ""; }
+        int dotAt = -1;
+        bool grouped = false;
+        bool anyDigit = false;
+        for (int i = 0; i < n; i = i + 1) {
+            int c = (int)spec[i];
+            if (c == 46) {                    // '.'
+                if (dotAt >= 0) { return ""; }
+                dotAt = i;
+            } else if (c == 44) {             // ','：分组只允许整数段
+                if (dotAt >= 0) { return ""; }
+                grouped = true;
+            } else if (c == 48 || c == 35) {  // '0' '#'
+                anyDigit = true;
+            } else {
+                return "";
+            }
+        }
+        if (!anyDigit) { return ""; }
+        int intEnd = dotAt >= 0 ? dotAt : n;
+        int maxDec = dotAt >= 0 ? n - dotAt - 1 : 0;
+        int minDec = 0;
+        for (int i = dotAt + 1; i < n; i = i + 1) {
+            if ((int)spec[i] == 48) { minDec = minDec + 1; }
+        }
+        int minInt = 0;
+        for (int i = 0; i < intEnd; i = i + 1) {
+            if ((int)spec[i] == 48) { minInt = minInt + 1; }
+        }
+        string s = DataTable.FormatReal(v, maxDec);
+        string sign = "";
+        if ((int)s[0] == 45) { sign = "-"; s = s.Substring(1); }
+        string ipart = s;
+        string fpart = "";
+        int dot = -1;
+        for (int i = 0; i < s.Length; i = i + 1) {
+            if ((int)s[i] == 46) { dot = i; i = s.Length; }
+        }
+        if (dot >= 0) {
+            ipart = s.Substring(0, dot);
+            fpart = s.Substring(dot + 1);
+        }
+        // `0.##` 不显示 1.50 的尾零：剪到 minDec 为止
+        while (fpart.Length > minDec) {
+            int last = fpart.Length - 1;
+            if ((int)fpart[last] == 48) { fpart = fpart.Substring(0, last); }
+            else { break; }
+        }
+        while (ipart.Length < minInt) { ipart = "0" + ipart; }
+        if (grouped) { ipart = DataTable.GroupDigits(ipart); }
+        string outp = ipart;
+        if (fpart.Length > 0) { outp = outp + "." + fpart; }
+        return sign + outp;
+    }
+
+    /// 合计行文案模板：`{0}` 替换为该列默认渲染的聚合文本，
+    /// `{0:spec}` 按数字格式说明渲染聚合值（老 DevExpress
+    /// DisplayFormat，如「合计{0:0.##}行:」）。无法识别的 spec
+    /// 回退为默认文本；不含占位符的模板原样显示。
+    static string ApplySummaryTemplate(string fmt, string dflt, double num) {
+        string o = "";
+        int i = 0;
+        int n = fmt.Length;
+        while (i < n) {
+            if ((int)fmt[i] != 123) {          // '{'
+                o = o + fmt.Substring(i, 1);
+                i = i + 1;
+                continue;
+            }
+            // `{0}`：默认渲染文本
+            if (i + 2 < n && (int)fmt[i + 1] == 48 && (int)fmt[i + 2] == 125) {
+                o = o + dflt;
+                i = i + 3;
+                continue;
+            }
+            // `{0:spec}`：按说明渲染；空 spec/未识别 spec 回退默认
+            if (i + 3 < n && (int)fmt[i + 1] == 48 && (int)fmt[i + 2] == 58) {
+                int close = -1;
+                for (int k = i + 3; k < n; k = k + 1) {
+                    if ((int)fmt[k] == 125) { close = k; k = n; }
+                }
+                if (close >= i + 3) {
+                    string spec = fmt.Substring(i + 3, close - i - 3);
+                    string sv = DataTable.FormatSpecNum(num, spec);
+                    o = o + (sv.Length > 0 ? sv : dflt);
+                    i = close + 1;
+                    continue;
+                }
+            }
+            // 不是可识别的占位符：'{' 原样保留
+            o = o + "{";
+            i = i + 1;
+        }
+        return o;
+    }
+
     // ---- bool 支持 ----
     // bool 列存储文本但以真值作键，因此它按
     // false 在前 true 在后的顺序排序，并恰好分成两组，无论

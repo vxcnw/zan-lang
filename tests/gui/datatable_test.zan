@@ -91,6 +91,24 @@ class Program {
         Console.WriteLine(st.summaryText[1] == "13.65");
         Console.WriteLine(st.summaryText[2]);
 
+        // 合计行文案模板：{0} 保持默认渲染，{0:0.##} 等带格式说明的
+        // 占位符按说明格式化聚合值（尾零剪除、固定小数、千位分组、
+        // 补零）；未识别的 spec 与不含占位符的模板回退/原样。
+        cols[1] = DataColumn.SummaryFmt(cols[1], "合计{0:0.##}");
+        st.dirty = true;
+        DataTable.Recompute(st, cols, src);
+        DataTable.ComputeSummary(st, cols, src);
+        Console.WriteLine(st.summaryText[1]);
+        cols[1] = DataColumn.SummaryFmt(cols[1], "");
+        Console.WriteLine(DataTable.ApplySummaryTemplate("合计{0}元", "13.65", 13.65));
+        Console.WriteLine(DataTable.ApplySummaryTemplate("{0:0.00}", "x", 3.5));
+        Console.WriteLine(DataTable.ApplySummaryTemplate("{0:#,##0.0}", "x", 1234567.875));
+        Console.WriteLine(DataTable.ApplySummaryTemplate("{0:0.##}", "x", -2.5));
+        Console.WriteLine(DataTable.ApplySummaryTemplate("{0:00}", "x", 5));
+        Console.WriteLine(DataTable.ApplySummaryTemplate("{0:N2}", "2.33", 2.3333));
+        Console.WriteLine(DataTable.ApplySummaryTemplate("literal", "2.33", 2.3333));
+        Console.WriteLine(DataTable.ApplySummaryTemplate("{0}", "2.33", 2.3333));
+
         // ---- date columns: parse, render, sort and bucket ----
         // A date column keys on days since the epoch, so a chronological order
         // holds across a year boundary where a string compare would not.
