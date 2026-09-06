@@ -24,6 +24,9 @@ class LegendSystemTests {
         g.gems = 100; int shopRune1 = g.RuneCount(1); g.Shop(5); Check(g.RuneCount(1) == shopRune1 + 1 && g.gems == 0, "shop sells a documented 1# rune for yuan");
         g.gems = 2000; int shopRune10 = g.RuneCount(10); g.Shop(6); Check(g.RuneCount(10) == shopRune10 + 1 && g.gems == 0, "shop sells a documented 10# rune for yuan");
         g.gems = 0; int noBuyRune = g.RuneCount(1); g.Shop(5); Check(g.RuneCount(1) == noBuyRune, "rune shop purchase is atomic when yuan is insufficient");
+        g.gems = 200; int oreBefore = g.legendOre; g.Shop(7); Check(g.legendOre == oreBefore + 100 && g.gems == 0, "shop sells legendary ore for yuan");
+        g.gems = 300; int ballBefore = g.DragonBallCount(1); g.Shop(8); Check(g.DragonBallCount(1) == ballBefore + 10 && g.gems == 0, "shop sells dragon balls for yuan");
+        g.gems = 20000; int thirteenthBefore = g.RuneCount(13); g.Shop(17); Check(g.RuneCount(13) == thirteenthBefore + 1 && g.gems == 0, "shop sells 13# runes for rune words");
         int floor = g.floor; g.active = false; int wave = g.wave; int tries = g.bossTries;
         g.level = 1; g.Challenge(1, 0); Check(g.mode == 0 && g.bossTries == tries, "boss level gate atomic");
         g.level = 80; g.Challenge(1, -1); Check(g.bossTries == tries, "invalid boss does not consume tries");
@@ -111,6 +114,35 @@ class LegendSystemTests {
         Check(g.treasureMaps == treasureMaps - 1 && g.treasureDraws == 1, "treasure map draw consumes one map and records today's draw");
         int dailyMaps = g.treasureMaps; g.Daily();
         Check(g.treasureMaps == dailyMaps + g.B("daily_treasure_maps"), "daily welfare grants configured treasure maps");
+        g.AddRune(13, 1);
+        Equipment blood = g.CreateItem(151, 1, 30); g.bag.Add(blood);
+        int craftBag = g.bag.Count; int rune13ForCraft = g.RuneCount(13);
+        g.legendOre = g.B("rune_word_ore") - 1;
+        Check(!g.CraftLegend(0, g.bag.Count - 1) && g.bag.Count == craftBag && g.legendOre == g.B("rune_word_ore") - 1 && g.RuneCount(13) == rune13ForCraft, "legend craft ore shortage is atomic");
+        g.legendOre = g.B("rune_word_ore");
+        Check(g.CraftLegend(0, g.bag.Count - 1) && g.bag.Count == craftBag && g.legendOre == 0 && g.RuneCount(13) == rune13ForCraft - 1, "legend sword craft consumes base, ore and one 13# rune");
+        Equipment legendary = g.bag[g.bag.Count - 1];
+        Check(legendary.definitionId == g.B("legend_first_form") && legendary.tier == blood.tier && legendary.coefficient == blood.coefficient && legendary.upgrade == blood.upgrade, "legend sword becomes first form preserving quality");
+        Check(!g.CraftLegend(1, g.bag.Count - 1) && g.bag[g.bag.Count - 1] == legendary, "legend recipe rejects wrong base without consuming");
+        Equipment bloodLocked = g.CreateItem(151, 2, 30); g.bag.Add(bloodLocked); bloodLocked.locked = true;
+        g.legendOre = g.B("rune_word_ore"); g.AddRune(13, 1); int lockedBag = g.bag.Count;
+        Check(!g.CraftLegend(0, g.bag.Count - 1) && g.bag.Count == lockedBag && g.legendOre == g.B("rune_word_ore"), "locked legend base is rejected atomically");
+        Equipment robeMale = g.CreateItem(341, 1, 30); g.bag.Add(robeMale);
+        g.legendOre = g.B("rune_word_ore"); g.AddRune(13, 1);
+        Check(g.CraftLegend(1, g.bag.Count - 1) && g.bag[g.bag.Count - 1].definitionId == g.B("legend_first_form") + g.B("legend_form_count"), "city lord male robe crafts legendary robe first form");
+        Equipment robeFemale = g.CreateItem(342, 1, 30); g.bag.Add(robeFemale);
+        g.legendOre = g.B("rune_word_ore"); g.AddRune(13, 1);
+        Check(g.CraftLegend(2, g.bag.Count - 1) && g.bag[g.bag.Count - 1].definitionId == g.B("legend_first_form") + g.B("legend_form_count") * 2, "city lord female robe crafts legendary skirt first form");
+        Equipment formOne = g.bag[g.bag.Count - 1];
+        g.dragonBalls[0] = g.B("form_growth_balls") - 1; g.AddRune(13, 1);
+        int formId = formOne.definitionId; int growRune13 = g.RuneCount(13); int growBag = g.bag.Count;
+        Check(!g.GrowLegendForm(g.bag.Count - 1) && formOne.definitionId == formId && g.RuneCount(13) == growRune13 && g.bag.Count == growBag, "form growth ball shortage is atomic");
+        g.dragonBalls[0] = g.B("form_growth_balls");
+        Check(g.GrowLegendForm(g.bag.Count - 1) && formOne.definitionId == formId + 1 && formOne.coefficient == robeFemale.coefficient && g.RuneCount(13) == growRune13 - 1 && g.dragonBalls[0] == 0, "form growth advances chain in place preserving identity and quality");
+        formOne.definitionId = g.B("legend_first_form") + g.B("legend_form_count") * 3 - 1;
+        g.dragonBalls[8] = g.B("form_growth_balls"); g.AddRune(13, 1);
+        Check(!g.GrowLegendForm(g.bag.Count - 1) && formOne.definitionId == g.B("legend_first_form") + g.B("legend_form_count") * 3 - 1, "ninth form is the template terminal");
+        g.legendOre = 1234; g.dragonBalls[4] = 77;
         g.filter = 3; g.filterCoefficient = 5; g.filterMinLevel = 40; g.filterJobOnly = true;
         g.AddRune(3, 4);
         g.savedAt = 1700000120; Game loaded = SaveStore.Decode(SaveStore.Encode(g).ToJson());
@@ -120,9 +152,12 @@ class LegendSystemTests {
         Check(loaded.reputation == g.reputation && loaded.redPackets == g.redPackets && loaded.recyclePoints == g.recyclePoints, "recycle wallets persisted");
         Check(loaded.treasureMaps == g.treasureMaps && loaded.treasureDraws == g.treasureDraws, "treasure map state persisted");
         Check(loaded.RuneCount(1) == 2 && loaded.RuneCount(3) == 4 && loaded.RuneCount(14) == 2, "levelled rune inventory survives save roundtrip");
+        Check(loaded.legendOre == g.legendOre && loaded.DragonBallCount(5) == 77 && loaded.DragonBallCount(9) == g.DragonBallCount(9), "legendary materials survive save roundtrip");
         Check(loaded.SkillRank(1) == 2 && loaded.IsSkillEquipped(1) && loaded.SkillAtSlot(7).Text("kind") == "passive", "skill ranks and loadout persisted");
         JsonValue broken = SaveStore.Encode(g); broken.Set("elementRanks",JsonValue.NewArray()); bool rejected = false;
         try { SaveStore.Decode(broken.ToJson()); } catch (Exception ex) { rejected = true; } Check(rejected,"malformed elements rejected");
+        broken = SaveStore.Encode(g); broken.Set("dragonBalls", JsonValue.NewArray()); rejected = false;
+        try { SaveStore.Decode(broken.ToJson()); } catch (Exception ex) { rejected = true; } Check(rejected, "malformed dragon balls rejected");
         Console.WriteLine("PASS system gameplay checks=" + checks.ToString());
     }
 }

@@ -348,6 +348,19 @@ class LegendApp {
                 }
                 detailsScroll.With(runeGrid);
                 detailsScroll.With(Text("规则来源：参考配方 1#–11#升级、2#–12#降级。旧版通用符文库存仍保留用于兼容旧存档和既有锻造配方。", "secondary small", 0));
+                detailsScroll.With(Text("符文之语 · 传说锻造（配方公开，模板数值）", "yellow small", 24));
+                detailsScroll.With(Text("材料：传说矿石 ×" + Rules.N(g.legendOre) + " · " + Rules.N(g.B("rune_word_rune")) + "#符文 ×" + Rules.N(g.RuneCount(g.B("rune_word_rune"))), "cyan small", 0));
+                detailsScroll.With(Text("当前选中：" + (selected >= 0 && !vault ? g.BagItemAt(selected) : "（在背包中单击选择装备）"), "secondary small", 0));
+                Grid runeWords = Grid.Of(2); runeWords.Gap(4);
+                string[] wordNames = new string[] { "锻造传说武器", "锻造传说男衣", "锻造传说女衣" };
+                for (int i = 0; i < 3; i = i + 1) {
+                    int n = i; Button craft = Btn(wordNames[n], "legend-craft-" + Rules.N(n), () => { g.CraftLegend(n, selected); selected = -1; Rebuild(); });
+                    craft.Disabled = !g.LegendReady(n, selected); craft.Class = "tiny"; runeWords.With(craft);
+                }
+                detailsScroll.With(runeWords);
+                Button grow = Btn("形态增长（" + Rules.N(g.B("form_growth_balls")) + "颗当级龙珠 + 新" + Rules.N(g.B("form_growth_rune")) + "#）", "legend-grow", () => { g.GrowLegendForm(selected); selected = -1; Rebuild(); });
+                grow.Disabled = !g.GrowReady(selected); detailsScroll.With(grow);
+                detailsScroll.With(Text("配方：传说武器 = 赤血魔剑 + 传说矿石×" + Rules.N(g.B("rune_word_ore")) + " + " + Rules.N(g.B("rune_word_rune")) + "#；传说男/女衣 = 城主战袍（男/女）+ 同价材料。形态增长 = 传说装备[第N形态] + 龙珠N★×" + Rules.N(g.B("form_growth_balls")) + " + 新" + Rules.N(g.B("form_growth_rune")) + "#，保留系数/品阶/强化；第九形态为模板终点（更高形态依赖传奇黄，未收录）。材料可从商城购买，基础装备出自巅峰塔深层。", "secondary small", 0));
             } else {
                 Equipment book = g.equipped[11]; string bookStatus = "当前未穿戴天书。";
                 if (book != null) { bookStatus = "当前天书：" + book.Name() + "\n" + book.Detail(); }

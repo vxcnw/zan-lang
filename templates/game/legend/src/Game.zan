@@ -13,6 +13,8 @@ class Game {
     int iron = GameTables.Value("initial_iron");
     int runes;
     int[] runeCounts = new int[14];
+    int legendOre;
+    int[] dragonBalls = new int[9];
     int potions = GameTables.Value("initial_potions");
     int floor = 1;
     int best = 1;
@@ -184,6 +186,68 @@ class Game {
         iron = iron - 10;
         runeCounts[level - 2] = Rules.Clamp((long)runeCounts[level - 2] + 1, 0, 1000000);
         Log(Rules.N(level) + "#符文降级成功，获得1枚" + Rules.N(level - 1) + "#符文。"); return true;
+    }
+    bool ConsumeRune(int level, int amount) {
+        if (level < 1 || level > 14 || RuneCount(level) < amount) { return false; }
+        runeCounts[level - 1] = Rules.Clamp((long)runeCounts[level - 1] - amount, 0, 1000000); return true;
+    }
+    int DragonBallCount(int star) { return star < 1 || star > 9 ? 0 : dragonBalls[star - 1]; }
+    void AddDragonBall(int star, int amount) {
+        if (star < 1 || star > 9 || amount <= 0) { return; }
+        dragonBalls[star - 1] = Rules.Clamp((long)dragonBalls[star - 1] + amount, 0, 1000000);
+    }
+    // Rune-word legendaries are contiguous definition blocks: three chains of legend_form_count forms.
+    bool IsLegendForm(Equipment e) { return e != null && e.definitionId >= B("legend_first_form") && e.definitionId < B("legend_first_form") + B("legend_form_count") * 3; }
+    int LegendFormStep(Equipment e) { return (e.definitionId - B("legend_first_form")) % B("legend_form_count") + 1; }
+    bool IsLegendBase(int index, int kind) {
+        if (index < 0 || index >= bag.Count || kind < 0 || kind > 2) { return false; }
+        int baseId = kind == 0 ? B("legend_sword_base") : (kind == 1 ? B("legend_robe_male_base") : B("legend_robe_female_base"));
+        return bag[index].definitionId == baseId;
+    }
+    string BagItemAt(int index) { return index >= 0 && index < bag.Count ? bag[index].Name() : ""; }
+    bool LegendReady(int kind, int index) {
+        if (!IsLegendBase(index, kind) || bag[index].locked) { return false; }
+        return legendOre >= B("rune_word_ore") && RuneCount(B("rune_word_rune")) >= 1;
+    }
+    bool GrowReady(int index) {
+        if (index < 0 || index >= bag.Count) { return false; }
+        Equipment e = bag[index];
+        if (!IsLegendForm(e) || e.locked) { return false; }
+        int step = LegendFormStep(e);
+        return step < B("legend_form_count") && DragonBallCount(step) >= B("form_growth_balls") && RuneCount(B("form_growth_rune")) >= 1;
+    }
+    // 公开配方：传说武器/衣 = 基础装备 + 传说矿石 + 13#（产品文档 7.4；系数/品阶/强化由模板规则保留）。
+    bool CraftLegend(int kind, int index) {
+        if (job < 0 || kind < 0 || kind > 2 || index < 0 || index >= bag.Count) { return false; }
+        Equipment sourceBase = bag[index];
+        if (!IsLegendBase(index, kind)) { Log("请先在背包选中配方要求的基础装备。"); return false; }
+        if (sourceBase.locked) { Log("锻造基础已锁定，请先解锁。"); return false; }
+        int oreCost = B("rune_word_ore"); int runeLevel = B("rune_word_rune");
+        if (legendOre < oreCost) { Log("传说矿石不足，需要 " + Rules.N(oreCost) + "，本次未消耗任何材料。"); return false; }
+        if (RuneCount(runeLevel) < 1) { Log(Rules.N(runeLevel) + "#符文不足，本次未消耗任何材料。"); return false; }
+        int resultId = B("legend_first_form") + kind * B("legend_form_count");
+        legendOre = legendOre - oreCost; ConsumeRune(runeLevel, 1);
+        Equipment legendary = new Equipment(); legendary.definitionId = resultId; legendary.slot = sourceBase.slot; legendary.tier = sourceBase.tier;
+        legendary.coefficient = sourceBase.coefficient; legendary.level = sourceBase.level; legendary.upgrade = sourceBase.upgrade;
+        bag.RemoveAt(index); bag.Add(legendary);
+        hp = Rules.Clamp(hp, 0, MaxHp()); mp = Rules.Clamp(mp, 0, MaxMp());
+        Log("符文之语合成成功：" + sourceBase.Name() + " → " + legendary.Name() + "。消耗传说矿石 " + Rules.N(oreCost) + " 与1枚" + Rules.N(runeLevel) + "#符文。"); return true;
+    }
+    // 形态增长：传说装备[第N形态] + 龙珠N★×配置数量 + 新13# → 下一形态，保留系数/品阶/强化。
+    bool GrowLegendForm(int index) {
+        if (job < 0 || index < 0 || index >= bag.Count) { return false; }
+        Equipment e = bag[index];
+        if (!IsLegendForm(e)) { Log("请先在背包选中一件传说形态装备。"); return false; }
+        if (e.locked) { Log("传说装备已锁定，请先解锁。"); return false; }
+        int step = LegendFormStep(e);
+        if (step >= B("legend_form_count")) { Log("已至第九形态；更高形态依赖传奇黄材料，模板未收录，不能增长。"); return false; }
+        int runeLevel = B("form_growth_rune"); int ballCost = B("form_growth_balls");
+        if (DragonBallCount(step) < ballCost) { Log("龙珠" + Rules.N(step) + "★不足，需要 " + Rules.N(ballCost) + " 颗，本次未消耗任何材料。"); return false; }
+        if (RuneCount(runeLevel) < 1) { Log(Rules.N(runeLevel) + "#符文不足，本次未消耗任何材料。"); return false; }
+        dragonBalls[step - 1] = dragonBalls[step - 1] - ballCost; ConsumeRune(runeLevel, 1);
+        e.definitionId = e.definitionId + 1;
+        hp = Rules.Clamp(hp, 0, MaxHp()); mp = Rules.Clamp(mp, 0, MaxMp());
+        Log("形态增长成功：" + e.Name() + "（第 " + Rules.N(step + 1) + " 形态）。消耗龙珠" + Rules.N(step) + "★ ×" + Rules.N(ballCost) + " 与1枚" + Rules.N(runeLevel) + "#符文。"); return true;
     }
     Equipment CreateItem(int definitionId, int tier, int atLevel) {
         DataRow d = GameTables.current.items.At(definitionId);
@@ -680,13 +744,19 @@ class Game {
         if (reward == "rune9") { return 9; } if (reward == "rune10") { return 10; } if (reward == "rune11") { return 11; } if (reward == "rune12") { return 12; }
         if (reward == "rune13") { return 13; } if (reward == "rune14") { return 14; } return 0;
     }
+    int ShopBallStar(string reward) {
+        if (reward == "ball1") { return 1; } if (reward == "ball2") { return 2; } if (reward == "ball3") { return 3; } if (reward == "ball4") { return 4; }
+        if (reward == "ball5") { return 5; } if (reward == "ball6") { return 6; } if (reward == "ball7") { return 7; } if (reward == "ball8") { return 8; }
+        if (reward == "ball9") { return 9; } return 0;
+    }
     void Shop(int item) {
         if (!GameTables.current.shop.index.ContainsKey(Rules.N(item))) { return; }
-        DataRow offer = GameTables.current.shop.At(item); string reward = offer.Text("reward"); int quantity = offer.Int("quantity"); int runeLevel = ShopRuneLevel(reward);
-        if ((reward == "potions" && potions > 9999 - quantity) || (reward == "iron" && iron > 1000000 - quantity) || (reward == "runes" && runes > 1000000 - quantity) || (reward == "capacity" && capacity > B("max_capacity") - quantity) || (reward == "gold" && gold > 1000000000 - quantity) || (runeLevel > 0 && RuneCount(runeLevel) > 1000000 - quantity)) { Log("空间或资源容量不足。"); return; }
+        DataRow offer = GameTables.current.shop.At(item); string reward = offer.Text("reward"); int quantity = offer.Int("quantity"); int runeLevel = ShopRuneLevel(reward); int ballStar = ShopBallStar(reward);
+        if ((reward == "potions" && potions > 9999 - quantity) || (reward == "iron" && iron > 1000000 - quantity) || (reward == "runes" && runes > 1000000 - quantity) || (reward == "capacity" && capacity > B("max_capacity") - quantity) || (reward == "gold" && gold > 1000000000 - quantity) || (runeLevel > 0 && RuneCount(runeLevel) > 1000000 - quantity) || (reward == "ore" && legendOre > 1000000 - quantity) || (ballStar > 0 && DragonBallCount(ballStar) > 1000000 - quantity)) { Log("空间或资源容量不足。"); return; }
         if (!Pay(offer.Int("gold") + capacity * offer.Int("capacity_gold"), offer.Int("iron"), offer.Int("yuan"))) { return; }
         if (reward == "potions") { potions = potions + quantity; } if (reward == "iron") { iron = iron + quantity; }
         if (reward == "capacity") { capacity = capacity + quantity; } if (reward == "runes") { runes = runes + quantity; } if (runeLevel > 0) { AddRune(runeLevel, quantity); }
+        if (reward == "ore") { legendOre = Rules.Clamp((long)legendOre + quantity, 0, 1000000); } if (ballStar > 0) { AddDragonBall(ballStar, quantity); }
         if (reward == "gold") { Gold(quantity); } Log("购买成功：" + offer.Text("name"));
     }
     void Daily() { if (dailyClaim != 0) { Log("今日福利已领取。"); return; } dailyClaim = 1; Gold(B("daily_gold")); gems = Rules.Clamp(gems + B("daily_yuan"), 0, 1000000); potions = Rules.Clamp(potions + B("daily_potions"), 0, 9999); treasureMaps = Rules.Clamp(treasureMaps + B("daily_treasure_maps"), 0, 9999); Log("今日福利已按配置发放，藏宝图 +" + Rules.N(B("daily_treasure_maps")) + "。"); }
