@@ -23,10 +23,14 @@ namespace Gui.Component.DataTable;
 class SwitchComp : CellComp {
     List<string> poolKeys;
     List<Control> poolCtl;
+    DataColumn lastCol;
+    bool lastOn;
 
     SwitchComp() : base("switch") {
         this.poolKeys = new List<string>();
         this.poolCtl = new List<Control>();
+        this.lastCol = null;
+        this.lastOn = false;
     }
 
     override Control Acquire(App app, DataSource src, int row, int col,
@@ -46,19 +50,28 @@ class SwitchComp : CellComp {
     override void FillStr(Control ctl, string val, DataColumn col,
                           DataSource src, int row) {
         Switch sw = (Switch)ctl;
-        bool on = DataTable.ParseBool(val);
-        if (sw.IsOn() != on) { sw.SetOn(on); }
+        this.lastCol = col;
+        this.lastOn = WidgetComps.BoolOf(col, val);
+        if (sw.IsOn() != this.lastOn) { sw.SetOn(this.lastOn); }
     }
 
+    /// 仅在控件状态相对本次灌入值发生变化（= 本帧用户点击）
+    /// 时上报，文本走列布尔口径。展示从不写数据：排序/筛选/
+    /// 换页重灌不会误触发提交，引擎的 nv != val 只是兜底。
     override bool TakeCommit(Control ctl, ref string outVal) {
         Switch sw = (Switch)ctl;
-        outVal = sw.IsOn() ? "1" : "0";
+        bool on = sw.IsOn();
+        if (on == this.lastOn) { return false; }
+        outVal = WidgetComps.BoolText(this.lastCol, on);
+        this.lastOn = on;
         return true;
     }
 
     override void Reset() {
         this.poolKeys.Clear();
         this.poolCtl.Clear();
+        this.lastCol = null;
+        this.lastOn = false;
     }
 }
 
@@ -67,10 +80,14 @@ class SwitchComp : CellComp {
 class CheckboxComp : CellComp {
     List<string> poolKeys;
     List<Control> poolCtl;
+    DataColumn lastCol;
+    bool lastOn;
 
     CheckboxComp() : base("checkbox") {
         this.poolKeys = new List<string>();
         this.poolCtl = new List<Control>();
+        this.lastCol = null;
+        this.lastOn = false;
     }
 
     override Control Acquire(App app, DataSource src, int row, int col,
@@ -91,19 +108,26 @@ class CheckboxComp : CellComp {
     override void FillStr(Control ctl, string val, DataColumn col,
                           DataSource src, int row) {
         Checkbox cb = (Checkbox)ctl;
-        bool on = DataTable.ParseBool(val);
-        if (cb.IsChecked() != on) { cb.SetChecked(on); }
+        this.lastCol = col;
+        this.lastOn = WidgetComps.BoolOf(col, val);
+        if (cb.IsChecked() != this.lastOn) { cb.SetChecked(this.lastOn); }
     }
 
+    /// 与 SwitchComp 同契约：仅本帧用户点击才上报，列口径文本。
     override bool TakeCommit(Control ctl, ref string outVal) {
         Checkbox cb = (Checkbox)ctl;
-        outVal = cb.IsChecked() ? "1" : "0";
+        bool on = cb.IsChecked();
+        if (on == this.lastOn) { return false; }
+        outVal = WidgetComps.BoolText(this.lastCol, on);
+        this.lastOn = on;
         return true;
     }
 
     override void Reset() {
         this.poolKeys.Clear();
         this.poolCtl.Clear();
+        this.lastCol = null;
+        this.lastOn = false;
     }
 }
 
@@ -113,10 +137,12 @@ class CheckboxComp : CellComp {
 class RateComp : CellComp {
     List<string> poolKeys;
     List<Control> poolCtl;
+    int lastV;
 
     RateComp() : base("rate") {
         this.poolKeys = new List<string>();
         this.poolCtl = new List<Control>();
+        this.lastV = 0;
     }
 
     override Control Acquire(App app, DataSource src, int row, int col,
@@ -139,18 +165,24 @@ class RateComp : CellComp {
         Rate r = (Rate)ctl;
         int v = DataTable.ParseInt(val);
         if (v < 0) { v = 0; }
+        this.lastV = v;
         if (r.Value() != v) { r.SetStars(v); }
     }
 
+    /// 空文本/非数值灌 0 后不再上报 "0"（展示不写数据）。
     override bool TakeCommit(Control ctl, ref string outVal) {
         Rate r = (Rate)ctl;
-        outVal = Convert.ToString(r.Value());
+        int v = r.Value();
+        if (v == this.lastV) { return false; }
+        outVal = Convert.ToString(v);
+        this.lastV = v;
         return true;
     }
 
     override void Reset() {
         this.poolKeys.Clear();
         this.poolCtl.Clear();
+        this.lastV = 0;
     }
 }
 
@@ -159,10 +191,12 @@ class RateComp : CellComp {
 class SelectComp : CellComp {
     List<string> poolKeys;
     List<Control> poolCtl;
+    int lastIdx;
 
     SelectComp() : base("select") {
         this.poolKeys = new List<string>();
         this.poolCtl = new List<Control>();
+        this.lastIdx = 0 - 1;
     }
 
     override Control Acquire(App app, DataSource src, int row, int col,
@@ -189,23 +223,32 @@ class SelectComp : CellComp {
             }
             s.SetIndex(0 - 1);
         }
-        if (val == s.SelectedLabel()) { return; }
+        if (val == s.SelectedLabel()) {
+            this.lastIdx = s.Selected();
+            return;
+        }
         int idx = 0 - 1;
         for (int i = 0; i < col.choices.Count; i = i + 1) {
             if (col.choices[i] == val) { idx = i; break; }
         }
         if (idx != s.Selected()) { s.SetIndex(idx); }
+        this.lastIdx = idx;
     }
 
+    /// 单元格值不在 choices 内时灌 -1，TakeCommit 因状态未变
+    /// 不上报——展示不会把未知值清成空串。
     override bool TakeCommit(Control ctl, ref string outVal) {
         SelectBox s = (SelectBox)ctl;
+        if (s.Selected() == this.lastIdx) { return false; }
         outVal = s.SelectedLabel();
+        this.lastIdx = s.Selected();
         return true;
     }
 
     override void Reset() {
         this.poolKeys.Clear();
         this.poolCtl.Clear();
+        this.lastIdx = 0 - 1;
     }
 }
 
@@ -216,10 +259,12 @@ class SelectComp : CellComp {
 class ButtonsComp : CellComp {
     List<string> poolKeys;
     List<Control> poolCtl;
+    string lastLabel;
 
     ButtonsComp() : base("buttons") {
         this.poolKeys = new List<string>();
         this.poolCtl = new List<Control>();
+        this.lastLabel = "";
     }
 
     override Control Acquire(App app, DataSource src, int row, int col,
@@ -246,13 +291,17 @@ class ButtonsComp : CellComp {
             }
         }
         if (val != g.ActiveLabel()) { g.SetActive(val); }
+        this.lastLabel = g.ActiveLabel();
     }
 
+    /// 段选择未变不上报（重灌当前值不会写数据）；点击动作语义
+    /// 不受影响——CellClick 经 CompPos 独立归一，仍每次触发。
     override bool TakeCommit(Control ctl, ref string outVal) {
         ButtonGroup g = (ButtonGroup)ctl;
         string lbl = g.ActiveLabel();
-        if (lbl == "") { return false; }
+        if (lbl == "" || lbl == this.lastLabel) { return false; }
         outVal = lbl;
+        this.lastLabel = lbl;
         return true;
     }
 
@@ -268,6 +317,7 @@ class ButtonsComp : CellComp {
     override void Reset() {
         this.poolKeys.Clear();
         this.poolCtl.Clear();
+        this.lastLabel = "";
     }
 }
 
@@ -276,6 +326,23 @@ class WidgetComps {
     /// 池化键（与 BandGridComp 同约定：稳定行键 + 列号）。
     static string PoolKey(RowKey key, int col) {
         return key.Canonical() + ":" + Convert.ToString(col);
+    }
+
+    /// 布尔列口径解读：声明的 boolTrue/boolFalse 文本精确匹配
+    /// 优先（"是"/"否" 等自定义口径 ParseBool 不认识），其余交
+    /// ParseBool（"1"/"true"/"yes"/"✓"…）。
+    static bool BoolOf(DataColumn c, string val) {
+        if (c != null && c.boolTrue != "" && val == c.boolTrue) { return true; }
+        if (c != null && c.boolFalse != "" && val == c.boolFalse) { return false; }
+        return DataTable.ParseBool(val);
+    }
+
+    /// 布尔列口径文本：开关/复选提交写回用，与 ToggleBoolCell
+    /// 同一套口径，不产生混方言数据。
+    static string BoolText(DataColumn c, bool on) {
+        if (c != null && on && c.boolTrue != "") { return c.boolTrue; }
+        if (c != null && !on && c.boolFalse != "") { return c.boolFalse; }
+        return on ? "1" : "0";
     }
 }
 
