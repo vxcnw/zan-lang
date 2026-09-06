@@ -1629,7 +1629,15 @@ zan_type_t *zan_checker_check_expr(zan_checker_t *c, zan_ast_node_t *expr) {
          * IRGen and so a narrowing target (`int x = 0xFFFFFFFF`) is
          * diagnosable: a value outside i32 is `long`. A suffix pins the type:
          * L/l -> long, U/u -> uint (ulong when the value overflows uint),
-         * UL/LU -> ulong. */
+         * UL/LU -> ulong.
+         *
+         * Exception (Java-style): unsuffixed hex/binary/octal literals in
+         * [2^31, 2^32] type as `int` with two's-complement wrap. ARGB colors
+         * (`0xFFRRGGBB`) are idiomatic int values here; typing them long made
+         * every `field == 0xFFRRGGBB` comparison silently false (int operand
+         * promoted to long, the wrapped field value never equals the full
+         * literal), while the identical assignment truncated as intended —
+         * the split that forced Crc32/Encoding to spell colors as decimal. */
         switch (expr->lit_suffix) {
         case 1:
             return c->binder->type_long;
@@ -1640,6 +1648,11 @@ zan_type_t *zan_checker_check_expr(zan_checker_t *c, zan_ast_node_t *expr) {
         case 3:
             return c->binder->type_ulong;
         default:
+            if ((expr->lit_radix == 2 || expr->lit_radix == 8
+                 || expr->lit_radix == 16)
+                && expr->int_val >= 0 && expr->int_val <= 4294967295LL) {
+                return c->binder->type_int;
+            }
             if (expr->int_val < -2147483648LL || expr->int_val > 2147483647LL)
                 return c->binder->type_long;
             return c->binder->type_int;

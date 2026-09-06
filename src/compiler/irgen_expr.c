@@ -8031,8 +8031,19 @@ static LLVMValueRef emit_expr(zan_irgen_t *g, zan_ast_node_t *expr, local_scope_
     }
 
     switch (expr->kind) {
-    case AST_INT_LITERAL:
-        return LLVMConstInt(LLVMInt64TypeInContext(g->ctx), (uint64_t)expr->int_val, 1);
+    case AST_INT_LITERAL: {
+        /* The runtime value must match the static type: a radix-2/8/16
+         * literal up to 0xFFFFFFFF types as int (checker agrees), so its
+         * value here is the int-domain (two's-complement) one. Emitting the
+         * full 64-bit value made `field == 0xFF378ADD` compare the stored
+         * sign-extended int against 4281830109 and never match. */
+        int64_t v = expr->int_val;
+        if (expr->lit_suffix == 0 && v > 2147483647LL && v <= 4294967295LL &&
+            (expr->lit_radix == 2 || expr->lit_radix == 8 ||
+             expr->lit_radix == 16))
+            v = (int32_t)v;
+        return LLVMConstInt(LLVMInt64TypeInContext(g->ctx), (uint64_t)v, 1);
+    }
 
     case AST_FLOAT_LITERAL:
         return LLVMConstReal(LLVMDoubleTypeInContext(g->ctx), expr->float_val);

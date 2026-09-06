@@ -827,6 +827,7 @@ static zan_ast_node_t *parse_primary(zan_parser_t *p) {
         zan_ast_node_t *n = zan_ast_new(p->arena, AST_INT_LITERAL, loc);
         n->int_val = p->previous.int_val;
         n->lit_suffix = p->previous.lit_suffix;
+        n->lit_radix = p->previous.lit_radix;
         return n;
     }
     case TK_FLOAT_LIT: {
@@ -2490,8 +2491,18 @@ static zan_ast_node_t *parse_for_stmt(zan_parser_t *p) {
             /* parse_var_decl already consumed ; */
             goto parse_cond;
         } else {
-            init = parse_expression(p);
+            /* `for (r = 0; ...)` reusing an outer local: the init is a bare
+             * expression. Wrap it in EXPR_STMT like a standalone statement —
+             * emit_stmt's default case silently drops bare expression nodes,
+             * which used to discard the init assignment entirely (the loop
+             * then tested the stale slot and never ran). This also gives a
+             * fluent-call init the same async-detach/ARC-drop semantics as
+             * a normal expression statement. */
+            zan_loc_t eloc = p->current.loc;
+            zan_ast_node_t *expr = parse_expression(p);
             parser_expect(p, TK_SEMICOLON);
+            init = zan_ast_new(p->arena, AST_EXPR_STMT, eloc);
+            init->expr_stmt.expr = expr;
         }
     } else {
         parser_advance(p); /* ; */

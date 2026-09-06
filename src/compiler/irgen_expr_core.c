@@ -1632,7 +1632,11 @@ static zan_type_t *infer_expr_type_raw(zan_irgen_t *g, zan_ast_node_t *e,
         /* Value-based type: literals outside i32 are `long`, so assigning one
          * to an `int` target is a real narrowing (ZAN_WARN_NARROW). A suffix
          * pins the type regardless of value: L/l -> long, U/u -> uint (ulong
-         * when the value overflows uint), UL/LU -> ulong. */
+         * when the value overflows uint), UL/LU -> ulong.
+         * Hex/binary/octal literals up to 0xFFFFFFFF are the Java-style
+         * exception: they type as `int` (two's-complement wrap) so ARGB
+         * color comparisons agree with the wrapped field values — see the
+         * matching rule in checker.c. */
         if (!g->binder) return NULL;
         switch (e->lit_suffix) {
         case 1:
@@ -1644,6 +1648,11 @@ static zan_type_t *infer_expr_type_raw(zan_irgen_t *g, zan_ast_node_t *e,
         case 3:
             return g->binder->type_ulong;
         default:
+            if ((e->lit_radix == 2 || e->lit_radix == 8
+                 || e->lit_radix == 16)
+                && e->int_val >= 0 && e->int_val <= 4294967295LL) {
+                return g->binder->type_int;
+            }
             if (e->int_val < -2147483648LL || e->int_val > 2147483647LL)
                 return g->binder->type_long;
             return g->binder->type_int;

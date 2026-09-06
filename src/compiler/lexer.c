@@ -650,6 +650,7 @@ static zan_token_t lexer_number(zan_lexer_t *lex) {
             }
             zan_token_t tok = lexer_make(lex, TK_INT_LIT, loc);
             tok.lit_suffix = lexer_int_suffix(lex);
+            tok.lit_radix = 16;
             /* parse hex value, ignoring underscores */
             char buf[64];
             size_t bi = 0;
@@ -675,6 +676,7 @@ static zan_token_t lexer_number(zan_lexer_t *lex) {
             }
             zan_token_t tok = lexer_make(lex, TK_INT_LIT, loc);
             tok.lit_suffix = lexer_int_suffix(lex);
+            tok.lit_radix = 2;
             char buf[128];
             size_t bi = 0;
             for (size_t i = start + 2; i < lex->pos && bi < 127; i++) {
@@ -699,6 +701,7 @@ static zan_token_t lexer_number(zan_lexer_t *lex) {
             }
             zan_token_t tok = lexer_make(lex, TK_INT_LIT, loc);
             tok.lit_suffix = lexer_int_suffix(lex);
+            tok.lit_radix = 8;
             char buf[64];
             size_t bi = 0;
             for (size_t i = start + 2; i < lex->pos && bi < 63; i++) {
@@ -780,6 +783,7 @@ static zan_token_t lexer_number(zan_lexer_t *lex) {
     } else {
         zan_token_t tok = lexer_make(lex, TK_INT_LIT, loc);
         tok.lit_suffix = lit_suffix;
+        tok.lit_radix = 10;
         /* Decimal literals above long.MaxValue are ulong in C#; strtoll would
          * clamp them to LLONG_MAX, so keep the unsigned bit pattern instead
          * (the hex/binary/octal paths already do). */

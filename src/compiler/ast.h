@@ -137,6 +137,12 @@ struct zan_ast_node {
      * 2=U/u (uint), 3=UL/LU in either case (ulong). */
     int lit_suffix;
 
+    /* Integer literal radix (AST_INT_LITERAL only): 2/8/10/16. Non-decimal
+     * unsuffixed literals up to 0xFFFFFFFF type as int (two's-complement
+     * wrap), so `0xFFRRGGBB` ARGB colors compare equal to the wrapped int
+     * field values they assign to. */
+    int lit_radix;
+
     /* [Attr(...)] usages attached to a declaration; empty list if none. */
     zan_ast_list_t attributes;
 

@@ -21,6 +21,10 @@ struct zan_token {
     /* Integer literal suffix encoding (TK_INT_LIT only): 0=none, 1=L/l
      * (long), 2=U/u (uint), 3=UL/LU in either case (ulong). */
     int lit_suffix;
+    /* Integer literal radix (TK_INT_LIT only): 2/8/10/16. Hex/binary/octal
+     * literals up to 0xFFFFFFFF type as int with two's-complement wrap
+     * (ARGB colors), decimal keeps the value-fit rule (checker). */
+    unsigned char lit_radix;
     union {
         int64_t int_val;
         double float_val;

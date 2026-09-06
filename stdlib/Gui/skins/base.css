@@ -1097,6 +1097,13 @@ datatable::tool { color: var(--text-secondary); }
 datatable::tool:hover { background: var(--bg-hover); }
 datatable::tool:selected { background: var(--bg-active); color: var(--primary); }
 
+/* ---- BandGrid（热力/排班矩阵，含 DataTable 组件列内嵌） ----
+ * head/body 继承 panel 表面 token；accent 与 datatable::accent 同源，
+ * 选中框、数据条、悬停描边随主题走而不是写死的蓝。 */
+bandgrid::head { background: var(--bg-tertiary); color: var(--text-secondary); }
+bandgrid::body { background: var(--bg-primary); color: var(--text-primary); }
+bandgrid::accent { background: var(--primary); }
+
 /* ---- Chart 共享框架（面板/图例/轴/网格/标记/dataZoom） ----
  * 轴与网格取 ECharts 2.2.7 默认主题：轴线 #48b（宽 2px 由
  * Chart.zan 画死）、刻度文字 #333、分隔线 #ccc。 */

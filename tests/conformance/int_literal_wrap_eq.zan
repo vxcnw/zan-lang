@@ -1,0 +1,26 @@
+using System;
+namespace Conf;
+class Program {
+    static int Field = 0xFF378ADD;
+
+    static void Main() {
+        // An unsuffixed hex literal up to 0xFFFFFFFF types as int: its value
+        // is the two's-complement int, so comparisons against an int storage
+        // must match (regression: the literal compared at full 64-bit value
+        // and `field == 0xFF378ADD` was always false).
+        Console.WriteLine(Field == 0xFF378ADD);
+        int a = 0xFF378ADD;
+        Console.WriteLine(a == 0xFF378ADD);
+        Console.WriteLine(a);
+        Console.WriteLine(a == Field);
+        Console.WriteLine(a == 0xFFFFFFFF);
+        Console.WriteLine(0xFF378ADD < 0);
+        Console.WriteLine(0xFFFFFFFF == -1);
+        // Wider and suffixed literals keep their full value.
+        long l = 0xFF378ADD;
+        Console.WriteLine(l);
+        Console.WriteLine(0xFF378ADDL == 4281830109L);
+        uint u = 0xFF378ADDu;
+        Console.WriteLine(u == 4281830109u);
+    }
+}

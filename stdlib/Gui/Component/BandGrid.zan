@@ -67,6 +67,8 @@ class BandGrid : Control {
         actR = 0 - 1;
         actC = 0 - 1;
         barMax = 0;
+        // accent 仅作无样式系统环境（测试/裸画）的兜底；有 App 时
+        // OnPaint 先经 bandgrid::accent / 主题主色解析覆盖。
         accent = 0xFF378ADD;
         lastApp = null;
         Changed = new UiEvent();
@@ -278,8 +280,21 @@ class BandGrid : Control {
                                    "", "", Style.SNormal());
         int headBg = head.BgOr(0);
         int bodyBg = body.BgOr(0);
-        if (headBg == 0) { headBg = bodyBg; }
+        // 0 = 未声明/透明，回退主题文本色而不是画黑字
+        // （head 默认继承 panel 族，CSS 未声明 color 时 FgOr 是 0）。
         int fg = head.FgOr(0);
+        if (fg == 0) { fg = body.FgOr(0); }
+        if (fg == 0) { fg = app.theme.textPrimary; }
+        // 表头底色同理：panel 族在透明主题下可能给出带 alpha 的
+        // 表面色，直接垫身底；全 0 才用身底兜底。
+        if (headBg == 0) { headBg = bodyBg; }
+        // 选中框/数据条主色：bandgrid::accent 未声明时随主题主色，
+        // 与 datatable::accent 同一套 token。显式 Accent(...) 优先。
+        if (accent == 0xFF378ADD) {
+            int themed = Style.Part(app, "bandgrid", "accent", "panel",
+                                    "", "", Style.SNormal()).BgOr(0);
+            accent = themed != 0 ? themed : app.theme.primary;
+        }
 
         c.FillRect(bx, by, bw, bh, bodyBg);
         int i;
@@ -313,6 +328,9 @@ class BandGrid : Control {
                 int colBg = bodyBg;
                 if (colorOf != null) {
                     colBg = colorOf(r, k, texts[idx], nums[idx]);
+                    // 契约：0 = 用默认底色。0 直接 FillRect 是透明
+                    // 无操作，格底会露出父层（热力图零值格透白）。
+                    if (colBg == 0) { colBg = bodyBg; }
                 }
                 // 留 1px 缝出网格感。
                 c.FillRect(x0, y0, cw - 1, ch - 1, colBg);
