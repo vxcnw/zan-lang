@@ -1086,6 +1086,10 @@ class ChartSeries {
     string symbol;   // ECharts series.symbol 形状族（Sanitized：circle/emptyCircle/
                      //   rectangle/diamond/triangle；"" = 按族默认）
     int symbolSize;  // ECharts series.symbolSize 像素；0 = 自动（族默认）
+    int pointG;      // 点坐标放大器：points 的 x/y 存的是值×pointG（定点），
+                     // 渲染/量程/命中/tooltip 统一除回——ECharts 小数坐标
+                     //（scatter3 的 (Math.random()*10).toFixed(3)）在 int
+                     // 管线里这样承载；1 = 原值（缺省，除法跳过）。
     string symbolSizeFn; // ECharts symbolSize:function(val){...} 的确定性替代：
                          // "y"      -> 半径 = y 值（平方根比例可选）
                          // "ySqrt"  -> 半径 = ISqrt(y)（面积∝值，气泡图常用）
@@ -1164,6 +1168,7 @@ class ChartSeries {
         s.barGapPct = 0 - 1;
         s.symbol = "";
         s.symbolSize = 0;
+        s.pointG = 1;
         s.symbolSizeFn = "";
         s.showSymbol = 0 - 1;
         s.showBackground = false;
@@ -1545,6 +1550,7 @@ class ChartSeries {
         s.selectedOffset = src.selectedOffset; s.barWidth = src.barWidth;
         s.barGapPct = src.barGapPct; s.symbol = src.symbol;
         s.symbolSize = src.symbolSize; s.symbolSizeFn = src.symbolSizeFn;
+        s.pointG = src.pointG;
         s.showSymbol = src.showSymbol; s.showBackground = src.showBackground;
         s.backgroundColor = src.backgroundColor; s.innerPct = src.innerPct;
         s.hbar = src.hbar; s.treeOrient = src.treeOrient; s.custom = src.custom;
@@ -1642,7 +1648,9 @@ class ChartAxis {
         return a;
     }
 
-    /// 数值轴工厂：范围自动推导、显示网格线、默认 5 刻度。
+    /// 数值轴工厂：范围自动推导、显示网格线。ticks 0 = 自动
+    /// （ECharts splitNumber 缺省，刻度数由量程算法给出；消费方
+    /// 一律 <1 回落 5），显式 splitNumber 才赋 ticks。
     static ChartAxis Value() {
         ChartAxis a = new ChartAxis();
         a.type = ChartAxisType.Value;
@@ -1650,7 +1658,7 @@ class ChartAxis {
         a.min = ChartOption.Auto();
         a.max = ChartOption.Auto();
         a.reversed = false;
-        a.ticks = 5;
+        a.ticks = 0;
         a.showGrid = true;
         a.labelRotate = 0;
         a.labelInterval = 0 - 1;

@@ -121,7 +121,8 @@ class Program {
             + Convert.ToString(ChartBig.AnimationKey(8)) + ":"
             + Convert.ToString(ChartBig.AnimationKey(7) != ChartBig.AnimationKey(8)));
 
-        // Time/Log 轴类型标记（默认刻度仍为 5）。
+        // Time/Log 轴类型标记（数值轴 ticks 缺省 0 = 自动，消费方
+        // <1 回落 5，ECharts splitNumber 缺省语义）。
         ChartAxis timeAxis = ChartAxis.Time();
         ChartAxis logAxis = ChartAxis.Value();
         logAxis.type = ChartAxisType.Log;

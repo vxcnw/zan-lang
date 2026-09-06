@@ -2204,6 +2204,80 @@ class Chart {
 
     // ---- 坐标系（双轴 + 友好刻度 + 标题）----
 
+    /// 点坐标定点值除回真实值（points 存 值×pointG，g<=1 原值跳过）：
+    /// 四舍五入、负值对称。散点/值对折线的渲染映射、量程、命中与
+    /// tooltip 统一走这里（ECharts 小数坐标在 int 管线的承载约定，
+    /// 与折线 value 的 g/1000 同构）。
+    static int PointV(int v, int g) {
+        if (g <= 1) { return v; }
+        if (v >= 0) { return (v + g / 2) / g; }
+        return 0 - ((0 - v + g / 2) / g);
+    }
+
+    /// 点坐标定点值的提示文本：g<=1 直接整数；g>1 按 g 的十进制
+    /// 位数输出定点小数（1000 → 3 位，-1500/1000 → "-1.5"），
+    /// tooltip/状态栏展示与 PointV 的除回约定配套。
+    static string PointText(int v, int g) {
+        if (g <= 1) { return Convert.ToString(v); }
+        bool neg = v < 0;
+        int av = neg ? 0 - v : v;
+        int ip = av / g;
+        int fr = av - ip * g;
+        int dg = g;
+        int dc = 0;
+        while (dg > 1) { dg = dg / 10; dc = dc + 1; }
+        string fs = Convert.ToString(fr);
+        while (fs.Length < dc) { fs = "0" + fs; }
+        return (neg ? "-" : "") + Convert.ToString(ip) + "." + fs;
+    }
+
+    /// 散点双 value 轴缺省 scale:true 的紧致 nice 量程：不强制含 0，
+    /// 数据域两端对齐到 nice 步长（NiceRange 的零锚定对身高体重这
+    /// 类有自然域的散点会把云挤进角落，ECharts2 原版贴数据包络）。
+    /// 步长候选同 echarts2 smartSteps：1/2/2.5/5 × 10^k，splitNumber
+    /// （5）只是预估——实际分段数取包络/步长。
+    static ChartSpan ScatterAutoRange(int lo, int hi) {
+        if (hi < lo) {
+            int tmp = lo;
+            lo = hi;
+            hi = tmp;
+        }
+        if (lo == hi) {
+            if (lo == 0) {
+                hi = lo + 1;
+            } else if (lo > 0) {
+                lo = 0;
+            } else {
+                hi = 0;
+            }
+        }
+        if (lo == hi) { hi = lo + 1; }
+        int span = hi - lo;
+        if (span < 5) {
+            return Chart.SmartForInteger(lo, hi, 0);
+        }
+        int avg = span / 5;
+        if (span % 5 > 0) { avg = avg + 1; }
+        int step = Chart.NiceStepUp(avg);
+        ChartSpan s = new ChartSpan();
+        s.lo = Chart.FloorDivQ(lo, step) * step;
+        s.hi = Chart.CeilDivQ(hi, step) * step;
+        s.ticks = (s.hi - s.lo) / step;
+        return s;
+    }
+
+    /// ≥ v 的最小 1/2/2.5/5 × 10^k（echarts2 nice 步长候选）。
+    static int NiceStepUp(int v) {
+        if (v < 1) { return 1; }
+        int d = 1;
+        while (d * 10 <= v) { d = d * 10; }
+        if (v <= d) { return d; }
+        if (v <= 2 * d) { return 2 * d; }
+        if (v <= 25 * d / 10) { return 25 * d / 10; }
+        if (v <= 5 * d) { return 5 * d; }
+        return 10 * d;
+    }
+
     /// 绑定到给定数值轴的（可见）系列中的最大值。
     static int AxisMaxFor(List<ChartSeries> series, int axisIndex) {
         int mx = 0;
@@ -2212,7 +2286,8 @@ class Chart {
             if (!s.hidden && s.axisIndex == axisIndex) {
                 for (int j = 0; j < s.Count(); j = j + 1) { if (s.Value(j) > mx) { mx = s.Value(j); } }
                 for (int j2 = 0; j2 < s.points.Count; j2 = j2 + 1) {
-                    if (s.points[j2].y > mx) { mx = s.points[j2].y; }
+                    int py = Chart.PointV(s.points[j2].y, s.pointG);
+                    if (py > mx) { mx = py; }
                 }
             }
         }
@@ -2228,7 +2303,8 @@ class Chart {
             if (!s.hidden && s.axisIndex == axisIndex) {
                 for (int j = 0; j < s.Count(); j = j + 1) { if (s.Value(j) < mn) { mn = s.Value(j); } }
                 for (int j2 = 0; j2 < s.points.Count; j2 = j2 + 1) {
-                    if (s.points[j2].y < mn) { mn = s.points[j2].y; }
+                    int py = Chart.PointV(s.points[j2].y, s.pointG);
+                    if (py < mn) { mn = py; }
                 }
             }
         }
@@ -2248,7 +2324,8 @@ class Chart {
                 }
             } else {
                 for (int j = 0; j < s.points.Count; j = j + 1) {
-                    if (s.points[j].x < mn) { mn = s.points[j].x; }
+                    int px = Chart.PointV(s.points[j].x, s.pointG);
+                    if (px < mn) { mn = px; }
                 }
             }
         }
@@ -2266,7 +2343,8 @@ class Chart {
                 }
             } else {
                 for (int j = 0; j < s.points.Count; j = j + 1) {
-                    if (s.points[j].x > mx) { mx = s.points[j].x; }
+                    int px = Chart.PointV(s.points[j].x, s.pointG);
+                    if (px > mx) { mx = px; }
                 }
             }
         }

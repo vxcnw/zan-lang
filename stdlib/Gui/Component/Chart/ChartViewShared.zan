@@ -744,15 +744,16 @@ partial class ChartView {
             int ext = m.kind == "min" ? 2147483647 : 0 - 2147483647 - 1;
             int found = 0 - 1;
             for (int j = i0; j <= i1 && j < s.points.Count; j = j + 1) {
-                int v = onX ? s.points[j].x : s.points[j].y;
+                int v = Chart.PointV(onX ? s.points[j].x : s.points[j].y,
+                    s.pointG);
                 if ((m.kind == "min" && v < ext) || (m.kind == "max" && v > ext)) {
                     ext = v;
                     found = j;
                 }
             }
             if (found < 0) { continue; }
-            int lx = f.XOfValue(s.points[found].x);
-            int ly = f.YOf(s.points[found].y, s.axisIndex);
+            int lx = f.XOfValue(Chart.PointV(s.points[found].x, s.pointG));
+            int ly = f.YOf(Chart.PointV(s.points[found].y, s.pointG), s.axisIndex);
             int rad = m.sizeSet && m.size > 0 ? m.size / 2 : app.Scale(4);
             int col = m.color != 0 ? m.color : s.color;
             string sym = m.symbol.Length > 0 ? m.symbol : "";
@@ -768,11 +769,11 @@ partial class ChartView {
             // 的"最大值"不能吞掉数值），{value} 占位仍原样替换。
             string lbl = m.label;
             if (lbl.Length == 0) {
-                lbl = m.kind + ": " + Convert.ToString(ext);
+                lbl = m.kind + ": " + Chart.PointText(ext, s.pointG);
             } else if (lbl.IndexOf("{value}") >= 0) {
-                lbl = lbl.Replace("{value}", Convert.ToString(ext));
+                lbl = lbl.Replace("{value}", Chart.PointText(ext, s.pointG));
             } else {
-                lbl = lbl + ": " + Convert.ToString(ext);
+                lbl = lbl + ": " + Chart.PointText(ext, s.pointG);
             }
             int fs = Style.FontFallback(app, "small");
             int lw = Canvas.MeasureText(lbl, fs);

@@ -18,8 +18,8 @@ partial class ChartView {
             int j = i0;
             if (j < 0) { j = 0; }
             while (j <= i1 && j < s.points.Count) {
-                int pxv = s.points[j].x;
-                int pyv = s.points[j].y;
+                int pxv = Chart.PointV(s.points[j].x, s.pointG);
+                int pyv = Chart.PointV(s.points[j].y, s.pointG);
                 if (!seen) {
                     minX = pxv; maxX = pxv; minY = pyv; maxY = pyv; seen = true;
                 } else {
@@ -75,13 +75,19 @@ partial class ChartView {
 
         int minX = 0; int maxX = 0; int minY = 0; int maxY = 0;
         ChartView.ScatterSpan(o.series, i0, i1, out minX, out maxX, out minY, out maxY);
-        int maxXN = maxX > 0 ? Chart.NiceMax(maxX) : 0;
-        int maxYN = maxY > 0 ? Chart.NiceMax(maxY) : 0;
+        // ECharts2 双 value 轴缺省 scale:true：不强制含 0，数据域走
+        // nice 步长的紧致包络；显式 min/max（下方覆盖）仍固定定义域。
+        ChartSpan xsp = Chart.ScatterAutoRange(minX, maxX);
+        ChartSpan ysp = Chart.ScatterAutoRange(minY, maxY);
+        int xLo = xsp.lo;
+        int yLo = ysp.lo;
+        int maxXN = xsp.hi;
+        int maxYN = ysp.hi;
+        int xTicksAuto = xsp.ticks;
+        int yTicksAuto = ysp.ticks;
         // 显式数值轴范围（ECharts xAxis/yAxis.min/max）：设了就固定
         // 定义域，数据不再参与推导——身高体重这类有自然域的散点
         // 靠它贴合原例的坐标格。
-        int xLo = minX < 0 ? Chart.NiceMin(minX) : 0;
-        int yLo = minY < 0 ? Chart.NiceMin(minY) : 0;
         if (o.xAxes.Count > 0 && o.xAxes[0].min != ChartOption.Auto()) {
             xLo = o.xAxes[0].min;
         }
@@ -121,15 +127,21 @@ partial class ChartView {
                                     Style.SNormal());
         StyleBox sAxis = Style.Part(app, "chart", "axis", "", "", "",
                                     Style.SNormal());
-        int ticks = 5;
+        // ECharts xAxis/yAxis.splitNumber：轴显式给 ticks 就用；自动
+        // 量程时用 smartSteps 的步长数（scale:true 紧致包络）。
+        int yTicks = yTicksAuto;
+        if (o.yAxes.Count > 0 && o.yAxes[0].ticks > 0) { yTicks = o.yAxes[0].ticks; }
+        int xTicks = xTicksAuto;
+        if (o.xAxes.Count > 0 && o.xAxes[0].ticks > 0) { xTicks = o.xAxes[0].ticks; }
+        int ticks = yTicks > xTicks ? yTicks : xTicks;
         for (int k = 0; k <= ticks; k = k + 1) {
-            int gy = plotY + plotH - (k * plotH / ticks);
+            int gy = plotY + plotH - (k * plotH / yTicks);
             c.FillRect(plotX, gy, plotW, 1, sGrid.BgOr(0));
-            string vs = Convert.ToString(yLo + ySpan * k / ticks);
+            string vs = Convert.ToString(yLo + ySpan * k / yTicks);
             int vw = Canvas.MeasureText(vs, axisFs);
             c.DrawText(plotX - app.Scale(6) - vw, Canvas.CenterTextYAt(gy, axisFs), vs, sAxis.FgOr(0), axisFs);
-            int gx = plotX + k * plotW / ticks;
-            c.DrawTextCentered(gx - app.Scale(20), plotY + plotH + app.Scale(4), app.Scale(40), botGut, Convert.ToString(xLo + xSpan * k / ticks), sAxis.FgOr(0), axisFs);
+            int gx = plotX + k * plotW / xTicks;
+            c.DrawTextCentered(gx - app.Scale(20), plotY + plotH + app.Scale(4), app.Scale(40), botGut, Convert.ToString(xLo + xSpan * k / xTicks), sAxis.FgOr(0), axisFs);
         }
         c.FillRect(plotX, plotY, app.Scale(2), plotH, sAxis.BgOr(0));
         c.FillRect(plotX, plotY + plotH, plotW, app.Scale(2), sAxis.BgOr(0));
@@ -156,20 +168,24 @@ partial class ChartView {
                     List<int> ly = new List<int>();
                     int j0 = i0;
                     while (j0 <= i1 && j0 < s.points.Count) {
-                        lx.Add(Chart.ValueX(plotX, plotW, xLo, maxXN, s.points[j0].x));
-                        ly.Add(Chart.ValueY(plotY, plotH, yLo, maxYN, s.points[j0].y));
+                        lx.Add(Chart.ValueX(plotX, plotW, xLo, maxXN,
+                            Chart.PointV(s.points[j0].x, s.pointG)));
+                        ly.Add(Chart.ValueY(plotY, plotH, yLo, maxYN,
+                            Chart.PointV(s.points[j0].y, s.pointG)));
                         j0 = j0 + 1;
                     }
                     c.DrawPolyline(lx, ly, s.color, app.Scale(2));
                 } else {
                     int j = i0;
                     while (j <= i1 && j < s.points.Count) {
-                        int px = Chart.ValueX(plotX, plotW, xLo, maxXN, s.points[j].x);
-                        int py = Chart.ValueY(plotY, plotH, yLo, maxYN, s.points[j].y);
+                        int px = Chart.ValueX(plotX, plotW, xLo, maxXN,
+                            Chart.PointV(s.points[j].x, s.pointG));
+                        int py = Chart.ValueY(plotY, plotH, yLo, maxYN,
+                            Chart.PointV(s.points[j].y, s.pointG));
                         int col = s.color;
                         if (s.points[j].color != 0) { col = s.points[j].color; }
                         if (ramp) {
-                            int dv = s.points[j].y;
+                            int dv = Chart.PointV(s.points[j].y, s.pointG);
                             if (dv < dLo) { dv = dLo; }
                             if (dv > dHi) { dv = dHi; }
                             col = Chart.RampAt(o.rampColors, (dv - dLo) * 1000 / dSpan);
@@ -180,16 +196,18 @@ partial class ChartView {
                             jr = s.points[j].size / 2;
                         } else if (s.symbolSizeFn.Length > 0) {
                             // symbolSize 回调的公式化替代：半径随该点的
-                            // 坐标值变化（面积∝值用 Sqrt 形）。
+                            // 坐标值（真实值）变化（面积∝值用 Sqrt 形）。
                             int v = (s.symbolSizeFn == "y" || s.symbolSizeFn == "ySqrt")
-                                ? s.points[j].y : s.points[j].x;
+                                ? Chart.PointV(s.points[j].y, s.pointG)
+                                : Chart.PointV(s.points[j].x, s.pointG);
                             if (v < 0) { v = 0 - v; }
                             if (s.symbolSizeFn == "ySqrt" || s.symbolSizeFn == "xSqrt") {
                                 v = ChartView.ISqrt(v);
                             }
                             if (v > 0) { jr = v; }
                         }
-                        if (!Chart.DRangeOk(app, o, o.iwid, dLo, dHi, s.points[j].y)) {
+                        if (!Chart.DRangeOk(app, o, o.iwid, dLo, dHi,
+                                Chart.PointV(s.points[j].y, s.pointG))) {
                             col = Chart.Rgb(204, 204, 204);
                         }
                         Chart.DrawSymbol(c, px, py, jr, shape, col, bCol, bW);
@@ -199,6 +217,35 @@ partial class ChartView {
             }
         }
         c.PopClip();
+
+        // 系列 markPoint/markLine（scatter1 的 Max/Min 标注 +
+        // Average 标线）：复用值对折线的 marks 通道，把散点映射
+        // 包成临时 ChartFrame；XOfValue/YOf 走与点绘制相同的
+        // lo/hi 包络，命中坐标逐像素一致。
+        bool anyMarks = false;
+        for (int r2 = 0; r2 < o.series.Count; r2 = r2 + 1) {
+            if (o.series[r2].marks.Count > 0 || o.series[r2].markLines.Count > 0) {
+                anyMarks = true;
+                break;
+            }
+        }
+        if (anyMarks) {
+            ChartFrame f = new ChartFrame();
+            f.plotX = plotX;
+            f.plotY = plotY;
+            f.plotW = plotW;
+            f.plotH = plotH;
+            f.leftMin = yLo;
+            f.leftMax = maxYN;
+            f.xLo = xLo;
+            f.xHi = maxXN;
+            for (int r3 = 0; r3 < o.series.Count; r3 = r3 + 1) {
+                ChartSeries s2 = o.series[r3];
+                if (s2.hidden) { continue; }
+                if (s2.marks.Count > 0) { ChartView.DrawPointsMarkPoints(app, f, s2, i0, i1); }
+                if (s2.markLines.Count > 0) { ChartView.DrawSeriesMarkLines(app, f, s2, i0, i1, o); }
+            }
+        }
     }
 
     /// 散点图悬停覆盖层：在命中半径内查找最近点
@@ -231,12 +278,14 @@ partial class ChartView {
 
         int minX = 0; int maxX = 0; int minY = 0; int maxY = 0;
         ChartView.ScatterSpan(o.series, i0, i1, out minX, out maxX, out minY, out maxY);
-        int maxXN = maxX > 0 ? Chart.NiceMax(maxX) : 0;
-        int maxYN = maxY > 0 ? Chart.NiceMax(maxY) : 0;
-        // 与 DrawScatterCore 相同的显式轴范围与映射，命中检测
-        // 才能落在真实的点上。
-        int xLo = minX < 0 ? Chart.NiceMin(minX) : 0;
-        int yLo = minY < 0 ? Chart.NiceMin(minY) : 0;
+        // 与 DrawScatterCore 相同的 scale:true 自动范围、显式轴范围
+        // 与映射，命中检测才能落在真实的点上。
+        ChartSpan xsp = Chart.ScatterAutoRange(minX, maxX);
+        ChartSpan ysp = Chart.ScatterAutoRange(minY, maxY);
+        int xLo = xsp.lo;
+        int yLo = ysp.lo;
+        int maxXN = xsp.hi;
+        int maxYN = ysp.hi;
         if (o.xAxes.Count > 0 && o.xAxes[0].min != ChartOption.Auto()) {
             xLo = o.xAxes[0].min;
         }
@@ -274,8 +323,10 @@ partial class ChartView {
                 if (!s2.hidden) {
                     int j2 = i0;
                     while (j2 <= i1 && j2 < s2.points.Count) {
-                        int px2 = Chart.ValueX(plotX, plotW, xLo, maxXN, s2.points[j2].x);
-                        int py2 = Chart.ValueY(plotY, plotH, yLo, maxYN, s2.points[j2].y);
+                        int px2 = Chart.ValueX(plotX, plotW, xLo, maxXN,
+                            Chart.PointV(s2.points[j2].x, s2.pointG));
+                        int py2 = Chart.ValueY(plotY, plotH, yLo, maxYN,
+                            Chart.PointV(s2.points[j2].y, s2.pointG));
                         int ddx = mx - px2;
                         int ddy = my - py2;
                         int d2 = ddx * ddx + ddy * ddy;
@@ -292,7 +343,8 @@ partial class ChartView {
                 if (bp0.sizeSet && bp0.size > 0) { hitR = bp0.size / 2; }
                 if (bs0.symbolSizeFn.Length > 0) {
                     int sv = (bs0.symbolSizeFn == "y" || bs0.symbolSizeFn == "ySqrt")
-                        ? bp0.y : bp0.x;
+                        ? Chart.PointV(bp0.y, bs0.pointG)
+                        : Chart.PointV(bp0.x, bs0.pointG);
                     if (sv < 0) { sv = 0 - sv; }
                     if (bs0.symbolSizeFn == "ySqrt" || bs0.symbolSizeFn == "xSqrt") {
                         sv = ChartView.ISqrt(sv);
@@ -305,25 +357,28 @@ partial class ChartView {
                 if (bestS >= 0) {
                     ChartSeries bs = o.series[bestS];
                 ChartPoint bp = bs.points[bestJ];
-                int pxHit = Chart.ValueX(plotX, plotW, xLo, maxXN, bp.x);
-                int pyHit = Chart.ValueY(plotY, plotH, yLo, maxYN, bp.y);
+                int pxHit = Chart.ValueX(plotX, plotW, xLo, maxXN,
+                    Chart.PointV(bp.x, bs.pointG));
+                int pyHit = Chart.ValueY(plotY, plotH, yLo, maxYN,
+                    Chart.PointV(bp.y, bs.pointG));
                 ChartElementType pointType = bs.type == ChartType.Line
                     ? ChartElementType.LinePoint : ChartElementType.ScatterPoint;
                 string pointName = "#" + Convert.ToString(bestJ + 1);
                 ChartHit sh = ChartHit.Of(pointType,
-                    bestS, bs.name, bestJ, pointName, bp.y, pxHit, pyHit);
+                    bestS, bs.name, bestJ, pointName,
+                    Chart.PointV(bp.y, bs.pointG), pxHit, pyHit);
                 sh.xValueSet = true;
-                sh.xValue = (double)bp.x;
+                sh.xValue = (double)Chart.PointV(bp.x, bs.pointG);
                 sh.yValueSet = true;
-                sh.yValue = (double)bp.y;
+                sh.yValue = (double)Chart.PointV(bp.y, bs.pointG);
                 sh.axisIndex = bs.axisIndex;
                 ChartView.OfferActiveHit(sh);
                 if (o.showTooltip) {
                     List<TooltipRow> rows = new List<TooltipRow>{
                         TooltipRow.Of(bs.color, bs.name),
                         TooltipRow.Of(bs.color,
-                            "x  " + Convert.ToString(bp.x)
-                            + "   y  " + Convert.ToString(bp.y)) };
+                            "x  " + Chart.PointText(bp.x, bs.pointG)
+                            + "   y  " + Chart.PointText(bp.y, bs.pointG)) };
                     ChartView.TooltipCard(app, mx, my, plotX + plotW, rows);
                 }
             }
