@@ -69,12 +69,18 @@ int vsnprintf(char *s, unsigned long n, const char *fmt, zan_va_list ap);
 union zan_shim_block {
     struct {
         size_t size;             /* payload bytes, free blocks only */
+        size_t magic;            /* set at malloc, checked at free */
         union zan_shim_block *next;
     } hdr;
     /* guarantees the payload is 8-byte aligned and at least word sized */
     long long align_min;
     unsigned char align_bytes[16];
 };
+/* Block magic so free() can refuse a wild or doubled pointer instead of
+ * unlinking it into the free list: a bare-metal build has no MMU, so one
+ * bad free would otherwise corrupt the whole pool silently. Fills the
+ * union's existing slack (rv32 header stays 16 bytes). */
+#define ZAN_SHIM_MAGIC ((size_t)0x5A4E4245u)   /* "ZNBE" */
 
 static unsigned char zan_shim_pool[ZAN_BARE_HEAP_BYTES]
     __attribute__((aligned(8)));
@@ -88,6 +94,19 @@ static unsigned zan_shim_oom;
 static size_t zan_shim_oom_size;   /* request size of the latest OOM */
 static unsigned zan_shim_frees;
 static unsigned zan_shim_allocs;
+static unsigned zan_shim_bad_frees;  /* wild/doubled pointers refused */
+
+/* Header validation for free/realloc: pointer must sit inside the pool with
+ * a live block's magic. Refused pointers are counted, never unlinked. */
+static union zan_shim_block *zan_shim_checked_header(void *p) {
+    if ((uintptr_t)p < (uintptr_t)zan_shim_pool + sizeof(union zan_shim_block) ||
+        (uintptr_t)p >= (uintptr_t)zan_shim_pool + sizeof(zan_shim_pool))
+        return NULL;
+    union zan_shim_block *b =
+        (union zan_shim_block *)((unsigned char *)p - sizeof(union zan_shim_block));
+    if (b->hdr.magic != ZAN_SHIM_MAGIC) return NULL;
+    return b;
+}
 /* last-N request sizes, dumped by the board's exit report when a soak
  * behaves oddly (rv32 brought-up the need: allocs were far fewer than
  * string operations and the live bytes made no sense) */
@@ -106,6 +125,7 @@ void zan_shim_pool_stats(size_t *live, size_t *peak, unsigned *oom) {
 size_t zan_shim_oom_request(void) { return zan_shim_oom_size; }
 unsigned zan_shim_free_count(void) { return zan_shim_frees; }
 unsigned zan_shim_alloc_count(void) { return zan_shim_allocs; }
+unsigned zan_shim_bad_free_count(void) { return zan_shim_bad_frees; }
 
 void zan_shim_trace(const size_t **allocs, const size_t **frees,
     unsigned *an, unsigned *fn) {
@@ -161,6 +181,14 @@ static void zan_shim_pool_init(void) {
 void *malloc(size_t n) {
     if (!zan_shim_pool_ready) zan_shim_pool_init();
     if (n == 0) n = 1;
+    /* Reject oversize before rounding: past the pool means the walk can
+     * never satisfy it anyway, and the +7 rounding must never wrap a
+     * hostile size down to a small allocation. */
+    if (n > sizeof(zan_shim_pool)) {
+        zan_shim_oom++;
+        zan_shim_oom_size = n;
+        return NULL;
+    }
     n = (n + 7u) & ~(size_t)7u;
     union zan_shim_block **prev = &zan_shim_free;
     for (union zan_shim_block *b = zan_shim_free; b; b = b->hdr.next) {
@@ -175,8 +203,13 @@ void *malloc(size_t n) {
             *prev = tail;
         } else {
             *prev = b->hdr.next;
+            /* a tail smaller than a header can't stand alone: absorb it so
+             * free() returns exactly what malloc() took (live accounting
+             * stays exact, no bytes fall out of the ledger) */
+            n = b->hdr.size;
         }
         b->hdr.size = n;         /* free() reads this back */
+        b->hdr.magic = ZAN_SHIM_MAGIC;
         zan_shim_allocs++;
         zan_shim_alloc_trace[zan_shim_alloc_trace_n++ % ZAN_SHIM_TRACE] = n;
         zan_shim_live_bytes += n;
@@ -208,8 +241,13 @@ void zan_shim_free_walk(size_t *total, size_t *maxhole, unsigned *holes) {
 
 void free(void *p) {
     if (!p) return;
-    union zan_shim_block *b =
-        (union zan_shim_block *)((unsigned char *)p - sizeof(*b));
+    union zan_shim_block *b = zan_shim_checked_header(p);
+    if (!b) {
+        /* wild or already-freed pointer: refuse rather than corrupt */
+        zan_shim_bad_frees++;
+        return;
+    }
+    b->hdr.magic = 0;        /* a second free of the same block fails above */
     zan_shim_frees++;
     zan_shim_free_trace[zan_shim_free_trace_n++ % ZAN_SHIM_TRACE] =
         b->hdr.size;
@@ -243,6 +281,7 @@ void free(void *p) {
 }
 
 void *calloc(size_t count, size_t size) {
+    if (count && size > (size_t)-1 / count) return NULL;   /* would wrap */
     size_t total = count * size;
     void *p = malloc(total);
     if (p) {
@@ -255,8 +294,12 @@ void *calloc(size_t count, size_t size) {
 void *realloc(void *p, size_t n) {
     if (!p) return malloc(n);
     if (!n) { free(p); return NULL; }
-    union zan_shim_block *b =
-        (union zan_shim_block *)((unsigned char *)p - sizeof(*b));
+    union zan_shim_block *b = zan_shim_checked_header(p);
+    if (!b) {
+        /* wild pointer: serve a fresh block, never read the garbage header */
+        zan_shim_bad_frees++;
+        return malloc(n);
+    }
     size_t old = b->hdr.size;
     void *np = malloc(n);
     if (!np) return NULL;

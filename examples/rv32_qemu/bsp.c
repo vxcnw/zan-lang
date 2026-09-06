@@ -321,10 +321,15 @@ void __attribute__((noreturn)) exit(int code) {
         {
             extern unsigned zan_shim_free_count(void);
             extern unsigned zan_shim_alloc_count(void);
+            extern unsigned zan_shim_bad_free_count(void);
             uart_write(" / frees ", 9);
             uart_print_dec((long long)zan_shim_free_count());
             uart_write("/", 1);
             uart_print_dec((long long)zan_shim_alloc_count());
+            if (zan_shim_bad_free_count()) {
+                uart_write(" / BAD-FREE ", 12);
+                uart_print_dec((long long)zan_shim_bad_free_count());
+            }
         }
         {
             extern void zan_shim_free_walk(size_t *total, size_t *maxhole,

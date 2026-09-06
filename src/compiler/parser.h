@@ -21,6 +21,9 @@ struct zan_parser {
     int unchecked_depth; /* >0 while inside unchecked(...)/unchecked{...}:
                           * explicitly wrapping semantics (binary.checked = -1) */
     int synth_counter; /* unique-id seed for synthesized locals (using temp) */
+    bool chain_cap_reported; /* the binop-chain guard reports once per unit:
+                              * error recovery re-parses the same chain and
+                              * would otherwise repeat the diagnostic */
     /* Synthesized property accessor methods (get_<name>/set_<name>) queued by
      * parse_member_decl_inner; drained into the enclosing type's members list
      * right after the property declaration itself. */

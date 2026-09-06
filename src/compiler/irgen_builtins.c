@@ -1745,9 +1745,31 @@ static LLVMValueRef emit_eh_chunk_call(zan_irgen_t *g, LLVMValueRef fn,
         fn, args, 2, name);
 }
 
+/* First-touch chunk geometry. A hosted process pays the default shifts'
+ * 64x1040B handler chunk + 4096x8B unwind chunk without noticing; a
+ * bare-metal pool (default 64KiB) cannot — the first try/catch would be a
+ * fatal OOM at 97% of the whole heap. Bare-metal ELF targets therefore take
+ * narrow chunks: the chunk table still holds ZAN_EH_CHUNKS entries, so only
+ * the granularity (and the per-chunk calloc) shrinks — 2080B per handler
+ * chunk (128 max nested tries), 512B per unwind chunk (4096 entries). The
+ * on-heap layout of a slot is target-independent (ZAN_EH_SLOT_BYTES), so the
+ * two geometries never mix in one program. */
+static bool eh_bare_target(zan_irgen_t *g) {
+    return strncmp(g->target_triple, "riscv", 5) == 0 &&
+           !strstr(g->target_triple, "linux");
+}
+
+static unsigned eh_slot_shift(zan_irgen_t *g) {
+    return eh_bare_target(g) ? 1 : ZAN_EH_SLOT_SHIFT;
+}
+
+static unsigned eh_tmp_shift(zan_irgen_t *g) {
+    return eh_bare_target(g) ? 6 : ZAN_EH_TMP_SHIFT;
+}
+
 static LLVMValueRef get_eh_slot_fn(zan_irgen_t *g) {
     return get_eh_chunk_fn(g, "__zan_eh_slot", EH_F_BUFS,
-        ZAN_EH_SLOT_SHIFT, ZAN_EH_SLOT_BYTES,
+        eh_slot_shift(g), ZAN_EH_SLOT_BYTES,
         "zan: exception handler stack exhausted (too many nested try blocks)\n");
 }
 
@@ -1801,8 +1823,13 @@ static LLVMValueRef emit_eh_setjmp(zan_irgen_t *g, LLVMValueRef bufp) {
         add_enum_attr(g, fn, call, "returns_twice");
         return call;
     }
+    /* Bare-metal ELF libc (picolibc/newlib, the riscv*-unknown-elf case)
+     * ships only `setjmp` — `_setjmp` is a hosted-libc (glibc/msvcrt) name.
+     * Linux triples keep `_setjmp` because it skips the sigmask save. */
+    bool riscv_bare = strncmp(g->target_triple, "riscv", 5) == 0 &&
+                      !strstr(g->target_triple, "linux");
     LLVMTypeRef ty = LLVMFunctionType(i32t, (LLVMTypeRef[]){ i8ptr }, 1, 0);
-    LLVMValueRef fn = get_libc_fn(g, "_setjmp", ty);
+    LLVMValueRef fn = get_libc_fn(g, riscv_bare ? "setjmp" : "_setjmp", ty);
     LLVMValueRef call = zan_call2(g->builder, ty, fn, &bufp, 1, "sj");
     add_enum_attr(g, fn, call, "returns_twice");
     return call;
@@ -2000,7 +2027,7 @@ static LLVMValueRef get_eh_tmp_slot_fast_fn(zan_irgen_t *g, LLVMValueRef slow) {
     LLVMPositionBuilderAtEnd(g->builder, entry);
     LLVMBuildCondBr(g->builder,
         zan_icmp(g->builder, LLVMIntUGE, idx,
-            LLVMConstInt(i32t, 1u << ZAN_EH_TMP_SHIFT, 0), "tmp.deep"),
+            LLVMConstInt(i32t, 1u << eh_tmp_shift(g), 0), "tmp.deep"),
         slowbb, look);
     LLVMPositionBuilderAtEnd(g->builder, look);
     LLVMValueRef tab = LLVMBuildStructGEP2(g->builder, state_ty,
@@ -2037,7 +2064,7 @@ static LLVMValueRef emit_eh_tmp_slot_ptr(zan_irgen_t *g, LLVMValueRef idx) {
     LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
     LLVMValueRef fn = get_eh_tmp_slot_fast_fn(g,
         get_eh_chunk_fn(g, "__zan_eh_tmp_slot", EH_F_TMPS,
-            ZAN_EH_TMP_SHIFT, 8, "zan: exception unwind stack exhausted\n"));
+            eh_tmp_shift(g), 8, "zan: exception unwind stack exhausted\n"));
     return LLVMBuildBitCast(g->builder,
         emit_eh_chunk_call(g, fn, idx, "eh.tslot"),
         LLVMPointerType(i8ptr, 0), "eh.tslotp");

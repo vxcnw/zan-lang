@@ -2031,10 +2031,20 @@ int main(int argc, char **argv) {
             fprintf(stderr, "ZANPKG_STATUS action=install status=missing_name\n"); return 1;
         }
         const char *install_project = package_project ? package_project : ".";
+        zan_package_t package_manifest;
+        char manifest_path[1024];
+        snprintf(manifest_path, sizeof(manifest_path), "%s/zan.pkg", package_install_dir);
+        bool manifest_ok = zan_pkg_load(&package_manifest, manifest_path);
+        if (!manifest_ok) { memset(&package_manifest, 0, sizeof(package_manifest)); }
         bool ok = zan_pkg_install_local(package_install_dir, package_name,
                                         package_scope, install_project,
                                         status, sizeof(status));
         fprintf(stderr, "%s\n", status);
+        if (ok && package_manifest.plugin_id[0])
+            fprintf(stderr, "ZANPKG_USAGE plugin_id=%s package=%s scope=%s\n",
+                    package_manifest.plugin_id, package_name,
+                    package_scope == ZAN_PKG_SCOPE_GLOBAL ? "global" : "project");
+        if (manifest_ok) { zan_pkg_destroy(&package_manifest); }
         return ok ? 0 : 1;
     }
 
@@ -2136,6 +2146,25 @@ int main(int argc, char **argv) {
     }
     snprintf(resolved_stdlib_root, sizeof(resolved_stdlib_root), "%s",
              stdlib_root);
+
+    /* A compiler copy whose sibling stdlib/ is missing (scratch builds, a
+     * bare zanc.exe shipped alone) would silently resolve NOTHING: every
+     * `using` glob no-ops and only compiler-intrinsic types (Console, Task,
+     * Convert, ...) work, which reads as a bogus "undefined type" for real
+     * stdlib classes. Say so instead. */
+#ifdef _WIN32
+    {
+        DWORD root_attr = zan_utf8_get_file_attributes(stdlib_root);
+        if (auto_stdlib && !stdlib_path &&
+            (root_attr == INVALID_FILE_ATTRIBUTES ||
+             !(root_attr & FILE_ATTRIBUTE_DIRECTORY)))
+            fprintf(stderr,
+                    "warning: --auto-stdlib: no stdlib directory found next "
+                    "to the compiler (tried %s); `using` directives will not "
+                    "resolve stdlib namespaces (pass --stdlib-path)\n",
+                    stdlib_root);
+    }
+#endif
 
         /* Auto-include stdlib modules by PATH. Every `using X.Y.Z;` directive
          * maps directly to the directory stdlib_root/X/Y/Z, and all *.zan files

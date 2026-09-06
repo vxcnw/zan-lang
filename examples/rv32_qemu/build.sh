@@ -37,7 +37,11 @@ case "$ZANC" in
     SRC_ARG="$DIR/hello.zan"; OBJ_ARG="$OUT/zan_hello.o" ;;
 esac
 if [ ! -f "$OUT/zan_hello.o" ] || [ "$DIR/hello.zan" -nt "$OUT/zan_hello.o" ]; then
-    "$ZANC" "$SRC_ARG" --auto-stdlib --publish --target riscv32 -o "$OBJ_ARG"
+    # --stdlib-path: the stdlib root is discovered relative to the compiler
+    # executable, so a zanc outside the repo tree (a copied binary, a WSL
+    # interop invocation) silently resolves no `using` namespaces at all --
+    # only compiler intrinsics keep working. Pin the root explicitly.
+    "$ZANC" "$SRC_ARG" --auto-stdlib --publish --target riscv32         --stdlib-path "$DIR/../../stdlib" -o "$OBJ_ARG"
 fi
 
 # 2. board support, the deterministic pool shim, and the timer reactor

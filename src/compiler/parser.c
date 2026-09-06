@@ -1805,12 +1805,32 @@ static bool is_binary_op(zan_token_kind_t kind) {
     return get_precedence(kind) > 0;
 }
 
+/* A same-precedence chain (`a+b+c+...`) is built iteratively, so unlike the
+ * unary paths it never trips the expr_depth guard above and the left spine
+ * grows one AST level per token. Every later pass walks that spine
+ * recursively (inference, walkers, AST free), so a hostile or generated
+ * million-token chain ends the compiler in a stack overflow well after the
+ * parser has returned. Cap the chain here, where it is built. */
+#define ZAN_PARSER_MAX_BINOP_CHAIN 1024
+
 static zan_ast_node_t *parse_binary(zan_parser_t *p, int min_prec) {
     zan_ast_node_t *left = parse_unary(p);
+    int chain = 0;
 
     while (is_binary_op(p->current.kind)) {
         int prec = get_precedence(p->current.kind);
         if (prec < min_prec) break;
+
+        if (++chain > ZAN_PARSER_MAX_BINOP_CHAIN) {
+            if (!p->chain_cap_reported) {
+                zan_diag_emit(p->diag, DIAG_ERROR, p->current.loc,
+                              "expression chain too long (max %d operators); "
+                              "split it into statements",
+                              ZAN_PARSER_MAX_BINOP_CHAIN);
+                p->chain_cap_reported = true;
+            }
+            break;
+        }
 
         zan_token_kind_t op = p->current.kind;
         zan_loc_t loc = p->current.loc;
