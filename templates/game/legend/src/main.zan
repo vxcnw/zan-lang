@@ -260,7 +260,7 @@ class LegendApp {
         tools.With(Btn("整理", "sort-inventory", () => { g.SortInventory(vault); selected = -1; Changed(); }));
         tools.With(Btn("自动配装", "best-gear", () => { if (!vault) { g.BestGear(); selected = -1; Changed(); } }));
         tools.With(Btn("放入图鉴", "collect", () => { if (!vault) { g.Collect(selected); selected = -1; } Changed(); }));
-        tools.With(Btn("一键熔炼", "recycle-weak", () => { if (!vault) { g.RecycleWeak(); selected = -1; Changed(); } }));
+        tools.With(Btn("一键熔炼（" + Rules.N(g.RecycleWeakCount()) + "件）", "recycle-weak", () => { if (!vault) { g.RecycleWeak(); selected = -1; Changed(); } }));
         tools.With(Btn("卖出(X)", "recycle", () => { if (!vault) { g.Sell(selected); selected = -1; } Changed(); }));
         Grid inventory = Grid.Of(12); inventory.Gap(0); inventory.Grow(); top.With(inventory);
         for (int i = 0; i < 84; i = i + 1) { inventory.With(ItemCell(i, 44)); }

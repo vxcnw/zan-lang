@@ -434,11 +434,22 @@ class Game {
         Log("回收 " + target.Name() + " ×1 → " + r.Text("name") + " +" + Rules.N(amount));
     }
     void Recycle(int index) { if (index >= 0 && index < bag.Count) { RecycleAs(bag[index], 0); } }
+    bool IsRecycleWeak(Equipment e) {
+        if (e == null || e.locked || e.tier > 1 || e.slot < 0 || e.slot >= 12) { return false; }
+        Equipment worn = equipped[e.slot]; return worn != null && worn.Score(AttackSchool()) >= e.Score(AttackSchool());
+    }
+    int RecycleWeakCount() {
+        int count = 0; for (int i = 0; i < bag.Count; i = i + 1) { if (IsRecycleWeak(bag[i])) { count = count + 1; } } return count;
+    }
+    int RecycleWeakGold() {
+        int reward = 0; for (int i = 0; i < bag.Count; i = i + 1) { if (IsRecycleWeak(bag[i])) { reward = Rules.Bounded((long)reward + RecyclePrice(bag[i], 0)); } } return reward;
+    }
     void RecycleWeak() {
-        for (int i = bag.Count - 1; i >= 0; i = i - 1) {
-            Equipment e = bag[i]; Equipment worn = equipped[e.slot];
-            if (!e.locked && e.tier <= 1 && worn != null && worn.Score(AttackSchool()) >= e.Score(AttackSchool())) { Recycle(i); }
-        }
+        int count = RecycleWeakCount(); int reward = RecycleWeakGold(); DataRow currency = GameTables.current.recycle.At(0);
+        if (count <= 0) { Log("没有符合条件的低级装备可熔炼。"); return; }
+        if ((long)gold + reward > currency.Int("cap")) { Log("批量熔炼收益将超过金币上限，未消耗装备。"); return; }
+        for (int i = bag.Count - 1; i >= 0; i = i - 1) { if (IsRecycleWeak(bag[i])) { bag.RemoveAt(i); recycled = Rules.Bounded((long)recycled + 1); } }
+        Gold(reward); Log("一键熔炼 " + Rules.N(count) + " 件 → " + currency.Text("name") + " +" + Rules.N(reward));
     }
     void Store(int index, bool withdraw) {
         if (withdraw) {
