@@ -16,7 +16,7 @@ class SaveStore {
         return dir + "/hero-v2.json";
     }
     static JsonValue Encode(Game g) {
-        JsonValue j = JsonValue.NewObject(); Rules.Put(j, "version", 4);
+        JsonValue j = JsonValue.NewObject(); Rules.Put(j, "version", 5);
         Rules.Put(j, "job", g.job);
         Rules.Put(j, "level", g.level);
         Rules.Put(j, "xp", g.xp);
@@ -32,6 +32,9 @@ class SaveStore {
         Rules.Put(j, "kills", g.kills);
         Rules.Put(j, "deaths", g.deaths);
         Rules.Put(j, "skill", g.skill);
+        JsonValue skillRanks = JsonValue.NewArray(); JsonValue skillEquipped = JsonValue.NewArray();
+        for (int i = 0; i < 8; i = i + 1) { skillRanks.Append(JsonValue.NewNum(Rules.N(g.skillRanks[i]))); skillEquipped.Append(JsonValue.NewNum(g.skillEquipped[i] ? "1" : "0")); }
+        j.Put("skillRanks", skillRanks); j.Put("skillEquipped", skillEquipped);
         Rules.Put(j, "training", g.training); Rules.Put(j, "tp", g.tp);
         JsonValue inner = JsonValue.NewArray(); for (int i = 0; i < 8; i = i + 1) { inner.Append(JsonValue.NewNum(Rules.N(g.innerRanks[i]))); } j.Put("innerRanks", inner);
         JsonValue gems = JsonValue.NewArray(); for (int i = 0; i < 6; i = i + 1) { gems.Append(JsonValue.NewNum(Rules.N(g.gemRanks[i]))); } j.Put("gemRanks", gems);
@@ -99,7 +102,7 @@ class SaveStore {
     }
     static Game Decode(string text) {
         JsonValue j = JsonValue.Parse(text);
-        if (!j.IsObject() || (j.Int("version", 0) != 2 && j.Int("version", 0) != 3 && j.Int("version", 0) != 4) || !j.Has("savedAt") || !j.Has("job")) { throw new Exception("Unsupported or incomplete save"); }
+        if (!j.IsObject() || (j.Int("version", 0) != 2 && j.Int("version", 0) != 3 && j.Int("version", 0) != 4 && j.Int("version", 0) != 5) || !j.Has("savedAt") || !j.Has("job")) { throw new Exception("Unsupported or incomplete save"); }
         Game g = new Game();
         g.job = Rules.Clamp(j.Int("job", g.job), -1, 2);
         g.level = Rules.Clamp(j.Int("level", g.level), 1, GameTables.current.levels.rows.Count);
@@ -116,6 +119,16 @@ class SaveStore {
         g.kills = Rules.Clamp(j.Int("kills", g.kills), 0, 1000000000);
         g.deaths = Rules.Clamp(j.Int("deaths", g.deaths), 0, 1000000000);
         g.skill = Rules.Clamp(j.Int("skill", g.skill), 1, g.SkillData().Int("max_level"));
+        g.InitSkills();
+        JsonValue skillRanks = j.Get("skillRanks"); JsonValue skillEquipped = j.Get("skillEquipped");
+        if (j.Int("version", 0) >= 5) {
+            if (skillRanks == null || !skillRanks.IsArray() || skillRanks.Count() != 8 || skillEquipped == null || !skillEquipped.IsArray() || skillEquipped.Count() != 8) { throw new Exception("Invalid skill loadout"); }
+            for (int i = 0; i < 8; i = i + 1) {
+                g.skillRanks[i] = Rules.Clamp(skillRanks.At(i).AsInt(1), 1, g.SkillAtSlot(i).Int("max_level"));
+                g.skillEquipped[i] = skillEquipped.At(i).AsInt(1) == 1;
+            }
+            g.skill = g.skillRanks[0];
+        } else { g.skillRanks[0] = g.skill; }
         g.tp = Rules.Clamp(j.Int("tp", 0), 0, g.B("inner_tp_cap"));
         JsonValue inner = j.Get("innerRanks");
         if (inner != null) {

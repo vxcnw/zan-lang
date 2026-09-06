@@ -5,8 +5,12 @@ class LegendSystemTests {
     static int checks;
     static void Check(bool ok, string message) { checks = checks + 1; if (!ok) { throw new Exception("FAIL " + message); } }
     static void Main() {
-        GameTables.Initialize("templates/game/legend/data"); Game g = new Game(); g.Choose(0); g.active = false;
-        int floor = g.floor; int wave = g.wave; int tries = g.bossTries;
+        GameTables.Initialize("templates/game/legend/data"); Game g = new Game(); g.Choose(0);
+        Check(g.SkillAtSlot(0).Text("kind") == "active" && g.SkillAtSlot(1).Text("kind") == "passive" && g.SkillRank(0) == 1, "eight-slot skill loadout initializes by job");
+        int skillGold = g.gold; int skillIron = g.iron; g.TrainSkill(1);
+        Check(g.SkillRank(1) == 2 && g.gold == skillGold - 100 && g.iron == skillIron - 2, "passive skill trains with configured costs");
+        g.ToggleSkill(1); Check(!g.IsSkillEquipped(1), "skill can be unequipped"); g.ToggleSkill(1); Check(g.IsSkillEquipped(1), "skill can be re-equipped");
+        int floor = g.floor; g.active = false; int wave = g.wave; int tries = g.bossTries;
         g.level = 1; g.Challenge(1, 0); Check(g.mode == 0 && g.bossTries == tries, "boss level gate atomic");
         g.level = 80; g.Challenge(1, -1); Check(g.bossTries == tries, "invalid boss does not consume tries");
         g.Challenge(1, 0); Check(g.mode == 1 && g.bossTries == tries - 1 && g.challenge == 1, "boss has distinct mode and configured identity");
@@ -93,6 +97,7 @@ class LegendSystemTests {
         Check(loaded.filter == 3 && loaded.filterCoefficient == 5 && loaded.filterMinLevel == 40 && loaded.filterJobOnly, "pickup filters save roundtrip");
         Check(loaded.elementPool == g.elementPool && loaded.elementSeconds == 61 && loaded.elementRanks[0] == 1 && loaded.elementRanks[4] == 100, "elements save roundtrip");
         Check(loaded.reputation == g.reputation && loaded.redPackets == g.redPackets && loaded.recyclePoints == g.recyclePoints, "recycle wallets persisted");
+        Check(loaded.SkillRank(1) == 2 && loaded.IsSkillEquipped(1) && loaded.SkillAtSlot(7).Text("kind") == "passive", "skill ranks and loadout persisted");
         JsonValue broken = SaveStore.Encode(g); broken.Set("elementRanks",JsonValue.NewArray()); bool rejected = false;
         try { SaveStore.Decode(broken.ToJson()); } catch (Exception ex) { rejected = true; } Check(rejected,"malformed elements rejected");
         Console.WriteLine("PASS system gameplay checks=" + checks.ToString());

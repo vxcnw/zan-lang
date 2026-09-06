@@ -19,6 +19,7 @@ class Game {
     int kills;
     int deaths;
     int skill = 1;
+    int[] skillRanks = new int[8]; bool[] skillEquipped = new bool[8];
     int training;
     int tp;
     int[] innerRanks = new int[8];
@@ -83,6 +84,22 @@ class Game {
     int B(string key) { return GameTables.Value(key); }
     DataRow JobData() { return GameTables.current.jobs.At(job < 0 ? 0 : job); }
     DataRow SkillData() { return GameTables.current.skills.At(JobData().Int("skill_id")); }
+    DataRow SkillAtSlot(int slot) {
+        DataRow fallback = SkillData();
+        foreach (DataRow row in GameTables.current.skills.rows) { if (row.Int("job") == job && row.Int("slot") == slot) { return row; } }
+        return fallback;
+    }
+    int SkillRank(int slot) { if (slot < 0 || slot >= 8) { return 0; } return slot == 0 && skillRanks[slot] <= 0 ? skill : (skillRanks[slot] <= 0 ? 1 : skillRanks[slot]); }
+    bool IsSkillEquipped(int slot) { return slot >= 0 && slot < 8 && skillEquipped[slot]; }
+    void InitSkills() { for (int i = 0; i < 8; i = i + 1) { skillRanks[i] = 1; skillEquipped[i] = true; } skill = 1; }
+    void ToggleSkill(int slot) {
+        if (job < 0 || slot < 0 || slot >= 8) { return; }
+        if (IsSkillEquipped(slot) && SkillAtSlot(slot).Text("kind") == "active") {
+            int active = 0; for (int i = 0; i < 8; i = i + 1) { if (IsSkillEquipped(i) && SkillAtSlot(i).Text("kind") == "active") { active = active + 1; } }
+            if (active <= 1) { Log("至少保留一个主动技能装备。每回合按槽位顺序施放可用技能。"); return; }
+        }
+        skillEquipped[slot] = !skillEquipped[slot]; Log((skillEquipped[slot] ? "装备" : "卸下") + "技能：" + SkillAtSlot(slot).Text("name"));
+    }
     int NeedXp() { return GameTables.current.levels.At(level).Int("xp"); }
     int GearPower() { int n = 0; foreach (Equipment e in equipped) { if (e != null) { n = Rules.Bounded((long)n + e.Power()); } } return n; }
     string AttackSchool() { return JobData().Text("attack_school"); }
@@ -94,8 +111,16 @@ class Game {
         foreach (DataRow e in GameTables.current.elements.rows) { if (e.Text("stat") == key) { value = value + (long)elementRanks[e.Int("id")] * e.Int("value_per_level"); } }
         foreach (DataRow gem in GameTables.current.gems.rows) { if (gem.Text("stat") == key) { value = value + (long)gemRanks[gem.Int("id")] * gem.Int("value_per_level"); } }
         bool offense = key == AttackSchool() + "_min" || key == AttackSchool() + "_max";
-        value = value + (offense ? (long)skill * rule.Int("skill_flat") : 0) + (long)training * rule.Int("training_flat") + (long)collection * rule.Int("collection_flat") + (long)rebirth * rule.Int("rebirth_flat");
-        return Rules.Bounded(value * (100 + rebirth * rule.Int("rebirth_pct") + title * rule.Int("title_pct")) / 100);
+        value = value + (offense ? (long)SkillRank(0) * rule.Int("skill_flat") : 0) + (long)training * rule.Int("training_flat") + (long)collection * rule.Int("collection_flat") + (long)rebirth * rule.Int("rebirth_flat");
+        long passive = 0;
+        foreach (DataRow ability in GameTables.current.skills.rows) {
+            if (ability.Int("job") == job && IsSkillEquipped(ability.Int("slot")) && ability.Text("kind") == "passive") {
+                if (offense) { passive = passive + (long)SkillRank(ability.Int("slot")) * ability.Int("passive_damage_pct"); }
+                if (key == "defense" || key == "magic_defense") { passive = passive + (long)SkillRank(ability.Int("slot")) * ability.Int("passive_defense_pct"); }
+            }
+        }
+        long scaled = value * (100 + rebirth * rule.Int("rebirth_pct") + title * rule.Int("title_pct")) / 100;
+        return Rules.Bounded(scaled + passive);
     }
     int StatMax(string group) { int lo = Stat(group + "_min"); int hi = Stat(group + "_max"); return hi < lo ? lo : hi; }
     string StatPair(string group) { return Rules.N(Stat(group + "_min")) + "–" + Rules.N(StatMax(group)); }
@@ -152,7 +177,7 @@ class Game {
     }
     void Choose(int selected) {
         if (job >= 0 || !GameTables.current.jobs.index.ContainsKey(Rules.N(selected))) { return; }
-        job = selected; DataRow j = JobData(); equipped[0] = CreateItem(j.Int("weapon_id"), 0, 1);
+        job = selected; InitSkills(); DataRow j = JobData(); equipped[0] = CreateItem(j.Int("weapon_id"), 0, 1);
         bag.Add(CreateItem(j.Int("armor_id"), 1, 1)); bag.Add(CreateItem(j.Int("helmet_id"), 0, 1));
         hp = MaxHp(); mp = MaxMp(); Spawn(); Log("欢迎，" + Rules.Job(job) + "。初始装备由职业配置表发放。");
     }
@@ -271,11 +296,14 @@ class Game {
         int damage = Strike(AttackSchool(), 100);
         bool critical = Random(100) < B("critical_chance");
         if (critical) { damage = Rules.Bounded((long)damage * B("critical_damage_pct") / 100); }
-        DataRow ability = SkillData();
-        if (tick % ability.Int("cooldown") == 0 && mp >= ability.Int("mana")) {
-            mp = mp - ability.Int("mana");
-            damage = Rules.Bounded((long)damage + Strike(ability.Text("school"), ability.Int("damage_pct") + skill * ability.Int("damage_per_level")));
-            hp = Rules.Clamp(Rules.Bounded((long)hp + (long)MaxHp() * (ability.Int("heal_pct") + skill * ability.Int("heal_per_level")) / 100), 0, MaxHp());
+        for (int slot = 0; slot < 8; slot = slot + 1) {
+            DataRow ability = SkillAtSlot(slot); int rank = SkillRank(slot);
+            if (IsSkillEquipped(slot) && ability.Text("kind") == "active" && ability.Int("cooldown") > 0 && tick % ability.Int("cooldown") == 0 && mp >= ability.Int("mana")) {
+                mp = mp - ability.Int("mana");
+                damage = Rules.Bounded((long)damage + Strike(ability.Text("school"), ability.Int("damage_pct") + rank * ability.Int("damage_per_level")));
+                hp = Rules.Clamp(Rules.Bounded((long)hp + (long)MaxHp() * (ability.Int("heal_pct") + rank * ability.Int("heal_per_level")) / 100), 0, MaxHp());
+                break;
+            }
         }
         if (JobData().Int("pet_attack_pct") > 0) { damage = Rules.Bounded((long)damage + Strike(AttackSchool(), JobData().Int("pet_attack_pct"))); }
         damage = Rules.Clamp(damage, 1, 10000000); enemyHp = enemyHp - damage;
@@ -510,8 +538,15 @@ class Game {
         collection = collection + rank - collected[e.slot]; collected[e.slot] = rank;
         bag.RemoveAt(index); Log("已消耗装备，提升此部位图鉴等级。");
     }
+    void TrainSkill(int slot) {
+        if (job < 0 || slot < 0 || slot >= 8) { return; }
+        DataRow ability = SkillAtSlot(slot); int rank = SkillRank(slot);
+        if (rank >= ability.Int("max_level")) { Log("技能已满级。"); return; }
+        if (!Pay(rank * ability.Int("train_gold"), rank * ability.Int("train_iron"), 0)) { return; }
+        skillRanks[slot] = rank + 1; if (slot == 0) { skill = skillRanks[slot]; } Log(ability.Text("name") + "提升至 " + Rules.N(skillRanks[slot]) + "级。");
+    }
     void Train(int kind) {
-        if (kind == 0) { if (skill >= SkillData().Int("max_level")) { Log("技能已满级。"); return; } if (!Pay(skill * SkillData().Int("train_gold"), skill * SkillData().Int("train_iron"), 0)) { return; } skill = skill + 1; Log("职业技能提升一级。"); }
+        if (kind == 0) { TrainSkill(0); }
         if (kind < 1 || kind > 3) { return; }
         DataRow recipe = GameTables.current.growth.At(kind); int rank = kind == 1 ? training : (kind == 2 ? title : guild);
         if (rank >= recipe.Int("max_level")) { Log("已达配置上限。"); return; }

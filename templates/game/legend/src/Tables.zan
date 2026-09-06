@@ -126,7 +126,7 @@ class GameTables {
         t.bosses = DataTable.Load(dir + "/bosses.csv", "id:1:1000000,name,min_level:1:1500,rebirth:0:10,hp:1:100000000,picture,gold:0:1000000,xp:0:1000000,xp_floor:0:10000,iron:0:1000000,yuan:0:1000000,runes:0:1000000,quality:0:4,drop_pool:1:1000000,mp:0:100000000,attack_min:0:100000000,attack_max:0:100000000,magic_min:0:100000000,magic_max:0:100000000,tao_min:0:100000000,tao_max:0:100000000,defense_min:0:100000000,defense_max:0:100000000,magic_defense_min:0:100000000,magic_defense_max:0:100000000,attack_school");
         t.maps = DataTable.Load(dir + "/maps.csv", "id:1:1000000,name,start_floor:1:10000,min_level:1:1500,rebirth:0:10,monster_id:1:1000000,gold:0:1000000,xp:0:1000000,drop_pool:1:1000000");
         t.jobs = DataTable.Load(dir + "/jobs.csv", "id:0:2,name,hp_base:1:100000,hp_level:0:1000,mp_base:1:100000,mp_level:0:1000,damage_taken_pct:1:100,pet_attack_pct:0:100,skill_id:1:1000000,weapon_id:1:1000000,armor_id:1:1000000,helmet_id:1:1000000,attack_school,attack_min_base:0:100000,attack_min_level:0:100000,attack_max_base:0:100000,attack_max_level:0:100000,magic_min_base:0:100000,magic_min_level:0:100000,magic_max_base:0:100000,magic_max_level:0:100000,tao_min_base:0:100000,tao_min_level:0:100000,tao_max_base:0:100000,tao_max_level:0:100000,defense_min_base:0:100000,defense_min_level:0:100000,defense_max_base:0:100000,defense_max_level:0:100000,magic_defense_min_base:0:100000,magic_defense_min_level:0:100000,magic_defense_max_base:0:100000,magic_defense_max_level:0:100000");
-        t.skills = DataTable.Load(dir + "/skills.csv", "id:1:1000000,name,cooldown:1:3600,mana:0:100000,damage_pct:0:1000,damage_per_level:0:100,heal_pct:0:100,heal_per_level:0:10,max_level:1:100,train_gold:0:1000000,train_iron:0:1000000,school");
+        t.skills = DataTable.Load(dir + "/skills.csv", "id:1:1000000,name,job:0:2,slot:0:7,kind,target,cooldown:0:3600,mana:0:100000,damage_pct:0:1000,damage_per_level:0:100,heal_pct:0:100,heal_per_level:0:10,passive_damage_pct:0:100,passive_defense_pct:0:100,max_level:1:100,train_gold:0:1000000,train_iron:0:1000000,school");
         t.levels = DataTable.Load(dir + "/levels.csv", "id:1:1500,xp:1:100000000");
         t.drops = DataTable.Load(dir + "/drops.csv", "id:1:1000000,pool:1:1000000,item_id:1:1000000,weight:1:100000");
         t.forge = DataTable.Load(dir + "/forge.csv", "id:0:100,name,operation,gold:0:1000000,iron:0:1000000,yuan:0:1000000,runes:0:1000000,scale,limit:1:20");
@@ -162,7 +162,20 @@ class GameTables {
         Require(attributes.rows.Count == attributeIds.Count, "attribute schema mismatch");
         foreach (string id in attributeIds) { attributes.Get(id); }
         foreach (DataRow j in jobs.rows) { CheckSchool(j.Text("attack_school"), j.location); }
-        foreach (DataRow ability in skills.rows) { CheckSchool(ability.Text("school"), ability.location); }
+        foreach (DataRow ability in skills.rows) {
+            CheckSkillSchool(ability.Text("school"), ability.Text("kind"), ability.location);
+            Require(ability.Int("job") >= 0 && ability.Int("job") < 3, ability.location + ": unknown skill job");
+            Require(ability.Int("slot") >= 0 && ability.Int("slot") < 8, ability.location + ": skill slot must be 0..7");
+            Require(ability.Text("kind") == "active" || ability.Text("kind") == "passive", ability.location + ": unsupported skill kind");
+            Require(ability.Text("target") == "enemy" || ability.Text("target") == "self", ability.location + ": unsupported skill target");
+            Require(ability.Text("kind") == "passive" || ability.Int("cooldown") > 0, ability.location + ": active skill cooldown must be positive");
+        }
+        for (int jobIndex = 0; jobIndex < 3; jobIndex = jobIndex + 1) {
+            for (int slotIndex = 0; slotIndex < 8; slotIndex = slotIndex + 1) {
+                int matches = 0; foreach (DataRow ability in skills.rows) { if (ability.Int("job") == jobIndex && ability.Int("slot") == slotIndex) { matches = matches + 1; } }
+                Require(matches == 1, "skill loadout must define exactly one skill per job and slot");
+            }
+        }
         foreach (DataRow m in monsters.rows) { CheckSchool(m.Text("attack_school"), m.location); CheckRanges(m); }
         foreach (DataRow m in bosses.rows) { CheckSchool(m.Text("attack_school"), m.location); CheckRanges(m); }
         Require(slots.rows.Count == 12 && qualities.rows.Count == 5 && jobs.rows.Count == 3, "save schema requires 12 slots, 5 qualities, 3 jobs");
@@ -209,6 +222,10 @@ class GameTables {
         Require(Rule("offline_seconds") <= 86400 && Rule("equipment_coefficient_max") <= 10 && Rule("equipment_coefficient_max") > 0, "simulation bounds");
     }
     void CheckSchool(string school, string context) { Require(school == "attack" || school == "magic" || school == "tao", context + ": unknown attack school"); }
+    void CheckSkillSchool(string school, string kind, string context) {
+        if (kind == "passive") { Require(school == "attack" || school == "magic" || school == "tao" || school == "defense" || school == "magic_defense", context + ": unknown skill school"); }
+        else { CheckSchool(school, context); }
+    }
     void CheckRanges(DataRow row) {
         foreach (string group in "attack,magic,tao,defense,magic_defense".Split(",")) { Require(row.Int(group + "_min") <= row.Int(group + "_max"), row.location + ": inverted " + group + " range"); }
     }

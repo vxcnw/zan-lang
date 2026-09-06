@@ -300,10 +300,21 @@ class LegendApp {
                 }
                 detailsScroll.With(gems);
             } else if (growthTab == 3) {
-                DataRow skill = g.SkillData();
-                detailsScroll.With(Text(skill.Text("name") + " Lv." + Rules.N(g.skill) + "/" + Rules.N(skill.Int("max_level")), "cyan", 28));
-                detailsScroll.With(Text("冷却 " + Rules.N(skill.Int("cooldown")) + " 秒 · 法力 " + Rules.N(skill.Int("mana")) + " · 升级金币 " + Rules.N(skill.Int("train_gold") * g.skill) + " / 黑铁 " + Rules.N(skill.Int("train_iron") * g.skill), "secondary small", 0));
-                detailsScroll.With(Btn("升级技能", "growth-up-0", () => { g.Train(0); Rebuild(); }));
+                detailsScroll.With(Text("技能配置 · 8 个槽位，按槽位顺序自动施放主动技能；被动技能即时生效", "yellow small", 24));
+                Grid skills = Grid.Of(2); skills.Gap(4); skills.Prefer(0, 304);
+                for (int i = 0; i < 8; i = i + 1) {
+                    int n = i; DataRow ability = g.SkillAtSlot(i); int rank = g.SkillRank(i);
+                    Panel card = Col("frame"); string state = g.IsSkillEquipped(i) ? "已装备" : "未装备";
+                    string kind = ability.Text("kind") == "active" ? "主动" : "被动";
+                    card.With(Text("槽位 " + Rules.N(i + 1) + " · " + kind + " · " + state, "strong small", 22));
+                    card.With(Text(ability.Text("name") + " Lv." + Rules.N(rank) + "/" + Rules.N(ability.Int("max_level")), "cyan small", 24));
+                    if (ability.Text("kind") == "active") { card.With(Text("冷却 " + Rules.N(ability.Int("cooldown")) + " 秒 · 法力 " + Rules.N(ability.Int("mana")) + " · 伤害 " + Rules.N(ability.Int("damage_pct") + rank * ability.Int("damage_per_level")) + "%", "secondary small", 0)); }
+                    else { card.With(Text("攻击 +" + Rules.N(rank * ability.Int("passive_damage_pct")) + " · 防御 +" + Rules.N(rank * ability.Int("passive_defense_pct")), "secondary small", 0)); }
+                    card.With(Btn(g.IsSkillEquipped(i) ? "卸下技能" : "装备技能", "skill-toggle-" + Rules.N(i), () => { g.ToggleSkill(n); Rebuild(); }));
+                    card.With(Btn(rank >= ability.Int("max_level") ? "已满级" : "升级 · 金 " + Rules.N(rank * ability.Int("train_gold")) + " / 铁 " + Rules.N(rank * ability.Int("train_iron")), "skill-up-" + Rules.N(i), () => { g.TrainSkill(n); Rebuild(); }));
+                    skills.With(card);
+                }
+                detailsScroll.With(skills);
             } else {
                 Equipment book = g.equipped[11]; string bookStatus = "当前未穿戴天书。";
                 if (book != null) { bookStatus = "当前天书：" + book.Name() + "\n" + book.Detail(); }
