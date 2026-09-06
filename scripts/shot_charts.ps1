@@ -1,4 +1,4 @@
-﻿param([string]$Demo = "", [string]$Out = "d:\project\zan-lang\build\shot_charts.png")
+﻿param([string]$Demo = "", [string]$Out = "d:\project\zan-lang\build\shot_charts.png", [string]$Skin = "")
 $exe = "d:\project\zan-lang\build\charts_test.exe"
 Get-Process charts_test -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 300
@@ -6,10 +6,13 @@ Start-Sleep -Milliseconds 300
 # --nomouse：截图模式（charts_test 把鼠标钉到窗口外，悬停
 # tooltip/轴指示器不再随宿主光标进画面——本机光标归自动化
 # 宿主管理，SetCursorPos/PostMessage 都挪不动它）。
+# --skin <name>：图表皮肤取样（ChartSkin 名，可省）。
+$extra = @()
+if ($Skin -ne "") { $extra += @('--skin', $Skin) }
 if ($Demo -ne "") {
-    Start-Process $exe -ArgumentList ('"' + $Demo + '" --nomouse')
+    Start-Process $exe -ArgumentList (@('"' + $Demo + '"', '--nomouse') + $extra)
 } else {
-    Start-Process $exe -ArgumentList '--nomouse'
+    Start-Process $exe -ArgumentList (@('--nomouse') + $extra)
 }
 Start-Sleep -Milliseconds 1400
 

@@ -187,25 +187,39 @@ partial class Charts {
         Charts.Show(app, o, x, y, w, h);
     }
 
-    /// example/line8 时间坐标轴折线图：200 个随机点 + dataZoom
-    /// （初始窗口 70%..100%）。ECharts 用 Math.random()，这里用固定
-    /// 种子伪随机（同点数同分布，截图可复现）；时间刻度取自
+    /// example/line8 时间坐标轴折线图，option 逐项对齐：200 个随机
+    /// 点 + dataZoom（原版只声明 start:70，end 缺省 = 100）；y 值两
+    /// 位小数（(Math.random()*30).toFixed(2)——ChartData.Numeric 承
+    /// 载），第三维 v2=(Math.random()*100) 驱动逐点 symbolSize =
+    /// round(v2/10)+2（2..12px 气泡，showAllSymbol 全显）；y 轴固定
+    /// 0..30 splitNumber 5（原版 value 轴默认 splitNumber → 0,6,12,
+    /// 18,24,30）。ECharts 用 Math.random()，这里用固定种子伪随机
+    /// （同点数同分布，截图可复现）；时间刻度取自
     /// new Date(2014,9,1,0,len*10000) 的真实进位结果。
     static void Line8(App app, int x, int y, int w, int h) {
         int seed = 20141001;
-        List<int> ys = new List<int>();
+        List<ChartData> pts = new List<ChartData>();
         for (int i = 0; i < 200; i = i + 1) {
             seed = (int)((seed * 1103515245L + 12345L) % 2147483648L);
-            ys.Add((seed % 3000) / 100);
+            double yv = (seed % 3000) / 100.0;
+            seed = (int)((seed * 1103515245L + 12345L) % 2147483648L);
+            int v2 = seed % 100;
+            ChartData d = ChartData.Numeric(yv);
+            d.size = v2 / 10 + 2;
+            d.sizeSet = true;
+            pts.Add(d);
         }
-        ChartSeries s = ChartSeries.Line("series1", ys);
-        s.symbol = "emptyCircle";
-        s.symbolSize = 5;
+        ChartSeries s = ChartSeries.Named("series1", ChartType.Line, pts);
         ChartOption o = ChartOption.Of(
             Charts.T("Time axis", "时间坐标折线图"),
             TimeCats(), new List<ChartSeries>{ s });
         o.titleSub = Charts.T("dataZoom support", "dataZoom支持");
         o.X(ChartAxis.Time());
+        ChartAxis yax = ChartAxis.Value();
+        yax.min = 0;
+        yax.max = 30;
+        yax.ticks = 5;
+        o.Y(yax);
         o.zoom = true;
         o.zoomStart = 70;
         o.zoomEnd = 100;

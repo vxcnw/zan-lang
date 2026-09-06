@@ -359,11 +359,14 @@ class Chart {
         return Chart.Rgb(r, g, bl);
     }
 
-    /// 定性调色板第 i 档：优先取皮肤的 --chart-1 .. --chart-8 token
-    /// （Theme.chart1..8，0 = 该槽位未定义），缺的槽位回退到
-    /// ECharts 2.2 默认调色板前 8 色，因此任何皮肤只需定义想要
-    /// 覆盖的色槽。i 自动取模 8 循环。
+    /// 定性调色板第 i 档：图表皮肤（ChartSkin）优先——图表配色是
+    /// 独立板块，不占全局皮肤主题的 token；当前皮肤 8 档齐全，
+    /// 命中即返回。皮肤之后依次是主题的 --chart-1 .. --chart-8
+    /// token（Theme.chart1..8，0 = 该槽位未定义）与 ECharts 2.2
+    /// 默认调色板兜底。i 自动取模 8 循环。
     static int Palette(Theme t, int i) {
+        int skc = ChartSkin.ColorAt(ChartSkin.Current(), i);
+        if (skc != 0) { return skc; }
         int m = i % 8;
         if (t != null) {
             if (m == 0 && t.chart1 != 0) { return t.chart1; }

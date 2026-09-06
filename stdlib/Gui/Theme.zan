@@ -211,17 +211,11 @@ class Theme {
         t.scrimChipHover    = 0x66FFFFFF;
         t.onScrim           = (int)0xFFFFFFFF;
         t.statusDebugBg     = (int)0xFFCC6633;
-        // 图表调色板：ECharts 2.2.4 默认主题前 8 档（青-紫-蓝-橙-红…，
-        // 与 echarts@2.2.7 dist 内置色一致）。Chart.Palette 的硬编码
-        // 回退仅是皮肤未加载时的兜底；配色统一走皮肤 token。
-        t.chart1 = (int)0xFF2EC7C9;
-        t.chart2 = (int)0xFFB6A2DE;
-        t.chart3 = (int)0xFF5AB1EF;
-        t.chart4 = (int)0xFFFFB980;
-        t.chart5 = (int)0xFFD87A80;
-        t.chart6 = (int)0xFF8D98B3;
-        t.chart7 = (int)0xFFE5CF0D;
-        t.chart8 = (int)0xFF97B552;
+        // 图表调色板默认未定义（0）：配色是图表皮肤（ChartSkin）的
+        // 独立板块，不进全局皮肤主题；Chart.Palette 回退到当前
+        // 图表皮肤，未定义时再落 ECharts 默认色。
+        t.chart1 = 0; t.chart2 = 0; t.chart3 = 0; t.chart4 = 0;
+        t.chart5 = 0; t.chart6 = 0; t.chart7 = 0; t.chart8 = 0;
 
         t.borderRadiusSmall  = 3;
         t.borderRadiusMedium = 3;
@@ -327,17 +321,11 @@ class Theme {
         t.scrimChipHover    = 0x66FFFFFF;
         t.onScrim           = (int)0xFFFFFFFF;
         t.statusDebugBg     = (int)0xFFCC6633;
-        // 图表调色板：ECharts 2.2.4 默认主题前 8 档（青-紫-蓝-橙-红…，
-        // 与 echarts@2.2.7 dist 内置色一致）。Chart.Palette 的硬编码
-        // 回退仅是皮肤未加载时的兜底；配色统一走皮肤 token。
-        t.chart1 = (int)0xFF2EC7C9;
-        t.chart2 = (int)0xFFB6A2DE;
-        t.chart3 = (int)0xFF5AB1EF;
-        t.chart4 = (int)0xFFFFB980;
-        t.chart5 = (int)0xFFD87A80;
-        t.chart6 = (int)0xFF8D98B3;
-        t.chart7 = (int)0xFFE5CF0D;
-        t.chart8 = (int)0xFF97B552;
+        // 图表调色板默认未定义（0）：配色是图表皮肤（ChartSkin）的
+        // 独立板块，不进全局皮肤主题；Chart.Palette 回退到当前
+        // 图表皮肤，未定义时再落 ECharts 默认色。
+        t.chart1 = 0; t.chart2 = 0; t.chart3 = 0; t.chart4 = 0;
+        t.chart5 = 0; t.chart6 = 0; t.chart7 = 0; t.chart8 = 0;
 
         t.borderRadiusSmall  = 3;
         t.borderRadiusMedium = 3;

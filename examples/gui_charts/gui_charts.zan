@@ -142,10 +142,18 @@ partial class Charts {
         app.Show();
         // --nomouse：截图/回归模式——鼠标由自动化宿主管理，帧内
         // 把鼠标钉到窗口外并整体关闭 tooltip，悬停覆盖层不进画面。
+        // --skin <name>：启动即选图表皮肤（ChartSkin 名），截图
+        // 回归按皮肤取样。
         bool pin = false;
+        string skinArg = "";
         for (int ai = 0; ai < Environment.ArgCount(); ai = ai + 1) {
             if (Environment.ArgAt(ai) == "--nomouse") { pin = true; }
+            if (Environment.ArgAt(ai) == "--skin"
+                && ai + 1 < Environment.ArgCount()) {
+                skinArg = Environment.ArgAt(ai + 1);
+            }
         }
+        if (skinArg != "") { ChartSkin.SetCurrent(skinArg); }
         Charts.nomouse = pin;
         app.SetFrameBody(() => {
             WidgetId.ResetFrame();
@@ -544,6 +552,11 @@ partial class Charts {
     /// 光标进画面，整体关掉，截图只含图表本体。
     static bool nomouse;
 
+    /// 图表皮肤（ChartSkin）选择器：nav 侧栏的单选按钮组，
+    /// 一行四档；skinLang 记录建组时的语言（换语言重建选项）。
+    static RadioGroup skinGroup;
+    static int skinLang = 0 - 1;
+
     static void Show(App app, ChartOption o, int x, int y, int w, int h) {
         o.toolboxShow = true;
         if (Charts.nomouse) { o.showTooltip = false; }
@@ -724,6 +737,37 @@ partial class Charts {
             + "   ·   " + d.id;
         c.DrawText(x + pad, area.y + app.Scale(14), head,
             t.textSecondary, t.fontSizeSmall);
+
+        // 图表皮肤（ChartSkin）选择：图表配色是独立板块，与全局
+        // 皮肤主题无关。连体单选按钮组一行四档，随嵌入的图表显示
+        // 在预览头，换肤全窗生效。
+        int skW = app.Scale(64);
+        c.DrawText(x + w - pad - app.Scale(380), area.y + app.Scale(18),
+            Charts.T("CHART SKIN", "图表皮肤"), t.textTertiary, t.fontSizeSmall);
+        if (Charts.skinLang != Charts.lang.Get()) {
+            Charts.skinLang = Charts.lang.Get();
+            bool skEn = Charts.skinLang == 0;
+            RadioGroup skG = new RadioGroup();
+            skG.Buttons = true;
+            skG.Size = "small";
+            for (int si = 0; si < ChartSkin.Count(); si = si + 1) {
+                skG.AddOption(ChartSkin.Label(si, skEn), si);
+            }
+            int skCur = ChartSkin.IndexOf(ChartSkin.Current());
+            skG.SetSelectedValue(skCur >= 0 ? skCur : 0);
+            skG.OnChange(() => {
+                int v = Charts.skinGroup.SelectedValue();
+                if (v >= 0 && v < ChartSkin.Count()) {
+                    ChartSkin.SetCurrent(ChartSkin.Name(v));
+                }
+                Charts.app.RequestRedraw();
+            });
+            Charts.skinGroup = skG;
+        }
+        Charts.skinGroup.RenderInside(app, new Rect(
+            x + w - pad - app.Scale(380) + skW + app.Scale(8),
+            area.y + app.Scale(10), app.Scale(310), app.Scale(24)));
+
         int top = area.y + app.Scale(40);
         Charts.Draw(app, d.id, x + pad, top,
             w - pad * 2, area.y + area.height - pad - top);
