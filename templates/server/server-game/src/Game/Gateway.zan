@@ -1,0 +1,493 @@
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Json;
+using System.Net;
+using System.Security.Cryptography;
+
+namespace ZanWeb.Game;
+
+/* 游戏网关：Worker("tcp") 监听 [game].port，与 HTTP 管理后台同进程。
+   协议为换行分隔的 JSON（每行一条，UTF-8，单行上限 8KB）：
+
+     客户端 → 服务端                          服务端 → 客户端
+     {"op":"register","user","pass","nick"}   {"ok":1,"msg"} / {"ok":0,"err"}
+     {"op":"login","user","pass"}             {"ok":1,"uid","self","maps","announce","offline"}
+     {"op":"hb"}                              {"ok":1,"t","online"}
+     {"op":"state"}                           {"ok":1,"self"}
+     {"op":"maps"}                            {"ok":1,"maps"}
+     {"op":"move","map":2}                    {"ok":1,"self"} + 全服 ev move
+     {"op":"walk","x","y"}                    {"ok":1} + 同图 ev walk
+     {"op":"say","text"}                      {"ok":1} + 全服 ev chat
+     {"op":"who"}                             {"ok":1,"rows":[同图玩家]}
+
+     推送：{"ev":"chat","from","text"} {"ev":"walk",...} {"ev":"move",...}
+           {"ev":"announce","title","body"} {"ev":"kick","reason"}（随后断开）
+           {"ev":"online","count"}（tick 每 30 秒）
+
+   Worker 的 TCP 回调按 recv 分块交付，此处按连接缓冲、按行拆分。
+   登录成功后连接即会话：cid ↔ Session 由 World 维护；未登录连接只
+   能 register/login/hb。密码散列与管理后台同一套（AuthUser）。 */
+class Gateway {
+    /* cid → 未凑满一行的字节（不含行尾）。 */
+    static Dictionary<int, string> buffers = new Dictionary<int, string>();
+
+    static int MaxLine = 8192;
+
+    /* 注册 TCP worker；在 main 里、Worker.RunAll 之前调用。 */
+    static void Start() {
+        Worker w = new Worker("tcp", Cfg.Game.host, Cfg.Game.port);
+        w.name = "game";
+        w.onConnect = Gateway.OnConnect;
+        w.onMessage = Gateway.OnMessage;
+        w.onClose = Gateway.OnClose;
+        Console.WriteLine("[game] tcp://" + Cfg.Game.host + ":"
+            + Convert.ToString(Cfg.Game.port));
+    }
+
+    static async void OnConnect(Connection conn) {
+        Gateway.buffers.Add(conn.GetId(), "");
+        Gateway.Send(conn, Gateway.Ev("hello", "请 login 或 register"));
+    }
+
+    static async string OnMessage(Connection conn, string data) {
+        int cid = conn.GetId();
+        string buf = "";
+        if (!Gateway.buffers.TryGetValue(cid, out buf)) { return ""; }
+        buf = buf + data;
+        while (true) {
+            int nl = buf.IndexOf("\n");
+            if (nl < 0) {
+                if (buf.Length > Gateway.MaxLine) {
+                    Gateway.Send(conn, Gateway.Err("消息过长"));
+                    buf = "";
+                }
+                break;
+            }
+            string line = buf.Substring(0, nl);
+            buf = buf.Substring(nl + 1);
+            if (line.Length == 0) { continue; }
+            if (line.Length > Gateway.MaxLine) {
+                Gateway.Send(conn, Gateway.Err("消息过长"));
+                continue;
+            }
+            await Gateway.Handle(conn, line);
+        }
+        if (Gateway.buffers.ContainsKey(cid)) {
+            Gateway.buffers.Remove(cid);
+            Gateway.buffers.Add(cid, buf);
+        }
+        return "";
+    }
+
+    static async void OnClose(Connection conn) {
+        Gateway.buffers.Remove(conn.GetId());
+        await World.Leave(conn.GetId());
+    }
+
+    /* 一条已拆分的协议行：解析 JSON、认领会话、分发 op。 */
+    static async void Handle(Connection conn, string line) {
+        JsonValue m = null;
+        try {
+            m = JsonValue.ParseLenient(line);
+        } catch (Exception ex) {
+            Gateway.Send(conn, Gateway.Err("不是合法的 JSON"));
+            return;
+        }
+        if (m == null || !m.IsObject()) {
+            Gateway.Send(conn, Gateway.Err("不是合法的 JSON"));
+            return;
+        }
+        string op = m.Str("op", "");
+        long now = WebApp.NowSeconds();
+        Session s = World.ByCid(conn.GetId());
+
+        if (op == "register") { await Gateway.Register(conn, m); return; }
+        if (op == "login") { await Gateway.Login(conn, m, now); return; }
+
+        /* 心跳允许在登录前发包，其余 op 需要会话。 */
+        s = World.ByCid(conn.GetId());
+        if (s != null) { s.lastSeen = now; }
+        if (op == "hb") {
+            JsonValue r = Gateway.Ok();
+            r.Set("t", JsonValue.NewNum(Convert.ToString(now)));
+            r.Set("online", JsonValue.NewNum(Convert.ToString(World.OnlineCount())));
+            Gateway.Send(conn, r);
+            return;
+        }
+        if (s == null) {
+            Gateway.Send(conn, Gateway.Err("请先 login"));
+            return;
+        }
+        if (op == "state") { Gateway.PushState(s); return; }
+        if (op == "maps") { await Gateway.SendMaps(conn); return; }
+        if (op == "move") { await Gateway.Move(conn, s, m); return; }
+        if (op == "walk") { Gateway.Walk(s, m); return; }
+        if (op == "say") { Gateway.Say(s, m.Str("text", "")); return; }
+        if (op == "who") { await Gateway.Who(conn, s); return; }
+        Gateway.Send(conn, Gateway.Err("未知 op: " + op));
+    }
+
+    /* ---- 账号 ---- */
+
+    static async void Register(Connection conn, JsonValue m) {
+        string user = m.Str("user", "").Trim();
+        string pass = m.Str("pass", "");
+        string nick = m.Str("nick", "").Trim();
+        if (user.Length < 3 || user.Length > 32) {
+            Gateway.Send(conn, Gateway.Err("账号需 3-32 字符"));
+            return;
+        }
+        if (pass.Length < 6 || pass.Length > 64) {
+            Gateway.Send(conn, Gateway.Err("密码需 6-64 字符"));
+            return;
+        }
+        if (nick.Length == 0) { nick = user; }
+        IDbConnection db = await Gateway.Db(conn);
+        if (db == null) { return; }
+        try {
+            int have = await db.Select<ZanWeb.Model.Game.Player>()
+                .Where(a => a.username == user).CountAsync();
+            if (have > 0) {
+                Gateway.Send(conn, Gateway.Err("账号已存在"));
+                return;
+            }
+            ZanWeb.Model.Game.Player row = new ZanWeb.Model.Game.Player();
+            row.username = user;
+            row.passwordSalt = Hex.Encode(RandomNumberGenerator.GetBytes(16), 16);
+            row.passwordHash = AuthUser.PasswordHash(pass, row.passwordSalt);
+            row.nickname = nick;
+            row.job = 0;
+            row.level = 1;
+            row.gold = 0;
+            row.gems = 0;
+            row.mapId = 1;
+            row.x = 5;
+            row.y = 5;
+            row.status = 1;
+            row.banReason = "";
+            row.lastLoginAt = 0;
+            row.lastLogoutAt = 0;
+            row.createdAt = WebApp.NowSeconds();
+            row.updatedAt = row.createdAt;
+            int id = await db.Insert<ZanWeb.Model.Game.Player>(row)
+                .ExecuteIdentityAsync();
+            if (id <= 0) {
+                Gateway.Send(conn, Gateway.Err("注册失败，请稍后再试"));
+                return;
+            }
+            JsonValue r = Gateway.Ok();
+            r.Set("msg", JsonValue.NewStr("注册成功，请登录"));
+            r.Set("uid", JsonValue.NewNum(Convert.ToString(id)));
+            Gateway.Send(conn, r);
+        } finally {
+            Gateway.Give(conn, db);
+        }
+    }
+
+    static async void Login(Connection conn, JsonValue m, long now) {
+        string user = m.Str("user", "").Trim();
+        string pass = m.Str("pass", "");
+        IDbConnection db = await Gateway.Db(conn);
+        if (db == null) { return; }
+        try {
+            ZanWeb.Model.Game.Player row = await db
+                .Select<ZanWeb.Model.Game.Player>()
+                .Where(a => a.username == user).FirstAsync();
+            /* 空响应同文案：不向爆破者透露账号是否存在。 */
+            if (row == null
+                || AuthUser.PasswordHash(pass, row.passwordSalt)
+                    != row.passwordHash) {
+                Gateway.Send(conn, Gateway.Err("账号或密码不正确"));
+                return;
+            }
+            if (row.status != 1) {
+                string why = row.banReason.Length > 0
+                    ? "账号已被封禁：" + row.banReason
+                    : "账号已被封禁";
+                Gateway.Send(conn, Gateway.Err(why));
+                return;
+            }
+
+            /* 离线结算：金库按离线时长进账，封顶配置小时数。 */
+            JsonValue offline = JsonValue.NewObject();
+            if (row.lastLogoutAt > 0 && now > row.lastLogoutAt) {
+                long seconds = now - row.lastLogoutAt;
+                long cap = (long)Cfg.Game.offlineCapHours * 3600;
+                if (seconds > cap) { seconds = cap; }
+                long gain = seconds / 3600 * Cfg.Game.offlineGoldPerHour
+                    + seconds % 3600 * Cfg.Game.offlineGoldPerHour / 3600;
+                row.gold = row.gold + gain;
+                offline.Set("seconds", JsonValue.NewNum(Convert.ToString(seconds)));
+                offline.Set("gold", JsonValue.NewNum(Convert.ToString(gain)));
+            }
+
+            row.lastLoginAt = now;
+            /* 登录即落一次库：最后登录时间与离线收益不入内存 dirty 流。 */
+            int _u = await db.Update<ZanWeb.Model.Game.Player>()
+                .Set(a => a.lastLoginAt, now)
+                .Set(a => a.gold, row.gold)
+                .Where(a => a.id == row.id)
+                .ExecuteAffrowsAsync();
+
+            Session s = new Session();
+            s.cid = conn.GetId();
+            s.conn = conn;
+            s.row = row;
+            s.dirty = false;
+            s.kicked = false;
+            s.lastSeen = now;
+            s.loginAt = now;
+            World.Enter(s, now);
+
+            JsonValue r = Gateway.Ok();
+            r.Set("uid", JsonValue.NewNum(Convert.ToString(row.id)));
+            r.Set("self", Gateway.SelfJson(s));
+            r.Set("offline", offline);
+            await Gateway.MapsInto(r, db);
+            await Gateway.AnnounceInto(r, db);
+            Gateway.Send(conn, r);
+        } finally {
+            Gateway.Give(conn, db);
+        }
+    }
+
+    /* ---- 世界交互 ---- */
+
+    /* 换图：门槛不够答错误；成功后向全服播报动向。 */
+    static async void Move(Connection conn, Session s, JsonValue m) {
+        int target = m.Int("map", 0);
+        IDbConnection db = await Gateway.Db(conn);
+        if (db == null) { return; }
+        try {
+            ZanWeb.Model.Game.GameMap map = await db
+                .Select<ZanWeb.Model.Game.GameMap>()
+                .Where(a => a.id == target && a.status == 1).FirstAsync();
+            if (map == null) {
+                Gateway.Send(conn, Gateway.Err("没有这张地图"));
+                return;
+            }
+            if (s.row.level < map.minLevel) {
+                Gateway.Send(conn, Gateway.Err(map.name + " 需要 "
+                    + Convert.ToString(map.minLevel) + " 级"));
+                return;
+            }
+            s.row.mapId = target;
+            s.row.x = 5;
+            s.row.y = 5;
+            s.dirty = true;
+            JsonValue r = Gateway.Ok();
+            r.Set("self", Gateway.SelfJson(s));
+            Gateway.Send(conn, r);
+            JsonValue ev = Gateway.Ev("move", s.row.nickname + " 进入了 "
+                + map.name);
+            ev.Set("user", JsonValue.NewStr(s.row.nickname));
+            ev.Set("map", JsonValue.NewStr(map.name));
+            Gateway.Broadcast(ev);
+        } finally {
+            Gateway.Give(conn, db);
+        }
+    }
+
+    /* 同图移动：坐标钳在 [0, walkMax]，向同图玩家播报。 */
+    static void Walk(Session s, JsonValue m) {
+        int x = m.Int("x", s.row.x);
+        int y = m.Int("y", s.row.y);
+        if (x < 0) { x = 0; }
+        if (y < 0) { y = 0; }
+        if (x > Cfg.Game.walkMax) { x = Cfg.Game.walkMax; }
+        if (y > Cfg.Game.walkMax) { y = Cfg.Game.walkMax; }
+        s.row.x = x;
+        s.row.y = y;
+        s.dirty = true;
+        JsonValue ev = JsonValue.NewObject();
+        ev.Set("ev", JsonValue.NewStr("walk"));
+        ev.Set("user", JsonValue.NewStr(s.row.nickname));
+        ev.Set("x", JsonValue.NewNum(Convert.ToString(x)));
+        ev.Set("y", JsonValue.NewNum(Convert.ToString(y)));
+        ev.Set("map", JsonValue.NewNum(Convert.ToString(s.row.mapId)));
+        List<Session> rows = World.All();
+        for (int i = 0; i < rows.Count; i = i + 1) {
+            if (rows[i].row.mapId != s.row.mapId) { continue; }
+            Gateway.Send(rows[i].conn, ev);
+        }
+    }
+
+    /* 全服聊天：文本钳 200 字，空文本不播。 */
+    static void Say(Session s, string text) {
+        text = text.Trim();
+        if (text.Length == 0) { return; }
+        if (text.Length > 200) { text = text.Substring(0, 200); }
+        JsonValue ev = JsonValue.NewObject();
+        ev.Set("ev", JsonValue.NewStr("chat"));
+        ev.Set("from", JsonValue.NewStr(s.row.nickname));
+        ev.Set("text", JsonValue.NewStr(text));
+        List<Session> rows = World.All();
+        for (int i = 0; i < rows.Count; i = i + 1) {
+            Gateway.Send(rows[i].conn, ev);
+        }
+    }
+
+    /* 同图玩家列表。 */
+    static async void Who(Connection conn, Session s) {
+        List<Session> rows = World.All();
+        JsonValue arr = JsonValue.NewArray();
+        for (int i = 0; i < rows.Count; i = i + 1) {
+            if (rows[i].row.mapId != s.row.mapId) { continue; }
+            JsonValue o = JsonValue.NewObject();
+            o.Set("name", JsonValue.NewStr(rows[i].row.nickname));
+            o.Set("level", JsonValue.NewNum(Convert.ToString(rows[i].row.level)));
+            o.Set("job", JsonValue.NewNum(Convert.ToString(rows[i].row.job)));
+            o.Set("x", JsonValue.NewNum(Convert.ToString(rows[i].row.x)));
+            o.Set("y", JsonValue.NewNum(Convert.ToString(rows[i].row.y)));
+            arr.Append(o);
+        }
+        JsonValue r = Gateway.Ok();
+        r.Set("rows", arr);
+        Gateway.Send(conn, r);
+    }
+
+    /* 向全部在线会话推一条事件。 */
+    static void Broadcast(JsonValue ev) {
+        List<Session> rows = World.All();
+        for (int i = 0; i < rows.Count; i = i + 1) {
+            Gateway.Send(rows[i].conn, ev);
+        }
+    }
+
+    /* ---- 服务端推送（World/GM 页调用） ---- */
+
+    static void PushState(Session s) {
+        JsonValue r = JsonValue.NewObject();
+        r.Set("ev", JsonValue.NewStr("state"));
+        r.Set("self", Gateway.SelfJson(s));
+        Gateway.Send(s.conn, r);
+    }
+
+    static void PushChat(Connection conn, string from, string text) {
+        JsonValue ev = JsonValue.NewObject();
+        ev.Set("ev", JsonValue.NewStr("chat"));
+        ev.Set("from", JsonValue.NewStr(from));
+        ev.Set("text", JsonValue.NewStr(text));
+        Gateway.Send(conn, ev);
+    }
+
+    static void PushAnnounce(Connection conn, string title, string body) {
+        JsonValue ev = JsonValue.NewObject();
+        ev.Set("ev", JsonValue.NewStr("announce"));
+        ev.Set("title", JsonValue.NewStr(title));
+        ev.Set("body", JsonValue.NewStr(body));
+        Gateway.Send(conn, ev);
+    }
+
+    /* ---- JSON 帮手 ---- */
+
+    static JsonValue Ok() {
+        JsonValue r = JsonValue.NewObject();
+        r.Set("ok", JsonValue.NewNum("1"));
+        return r;
+    }
+
+    static JsonValue Err(string why) {
+        JsonValue r = JsonValue.NewObject();
+        r.Set("ok", JsonValue.NewNum("0"));
+        r.Set("err", JsonValue.NewStr(why));
+        return r;
+    }
+
+    static JsonValue Ev(string name, string text) {
+        JsonValue ev = JsonValue.NewObject();
+        ev.Set("ev", JsonValue.NewStr(name));
+        ev.Set("text", JsonValue.NewStr(text));
+        return ev;
+    }
+
+    static JsonValue SelfJson(Session s) {
+        JsonValue o = JsonValue.NewObject();
+        o.Set("uid", JsonValue.NewNum(Convert.ToString(s.row.id)));
+        o.Set("name", JsonValue.NewStr(s.row.nickname));
+        o.Set("job", JsonValue.NewNum(Convert.ToString(s.row.job)));
+        o.Set("level", JsonValue.NewNum(Convert.ToString(s.row.level)));
+        o.Set("gold", JsonValue.NewNum(Convert.ToString(s.row.gold)));
+        o.Set("gems", JsonValue.NewNum(Convert.ToString(s.row.gems)));
+        o.Set("map", JsonValue.NewNum(Convert.ToString(s.row.mapId)));
+        o.Set("x", JsonValue.NewNum(Convert.ToString(s.row.x)));
+        o.Set("y", JsonValue.NewNum(Convert.ToString(s.row.y)));
+        return o;
+    }
+
+    static async void SendMaps(Connection conn) {
+        JsonValue r = Gateway.Ok();
+        IDbConnection db = await Gateway.Db(conn);
+        if (db == null) { return; }
+        try {
+            await Gateway.MapsInto(r, db);
+        } finally {
+            Gateway.Give(conn, db);
+        }
+        Gateway.Send(conn, r);
+    }
+
+    static async bool MapsInto(JsonValue r, IDbConnection db) {
+        List<ZanWeb.Model.Game.GameMap> maps = await db
+            .Select<ZanWeb.Model.Game.GameMap>()
+            .Where(a => a.status == 1)
+            .OrderBy(a => a.sortOrder).ToListAsync();
+        JsonValue arr = JsonValue.NewArray();
+        for (int i = 0; i < maps.Count; i = i + 1) {
+            JsonValue o = JsonValue.NewObject();
+            o.Set("id", JsonValue.NewNum(Convert.ToString(maps[i].id)));
+            o.Set("name", JsonValue.NewStr(maps[i].name));
+            o.Set("minLevel", JsonValue.NewNum(Convert.ToString(maps[i].minLevel)));
+            arr.Append(o);
+        }
+        r.Set("maps", arr);
+        return true;
+    }
+
+    static async bool AnnounceInto(JsonValue r, IDbConnection db) {
+        ZanWeb.Model.Game.Announce row = await db
+            .Select<ZanWeb.Model.Game.Announce>()
+            .Where(a => a.enabled == 1)
+            .OrderByDescending(a => a.id).FirstAsync();
+        if (row == null) { return false; }
+        JsonValue o = JsonValue.NewObject();
+        o.Set("title", JsonValue.NewStr(row.title));
+        o.Set("body", JsonValue.NewStr(row.body));
+        r.Set("announce", o);
+        return true;
+    }
+
+    /* ---- 传输帮手 ---- */
+
+    static void Send(Connection conn, JsonValue o) {
+        conn.Send(o.ToJson() + "\n");
+    }
+
+    /* 会话外（登录/注册/未登录 op）的临时借连接：借不到答语义化错误行。 */
+    static async IDbConnection Db(Connection conn) {
+        AppServices svc = AppServices.Current();
+        if (svc == null) {
+            Gateway.Send(conn, Gateway.Err("数据库不可用，请稍后再试"));
+            return null;
+        }
+        DbContext ctx = svc.Db();
+        if (ctx == null) {
+            Gateway.Send(conn, Gateway.Err("数据库不可用，请稍后再试"));
+            return null;
+        }
+        IDbConnection db = await ctx.Acquire();
+        if (db == null) {
+            Gateway.Send(conn, Gateway.Err("数据库不可用，请稍后再试"));
+        }
+        return db;
+    }
+
+    static void Give(Connection conn, IDbConnection db) {
+        if (db == null) { return; }
+        AppServices svc = AppServices.Current();
+        if (svc == null) { return; }
+        DbContext ctx = svc.Db();
+        if (ctx != null) { ctx.Release(db); }
+    }
+}

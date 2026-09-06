@@ -1,0 +1,63 @@
+using System;
+using System.Data;
+using System.Data.Orm;
+using System.Web;
+using ZanWeb;
+using ZanWeb.Model.Game;
+using ZanWeb.Game;
+
+namespace ZanWeb.Index;
+
+/* 落地页：服务器状态 — 在线会话（World 内存态）、开放地图与最新公告
+   （库）。无鉴权，只暴露展示性数字。 */
+[Route("[controller]/[action]")]
+[Description("首页")]
+class Index : Controller {
+    [HttpGet]
+    [Route("/")]
+    [Description("首页")]
+    async void Index() {
+        ViewData d = new ViewData();
+        await Settings.Apply(d);
+        string site = await Settings.Get(SettingKeys.SiteTitle, "{{NAME}}");
+        d.Set("title", site);
+        d.Set("navHome", "page");
+        d.Set("online", Convert.ToString(World.OnlineCount()));
+        d.Set("gamePort", Convert.ToString(Cfg.Game.port));
+
+        d.Set("mapCount", "0");
+        d.Set("noMaps", "1");
+        List<StrMap> maps = d.AddList("maps");
+        d.Set("noAnnounce", "1");
+        AppServices svc = AppServices.Current();
+        if (svc != null && svc.Db() != null) {
+            IDbConnection db = await svc.Db().Acquire();
+            if (db != null) {
+                try {
+                    List<GameMap> rows = await db
+                        .Select<GameMap>().Where(a => a.status == 1)
+                        .OrderBy(a => a.sortOrder).ToListAsync();
+                    for (int i = 0; i < rows.Count; i = i + 1) {
+                        StrMap row = new StrMap();
+                        row.Set("name", rows[i].name);
+                        row.Set("minLevel", Convert.ToString(rows[i].minLevel));
+                        maps.Add(row);
+                    }
+                    d.Set("mapCount", Convert.ToString(rows.Count));
+                    if (rows.Count > 0) { d.Set("noMaps", ""); }
+                    Game.Announce ann = await db
+                        .Select<Game.Announce>().Where(a => a.enabled == 1)
+                        .OrderByDescending(a => a.id).FirstAsync();
+                    if (ann != null) {
+                        d.Set("noAnnounce", "");
+                        d.Set("annTitle", ann.title);
+                        d.Set("annBody", ann.body);
+                    }
+                } finally {
+                    svc.Db().Release(db);
+                }
+            }
+        }
+        this.View(d);
+    }
+}

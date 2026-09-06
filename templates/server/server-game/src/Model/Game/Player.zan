@@ -1,0 +1,51 @@
+using System.Data.Orm;
+
+namespace ZanWeb.Model.Game;
+
+/* 玩家账号表。游戏客户端经 TCP 网关 register/login，管理后台经 GM 页编辑；
+   两侧共用同一张表与同一套加盐散列（AuthUser.PasswordHash）。在线玩家的
+   权威状态在内存会话（Game.Session）中，定期与登出时落库；离线玩家直接
+   以本表为准。status=0 封禁：登录被拒，已在线会话被 GM 踢出。 */
+[Table(Name = "game_player")]
+class Player {
+    [Column(IsIdentity = true)]
+    int id;
+
+    [Column(StringLength = 64, IsNullable = false)]
+    string username;
+
+    /* 加盐迭代 SHA-256（见 AuthUser.PasswordHash）。不返回、不记录。 */
+    [Column(StringLength = 128, IsNullable = false)]
+    string passwordHash;
+
+    [Column(StringLength = 64, IsNullable = false)]
+    string passwordSalt;
+
+    [Column(StringLength = 32, IsNullable = false)]
+    string nickname;
+
+    /* 0=战士 1=法师 2=道士；模板只用职业名，玩法扩展自定。 */
+    int job;
+
+    int level;
+
+    long gold;
+    long gems;
+
+    /* 当前所在地图（game_map.id）与坐标；移动合法性由网关校验。 */
+    int mapId;
+    int x;
+    int y;
+
+    /* 1=正常；0=封禁（banReason 说明原因，GM 页可读改）。 */
+    int status;
+
+    [Column(StringLength = 128)]
+    string banReason;
+
+    long lastLoginAt;
+    long lastLogoutAt;
+
+    long createdAt;
+    long updatedAt;
+}

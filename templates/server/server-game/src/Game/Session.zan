@@ -1,0 +1,28 @@
+using System;
+using System.Net;
+
+namespace ZanWeb.Game;
+
+/* 一条在线会话 = 一个已通过网关登录的玩家。持有数据库行的内存副本，
+   在线期间的变更（移动、聊天、GM 发奖）都改这份副本并置 dirty，由
+   World 的 tick 定期与登出时落库——在线玩家以内存为权威，避免 GM 页
+   与网关两条写路径互相覆盖。字段与行一样公开可读，但写入请走 World
+   的入口，让 dirty 与推送不漏。Zan 调度器是协作式单线程，会话表无需
+   加锁，只要不跨 await 持有半更新的状态即可。 */
+class Session {
+    /* 网关连接 id（进程内自增，唯一）。 */
+    int cid;
+
+    /* 该玩家的 TCP 连接；Kick 走 conn.Close()，onClose 随后清理。 */
+    System.Net.Connection conn;
+
+    /* 数据库行的内存副本；落库与读档都经它。 */
+    ZanWeb.Model.Game.Player row;
+
+    bool dirty;
+    long lastSeen;
+    long loginAt;
+
+    /* 被顶号或 GM 踢出时置位：登出推送据此区分主动离线。 */
+    bool kicked;
+}

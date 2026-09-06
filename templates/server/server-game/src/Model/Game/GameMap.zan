@@ -1,0 +1,19 @@
+using System.Data.Orm;
+
+namespace ZanWeb.Model.Game;
+
+/* 地图表。种子写入五张初始地图；minLevel 是进入门槛，网关在 move 时
+   校验。status=1 开放。GM 可直接改库加图，客户端登录时拉取全表。 */
+[Table(Name = "game_map")]
+class GameMap {
+    [Column(IsIdentity = true)]
+    int id;
+
+    [Column(StringLength = 64, IsNullable = false)]
+    string name;
+
+    int minLevel;
+    int sortOrder;
+
+    int status;
+}

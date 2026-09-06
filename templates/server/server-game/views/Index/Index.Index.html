@@ -1,0 +1,34 @@
+<section class="a-hero">
+  <span class="pill">游戏服务器运行中</span>
+  <h1>{{siteTitle}}</h1>
+  <p class="tag">传奇类多人在线模板 · 权威服务端</p>
+  <p class="lede">局域网内用任意 TCP 客户端连 <b>{{gamePort}}</b> 端口即可进入游戏；管理后台提供玩家、在线会话与公告管理。当前在线 <b>{{online}}</b> 人。</p>
+  <div class="btn-row">
+    <a class="btn btn-primary" href="/admin">进入管理后台</a>
+    <a class="btn" href="/login">GM 登录</a>
+  </div>
+</section>
+
+<section class="a-section alt">
+  <div class="a-inner">
+    <p class="a-eyebrow">开区公告</p>
+    <h2 class="a-title">{{annTitle}}</h2>
+    <p class="a-sub">{{annBody}}</p>
+    {{#if noAnnounce}}<p class="a-sub">暂无公告。</p>{{/if}}
+  </div>
+</section>
+
+<section class="a-section">
+  <div class="a-inner wide">
+    <p class="a-eyebrow">开放地图（{{mapCount}}）</p>
+    <div class="a-pains">
+      {{#each maps}}
+      <div class="a-pain">
+        <p class="p">{{name}}</p>
+        <p class="f">进入等级 {{minLevel}}</p>
+      </div>
+      {{/each}}
+    </div>
+    {{#if noMaps}}<p class="a-sub">暂无开放地图。</p>{{/if}}
+  </div>
+</section>

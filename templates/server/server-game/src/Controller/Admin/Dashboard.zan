@@ -1,0 +1,111 @@
+using System;
+using System.Data;
+using System.Json;
+using System.Web;
+using ZanWeb;
+using ZanWeb.Model.Game;
+using ZanWeb.Game;
+
+namespace ZanWeb.Admin;
+
+/* /admin 仪表盘：玩家经济 KPI（玩家数、金币/元宝总量）+ 实时在线
+   会话（与在线页同取 World 内存态）+ 请求指标（与监控同取一份快照，
+   经 metrics 事件流推送）。 */
+[Route("admin/[controller]/[action]")]
+[Custom(Authorization = CustomAuthorization.Login)]
+[Description("仪表盘")]
+class Dashboard : AdminController {
+    /* 侧边栏条目即此属性——见 AdminController.Layout，向 MenuBuilder 询问该账号可到达的项。 */
+    [HttpGet]
+    [Route("/admin")]
+    [Custom(IsMenu = true, Icon = "mdi:gauge")]
+    [Description("仪表盘")]
+    async void Index() {
+        ViewData d = await this.Layout("仪表盘");
+
+        JsonValue m = JsonValue.ParseLenient(WebHost.Current().MetricsJson());
+        JsonValue req = m.Get("requests");
+        if (req == null) { req = JsonValue.NewObject(); }
+
+        d.Set("requests", Convert.ToString(req.Long("count", 0)));
+        d.Set("errors", Convert.ToString(req.Long("errors", 0)));
+        d.Set("avg", Fmt.Dur(req.Long("avg_us", 0)));
+        d.Set("uptime", Fmt.Uptime(m.Long("uptime_ms", 0)));
+
+        d.Set("players", "—");
+        d.Set("banned", "—");
+        d.Set("gold", "—");
+        d.Set("gems", "—");
+        if (this.DbReady()) {
+            int players = await this.Player.CountAsync();
+            int banned = await this.Player
+                .Where(a => a.status == 0).CountAsync();
+            List<Player> all = await this.Player.ToListAsync();
+            long gold = 0;
+            long gems = 0;
+            for (int i = 0; i < all.Count; i = i + 1) {
+                gold = gold + all[i].gold;
+                gems = gems + all[i].gems;
+            }
+            d.Set("players", Convert.ToString(players));
+            d.Set("banned", Convert.ToString(banned));
+            d.Set("gold", Convert.ToString(gold));
+            d.Set("gems", Convert.ToString(gems));
+
+            List<LoginLog> logins = await this.LoginLog
+                .OrderByDescending(a => a.id).Take(8).ToListAsync();
+            List<StrMap> lrows = d.AddList("logins");
+            for (int i = 0; i < logins.Count; i = i + 1) {
+                LoginLog l = logins[i];
+                StrMap row = new StrMap();
+                row.Set("username", Fmt.Dash(l.username));
+                row.Set("ip", Fmt.Dash(l.ip));
+                row.Set("createdAt", Fmt.Stamp(l.createdAt));
+                row.Set("okText", Dashboard.OkText(l.ok));
+                row.Set("okClass", Dashboard.OkClass(l.ok));
+                lrows.Add(row);
+            }
+            if (logins.Count == 0) { d.Set("noLogins", "1"); }
+        } else {
+            d.Set("dbDown", "1");
+        }
+
+        /* 在线会话来自 World 内存态：与在线页同源，不看库。 */
+        List<Session> live = World.All();
+        long now = WebApp.NowSeconds();
+        d.Set("online", Convert.ToString(live.Count));
+        List<GameMap> maps = new List<GameMap>();
+        if (this.DbReady()) {
+            maps = await this.GameMap.OrderBy(a => a.sortOrder).ToListAsync();
+        }
+        List<StrMap> orows = d.AddList("onlineRows");
+        for (int i = 0; i < live.Count && i < 10; i = i + 1) {
+            Session s = live[i];
+            StrMap row = new StrMap();
+            row.Set("username", s.row.username);
+            row.Set("level", Convert.ToString(s.row.level));
+            row.Set("map", Dashboard.MapName(maps, s.row.mapId));
+            row.Set("idle", Fmt.Dur((now - s.lastSeen) * 1000000));
+            orows.Add(row);
+        }
+        if (live.Count == 0) { d.Set("noOnline", "1"); }
+        this.Page(d);
+    }
+
+    static string OkText(int ok) {
+        if (ok == 1) { return "成功"; }
+        return "失败";
+    }
+
+    static string OkClass(int ok) {
+        if (ok == 1) { return "ok"; }
+        return "bad";
+    }
+
+    static string MapName(List<GameMap> maps, int id) {
+        for (int i = 0; i < maps.Count; i = i + 1) {
+            if (maps[i].id == id) { return maps[i].name; }
+        }
+        return "#" + Convert.ToString(id);
+    }
+}

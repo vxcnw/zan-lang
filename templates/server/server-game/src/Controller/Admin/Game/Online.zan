@@ -1,0 +1,91 @@
+using System;
+using System.Data;
+using System.Data.Orm;
+using System.Web;
+using ZanWeb;
+using ZanWeb.Model.Game;
+using ZanWeb.Game;
+
+namespace ZanWeb.Admin.Game;
+
+/* /admin/game/online 在线会话：世界内存态的直接视口（不查玩家表，
+   数字即真实会话数），支持单点踢下线与全服喊话。会话不记录对端 IP
+   （Worker 的 TCP 连接不暴露远端地址），需要审计时看操作日志。 */
+[Route("admin/game/online/[action]")]
+[Custom(Authorization = CustomAuthorization.Grant)]
+[Description("在线会话")]
+class Online : AdminController {
+    [HttpGet]
+    [Route("/admin/game/online")]
+    [Custom(IsMenu = true, Icon = "mdi:radar", Perm = PermBit.View)]
+    [Description("在线会话")]
+    async void Index() {
+        ViewData d = await this.Layout("在线会话");
+        List<Session> rows = World.All();
+        long now = WebApp.NowSeconds();
+        List<GameMap> maps = new List<GameMap>();
+        if (this.DbReady()) {
+            maps = await this.GameMap.OrderBy(a => a.sortOrder).ToListAsync();
+        }
+        d.Set("count", Convert.ToString(rows.Count));
+        List<StrMap> items = d.AddList("rows");
+        for (int i = 0; i < rows.Count; i = i + 1) {
+            Session s = rows[i];
+            StrMap row = new StrMap();
+            row.Set("cid", Convert.ToString(s.cid));
+            row.Set("uid", Convert.ToString(s.row.id));
+            row.Set("username", s.row.username);
+            row.Set("nickname", Fmt.Dash(s.row.nickname));
+            row.Set("level", Convert.ToString(s.row.level));
+            row.Set("map", Online.MapName(maps, s.row.mapId));
+            row.Set("pos", Convert.ToString(s.row.x) + ","
+                + Convert.ToString(s.row.y));
+            row.Set("loginAt", Fmt.Stamp(s.loginAt));
+            row.Set("idle", Fmt.Dur((now - s.lastSeen) * 1000000));
+            items.Add(row);
+        }
+        if (rows.Count == 0) { d.Set("empty", "1"); }
+        this.Page(d);
+    }
+
+    /* 按 cid 踢下线。 */
+    [HttpPost]
+    [Custom(Perm = PermBit.Update)]
+    [Description("踢下线")]
+    async void Kick() {
+        int cid = this.InInt("cid", 0);
+        Session s = World.ByCid(cid);
+        if (s == null) { this.Fail(404, "0404", "该会话已不在线"); }
+        string who = s.row.username;
+        World.Kick(s.row.id, "GM 强制下线");
+        await this.Note("在线踢下线", "#" + Convert.ToString(cid)
+            + " " + who, true, "");
+        this.Saved("已断开该会话");
+    }
+
+    /* 全服喊话：经聊天通道推送，from 为当前 GM。 */
+    [HttpPost]
+    [Custom(Perm = PermBit.Update)]
+    [Description("全服喊话")]
+    async void Broadcast() {
+        string text = this.Need("text", "喊话内容");
+        if (text.Length > 200) {
+            this.Fail(400, "0003", "喊话最长 200 字符");
+        }
+        string from = "GM";
+        if (this.who != null) {
+            from = Fmt.Text(this.who.nickname, this.who.username);
+        }
+        int hit = World.Broadcast(from, text);
+        await this.Note("全服喊话", text, true,
+            Convert.ToString(hit) + " 人在线");
+        this.Saved("已推送给 " + Convert.ToString(hit) + " 个在线会话");
+    }
+
+    static string MapName(List<GameMap> maps, int id) {
+        for (int i = 0; i < maps.Count; i = i + 1) {
+            if (maps[i].id == id) { return maps[i].name; }
+        }
+        return "#" + Convert.ToString(id);
+    }
+}
