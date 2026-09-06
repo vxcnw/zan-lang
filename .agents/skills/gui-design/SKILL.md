@@ -1,6 +1,6 @@
 ---
 name: gui-design
-description: Zan GUI (stdlib/Gui) 的审美与排版规范——对齐、间距、尺寸统一、层级与克制,以及商务/街头嘻哈/赛博/国风/极简/玻璃拟态/新拟态/豪华/波普等风格配方,适用于任何使用 Zan 标准库 Gui 的项目(随工具链发布给用户)。凡是用 stdlib/Gui 写界面(窗口、页面、HMI、自定义组件)、做皮肤/换风格,或用户提到 好看/美观/精致/精美/对齐/间距/尺寸统一/风格/审美/商务/酷炫 时使用;界面写完收尾自查也用它。
+description: Zan GUI (stdlib/Gui) 的审美与排版规范——对齐、间距、尺寸统一、层级与克制,以及商务/街头嘻哈/赛博/国风/极简/玻璃拟态/新拟态/豪华/波普等风格配方,适用于任何使用 Zan 标准库 Gui 的项目(随工具链发布给用户)。凡是用 stdlib/Gui 写界面(窗口、页面、HMI、自定义组件)、做皮肤/换风格,或用户提到 好看/美观/精致/精美/对齐/间距/尺寸统一/风格/审美/商务/酷炫 时使用;界面写完收尾自查也用它。复杂窗口布局迭代(标题栏/导航/内容/弹窗/动效从混乱到收口)、自定义或加高标题栏、窗口拖动与命中区、弹窗居中与层序、飘带等氛围动效,写码前先读 references/layout-iteration.md。
 ---
 
 # Zan GUI 界面审美规范
@@ -12,6 +12,9 @@ description: Zan GUI (stdlib/Gui) 的审美与排版规范——对齐、间距�
 - 主流风格九张配方卡:`references/style-directions.md`(用户点名风格、
   或要求"好看一点"而现有皮肤不对味时,写码前先选卡)
 - 页面搭配模式与反模式:`references/composition.md`(写页面布局前先读)
+- 复杂窗口的迭代过程纪律(先问框架要、加高标题栏三处同步、动效帧调度、
+  弹窗层序、截图驱动的小步收口):`references/layout-iteration.md`
+  (标题栏+导航+内容+弹窗+动效的窗口,动手前先读——每条都是真实返工换来的)
 - 立即模式心智模型/控件目录:`docs/agent-kb/gui-development.md`
 - 样式解析规则:`docs/GUI_STYLE_RESOLUTION.md`;Tailwind 原子类全集:`docs/GUI_TAILWIND.md`
 
@@ -113,7 +116,8 @@ token 定义在 `stdlib/Gui/Theme.zan`,由 `Style.zan` 导出为 `:root` 变量,
 ## 验证
 
 - 编译:`zanc <file>.zan --auto-stdlib -o out.exe`(GUI 程序自动带 zan_gui 驱动)。
-- 跑起来真实看一眼,截图对照自查清单;交互(点击/拖拽/键盘)用
+- 跑起来真实看一眼,截图对照自查清单(截图必须锚定被调试窗口的 PID、按窗口
+  截取并先验证再判断,规范见 `testing-gui-screenshot` skill);交互(点击/拖拽/键盘)用
   `ZAN_UI_SCRIPT` UiDriver 驱动做可重复流程,不要手点一次就算完。
 
 ## 在 zan-lang 仓库内工作(仅仓库内,发布给用户的版面无此节内容)
