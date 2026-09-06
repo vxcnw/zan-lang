@@ -138,12 +138,23 @@ partial class ChartView {
             int gy = plotY + plotH - (k * plotH / yTicks);
             c.FillRect(plotX, gy, plotW, 1, sGrid.BgOr(0));
             string vs = Convert.ToString(yLo + ySpan * k / yTicks);
+            if (o.yAxes.Count > 0 && o.yAxes[0].labelFormatter.Length > 0) {
+                vs = o.yAxes[0].labelFormatter.Replace("{value}", vs);
+            }
             int vw = Canvas.MeasureText(vs, axisFs);
             c.DrawText(plotX - app.Scale(6) - vw, Canvas.CenterTextYAt(gy, axisFs), vs, sAxis.FgOr(0), axisFs);
             int gx = plotX + k * plotW / xTicks;
             // ECharts splitLine 横竖两向都有。
             c.FillRect(gx, plotY, 1, plotH, sGrid.BgOr(0));
-            c.DrawTextCentered(gx - app.Scale(20), plotY + plotH + app.Scale(4), app.Scale(40), botGut, Convert.ToString(xLo + xSpan * k / xTicks), sAxis.FgOr(0), axisFs);
+            string xs = Convert.ToString(xLo + xSpan * k / xTicks);
+            if (o.xAxes.Count > 0 && o.xAxes[0].labelFormatter.Length > 0) {
+                xs = o.xAxes[0].labelFormatter.Replace("{value}", xs);
+            }
+            // 长标签（formatter 加了「类目」前缀之类）加宽居中框，
+            // 短标签维持原 40px 几何。
+            int xw = Canvas.MeasureText(xs, axisFs) + app.Scale(8);
+            if (xw < app.Scale(40)) { xw = app.Scale(40); }
+            c.DrawTextCentered(gx - xw / 2, plotY + plotH + app.Scale(4), xw, botGut, xs, sAxis.FgOr(0), axisFs);
         }
         c.FillRect(plotX, plotY, app.Scale(2), plotH, sAxis.BgOr(0));
         c.FillRect(plotX, plotY + plotH, plotW, app.Scale(2), sAxis.BgOr(0));

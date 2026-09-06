@@ -210,16 +210,40 @@ partial class Charts {
         Charts.Show(app, o, x, y, w, h);
     }
 
+    /// ECharts2 scatter5「类目坐标散点图」：500 个类目 × 2 系列，
+    /// 每点 [类目序号, y=0..30.00, z=0..100.00]，气泡直径
+    /// round(z/10)、颜色按 z 走 lightgreen→orange 渐变；dataZoom
+    /// 初始窗口 30%..70%。随机量用逐系列二次 mod 流形替代。
     static void Scatter4(App app, int x, int y, int w, int h) {
-        List<ChartPoint> pts = new List<ChartPoint>();
-        for (int i = 0; i < 40; i = i + 1) {
-            pts.Add(ChartPoint.Of(i, 20 + (i * 13) % 50));
+        List<int> ramp = new List<int>{
+            Chart.Rgb(173, 255, 47), Chart.Rgb(255, 165, 0) };
+        ChartSeries s1 = ChartSeries.OfPoints(Charts.T("series1", "series1"),
+            new List<ChartPoint>());
+        ChartSeries s2 = ChartSeries.OfPoints(Charts.T("series2", "series2"),
+            new List<ChartPoint>());
+        s1.pointG = 100;
+        s2.pointG = 100;
+        for (int i = 0; i < 500; i = i + 1) {
+            int y1 = (i * i * 7 + i * 61 + 13) % 3001;
+            int z1 = (i * i * 11 + i * 89 + 29) % 10001;
+            ChartPoint p1 = ChartPoint.Sized((i + 1) * 100, y1, (z1 + 500) / 1000);
+            p1.color = Chart.RampAt(ramp, z1 / 10);
+            s1.points.Add(p1);
+            int y2 = (i * i * 13 + i * 97 + 511) % 3001;
+            int z2 = (i * i * 17 + i * 43 + 733) % 10001;
+            ChartPoint p2 = ChartPoint.Sized((i + 1) * 100, y2, (z2 + 500) / 1000);
+            p2.color = Chart.RampAt(ramp, z2 / 10);
+            s2.points.Add(p2);
         }
-        ChartOption o = ChartOption.Of(Charts.T("Category scatter", "类目散点图"),
-            Charts.Week(), new List<ChartSeries>{
-                ChartSeries.OfPoints(Charts.T("Samples", "样本"), pts)
-            });
+        ChartOption o = ChartOption.Of(Charts.T("Category scatter", "类目坐标散点图"),
+            null, new List<ChartSeries>{ s1, s2 });
+        o.titleSub = Charts.T("dataZoom support", "dataZoom支持");
+        ChartAxis xa = ChartAxis.Value();
+        xa.labelFormatter = Charts.T("Category {value}", "类目{value}");
+        o.X(xa);
         o.zoom = true;
+        o.zoomStart = 30;
+        o.zoomEnd = 70;
         Charts.Show(app, o, x, y, w, h);
     }
 
