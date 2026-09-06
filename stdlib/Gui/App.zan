@@ -81,6 +81,15 @@ class App {
     int designH;
     int titlebarH;
     int captionBtnW;
+    // 应用在系统标题按钮左侧追加的功能按钮（玻璃胶囊）：
+    // 稳定 id + 标签，由 RenderCaptionButtons 随 chrome 每帧
+    // 渲染并注册命中区，点击照常经 Ui.Clicked(id) 送达应用。
+    int[] capActionIds;
+    string[] capActionLabels;
+    // 品牌图标字形名（默认 "home"），可用 SetChromeBrandIcon 换成
+    // 图标库里的任意字形（如 "rocket"）。大小/颜色走
+    // CSS `titlebar::brand`。
+    string chromeBrandIcon;
     int splitX;
     int sidebarScrollY;
     int sidebarContentHeight;
@@ -195,14 +204,21 @@ class App {
     int shapeMode;
     int shapeRadius;
     string shapeSpec;
-    // 异形轮廓投影（逻辑像素扩散量，0 = 无）：由
-    // RenderBackground 在控件树之前绘制，使每个形状区域投下柔和的
-    // 阴影。设计中的 winShadow 还会让 formgen 前置追加一个 type-3
-    // "阴影带"区域（全窗口圆角矩形）到规格中，使操作系统
-    // 表面覆盖阴影像素。shapeRects 以逻辑像素镜像已解析的规格，
-    // 使 App 无需接触后端即可绘制阴影。
+    // 异形轮廓投影（逻辑像素扩散量，0 = 无）：系统表面会向四周
+    // 外扩 shapeShadow 逻辑像素（Win32 FitShapeWindow / 非 Windows
+    // 后端 zan_gui_set_shape 各自负责），RenderBackground 在控件树
+    // 之前把柔和投影画进轮廓外的这圈扩展带。设计中的 winShadow
+    // 还会让 formgen 前置追加一个 type-3 "阴影带"区域（全窗口
+    // 圆角矩形）到规格中，标记外扩后的表面边界。shapeRects 以
+    // 逻辑像素镜像已解析的规格，使 App 无需接触后端即可绘制阴影。
     int shapeShadow;
     List<int> shapeRects;
+    // SetWindowShadow 外扩时整份规格被平移 (px, px)（FitShapeWindow
+    // 拒绝负坐标包围盒，见 SetWindowShadow 注释），因此画布上的内容
+    // 轮廓相对窗口左上角偏移了 (px, px)：阴影、填充与自绘标题栏
+    // 都要按这个偏移定位，否则整幅画面会"缩"进窗口右下角。
+    int shapeOffX;
+    int shapeOffY;
     // 是否绘制自定义标题栏装饰（品牌区 + 标题按钮）。
     // 对于设计自带头部区域的异形/无边框窗口保持隐藏；
     // 无论哪种方式，操作系统都会保持顶部 TitlebarHeight() 条带可拖动。
@@ -672,7 +688,7 @@ class App {
         this.scrollSpeed = 40;
         this.dpiScale = 100;
         this.titlebarH = 32;
-        this.captionBtnW = 46;
+        this.captionBtnW = 32;
         this.splitX = 0;
         this.sidebarScrollY = 0;
         this.sidebarContentHeight = 0;
@@ -716,6 +732,8 @@ class App {
         this.shapeMode = 0;
         this.shapeRadius = 0;
         this.shapeSpec = "";
+        this.shapeOffX = 0;
+        this.shapeOffY = 0;
         this.windowResizable = true;
         this.showChrome = true;
         this.chromeStatus = "";
@@ -1288,6 +1306,10 @@ class App {
     void SetWindowShape(string spec) {
         shapeSpec = spec;
         this.ParseShapeSpec(spec);
+        // 新规格以 (0,0) 为原点，重置阴影带偏移（SetWindowShadow
+        // 在此外扩时会把整份规格平移并再次累加偏移）。
+        shapeOffX = 0;
+        shapeOffY = 0;
         if (spec.Length == 0) {
             shapeMode = 0;
             shapeRadius = 0;
@@ -1325,13 +1347,12 @@ class App {
     }
 
     /// 围绕异形轮廓的柔和投影。`px` 是阴影的逻辑
-    /// 扩展范围（0 禁用）。当形状规格尚未包含
-    /// 阴影带时，会自动在开头追加一个覆盖形状包围盒向四周扩展 `px` 的
-    /// 类型 3 区域，使 OS 表面延伸到
-    /// 阴影像素之上，软件绘制的渐变永远不会
-    /// 被裁剪。形状应从其包围盒向内缩进至少 `px`
-    /// （例如 px 为 24 时的 "1,24,24,520,360,20"），使阴影带保持在屏幕上。
-    /// 在 SetWindowShape 之后、Run 之前调用。
+    /// 扩展范围（0 禁用）。会自动在形状规格开头追加一个覆盖
+    /// 形状包围盒向四周扩展 `px` 的类型 3 区域，把 OS 表面
+    /// 外扩到轮廓之外：Win32 由 FitShapeWindow 按扩展后的包围盒
+    /// 定窗口尺寸，其他平台由后端 zan_gui_set_shape 同样外扩，
+    /// 内容轮廓保持原坐标，投影画在轮廓外的扩展带里。
+    /// 在 SetWindowShape 之后、Show 之前调用。
     void SetWindowShadow(int px) {
         if (px < 0) { px = 0; }
         shapeShadow = px;
@@ -1356,12 +1377,36 @@ class App {
                 i = i + 6;
             }
             if (minX <= maxX && minY <= maxY) {
-                string band = "3," + Convert.ToString(minX - px) + ","
-                    + Convert.ToString(minY - px) + ","
+                // FitShapeWindow 拒绝负坐标的包围盒（"超出窗口上方/
+                // 左方的形状保持不变"），外扩必须同时平移：把整份
+                // 规格平移 (px, px)，band 从 (0,0) 起，内容轮廓
+                // 相应右移下移，屏幕上的合成结果不变。
+                int i2 = 0;
+                StringBuilder shifted = new StringBuilder();
+                while (i2 + 5 < shapeRects.Count) {
+                    if (i2 > 0) { shifted.Append(";"); }
+                    shifted.Append(Convert.ToString(shapeRects[i2]));
+                    shifted.Append(",");
+                    shifted.Append(Convert.ToString(shapeRects[i2 + 1] + px));
+                    shifted.Append(",");
+                    shifted.Append(Convert.ToString(shapeRects[i2 + 2] + px));
+                    shifted.Append(",");
+                    shifted.Append(Convert.ToString(shapeRects[i2 + 3]));
+                    shifted.Append(",");
+                    shifted.Append(Convert.ToString(shapeRects[i2 + 4]));
+                    shifted.Append(",");
+                    shifted.Append(Convert.ToString(shapeRects[i2 + 5]));
+                    i2 = i2 + 6;
+                }
+                string band = "3,0,0,"
                     + Convert.ToString(maxX - minX + px * 2) + ","
                     + Convert.ToString(maxY - minY + px * 2) + ",0";
-                shapeSpec = band + ";" + shapeSpec;
+                shapeSpec = band + ";" + shifted.ToString();
                 this.ParseShapeSpec(shapeSpec);
+                // 记下内容轮廓的新原点：PaintShapeShadow / PaintShapeFill /
+                // RenderChrome 都按 (shapeOffX, shapeOffY) 定位。
+                shapeOffX = shapeOffX + px;
+                shapeOffY = shapeOffY + px;
                 window.SetShape(shapeSpec);
             }
         }
@@ -1433,6 +1478,37 @@ class App {
         chromeStatus = text;
         chromeAccent = accent;
         this.RequestRedraw();
+    }
+
+    /// 自定义标题栏品牌图标：传图标库字形名（如 "rocket"），
+    /// 传空串恢复默认 "home"。大小/颜色走 CSS `titlebar::brand`。
+    void SetChromeBrandIcon(string icon) {
+        if (chromeBrandIcon == icon) { return; }
+        chromeBrandIcon = icon;
+        this.RequestRedraw();
+    }
+
+    /// 运行期加高自绘标题栏（设备像素，不小于当前值）。chrome 的
+    /// 背景、标题、状态位与标题按钮的布局都跟随该值；后端的
+    /// 原生拖动条带同步加高，整条标题栏都能拖动。
+    /// 在帧内调用（Show 会在启动时重读后端默认值）。
+    void SetTitlebarHeight(int devicePx) {
+        if (devicePx <= titlebarH) { return; }
+        titlebarH = devicePx;
+        window.SetTitlebarHeight(devicePx);
+        this.RequestRedraw();
+    }
+
+    /// 在系统标题按钮左侧追加应用功能按钮：玻璃胶囊样式（半透明
+    /// 白底白字，悬停变亮），随 chrome 每帧渲染并注册命中区。
+    /// ids 须是应用以 focus.PushIds 专用段分配的稳定 id，点击
+    /// 照常经 Ui.Clicked(id) 送达。须在 RunLoop 之前设置，
+    /// 原生免拖区宽度会把这些按钮一并计入。
+    void SetCaptionActions(int[] ids, string[] labels) {
+        if (ids == null || labels == null) { return; }
+        if (ids.Length != labels.Length || ids.Length > 4) { return; }
+        capActionIds = ids;
+        capActionLabels = labels;
     }
 
     /// 当前标题栏状态文本（常规段）。
@@ -1771,6 +1847,8 @@ class App {
         // 只负责按轮廓合成，轮廓内的像素仍要自己画——所以这里
         // 用皮肤底色铺满每个形状区域（先画投影，再铺底），
         // 设计里没有铺满窗口的背景控件时，窗口才不会整个透明。
+        // 参数是内容区坐标（调用方按 ContentTop/ClientWidth 布局），
+        // 这里忽略：轮廓与阴影带覆盖整幅表面，按画布坐标一次画完。
         if (shapeMode != 0) {
             if (shapeShadow > 0) { this.PaintShapeShadow(); }
             this.PaintShapeFill();
@@ -1830,47 +1908,40 @@ class App {
     }
 
     /// 用皮肤底色铺满异形窗口的轮廓（见 RenderBackground）。
-    /// 类型 3 的阴影带只是把系统表面撑大，不参与填充；
-    /// 投影占的那圈边也要留出来（见 ShapeInset），否则底色
-    /// 盖住光晕，圆角窗口看上去就没了阴影。
+    /// 类型 3 的阴影带只是把系统表面撑大，不参与填充。
+    /// 填充铺满整个轮廓：内容贴着窗口边缘，投影从轮廓边缘向外
+    /// 衰减到阴影带里（见 PaintShapeShadow）；落在轮廓内的那半圈
+    /// 衰减带被这张不透明底色盖住，不会脏到内容。
     void PaintShapeFill() {
         if (shapeRects.Count == 0) { return; }
         Canvas c = canvas;
         StyleBox shapeStyle = Style.Part(this, "windowbg", "shape", "",
                                           "", "", Style.SNormal());
         int col = shapeStyle.BgOr(0);
-        int pad = this.ShapeInset();
         int i = 0;
         while (i + 5 < shapeRects.Count) {
             int t = shapeRects[i];
             if (t != 3) {
-                int x = this.Scale(shapeRects[i + 1]) + pad;
-                int y = this.Scale(shapeRects[i + 2]) + pad;
-                int w = this.Scale(shapeRects[i + 3]) - pad * 2;
-                int h = this.Scale(shapeRects[i + 4]) - pad * 2;
-                int r = this.Scale(shapeRects[i + 5]) - pad;
+                // shapeRects 已被 SetWindowShadow 平移到画布坐标，
+                // 这里不能再加 ShapeOffX/Y（否则双重偏移）。
+                int x = this.Scale(shapeRects[i + 1]);
+                int y = this.Scale(shapeRects[i + 2]);
+                int w = this.Scale(shapeRects[i + 3]);
+                int h = this.Scale(shapeRects[i + 4]);
+                int r = this.Scale(shapeRects[i + 5]);
                 if (r < 0) { r = 0; }
                 if (w > 0 && h > 0) {
                     if (t == 2) {
                         this.FillEllipse(x, y, w, h, col);
-                    } else {
+                    } else if (r > 0) {
                         c.FillRoundRect(x, y, w, h, r, col);
+                    } else {
+                        c.FillRect(x, y, w, h, col);
                     }
                 }
             }
             i = i + 6;
         }
-    }
-
-    /// 轮廓内留给投影的边（设备像素）。操作系统按形状裁剪
-    /// 表面，形状之外的像素根本出不来，所以光晕只能画在
-    /// 轮廓里头：填充向内缩 shadow 像素，投影从缩后的轮廓
-    /// 向外扩到形状边缘。
-    int ShapeInset() {
-        if (shapeShadow <= 0) { return 0; }
-        int pad = this.Scale(shapeShadow);
-        if (pad < 0) { pad = 0; }
-        return pad;
     }
 
     /// 椭圆填充（渲染器只有正圆），按行扫描：轮廓由
@@ -1927,27 +1998,40 @@ class App {
                                            "", "", "", Style.SNormal());
         int baseCol = shadowStyle.BgOr(0);
         if (baseCol == 0) { baseCol = 0x50000000; }
-        // 峰值 alpha：主题的阴影着色（非常淡），但绝不能暗到
-        // 让光晕看起来像硬边轮廓。
+        // 峰值 alpha：主题的阴影着色。火绒的影子贴边约三成黑、向
+        // 外一扫即淡，所以峰值压在 0x66（约 40%）上下——高了整圈
+        // 变成黑晕，低了在浅色壁纸上没存在感。
         int peak = (baseCol >> 24) & 255;
-        if (peak < 40) { peak = 40; }
-        if (peak > 110) { peak = 110; }
+        if (peak < 90) { peak = 90; }
+        if (peak > 105) { peak = 105; }
         int rgb = baseCol % 16777216;
         if (rgb < 0) { rgb = rgb + 16777216; }
-        int pad = this.ShapeInset();
         int i = 0;
         while (i + 5 < shapeRects.Count) {
             int t = shapeRects[i];
             if (t == 3) { i = i + 6; continue; }
-            int x = this.Scale(shapeRects[i + 1]) + pad;
-            int y = this.Scale(shapeRects[i + 2]) + pad;
-            int w = this.Scale(shapeRects[i + 3]) - pad * 2;
-            int h = this.Scale(shapeRects[i + 4]) - pad * 2;
-            int r = this.Scale(shapeRects[i + 5]) - pad;
+            // shapeRects 已含 SetWindowShadow 的 (px,px) 平移，
+            // 直接就是画布坐标——再叠加 ShapeOffX/Y 会双重偏移。
+            int x = this.Scale(shapeRects[i + 1]);
+            int y = this.Scale(shapeRects[i + 2]);
+            int w = this.Scale(shapeRects[i + 3]);
+            int h = this.Scale(shapeRects[i + 4]);
+            int r = this.Scale(shapeRects[i + 5]);
             if (r < 0) { r = 0; }
             if (w <= 0 || h <= 0) { i = i + 6; continue; }
-            int col = (peak << 24) | rgb;
-            c.ShadowRoundRect(x, y, w, h, r, blur, col);
+            // "由深到浅"的渐变要贴着轮廓收短：渲染器的衰减带以
+            // 矩形边为中心（两侧各 fade/2），把矩形向外扩 fade/2
+            // （圆角同心扩大），全峰值恰好落在轮廓边、轮廓外约
+            // fade 处归零。fade 取阴影带的一半——smoothstep 的
+            // 长尾会往远处拖 10+px 的淡影，带越满影子越"远"，
+            // 火绒的影子是贴边一扫即收的窄晕。
+            int fade = (blur + 1) / 2;
+            int hx = (fade + 1) / 2;
+            int sr = r + hx;
+            if (sr > w / 2) { sr = w / 2; }
+            if (sr > h / 2) { sr = h / 2; }
+            c.ShadowRoundRect(x - hx, y - hx, w + hx * 2, h + hx * 2,
+                sr, fade, (peak << 24) | rgb);
             i = i + 6;
         }
     }
@@ -1976,6 +2060,19 @@ class App {
         fxTouchedFull = false;
         if (!on) { fxNextMs = -1; }
         this.NoteRedrawWhy("SetBackdropFx");
+        needsRedraw = true;
+    }
+
+    /// 从 Gui 动画库（Gui.BackdropFx）中选择动态背景效果：
+    /// 传 KindXxx() 常量覆盖皮肤自带效果，传 0 关闭，
+    /// 传 -1 恢复跟随当前皮肤。
+    void SetFxKind(int kind) {
+        if (fxKindOverride == kind) { return; }
+        fxKindOverride = kind;
+        fxSnapValid = false;
+        fxTouched = null;
+        fxTouchedFull = false;
+        this.NoteRedrawWhy("SetFxKind");
         needsRedraw = true;
     }
 
@@ -2498,6 +2595,7 @@ class App {
         if (showPinButton) { count = count + 1; }
         if (showMinimizeButton) { count = count + 1; }
         if (showMaximizeButton) { count = count + 1; }
+        if (capActionIds != null) { count = count + capActionIds.Length; }
         return count;
     }
 
@@ -2524,7 +2622,8 @@ class App {
     /// 不到屏幕上（只有别的原因触发整窗重绘时才闪一下）。
     bool CaptionTipShown(int id, int bx, int bw, int hbar) {
         int rh = hbar + this.Scale(80);
-        return Ui.HoverLevelMsIn(this, id, 0, this.CaptionTipX(bx, bw), 0,
+        int ty = this.ShapeOffY();
+        return Ui.HoverLevelMsIn(this, id, 0, this.CaptionTipX(bx, bw), ty,
             this.Scale(300), rh) >= 900;
     }
 
@@ -2544,6 +2643,8 @@ class App {
         if (id == capTipId) { return; }
         int tipW = this.Scale(300);
         int tipH = hbar + this.Scale(80);
+        // hbar 已含阴影带顶偏移（RenderCaptionButtons 传 stripH +
+        // ShapeOffY），失效矩形从画布顶算起即可覆盖旧/新位置。
         if (capTipId != 0) {
             this.RequestAnimationFrameIn(16, capTipX, 0, tipW, tipH);
         }
@@ -2690,7 +2791,7 @@ class App {
         titlebarH = Window.TitlebarHeight();
         captionBtnW = Window.CaptionButtonWidth();
         if (titlebarH < 24) { titlebarH = Scale(32); }
-        if (captionBtnW < 24) { captionBtnW = Scale(46); }
+        if (captionBtnW < 24) { captionBtnW = Scale(32); }
         int nCap = 0;
         if (showChrome) { nCap = ChromeButtonCount(); }
         window.SetCaptionButtons(nCap);
@@ -2892,7 +2993,8 @@ class App {
     string LastFrameError() { return lastFrameError; }
 
     /// 自定义标题栏占用的高度；内容应从其下方开始。
-    /// 边框隐藏时为 0（见 SetChromeVisible）。
+    /// 边框隐藏时为 0（见 SetChromeVisible）。这是内容区内的
+    /// 相对高度：阴影带的画布偏移由渲染层处理，不在此叠加。
     int ContentTop() {
         if (!showChrome) { return 0; }
         return titlebarH;
@@ -2901,8 +3003,13 @@ class App {
     /// Client dimensions exposed without leaking the backing Canvas to
     /// application layout code. Controls and forms use these for their root
     /// arrange pass; direct pixel drawing remains an internal App concern.
-    int ClientWidth() { return canvas.Width(); }
-    int ClientHeight() { return canvas.Height(); }
+    /// 阴影带外扩的异形窗口扣掉两侧 band，返回内容区尺寸。
+    int ClientWidth() {
+        return canvas.Width() - this.ShapeOffX() * 2;
+    }
+    int ClientHeight() {
+        return canvas.Height() - this.ShapeOffY() * 2;
+    }
 
     /// 绘制无边框窗口的标题栏（品牌 + 拖动区域 + 最小化/最大化/关闭
     /// 标题按钮）并处理标题按钮的点击。应
@@ -2928,33 +3035,76 @@ class App {
                                                   "", "", Style.SNormal());
         Canvas c = canvas;
         Theme t = theme;
-        int W = c.Width();
+        // 阴影带外扩了表面，内容轮廓相对画布原点偏移
+        // (ShapeOffX, ShapeOffY)：标题栏底、边框与整圈按钮
+        // 都以内容区原点定位，不能从 (0,0) 画起。
+        int offX = this.ShapeOffX();
+        int offY = this.ShapeOffY();
+        int W = c.Width() - offX * 2;
         int hbar = titlebarH;
 
+        // 异形窗口：标题栏按窗口轮廓圆角化其上角后再上屏。方角
+        // 条先画、圆角条再补一遍是盖不住的——方角条画进角外的
+        // 像素没人擦，尖角原样留在屏上。这里从源头只画一次：
+        // 克隆皮肤声明的标题栏盒子（皮肤可能自带圆角/渐变/各边
+        // 边框，不能改原对象），半径取轮廓圆角，只圆化上角；
+        // 渐变、边框、sheen 各原语都按覆盖率裁角，尖角不会出现。
+        int cr = this.Scale(shapeRadius);
+        bool shapeTop = shapeMode != 0 && cr > 0;
+        if (shapeTop) {
+            chromeStyle = chromeStyle.Clone();
+            chromeStyle.SetRadius(cr);
+            chromeStyle.SetCorners(Corner.Top());
+            chromeStyle.shadow = 0;
+            chromeStyle.blur = 0;
+        }
         // 在磨砂玻璃皮肤下，标题栏也会磨砂其后的内容
         // （模糊 + 半透明主题着色 + 微弱白色光泽），
         // 使边框与玻璃主体协调，而非落在扁平的实色条上。
         if (t.glass != 0) {
             // 标题栏是每帧同一个元素：固定身份，永不换槽。
             int tslot = this.BlurSlotFor(1);
-            c.BlurRectCached(0, 0, W, hbar, Scale(22),
-                tslot, this.BackdropDirtyIn(tslot, 0, 0, W, hbar));
-            c.FillRect(0, 0, W, hbar, glassStyle.BgOr(0));
-            c.FillRect(0, 0, W, hbar, sheenStyle.BgOr(0));
+            bool dirty = this.BackdropDirtyIn(tslot, offX, offY, W, hbar);
+            if (shapeTop) {
+                // 模糊与着色都裁进圆角：方形模糊盖在异形轮廓上，
+                // 角外像素会以不透明玻璃色顶替阴影。
+                c.BlurRoundCached(offX, offY, W, hbar, Scale(22),
+                    tslot, dirty, cr, Corner.Top());
+                c.FillRoundRectIn(offX, offY, W, hbar, cr, Corner.Top(),
+                                  glassStyle.BgOr(0));
+                c.FillRoundRectIn(offX, offY, W, hbar, cr, Corner.Top(),
+                                  sheenStyle.BgOr(0));
+                if (chromeStyle.borderBottomW > 0) {
+                    c.FillRect(offX + cr, offY + hbar - chromeStyle.borderBottomW,
+                               W - cr * 2, chromeStyle.borderBottomW,
+                               chromeStyle.borderBottomColor);
+                }
+            } else {
+                c.BlurRectCached(offX, offY, W, hbar, Scale(22), tslot, dirty);
+                c.FillRect(offX, offY, W, hbar, glassStyle.BgOr(0));
+                c.FillRect(offX, offY, W, hbar, sheenStyle.BgOr(0));
+                if (chromeStyle.borderBottomW > 0) {
+                    c.FillRect(offX, offY + hbar - chromeStyle.borderBottomW, W,
+                               chromeStyle.borderBottomW, chromeStyle.borderBottomColor);
+                }
+            }
         } else {
-            c.FillRect(0, 0, W, hbar, chromeStyle.BgOr(0));
-        }
-        if (chromeStyle.borderBottomW > 0) {
-            c.FillRect(0, hbar - chromeStyle.borderBottomW, W,
-                       chromeStyle.borderBottomW, chromeStyle.borderBottomColor);
+            // 标题栏底交给 StyleBox 标准绘制路径：应用 CSS 写的
+            // 纯色、linear-gradient（含方向/中间停靠点）、各边
+            // 边框、sheen 与 animation 由此全部生效，chrome 不再
+            // 自绘一份只认纯色的底。
+            chromeStyle.Paint(this, offX, offY, W, hbar);
         }
 
-        int pad = t.paddingLarge;
+        int pad = t.paddingLarge + offX;
         int brand = t.iconSizeSmall;
-        c.DrawGlyph("home", pad, (hbar - brand) / 2, brand,
+        // 品牌图标大小可用 CSS `titlebar::brand { font-size: N; }` 调。
+        if (brandStyle.fontPx > 0) { brand = brandStyle.fontPx; }
+        string brandIcon = chromeBrandIcon == "" ? "home" : chromeBrandIcon;
+        c.DrawGlyph(brandIcon, pad, offY + (hbar - brand) / 2, brand,
                     brandStyle.FgOr(0));
         int titleFs = titleStyle.FontOr(Style.FontFallback(this, "medium"));
-        int txtY = Canvas.CenterTextY(0, hbar, titleFs);
+        int txtY = Canvas.CenterTextY(offY, hbar, titleFs);
         int titleX = pad + brand + t.gapSmall;
         c.DrawText(titleX, txtY, title,
                    titleStyle.FgOr(0), titleFs);
@@ -2967,7 +3117,7 @@ class App {
             StyleBox accentStyle = Style.Part(this, "titlebar", "status-accent",
                                               "", "", "", Style.SNormal());
             int fsS = statusStyle.FontOr(titleFs);
-            int sy = Canvas.CenterTextY(0, hbar, fsS);
+            int sy = Canvas.CenterTextY(offY, hbar, fsS);
             int sx = titleX + Canvas.MeasureText(title, titleFs)
                      + t.gapLarge;
             int limit = W - pad;
@@ -2994,9 +3144,9 @@ class App {
         // 融入相近的壁纸。为整个窗口描一圈细边
         // 并加上更亮的顶部高光，使边界清晰可辨。
         if (glassNative) {
-            int H = c.Height();
-            c.DrawRect(0, 0, W, H, edgeStyle.BgOr(0), 1);
-            c.FillRect(0, 0, W, 1, edgeHighlightStyle.BgOr(0));
+            int H = c.Height() - offY * 2;
+            c.DrawRect(offX, offY, W, H, edgeStyle.BgOr(0), 1);
+            c.FillRect(offX, offY, W, 1, edgeHighlightStyle.BgOr(0));
         }
 
         // 将预设菜单推迟到覆盖层渲染，使其浮于所有
@@ -3021,6 +3171,10 @@ class App {
         StyleBox closeHoverStyle = Style.Part(this, "titlebar", "cap", "",
                                                "danger", "", Style.SHover());
         int bw = captionBtnW;
+        // 标题按钮固定钉在右上角的标准条带里（标准标题栏高度），
+        // 不随加高的品牌栏拉高：栏的其余部分照常是原生拖动区。
+        int stripH = Scale(32);
+        if (stripH > hbar) { stripH = hbar; }
         int closeX = -bw;
         int nextX = W;
         if (showCloseButton) {
@@ -3060,26 +3214,31 @@ class App {
         // 固定灰色。关闭按钮保留标志性的 Windows 红色。
         int capHover = capHoverStyle.BgOr(0);
         int closeRed = closeHoverStyle.BgOr(0);
+        // 阴影带把内容轮廓推离画布原点：按钮条带挂在内容区
+        // 顶部（offY），水平布局用传入的 W（已扣掉两侧 band）。
+        int capY = this.ShapeOffY();
         if (showThemeButton && themeH) {
-            c.FillRect(themeX, 0, bw, hbar, capHover);
+            c.FillRect(themeX, capY, bw, stripH, capHover);
         }
         if (showPinButton && pinH) {
-            c.FillRect(pinX, 0, bw, hbar, capHover);
+            c.FillRect(pinX, capY, bw, stripH, capHover);
         }
         if (showMinimizeButton && minH) {
-            c.FillRect(minX, 0, bw, hbar, capHover);
+            c.FillRect(minX, capY, bw, stripH, capHover);
         }
         if (showMaximizeButton && maxH) {
-            c.FillRect(maxX, 0, bw, hbar, capHover);
+            c.FillRect(maxX, capY, bw, stripH, capHover);
         }
         if (showCloseButton && closeH) {
-            c.FillRect(closeX, 0, bw, hbar, closeRed);
+            c.FillRect(closeX, capY, bw, stripH, closeRed);
         }
 
         // 标题字形以 Windows 和微信使用的
-        // 小型"标题"字号（约 11px）渲染——细而清晰而非粗壮——并在
-        // 每个 46 宽的按钮中居中，呈现精致均衡的标题栏。
-        int gl = (t.iconSizeCaption * 33) / 25;
+        // 小型"标题"字号（约 11px）为基准放大 1.7 倍——在正方形
+        // 按钮格中饱满居中，呈现精致均衡的标题栏。
+        int gl = (t.iconSizeCaption * 17) / 10;
+        // 标题字形大小可用 CSS `titlebar::cap { font-size: N; }` 调。
+        if (capStyle.fontPx > 0) { gl = capStyle.fontPx; }
         // 主题/置顶字形在视觉上比几何的
         // 最小化/最大化/关闭笔画更轻，因此绘制时放大约 5% 以显得大小一致。
         int glBig = (gl * 21) / 20;
@@ -3094,7 +3253,7 @@ class App {
         }
         string themeIcon = "color";
         if (showThemeButton) {
-            c.DrawGlyphIn(themeIcon, themeX, 0, bw, hbar, glBig, themeColor);
+            c.DrawGlyphIn(themeIcon, themeX, capY, bw, stripH, glBig, themeColor);
         }
 
         // 置顶：激活时使用强调色 + 实心字形。
@@ -3106,13 +3265,13 @@ class App {
             pinColor = capSelectedStyle.FgOr(0);
         }
         if (showPinButton) {
-            c.DrawGlyphIn(pinIcon, pinX, 0, bw, hbar, glBig, pinColor);
+            c.DrawGlyphIn(pinIcon, pinX, capY, bw, stripH, glBig, pinColor);
         }
 
         int minColor = gcolor;
         if (minH) { minColor = capHoverStyle.FgOr(0); }
         if (showMinimizeButton) {
-            c.DrawGlyphIn("minimize", minX, 0, bw, hbar, gl, minColor);
+            c.DrawGlyphIn("minimize", minX, capY, bw, stripH, gl, minColor);
         }
 
         string maxName = "maximize";
@@ -3120,68 +3279,68 @@ class App {
         int maxColor = gcolor;
         if (maxH) { maxColor = capHoverStyle.FgOr(0); }
         if (showMaximizeButton) {
-            c.DrawGlyphIn(maxName, maxX, 0, bw, hbar, gl, maxColor);
+            c.DrawGlyphIn(maxName, maxX, capY, bw, stripH, gl, maxColor);
         }
 
         int xcolor = gcolor;
         if (closeH) { xcolor = closeHoverStyle.FgOr(0); }
         if (showCloseButton) {
-            c.DrawGlyphIn("close", closeX, 0, bw, hbar, gl, xcolor);
+            c.DrawGlyphIn("close", closeX, capY, bw, stripH, gl, xcolor);
         }
 
         if (showThemeButton) {
-            hitTester.RegisterRect(themeId, themeX, 0, bw, hbar, 3);
+            hitTester.RegisterRect(themeId, themeX, capY, bw, stripH, 3);
         }
         if (showPinButton) {
-            hitTester.RegisterRect(pinId, pinX, 0, bw, hbar, 3);
+            hitTester.RegisterRect(pinId, pinX, capY, bw, stripH, 3);
         }
         if (showMinimizeButton) {
-            hitTester.RegisterRect(minId, minX, 0, bw, hbar, 3);
+            hitTester.RegisterRect(minId, minX, capY, bw, stripH, 3);
         }
         if (showMaximizeButton) {
-            hitTester.RegisterRect(maxId, maxX, 0, bw, hbar, 3);
+            hitTester.RegisterRect(maxId, maxX, capY, bw, stripH, 3);
         }
         if (showCloseButton) {
-            hitTester.RegisterRect(closeId, closeX, 0, bw, hbar, 3);
+            hitTester.RegisterRect(closeId, closeX, capY, bw, stripH, 3);
         }
 
         // 标题栏在宿主 Flush 之后才绘制，而独立 App.Run 根本不 Flush，
         // 所以提示必须在这里当帧绘制，不能再走 pending 通道。
         int tipId = 0;
         int tipX = 0;
-        if (showThemeButton && this.CaptionTipShown(themeId, themeX, bw, hbar)) {
-            Tooltip.RenderAt(this, themeX + bw / 2, hbar, themeTipText,
+        if (showThemeButton && this.CaptionTipShown(themeId, themeX, bw, stripH)) {
+            Tooltip.RenderAt(this, themeX + bw / 2, capY + stripH, themeTipText,
                 Tooltip.Bottom(), this.Scale(260));
             tipId = themeId;
             tipX = themeX;
         }
-        if (showPinButton && this.CaptionTipShown(pinId, pinX, bw, hbar)) {
-            Tooltip.RenderAt(this, pinX + bw / 2, hbar, pinTipText,
+        if (showPinButton && this.CaptionTipShown(pinId, pinX, bw, stripH)) {
+            Tooltip.RenderAt(this, pinX + bw / 2, capY + stripH, pinTipText,
                 Tooltip.Bottom(), this.Scale(260));
             tipId = pinId;
             tipX = pinX;
         }
-        if (showMinimizeButton && this.CaptionTipShown(minId, minX, bw, hbar)) {
-            Tooltip.RenderAt(this, minX + bw / 2, hbar, minimizeTipText,
+        if (showMinimizeButton && this.CaptionTipShown(minId, minX, bw, stripH)) {
+            Tooltip.RenderAt(this, minX + bw / 2, capY + stripH, minimizeTipText,
                 Tooltip.Bottom(), this.Scale(260));
             tipId = minId;
             tipX = minX;
         }
-        if (showMaximizeButton && this.CaptionTipShown(maxId, maxX, bw, hbar)) {
+        if (showMaximizeButton && this.CaptionTipShown(maxId, maxX, bw, stripH)) {
             string maxTip = maximizeTipText;
             if (window.IsMaximized()) { maxTip = restoreTipText; }
-            Tooltip.RenderAt(this, maxX + bw / 2, hbar, maxTip,
+            Tooltip.RenderAt(this, maxX + bw / 2, capY + stripH, maxTip,
                 Tooltip.Bottom(), this.Scale(260));
             tipId = maxId;
             tipX = maxX;
         }
-        if (showCloseButton && this.CaptionTipShown(closeId, closeX, bw, hbar)) {
-            Tooltip.RenderAt(this, closeX + bw / 2, hbar, closeTipText,
+        if (showCloseButton && this.CaptionTipShown(closeId, closeX, bw, stripH)) {
+            Tooltip.RenderAt(this, closeX + bw / 2, capY + stripH, closeTipText,
                 Tooltip.Bottom(), this.Scale(260));
             tipId = closeId;
             tipX = closeX;
         }
-        this.NoteCaptionTip(tipId, tipX, bw, hbar);
+        this.NoteCaptionTip(tipId, tipX, bw, stripH + capY);
 
         // 标题按钮和其它控件走同一套点击语义：只认主键、只认
         // 本帧解析出的那个点击目标。以前这里直接对当前坐标做
@@ -3203,10 +3362,62 @@ class App {
             } else if (showMinimizeButton && hit == minId) {
                 window.Minimize();
             } else if (showMaximizeButton && hit == maxId) {
+                // 异形窗口先退回普通矩形再切换最大化：最大化尺寸由
+                // 系统决定，异形表面的阴影带几何、轮廓掩码都会与
+                // 最大化后的窗口尺寸错位（甚至卡在尺寸调整循环里），
+                // 火绒这类异形主窗本身也不提供最大化。阴影随之取消，
+                // 恢复矩形时也不复原——最大化是单向的形态切换。
+                // 退异形的同时向 DWM 请求圆角轮廓：异形自带圆角，
+                // SetWindowRoundCorners 在异形态下只登记策略，这里
+                // SetWindowShape("") 会按登记恢复，最大化还原后的
+                // 矩形窗口因此不再是四个直角。
+                if (shapeMode != 0 && !window.IsMaximized()) {
+                    shapeShadow = 0;
+                    this.SetWindowRoundCorners(true);
+                    this.SetWindowShape("");
+                }
                 window.ToggleMaximize();
             } else if (showCloseButton && hit == closeId) {
                 window.Close();
             }
+        }
+
+        // 应用功能按钮（SetCaptionActions 注册）：在系统按钮左侧
+        // 依次排开的玻璃胶囊，样式沿用网页 title-bar .btn（半透明
+        // 白底白边白字，悬停变亮）。标准按钮尺寸（2/3 条带高、上限
+        // Scale(24)），与标题按钮一同钉在右上角的标准条带内。
+        if (capActionIds != null) {
+            // 功能胶囊走独立的 `titlebar::action` 样式部件：字号/颜色
+            // 可单独传参，不牵动系统按钮（`titlebar::cap`）的字形大小。
+            // 不设 font-size 时用标准小字号。
+            StyleBox actStyle = Style.Part(this, "titlebar", "action",
+                "", "", "", Style.SNormal());
+            int fs = actStyle.fontPx > 0 ? actStyle.fontPx
+                : (capStyle.fontPx > 0 ? capStyle.fontPx
+                    : Style.FontFallback(this, "small"));
+            int actCol = actStyle.FgOr(0) != 0 ? actStyle.FgOr(0) : 0xFFFFFFFF;
+            int ph2 = stripH * 2 / 3;
+            if (ph2 > Scale(24)) { ph2 = Scale(24); }
+            int py = capY + (stripH - ph2) / 2;
+            int px = nextX - Scale(8);
+            for (int i = capActionIds.Length - 1; i >= 0; i = i - 1) {
+                int tw = Canvas.MeasureText(capActionLabels[i], fs);
+                int pw = tw + Scale(24);
+                px = px - pw;
+                bool actH = focus.IsHovered(capActionIds[i]);
+                c.FillRoundRect(px, py, pw, ph2, Scale(8),
+                    actH ? 0x40FFFFFF : 0x26FFFFFF);
+                c.DrawRoundRect(px, py, pw, ph2, Scale(8),
+                    actH ? 0x66FFFFFF : 0x33FFFFFF, 1);
+                c.DrawText(px + (pw - tw) / 2,
+                    Canvas.CenterTextY(py, ph2, fs),
+                    capActionLabels[i], actCol, fs);
+                hitTester.RegisterRect(capActionIds[i], px, py, pw, ph2, 3);
+                px = px - Scale(8);
+            }
+            // 原生保护带盖到最左一颗胶囊：那里的按下交给
+            // 客户区（按钮命中区），而不是当成窗口拖动。
+            window.SetCaptionZone(W - px);
         }
         return themeId;
     }
@@ -3796,6 +4007,12 @@ class App {
     int Scale(int v) {
         return v * dpiScale / 100;
     }
+
+    /// SetWindowShadow 外扩时内容轮廓相对画布原点的偏移
+    /// （物理像素）。异形窗口的阴影/填充/自绘标题栏都以
+    /// 它为基准定位；矩形窗口恒为 0。
+    int ShapeOffX() { return shapeOffX * dpiScale / 100; }
+    int ShapeOffY() { return shapeOffY * dpiScale / 100; }
 
     /// 填充结构性框架表面（侧边栏、标签条、工具面板）：
     /// 玻璃皮肤下会磨砂背景，使整个外壳呈现玻璃质感；
