@@ -1179,6 +1179,7 @@ class DataTableState {
     int hdrCtxX;               // 表头上下文菜单锚点 X
     int hdrCtxY;               // 表头上下文菜单锚点 Y
     int cfSubOpen;             // 头菜单条件格式子面板：0 收起，1..4 同 cfMode
+    bool aggSubOpen;           // 头菜单合计聚合子面板已展开
     string toast;              // 临时状态消息（复制/导出反馈）
     int toastFrames;           // toast 剩余显示帧数
 
@@ -1512,6 +1513,7 @@ class DataTableState {
         this.hdrCtxX = 0;
         this.hdrCtxY = 0;
         this.cfSubOpen = 0;
+        this.aggSubOpen = false;
         this.toast = "";
         this.toastFrames = 0;
         this.showFilterRow = false;

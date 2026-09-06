@@ -677,6 +677,67 @@ partial class DataTable {
         return (int)(sum / (double)n + 0.5);
     }
 
+    /// 合计聚合子面板：与条件格式面板同一形态（锚点右侧一列
+    /// 预设），当前模式带勾选。命中应用 SetAggregate 并关闭整个
+    /// 菜单；面板外点击只收面板。
+    static void RenderAggPanel(App app, int ax, int ay, int mw, int ih, int sepH,
+                               StyleBox sMenu, DataTableState st, int col,
+                               int curAgg) {
+        Canvas c = app.canvas;
+        Theme t = app.theme;
+        int n = 6;
+        int panelW = app.Scale(160);
+        int panelH = ih * n + app.Scale(8);
+        int px = ax + mw + app.Scale(2);
+        int py = ay;
+        if (py + panelH > app.window.GetHeight()) { py = app.window.GetHeight() - panelH - app.Scale(2); }
+        if (py < 0) { py = 0; }
+        app.CaptureWheel(px, py, panelW, panelH);
+        c.FillRoundRect(px, py, panelW, panelH, t.borderRadiusMedium, sMenu.BgOr(0));
+        c.DrawRoundRect(px, py, panelW, panelH, t.borderRadiusMedium, sMenu.BorderOr(0), 1);
+
+        int iy = py + app.Scale(4);
+        int[] modes = new int[6];
+        modes[0] = 1;
+        modes[1] = 2;
+        modes[2] = 3;
+        modes[3] = 4;
+        modes[4] = 5;
+        modes[5] = 0;
+        bool hit = false;
+        for (int i = 0; i < n; i = i + 1) {
+            string lbl;
+            if (modes[i] == 1) { lbl = DataTable.T("Sum", "合计"); }
+            else if (modes[i] == 2) { lbl = DataTable.T("Average", "平均"); }
+            else if (modes[i] == 3) { lbl = DataTable.T("Min", "最小"); }
+            else if (modes[i] == 4) { lbl = DataTable.T("Max", "最大"); }
+            else if (modes[i] == 5) { lbl = DataTable.T("Count", "计数"); }
+            else { lbl = DataTable.T("No Total", "无汇总"); }
+            string mark = modes[i] == curAgg ? "✓" : "";
+            int id = app.focus.AllocId();
+            ContextMenu.PaintItem(app, px, iy, panelW, ih, lbl, mark,
+                                  app.focus.IsHovered(id));
+            app.hitTester.RegisterRect(id, px, iy, panelW, ih, 0);
+            if (DataTable.CtxHit(app, px, iy, panelW, ih)) {
+                DataTable.SetAggregate(st, col, modes[i]);
+                st.hitCol = col; st.ColumnResize.Raise();
+                hit = true;
+            }
+            iy = iy + ih;
+        }
+        if (hit) {
+            st.hdrCtxOpen = false;
+            st.aggSubOpen = false;
+            app.RequestRedraw();
+        }
+        if (app.EventKind() == 3 && !app.LongPressFired()
+            && !(app.mouseX >= px && app.mouseX < px + panelW
+                 && app.mouseY >= py && app.mouseY < py + panelH)) {
+            st.aggSubOpen = false;
+            app.RequestRedraw();
+        }
+    }
+
     /// 预设色的显示名（蓝/浅蓝/绿/…）。
     static string SwatchName(int i) {
         if (i == 0) { return DataTable.T("Blue", "蓝"); }
@@ -720,7 +781,7 @@ partial class DataTable {
         nItems = nItems + 1;                  // 隐藏列
         if (anyHidden) { nItems = nItems + 1; }
         nItems = nItems + 1;                  // 列选择器
-        if (canAgg) { nItems = nItems + 6; }  // 合计：求和/平均/最小/最大/计数/无
+        if (canAgg) { nItems = nItems + 1; }  // 合计主项（聚合预设收进子面板）
         if (canFilter) { nItems = nItems + 1; }
         int nSep = 3;                         // 排序后、自动适配后、分组后
         if (canAgg) { nSep = nSep + 1; }      // 聚合项之前
@@ -856,12 +917,24 @@ partial class DataTable {
             iy = iy + sepH;
             int curAgg = 0;
             if (col < st.aggMode.Count) { curAgg = st.aggMode[col]; }
-            iy = DataTable.AggItem(app, mx, iy, mw, ih, st, col, 1, DataTable.T("Sum", "合计"), curAgg);
-            iy = DataTable.AggItem(app, mx, iy, mw, ih, st, col, 2, DataTable.T("Average", "平均"), curAgg);
-            iy = DataTable.AggItem(app, mx, iy, mw, ih, st, col, 3, DataTable.T("Min", "最小"), curAgg);
-            iy = DataTable.AggItem(app, mx, iy, mw, ih, st, col, 4, DataTable.T("Max", "最大"), curAgg);
-            iy = DataTable.AggItem(app, mx, iy, mw, ih, st, col, 5, DataTable.T("Count", "计数"), curAgg);
-            iy = DataTable.AggItem(app, mx, iy, mw, ih, st, col, 0, DataTable.T("No Total", "无汇总"), curAgg);
+            // 合计主项：折叠子菜单——主项右侧标当前聚合的勾选，
+            // 点击展开聚合预设面板（与条件格式面板同一形态）。
+            int aggY = iy;
+            string aggLbl = DataTable.T("Total", "合计");
+            string aggMark = curAgg >= 1 && curAgg <= 5 ? "✓" : "";
+            int idAgg = app.focus.AllocId();
+            ContextMenu.PaintItem(app, mx, aggY, mw, ih, aggLbl, aggMark,
+                                  app.focus.IsHovered(idAgg));
+            app.hitTester.RegisterRect(idAgg, mx, aggY, mw, ih, 0);
+            if (DataTable.CtxHit(app, mx, aggY, mw, ih)) {
+                st.aggSubOpen = !st.aggSubOpen;
+                app.RequestRedraw();
+            }
+            iy = iy + ih;
+            if (st.aggSubOpen) {
+                DataTable.RenderAggPanel(app, mx, aggY, mw, ih, sepH, sMenu, st, col,
+                                         curAgg);
+            }
         }
 
         if (canFilter) {
@@ -917,8 +990,9 @@ partial class DataTable {
         bool insideAny = app.mouseX >= mx && app.mouseX < mx + mw
             && app.mouseY >= my && app.mouseY < my + mh;
         if (app.EventKind() == 3 && !app.LongPressFired() && !insideAny) {
-            if (st.cfSubOpen != 0) {
+            if (st.cfSubOpen != 0 || st.aggSubOpen) {
                 st.cfSubOpen = 0;
+                st.aggSubOpen = false;
                 app.RequestRedraw();
             } else {
                 st.hdrCtxOpen = false;
