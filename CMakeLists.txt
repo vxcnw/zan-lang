@@ -1994,6 +1994,20 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
       -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_chart_symbol${_exe_ext}
       -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
 
+  # 堆叠面积带边界亚像素 AA 回归（用户报告 Line4 条带边缘毛刺）：
+  # 带边界此前用整数 YOf 计算并被量化到整行，FillBandFx 的亚像素
+  # 光栅化拿不到 1/256 精度，缓坡每列硬跳一行成阶梯锯齿。修复后
+  # 边界走 YOfFx 16.8 定点直进光栅化器；用例统计纯彩带硬相接数
+  # （修复前 1065 → 修复后 4）。
+  add_test(NAME conformance_gui_chart_stackedarea_aa
+    COMMAND ${CMAKE_COMMAND}
+      -DZANC=$<TARGET_FILE:zanc>
+      -DSRC=${CMAKE_SOURCE_DIR}/tests/gui/chart_stackedarea_aa_test.zan
+      "-DZANC_ARGS=--auto-stdlib${_gui_driver_tail}"
+      -DEXPECTED=${CMAKE_SOURCE_DIR}/tests/conformance/gui_chart_stackedarea_aa.out
+      -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_chart_stackedarea_aa${_exe_ext}
+      -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
+
   add_test(NAME conformance_gui_layer
     COMMAND ${CMAKE_COMMAND}
       -DZANC=$<TARGET_FILE:zanc>

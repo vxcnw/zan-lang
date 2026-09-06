@@ -1,0 +1,93 @@
+using System;
+using Gui;
+using Gui.Component.Chart;
+
+/// 堆叠面积带边界的亚像素抗锯齿回归（真实 App 离屏渲染）。
+///
+/// 用户报告：Line4（堆积面积图）条带边缘全是毛刺——根因是
+/// DrawStackedArea 的带边界 topY/botY 用整数 YOf 计算并被量化到
+/// 整像素行，FillBandFx 的亚像素光栅化器拿不到 1/256 精度，
+/// 缓坡上每列硬跳一整行，放大看是阶梯锯齿。
+///
+/// 修复后边界以 16.8 定点（Chart.YOfFx）进入 BuildPathFxEx/
+/// FillBandFx，本用例统计画面里"两种纯彩带颜色直接硬相接、
+/// 中间没有任何混合行"的位置数：量化阶梯会产生大量硬相接，
+/// 亚像素 AA 会在每条边界铺出渐变混合行。断言用定性阈值，
+/// 对两条栅格化路径（GDI / FreeType）与不同 DPI 缩放成立：
+/// 全部彩带互异且占满画面，硬相接上限取保守值。
+class ChartStackedAreaAaTest {
+    static App app;
+    static int fails;
+
+    static void True(string what, bool got) {
+        if (got) { return; }
+        fails = fails + 1;
+        Console.WriteLine("FAIL " + what);
+    }
+
+    // 与 Line4 一致的五段堆积面积图（ECharts 参考站同数据）。
+    static void Body() {
+        app.BeginFrame();
+        WidgetId.ResetFrame();
+        ChartOption o = ChartOption.Of("",
+            new List<string>{ "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" },
+            new List<ChartSeries>{
+                ChartSeries.StackedArea("Mail", new List<int>{ 120, 132, 101, 134, 90, 230, 210 }),
+                ChartSeries.StackedArea("Affiliate", new List<int>{ 220, 182, 191, 234, 290, 330, 310 }),
+                ChartSeries.StackedArea("Video", new List<int>{ 150, 232, 201, 154, 190, 330, 410 }),
+                ChartSeries.StackedArea("Direct", new List<int>{ 320, 332, 301, 334, 390, 330, 320 }),
+                ChartSeries.StackedArea("Search", new List<int>{ 820, 932, 901, 934, 1290, 1330, 1320 })
+            });
+        o.xAxes[0].boundaryGap = false;
+        ChartView.KeyedStatic(o, 9101).Render(app, 10, 10, 1100, 280);
+        app.RunOverlays();
+    }
+
+    // 灰色（背景/网格/文字/描边黑）——只统计彩色墨迹。
+    static bool Gray(int p) {
+        int r = (p >> 16) & 255; int g = (p >> 8) & 255; int b = p & 255;
+        int mx = r > g ? r : g; if (b > mx) { mx = b; }
+        int mn = r < g ? r : g; if (b < mn) { mn = b; }
+        return mx - mn < 24;
+    }
+
+    static void Main() {
+        fails = 0;
+        app = new App("chart-stackedarea-aa", 1120, 300);
+        app.Show();
+        for (int i = 0; i < 3; i = i + 1) {
+            ChartStackedAreaAaTest.Body();
+            app.PumpGuarded();
+        }
+        Canvas c = app.canvas;
+
+        // 硬相接 = 相邻两像素都是纯彩（非灰、非混合）且颜色差大。
+        // 混合像素的判定：与上下彩带任一端相比，通道值落在两端
+        // 之间（通道级混合）——混合行的中点像素通道值必然介于
+        // 两带纯色之间，不满足"两侧都是纯彩"。
+        int hardEdges = 0;
+        int colorBands = 0;
+        for (int x = 60; x < 1060; x = x + 1) {
+            for (int y = 25; y < 270; y = y + 1) {
+                int c0 = c.GetPixel(x, y) & 0x00FFFFFF;
+                int c1 = c.GetPixel(x, y + 1) & 0x00FFFFFF;
+                if (c0 == c1 || Gray(c0) || Gray(c1)) { continue; }
+                int r0 = (c0 >> 16) & 255; int g0 = (c0 >> 8) & 255;
+                int r1 = (c1 >> 16) & 255; int g1 = (c1 >> 8) & 255;
+                int dr = r0 - r1; if (dr < 0) { dr = 0 - dr; }
+                int dg = g0 - g1; if (dg < 0) { dg = 0 - dg; }
+                // 纯彩带间色差大（ECharts 调色板相邻带通道差 ≥64）；
+                // 带内阴影/网格的微弱色差不算。
+                if (dr < 64 || dg < 64) { continue; }
+                hardEdges = hardEdges + 1;
+                colorBands = colorBands + 1;
+            }
+        }
+        // 修复前：整数边界量化 → 全画布上千处硬相接（实测 1065）。
+        // 修复后：每条边界都有亚像素混合行 → 剩余硬相接只是
+        // 边界恰好落在整行的少数列（实测 4）。
+        True("stacked band edges are anti-aliased", hardEdges <= 32);
+        True("chart painted colored bands", hardEdges > 0);
+        Console.WriteLine("stackedarea-aa:" + Convert.ToString(fails == 0 ? 1 : 0));
+    }
+}

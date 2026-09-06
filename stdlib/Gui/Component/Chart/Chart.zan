@@ -124,6 +124,21 @@ class ChartFrame {
         return this.plotY + this.plotH - d;
     }
 
+    /// YOf 的 16.8 定点版本（1/256 px）：堆叠面积带的填充边界走
+    /// 亚像素光栅化（FillBandFx），整数 YOf 会把边界量化到整行，
+    /// 缓坡上每列硬跳 1 行——正是"面积边缘锯齿"的来源。
+    int YOfFx(int v, int axisIndex) {
+        int lo = this.leftMin;
+        int hi = this.leftMax;
+        bool rev = this.reversed;
+        if (axisIndex == 1) { lo = this.rightMin; hi = this.rightMax; rev = this.rightReversed; }
+        int span = hi - lo;
+        if (span == 0) { span = 1; }
+        int d = (v - lo) * this.plotH * 256 / span;
+        if (rev) { return (this.plotY + this.plotH) * 256 - d; }
+        return this.plotY * 256 + this.plotH * 256 - d;
+    }
+
     /// 系列所在轴的零线像素（ECharts 面积/柱的填充基线）：
     /// 0 在该轴范围内时返回其映射（钳制进绘图区），否则返回
     /// 绘图区底——与 ECharts「0 不在范围内时填到对侧边缘」一致。

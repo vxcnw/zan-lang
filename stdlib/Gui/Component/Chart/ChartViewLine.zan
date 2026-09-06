@@ -54,15 +54,32 @@ partial class ChartView {
     /// （这就是按真实几何采样的圆看起来平滑、
     /// 而折线曲线呈阶梯状的原因）。亚像素顶点
     /// 让描边光栅化器能采样到真实曲线的距离。
+    /// 输入顶点既可以是整数像素（x 常规情形），也可以是已经
+    /// 16.8 定点的坐标（堆叠面积带边界 y 来自 YOfFx）——
+    /// 直线透传分支统一 ×256 会把定点输入放大 256 倍，因此
+    /// 用 inFx 标志区分：定点输入直线段原样透传，曲线插值
+    /// 本来就在 1/256 域内进行，两种输入自然一致。
     static void BuildPathFx(List<int> px, List<int> py, bool smooth,
                             List<int> ox, List<int> oy) {
+        BuildPathFxEx(px, py, smooth, false, ox, oy);
+    }
+
+    /// BuildPathFx 的显式输入精度版本：inFx=true 时输入顶点已是
+    /// 16.8 定点数，输出不再二次 ×256。
+    static void BuildPathFxEx(List<int> px, List<int> py, bool smooth,
+                              bool inFx, List<int> ox, List<int> oy) {
         int n = px.Count;
         if (n < 1) { return; }
         if (!smooth || n < 3) {
-            for (int i = 0; i < n; i = i + 1) { ox.Add(px[i] * 256); oy.Add(py[i] * 256); }
+            if (inFx) {
+                for (int i = 0; i < n; i = i + 1) { ox.Add(px[i]); oy.Add(py[i]); }
+            } else {
+                for (int i = 0; i < n; i = i + 1) { ox.Add(px[i] * 256); oy.Add(py[i] * 256); }
+            }
             return;
         }
-        ox.Add(px[0] * 256); oy.Add(py[0] * 256);
+        int mul = inFx ? 1 : 256;
+        ox.Add(px[0] * mul); oy.Add(py[0] * mul);
         for (int seg = 0; seg + 1 < n; seg = seg + 1) {
             int p0 = seg - 1; if (p0 < 0) { p0 = 0; }
             int p3 = seg + 2; if (p3 > n - 1) { p3 = n - 1; }
@@ -769,6 +786,12 @@ partial class ChartView {
                 bool stacked = s.stackName.Length > 0 || s.stack != 0;
                 List<int> topY = new List<int>();
                 List<int> botY = new List<int>();
+                // 带边界的 16.8 定点 Y（YOfFx）：整数 Y 把边界量化到
+                // 整行，斜坡上每列硬跳 1 行——面积边缘锯齿的根源。
+                // 定点列表直接喂 FillBandFx（亚像素光栅化）；整数
+                // topY 仍供符号与命中复用。
+                List<int> topYFx = new List<int>();
+                List<int> botYFx = new List<int>();
                 for (int j = 0; j < n; j = j + 1) {
                     int oi = i0 + j;
                     int prev = inCum[j];
@@ -779,10 +802,14 @@ partial class ChartView {
                         int prevG = prev * g / 1000;
                         topY.Add(f.plotY + f.plotH - (cumG * f.plotH / maxV));
                         botY.Add(f.plotY + f.plotH - (prevG * f.plotH / maxV));
+                        topYFx.Add(f.YOfFx(cumG, 0));
+                        botYFx.Add(f.YOfFx(prevG, 0));
                     } else {
                         int absG = val * g / 1000;
                         topY.Add(f.plotY + f.plotH - (absG * f.plotH / maxV));
                         botY.Add(f.plotY + f.plotH);
+                        topYFx.Add(f.YOfFx(absG, 0));
+                        botYFx.Add((f.plotY + f.plotH) * 256);
                     }
                 }
                 List<int> xs = new List<int>();
@@ -822,15 +849,21 @@ partial class ChartView {
                     List<int> rxs = new List<int>();
                     List<int> rt = new List<int>();
                     List<int> rb = new List<int>();
+                    List<int> rtFx = new List<int>();
+                    List<int> rbFx = new List<int>();
                     for (int rm = r0; rm <= r1; rm = rm + 1) {
                         rxs.Add(xs[rm]); rt.Add(topY[rm]); rb.Add(botY[rm]);
+                        rtFx.Add(topYFx[rm]); rbFx.Add(botYFx[rm]);
                     }
                     List<int> topFx = new List<int>();
                     List<int> topPath = new List<int>();
                     List<int> botFx = new List<int>();
                     List<int> botPath = new List<int>();
-                    ChartView.BuildPathFx(rxs, rt, smooth, topFx, topPath);
-                    ChartView.BuildPathFx(rxs, rb, botSmooth, botFx, botPath);
+                    // 填充边界走定点（亚像素 AA）；描边路径仍用整数
+                    // 顶点（rt/rb → BuildPathFx 自乘 256），两条路径
+                    // 几何一致。
+                    ChartView.BuildPathFxEx(rxs, rtFx, smooth, true, topFx, topPath);
+                    ChartView.BuildPathFxEx(rxs, rbFx, botSmooth, true, botFx, botPath);
                     if (s.areaStyle) {
                         // ECharts 2 堆积面积 = 实色带（255）；o.gradient
                         // （邮件营销式纵向渐变）保留半透明衰减。
