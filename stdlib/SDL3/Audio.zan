@@ -99,6 +99,14 @@ class SdlAudioClip {
         return clip;
     }
 
+    /// <summary>加载 OGG Vorbis 文件(背景音乐)。失败时返回的对象
+    /// IsValid() 为 false,不返回 null。</summary>
+    static SdlAudioClip LoadOgg(string path) {
+        SdlAudioClip clip = new SdlAudioClip();
+        clip.handle = SdlNative.zan_audio_load_ogg(path);
+        return clip;
+    }
+
     /// <summary>从内存字节解析 WAV。<paramref name="data"/> 是完整的
     /// WAV 文件字节（如从加密资源包解密出来的内容），全程不落盘。
     /// 字节只在本次调用内同步读取（PCM 会被拷出），返回后即可释放
@@ -107,6 +115,15 @@ class SdlAudioClip {
     static SdlAudioClip LoadWavFromMem(string data, int len) {
         SdlAudioClip clip = new SdlAudioClip();
         clip.handle = SdlNative.zan_audio_load_wav_mem(data, len);
+        return clip;
+    }
+
+    /// <summary>从内存字节解码 OGG Vorbis（背景音乐）。字节只在本次
+    /// 调用内同步读取（PCM 会被拷出），返回后即可释放缓冲区。
+    /// 失败时返回的对象 IsValid() 为 false。</summary>
+    static SdlAudioClip LoadOggFromMem(string data, int len) {
+        SdlAudioClip clip = new SdlAudioClip();
+        clip.handle = SdlNative.zan_audio_load_ogg_mem(data, len);
         return clip;
     }
 

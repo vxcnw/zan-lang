@@ -93,6 +93,19 @@ class ProfileStore {
         }
         lastError=""; return true;
     }
+    // 彻底清除一个槽位：主档、备份与槽 1 的旧版元数据一并删除。
+    // 删除后槽位回到"空白"状态：阻塞标记清掉，SaveStore 重新指向
+    // 同一路径，后续 Read/Write 与全新槽位行为一致。
+    public bool Delete(int slot) {
+        if (!Valid(slot)) { return false; }
+        try {
+            if (File.Exists(SlotPath(slot))) { File.Delete(SlotPath(slot)); }
+            if (File.Exists(SlotPath(slot)+".bak")) { File.Delete(SlotPath(slot)+".bak"); }
+            if (slot==1 && File.Exists(root+"/profiles/slot1-meta.wsv")) { File.Delete(root+"/profiles/slot1-meta.wsv"); }
+        } catch (Exception ex) { lastError="删除失败：文件被占用或无权限，原文件保留。"; return false; }
+        blocked[slot-1]=false; lastError=""; slots[slot-1]=new SaveStore(SlotPath(slot));
+        return true;
+    }
     public string SettingsRead() { string text=settings.Read(); lastError=settings.Error(); return text; }
     public bool SettingsWrite(string text) {
         settings.Read(); if (settings.Error()!="") { lastError=settings.Error(); return false; }

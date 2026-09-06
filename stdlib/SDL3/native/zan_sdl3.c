@@ -16,6 +16,12 @@
 #endif
 #include "stb_image.h"
 
+/* OGG Vorbis (背景音乐): stb_vorbis 单文件实现, 整曲解码为内存 PCM, 循环
+ * voice 与 WAV 共用同一重灌回调, 接缝无缝。pushdata 流式 API 不用, 关掉
+ * 以缩体积。 */
+#define STB_VORBIS_NO_PUSHDATA_API
+#include "stb_vorbis.c"
+
 #if defined(_WIN32)
 #define ZAN_SDL_API __declspec(dllexport)
 #else
@@ -1401,6 +1407,63 @@ ZAN_SDL_API zan_iptr zan_audio_load_wav_mem(const void *data, zan_i32 len) {
         SDL_free(clip);
         return 0;
     }
+    return zan_handle(clip);
+}
+
+/* Loads an OGG Vorbis file (background music) fully into memory as s16 PCM.
+ * stb_vorbis decodes with the CRT heap, so the samples are copied into an
+ * SDL-owned buffer before the decode buffer is freed: the clip's PCM is
+ * released with SDL_free in zan_audio_free_clip and the two heaps must not
+ * mix. The SDL audio stream converts s16/device format, same as WAV clips. */
+ZAN_SDL_API zan_iptr zan_audio_load_ogg(const char *path) {
+    if (!path || !path[0]) return 0;
+    ZanAudioClip *clip = (ZanAudioClip *)SDL_calloc(1, sizeof(ZanAudioClip));
+    if (!clip) return 0;
+    int channels = 0, sample_rate = 0;
+    short *decoded = NULL;
+    int total = stb_vorbis_decode_filename(path, &channels, &sample_rate, &decoded);
+    if (total <= 0 || !decoded || channels <= 0 || sample_rate <= 0) {
+        if (decoded) free(decoded);
+        SDL_free(clip);
+        return 0;
+    }
+    size_t bytes = (size_t)total * sizeof(short);
+    clip->pcm = (Uint8 *)SDL_malloc(bytes);
+    if (!clip->pcm) {
+        free(decoded);
+        SDL_free(clip);
+        return 0;
+    }
+    memcpy(clip->pcm, decoded, bytes);
+    free(decoded);
+    clip->len = (Uint32)bytes;
+    clip->spec.freq = sample_rate;
+    clip->spec.channels = (Uint8)channels;
+    clip->spec.format = SDL_AUDIO_S16;
+    return zan_handle(clip);
+}
+
+ZAN_SDL_API zan_iptr zan_audio_load_ogg_mem(const void *data, zan_i32 len) {
+    if (!data || len <= 0) return 0;
+    ZanAudioClip *clip = (ZanAudioClip *)SDL_calloc(1, sizeof(ZanAudioClip));
+    if (!clip) return 0;
+    int channels = 0, sample_rate = 0;
+    short *decoded = NULL;
+    int total = stb_vorbis_decode_memory((const unsigned char *)data, len, &channels, &sample_rate, &decoded);
+    if (total <= 0 || !decoded || channels <= 0 || sample_rate <= 0) {
+        if (decoded) free(decoded);
+        SDL_free(clip);
+        return 0;
+    }
+    size_t bytes = (size_t)total * sizeof(short);
+    clip->pcm = (Uint8 *)SDL_malloc(bytes);
+    if (!clip->pcm) { free(decoded); SDL_free(clip); return 0; }
+    memcpy(clip->pcm, decoded, bytes);
+    free(decoded);
+    clip->len = (Uint32)bytes;
+    clip->spec.freq = sample_rate;
+    clip->spec.channels = (Uint8)channels;
+    clip->spec.format = SDL_AUDIO_S16;
     return zan_handle(clip);
 }
 

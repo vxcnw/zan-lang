@@ -82,7 +82,47 @@ class WuweiApp {
     static List<Button> SectButtons=new List<Button>(); static List<Button> TalentButtons=new List<Button>(); static List<Button> BagRecycle=new List<Button>();
     static double LastTick=0;
     static Stopwatch Clock;
-    static void Heartbeat() { double now=Clock.ElapsedSeconds();if(!InMenu){Model.Tick(now-LastTick);}LastTick=now;Refresh(); }
+    // 删档确认弹窗（保留式 LayerState，静态构造一次保证 id 稳定）。
+    // DeleteArmed=待删槽位，0 表示没有弹窗在等答案。
+    static int DeleteArmed=0;
+    static DialogHost Dialogs;
+    static List<Button> SlotDelete=new List<Button>();
+    static LayerState DeleteDialog=LayerState.Confirm("删除仙缘","将永久删除该仙缘的存档与备份，无法恢复。确定删除？",2);
+    static void Heartbeat() {
+        double now=Clock.ElapsedSeconds();
+        if(!InMenu){Model.Tick(now-LastTick);}
+        LastTick=now;Refresh();
+    }
+    // 删除确认弹窗的渲染与答案消费：由 DialogHost.OnPaint 在保留树的
+    // 绘制阶段调用（每帧、事件仍为“当前事件”），点击与回车都能在同
+    // 一帧被读取。action 1=删除，2/3=取消或关闭。心跳定时器不行：
+    // PumpTasks 阶段事件已被清零，回车赶不上键盘门槛。
+    static void PumpDeleteDialog() {
+        if(DeleteArmed==0){return;}
+        Layer.Render(Window.GetApp(),DeleteDialog);
+        int a=DeleteDialog.action;
+        if(a==0){return;}
+        int slot=DeleteArmed;DeleteArmed=0;DeleteDialog.action=0;DeleteDialog.open=false;
+        if(a==1){DeleteSlot(slot);}
+        Window.GetApp().RequestRedraw();
+    }
+    static void DeleteSlot(int slot) {
+        if(!InMenu || slot<1 || slot>5){return;}
+        if(slot==ActiveSlot && !Profiles.Metadata(slot).Exists){return;}
+        if(!Profiles.Delete(slot)){MenuStatus.Text=Profiles.Error();Refresh();return;}
+        if(ActiveSlot==slot){SavePath="";}
+        MenuStatus.Text="仙缘 "+Number(slot)+" 已删除，该槽位回到空白。";
+        RefreshProfiles();Refresh();
+    }
+    static void AskDelete(int slot) {
+        if(!InMenu || DeleteArmed!=0){return;}
+        DeleteDialog.title="删除仙缘 "+Number(slot);
+        DeleteDialog.okText="删除";
+        DeleteDialog.cancelText="保留";
+        DeleteArmed=slot;
+        DeleteDialog.Open();
+        Window.GetApp().RequestRedraw();
+    }
 
     static void Size(Control c,int width,int height) { c.logW=width;c.logH=height;c.Prefer(width,height); }
     static Label Text(string value,string cls,int height) {
@@ -132,6 +172,7 @@ class WuweiApp {
         UiDriver.SetProbe("embeddedArt",File.EmbedExists("assets/images/main_menu_bg.webp")?"1":"0");UiDriver.SetProbe("embeddedMusic",File.EmbedExists("assets/audio/bgm_main.ogg")?"1":"0");UiDriver.SetProbe("embeddedBaseSkin",File.EmbedExists("skins/base.css")?"1":"0");
         UiDriver.SetProbe("menuArtLoaded",Canvas.ImageWidth(ArtPath("main_menu_bg.webp"))>0 && Canvas.ImageHeight(ArtPath("main_menu_bg.webp"))>0?"1":"0");
         UiDriver.SetProbe("autoHeal",Model.AutoHeal?"1":"0");UiDriver.SetProbe("musicAdjusted",Number(Model.Count(Model.RunState,"music_adjusted")));UiDriver.SetProbe("manualSaves",Number(Model.ManualSaves));
+        UiDriver.SetProbe("deleteAsk",DeleteArmed>0?"1":"0");
     }
     static Dictionary<string,string> ArtCache=new Dictionary<string,string>();
     static string ToWebp(string file) {
@@ -180,13 +221,13 @@ class WuweiApp {
     }
     static void NewJourney() { for(int i=1;i<=5;i=i+1){ProfileInfo info=Profiles.Metadata(i);if(!info.Exists && info.Error==""){OpenSlot(i,true);return;}}MenuStatus.Text="五段仙缘均有存档；请继续已有仙缘。新游戏不会删除任何存档。"; }
     static void ShowMenu() {SaveGame(false);if(Profiles.Error()!=""){return;}InMenu=true;MenuPage=0;PrestigeArmed=false;PrestigeButton.Text="转生 · 再续仙缘";RefreshProfiles();Refresh();}
-    static void RefreshProfiles() {for(int i=0;i<5;i=i+1){ProfileInfo info=Profiles.Metadata(i+1);string title=info.Exists&&info.Name!=""&&info.Name!="仙缘 "+Number(i+1)?info.Name+"  ·  ":"";ProfileLabels[i].Text="仙缘 "+Number(i+1)+(title!=""?"  ·  "+info.Name:"")+"  ·  "+(info.Exists?info.Summary:"空白 · 开启新旅程")+(info.Error!=""?" · 已保护":"");}}
+    static void RefreshProfiles() {for(int i=0;i<5;i=i+1){ProfileInfo info=Profiles.Metadata(i+1);string title=info.Exists&&info.Name!=""&&info.Name!="仙缘 "+Number(i+1)?info.Name+"  ·  ":"";ProfileLabels[i].Text="仙缘 "+Number(i+1)+(title!=""?"  ·  "+info.Name:"")+"  ·  "+(info.Exists?info.Summary:"空白 · 开启新旅程")+(info.Error!=""?" · 已保护":"");if(i>0 && i-1<SlotDelete.Count){SlotDelete[i-1].visible=info.Exists;}}}
     static void SaveMusic() {if(!InMenu){Model.SetMusicAdjusted();}if(!Profiles.SettingsWrite(Number(Music.Volume())+","+(Music.Muted()?"1":"0"))){Model.Say(Profiles.Error(),false);}Refresh();}
     static void ChangeVolume(int delta) {Music.SetVolume(Music.Volume()+delta);SaveMusic();}
     static void Place(Control c,int x,int y,int w,int h) {Size(c,w,h);c.DockManual();c.logPlaceSet=true;c.logX=x;c.logY=y;}
     static void OpenMenuPage(int page) {MenuPage=page;RefreshProfiles();Refresh();}
     static ScrollColumn MenuPanel(string name,string title) {
-        ScrollColumn p=new ScrollColumn();p.name=name;p.Class="menu-panel";p.logGap=12;Place(p,320,56,640,660);Menu.With(p);
+        ScrollColumn p=new ScrollColumn();p.name=name;p.Class="menu-panel";p.logGap=12;Place(p,340,70,640,700);Menu.With(p);
         Panel heading=RowBox();Size(heading,0,44);heading.With(Text(title,"title",36).Grow());heading.With(RowButton(name+"Back","返回菜单",()=>{OpenMenuPage(0);},"secondary",150));p.With(heading);return p;
     }
     static void BuildMenu() {
@@ -202,12 +243,14 @@ class WuweiApp {
         Label version=Text("无为修仙传  v1.0 · Zan 原生版","kicker",24);Place(version,40,716,480,24);Landing.With(version);
         Slots=MenuPanel("slots","选择仙缘");Slots.With(Wrap("五段仙缘，各自珍藏。新旅程只使用空白槽位，绝不覆盖旧存档。","muted",48));
         Panel actions=RowBox();Size(actions,0,44);actions.With(RowButton("menuContinue","继续仙缘",()=>{OpenSlot(ActiveSlot,false);},"primary",180));actions.With(RowButton("menuNew","开启新仙途",()=>{NewJourney();},"secondary",180));Slots.With(actions);
-        for(int i=1;i<=5;i=i+1){int slot=i;Flex row=CardRow(76);Label summary=Text("","section",36);ProfileLabels.Add(summary);row.With(summary);row.With(GrowSpace());row.With(RowButton("profile"+Number(i),"进入仙缘",()=>{OpenSlot(slot,false);},"secondary",150));Slots.With(row);}
+        for(int i=1;i<=5;i=i+1){int slot=i;Flex row=CardRow(76);Label summary=Text("","section",36);ProfileLabels.Add(summary);row.With(summary);row.With(GrowSpace());if(slot>1){SlotDelete.Add(RowButton("profileDelete"+Number(slot),"删除",()=>{AskDelete(slot);},"ghost",88));row.With(SlotDelete[SlotDelete.Count-1]);}row.With(RowButton("profile"+Number(i),"进入仙缘",()=>{OpenSlot(slot,false);},"secondary",150));Slots.With(row);}
         MenuStatus=Wrap("选择一段仙缘，即可启程。","notice",44);Slots.With(MenuStatus);
         MenuSettings=MenuPanel("menuAudio","游戏设置");MenuSettings.With(Text("山中清音","section",36));MenuMusicStatus=Wrap("","jade",72);MenuSettings.With(MenuMusicStatus);
         Panel audio=RowBox();Size(audio,0,44);audio.With(RowButton("menuVolumeDown","音量 −10",()=>{ChangeVolume(-10);},"secondary",120));audio.With(RowButton("menuMute","静音 / 恢复",()=>{Music.SetMuted(!Music.Muted());SaveMusic();},"secondary",150));audio.With(RowButton("menuVolumeUp","音量 +10",()=>{ChangeVolume(10);},"secondary",120));MenuSettings.With(audio);MenuSettings.With(Wrap("音乐设置独立保存。返回菜单不会创建或改写任何仙缘存档。","muted",72));
         MenuAchievements=MenuPanel("menuAwards","游戏成就");MenuAchievements.With(Wrap("当前仙缘的修行足迹 · 尚未开始时展示成就目标，不创建存档。","muted",48));
         for(int i=0;i<Model.AchievementCount();i=i+1){Label label=Wrap("","muted",80);MenuAchievementLabels.Add(label);MenuAchievements.With(label);}
+        // 弹窗宿主排最后：绘制顺序在全部菜单内容之上，DockFill 全窗。
+        Dialogs=new DialogHost();Dialogs.name="dialogHost";DialogHost.Pump=PumpDeleteDialog;Dialogs.DockFill();Menu.With(Dialogs);
         RefreshProfiles();
     }
     static string MapKey(int mode) { return mode==0?"wild":(mode==1?"danger":"extreme"); }
