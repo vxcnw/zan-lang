@@ -21,6 +21,9 @@ class LegendSystemTests {
         int runeIron = g.iron; g.iron = 0; Check(!g.DowngradeRune(2) && g.RuneCount(2) == 1 && g.iron == 0, "rune downgrade shortage is atomic");
         g.iron = 10; Check(g.DowngradeRune(2) && g.RuneCount(2) == 0 && g.RuneCount(1) == 1 && g.iron == 0, "rune downgrade consumes one rune and ten iron");
         g.AddRune(14, 2); Check(!g.SynthesizeRune(14) && g.RuneCount(14) == 2, "highest rune cannot synthesize past 14#");
+        g.gems = 100; int shopRune1 = g.RuneCount(1); g.Shop(5); Check(g.RuneCount(1) == shopRune1 + 1 && g.gems == 0, "shop sells a documented 1# rune for yuan");
+        g.gems = 2000; int shopRune10 = g.RuneCount(10); g.Shop(6); Check(g.RuneCount(10) == shopRune10 + 1 && g.gems == 0, "shop sells a documented 10# rune for yuan");
+        g.gems = 0; int noBuyRune = g.RuneCount(1); g.Shop(5); Check(g.RuneCount(1) == noBuyRune, "rune shop purchase is atomic when yuan is insufficient");
         int floor = g.floor; g.active = false; int wave = g.wave; int tries = g.bossTries;
         g.level = 1; g.Challenge(1, 0); Check(g.mode == 0 && g.bossTries == tries, "boss level gate atomic");
         g.level = 80; g.Challenge(1, -1); Check(g.bossTries == tries, "invalid boss does not consume tries");
@@ -116,7 +119,7 @@ class LegendSystemTests {
         Check(loaded.elementPool == g.elementPool && loaded.elementSeconds == 61 && loaded.elementRanks[0] == 1 && loaded.elementRanks[4] == 100, "elements save roundtrip");
         Check(loaded.reputation == g.reputation && loaded.redPackets == g.redPackets && loaded.recyclePoints == g.recyclePoints, "recycle wallets persisted");
         Check(loaded.treasureMaps == g.treasureMaps && loaded.treasureDraws == g.treasureDraws, "treasure map state persisted");
-        Check(loaded.RuneCount(1) == 1 && loaded.RuneCount(3) == 4 && loaded.RuneCount(14) == 2, "levelled rune inventory survives save roundtrip");
+        Check(loaded.RuneCount(1) == 2 && loaded.RuneCount(3) == 4 && loaded.RuneCount(14) == 2, "levelled rune inventory survives save roundtrip");
         Check(loaded.SkillRank(1) == 2 && loaded.IsSkillEquipped(1) && loaded.SkillAtSlot(7).Text("kind") == "passive", "skill ranks and loadout persisted");
         JsonValue broken = SaveStore.Encode(g); broken.Set("elementRanks",JsonValue.NewArray()); bool rejected = false;
         try { SaveStore.Decode(broken.ToJson()); } catch (Exception ex) { rejected = true; } Check(rejected,"malformed elements rejected");

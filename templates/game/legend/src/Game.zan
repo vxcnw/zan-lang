@@ -674,13 +674,19 @@ class Game {
         altarPersonal = altarPersonal - AltarPersonalCap(); Gold(B("altar_personal_reward_gold")); gems = Rules.Clamp(gems + B("altar_personal_reward_yuan"), 0, 1000000); reputation = Rules.Bounded((long)reputation + B("altar_personal_reward_reputation"));
         Log("个人祭坛奖励已领取；溢出进度保留。");
     }
+    int ShopRuneLevel(string reward) {
+        if (reward == "rune1") { return 1; } if (reward == "rune2") { return 2; } if (reward == "rune3") { return 3; } if (reward == "rune4") { return 4; }
+        if (reward == "rune5") { return 5; } if (reward == "rune6") { return 6; } if (reward == "rune7") { return 7; } if (reward == "rune8") { return 8; }
+        if (reward == "rune9") { return 9; } if (reward == "rune10") { return 10; } if (reward == "rune11") { return 11; } if (reward == "rune12") { return 12; }
+        if (reward == "rune13") { return 13; } if (reward == "rune14") { return 14; } return 0;
+    }
     void Shop(int item) {
         if (!GameTables.current.shop.index.ContainsKey(Rules.N(item))) { return; }
-        DataRow offer = GameTables.current.shop.At(item); string reward = offer.Text("reward"); int quantity = offer.Int("quantity");
-        if ((reward == "potions" && potions > 9999 - quantity) || (reward == "iron" && iron > 1000000 - quantity) || (reward == "runes" && runes > 1000000 - quantity) || (reward == "capacity" && capacity > B("max_capacity") - quantity) || (reward == "gold" && gold > 1000000000 - quantity)) { Log("空间或资源容量不足。"); return; }
+        DataRow offer = GameTables.current.shop.At(item); string reward = offer.Text("reward"); int quantity = offer.Int("quantity"); int runeLevel = ShopRuneLevel(reward);
+        if ((reward == "potions" && potions > 9999 - quantity) || (reward == "iron" && iron > 1000000 - quantity) || (reward == "runes" && runes > 1000000 - quantity) || (reward == "capacity" && capacity > B("max_capacity") - quantity) || (reward == "gold" && gold > 1000000000 - quantity) || (runeLevel > 0 && RuneCount(runeLevel) > 1000000 - quantity)) { Log("空间或资源容量不足。"); return; }
         if (!Pay(offer.Int("gold") + capacity * offer.Int("capacity_gold"), offer.Int("iron"), offer.Int("yuan"))) { return; }
         if (reward == "potions") { potions = potions + quantity; } if (reward == "iron") { iron = iron + quantity; }
-        if (reward == "capacity") { capacity = capacity + quantity; } if (reward == "runes") { runes = runes + quantity; }
+        if (reward == "capacity") { capacity = capacity + quantity; } if (reward == "runes") { runes = runes + quantity; } if (runeLevel > 0) { AddRune(runeLevel, quantity); }
         if (reward == "gold") { Gold(quantity); } Log("购买成功：" + offer.Text("name"));
     }
     void Daily() { if (dailyClaim != 0) { Log("今日福利已领取。"); return; } dailyClaim = 1; Gold(B("daily_gold")); gems = Rules.Clamp(gems + B("daily_yuan"), 0, 1000000); potions = Rules.Clamp(potions + B("daily_potions"), 0, 9999); treasureMaps = Rules.Clamp(treasureMaps + B("daily_treasure_maps"), 0, 9999); Log("今日福利已按配置发放，藏宝图 +" + Rules.N(B("daily_treasure_maps")) + "。"); }
