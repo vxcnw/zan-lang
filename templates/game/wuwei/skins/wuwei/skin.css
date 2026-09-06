@@ -29,13 +29,15 @@ stack.bg-wash { background: rgba(245,237,219,0.78); }
 
 /* 顶栏 78px：纸底、下边框；玩家名与状态 pill 垂直居中。
  * pill 全部走中性描边款，资源两组（灵石/修为）用主色深一档区分
- * 层级——单一强调色规则下不再使用三块高饱和彩底。 */
-flex.topbar { background: rgba(242,235,217,0.96); border-bottom: 1 solid rgba(64,64,56,0.38); padding: 0 18 0 24; }
-label.topname { font-size: 28; font-weight: 600; color: var(--text-primary); height: 40; }
-flex.pill { height: 40; padding: 0 14; border-radius: 18; gap: 0; }
-flex.pill-res { background: rgba(51,51,46,0.07); border: 1 solid #bdb29f; }
+ * 层级——单一强调色规则下不再使用三块高饱和彩底。
+ * 三段节奏：名字 | 状态 pill | (弹性空隙) 资源 pill，
+ * 状态组与资源组各自相邻、组内同高同字号，不散排。 */
+flex.topbar { background: rgba(242,235,217,0.96); border-bottom: 1 solid rgba(64,64,56,0.38); padding: 0 24 0 24; }
+label.topname { font-size: 26; font-weight: 600; color: var(--text-primary); height: 40; margin: 0 24 0 0; }
+flex.pill { height: 36; padding: 0 16; border-radius: 18; gap: 0; }
+flex.pill-res { background: rgba(51,51,46,0.05); border: 1 solid #c3b9a4; }
 flex.pill-strong { background: var(--primary); border: 1 solid var(--primary-pressed); }
-label.pill-text-ink { font-size: 14; color: var(--text-primary); }
+label.pill-text-ink { font-size: 14; color: var(--text-secondary); }
 label.pill-strong { font-size: 14; color: #ffffff; }
 
 /* 左侧 185px 浅纸导航：与顶栏同一纸底，墨字、玉色当前项 */

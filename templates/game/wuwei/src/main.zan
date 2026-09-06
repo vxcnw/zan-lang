@@ -437,11 +437,11 @@ class WuweiApp {
         if(InMenu){return;}
         for(int i=0;i<Pages.Count;i=i+1){Pages[i].visible=i==Page;}
         NameText.Text=JourneyName;
-        RealmText.Text=Model.RealmName()+" "+Number(Model.Layer())+"层";
+        RealmText.Text=Model.RealmName()+" "+Number(Model.Layer())+" 层";
         AgeText.Text="年龄 "+Number(Model.Age());
-        LifeText.Text="剩余寿元 "+Number(Model.Lifespan()-Model.Age())+"年";
-        StonesText.Text="灵石  "+Number(Model.Stones);
-        XpText.Text="修为经验  "+Number(Model.Xp);
+        LifeText.Text="寿元 "+Number(Model.Lifespan()-Model.Age())+" 年";
+        StonesText.Text="灵石 "+Number(Model.Stones);
+        XpText.Text="修为 "+Number(Model.Xp);
         ActivityText.Text=Model.Activity==1?"正在闭关 · 吐纳天地":Model.Activity==2?"正在历练":Model.Activity==3?"正在百艺 · 制作中":"静养生息 · 尘缘未扰";
         Notice.Text=Model.LastMessage;
         QiText.Text="境界根基    "+Number(Model.Qi)+" / "+Number(Model.QiNeed());
@@ -522,7 +522,7 @@ class WuweiApp {
         Image world=Art("qingzhu_ridge.webp",800);world.name="worldBackground";world.Class="world-bg";world.Fit="cover";world.DockFill();Shell.With(world);
         Panel wash=Panel.Root("wash");wash.Class="bg-wash";wash.DockFill();Shell.With(wash);
         Flex top=Flex.Row().AlignCenter();top.Class="topbar";Size(top,0,78);top.Gap(12);top.DockTop();wash.With(top);
-        NameText=Text(JourneyName,"topname",40);Size(NameText,240,40);top.With(NameText);
+        NameText=Text(JourneyName,"topname",40);Size(NameText,0,40);top.With(NameText);
         RealmText=Text("","pill-text-ink",24);top.With(Pill("pill-res",RealmText));
         AgeText=Text("","pill-text-ink",24);top.With(Pill("pill-res",AgeText));
         LifeText=Text("","pill-text-ink",24);top.With(Pill("pill-res",LifeText));
@@ -538,13 +538,20 @@ class WuweiApp {
         nav.With(Wrap("Space 开始 / 暂停\nEsc   系统页","navfoot",44));
         Panel center=Column("center");center.DockFill();center.logGap=12;wash.With(center);
         Panel subnavs=Panel.Root("subnavs");Size(subnavs,0,58);center.With(subnavs);
-        Flex bar0=NewSubnav(subnavs);AddTab(bar0,0,"闭关");AddTab(bar0,1,"功法");AddTab(bar0,2,"破境");SectionBars.Add(bar0);
-        Flex bar1=NewSubnav(subnavs);AddTab(bar1,3,"任务");AddTab(bar1,4,"野外");AddTab(bar1,5,"险地");AddTab(bar1,6,"绝境");SectionBars.Add(bar1);
-        Flex bar2=NewSubnav(subnavs);AddCraftTab(bar2,"fish","垂钓","fishing");AddCraftTab(bar2,"herbs","采药","herbalism");AddCraftTab(bar2,"mining","采矿","mining");AddCraftTab(bar2,"brew","酿造","brewing");AddCraftTab(bar2,"forge","炼器","forging");AddCraftTab(bar2,"alchemy","炼丹","alchemy");AddCraftTab(bar2,"talisman","符箓","talismans");AddCraftTab(bar2,"formation","阵法","formations");SectionBars.Add(bar2);
-        Flex bar3=NewSubnav(subnavs);AddTab(bar3,8,"行囊");AddTab(bar3,9,"坊市");SectionBars.Add(bar3);
-        Flex bar4=NewSubnav(subnavs);AddTab(bar4,10,"宗门事务");AddTab(bar4,11,"宗门宝库");AddTab(bar4,12,"宗门擂台");SectionBars.Add(bar4);
-        Flex bar5=NewSubnav(subnavs);Subnote=Text("轮回 · 因果与永久天赋","muted grow",42);bar5.With(Subnote);SectionBars.Add(bar5);
-        Flex bar6=NewSubnav(subnavs);AddTab(bar6,14,"设置");AddTab(bar6,15,"图鉴");SectionBars.Add(bar6);
+        Flex bar0=NewSubnav(subnavs);AddTab(bar0,0,"闭关");AddTab(bar0,1,"功法");AddTab(bar0,2,"破境");
+        SectionBars.Add(bar0);
+        Flex bar1=NewSubnav(subnavs);AddTab(bar1,3,"任务");AddTab(bar1,4,"野外");AddTab(bar1,5,"险地");AddTab(bar1,6,"绝境");
+        SectionBars.Add(bar1);
+        Flex bar2=NewSubnav(subnavs);AddCraftTab(bar2,"fish","垂钓","fishing");AddCraftTab(bar2,"herbs","采药","herbalism");AddCraftTab(bar2,"mining","采矿","mining");AddCraftTab(bar2,"brew","酿造","brewing");AddCraftTab(bar2,"forge","炼器","forging");AddCraftTab(bar2,"alchemy","炼丹","alchemy");AddCraftTab(bar2,"talisman","符箓","talismans");AddCraftTab(bar2,"formation","阵法","formations");
+        SectionBars.Add(bar2);
+        Flex bar3=NewSubnav(subnavs);AddTab(bar3,8,"行囊");AddTab(bar3,9,"坊市");
+        SectionBars.Add(bar3);
+        Flex bar4=NewSubnav(subnavs);AddTab(bar4,10,"宗门事务");AddTab(bar4,11,"宗门宝库");AddTab(bar4,12,"宗门擂台");
+        SectionBars.Add(bar4);
+        Flex bar5=NewSubnav(subnavs);Subnote=Text("轮回 · 因果与永久天赋","muted grow",42);bar5.With(Subnote);
+        SectionBars.Add(bar5);
+        Flex bar6=NewSubnav(subnavs);AddTab(bar6,14,"设置");AddTab(bar6,15,"图鉴");
+        SectionBars.Add(bar6);
         Panel body=Panel.Root("pages");body.Grow();center.With(body);
         BuildCultivate();BuildSkills();BuildBreakthrough();BuildQuests();BuildRegions();BuildCraft();BuildInventory();BuildMarket();BuildSect();BuildPrestige();BuildSettings();BuildCodex();
         foreach(ScrollColumn p in Pages){body.With(p);}
