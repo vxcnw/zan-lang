@@ -1446,6 +1446,10 @@ class Gallery {
         // CPU 上重新光栅一遍 —— 后者是 HMI 各页 CPU 高的全部原因。
         // 用 ZAN_GALLERY_FULLFRAMES=1 可以关掉，用来对比排查残影。
         app.SetPartialFrames(UiDriver.Env("ZAN_GALLERY_FULLFRAMES") != "1");
+        // ZAN_GALLERY_NOFX=1 关掉动画背景特效，用来对比排查残影。
+        if (UiDriver.Env("ZAN_GALLERY_NOFX") == "1") {
+            app.SetBackdropFx(false);
+        }
         Gallery.ringDump = UiDriver.Env("ZAN_CANVAS_RING") != "";
         Gallery.audit = UiDriver.Env("ZAN_GALLERY_AUDIT") == "1";
         Gallery.auditSeen = new Dictionary<string, string>();
