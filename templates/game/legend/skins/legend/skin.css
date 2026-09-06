@@ -1,0 +1,82 @@
+:root {
+ --primary: #009de0;
+ --primary-hover: #25bcf4;
+ --bg-base: #24303e;
+ --bg-surface: #181f29;
+ --bg-elevated: #24303e;
+ --bg-hover: #2d4153;
+ --bg-active: #314b60;
+ --text-primary: #c4c9d0;
+ --text-secondary: #a5aeb9;
+ --text-tertiary: #707d8c;
+ --border-primary: #3b4956;
+ --border-secondary: #344450;
+ --border-hover: #008acb;
+ --border-focus: #009de0;
+ --radius: 0;
+ --radius-large: 0;
+ --border-radius-small: 0;
+ --border-radius-medium: 0;
+ --border-radius-large: 0;
+ --font-size-tiny: 12;
+ --font-size-small: 13;
+ --font-size-medium: 14;
+ --font-size-large: 16;
+ --font-size-huge: 20;
+ --game-yellow: #ffff00;
+ --game-green: #00dd00;
+ --game-cyan: #00dddd;
+ --game-orange: #f18c00;
+ --game-red: #ff2020;
+ --game-magenta: #ed00ed;
+ --game-purple: #8872f0;
+ --game-pink: #e075b9;
+}
+button { color: var(--primary); background: #202c39; border: 1px var(--border-primary); border-radius: 0; padding: 2px 4px; }
+button.small { font-size: var(--font-size-medium); }
+button.tiny { font-size: var(--font-size-small); }
+.navtile { display: flex; flex-direction: row; align-items: center; background: #202c39; border: 1px var(--border-primary); border-radius: 0; }
+.navtile:hover { background: var(--bg-hover); border-color: var(--primary); }
+.navicon { flex-shrink: 0; }
+.navtext { flex: 1 1 0; min-width: 0; color: #cbd3dc; font-size: var(--font-size-small); }
+.navtile-active { background: #304151; border-color: #bda36a; }
+.navtile-active .navtext { align-self: center; color: #f1d592; }
+.navigation-grid { column-gap: 4px; row-gap: 4px; }
+.page-surface, .battlefield { background: #1e2835; }
+.sidebar, .profile, .feed, .chat-panel, .rank-panel { background: var(--bg-surface); border: 1px var(--border-primary); }
+.frame { background: var(--bg-surface); border: 1px #256489; }
+.item-cell { background: #08090b; border: 1px #3c454d; }
+.item-selected { background: #182938; border: 1px var(--game-yellow); }
+.item-locked { background: #10151d; border: 1px #29323b; }
+.paperdoll { background: #0c0d0e; border: 1px #256489; }
+.map-tile { background: #172330; border: 1px #3b4956; }
+.bottom-nav { background: #24303e; border: 1px var(--border-primary); }
+.table-head { background: #10273b; }
+.table-row { background: #18232f; }
+.table-alt { background: #202e3c; }
+.yellow { color: var(--game-yellow); }
+.green { color: var(--game-green); }
+.cyan { color: var(--game-cyan); }
+.blue { color: var(--primary); }
+.orange { color: var(--game-orange); }
+.red { color: var(--game-red); }
+.magenta { color: var(--game-magenta); }
+.purple { color: var(--game-purple); }
+.pink { color: var(--game-pink); }
+.strong { font-weight: 700; }
+.tiny { font-size: var(--font-size-tiny); }
+.small { font-size: var(--font-size-small); }
+.battle-title { font-size: var(--font-size-huge); font-weight: 700; color: var(--game-orange); }
+.secondary { color: var(--text-secondary); }
+
+.legend-root { background: #24303e; }
+grid { column-gap: 0; row-gap: 0; padding: 0; }
+progress { font-size: var(--font-size-tiny); }
+
+image { background: transparent; border-width: 0; }
+
+/* Keep the track inside its measured box; HP text has its own row. */
+progress.error::track { background: #101821; border-radius: 2px; }
+progress.error::fill { background: #c94b48; border-radius: 2px; }
+
+.map-grid { column-gap: 4px; row-gap: 4px; }

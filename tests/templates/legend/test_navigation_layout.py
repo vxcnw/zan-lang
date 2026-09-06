@@ -17,15 +17,16 @@ def check(path):
     assert len(nodes) == 31, 'Missing or duplicate navigation controls'
     nav = {int(n['name'][4:]): n for n in nodes}
     assert set(nav) == set(range(31)), 'Missing or duplicate navigation route'
-    scale = nav[0]['kids'][0]['w']/24
+    scale = nav[0]['kids'][0]['w']/28
     for i, tile in nav.items():
         image, label = tile['kids']
         assert image['kind'] == 'Image' and label['kind'] == 'Label', (i,'child order')
-        assert abs(tile['h']-40*scale) <= 1, (i,'height')
-        assert image['w'] == image['h'] == 24*scale, (i,'icon size')
+        assert abs(tile['h']-48*scale) <= 1, (i,'height')
+        assert image['w'] == image['h'] == 28*scale, (i,'icon size')
         assert abs(image['x']-tile['x']-4*scale) <= 1, (i,'left inset')
         assert abs(label['x']-image['x']-image['w']-4*scale) <= 1, (i,'icon/text gap')
-        assert label['y'] == image['y'] and label['h'] == image['h'], (i,'baseline')
+        assert abs(label['h']-40*scale) <= 1, (i,'two-line label height')
+        assert abs(2*label['y']+label['h']-2*tile['y']-tile['h']) <= 1, (i,'label vertical center')
         assert abs(2*image['y']+image['h']-2*tile['y']-tile['h']) <= 1, (i,'vertical center')
         assert label['x']+label['w'] <= tile['x']+tile['w'], (i,'overflow')
     for start in (0,10,20):

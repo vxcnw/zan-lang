@@ -23,7 +23,7 @@ def read(path):
 
 def check(path, scrolled=None, pixels=None):
     nodes = read(path)
-    scale = nodes['nav-0']['kids'][0]['w'] / 24
+    scale = nodes['nav-0']['kids'][0]['w'] / 28
     for prefix in ('income', 'chat'):
         viewport, text = nodes[prefix+'-scroll'], nodes[prefix+'-content']
         assert viewport['kind'] == 'ScrollColumn', prefix

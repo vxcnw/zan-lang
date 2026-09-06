@@ -1,18 +1,50 @@
-zan Legend Idle — 传奇放置挂机（模板版）
-====================================
+# 传奇放置 · Zan 模板
 
-玩法
-----
-- 自动战斗、自动拾取，装备分品级
-- 世界频道广播战况，离线收益结算
-- 无头自测：LEGEND_SIM=1（平衡）、LEGEND_TOUR=1（面板巡游）、
-  LEGEND_SHOT=1（截图模式）
+以 CSV 定义驱动的本地放置 RPG。入口 `src/main.zan`；游戏规则使用 Zan，界面使用 Gui 标准组件。本工程仍在还原参考游戏：**原始数据导出不等于全部玩法已实现**。
 
-架构
-----
-三文件拆分：src/Data.zan（数值与表）、src/Game.zan（战斗与状态机）、
-src/main.zan（Host 循环与全部渲染）。完整设计见 DESIGN.md。
+## 在 zan-lang 仓库构建
 
-编译
-----
-    zanc src/main.zan src/Game.zan src/Data.zan --auto-stdlib -o legend.exe
+在仓库根目录运行（已构建 `build/zanc.exe`）：
+
+```powershell
+& templates/game/legend/tools/build.ps1
+& build/legend-game/Legend.exe
+& templates/game/legend/tools/test.ps1 -Python C:/Python311/python.exe
+```
+
+输出仅写入 `build/legend-game/`。复制出的模板可给 `tools/build.ps1` 传 `-Compiler <zanc.exe绝对路径> -Output <源目录外的输出目录>`。
+
+运行目录需要同时携带 `data/`、`assets/`、`skins/` 与 GUI 驱动。数据在启动时读取，修改 CSV 后重启即可生效，不需要重新编译游戏。环境变量 `LEGEND_DATA_DIR` 可指定其他数据目录。存档默认 `%LOCALAPPDATA%/ZanLegend/hero-v2.json`（文件名兼容历史版本，内部版本为 3）；`LEGEND_SAVE_DIR` 可隔离测试存档。不要把测试存档写到源码目录。
+
+## 已接入
+
+- 三职业、自动战斗、技能耗蓝与冷却、地图推进、BOSS 挑战、本地挑战曲线、离线结算。
+- 装备掉落、穿戴、职业/等级/转生条件、背包与仓库、锁定、独立出售/回收、图鉴收集；整理不会换装，自动配装为独立操作。
+- 装备独立生命/法力、攻击/魔法/道术/防御/魔防上下限；角色逐项聚合；匹配伤害类型的减伤。
+- 表驱动的四种锻造、等级成长、修炼、任务、转生、商店和消耗规则。
+- 八槽内功：TP/黑铁消耗、独立等级与属性、离线击杀 TP、旧存档兼容。具体数值为模板配置而非已知原版公式。
+- 36 张统一透明底装备族图，所有可穿戴定义通过 `data/equipment_art.csv` 显式映射，不再按槽位取截图。
+- 稳定定义 ID 的版本化 JSON 存档、损坏配置拒绝加载、存档加载后重新计算属性。
+
+## 未实现或仅保留定义
+
+联机 PK、行会、沙巴克、交易、排行榜等没有服务器支持，不制造玩家或战报。原始 41 条技能、475 条配方、251 条称谓、52 条套装等保留在 `data/reference/`，不宣称已全部执行；运行时技能目前是三职业各一个模板技能。天书传承仍未实现，界面明确提示且不扣资源；宝石成长已接入六槽独立等级、属性聚合、资源事务与版本化存档，宝石合成尚未实现；内功已接入八槽模板规则。勋章、龙珠等额外槽位未实现；当前支持十二个穿戴位置。重量、基准售价、堆叠上限等已导入（出售已使用基准售价），但尚未实现负重系统、通用消耗品背包和原版商店经济；不能把这些元数据当成已完成玩法。
+
+详见 `data/README.md` 的字段、映射依据与规则边界。引用素材来自本地参考资料；对外分发前需要自行确认素材和原始数据授权。
+
+## 本轮对照与美术重建
+
+`REFERENCE_AUDIT.md` 逐项列出原图差异、已验证行为、后续验收条件和框架级已知问题；不要将现状称为全部玩法还原。
+
+- `data/inner_power.csv`：八项属性、每级收益、等级上限、TP/黑铁成本。
+- `data/balance.csv`：击杀 TP、TP 上限等基础平衡参数。
+- `data/navigation.csv`：路由名称、图标和显示标签；`label` 中的字面量 `\n` 表示两行分组，不改变路由名称。
+- `data/equipment_art.csv`：装备定义 ID 到图标路径；外观层次不代表随机品质。
+
+素材处理脚本仅供开发使用，依赖 Pillow、NumPy；发布的 Zan 游戏不需要 Python。
+
+```powershell
+C:/Python311/python.exe templates/game/legend/tools/prepare_equipment.py --preview _scratch/legend/equipment-preview.png
+```
+
+该命令从已保存的三张素材源图重新生成 36 张 PNG 和基础 ID 映射，会覆盖手工修改过的映射；定制图标后请先保存自己的映射表。
