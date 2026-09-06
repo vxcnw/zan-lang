@@ -14,7 +14,7 @@ class ItemDef {
     public const int KIND_COUNT = 11;
     // 半径(碰撞,设计单位) / 重量(拉回速度分子) / 分值 / 是否垃圾(清连击)
     public int rad;
-    public int weight;      // 拉回耗时 ≈ weight * dist / 300 (秒)
+    public int weight;      // 收线权重:baseV = 720/(0.5+0.62w),越重拉越久
     public int score;
     public bool junk;       // 石头/骷髅:清空连击
     public string name;
@@ -382,9 +382,11 @@ class World {
 
     void StepRetract(int dtMs, double dt) {
         ItemDef d = this.hookedKind >= 0 ? Data.DEFS[this.hookedKind] : null;
-        int weight = d != null ? d.weight : 2;
-        // 重物基础速度慢;QTE 加速叠加
-        double baseV = 900.0 / (2.0 + weight * 0.55);
+        int weight = d != null ? d.weight : 3;
+        // 原版体感:轻物(小金/金币袋)一甩就回,重物(大金/石头)沉得
+        // 拉好久。整体放慢一档、拉开轻重差距(重:轻 ≈ 1:3.4):
+        //   w=3  ≈ 452 px/s   w=8  ≈ 202   w=16 ≈ 67
+        double baseV = 720.0 / (0.5 + weight * 0.62);
         double v = baseV;
         if (this.qteBoost > 0) {
             v = v * 1.9;
@@ -407,7 +409,7 @@ class World {
         }
         // 收线同时缓慢回收绳长(基础速度),QTE 命中给大加速
         ItemDef d = Data.DEFS[this.hookedKind];
-        double baseV = 900.0 / (2.0 + d.weight * 0.55);
+        double baseV = 720.0 / (0.5 + d.weight * 0.62);
         double v = baseV;
         if (this.qteBoost > 0) {
             v = v * 2.2;

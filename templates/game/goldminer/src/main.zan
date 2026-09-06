@@ -881,7 +881,10 @@ class MinerApp {
                             if (perp > 26.0) { continue; }   // 爪半径内才算可抓
                             int sc = Data.DEFS[it.kind].score;
                             if (it.kind == 8 || it.kind == 9) { sc = -1; } // 避开
-                            if (sc > 0 && sc < 120) { sc = 0; }   // 小鱼不值当
+                            // 终局放宽:收线要好几秒,小鱼平时不值当;
+                            // 最后 15 秒有啥抓啥(石头除外),模拟真人抢分
+                            int minFish = w.timeLeftMs < 15000 ? 30 : 100;
+                            if (sc > 0 && sc < minFish) { sc = 0; }
                             // 价值/重量性价比优先
                             if (sc > 0) {
                                 sc = sc * 10 / (Data.DEFS[it.kind].weight + 4);
@@ -904,8 +907,9 @@ class MinerApp {
                                         -ox * Math.Sin(rad) + oy * Math.Cos(rad));
                                     if (operp > 26.0) { continue; }
                                     ItemDef od = Data.DEFS[ob.kind];
-                                    if (od.junk || od.score < 120) {
-                                        sc = sc / 4;    // 大概率先抓到它
+                                    int obMin = w.timeLeftMs < 15000 ? 30 : 100;
+                                    if (od.junk || od.score < obMin) {
+                                        sc = 0;     // 垃圾挡道必被抓到,别浪费收线时间
                                         break;
                                     }
                                 }
