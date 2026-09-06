@@ -1711,13 +1711,6 @@ partial class DataTable {
         int edW = 0;
         int edH = 0;
         bool edVis = false;
-        // 键盘/鼠标光标所在的焦点单元格（Excel 式描边），
-        // 同样在循环中捕获、行绘制完成后统一描边。
-        int fcX = 0;
-        int fcY = 0;
-        int fcW = 0;
-        int fcH = 0;
-        bool fcVis = false;
 
         int r = 0;
         while (r < visRows && (start + r) < total) {
@@ -1944,9 +1937,6 @@ partial class DataTable {
                     if (st.editing && rowIdx == st.editRow && cc == st.editCol) {
                         edX = ccl; edY = ry; edW = cw; edH = rowH; edVis = true;
                     }
-                    if (rowIdx == st.hitRow && cc == st.hitCol) {
-                        fcX = ccl; fcY = ry; fcW = cw; fcH = rowH; fcVis = true;
-                    }
                     // 单元格控件插槽：真控件按格矩形渲染
                     // （PropertyGrid/设计器 PvCtrl 同款 Measure+Arrange+
                     // RenderTree 三步）。优先于自绘与内置渲染——它是
@@ -2029,17 +2019,54 @@ partial class DataTable {
         }
 
         // ---------------- 焦点单元格描边 ----------------
-        // Excel/DevExpress 式：单元格光标所在处一圈 1px 强调线，
+        // Excel/DevExpress 式：一圈 1px 强调线标出活动区域，
         // 让键盘导航有落点。编辑器打开时不画——编辑器自带
         // 更粗的焦点边。行选择模式（hitCol = -1）没有光标单元格。
-        if (fcVis && !st.editing) {
-            int fvi = DataTable.VisPos(frameColumns, st.hitCol);
-            if (fvi >= 0) {
-                FrameColumn focusColumn = frameColumns[fvi];
-                DataTable.PushBandClip(c, focusColumn.band, firstDataX, bandX, bandW,
-                                       rightX, pinnedW, pinnedRW, fcY, fcH, clipRight);
-                c.DrawRect(fcX, fcY, fcW, fcH, sAccent.BgOr(0), 1);
-                c.PopClip();
+        // 有范围选区时描边包住整个矩形（Excel 惯例），而不是
+        // 只圈光标格——否则拖出的高亮块与描边框分家，看起来
+        // 像两个互相矛盾的选区。范围跨 band（冻结/滚动列）时
+        // 逐 band 各画一段并裁剪到 band 条带，滚动列不会画到
+        // 冻结列上。
+        if (!st.editing && st.hitRow >= 0 && st.hitCol >= 0) {
+            int efR0 = st.hitRow;
+            int efR1 = st.hitRow;
+            int efC0 = st.hitCol;
+            int efC1 = st.hitCol;
+            if (hasRange) {
+                efR0 = rgR0;
+                efR1 = rgR1;
+                efC0 = rgC0;
+                efC1 = rgC1;
+            }
+            // 行窗口钳制：某端滚出视口时描边画到视口边缘
+            // （Excel 行为），不会缩成一个点或整段消失。
+            int efTop = bodyTop + (efR0 - start) * rowH;
+            if (efTop < bodyTop) { efTop = bodyTop; }
+            int efBottom = bodyTop + (efR1 - start + 1) * rowH;
+            if (efR1 >= start + r) { efBottom = bodyTop + visRows * rowH; }
+            if (efBottom > efTop && efR1 >= start && efR0 < start + r) {
+                int efH = efBottom - efTop;
+                for (int band = 0; band < 3; band = band + 1) {
+                    int efL = 0;
+                    int efR = -1;
+                    for (int vci = 0; vci < frameColumns.Count; vci = vci + 1) {
+                        FrameColumn efc = frameColumns[vci];
+                        if (efc.band != band || efc.column < efC0 || efc.column > efC1) { continue; }
+                        int ecw = st.dispW[efc.column];
+                        if (ecw <= 0) { continue; }
+                        if (efR < 0) { efL = efc.x; efR = efc.x + ecw; }
+                        else {
+                            if (efc.x < efL) { efL = efc.x; }
+                            if (efc.x + ecw > efR) { efR = efc.x + ecw; }
+                        }
+                    }
+                    if (efR > efL) {
+                        DataTable.PushBandClip(c, band, firstDataX, bandX, bandW,
+                                               rightX, pinnedW, pinnedRW, efTop, efH, clipRight);
+                        c.DrawRect(efL, efTop, efR - efL, efH, sAccent.BgOr(0), 1);
+                        c.PopClip();
+                    }
+                }
             }
         }
 
