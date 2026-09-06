@@ -92,9 +92,20 @@ class ChartFrame {
         int q = px - this.plotX;
         if (q < 0) { q = 0; }
         if (q >= this.plotW) { q = this.plotW - 1; }
-        // CatLeft 用逐项 floor(i*W/n) 分桶；反解必须在同一组
-        // 边界上找最后一个左缘不超过像素的位置，不能用
-        // q*n/W（非整除时会在每个余数边界错一格）。
+        if (!this.catBoundaryGap && n > 1) {
+            // 刻度模式（boundaryGap=false，点贴刻度、末点贴绘图区
+            // 右缘）：按等宽 n 格分桶、像素右缘 q+1 落格定类目——
+            // ECharts axis tooltip 手感，最后一格也能选中末类目。
+            // 带状「最后一个左缘 ≤ 像素」在这里永远够不到 n-1
+            // （CatLeft(n-1)=plotW 是开右端点），末类目的
+            // tooltip 就再也出不来。
+            int fi = (q + 1) * n / this.plotW;
+            if (fi > n - 1) { fi = n - 1; }
+            return fi;
+        }
+        // 带状（boundaryGap=true）：CatLeft 用逐项 floor(i*W/n)
+        // 分桶；反解必须在同一组边界上找最后一个左缘不超过像素
+        // 的位置，不能用 q*n/W（非整除时会在每个余数边界错一格）。
         int lo = 0;
         int hi = n;
         while (lo + 1 < hi) {

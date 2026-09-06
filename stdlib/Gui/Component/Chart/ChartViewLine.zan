@@ -95,6 +95,14 @@ partial class ChartView {
             long x1 = fx[seg]; long y1 = fy[seg];
             long x2 = fx[seg + 1]; long y2 = fy[seg + 1];
             long x3 = fx[p3]; long y3 = fy[p3];
+            // 平滑不得越过本段两端点的包络：Catmull-Rom 在急弯和
+            // 收尾段会冲出数据极值（数据顶格时曲线越过最高格线，
+            // 看起来"最高点不是 15°"；末段还会横向越过末刻度）。
+            // 逐子步钳回两端点范围，极值永远落在真实数据点上。
+            long xlo = x1 < x2 ? x1 : x2;
+            long xhi = x1 < x2 ? x2 : x1;
+            long ylo = y1 < y2 ? y1 : y2;
+            long yhi = y1 < y2 ? y2 : y1;
             int steps = 48;
             int s = 1;
             while (s <= steps) {
@@ -111,6 +119,8 @@ partial class ChartView {
                     + (y2 - y0) * tt / 1000
                     + (2 * y0 - 5 * y1 + 4 * y2 - y3) * tt2 / 1000
                     + (0 - y0 + 3 * y1 - 3 * y2 + y3) * tt3 / 1000) / 2;
+                if (qx < xlo) { qx = xlo; } else if (qx > xhi) { qx = xhi; }
+                if (qy < ylo) { qy = ylo; } else if (qy > yhi) { qy = yhi; }
                 ox.Add((int)qx); oy.Add((int)qy);
                 s = s + 1;
             }
