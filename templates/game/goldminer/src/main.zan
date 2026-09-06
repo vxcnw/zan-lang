@@ -745,6 +745,13 @@ class MinerApp {
                     && SdlEvent.MouseButton() == SdlMouseButton.Left()) {
                     action = true;
                 }
+                // 触屏(安卓/iOS):手指按下/抬起都当一次发射。Gui 运行时
+                // 已把手指合成鼠标点击供控件层用;这里再直发一拍,保证
+                // 场景层的放钩/QTE/拆弹点击在手机上与桌面同手感。
+                if (ty == SdlEventType.FingerDown()
+                    || ty == SdlEventType.FingerUp()) {
+                    action = true;
+                }
                 if (ty == SdlEventType.KeyDown() && !SdlEvent.IsRepeat()) {
                     int sc = SdlEvent.Scancode();
                     if (sc == SdlScancode.Space() || sc == SdlScancode.Down()

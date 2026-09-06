@@ -3,7 +3,7 @@ zan Gold Miner — 黄金矿工（模板版）
 
 玩法
 ----
-- 钩子自动摆动，点击 / 空格 / 下键 放钩
+- 钩子自动摆动，点击 / 空格 / 下键 / 触屏点按 放钩
 - 规定时间内挖满目标金额即过关，关卡目标逐关递增
 - 刺激机制：
   * 连击 FEVER：3 秒内连续回收有价物，倍率 x1.1 → 最高 x2，抓到垃圾清零
@@ -16,9 +16,21 @@ zan Gold Miner — 黄金矿工（模板版）
 
 操作
 ----
-- 鼠标点击 / 空格 / ↓   放钩、QTE 节拍点
+- 鼠标点击 / 空格 / ↓ / 触屏点按   放钩、QTE 节拍点
 - Q / E                 使用（消耗）炸药：钩住重物拉不动时直接炸掉
 - F11                   全屏；关窗即存档退出
+
+手机上玩
+--------
+```bash
+build/zanc templates/game/goldminer/src/main.zan templates/game/goldminer/src/Game.zan \
+  templates/game/goldminer/src/Kit.zan --auto-stdlib \
+  --publish --target android-arm64 --emit-apk goldminer.apk \
+  --apk-package com.example.goldminer --apk-label 黄金矿工
+```
+`--publish` 会把 assets/ 内嵌进 libmain.so（磁盘优先、内嵌兜底的加载
+逻辑不变），APK 直装手机即可；横竖屏都能玩——设计分辨率 960×720 经
+Letterbox 等比铺满，竖屏上下留黑边，点按屏幕任意位置即放钩。
 
 界面架构
 --------
