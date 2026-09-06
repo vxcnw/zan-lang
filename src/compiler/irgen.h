@@ -370,7 +370,7 @@ struct zan_irgen {
     LLVMValueRef rt_arr_retain;  /* zan_rt_arr_retain(void*) */
     LLVMValueRef rt_arr_release; /* zan_rt_arr_release(void*) */
     LLVMTypeRef weak_node_type;  /* { next, target, slot } */
-    LLVMValueRef weak_buckets;   /* zan_weak_buckets[8192] */
+    LLVMValueRef weak_buckets;   /* zan_weak_buckets: bucket-array base, calloc on first use */
     LLVMValueRef weak_lock;      /* zan_weak_lock */
     LLVMValueRef weak_count;     /* zan_weak_count */
     LLVMValueRef rt_weak_store;  /* zan_rt_weak_store(void**, void*) */

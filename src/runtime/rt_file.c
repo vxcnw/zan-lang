@@ -468,9 +468,9 @@ long long zan_file_set_time(const char *path, int which, long long unix_sec) {
  * FILE*-based stream IO with 64-bit offsets, exposed as an opaque 64-bit
  * handle so zan code never spells FILE* (its size and the width of fseek's
  * offset both vary by platform). Handles are unforgeable: a handle is
- * (gen << 32) | index into a fixed table of { FILE*, gen, open } slots, and
- * every operation first checks the index range, the generation and the open
- * flag under a mutex. A fabricated integer, a stale handle from a closed
+ * (gen << 32) | index into a growable table of { FILE*, gen, open } slots,
+ * and every operation first checks the index range, the generation and the
+ * open flag under a mutex. A fabricated integer, a stale handle from a closed
  * slot, or a double close no longer reaches fread/fclose on a bogus FILE*.
  * A handle is 0 when the open failed; every other call treats 0 (and every
  * other invalid handle) as a no-op so a failed open cannot corrupt memory.
@@ -478,25 +478,44 @@ long long zan_file_set_time(const char *path, int which, long long unix_sec) {
  * blocking I/O never holds it.
  */
 
-#define ZAN_FH_CAP 1024
+/* The table starts at ZAN_FH_CAP0 slots and doubles on demand up to
+ * ZAN_FH_CAP_MAX, so a program pays for the slots it has actually used
+ * instead of pinning 16 KB of bss for a fixed 1024. */
+#define ZAN_FH_CAP0 64
+#define ZAN_FH_CAP_MAX (1024 * 1024)
 typedef struct {
     FILE *fp;
     uint32_t gen;   /* bumped on every close; stale handles stop matching */
     int open;
 } zan_fh_slot;
-static zan_fh_slot g_fh_table[ZAN_FH_CAP];
-static int g_fh_ready = 0;
+static zan_fh_slot *g_fh_table = NULL;
+static uint32_t g_fh_cap = 0;
 
 static void zan_fh_ensure(void) {
-    if (g_fh_ready) return;
-    int i = 0;
-    while (i < ZAN_FH_CAP) {
-        g_fh_table[i].fp = NULL;
-        g_fh_table[i].gen = 1;   /* gen 0 would make slot 0's handle read 0 */
-        g_fh_table[i].open = 0;
-        i = i + 1;
-    }
-    g_fh_ready = 1;
+    if (g_fh_table) return;
+    g_fh_table = (zan_fh_slot *)calloc(ZAN_FH_CAP0, sizeof(*g_fh_table));
+    if (!g_fh_table) return;  /* without a table every handle resolves forged */
+    g_fh_cap = ZAN_FH_CAP0;
+}
+
+/* Double the table, called under the lock only when every slot is open. The
+ * calloc'ed tail reads as closed slots with generation 0, and the claim path
+ * below bumps a 0 generation to 1, so a claimed slot's handle never reads as
+ * the 0 error sentinel. Returns 0 at the ceiling or when the allocation
+ * fails -- the same "table full" answer a full fixed table gave. */
+static int zan_fh_grow(void) {
+    uint32_t ncap;
+    zan_fh_slot *ntab;
+    if (g_fh_cap == 0) return 0;
+    ncap = g_fh_cap * 2;
+    if (ncap > ZAN_FH_CAP_MAX || ncap < g_fh_cap) return 0;
+    ntab = (zan_fh_slot *)calloc((size_t)ncap, sizeof(*ntab));
+    if (!ntab) return 0;
+    memcpy(ntab, g_fh_table, (size_t)g_fh_cap * sizeof(*ntab));
+    free(g_fh_table);
+    g_fh_table = ntab;
+    g_fh_cap = ncap;
+    return 1;
 }
 
 #ifdef _WIN32
@@ -535,7 +554,7 @@ static long zan_fh_index(long long handle) {
     unsigned long long h = (unsigned long long)handle;
     uint32_t idx = (uint32_t)(h & 0xFFFFFFFFULL);
     uint32_t gen = (uint32_t)(h >> 32);
-    if (idx >= ZAN_FH_CAP) return -1;
+    if (!g_fh_table || idx >= g_fh_cap) return -1;
     zan_fh_slot *s = &g_fh_table[idx];
     if (!s->open || s->fp == NULL || s->gen != gen) return -1;
     return (long)idx;
@@ -549,20 +568,26 @@ long long zan_file_open(const char *path, const char *mode) {
     zan_fh_lock();
     zan_fh_ensure();
     long long handle = 0;
-    int i = 0;
-    while (i < ZAN_FH_CAP) {
-        zan_fh_slot *s = &g_fh_table[i];
-        if (!s->open) {
-            if (s->gen == 0) { s->gen = 1; }   /* keep slot 0's handle nonzero */
-            s->fp = f;
-            s->open = 1;
-            /* build in unsigned to avoid signed-shift UB when gen's high bit
-             * is set (a long long is bit-preserving on the Zan side) */
-            handle = (long long)(((unsigned long long)s->gen << 32)
-                                 | (unsigned long long)(uint32_t)i);
-            break;
+    if (g_fh_table) {
+        for (;;) {
+            uint32_t i = 0;
+            while (i < g_fh_cap) {
+                zan_fh_slot *s = &g_fh_table[i];
+                if (!s->open) {
+                    if (s->gen == 0) { s->gen = 1; }   /* keep slot 0's handle nonzero */
+                    s->fp = f;
+                    s->open = 1;
+                    /* build in unsigned to avoid signed-shift UB when gen's high bit
+                     * is set (a long long is bit-preserving on the Zan side) */
+                    handle = (long long)(((unsigned long long)s->gen << 32)
+                                         | (unsigned long long)i);
+                    break;
+                }
+                i = i + 1;
+            }
+            if (i < g_fh_cap) break;    /* claimed a slot */
+            if (!zan_fh_grow()) break;  /* ceiling or OOM: report "table full" */
         }
-        i = i + 1;
     }
     zan_fh_unlock();
     if (handle == 0) { fclose(f); return 0; }  /* table full: fail gracefully */

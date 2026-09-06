@@ -1,5 +1,8 @@
 /* Module-local weak-reference registry.  The registry is emitted into each
- * generated module so targets do not need an additional runtime object. */
+ * generated module so targets do not need an additional runtime object. The
+ * 64 KB bucket array used to be a .bss global in every program whether it
+ * used weak references or not; it is now a NULL global that weak_buckets_ensure
+ * calloc's on first use, under the weak spinlock both bodies already hold. */
 
 #define ZAN_WEAK_BUCKET_COUNT 8192
 
@@ -20,8 +23,8 @@ static LLVMTypeRef weak_node_type(zan_irgen_t *g) {
     return g->weak_node_type;
 }
 
-static LLVMValueRef weak_bucket_for(zan_irgen_t *g, LLVMValueRef obj,
-                                    const char *name) {
+static LLVMValueRef weak_bucket_for(zan_irgen_t *g, LLVMValueRef buckets,
+                                    LLVMValueRef obj, const char *name) {
     LLVMBuilderRef b = g->builder;
     LLVMTypeRef i64 = LLVMInt64TypeInContext(g->ctx);
     LLVMValueRef addr = LLVMBuildPtrToInt(b, obj, i64, "weak.addr");
@@ -33,12 +36,13 @@ static LLVMValueRef weak_bucket_for(zan_irgen_t *g, LLVMValueRef obj,
                                        "weak.bucket.index");
     index = LLVMBuildAnd(b, index,
         LLVMConstInt(i64, ZAN_WEAK_BUCKET_COUNT - 1, 0), "weak.bucket.mask");
+    LLVMTypeRef buckets_t = LLVMArrayType(weak_i8ptr(g), ZAN_WEAK_BUCKET_COUNT);
+    LLVMValueRef typed = LLVMBuildBitCast(b, buckets,
+        LLVMPointerType(buckets_t, 0), "weak.buckets.typed");
     LLVMValueRef indices[] = {
         LLVMConstInt(i64, 0, 0), index
     };
-    return LLVMBuildGEP2(b,
-        LLVMArrayType(weak_i8ptr(g), ZAN_WEAK_BUCKET_COUNT),
-        g->weak_buckets, indices, 2, name);
+    return LLVMBuildGEP2(b, buckets_t, typed, indices, 2, name);
 }
 
 static LLVMValueRef weak_node_field(zan_irgen_t *g, LLVMValueRef node,
@@ -79,7 +83,49 @@ static void emit_weak_unlock(zan_irgen_t *g) {
         LLVMAtomicOrderingRelease, 0);
 }
 
-static void emit_weak_store_body(zan_irgen_t *g) {
+/* Ensure the bucket array exists, calloc'ing it on first use. Call with the
+ * weak lock held, right after emit_weak_lock, so the lazy allocation cannot
+ * race. Positions the builder at the join block and returns the array base,
+ * which then dominates every bucket access in the body. */
+static LLVMValueRef weak_buckets_ensure(zan_irgen_t *g, LLVMValueRef fn,
+                                        LLVMValueRef calloc_fn) {
+    LLVMBuilderRef b = g->builder;
+    LLVMTypeRef i8ptr = weak_i8ptr(g);
+    LLVMTypeRef i64 = LLVMInt64TypeInContext(g->ctx);
+    LLVMBasicBlockRef lock_bb = LLVMGetInsertBlock(b);
+    LLVMValueRef cur = LLVMBuildLoad2(b, i8ptr, g->weak_buckets,
+                                      "weak.buckets.load");
+    LLVMValueRef have = LLVMBuildICmp(b, LLVMIntNE, cur,
+        LLVMConstPointerNull(i8ptr), "weak.buckets.have");
+    LLVMBasicBlockRef alloc_bb = LLVMAppendBasicBlockInContext(g->ctx, fn,
+        "weak.buckets.alloc");
+    LLVMBasicBlockRef join_bb = LLVMAppendBasicBlockInContext(g->ctx, fn,
+        "weak.buckets.ready");
+    LLVMBuildCondBr(b, have, join_bb, alloc_bb);
+
+    LLVMPositionBuilderAtEnd(b, alloc_bb);
+    LLVMValueRef args[] = {
+        LLVMConstInt(i64, ZAN_WEAK_BUCKET_COUNT, 0),
+        LLVMConstInt(i64, sizeof(void *), 0)
+    };
+    LLVMValueRef mem = zan_call2(b, LLVMGlobalGetValueType(calloc_fn),
+        calloc_fn, args, 2, "weak.buckets.calloc");
+    zan_irgen_emit_oom_check(g, fn, mem);
+    LLVMBuildStore(b, mem, g->weak_buckets);
+    /* The oom check may have split alloc_bb (fail/ok); the phi's predecessor
+     * is whichever block now falls through to the join. */
+    LLVMBasicBlockRef tail_bb = LLVMGetInsertBlock(b);
+    LLVMBuildBr(b, join_bb);
+
+    LLVMPositionBuilderAtEnd(b, join_bb);
+    LLVMValueRef phi = LLVMBuildPhi(b, i8ptr, "weak.buckets.base");
+    LLVMValueRef incoming[] = { cur, mem };
+    LLVMBasicBlockRef blocks[] = { lock_bb, tail_bb };
+    LLVMAddIncoming(phi, incoming, blocks, 2);
+    return phi;
+}
+
+static void emit_weak_store_body(zan_irgen_t *g, LLVMValueRef weak_calloc) {
     LLVMBuilderRef b = g->builder;
     LLVMTypeRef i8ptr = weak_i8ptr(g);
     LLVMTypeRef slot_t = weak_slot_type(g);
@@ -90,6 +136,7 @@ static void emit_weak_store_body(zan_irgen_t *g) {
     LLVMValueRef null = LLVMConstPointerNull(i8ptr);
 
     emit_weak_lock(g, g->rt_weak_store);
+    LLVMValueRef buckets = weak_buckets_ensure(g, g->rt_weak_store, weak_calloc);
 
     LLVMValueRef old = LLVMBuildLoad2(b, i8ptr, slot, "weak.old");
     LLVMValueRef old_present = LLVMBuildICmp(b, LLVMIntNE, old, null, "weak.hasold");
@@ -100,7 +147,7 @@ static void emit_weak_store_body(zan_irgen_t *g) {
     LLVMBuildCondBr(b, old_present, old_bb, set_bb);
 
     LLVMPositionBuilderAtEnd(b, old_bb);
-    LLVMValueRef bucket = weak_bucket_for(g, old, "weak.old.bucket");
+    LLVMValueRef bucket = weak_bucket_for(g, buckets, old, "weak.old.bucket");
     LLVMValueRef head = LLVMBuildLoad2(b, i8ptr, bucket, "weak.old.head");
     LLVMValueRef curr_mem = LLVMBuildAlloca(b, i8ptr, "weak.curr");
     LLVMValueRef prev_mem = LLVMBuildAlloca(b, i8ptr, "weak.prev");
@@ -182,7 +229,7 @@ static void emit_weak_store_body(zan_irgen_t *g) {
     LLVMValueRef node = zan_call2(b, LLVMGlobalGetValueType(g->fn_malloc),
         g->fn_malloc, &node_size, 1, "weak.node.alloc");
     zan_irgen_emit_oom_check(g, g->rt_weak_store, node);
-    LLVMValueRef new_bucket = weak_bucket_for(g, newobj, "weak.new.bucket");
+    LLVMValueRef new_bucket = weak_bucket_for(g, buckets, newobj, "weak.new.bucket");
     LLVMValueRef new_head = LLVMBuildLoad2(b, i8ptr, new_bucket,
                                            "weak.new.head");
     LLVMBuildStore(b, new_head, weak_node_field(g, node, 0, "weak.node.next"));
@@ -198,7 +245,7 @@ static void emit_weak_store_body(zan_irgen_t *g) {
     LLVMBuildRetVoid(b);
 }
 
-static void emit_weak_nil_all_body(zan_irgen_t *g) {
+static void emit_weak_nil_all_body(zan_irgen_t *g, LLVMValueRef weak_calloc) {
     LLVMBuilderRef b = g->builder;
     LLVMTypeRef i8ptr = weak_i8ptr(g);
     LLVMTypeRef slot_t = weak_slot_type(g);
@@ -221,7 +268,8 @@ static void emit_weak_nil_all_body(zan_irgen_t *g) {
 
     LLVMPositionBuilderAtEnd(b, lock_bb);
     emit_weak_lock(g, g->rt_weak_nil_all);
-    LLVMValueRef bucket = weak_bucket_for(g, obj, "weak.nil.bucket");
+    LLVMValueRef buckets = weak_buckets_ensure(g, g->rt_weak_nil_all, weak_calloc);
+    LLVMValueRef bucket = weak_bucket_for(g, buckets, obj, "weak.nil.bucket");
     LLVMValueRef head = LLVMBuildLoad2(b, i8ptr, bucket, "weak.nil.head");
     LLVMValueRef curr_mem = LLVMBuildAlloca(b, i8ptr, "weak.nil.curr");
     LLVMValueRef prev_mem = LLVMBuildAlloca(b, i8ptr, "weak.nil.prev");
@@ -299,10 +347,11 @@ static void emit_weak_runtime(zan_irgen_t *g) {
     LLVMTypeRef slot_t = weak_slot_type(g);
     LLVMTypeRef i32 = LLVMInt32TypeInContext(g->ctx);
     LLVMTypeRef i64 = LLVMInt64TypeInContext(g->ctx);
-    LLVMTypeRef buckets_t = LLVMArrayType(i8ptr, ZAN_WEAK_BUCKET_COUNT);
 
-    g->weak_buckets = LLVMAddGlobal(g->mod, buckets_t, "zan_weak_buckets");
-    LLVMSetInitializer(g->weak_buckets, LLVMConstNull(buckets_t));
+    /* The bucket array itself is a NULL pointer global; the array behind it
+     * is calloc'ed by weak_buckets_ensure on the first weak store. */
+    g->weak_buckets = LLVMAddGlobal(g->mod, i8ptr, "zan_weak_buckets");
+    LLVMSetInitializer(g->weak_buckets, LLVMConstNull(i8ptr));
     LLVMSetLinkage(g->weak_buckets, LLVMInternalLinkage);
     g->weak_lock = LLVMAddGlobal(g->mod, i32, "zan_weak_lock");
     LLVMSetInitializer(g->weak_lock, LLVMConstInt(i32, 0, 0));
@@ -312,6 +361,11 @@ static void emit_weak_runtime(zan_irgen_t *g) {
     LLVMSetLinkage(g->weak_count, LLVMInternalLinkage);
     LLVMSetAlignment(g->weak_count, 8);
     (void)weak_node_type(g);
+
+    /* void *calloc(size_t, size_t) -- the lazy bucket array */
+    LLVMTypeRef calloc_args[] = { i64, i64 };
+    LLVMTypeRef calloc_type = LLVMFunctionType(i8ptr, calloc_args, 2, 0);
+    LLVMValueRef weak_calloc = LLVMAddFunction(g->mod, "calloc", calloc_type);
 
     LLVMTypeRef store_args[] = { slot_t, i8ptr };
     LLVMTypeRef store_type = LLVMFunctionType(
@@ -325,12 +379,12 @@ static void emit_weak_runtime(zan_irgen_t *g) {
     LLVMBasicBlockRef store_entry = LLVMAppendBasicBlockInContext(g->ctx,
         g->rt_weak_store, "entry");
     LLVMPositionBuilderAtEnd(g->builder, store_entry);
-    emit_weak_store_body(g);
+    emit_weak_store_body(g, weak_calloc);
 
     LLVMBasicBlockRef nil_entry = LLVMAppendBasicBlockInContext(g->ctx,
         g->rt_weak_nil_all, "entry");
     LLVMPositionBuilderAtEnd(g->builder, nil_entry);
-    emit_weak_nil_all_body(g);
+    emit_weak_nil_all_body(g, weak_calloc);
 }
 
 static void emit_weak_store(zan_irgen_t *g, LLVMValueRef field_ptr,

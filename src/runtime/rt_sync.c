@@ -156,10 +156,15 @@ typedef struct {
 #endif
 } zan_shared_table;
 
+/* The buffer is claimed per thread on first use (FLS on Windows, a pthread
+ * key elsewhere) and freed at thread exit. A 64 KB thread-local static per
+ * thread was too high a price for programs that never touch shared tables,
+ * and the old Windows path answered FLS failure with one shared static
+ * buffer that two threads could scratch concurrently. Allocation failures
+ * are fatal (host_oom), matching the runtime's OOM policy. */
 #ifdef _WIN32
 static INIT_ONCE zan_shared_string_once = INIT_ONCE_STATIC_INIT;
 static DWORD zan_shared_string_slot = FLS_OUT_OF_INDEXES;
-static char zan_shared_string_fallback[ZAN_TABLE_MAX_STRING + 1];
 
 static void CALLBACK zan_shared_string_free(void *buffer) {
     free(buffer);
@@ -178,23 +183,40 @@ static char *zan_get_shared_string(void) {
     char *buffer;
     if (!InitOnceExecuteOnce(
             &zan_shared_string_once, zan_shared_string_init, NULL, NULL)) {
-        return zan_shared_string_fallback;
+        zan_host_oom();
     }
     buffer = (char *)FlsGetValue(zan_shared_string_slot);
     if (!buffer) {
         buffer = (char *)calloc(ZAN_TABLE_MAX_STRING + 1, 1);
-        if (!buffer || !FlsSetValue(zan_shared_string_slot, buffer)) {
+        if (!FlsSetValue(zan_shared_string_slot, buffer)) {
             free(buffer);
-            return zan_shared_string_fallback;
+            zan_host_oom();
         }
     }
     return buffer;
 }
 #else
-static _Thread_local char zan_shared_string[ZAN_TABLE_MAX_STRING + 1];
+static pthread_key_t zan_shared_string_key;
+
+static void zan_shared_string_dtor(void *buffer) { free(buffer); }
+
+static void zan_shared_string_key_create(void) {
+    if (pthread_key_create(&zan_shared_string_key, zan_shared_string_dtor) != 0)
+        zan_host_oom();
+}
 
 static char *zan_get_shared_string(void) {
-    return zan_shared_string;
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    pthread_once(&once, zan_shared_string_key_create);
+    char *buffer = (char *)pthread_getspecific(zan_shared_string_key);
+    if (!buffer) {
+        buffer = (char *)calloc(ZAN_TABLE_MAX_STRING + 1, 1);
+        if (pthread_setspecific(zan_shared_string_key, buffer) != 0) {
+            free(buffer);
+            zan_host_oom();
+        }
+    }
+    return buffer;
 }
 #endif
 
@@ -1037,7 +1059,9 @@ void zan_monitor_exit(void *obj) {
  * `UiEvent.Post`) drop that answer: a full queue silently meant "this click
  * handler never ran". Growth is bounded so a runaway producer cannot eat the
  * address space; at the ceiling the post is still refused, but loudly. */
-#define ZAN_DISPATCH_CAP0 1024
+/* A 64-entry static ring is only the seed: growth below doubles it on demand
+ * (bounded), so an idle program pays 512 B of bss instead of 8 KB. */
+#define ZAN_DISPATCH_CAP0 64
 #define ZAN_DISPATCH_CAP_MAX (1u << 20)
 static void *g_dispatch_static[ZAN_DISPATCH_CAP0];
 static void **g_dispatch_ring = g_dispatch_static;
@@ -2792,8 +2816,35 @@ long long zan_mmap_unlink(const char *name) {
 #endif
 #endif
 
+/* Adapter-snapshot scratch, POSIX only (the Windows branch of
+ * zan_plat_net_interfaces answers ""). Claimed per thread on first use via a
+ * pthread key and freed at thread exit: a 64 KB thread-local static charged
+ * every thread in the process for a buffer almost none of them ever use. */
+#ifndef _WIN32
 #define ZAN_PLAT_TEXT_MAX 65536
-static _Thread_local char zan_plat_text[ZAN_PLAT_TEXT_MAX];
+static pthread_key_t zan_plat_text_key;
+
+static void zan_plat_text_dtor(void *buffer) { free(buffer); }
+
+static void zan_plat_text_key_create(void) {
+    if (pthread_key_create(&zan_plat_text_key, zan_plat_text_dtor) != 0)
+        zan_host_oom();
+}
+
+static char *zan_get_plat_text(void) {
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    pthread_once(&once, zan_plat_text_key_create);
+    char *buffer = (char *)pthread_getspecific(zan_plat_text_key);
+    if (!buffer) {
+        buffer = (char *)calloc(ZAN_PLAT_TEXT_MAX, 1);
+        if (pthread_setspecific(zan_plat_text_key, buffer) != 0) {
+            free(buffer);
+            zan_host_oom();
+        }
+    }
+    return buffer;
+}
+#endif
 
 #ifndef _WIN32
 static void zan_plat_mac_from_sockaddr(struct sockaddr *sa, char *out,
@@ -2828,10 +2879,11 @@ static void zan_plat_mac_from_sockaddr(struct sockaddr *sa, char *out,
  * line of the interface that owns them (matching GetAdaptersAddresses, which
  * hands out one adapter record with a unicast list). */
 const char *zan_plat_net_interfaces(void) {
-    zan_plat_text[0] = '\0';
 #ifdef _WIN32
-    return zan_plat_text;
+    return "";
 #else
+    char *zan_plat_text = zan_get_plat_text();
+    zan_plat_text[0] = '\0';
     struct ifaddrs *list = NULL;
     if (getifaddrs(&list) != 0) return zan_plat_text;
 

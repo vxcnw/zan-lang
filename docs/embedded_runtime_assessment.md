@@ -3,6 +3,10 @@
 结论先说：**现在跑不了，但门槛不在 flash 体积，在 RAM 常驻和目标架构。** 下面全部是实测数字
 （Linux x64，`class Program { static void Main() { Console.WriteLine("hi"); } }`）。
 
+> **2026-09-07 更新：第 1 步（消灭固定大表）已落地**，见文末「落地记录」。原文的符号表
+> 有两处过时：异常表当时已是动态增长；`__zan_site_dtors` 只在 `-leaks` 构建里存在，
+> 默认 descriptor 模式从不生成。
+
 ## 1. 实测：一个 hello world 的成本
 
 | 段 | 大小 | 说明 |
@@ -14,18 +18,33 @@
 
 bss 里最大的几个（全部是编译期固定大小的静态表，无条件链接）：
 
-| 符号 | 大小 | 出处 |
-|---|---|---|
-| `zan_shared_string` | 64 KB | `rt_sync.c`（`ZAN_TABLE_MAX_STRING`） |
-| `zan_plat_text` | 64 KB | `rt_sync.c`（`ZAN_PLAT_TEXT_MAX 65536`） |
-| `__zan_site_dtors` | 32 KB | 站点析构表（data 段） |
-| `g_fh_table` | 16 KB | `rt_file.c`（`ZAN_FH_CAP 1024` 个文件句柄槽） |
-| `g_dispatch_ring` | 8 KB | 协程调度环 |
-| `__zan_eh_tids` / `__zan_eh_states` | 各 8 KB | 异常状态按线程 id 的固定表 |
-| `zan__crash_exe` / `zan__crash_logdir` | 各 4 KB | 崩溃日志路径缓冲 |
+| 符号 | 大小 | 出处 | 状态（2026-09-07） |
+|---|---|---|---|
+| `zan_weak_buckets` | 64 KB | 编译器发射进每个模块（`irgen_weak.c`） | ✅ 已改懒分配（首次弱写入时 calloc，弱自旋锁内，无竞态） |
+| `zan_shared_string` | 64 KB | `rt_sync.c`（`ZAN_TABLE_MAX_STRING`） | ✅ 已改每线程懒分配（POSIX pthread key / Windows FLS），线程退出释放；Windows 64 KB 静态兜底撤除 |
+| `zan_plat_text` | 64 KB | `rt_sync.c`（`ZAN_PLAT_TEXT_MAX 65536`） | ✅ 已改 POSIX 每线程懒分配（本就只服务网络接口枚举） |
+| `__zan_site_dtors` | 32 KB | 站点析构表（data 段） | ℹ️ 仅 `-leaks` 构建存在，默认构建零成本（原文误计） |
+| `g_fh_table` | 16 KB | `rt_file.c`（`ZAN_FH_CAP 1024` 个文件句柄槽） | ✅ 已改按需增长（64 槽起步，倍增到 1M 上限，句柄编码与失败码不变） |
+| `g_dispatch_ring` | 8 KB | 协程调度环 | ✅ 初始容量 1024→64（增长路径本就存在） |
+| `__zan_eh_tids` / `__zan_eh_states` | 各 8 KB | 异常状态按线程 id 的固定表 | ℹ️ 原文过时：当时已是动态表（1024 起步自动翻倍，从不 throw 零成本） |
+| `zan__crash_exe` / `zan__crash_logdir` | 各 4 KB | 崩溃日志路径缓冲 | ⏸ 保留静态：信号处理器内禁 malloc，安装期一次性解析的设计如此 |
 
 对照：ESP32-S3 只有 **512 KB SRAM**（可用更少），ESP32-C3 是 400 KB。
 **一个什么都没干的 Zan 程序就吃掉 ~225 KB（bss+data），接近一半 RAM。**
+
+### 落地后的实测（Windows x64，同一 hello world）
+
+PE 的 bss 计入 .data 虚拟尾部，按段 VMA 空洞测得：
+
+| 构建 | bss | 变化 |
+|---|---|---|
+| 改造前 | 77,824 B | — |
+| 改造后 | **12,288 B** | **−84%**（弱表 64 KB 消失，其余在链接对象里） |
+
+运行时对象 bss：`zanrt_sync.obj` ~76.5 KB → **3,264 B**；`zanrt_file.obj` ~21.1 KB → **4,704 B**。
+POSIX 侧每线程另省 128 KB TLS（shared_string + plat_text 各 64 KB）：百线程服务约省 12.8 MB。
+行为语义保持：共享表 64 KB 字符串上限、句柄/错误码、超限「table full」答案均不变；
+Windows FLS 失败从「共享静态兜底（潜在数据竞争）」改为 host_oom 致命中止（修一处潜伏竞争）。
 
 ## 2. 实测：hello world 拉进来的系统依赖
 
