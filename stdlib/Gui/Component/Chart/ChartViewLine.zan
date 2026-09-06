@@ -19,37 +19,23 @@ partial class ChartView {
             for (int i = 0; i < n; i = i + 1) { ox.Add(px[i]); oy.Add(py[i]); }
             return;
         }
-        ox.Add(px[0]); oy.Add(py[0]);
-        for (int seg = 0; seg + 1 < n; seg = seg + 1) {
-            int p0 = seg - 1; if (p0 < 0) { p0 = 0; }
-            int p3 = seg + 2; if (p3 > n - 1) { p3 = n - 1; }
-            int x0 = px[p0]; int y0 = py[p0];
-            int x1 = px[seg]; int y1 = py[seg];
-            int x2 = px[seg + 1]; int y2 = py[seg + 1];
-            int x3 = px[p3]; int y3 = py[p3];
-            int steps = 48;
-            int s = 1;
-            while (s <= steps) {
-                int tt = s * 1000 / steps;
-                int tt2 = tt * tt / 1000;
-                int tt3 = tt2 * tt / 1000;
-                int qx = (2 * x1
-                    + (x2 - x0) * tt / 1000
-                    + (2 * x0 - 5 * x1 + 4 * x2 - x3) * tt2 / 1000
-                    + (0 - x0 + 3 * x1 - 3 * x2 + x3) * tt3 / 1000) / 2;
-                int qy = (2 * y1
-                    + (y2 - y0) * tt / 1000
-                    + (2 * y0 - 5 * y1 + 4 * y2 - y3) * tt2 / 1000
-                    + (0 - y0 + 3 * y1 - 3 * y2 + y3) * tt3 / 1000) / 2;
-                ox.Add(qx); oy.Add(qy);
-                s = s + 1;
-            }
+        // 与定点路径（BuildPathFxEx，单调三次 Hermite）同一几何：
+        // 面积填充（FillUnder）和虚线描边消费这里的整数路径，实线
+        // 描边消费定点路径——两条路径必须逐像素一致，否则面积顶边
+        // 和曲线错位、峰顶出毛刺（Catmull-Rom 过冲被钳平时尤其
+        // 明显）。
+        List<int> fxp = new List<int>();
+        List<int> fyp = new List<int>();
+        BuildPathFxEx(px, py, smooth, false, fxp, fyp);
+        for (int i = 0; i < fxp.Count; i = i + 1) {
+            ox.Add(fxp[i] / 256);
+            oy.Add(fyp[i] / 256);
         }
     }
 
-    /// 同样的 Catmull-Rom 曲线，但输出顶点为 16.8 定点数
-    /// （1/256 px）。整数运算会把每个顶点截断到像素网格；
-    /// 平缓曲线上相邻顶点会相差 0 或 1 行，
+    /// 同一条平滑曲线（单调三次 Hermite，见 BuildPathFxEx），但
+    /// 输出顶点为 16.8 定点数（1/256 px）。整数运算会把每个顶点
+    /// 截断到像素网格；平缓曲线上相邻顶点会相差 0 或 1 行，
     /// 使曲线退化为平直段 + 单像素跳变，任何抗锯齿渐变都掩盖不了
     /// （这就是按真实几何采样的圆看起来平滑、
     /// 而折线曲线呈阶梯状的原因）。亚像素顶点
@@ -87,18 +73,19 @@ partial class ChartView {
             for (int i = 0; i < n; i = i + 1) { ox.Add(fx[i]); oy.Add(fy[i]); }
             return;
         }
+        // 单调三次 Hermite（Fritsch–Carlson）：切线取相邻割线的平均，
+        // 割线变号（局部极值点）处切线归零、并限幅到两侧割线的
+        // 3 倍以内。曲线因此永远落在相邻两点的包络内——极值圆滑地
+        // 掠过真实数据点，既不像 Catmull-Rom 那样冲出假极值（数据
+        // 顶格时越过最高格线），也不会像"过冲后钳平"那样把峰顶
+        // 削成搁架。x/y 两轴独立套用，值对/轴互换模式同样成立。
+        long[] mx = ChartView.MonoTangents(fx, n);
+        long[] my = ChartView.MonoTangents(fy, n);
         ox.Add(fx[0]); oy.Add(fy[0]);
         for (int seg = 0; seg + 1 < n; seg = seg + 1) {
-            int p0 = seg - 1; if (p0 < 0) { p0 = 0; }
-            int p3 = seg + 2; if (p3 > n - 1) { p3 = n - 1; }
-            long x0 = fx[p0]; long y0 = fy[p0];
             long x1 = fx[seg]; long y1 = fy[seg];
             long x2 = fx[seg + 1]; long y2 = fy[seg + 1];
-            long x3 = fx[p3]; long y3 = fy[p3];
-            // 平滑不得越过本段两端点的包络：Catmull-Rom 在急弯和
-            // 收尾段会冲出数据极值（数据顶格时曲线越过最高格线，
-            // 看起来"最高点不是 15°"；末段还会横向越过末刻度）。
-            // 逐子步钳回两端点范围，极值永远落在真实数据点上。
+            // 包络钳制兜底：正常切限下永不触发。
             long xlo = x1 < x2 ? x1 : x2;
             long xhi = x1 < x2 ? x2 : x1;
             long ylo = y1 < y2 ? y1 : y2;
@@ -109,22 +96,54 @@ partial class ChartView {
                 int tt = s * 1000 / steps;
                 int tt2 = tt * tt / 1000;
                 int tt3 = tt2 * tt / 1000;
-                // 64 位中间值全程保持 1/256 精度（输入已是 16.8，
-                // 不再二次乘 256）；最后的 /2 舍入到亚像素顶点。
-                long qx = (2 * x1
-                    + (x2 - x0) * tt / 1000
-                    + (2 * x0 - 5 * x1 + 4 * x2 - x3) * tt2 / 1000
-                    + (0 - x0 + 3 * x1 - 3 * x2 + x3) * tt3 / 1000) / 2;
-                long qy = (2 * y1
-                    + (y2 - y0) * tt / 1000
-                    + (2 * y0 - 5 * y1 + 4 * y2 - y3) * tt2 / 1000
-                    + (0 - y0 + 3 * y1 - 3 * y2 + y3) * tt3 / 1000) / 2;
+                // Hermite 基（t 已归一化到本段）：
+                // h00 = 2t³-3t²+1  h10 = t³-2t²+t
+                // h01 = -2t³+3t²   h11 = t³-t²
+                // 64 位中间值全程保持 1/256 精度。
+                long qx = ((2 * tt3 - 3 * tt2 + 1000) * x1
+                    + (tt3 - 2 * tt2 + tt) * mx[seg]
+                    + (0 - 2 * tt3 + 3 * tt2) * x2
+                    + (tt3 - tt2) * mx[seg + 1]) / 1000;
+                long qy = ((2 * tt3 - 3 * tt2 + 1000) * y1
+                    + (tt3 - 2 * tt2 + tt) * my[seg]
+                    + (0 - 2 * tt3 + 3 * tt2) * y2
+                    + (tt3 - tt2) * my[seg + 1]) / 1000;
                 if (qx < xlo) { qx = xlo; } else if (qx > xhi) { qx = xhi; }
                 if (qy < ylo) { qy = ylo; } else if (qy > yhi) { qy = yhi; }
                 ox.Add((int)qx); oy.Add((int)qy);
                 s = s + 1;
             }
         }
+    }
+
+    /// Fritsch–Carlson 切线（16.8 定点输入，返回 n 条切线）：
+    /// 端点取单侧割线；内部割线变号（该点是局部极值）时取 0，
+    /// 否则取两侧割线平均并限幅到任一侧割线的 3 倍以内——
+    /// 保证每个段内不产生越出两端点的假振荡。
+    static long[] MonoTangents(List<int> v, int n) {
+        long[] m = new long[n];
+        if (n < 2) { return m; }
+        long d0 = v[1] - v[0];
+        long d1 = 0;
+        m[0] = d0;
+        for (int i = 1; i + 1 < n; i = i + 1) {
+            d0 = v[i] - v[i - 1];
+            d1 = v[i + 1] - v[i];
+            if (d0 * d1 <= 0) {
+                m[i] = 0;
+            } else {
+                long avg = (d0 + d1) / 2;
+                long lim = 3 * (d0 < 0 ? 0 - d0 : d0);
+                long lim2 = 3 * (d1 < 0 ? 0 - d1 : d1);
+                if (lim2 < lim) { lim = lim2; }
+                if (avg > lim) { avg = lim; } else if (avg < 0 - lim) {
+                    avg = 0 - lim;
+                }
+                m[i] = avg;
+            }
+        }
+        m[n - 1] = v[n - 1] - v[n - 2];
+        return m;
     }
 
     /// 填充密集（从左到右）路径与 baseY 之间的区域，使

@@ -695,9 +695,18 @@ partial class ChartView {
                 dy = dy + dash + gap;
             }
             int fs = Style.FontFallback(app, "small");
-            string lbl = m.label.Length > 0 ? m.label
-                : (m.kind == "average" ? "avg" : m.kind);
-            lbl = lbl.Replace("{value}", Convert.ToString(vx));
+            // 标签默认是具体数值（ECharts markLine.label 默认 {c}），
+            // 不是 "max/min/avg" 字样；显式 label 可带 {value} 占位。
+            string lbl = m.label;
+            if (lbl.Length == 0) {
+                if (m.kind == "average") {
+                    lbl = ChartView.Avg1000Text(sum * 1000 / cnt);
+                } else {
+                    lbl = Convert.ToString(vx);
+                }
+            } else {
+                lbl = lbl.Replace("{value}", Convert.ToString(vx));
+            }
             int lw = Canvas.MeasureText(lbl, fs);
             int tx = lx - lw / 2;
             if (tx < f.plotX) { tx = f.plotX; }
@@ -741,8 +750,15 @@ partial class ChartView {
                 c.FillCircle(lx, ly, rad, col);
                 ChartView.RingOutline(c, lx, ly, rad, 4294967295);
             }
+            // 值对/points 系列的标注：默认 "max"/"min" 字样补上数值
+            // （ECharts markPoint.label 默认 {c}），显式 label 支持
+            // {value} 占位。
             string lbl = m.label;
-            if (lbl.Length == 0) { lbl = m.kind == "max" ? "max" : "min"; }
+            if (lbl.Length == 0) {
+                lbl = m.kind + ": " + Convert.ToString(ext);
+            } else if (lbl.IndexOf("{value}") >= 0) {
+                lbl = lbl.Replace("{value}", Convert.ToString(ext));
+            }
             int fs = Style.FontFallback(app, "small");
             int lw = Canvas.MeasureText(lbl, fs);
             int tx = lx - lw / 2;
@@ -884,6 +900,8 @@ partial class ChartView {
             // 标签默认是具体数值（ECharts 默认 markLine.label 即
             // {c}），不是 "avg/min/max" 字样；显式 label 仍可带
             // {value} 占位。
+            // 同 DrawSeriesMarkLines：默认具体数值，显式 label 支持
+            // {value} 占位，无占位则 "name: value"。
             string lbl = m.label;
             if (lbl.Length == 0) {
                 if (isAvg) {
@@ -892,8 +910,10 @@ partial class ChartView {
                 } else {
                     lbl = Convert.ToString(val);
                 }
-            } else {
+            } else if (lbl.IndexOf("{value}") >= 0) {
                 lbl = lbl.Replace("{value}", Convert.ToString(val));
+            } else {
+                lbl = lbl + ": " + Convert.ToString(val);
             }
             int fs = Style.FontFallback(app, "small");
             int lw = Canvas.MeasureText(lbl, fs);
@@ -932,6 +952,8 @@ partial class ChartView {
                     dy = dy + dash + gap;
                 }
             }
+            // 同 DrawSeriesMarkLines：默认具体数值，显式 label 支持
+            // {value} 占位，无占位则 "name: value"。
             string lbl = m.label;
             if (lbl.Length == 0) {
                 if (m.kind == "average") {
@@ -940,8 +962,10 @@ partial class ChartView {
                 } else {
                     lbl = Convert.ToString(val);
                 }
-            } else {
+            } else if (lbl.IndexOf("{value}") >= 0) {
                 lbl = lbl.Replace("{value}", Convert.ToString(val));
+            } else {
+                lbl = lbl + ": " + Convert.ToString(val);
             }
             int fs = Style.FontFallback(app, "small");
             int lw = Canvas.MeasureText(lbl, fs);
@@ -987,8 +1011,20 @@ partial class ChartView {
                 else { idx = 0 - 1; }
             }
             if (idx < i0 || idx > i1 || idx >= s.Count()) { continue; }
+            // 命名标记（ECharts data 项 name，如"最大值"）徽标里
+            // 组合 "name: value"（markPoint.label 默认 {c}），数值
+            // 不能被名字吞掉；{value} 占位仍原样替换。
             string lbl = m.label;
-            if (lbl.Length == 0) { lbl = Convert.ToString(s.Value(idx)); }
+            if (lbl.Length == 0) {
+                lbl = Convert.ToString(s.Value(idx));
+            } else {
+                string vv = Convert.ToString(s.Value(idx));
+                if (lbl.IndexOf("{value}") >= 0) {
+                    lbl = lbl.Replace("{value}", vv);
+                } else {
+                    lbl = lbl + ": " + vv;
+                }
+            }
             ChartView.MarkAt(app, f, s, idx, idx - i0, nWin, lbl,
                 o.showValues || s.labelShow, m.color, m.symbol, m.sizeSet ? m.size : 0);
         }

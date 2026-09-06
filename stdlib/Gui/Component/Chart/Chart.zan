@@ -2331,6 +2331,57 @@ class Chart {
         if (plotW < app.Scale(20)) { plotW = app.Scale(20); }
         if (plotH < app.Scale(20)) { plotH = app.Scale(20); }
 
+        // 极值贴边留出约半个徽标高度：数据最值逼近 nice 端点时
+        // 映射范围向外扩，顶点符号与 min/max 徽标不再被绘图区
+        // 裁切；网格/刻度仍取 nice 端点（Tick 副本），端格线悬在
+        // 绘图区内侧。0 基线不外扩——面积/柱的填充锚在零线。
+        int pxPad = app.Scale(16);
+        int leftTickLo = leftLo;
+        int leftTickHi = leftHi;
+        if (!leftLog && y0.min == ChartOption.Auto()
+            && y0.max == ChartOption.Auto()) {
+            int lpad = ((leftHi - leftLo) * pxPad + plotH - 1) / plotH;
+            int lDataMin = Chart.AxisMinFor(series, 0);
+            if (lpad > 0) {
+                if (leftHi - lData < lpad) { leftHi = lData + lpad; }
+                if (leftLo != 0 && lDataMin > leftLo
+                    && lDataMin - leftLo < lpad) {
+                    leftLo = lDataMin - lpad;
+                }
+            }
+        }
+        int rightTickLo = rightLo;
+        int rightTickHi = rightHi;
+        if (hasRight && !rightLog && y1.min == ChartOption.Auto()
+            && y1.max == ChartOption.Auto()) {
+            int rpad = ((rightHi - rightLo) * pxPad + plotH - 1) / plotH;
+            int rDataMax = rightDataMax;
+            if (rDataMax < 0) { rDataMax = Chart.AxisMaxFor(series, 1); }
+            int rDataMin = Chart.AxisMinFor(series, 1);
+            if (rpad > 0) {
+                if (rightHi - rDataMax < rpad) { rightHi = rDataMax + rpad; }
+                if (rightLo != 0 && rDataMin > rightLo
+                    && rDataMin - rightLo < rpad) {
+                    rightLo = rDataMin - rpad;
+                }
+            }
+        }
+        int xTickLo = xLo;
+        int xTickHi = xHi;
+        if (xValue && !isTime && x0.min == ChartOption.Auto()
+            && x0.max == ChartOption.Auto()) {
+            int xpad = ((xHi - xLo) * pxPad + plotW - 1) / plotW;
+            int xDataMin = Chart.XMinFor(series, catY);
+            int xDataMax = Chart.XMaxFor(series, catY);
+            if (xpad > 0) {
+                if (xHi - xDataMax < xpad) { xHi = xDataMax + xpad; }
+                if (xLo != 0 && xDataMin > xLo && xDataMin - xLo < xpad) {
+                    xLo = xDataMin - xpad;
+                }
+                if (xHi <= xLo) { xHi = xLo + 1; }
+            }
+        }
+
         ChartFrame f = new ChartFrame();
         f.plotX = plotX;
         f.plotY = plotY;
@@ -2393,9 +2444,11 @@ class Chart {
                     ls, sAxis.FgOr(0), fs);
             }
         } else {
-            int leftSpan = leftHi - leftLo;
+            // 刻度取 Tick 副本（nice 端点）：映射范围留白外扩后，
+            // 网格/标签仍落在整数 nice 值上，端格线悬在绘图区内侧。
+            int leftSpan = leftTickHi - leftTickLo;
             for (int k = 0; k <= ticks; k = k + 1) {
-                int lv = leftLo + leftSpan * k / ticks;
+                int lv = leftTickLo + leftSpan * k / ticks;
                 int gy = f.YOf(lv, 0);
                 if (grid) { c.FillRect(plotX, gy, plotW, 1, sGrid.BgOr(0)); }
                 if (!y0Show) { continue; }
@@ -2416,9 +2469,9 @@ class Chart {
                         Convert.ToString(rv), sAxis.FgOr(0), fs);
                 }
             } else {
-                int rightSpan = rightHi - rightLo;
+                int rightSpan = rightTickHi - rightTickLo;
                 for (int k = 0; k <= rt; k = k + 1) {
-                    int rv = rightLo + rightSpan * k / rt;
+                    int rv = rightTickLo + rightSpan * k / rt;
                     int gy = f.YOf(rv, 1);
                     string rs = Convert.ToString(y1.labelNegate ? 0 - rv : rv);
                     if (y1.labelFormatter.Length > 0) { rs = y1.labelFormatter.Replace("{value}", rs); }
@@ -2439,10 +2492,16 @@ class Chart {
         int n = labels.Count;
         if (x0.show && (catY || xValue)) {
             // 轴互换：类目在 Y（上面已画），X 画数值刻度。
-            int xspan = f.xHi - f.xLo;
+            // ECharts 数值轴 splitLine 默认开（类目轴默认关）：
+            // 竖向辅助线是轴互换图（line5 类目 Y + 数值 X）唯一
+            // 的网格，横线随类目 Y 的 showGrid=false 不画。
+            bool gridX = o.showGrid && x0.showGrid;
+            // X 刻度同左/右轴取 nice 端点副本（xLo/xHi 已留白外扩）。
+            int xspan = xTickHi - xTickLo;
             for (int k = 0; k <= xt; k = k + 1) {
-                int xv = f.xLo + xspan * k / xt;
+                int xv = xTickLo + xspan * k / xt;
                 int gx = f.XOfValue(xv);
+                if (gridX) { c.FillRect(gx, plotY, 1, plotH, sGrid.BgOr(0)); }
                 string xs2 = Convert.ToString(xv);
                 if (x0.labelFormatter.Length > 0) { xs2 = x0.labelFormatter.Replace("{value}", xs2); }
                 int lw = Canvas.MeasureText(xs2, fs);
