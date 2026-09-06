@@ -428,6 +428,15 @@ partial class ChartView {
         int half = step / 2;
         int th = app.Scale(2);
         int rad = app.Scale(3);
+        // 拐点符号 auto 抽稀（ECharts2 showAllSymbol 缺省 false，符号
+        // 只落在显示标签的主刻度上）：仅类目 X 有标签时生效，雨量图
+        // 这类 3079 点密集线不再满线小圆点。showSymbol=1 全显、=0 隐藏。
+        List<int> symTicks = null;
+        if (n == winLabels.Count && o.XAxis0().type == ChartAxisType.Category) {
+            symTicks = Chart.CategoryTicks(f, winLabels,
+                Style.FontFallback(app, "small"), f.plotX, app.Scale(6),
+                o.XAxis0());
+        }
 
         ChartView.PushPlotClip(app, f.plotX, f.plotY, f.plotW, f.plotH);
         for (int si = 0; si < series.Count; si = si + 1) {
@@ -589,6 +598,7 @@ partial class ChartView {
                     // 绘制（与原 if/else 两支行为一致）。
                     {
                         int nr = Chart.SymbolRadius(s.symbolSize, rad);
+                        int tickCur2 = 0;
                         for (int m2 = 0; m2 < pxs.Count; m2 = m2 + 1) {
                             if (gaps[m2]) { continue; }
                             int oiN = i0 + m2;
@@ -607,6 +617,17 @@ partial class ChartView {
                             }
                             bool showSym = sym2 != "none" && sym2 != "pass"
                                 && (s.symbol.Length > 0 || s.showSymbol != 0);
+                            if (showSym && symTicks != null
+                                && s.symbol.Length == 0 && s.showSymbol < 0) {
+                                // auto（ECharts2 缺省）：符号只落在显示
+                                // 标签的主刻度上（升序游标对齐）。
+                                while (tickCur2 < symTicks.Count
+                                    && symTicks[tickCur2] < m2) {
+                                    tickCur2 = tickCur2 + 1;
+                                }
+                                showSym = tickCur2 < symTicks.Count
+                                    && symTicks[tickCur2] == m2;
+                            }
                             if (showSym) {
                                 Chart.DrawSymbol(c, pxs[m2], pys[m2], pr, sym2,
                                     ncol, s.itemStyle.normal.borderColor,
@@ -795,6 +816,14 @@ partial class ChartView {
         if (n < 1 || maxV < 1) { return; }
         int step = f.plotW / n;
         int half = step / 2;
+        // 拐点符号 auto 抽稀：与 DrawLines 同语义（符号只落在显示
+        // 标签的主刻度上）。
+        List<int> symTicks = null;
+        if (winLabels.Count > 0 && o.XAxis0().type == ChartAxisType.Category) {
+            symTicks = Chart.CategoryTicks(f, winLabels,
+                Style.FontFallback(app, "small"), f.plotX, app.Scale(6),
+                o.XAxis0());
+        }
 
         // 按 stackName 分组：共享名的序列叠成一个色带组，
         // 不同组自下而上分层（与堆叠柱一致）；无 stackName 的
@@ -972,6 +1001,7 @@ partial class ChartView {
                 {
                     int rad = app.Scale(3);
                     int nr = Chart.SymbolRadius(s.symbolSize, rad);
+                    int tickCur3 = 0;
                     for (int u = 0; u < n; u = u + 1) {
                         int oi2 = i0 + u;
                         if (oi2 >= s.Count()) { continue; }
@@ -992,6 +1022,16 @@ partial class ChartView {
                         }
                         if (sym2 == "none" || sym2 == "pass") { continue; }
                         if (s.symbol.Length == 0 && s.showSymbol == 0) { continue; }
+                        if (symTicks != null && s.symbol.Length == 0
+                            && s.showSymbol < 0) {
+                            // auto：符号只落在显示标签的主刻度上。
+                            while (tickCur3 < symTicks.Count
+                                && symTicks[tickCur3] < u) {
+                                tickCur3 = tickCur3 + 1;
+                            }
+                            if (tickCur3 >= symTicks.Count
+                                || symTicks[tickCur3] != u) { continue; }
+                        }
                         Chart.DrawSymbol(c, xs[u], topY[u], pr, sym2, scol,
                             s.itemStyle.normal.borderColor,
                             s.itemStyle.normal.borderWidth);

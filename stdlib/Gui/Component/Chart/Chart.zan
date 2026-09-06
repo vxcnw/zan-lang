@@ -554,6 +554,49 @@ class Chart {
         return ci % (interval + 1) == 0;
     }
 
+    /// 类目轴 auto 抽稀的共用判定：返回窗口内实际显示标签的类目
+    /// 下标（升序）。ECharts 2 中 axisLabel.interval 缺省 'auto'，
+    /// splitLine 与折线拐点符号（isMainIdx）与标签同源——密集类目
+    /// 轴的竖网格和符号都只落在显示标签的刻度上，不再逐类目一条
+    ///（雨量图 3079 点曾把竖线糊成整幅灰罩、折线满线小圆点）。
+    /// 规则与 BuildAxesR 标签绘制一致：显式 interval 走 LabelShown、
+    /// 旋转标签不抽稀、刻度模式（boundaryGap=false）首标签豁免
+    ///（ECharts 始终画边界刻度），其余贪心让位。
+    static List<int> CategoryTicks(ChartFrame f, List<string> labels, int fs,
+                                    int plotX, int labelGap, ChartAxis x0) {
+        List<int> shown = new List<int>();
+        int n = labels.Count;
+        if (f == null || n < 1) { return shown; }
+        bool tickX = !f.catBoundaryGap && n > 1;
+        int labelRight = plotX - labelGap;
+        for (int ci = 0; ci < n; ci = ci + 1) {
+            string lab = labels[ci];
+            if (x0.labelFormatter.Length > 0) {
+                lab = x0.labelFormatter.Replace("{value}", lab);
+            }
+            int labelW = Canvas.MeasureText(lab, fs);
+            int cxs = f.CatLeft(ci, n);
+            int cellW = f.CatWidth(ci, n);
+            int labelLeft = tickX ? cxs - labelW / 2
+                : cxs + (cellW - labelW) / 2;
+            if (!tickX && labelLeft < cxs) { labelLeft = cxs; }
+            bool show;
+            if (x0.labelInterval >= 0) {
+                show = Chart.LabelShown(ci, x0.labelInterval);
+            } else if (x0.labelRotate != 0) {
+                show = true;
+            } else {
+                show = (tickX && ci == 0)
+                    || labelLeft >= labelRight + labelGap;
+            }
+            if (show) {
+                shown.Add(ci);
+                labelRight = labelLeft + labelW;
+            }
+        }
+        return shown;
+    }
+
     /// 旋转分类标签的竖直占位（像素）：行盒 w×h 绕锚点旋转
     /// |deg| 度后的垂直跨度 = w·|sin| + h·|cos|。用 ChartView 的
     /// 1000 倍三角表，确定性整数。
@@ -2688,18 +2731,24 @@ class Chart {
                 }
             } else {
                 int labelGap = app.Scale(6);
-                int labelRight = plotX - labelGap;
                 int rot = x0.labelRotate;
-                int ivl = x0.labelInterval;
                 // 刻度线模式（boundaryGap=false）标签以刻度为中心，
                 // 首尾标签允许越出绘图区（与数值轴标签同形态）；
                 // 带状模式居中在格子内、不越左缘。
                 bool tickX = !f.catBoundaryGap && n > 1;
-                // ECharts 2 类目轴 splitLine 默认开：刻度模式竖线落在
-                // 类目刻度上（CatX），带状模式落在格子边界（CatLeft）；
-                // 首线与 y 轴重合、末线贴绘图区右缘，都跳过。
+                // ECharts 2 类目轴 splitLine 默认开、interval 缺省
+                // 'auto'（与 axisLabel 同源抽稀）：竖线只落在显示标签
+                // 的刻度上——刻度模式落在类目刻度（CatX），带状模式落
+                // 在格子边界（CatLeft）；首线与 y 轴重合、末线贴绘图区
+                // 右缘，都跳过。密集类目（雨量图 3079 点）不再逐类目
+                // 一条竖线糊成灰罩。
+                List<int> tickShown = Chart.CategoryTicks(f, labels, fs,
+                    plotX, labelGap, x0);
+                int tickCur = 0;
                 if (o.showGrid && x0.showGrid) {
-                    for (int gvi = tickX ? 0 : 1; gvi < n; gvi = gvi + 1) {
+                    for (int si3 = 0; si3 < tickShown.Count; si3 = si3 + 1) {
+                        int gvi = tickShown[si3];
+                        if (!tickX && gvi == 0) { continue; }
                         int gvx = tickX ? f.CatX(gvi, n) : f.CatLeft(gvi, n);
                         if (gvx > plotX && gvx < plotX + plotW) {
                             c.FillRect(gvx, plotY, 1, plotH, sGrid.BgOr(0));
@@ -2715,21 +2764,10 @@ class Chart {
                     int labelLeft = tickX ? cxs - labelW / 2
                         : cxs + (cellW - labelW) / 2;
                     if (!tickX && labelLeft < cxs) { labelLeft = cxs; }
-                    bool show;
-                    if (ivl >= 0) {
-                        // 显式抽稀：每 (interval+1) 个画一个，贪心让位。
-                        show = Chart.LabelShown(ci, ivl);
-                    } else if (rot != 0) {
-                        // 旋转标签不再贪心防重叠（底栏已按旋转跨度扩过）。
-                        show = true;
-                    } else {
-                        // 刻度模式首标签以轴为中心、左半越出绘图区，
-                        // 不参与贪心让位（ECharts 始终画边界刻度）。
-                        // 尾标签不豁免：贴右缘的刻度标签会与前一
-                        // 标签重叠（雨量图 3079 点），同走贪心。
-                        show = (tickX && ci == 0)
-                            || labelLeft >= labelRight + labelGap;
-                    }
+                    // 与 splitLine 同一张显示集合（升序游标对齐）。
+                    bool show = tickCur < tickShown.Count
+                        && tickShown[tickCur] == ci;
+                    if (show) { tickCur = tickCur + 1; }
                     if (show) {
                         if (rot != 0) {
                             // DrawTextRot 绕未旋转行盒左上角顺时针旋转：
@@ -2739,15 +2777,12 @@ class Chart {
                             if (rot > 0) { ax = labelLeft; }
                             c.DrawTextRot(ax, plotBot + app.Scale(4), lab,
                                 sAxis.FgOr(0), fs, rot);
-                            labelRight = labelLeft + labelW;
                         } else if (tickX) {
                             c.DrawText(cxs - labelW / 2, plotBot + app.Scale(4),
                                 lab, sAxis.FgOr(0), fs);
-                            labelRight = labelLeft + labelW;
                         } else {
                             c.DrawTextCentered(cxs, plotBot + app.Scale(4), cellW,
                                 fh + app.Scale(4), lab, sAxis.FgOr(0), fs);
-                            labelRight = labelLeft + labelW;
                         }
                     }
                 }

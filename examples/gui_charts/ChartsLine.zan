@@ -210,6 +210,9 @@ partial class Charts {
             pts.Add(d);
         }
         ChartSeries s = ChartSeries.Named("series1", ChartType.Line, pts);
+        // 原版 showAllSymbol:true——200 个气泡全显（auto 抽稀只画
+        // 主刻度上的符号，会吃掉绝大多数气泡）。
+        s.showSymbol = 1;
         ChartOption o = ChartOption.Of(
             Charts.T("Time axis", "时间坐标折线图"),
             TimeCats(), new List<ChartSeries>{ s });
