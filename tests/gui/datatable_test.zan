@@ -2002,6 +2002,21 @@ class Program {
         Console.WriteLine(wrtCtl.Value() == 0);
         wrtOut = "keep";
         Console.WriteLine(wrtComp.TakeCommit(wrtCtl, ref wrtOut) == false && wrtOut == "keep");
+        // Rate star count is resolved by FillStr from the column shape:
+        // a declared shapeC applies even on a bare control, a shapeless
+        // column keeps Rate's default 5 (Acquire's matrix cols degenerates
+        // to 1 for cellType 10 and must never reach the widget), and an
+        // out-of-range cell value clamps for display WITHOUT committing
+        // the clamped value over the stored one.
+        Rate wrt2 = new Rate();
+        wrtComp.FillStr(wrt2, "9", wrt, null, 0);
+        Console.WriteLine(wrt2.MaxStars() == 7 && wrt2.Value() == 7);
+        DataColumn wrtFlat = DataColumn.WidgetCol("R2", 80, "rate");
+        Rate wrt3 = new Rate();
+        wrtComp.FillStr(wrt3, "9", wrtFlat, null, 0);
+        Console.WriteLine(wrt3.MaxStars() == 5 && wrt3.Value() == 5);
+        wrtOut = "keep";
+        Console.WriteLine(wrtComp.TakeCommit(wrt3, ref wrtOut) == false && wrtOut == "keep");
         // Select adapter: value is the chosen label; unknown text maps to
         // -1 and never commits "" over the stored value.
         SelectBox wselCtl = new SelectBox();
@@ -2071,6 +2086,13 @@ class Program {
         // Widget columns center vertically by default; VTop() opts out.
         Console.WriteLine(wact.vTop == false);
         Console.WriteLine(DataColumn.VTop(wact) == wact && wact.vTop);
+        // Cell-comp pools are namespaced per grid state: the adapter
+        // registry is process-global, so two grids sharing a compId must
+        // not trade pooled controls (same key text, distinct namespaces,
+        // stable per instance).
+        DataTableState pstA = new DataTableState();
+        DataTableState pstB = new DataTableState();
+        Console.WriteLine(DataTable.CompPoolKeyDistinctProbe(pstA, pstB));
     }
 }
 

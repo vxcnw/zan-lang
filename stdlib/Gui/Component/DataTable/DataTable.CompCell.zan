@@ -215,6 +215,10 @@ partial class DataTable {
         RowKey key = null;
         if (src != null) { key = src.GetRowKey(rowIdx); }
         if (key == null) { key = RowKey.Legacy(rowIdx); }
+        // 池键冠以本表实例序号：注册表是进程级单例，裸 (RowKey, col)
+        // 会让同屏两个网格（或一表一预览）声明同一 compId 时拿到
+        // 同一个控件实例——同帧互灌值、互抢命中矩形、提交串台。
+        key = DataTable.CompPoolKey(st, key);
         Control ctl = comp.Acquire(app, src, rowIdx, cc, key,
                                    cx, cy, cw, rowH, rows, cols);
         if (ctl == null) { return; }
@@ -272,4 +276,26 @@ partial class DataTable {
 
     /// 最近一次组件列点击在矩阵内的列。
     static int CompPosC(DataTableState st) { return st.compC; }
+
+    /// 组件池键命名空间：给行键冠以表状态实例序号。适配器池只按
+    /// (RowKey, col) 存控件，而注册表（CellComp.registry）是进程级
+    /// 单例——同屏两个网格声明同一 compId 时，两表同帧会从同一
+    /// 适配器拿到同一个控件实例：互灌值、互抢命中矩形、提交串台
+    /// （bandgrid 与 WidgetCol 形态同样中招）。业务键文本原样保留，
+    /// 同一表内的复用语义不变。
+    static RowKey CompPoolKey(DataTableState st, RowKey key) {
+        if (st == null || key == null) { return key; }
+        return RowKey.Of("t" + Convert.ToString(st.inst) + "@"
+                         + key.Canonical());
+    }
+
+    /// 测试钩子：两个状态实例对同一行键得到不同池键，且同一实例
+    /// 跨帧（多次调用）稳定。
+    static bool CompPoolKeyDistinctProbe(DataTableState a, DataTableState b) {
+        RowKey k = RowKey.Of("probe");
+        string ka = DataTable.CompPoolKey(a, k).Canonical();
+        string kb = DataTable.CompPoolKey(b, k).Canonical();
+        string ka2 = DataTable.CompPoolKey(a, k).Canonical();
+        return ka != kb && ka == ka2;
+    }
 }

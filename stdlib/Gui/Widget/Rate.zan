@@ -86,11 +86,20 @@ class Rate : Control {
         InitRate(new SignalInt(0), stars);
     }
 
-    /// 设置星星总数（流式写法：`new Rate().Max(5)`）。
+    /// 设置星星总数（流式写法：`new Rate().Max(5)`）。星数变化时
+    /// 按 2×重新预留命中 id 段（allowHalf 的右半格同段）：初始构造
+    /// 只按构造星数预留，扩到更大星数后不重预留的话，PaintStars
+    /// 注册的 id 会越过初始段落进后续控件的 id 空间——两控件互相
+    /// 误认领对方的悬停/点击。
     Rate Max(int stars) {
         maxStars = stars;
+        baseId = WidgetId.Block(stars * 2);
         return this;
     }
+
+    /// 当前星数（只读取数，不触动 id 预留；适配器按它避免逐帧
+    /// 重复 Max 重预留）。
+    int MaxStars() { return maxStars; }
 
     /// 控件类型标识（序列化/设计器用）。
     override string Kind() { return "Rate"; }

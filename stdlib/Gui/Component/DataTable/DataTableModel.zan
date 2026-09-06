@@ -1154,6 +1154,13 @@ class DataTableState {
     // 变化必须使派生显示模型失效，否则新列只能到下一次偶然重算才出现。
     int columnCount;
 
+    // 组件列控件池的命名空间（DataTable.CompPoolKey）：CellComp
+    // 注册表是全局单例，池键必须冠以表实例序号，同屏两个网格
+    // 声明同一 compId 时才不会互抢池化控件。
+    static int instSeq;
+    /// 本状态实例序号（构造时分配，进程内唯一）。
+    int inst;
+
     int filterTab;
     string searchText;
     int valScroll;
@@ -1567,6 +1574,8 @@ class DataTableState {
         this.menuVals = new List<string>();
         this.menuMatched = new List<string>();
         this.menuSearchCache = "";
+        instSeq = instSeq + 1;
+        this.inst = instSeq;
         this.showRowNum = true;
         this.showSelect = true;
         this.striped = true;
