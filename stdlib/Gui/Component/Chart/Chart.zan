@@ -141,10 +141,15 @@ class ChartFrame {
     /// Y 类目轴第 i 槽的垂直中线（轴互换折线的点行）。
     int CatMidY(int i, int n) {
         if (n < 1) { return this.plotY + this.plotH / 2; }
+        // ECharts 类目 Y 轴 index 0 在底部（自下而上）。
+        if (!this.catBoundaryGap && n > 1) {
+            // boundaryGap=false：首尾类目贴绘图区上下缘（刻度线）。
+            return this.plotY + this.plotH - i * this.plotH / (n - 1);
+        }
         int band = this.plotH / n;
         if (band < 1) { band = 1; }
-        int y = this.plotY + i * band + band / 2;
-        if (y > this.plotY + this.plotH) { y = this.plotY + this.plotH; }
+        int y = this.plotY + this.plotH - (i * band + band / 2);
+        if (y < this.plotY) { y = this.plotY; }
         return y;
     }
 
@@ -543,6 +548,283 @@ class Chart {
         return nice * mag;
     }
 
+    /// ECharts 2 数值轴 nice 量程结果（lo/hi 取整到步长倍数）。
+    class ChartSpan {
+        int lo;
+        int hi;
+        int ticks;
+    }
+
+    /// expNum 的 {c, e}：近似值 = c × 10^e。
+    class ChartExp {
+        int c;
+        int e;
+    }
+
+    /// a / b 的数学 floor（Zan 的 / 与 % 向零截断）。
+    static int FloorDivQ(int a, int b) {
+        int q = a / b;
+        if (a % b != 0 && a < 0) { q = q - 1; }
+        return q;
+    }
+
+    /// a / b 的数学 ceil。
+    static int CeilDivQ(int a, int b) {
+        int q = a / b;
+        if (a % b != 0 && a > 0) { q = q + 1; }
+        return q;
+    }
+
+    /// 十进制位数（v ≥ 1）。
+    static int DecDigits(int v) {
+        int n = 1;
+        while (v >= 10) { v = v / 10; n = n + 1; }
+        return n;
+    }
+
+    /// 去掉十进制尾部 0（全精度有效位计数用）。
+    static int StripZeros(int v) {
+        while (v > 0 && v % 10 == 0) { v = v / 10; }
+        return v;
+    }
+
+    /// JS Math.round(q / 2)（半数朝 +∞，q 可为负）。
+    static int JSRoundHalf(int q) {
+        if (q >= 0) { return (q + 1) / 2; }
+        return q / 2;
+    }
+
+    /// expNum(num/den, 2 位精度，向上)：v = num/den ≥ 0 的两位有效数
+    /// 上近似。对应 smartSteps 里 getCeil/expSpan 的 expNum(v, 2)。
+    static ChartExp ExpNum2Rat(int num, int den) {
+        ChartExp r = new ChartExp();
+        r.c = 0;
+        r.e = 0;
+        if (num <= 0 || den <= 0) { return r; }
+        int k;
+        if (num >= den) {
+            k = Chart.DecDigits(num / den) - 1;
+        } else {
+            k = 0;
+            int p = num;
+            while (p < den) { p = p * 10; k = k - 1; }
+        }
+        int expon = k - 1;
+        // Pow10 只服务非负指数，k ≥ 1 时改走除法表达 10^(1-k)。
+        int scaled;
+        if (k >= 1) {
+            scaled = Chart.CeilDivQ(num, den * Chart.Pow10(k - 1));
+        } else {
+            scaled = Chart.CeilDivQ(num * Chart.Pow10(1 - k), den);
+        }
+        if (scaled >= 100) { scaled = scaled / 10; expon = expon + 1; }
+        r.c = scaled;
+        r.e = expon;
+        return r;
+    }
+
+    /// expNum(n, 全精度)：整数 n 的精确分解（c × 10^e = n）。
+    /// byFloor 只在指数对齐除法时区分 floor/ceil。
+    static ChartExp ExpNumFull(int n, bool byFloor) {
+        ChartExp r = new ChartExp();
+        r.c = 0;
+        r.e = 0;
+        if (n == 0) { return r; }
+        int ad = n < 0 ? 0 - n : n;
+        int digit = Chart.DecDigits(Chart.StripZeros(ad));
+        int expon = Chart.DecDigits(ad) - digit;
+        r.e = expon;
+        r.c = n / Chart.Pow10(expon);
+        return r;
+    }
+
+    /// getCeil：两位尾数向上吸附到步长备选 [10,20,25,50]。
+    static void SmartCeilStep(ChartExp n) {
+        if (n.c <= 10) { n.c = 10; return; }
+        if (n.c <= 20) { n.c = 20; return; }
+        if (n.c <= 25) { n.c = 25; return; }
+        if (n.c <= 50) { n.c = 50; return; }
+        n.e = n.e + 1;
+        n.c = 10;
+    }
+
+    /// expFixTo：把 x 的指数对齐到 ref（缩指数乘 10 精确，升指数
+    /// 按 byFloor floor / 否则 ceil 除）。
+    static void ExpAlign(ChartExp x, ChartExp refx, bool byFloor) {
+        int delta = refx.e - x.e;
+        if (delta == 0) { return; }
+        x.e = refx.e;
+        if (delta < 0) {
+            x.c = x.c * Chart.Pow10(0 - delta);
+        } else {
+            int q = Chart.Pow10(delta);
+            x.c = byFloor ? Chart.FloorDivQ(x.c, q) : Chart.CeilDivQ(x.c, q);
+        }
+    }
+
+    /// smartSteps 的 forInteger：跨度小于段数时向两侧延展跨度
+    /// （section ≤ 0 时取 5 段），输出压回与原数据同侧。
+    static ChartSpan SmartForInteger(int min, int max, int section) {
+        if (section < 1) { section = 5; }
+        int delta = section - (max - min);
+        int newMin = Chart.JSRoundHalf(min * 2 - delta);
+        int newMax = Chart.JSRoundHalf(max * 2 + delta);
+        if (min >= 0 && newMin < 0) {
+            newMax = newMax - newMin;
+            newMin = 0;
+        } else if (max <= 0 && newMax > 0) {
+            newMin = newMin - newMax;
+            newMax = 0;
+        }
+        ChartSpan s = new ChartSpan();
+        s.lo = newMin;
+        s.hi = newMax;
+        s.ticks = section;
+        return s;
+    }
+
+    /// smartSteps 的 tryForInt：原最值同号（含 0）时尽量取整数步长，
+    /// 剩余误差向两侧均衡（可能改写 expMin/expMax 并强制 e = 0）。
+    static int SmartTryForInt(int min, int max, ChartExp expMin, ChartExp expMax, int secs) {
+        int span = expMax.c - expMin.c;
+        int expon = expMax.e;
+        int step;
+        bool stepInt;
+        if (expon >= 0) {
+            int num = span * Chart.Pow10(expon);
+            step = num / secs;
+            stepInt = num % secs == 0;
+        } else {
+            int den = secs * Chart.Pow10(0 - expon);
+            step = span / den;
+            stepInt = span % den == 0;
+        }
+        if (stepInt) { return secs; }
+        int spanN = step * secs;
+        if (spanN < max - min) {
+            step = step + 1;
+            spanN = step * secs;
+            // section = 0（自适应段数）恒走这一支。
+            if (step * (secs - 1) >= max - min) {
+                secs = secs - 1;
+                spanN = step * secs;
+            }
+        }
+        if (spanN >= max - min) {
+            int delta = spanN - (max - min);
+            expMin.c = Chart.JSRoundHalf(min * 2 - delta);
+            expMax.c = Chart.JSRoundHalf(max * 2 + delta);
+            expMin.e = 0;
+            expMax.e = 0;
+        }
+        return secs;
+    }
+
+    /// smartSteps 的 coreCalc（section = 0 自适应路径）：
+    /// 步长基准取 ceil(span/6)，段数在 [6,5,4] 中选（调整后跨度最小、
+    /// 同跨度步长小者胜），整数输入尽量整数步长并均衡误差。
+    static ChartSpan SmartCoreCalc(int min, int max) {
+        ChartExp expStep = Chart.ExpNum2Rat(max - min, 6);
+        Chart.SmartCeilStep(expStep);
+        ChartExp expSpan = Chart.ExpNum2Rat(max - min, 1);
+        ChartExp expMin = Chart.ExpNumFull(min, true);
+        ChartExp expMax = Chart.ExpNumFull(max, false);
+        Chart.ExpAlign(expSpan, expStep, false);
+        Chart.ExpAlign(expMin, expStep, true);
+        Chart.ExpAlign(expMax, expStep, false);
+
+        // look4sections。对齐单位可能是 10^e（e < 0 的细步长），
+        // 整体放大 100 倍参与整数运算，随后把指数一并回退 2。
+        int baseC = expMin.c * 100;
+        int spanC = (expMax.c - expMin.c) * 100;
+        int bestSpan = 0;
+        int bestStep = 0;
+        int bestMin = 0;
+        int bestMax = 0;
+        for (int section = 6; section >= 4; section = section - 1) {
+            ChartExp ts = Chart.ExpNum2Rat(spanC, section);
+            Chart.SmartCeilStep(ts);
+            int stepN = ts.c * Chart.Pow10(ts.e);
+            int tMin = Chart.FloorDivQ(baseC, stepN) * stepN;
+            int tMax = Chart.CeilDivQ(baseC + spanC, stepN) * stepN;
+            int sp = tMax - tMin;
+            if (section == 6 || sp < bestSpan || (sp == bestSpan && stepN < bestStep)) {
+                bestSpan = sp;
+                bestStep = stepN;
+                bestMin = tMin;
+                bestMax = tMax;
+            }
+        }
+        int secs = bestSpan / bestStep;
+        if (secs < 3) { secs = secs * 2; }
+        expMin.c = bestMin;
+        expMin.e = expStep.e - 2;
+        expMax.c = bestMax;
+        expMax.e = expStep.e - 2;
+
+        // 原最值同号（reform 后必有一端为 0）时尝试整数步长。
+        if (min * max >= 0) {
+            if (max - min < secs) { return Chart.SmartForInteger(min, max, secs); }
+            secs = Chart.SmartTryForInt(min, max, expMin, expMax, secs);
+        }
+        // cross0：原数据在某侧时输出压回同侧。
+        if (min >= 0 && expMin.c < 0) {
+            expMax.c = expMax.c - expMin.c;
+            expMin.c = 0;
+        } else if (max <= 0 && expMax.c > 0) {
+            expMin.c = expMin.c - expMax.c;
+            expMax.c = 0;
+        }
+        // makeResult 对整数输入在 lo/hi 上是恒等（只影响小数位与
+        // 标签数组），按各自指数还原即可。
+        ChartSpan sp2 = new ChartSpan();
+        sp2.lo = Chart.ExpRestore(expMin);
+        sp2.hi = Chart.ExpRestore(expMax);
+        sp2.ticks = secs;
+        return sp2;
+    }
+
+    /// c × 10^e 的整数还原（e < 0 时 c 必是 10^-e 的倍数）。
+    static int ExpRestore(ChartExp x) {
+        if (x.e >= 0) { return x.c * Chart.Pow10(x.e); }
+        return x.c / Chart.Pow10(0 - x.e);
+    }
+
+    /// ECharts 2.2.4 valueAxis 自动刻度（与演示站一致）：
+    /// 内层是 src/util/smartSteps.js（section=0 自适应路径）的忠实
+    /// 移植，外层套 valueAxis._reformValue 的非 scale 规则——
+    /// 同号数据一端归零（全正 min→0、全负 max→0）与 min==max 整形。
+    /// -2..15 → -5..15/4 段、0..1320 → 0..1500/6 段、0..2570 →
+    /// 0..3000/6 段。固定 min/max 不走此函数（尊重不取整）。
+    static ChartSpan NiceRange(int lo, int hi) {
+        int min = lo;
+        int max = hi;
+        if (max < min) {
+            int tmp = min;
+            min = max;
+            max = tmp;
+        }
+        if (min == max) {
+            // valueAxis 的 min==max 修复：全 0 → max=1；正数把 min
+            // 压到 0（源码 splitNumber ?? 5 实际取 null→0）；负数把
+            // max 抬到 0。
+            if (max == 0) {
+                max = 1;
+            } else if (max > 0) {
+                min = 0;
+            } else {
+                max = 0;
+            }
+        }
+        if (min >= 0 && max >= 0) { min = 0; }
+        if (min <= 0 && max <= 0) { max = 0; }
+        if (min == max) { max = min + 1; }
+        if (max - min < 5) {
+            return Chart.SmartForInteger(min, max, 0);
+        }
+        return Chart.SmartCoreCalc(min, max);
+    }
+
     /// 全部系列中的最大值（隐藏系列不计），下界 0。
     static int MaxOf(List<ChartSeries> series) {
         int mx = 0;
@@ -689,6 +971,42 @@ class Chart {
                 if (!cs.hidden && oi < cs.Count()) { sum = sum + cs.Value(oi); }
             }
             if (sum > mx) { mx = sum; }
+        }
+        return mx;
+    }
+
+    /// 堆叠感知的窗口最大值：逐 stackName 组累计组顶，未堆叠
+    /// 系列（stack=0）只按绝对值计入（ECharts 轴量程覆盖组顶与
+    /// 绝对值的最大者，绝对值不进累加和——多级控制混合图）。
+    static int MaxStackGroupsW(List<ChartSeries> series, int n, int i0) {
+        int mx = 0;
+        for (int i = 0; i < n; i = i + 1) {
+            int oi = i0 + i;
+            List<string> grp = new List<string>();
+            List<int> sums = new List<int>();
+            List<int> absMx = new List<int>();
+            for (int s = 0; s < series.Count; s = s + 1) {
+                ChartSeries cs = series[s];
+                if (cs.hidden || oi >= cs.Count()) { continue; }
+                bool stacked = cs.stackName.Length > 0 || cs.stack != 0;
+                int gi = 0 - 1;
+                for (int g2 = 0; g2 < grp.Count; g2 = g2 + 1) {
+                    if (grp[g2] == cs.stackName) { gi = g2; break; }
+                }
+                if (gi < 0) {
+                    grp.Add(cs.stackName);
+                    sums.Add(0);
+                    absMx.Add(0);
+                    gi = grp.Count - 1;
+                }
+                int v = cs.Value(oi);
+                if (v > absMx[gi]) { absMx[gi] = v; }
+                if (stacked) { sums[gi] = sums[gi] + v; }
+            }
+            for (int g3 = 0; g3 < sums.Count; g3 = g3 + 1) {
+                int top = sums[g3] > absMx[g3] ? sums[g3] : absMx[g3];
+                if (top > mx) { mx = top; }
+            }
         }
         return mx;
     }
@@ -1577,10 +1895,18 @@ class Chart {
     /// 轴范围 [0, maxV]。需要双轴/固定范围/时间轴时用 BuildAxes。
     static ChartFrame DrawFrame(App app, int x, int y, int w, int h, int plotTop,
                                 List<string> labels, int maxV) {
+        return Chart.DrawFrameT(app, x, y, w, h, plotTop, labels, maxV, 5);
+    }
+
+    /// 同 DrawFrame，但刻度数显式给定（ECharts nice 步长的
+    /// 刻度数可不同于 5，如 0..1400 每 200 = 7 格）。
+    static ChartFrame DrawFrameT(App app, int x, int y, int w, int h, int plotTop,
+                                 List<string> labels, int maxV, int ticks) {
         Canvas c = app.canvas;
         Theme t = app.theme;
         int pad = t.paddingMedium;
         int axisFs = Style.FontFallback(app, "small");
+        if (ticks < 1) { ticks = 5; }
 
         int leftGut = Canvas.MeasureText(Convert.ToString(maxV), axisFs) + app.Scale(12);
         int botGut = Canvas.FontHeight(axisFs) + app.Scale(8);
@@ -1596,7 +1922,6 @@ class Chart {
                                     Style.SNormal());
         StyleBox sAxis = Style.Part(app, "chart", "axis", "", "", "",
                                     Style.SNormal());
-        int ticks = 5;
         for (int k = 0; k <= ticks; k = k + 1) {
             int gy = plotY + plotH - (k * plotH / ticks);
             c.FillRect(plotX, gy, plotW, 1, sGrid.BgOr(0));
@@ -1856,23 +2181,42 @@ class Chart {
         if (o.yAxes.Count > 1) { hasRight = true; }
         int rightLo = 0;
         int rightHi = 1;
+        int rt = ticks;
         if (hasRight) {
             int rData = rightDataMax;
             if (rData < 0) { rData = Chart.AxisMaxFor(series, 1); }
             rightLo = Chart.AxisLo(y1.min, Chart.AxisMinFor(series, 1));
             rightHi = Chart.AxisHi(y1.max, rData, rightLo);
         }
-
         // 对数轴：仅正值，钳制下界到 ≥1（log10 对 ≤0 无定义）。
         bool leftLog = y0.type == ChartAxisType.Log;
+        bool rightLog = hasRight && y1.type == ChartAxisType.Log;
+        // 自动量程走 ECharts nice 步长（-76..15 → -80..20，
+        // 0..1320 → 0..1400），刻度数随步长；固定 min/max 尊重不取整。
+        if (!leftLog && y0.type == ChartAxisType.Value
+            && y0.min == ChartOption.Auto() && y0.max == ChartOption.Auto()
+            && leftDataMax < 0) {
+            ChartSpan ls = Chart.NiceRange(Chart.AxisMinFor(series, 0), lData);
+            leftLo = ls.lo;
+            leftHi = ls.hi;
+            ticks = ls.ticks;
+            rt = ticks;
+        }
         if (leftLog) {
             if (leftLo < 1) { leftLo = 1; }
             if (leftHi < leftLo + 1) { leftHi = leftLo + 1; }
         }
-        bool rightLog = hasRight && y1.type == ChartAxisType.Log;
         if (rightLog) {
             if (rightLo < 1) { rightLo = 1; }
             if (rightHi < rightLo + 1) { rightHi = rightLo + 1; }
+        } else if (hasRight && y1.type == ChartAxisType.Value
+            && y1.min == ChartOption.Auto() && y1.max == ChartOption.Auto()
+            && rightDataMax < 0) {
+            ChartSpan rs = Chart.NiceRange(Chart.AxisMinFor(series, 1),
+                Chart.AxisMaxFor(series, 1));
+            rightLo = rs.lo;
+            rightHi = rs.hi;
+            rt = rs.ticks;
         }
         // 时间 X 轴：整数天数范围（Auto → 0..n-1）。
         bool isTime = x0.type == ChartAxisType.Time;
@@ -1890,18 +2234,33 @@ class Chart {
         bool xValue = catY || x0.type == ChartAxisType.Value;
         int xLo = 0;
         int xHi = 100;
+        int xt = ticks;
         if (xValue) {
-            if (x0.min != ChartOption.Auto()) { xLo = x0.min; } else { xLo = Chart.XMinFor(series, catY); }
-            if (x0.max != ChartOption.Auto()) { xHi = x0.max; } else { xHi = Chart.XMaxFor(series, catY); }
-            if (xHi <= xLo) { xHi = xLo + 1; }
+            // 自动量程走 ECharts nice 步长（气温 -76..15 →
+            // -80..20 步长 20）；固定 min/max 尊重不取整。
+            if (x0.min != ChartOption.Auto() || x0.max != ChartOption.Auto()) {
+                xLo = x0.min;
+                if (xLo == ChartOption.Auto()) { xLo = Chart.XMinFor(series, catY); }
+                xHi = x0.max;
+                if (xHi == ChartOption.Auto()) { xHi = Chart.XMaxFor(series, catY); }
+                if (xHi <= xLo) { xHi = xLo + 1; }
+            } else {
+                ChartSpan xsp = Chart.NiceRange(Chart.XMinFor(series, catY),
+                    Chart.XMaxFor(series, catY));
+                xLo = xsp.lo;
+                xHi = xsp.hi;
+                xt = xsp.ticks;
+            }
         }
 
         int leftGut;
         if (catY && y0.categories.Count > 0) {
-            // 类目 Y：左栏取最宽类目标签。
+            // 类目 Y：左栏取最宽类目标签（含 formatter 展开）。
             int mw = 0;
             for (int cgi = 0; cgi < y0.categories.Count; cgi = cgi + 1) {
-                int wgi = Canvas.MeasureText(y0.categories[cgi], fs);
+                string cgl = y0.categories[cgi];
+                if (y0.labelFormatter.Length > 0) { cgl = y0.labelFormatter.Replace("{value}", cgl); }
+                int wgi = Canvas.MeasureText(cgl, fs);
                 if (wgi > mw) { mw = wgi; }
             }
             leftGut = mw + app.Scale(12);
@@ -1912,7 +2271,7 @@ class Chart {
             }
         }
         int rightGut = pad;
-        if (hasRight) { rightGut = Chart.TickLabelW(rightLo, rightHi, ticks, fs) + app.Scale(12); }
+        if (hasRight) { rightGut = Chart.TickLabelW(rightLo, rightHi, rt, fs) + app.Scale(12); }
         int botGut = fh + app.Scale(12);
         if (x0.title.Length > 0) { botGut = botGut + fh + app.Scale(2); }
         if (xValue) { botGut = botGut + fh + app.Scale(2); }
@@ -1985,6 +2344,7 @@ class Chart {
                 int gy = f.CatMidY(ci, cn);
                 if (grid) { c.FillRect(plotX, gy, plotW, 1, sGrid.BgOr(0)); }
                 string ls = y0.categories[ci];
+                if (y0.labelFormatter.Length > 0) { ls = y0.labelFormatter.Replace("{value}", ls); }
                 int lw = Canvas.MeasureText(ls, fs);
                 c.DrawText(plotX - app.Scale(6) - lw, Canvas.CenterTextYAt(gy, fs),
                     ls, sAxis.FgOr(0), fs);
@@ -2024,8 +2384,8 @@ class Chart {
                 }
             } else {
                 int rightSpan = rightHi - rightLo;
-                for (int k = 0; k <= ticks; k = k + 1) {
-                    int rv = rightLo + rightSpan * k / ticks;
+                for (int k = 0; k <= rt; k = k + 1) {
+                    int rv = rightLo + rightSpan * k / rt;
                     int gy = f.YOf(rv, 1);
                     string rs = Convert.ToString(y1.labelNegate ? 0 - rv : rv);
                     if (y1.labelFormatter.Length > 0) { rs = y1.labelFormatter.Replace("{value}", rs); }
@@ -2034,26 +2394,29 @@ class Chart {
                 }
             }
         }
-        c.FillRect(plotX, plotY, app.Scale(2), plotH, sAxis.BgOr(0));
+        c.FillRect(plotX, plotY, app.Scale(2), plotH,
+            y0.axisLineColor != 0 ? y0.axisLineColor : sAxis.BgOr(0));
         c.FillRect(plotX, plotY + plotH, plotW, app.Scale(2), sAxis.BgOr(0));
-        if (hasRight) { c.FillRect(plotX + plotW, plotY, 1, plotH, sAxis.BgOr(0)); }
+        if (hasRight) {
+            c.FillRect(plotX + plotW, plotY, 1, plotH,
+                y1.axisLineColor != 0 ? y1.axisLineColor : sAxis.BgOr(0));
+        }
 
         // x 分类标签（时间轴用 TimeLabel 日期刻度；值轴画数值刻度）
         int n = labels.Count;
         if (catY || xValue) {
             // 轴互换：类目在 Y（上面已画），X 画数值刻度。
             int xspan = f.xHi - f.xLo;
-            for (int k = 0; k <= ticks; k = k + 1) {
-                int xv = f.xLo + xspan * k / ticks;
+            for (int k = 0; k <= xt; k = k + 1) {
+                int xv = f.xLo + xspan * k / xt;
                 int gx = f.XOfValue(xv);
                 string xs2 = Convert.ToString(xv);
                 if (x0.labelFormatter.Length > 0) { xs2 = x0.labelFormatter.Replace("{value}", xs2); }
                 int lw = Canvas.MeasureText(xs2, fs);
                 int lx = gx - lw / 2;
                 if (lx < plotX) { lx = plotX; }
-                if (lx + lw <= plotX + plotW) {
-                    c.DrawText(lx, plotBot + app.Scale(4), xs2, sAxis.FgOr(0), fs);
-                }
+                if (lx + lw > plotX + plotW) { lx = plotX + plotW - lw; }
+                c.DrawText(lx, plotBot + app.Scale(4), xs2, sAxis.FgOr(0), fs);
             }
         } else if (n > 0) {
             if (isTime) {
@@ -2064,9 +2427,8 @@ class Chart {
                     int lw = Canvas.MeasureText(ls, fs);
                     int lx = tx - lw / 2;
                     if (lx < plotX) { lx = plotX; }
-                    if (lx + lw <= plotX + plotW) {
-                        c.DrawText(lx, plotBot + app.Scale(4), ls, sAxis.FgOr(0), fs);
-                    }
+                    if (lx + lw > plotX + plotW) { lx = plotX + plotW - lw; }
+                    c.DrawText(lx, plotBot + app.Scale(4), ls, sAxis.FgOr(0), fs);
                 }
             } else {
                 int labelGap = app.Scale(6);
@@ -2078,9 +2440,11 @@ class Chart {
                 // 带状模式居中在格子内、不越左缘。
                 bool tickX = !f.catBoundaryGap && n > 1;
                 for (int ci = 0; ci < n; ci = ci + 1) {
+                    string lab = labels[ci];
+                    if (x0.labelFormatter.Length > 0) { lab = x0.labelFormatter.Replace("{value}", lab); }
                     int cxs = f.CatLeft(ci, n);
                     int cellW = f.CatWidth(ci, n);
-                    int labelW = Canvas.MeasureText(labels[ci], fs);
+                    int labelW = Canvas.MeasureText(lab, fs);
                     int labelLeft = tickX ? cxs - labelW / 2
                         : cxs + (cellW - labelW) / 2;
                     if (!tickX && labelLeft < cxs) { labelLeft = cxs; }
@@ -2106,16 +2470,16 @@ class Chart {
                             // 对齐格子中线），正角取左缘（文本向右上收）。
                             int ax = labelLeft + labelW;
                             if (rot > 0) { ax = labelLeft; }
-                            c.DrawTextRot(ax, plotBot + app.Scale(4), labels[ci],
+                            c.DrawTextRot(ax, plotBot + app.Scale(4), lab,
                                 sAxis.FgOr(0), fs, rot);
                             labelRight = labelLeft + labelW;
                         } else if (tickX) {
                             c.DrawText(cxs - labelW / 2, plotBot + app.Scale(4),
-                                labels[ci], sAxis.FgOr(0), fs);
+                                lab, sAxis.FgOr(0), fs);
                             labelRight = labelLeft + labelW;
                         } else {
                             c.DrawTextCentered(cxs, plotBot + app.Scale(4), cellW,
-                                fh + app.Scale(4), labels[ci], sAxis.FgOr(0), fs);
+                                fh + app.Scale(4), lab, sAxis.FgOr(0), fs);
                             labelRight = labelLeft + labelW;
                         }
                     }

@@ -535,20 +535,23 @@ class ChartMarkPoint {
     int yValue;
     string label;
     int color;   // 0 = 继承系列颜色
+    string symbol; // ECharts symbol（"emptyCircle"/"star"/…）；"" = 默认实心圆
+    int size;    // ECharts symbolSize；sizeSet=false 时用引擎默认
 
     /// 构造"最大值"标记点（渲染时从系列窗口数据推导位置）。
     int valueIndex; // ECharts valueIndex：-1 = 值轴(y)，0 = x 轴标注
+    bool sizeSet;
 
     static ChartMarkPoint Max() {
-        return new ChartMarkPoint { kind = "max", dataIndex = 0 - 1, xValue = 0, yValue = 0, label = "", color = 0, valueIndex = 0 - 1 };
+        return new ChartMarkPoint { kind = "max", dataIndex = 0 - 1, xValue = 0, yValue = 0, label = "", color = 0, valueIndex = 0 - 1, symbol = "", size = 0, sizeSet = false };
     }
     /// 构造"最小值"标记点（渲染时从系列窗口数据推导位置）。
     static ChartMarkPoint Min() {
-        return new ChartMarkPoint { kind = "min", dataIndex = 0 - 1, xValue = 0, yValue = 0, label = "", color = 0, valueIndex = 0 - 1 };
+        return new ChartMarkPoint { kind = "min", dataIndex = 0 - 1, xValue = 0, yValue = 0, label = "", color = 0, valueIndex = 0 - 1, symbol = "", size = 0, sizeSet = false };
     }
     /// 构造显式坐标 (xValue,yValue) 的标记点并附标签。
     static ChartMarkPoint Point(int xValue, int yValue, string label) {
-        return new ChartMarkPoint { kind = "point", dataIndex = 0 - 1, xValue = xValue, yValue = yValue, label = label, color = 0, valueIndex = 0 - 1 };
+        return new ChartMarkPoint { kind = "point", dataIndex = 0 - 1, xValue = xValue, yValue = yValue, label = label, color = 0, valueIndex = 0 - 1, symbol = "", size = 0, sizeSet = false };
     }
 
     /// 深复制；src 为 null 时返回 null。
@@ -556,7 +559,8 @@ class ChartMarkPoint {
         if (src == null) { return null; }
         return new ChartMarkPoint { kind = src.kind, dataIndex = src.dataIndex,
             xValue = src.xValue, yValue = src.yValue, label = src.label,
-            color = src.color, valueIndex = src.valueIndex };
+            color = src.color, valueIndex = src.valueIndex,
+            symbol = src.symbol, size = src.size, sizeSet = src.sizeSet };
     }
 }
 
@@ -1561,6 +1565,7 @@ class ChartAxis {
     bool labelNegate;  // ECharts axisLabel.formatter 为 function(v){return -v}
                        // 的等价开关：刻度/工具提示按 -值 显示（雨量图负值轴）
     bool boundaryGap;  // ECharts boundaryGap（类目轴默认 true：点落在格中）
+    int axisLineColor; // ECharts axisLine.lineStyle.color；0 = 主题色
     List<string> categories;
 
     /// 分类轴工厂：携带标签列表，无网格线，标签自动防重叠。
@@ -1578,6 +1583,7 @@ class ChartAxis {
         a.nameLocation = "middle";
         a.labelFormatter = "";
         a.labelNegate = false;
+        a.axisLineColor = 0;
         a.boundaryGap = true;
         a.categories = cats;
         return a;
@@ -1605,6 +1611,7 @@ class ChartAxis {
         a.nameLocation = "middle";
         a.labelFormatter = "";
         a.labelNegate = false;
+        a.axisLineColor = 0;
         a.boundaryGap = false;
         a.categories = new List<string>();
         return a;
@@ -1655,6 +1662,7 @@ class ChartAxis {
         a.labelRotate = src.labelRotate; a.labelInterval = src.labelInterval;
         a.nameLocation = src.nameLocation; a.labelFormatter = src.labelFormatter;
         a.labelNegate = src.labelNegate;
+        a.axisLineColor = src.axisLineColor;
         a.boundaryGap = src.boundaryGap; a.categories = new List<string>();
         if (src.categories != null) {
             for (int i = 0; i < src.categories.Count; i = i + 1) {

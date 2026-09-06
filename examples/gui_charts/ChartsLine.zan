@@ -24,15 +24,20 @@ partial class Charts {
         lo.MarkPoint(wk);
         lo.MarkLine(ChartMarkLine.Average());
         ChartOption o = ChartOption.Of(
-            Charts.T("Weekly temperature - fiction", "未来一周气温变化 - 纯属虚构"),
+            Charts.T("Weekly temperature", "未来一周气温变化"),
             Charts.Week(), new List<ChartSeries>{ hi, lo });
+        o.titleSub = Charts.T("Fiction", "纯属虚构");
+        o.xAxes[0].boundaryGap = false;
+        o.Y(ChartAxis.Value());
+        o.yAxes[0].labelFormatter = "{value} °C";
         Charts.Show(app, o, x, y, w, h);
     }
 
     /// example/line2 堆积折线图：五条流量来源 stack「总量」，
-    /// 直线（ECharts 默认不 smoothing）。
+    /// 直线（ECharts 默认不 smoothing）；参考 option 无 title，
+    /// 类目轴 boundaryGap=false（点贴刻度线）。
     static void Line2(App app, int x, int y, int w, int h) {
-        ChartOption o = ChartOption.Of(Charts.T("Stacked line", "堆积折线图"),
+        ChartOption o = ChartOption.Of("",
             Charts.Week(), new List<ChartSeries>{
                 ChartSeries.StackedLine(Charts.T("Mail", "邮件营销"),
                     new List<int>{ 120, 132, 101, 134, 90, 230, 210 }),
@@ -45,14 +50,15 @@ partial class Charts {
                 ChartSeries.StackedLine(Charts.T("Search", "搜索引擎"),
                     new List<int>{ 820, 932, 901, 934, 1290, 1330, 1320 })
             });
+        o.xAxes[0].boundaryGap = false;
         Charts.Show(app, o, x, y, w, h);
     }
 
     /// example/line5「高度(km)与气温(°C)变化关系」：ECharts 把类目
-    /// 轴放在 Y、数值轴放在 X（轴互换 + 平滑）。直角系引擎目前只
-    /// 支持类目在 X（y 类目轴折线待支持，记 TASKS），数据保持一致，
-    /// 方向为互换前的镜像：气温 [15,-50,-56.5,...] 的 .5 按整数画布
-    /// 四舍五入。
+    /// 轴放在 Y、数值轴放在 X（轴互换 + 平滑），参考 option 无
+    /// title（系列名即 legend 项）；类目 Y boundaryGap=false 且
+    /// axisLabel formatter "{value} km"，数值 X formatter
+    /// "{value} °C"。
     static void Line5(App app, int x, int y, int w, int h) {
         // ECharts line5：类目（高度 km）在 Y 轴且 boundaryGap=false
         // （曲线贴刻度线），气温 °C 是 X 值轴，axisLabel formatter
@@ -66,14 +72,15 @@ partial class Charts {
         for (int i = 0; i < temps.Count; i = i + 1) {
             data.Add(ChartData.Numeric(temps[i]));
         }
-        ChartOption o = ChartOption.Of(
-            Charts.T("Altitude vs temperature", "高度(km)与气温(°C)变化关系"),
+        ChartOption o = ChartOption.Of("",
             null, new List<ChartSeries>{
-                ChartSeries.Named(Charts.T("Alt vs temp", "高度与气温"),
+                ChartSeries.Named(Charts.T(
+                    "Altitude(km) vs temperature", "高度(km)与气温(°C)变化关系"),
                     ChartType.Line, data)
             });
-        o.Y(ChartAxis.CategoryTitled(km, Charts.T("km", "km")));
+        o.Y(ChartAxis.CategoryTitled(km, ""));
         o.yAxes[0].boundaryGap = false;
+        o.yAxes[0].labelFormatter = "{value} km";
         o.X(ChartAxis.Value());
         ChartAxis xa = o.xAxes[0];
         xa.labelFormatter = "{value} °C";
@@ -96,14 +103,16 @@ partial class Charts {
         ChartOption o = ChartOption.Of(
             Charts.T("Real estate sales", "某楼盘销售情况"),
             Charts.Week(), new List<ChartSeries>{ deal, book, intent });
+        o.titleSub = Charts.T("Fiction", "纯属虚构");
         o.xAxes[0].boundaryGap = false;
         Charts.Show(app, o, x, y, w, h);
     }
 
     /// example/line4 堆积面积图：与 line2 同一套五系列数据，
-    /// stack「总量」+ areaStyle 填充，直线。
+    /// stack「总量」+ areaStyle 填充，直线；参考 option 无 title，
+    /// 类目轴 boundaryGap=false。
     static void Line4(App app, int x, int y, int w, int h) {
-        ChartOption o = ChartOption.Of(Charts.T("Stacked area", "堆积面积图"),
+        ChartOption o = ChartOption.Of("",
             Charts.Week(), new List<ChartSeries>{
                 ChartSeries.StackedArea(Charts.T("Mail", "邮件营销"),
                     new List<int>{ 120, 132, 101, 134, 90, 230, 210 }),
@@ -116,14 +125,16 @@ partial class Charts {
                 ChartSeries.StackedArea(Charts.T("Search", "搜索引擎"),
                     new List<int>{ 820, 932, 901, 934, 1290, 1330, 1320 })
             });
+        o.xAxes[0].boundaryGap = false;
         Charts.Show(app, o, x, y, w, h);
     }
 
-    /// example/line7 不等距折线图（双数值轴）「双数值轴折线」：
-    /// 数据1/数据2 两组 [x,y] 点连折线。ECharts 另有 6 条
-    /// markPoint/markLine（两轴各 max/min/average）；引擎的系列标注
-    /// 按类目下标定位，这里保留 y 轴三条水平线（crimson #dc143c），
-    /// x 轴竖线待引擎支持。
+    /// example/line7 双数值轴折线：数据1/数据2 两组 [x,y] 点，
+    /// x 轴自动量程。数据1 带 6 条 markPoint（纵轴 max/min 红、
+    /// 横轴 valueIndex:0 max/min 蓝，均 emptyCircle）+ 6 条
+    /// markLine（纵轴 max/min/avg 红、横轴 max/min/avg 蓝）；
+    /// y 轴轴线 crimson（axisLine.lineStyle.color）。
+    /// [1.5,10] 的 .5 按整数画布四舍五入为 2。
     static void Line7(App app, int x, int y, int w, int h) {
         List<ChartPoint> d1 = new List<ChartPoint>{
             ChartPoint.Of(2, 10), ChartPoint.Of(5, 7), ChartPoint.Of(8, 8),
@@ -133,19 +144,40 @@ partial class Charts {
             ChartPoint.Of(1, 2), ChartPoint.Of(2, 3), ChartPoint.Of(4, 2),
             ChartPoint.Of(7, 5), ChartPoint.Of(11, 2), ChartPoint.Of(18, 3) };
         ChartSeries s1 = ChartSeries.OfLinePoints(Charts.T("Data 1", "数据1"), d1);
-        // ECharts 原值 [1.5,10]，整数画布四舍五入为 2。
         ChartSeries s2 = ChartSeries.OfLinePoints(Charts.T("Data 2", "数据2"), d2);
         int crimson = Chart.Rgb(220, 20, 60);
+        int dodger = Chart.Rgb(30, 144, 255);
+        // 纵轴（默认）markPoint/markLine：crimson。
+        ChartMarkPoint ymx = ChartMarkPoint.Max();
+        ChartMarkPoint ymn = ChartMarkPoint.Min();
+        ymx.color = crimson; ymn.color = crimson;
+        ymx.symbol = "emptyCircle"; ymn.symbol = "emptyCircle";
+        s1.MarkPoint(ymx); s1.MarkPoint(ymn);
         ChartMarkLine mx = ChartMarkLine.Max();
         ChartMarkLine mn = ChartMarkLine.Min();
         ChartMarkLine av = ChartMarkLine.Average();
         mx.color = crimson; mn.color = crimson; av.color = crimson;
         s1.MarkLine(mx); s1.MarkLine(mn); s1.MarkLine(av);
+        // 横轴（valueIndex:0）markPoint/markLine：dodgerblue。
+        ChartMarkPoint xmx = ChartMarkPoint.Max();
+        ChartMarkPoint xmn = ChartMarkPoint.Min();
+        xmx.valueIndex = 0; xmn.valueIndex = 0;
+        xmx.color = dodger; xmn.color = dodger;
+        xmx.symbol = "emptyCircle"; xmn.symbol = "emptyCircle";
+        s1.MarkPoint(xmx); s1.MarkPoint(xmn);
+        ChartMarkLine xlx = ChartMarkLine.Max();
+        ChartMarkLine xln = ChartMarkLine.Min();
+        ChartMarkLine xla = ChartMarkLine.Average();
+        xlx.valueIndex = 0; xln.valueIndex = 0; xla.valueIndex = 0;
+        xlx.color = dodger; xln.color = dodger; xla.color = dodger;
+        s1.MarkLine(xlx); s1.MarkLine(xln); s1.MarkLine(xla);
         ChartOption o = ChartOption.Of(
-            Charts.T("Dual value axis - fiction", "双数值轴折线 - 纯属虚构"),
+            Charts.T("Dual value axis", "双数值轴折线"),
             null, new List<ChartSeries>{ s1, s2 });
-        o.X(ChartAxis.ValueRange(0, 20));
+        o.titleSub = Charts.T("Fiction", "纯属虚构");
+        o.X(ChartAxis.Value());
         o.Y(ChartAxis.Value());
+        o.yAxes[0].axisLineColor = crimson;
         Charts.Show(app, o, x, y, w, h);
     }
 
@@ -164,8 +196,9 @@ partial class Charts {
         s.symbol = "emptyCircle";
         s.symbolSize = 5;
         ChartOption o = ChartOption.Of(
-            Charts.T("Time axis - dataZoom", "时间坐标折线图 - dataZoom支持"),
+            Charts.T("Time axis", "时间坐标折线图"),
             TimeCats(), new List<ChartSeries>{ s });
+        o.titleSub = Charts.T("dataZoom support", "dataZoom支持");
         o.X(ChartAxis.Time());
         o.zoom = true;
         o.zoomStart = 70;
@@ -1459,8 +1492,8 @@ partial class Charts {
         search.itemStyle.normal.lineStyle.width = 2;
         search.itemStyle.normal.lineStyle.gradStops = new List<int>{
             Chart.Rgb(255, 0, 0), Chart.Rgb(255, 255, 0) };
-        ChartOption o = ChartOption.Of(
-            Charts.T("Multi-level line", "折线图（多级控制）"),
+        // 参考 option 无 title（页面名「多级控制」来自示例列表）。
+        ChartOption o = ChartOption.Of("",
             Charts.Week(), new List<ChartSeries>{ mail, aff, dir, search });
         o.xAxes[0].boundaryGap = false;
         o.gradient = true;
@@ -1468,9 +1501,11 @@ partial class Charts {
     }
 
     /// example/line9 对数轴：3 的指数与 2 的指数（0..8 次幂），
-    /// 类目 一..九。
+    /// 类目 一..九；title x:center、legend x:left、x 轴名 "x"、
+    /// y 轴（log）名 "y"，类目 x 轴 splitLine 不显示（引擎的类目
+    /// x 轴本就不画竖向网格，一致）。
     static void Line9(App app, int x, int y, int w, int h) {
-        ChartOption o = ChartOption.Of(Charts.T("Log axis", "对数轴"),
+        ChartOption o = ChartOption.Of(Charts.T("Log axis example", "对数轴示例"),
             new List<string>{ "一", "二", "三", "四", "五", "六", "七", "八", "九" },
             new List<ChartSeries>{
                 ChartSeries.Line(Charts.T("3 power n", "3的指数"),
@@ -1478,7 +1513,10 @@ partial class Charts {
                 ChartSeries.Line(Charts.T("2 power n", "2的指数"),
                     new List<int>{ 1, 2, 4, 8, 16, 32, 64, 128, 256 })
             });
-        o.Y(ChartAxis.Log());
+        o.titleAlign = "center";
+        o.legendX = "left";
+        o.xAxes[0].title = "x";
+        o.Y(ChartAxis.LogTitled("y"));
         Charts.Show(app, o, x, y, w, h);
     }
 }

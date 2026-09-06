@@ -637,6 +637,62 @@ partial class ChartView {
         }
     }
 
+    /// 值对折线（points 系列）的 markPoint（ECharts series.markPoint）：
+    /// valueIndex -1（默认纵轴）按 points.y 取 max/min，标签
+    /// 上/下（ECharts position top/bottom）；valueIndex 0（横轴）
+    /// 按 points.x 取 max/min，标签右/左。符号/颜色逐项覆盖
+    /// （参考站 line7：红纵轴 + 蓝横轴空心圆）。
+    static void DrawPointsMarkPoints(App app, ChartFrame f, ChartSeries s,
+                                     int i0, int i1) {
+        if (s.marks.Count < 1 || s.points.Count < 1) { return; }
+        Canvas c = app.canvas;
+        for (int mi = 0; mi < s.marks.Count; mi = mi + 1) {
+            ChartMarkPoint m = s.marks[mi];
+            if (m.kind != "max" && m.kind != "min") { continue; }
+            bool onX = m.valueIndex == 0;
+            int ext = m.kind == "min" ? 2147483647 : 0 - 2147483647 - 1;
+            int found = 0 - 1;
+            for (int j = i0; j <= i1 && j < s.points.Count; j = j + 1) {
+                int v = onX ? s.points[j].x : s.points[j].y;
+                if ((m.kind == "min" && v < ext) || (m.kind == "max" && v > ext)) {
+                    ext = v;
+                    found = j;
+                }
+            }
+            if (found < 0) { continue; }
+            int lx = f.XOfValue(s.points[found].x);
+            int ly = f.YOf(s.points[found].y, s.axisIndex);
+            int rad = m.sizeSet && m.size > 0 ? m.size / 2 : app.Scale(4);
+            int col = m.color != 0 ? m.color : s.color;
+            string sym = m.symbol.Length > 0 ? m.symbol : "";
+            if (sym.Length > 0) {
+                Chart.DrawSymbol(c, lx, ly, rad, sym, col, 0, 0);
+            } else {
+                c.FillCircle(lx, ly, rad, col);
+                ChartView.RingOutline(c, lx, ly, rad, 4294967295);
+            }
+            string lbl = m.label;
+            if (lbl.Length == 0) { lbl = m.kind == "max" ? "max" : "min"; }
+            int fs = Style.FontFallback(app, "small");
+            int lw = Canvas.MeasureText(lbl, fs);
+            int tx = lx - lw / 2;
+            int ty = ly - Canvas.FontHeight(fs) - app.Scale(1);
+            if (onX) {
+                // 横轴标注：max 贴右侧、min 贴左侧（ECharts right/left）。
+                if (m.kind == "max") { tx = lx + rad + app.Scale(2); }
+                else { tx = lx - rad - app.Scale(2) - lw; }
+                ty = ly - Canvas.FontHeight(fs) / 2;
+            } else if (m.kind == "min") {
+                ty = ly + rad + app.Scale(2);
+            }
+            if (tx < f.plotX) { tx = f.plotX; }
+            if (tx + lw > f.plotX + f.plotW) { tx = f.plotX + f.plotW - lw; }
+            c.DrawText(tx, ty, lbl,
+                Style.Part(app, "chart", "label", "", "", "", Style.SNormal()).FgOr(0),
+                fs);
+        }
+    }
+
     /// 值对折线（points 系列）的悬停：按距离命中最近点并出
     /// tooltip 卡（ECharts item trigger；行格式 "[ x, y ]"）。
     static void PointsHover(App app, ChartFrame f, List<ChartSeries> series,
@@ -787,11 +843,12 @@ partial class ChartView {
         if (nWin < 1) { nWin = 1; }
         if (o.markPoint) {
             bool below = o.showValues || s.labelShow;
-            if (maxI >= 0) { ChartView.MarkAt(app, f, s, maxI, maxI - i0, nWin, "max", below); }
-            if (minI >= 0 && minI != maxI) { ChartView.MarkAt(app, f, s, minI, minI - i0, nWin, "min", below); }
+            if (maxI >= 0) { ChartView.MarkAt(app, f, s, maxI, maxI - i0, nWin, "max", below, 0, "", 0); }
+            if (minI >= 0 && minI != maxI) { ChartView.MarkAt(app, f, s, minI, minI - i0, nWin, "min", below, 0, "", 0); }
         }
         for (int mi = 0; mi < s.marks.Count; mi = mi + 1) {
             ChartMarkPoint m = s.marks[mi];
+            if (m.valueIndex == 0) { continue; }  // x 轴标注由 points 路径绘制
             int idx = m.dataIndex;
             if (idx < 0) {
                 if (m.kind == "max") { idx = maxI; }
@@ -806,7 +863,7 @@ partial class ChartView {
                 else { lbl = Convert.ToString(s.Value(idx)); }
             }
             ChartView.MarkAt(app, f, s, idx, idx - i0, nWin, lbl,
-                o.showValues || s.labelShow);
+                o.showValues || s.labelShow, m.color, m.symbol, m.sizeSet ? m.size : 0);
         }
     }
 
@@ -815,14 +872,20 @@ partial class ChartView {
     /// 标签画到点下方——该系列同时显示数值标签时，点上方已被
     /// 数值占据，"min/max" 文字再画上去就会叠字。
     static void MarkAt(App app, ChartFrame f, ChartSeries s, int idx,
-                       int slot, int nWin, string lbl, bool below) {
+                       int slot, int nWin, string lbl, bool below,
+                       int colorOv, string symbolOv, int sizeOv) {
         Canvas c = app.canvas;
         Theme t = app.theme;
-        int rad = app.Scale(4);
+        int rad = sizeOv > 0 ? sizeOv / 2 : app.Scale(4);
         int lx = f.CatX(slot, nWin);
         int ly = f.YOf(s.Value(idx), s.axisIndex);
-        c.FillCircle(lx, ly, rad, s.color);
-        ChartView.RingOutline(c, lx, ly, rad, 4294967295);
+        int col = colorOv != 0 ? colorOv : s.color;
+        if (symbolOv.Length > 0) {
+            Chart.DrawSymbol(c, lx, ly, rad, symbolOv, col, 0, 0);
+        } else {
+            c.FillCircle(lx, ly, rad, col);
+            ChartView.RingOutline(c, lx, ly, rad, 4294967295);
+        }
         int mFs = Style.FontFallback(app, "small");
         int lw = Canvas.MeasureText(lbl, mFs);
         int tx = lx - lw / 2;

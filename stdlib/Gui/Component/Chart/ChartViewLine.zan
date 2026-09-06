@@ -576,10 +576,11 @@ partial class ChartView {
         }
         c.PopClip();
 
-        // markPoint：自动 max/min + 显式 marks（仅折线族）。
+        // markPoint：自动 max/min + 显式 marks（仅折线族；points
+        // 系列的标注走值对坐标，见下）。
         for (int msi = 0; msi < series.Count; msi = msi + 1) {
             ChartSeries ms = series[msi];
-            if (!ms.hidden && !ChartView.IsBarFamily(ms.type)) {
+            if (!ms.hidden && ms.points.Count < 1 && !ChartView.IsBarFamily(ms.type)) {
                 ChartView.DrawSeriesMarks(app, f, ms, i0, i1, step, half, o);
             }
         }
@@ -590,11 +591,12 @@ partial class ChartView {
             if (!ml.hidden) { ChartView.DrawSeriesMarkLines(app, f, ml, i0, i1, o); }
         }
         // 值对折线的 x 轴标注（ECharts valueIndex:0——竖直
-        // max/min/average 线）。
+        // max/min/average 线）与该系列的 markPoint（y/x 两轴）。
         for (int mxl = 0; mxl < series.Count; mxl = mxl + 1) {
             ChartSeries mxs = series[mxl];
             if (!mxs.hidden && mxs.points.Count > 0) {
                 ChartView.DrawValueXMarkLines(app, f, mxs, i0, i1);
+                ChartView.DrawPointsMarkPoints(app, f, mxs, i0, i1);
             }
         }
         c.PopClip();
@@ -704,9 +706,12 @@ partial class ChartView {
         }
         List<string> winLabels = Chart.WindowLabels(labels, i0, i1);
         int n = winLabels.Count;
-        int maxV = Chart.NiceMax(Chart.MaxStackAllW(series, n, i0));
+        // ECharts nice 量程：堆叠感知的组顶/绝对值最大取整到步长
+        // 倍数（如 0..1320 → 0..1400 每 200）。
+        ChartSpan sv = Chart.NiceRange(0, Chart.MaxStackGroupsW(series, n, i0));
+        int maxV = sv.hi;
         int plotTop = Chart.DrawPanelI(app, x, y, w, h, o.title, series, o.iwid, o.showLegend);
-        ChartFrame f = Chart.DrawFrame(app, x, y, w, h - zoomH, plotTop, winLabels, maxV);
+        ChartFrame f = Chart.DrawFrameT(app, x, y, w, h - zoomH, plotTop, winLabels, maxV, sv.ticks);
         if (zoomH > 0) {
             Chart.DrawZoomBar(app, f.plotX, f.plotW, y + h - app.Scale(18),
                 app.Scale(12), o.iwid, fullN);
