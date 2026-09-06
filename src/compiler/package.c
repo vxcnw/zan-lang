@@ -131,6 +131,7 @@ bool zan_pkg_load(zan_package_t *pkg, const char *manifest_path) {
             else if (strcmp(key, "author") == 0) strncpy(pkg->author, val, sizeof(pkg->author) - 1);
             else if (strcmp(key, "license") == 0) strncpy(pkg->license, val, sizeof(pkg->license) - 1);
             else if (strcmp(key, "entry") == 0) strncpy(pkg->entry_point, val, sizeof(pkg->entry_point) - 1);
+            else if (strcmp(key, "plugin_id") == 0) strncpy(pkg->plugin_id, val, sizeof(pkg->plugin_id) - 1);
         } else {
             if (pkg->dep_count >= pkg->dep_cap) {
                 pkg->dep_cap *= 2;
@@ -180,6 +181,7 @@ bool zan_pkg_save(const zan_package_t *pkg, const char *manifest_path) {
     if (pkg->author[0]) fprintf(f, "author = \"%s\"\n", pkg->author);
     if (pkg->license[0]) fprintf(f, "license = \"%s\"\n", pkg->license);
     if (pkg->entry_point[0]) fprintf(f, "entry = \"%s\"\n", pkg->entry_point);
+    if (pkg->plugin_id[0]) fprintf(f, "plugin_id = \"%s\"\n", pkg->plugin_id);
     if (pkg->dep_count > 0) {
         fprintf(f, "\n[deps]\n");
         for (int i = 0; i < pkg->dep_count; i++) {
@@ -500,8 +502,10 @@ static int pkg_scan_store(const char *store, const char *namespace_path,
         char cand[1024];
         snprintf(cand, sizeof(cand), "%s\\%s\\stdlib\\%s", store,
                  fd.cFileName, namespace_path);
-        if (pkg_is_dir(cand) && count < max_dirs)
+        if (pkg_is_dir(cand) && count < max_dirs) {
             snprintf(out_dirs[count++], 1024, "%s", cand);
+            zan_pkg_note_usage(store, fd.cFileName);
+        }
     } while (FindNextFileA(h, &fd));
     FindClose(h);
 #else
@@ -513,8 +517,10 @@ static int pkg_scan_store(const char *store, const char *namespace_path,
         snprintf(root, sizeof(root), "%s/%s", store, e->d_name);
         if (lstat(root, &st) != 0 || !S_ISDIR(st.st_mode) || S_ISLNK(st.st_mode)) continue;
         snprintf(cand, sizeof(cand), "%s/stdlib/%s", root, namespace_path);
-        if (pkg_is_dir(cand) && count < max_dirs)
+        if (pkg_is_dir(cand) && count < max_dirs) {
             snprintf(out_dirs[count++], 1024, "%s", cand);
+            zan_pkg_note_usage(store, e->d_name);
+        }
     }
     closedir(d);
 #endif
@@ -723,4 +729,45 @@ void zan_pkg_registry_destroy(zan_pkg_registry_t *reg) {
     for (int i = 0; i < reg->resolved_count; i++) { zan_pkg_destroy(reg->resolved[i]); free(reg->resolved[i]); }
     free(reg->resolved);
     memset(reg, 0, sizeof(*reg));
+}
+
+/* ---- commercial plugin build-time usage accounting ----
+ *
+ * When the compiler resolves namespaces through an installed package store and
+ * the hit package carries a plugin_id (a commercial plugin), emit one
+ * "ZANPKG_USAGE ... action=build" line on stderr. The IDE tees build output
+ * and asynchronously reports it; zanc itself never opens a socket. Signals
+ * are deduped per process so one build reports a plugin once no matter how
+ * many namespaces it provides. */
+
+typedef struct {
+    char pkg[128];
+    char plugin_id[64];
+} zan_usage_seen_t;
+
+static zan_usage_seen_t zan_usage_seen[64];
+static int zan_usage_seen_count;
+
+void zan_pkg_note_usage(const char *store, const char *package_name) {
+    if (!store || !package_name || !*package_name) return;
+    for (int i = 0; i < zan_usage_seen_count; i++)
+        if (strcmp(zan_usage_seen[i].pkg, package_name) == 0) return;
+    if (zan_usage_seen_count >= (int)(sizeof(zan_usage_seen) / sizeof(zan_usage_seen[0])))
+        return;
+    char manifest_path[1200];
+    snprintf(manifest_path, sizeof(manifest_path), "%s" PATH_SEP "%s" PATH_SEP "zan.pkg",
+             store, package_name);
+    zan_package_t pkg;
+    memset(&pkg, 0, sizeof(pkg));
+    if (!zan_pkg_load(&pkg, manifest_path)) return;
+    if (pkg.plugin_id[0]) {
+        strncpy(zan_usage_seen[zan_usage_seen_count].pkg, package_name,
+                sizeof(zan_usage_seen[0].pkg) - 1);
+        strncpy(zan_usage_seen[zan_usage_seen_count].plugin_id, pkg.plugin_id,
+                sizeof(zan_usage_seen[0].plugin_id) - 1);
+        zan_usage_seen_count++;
+        fprintf(stderr, "ZANPKG_USAGE plugin_id=%s package=%s action=build\n",
+                pkg.plugin_id, package_name);
+    }
+    zan_pkg_destroy(&pkg);
 }

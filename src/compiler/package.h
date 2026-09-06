@@ -63,6 +63,9 @@ typedef struct {
     int dep_cap;
     char **source_dirs;          /* source directories to compile */
     int source_dir_count;
+    char plugin_id[64];          /* commercial plugin identity written into the
+                                    package manifest; non-empty marks the
+                                    package as a protected commercial plugin */
 } zan_package_t;
 
 /* ---- package registry/cache ---- */
@@ -79,6 +82,10 @@ void zan_pkg_init(zan_pkg_registry_t *reg, const char *project_dir);
 
 /* Load package manifest from zan.pkg file */
 bool zan_pkg_load(zan_package_t *pkg, const char *manifest_path);
+
+/* Emit one build-time usage signal on stderr for a commercial plugin found in
+ * a package store (no-op for packages without plugin_id). */
+void zan_pkg_note_usage(const char *store, const char *package_name);
 
 /* Save package manifest to zan.pkg file */
 bool zan_pkg_save(const zan_package_t *pkg, const char *manifest_path);
