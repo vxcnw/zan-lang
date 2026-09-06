@@ -3253,6 +3253,49 @@ int main(int argc, char **argv) {
             }
         }
 
+        /* ---- Chart theme packs inside the executable -------------------
+         * Gui.Component.Chart/themes holds the chart's own skin packs
+         * (one <name>.css of `chart::*` rules per theme). They resolve at
+         * run time through ChartTheme.Roots() (env ZAN_CHART_THEMES, exe
+         * -beside layouts, then the stdlib copy) with embedded resources
+         * as the last resort -- so a GUI program carrying the Chart module
+         * (symbols prefixed "Chart_") bakes them in under
+         * "chartthemes/<name>.css", matching ChartTheme.Css's EmbedRead.
+         * Disk packs win over embedded ones at every read, so shipping a
+         * replacement pack still overrides the baked-in table without
+         * touching zanc. */
+        if (resolved_stdlib_root[0] &&
+            zan_irgen_defines_prefix(&irgen, "Chart_")) {
+            bool chartthemes_staged = false;
+            for (int es = 0; es < embed_spec_count && !chartthemes_staged;
+                 es++) {
+                const char *seq = strrchr(embed_specs[es], '=');
+                if (seq && strcmp(seq + 1, "chartthemes") == 0)
+                    chartthemes_staged = true;
+            }
+            if (!chartthemes_staged) {
+                char themes_dir[1200];
+                snprintf(themes_dir, sizeof(themes_dir),
+                         "%s/Gui/Component/Chart/themes",
+                         resolved_stdlib_root);
+                if (zan_file_exists(themes_dir)) {
+                    char *theme_spec = (char *)malloc(strlen(themes_dir) + 32);
+                    if (theme_spec) {
+                        snprintf(theme_spec, strlen(themes_dir) + 32,
+                                 "%s=chartthemes", themes_dir);
+                        if (embed_spec_count < 64) {
+                            embed_specs[embed_spec_count++] = theme_spec;
+                        } else {
+                            fprintf(stderr, "warning: cannot auto-embed chart "
+                                    "theme packs from '%s'; --embed resources "
+                                    "limit reached\n", themes_dir);
+                            free(theme_spec);
+                        }
+                    }
+                }
+            }
+        }
+
         /* ---- Project assets inside the executable (publish) -------------
          * A program's own data folder (<project>/assets/, the gallery's
          * gallery.json, an app's config/lang packs) resolves at run time

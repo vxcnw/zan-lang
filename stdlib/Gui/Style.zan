@@ -203,6 +203,11 @@ class Style {
         StyleBox themed = b.Clone();
         StyleSheet basef = Style.BaseSheet(app);
         if (basef != null) { Style.ApplySheet(basef, b, type, cls, id, state); }
+        // 图表主题包（Gui.Component.Chart/themes）是独立的一块样式表，
+        // 垫在内置基线之上、Gui 皮肤（app.sheet）之下：皮肤包对 chart
+        // 写过的规则优先于主题包，主题包只补基线没定义的部分。
+        StyleSheet chartf = app.chartSheet;
+        if (chartf != null) { Style.ApplySheet(chartf, b, type, cls, id, state); }
         StyleSheet sheet = app.sheet;
         if (sheet != null) {
             Style.ApplySheet(sheet, b, type, cls, id, state);
@@ -237,6 +242,14 @@ class Style {
                 Style.ApplySheet(basef, b, fallbackType, cls, "", state);
             }
             Style.ApplyPartSheet(basef, b, type, part, cls, id, state);
+        }
+        // 图表主题包：独立一块，同样垫在 Gui 皮肤（app.sheet）之下。
+        StyleSheet chartf = app.chartSheet;
+        if (chartf != null) {
+            if (fallbackType != "") {
+                Style.ApplySheet(chartf, b, fallbackType, cls, "", state);
+            }
+            Style.ApplyPartSheet(chartf, b, type, part, cls, id, state);
         }
         StyleSheet sheet = app.sheet;
         if (sheet != null) {

@@ -1,0 +1,110 @@
+using System;
+using Gui;
+using Gui.Component.Chart;
+
+/// 图表主题包（Gui/Component/Chart/themes/<名>.css，图表自己的
+/// 皮肤层）的无窗口回归，四类最容易断的契约。
+///
+/// 1. 配置生效：UseChartTheme 之后 chart::series-N（调色板）、
+///    chart::grid（网格线）、chart::axis（轴线）解析到主题包的
+///    颜色——图表主题是独立的一块样式表，垫在内置基线之上。
+/// 2. 卸载恢复："default" 卸载主题包，series-N 无规则（BgOr 为
+///    0，引擎回退皮肤 token / ECharts 默认调色板），面板背景回到
+///    皮肤的 --bg-primary。
+/// 3. 发现与容错：ChartTheme.Names() 能列出内建的 macarons；未知
+///    包名被拒绝且保持当前主题不变。
+/// 4. 分层：主题包垫在 Gui 皮肤（app.sheet）之下——皮肤/应用
+///    样式表写过的 chart 规则优先，主题包只补没定义的部分。
+/// 断言全部是颜色打包值比对，GDI/FreeType 两条路径等价。
+class Program {
+    static int fails;
+
+    static void EqInt(string what, int got, int want) {
+        if (got == want) { return; }
+        fails = fails + 1;
+        Console.WriteLine($"FAIL {what}: got {got} want {want}");
+    }
+
+    static void True(string what, bool got) {
+        if (got) { return; }
+        fails = fails + 1;
+        Console.WriteLine("FAIL " + what);
+    }
+
+    /// chart::series-N 背景通道（CSS 覆写入口，ResolvedSeries 的
+    /// 调色板走这里）；规则不存在时为 0。
+    static int SeriesCss(App app, int n) {
+        return Style.Part(app, "chart", "series-" + Convert.ToString(n),
+            "", "", "", Style.SNormal()).BgOr(0);
+    }
+
+    static void Main() {
+        fails = 0;
+        App app = new App("chart-theme-regression", 400, 300);
+        app.BeginFrame();
+
+        // ---- 卸载态（default）：图表跟随 Gui 皮肤 ----
+        True("default accepted", app.UseChartTheme("default"));
+        EqInt("default clears theme name",
+            app.ChartThemeName() == "" ? 1 : 0, 1);
+        EqInt("no series rule without pack", SeriesCss(app, 1), 0);
+
+        // ---- macarons：系列调色板 / 网格 / 轴线来自主题包 ----
+        True("macarons loads", app.UseChartTheme("macarons"));
+        EqInt("theme name kept", app.ChartThemeName() == "macarons" ? 1 : 0, 1);
+        EqInt("series-1 = macarons teal", SeriesCss(app, 1), Chart.Rgb(46, 199, 201));   // #2EC7C9
+        EqInt("series-2 = macarons violet", SeriesCss(app, 2), Chart.Rgb(182, 162, 222)); // #B6A2DE
+        EqInt("series-8 = macarons green", SeriesCss(app, 8), Chart.Rgb(151, 181, 82));   // #97B552
+        EqInt("grid = #EEEEEE",
+            Style.Part(app, "chart", "grid", "", "", "",
+                Style.SNormal()).BgOr(0),
+            Chart.Rgb(238, 238, 238));
+        EqInt("axis line = #008ACD",
+            Style.Part(app, "chart", "axis", "", "", "",
+                Style.SNormal()).BgOr(0),
+            Chart.Rgb(0, 138, 205));
+
+        // ---- dark：自带深色画布，不随当前 Gui 皮肤 ----
+        True("dark loads", app.UseChartTheme("dark"));
+        EqInt("dark panel bg = #1B1B1B",
+            Style.Full(app, "chart", "", "", Style.SNormal()).BgOr(0),
+            Chart.Rgb(27, 27, 27));
+        EqInt("dark axis label = #CCCCCC",
+            Style.Part(app, "chart", "axis", "", "", "",
+                Style.SNormal()).FgOr(0),
+            Chart.Rgb(204, 204, 204));
+
+        // ---- 容错：未知包名被拒，当前主题保持 dark ----
+        EqInt("unknown pack rejected",
+            app.UseChartTheme("nonexistent-theme") == false ? 1 : 0, 1);
+        EqInt("theme unchanged after reject",
+            app.ChartThemeName() == "dark" ? 1 : 0, 1);
+
+        // ---- 卸载回 default：规则与面板背景回到皮肤 ----
+        True("back to default", app.UseChartTheme("default"));
+        EqInt("series rule cleared", SeriesCss(app, 1), 0);
+        EqInt("theme name cleared",
+            app.ChartThemeName() == "" ? 1 : 0, 1);
+
+        // ---- 发现：内建包至少包含 macarons 与 dark（磁盘或内嵌）----
+        List<string> names = ChartTheme.Names();
+        bool hasMacarons = false;
+        bool hasDark = false;
+        for (int i = 0; i < names.Count; i = i + 1) {
+            if (names[i] == "macarons") { hasMacarons = true; }
+            if (names[i] == "dark") { hasDark = true; }
+        }
+        True("discovers macarons", hasMacarons);
+        True("discovers dark", hasDark);
+
+        // ---- 分层：主题包垫在皮肤/应用样式表之下 ----
+        app.UseCss("chart::series-1 { background: #112233; }");
+        True("macarons loads under app css", app.UseChartTheme("macarons"));
+        EqInt("app sheet wins over theme pack",
+            SeriesCss(app, 1), Chart.Rgb(17, 34, 51));                      // #112233
+        EqInt("theme pack fills what app sheet omits",
+            SeriesCss(app, 2), Chart.Rgb(182, 162, 222));                   // #B6A2DE
+
+        Console.WriteLine("chart-theme:" + Convert.ToString(fails == 0 ? 1 : 0));
+    }
+}

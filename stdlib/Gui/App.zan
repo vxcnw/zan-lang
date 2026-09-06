@@ -161,7 +161,13 @@ class App {
     // 与皮肤分开保存，并在每次皮肤变更时重新叠放到最上层，
     // 这样切换皮肤会重新为应用换装，而不会丢失其布局。
     string appCss;
+    // 图表主题包（Gui.Component.Chart/themes/<name>.css）编译出的
+    // 独立样式表：解析时垫在内置基线之上、皮肤 sheet 之下，不与
+    // 皮肤/appCss 合并成一张表。null = 未安装，图表跟随皮肤。
+    StyleSheet chartSheet;
+    string chartThemeName;
     string skinName;
+    StyleSheet useCssSheet;
     // 当操作系统正在合成真实的半透明背景（Win11
     // 亚克力 / macOS 毛玻璃 / Linux 合成器模糊）时为此窗口后面置 true。
     // 当玻璃皮肤激活时由 ApplyTheme 设置。开启时，帧被
@@ -758,7 +764,10 @@ class App {
         this.skinArtOpacity = 100;
         this.sheet = new StyleSheet();
         this.appCss = "";
+        this.chartSheet = null;
+        this.chartThemeName = "";
         this.skinName = "";
+        this.useCssSheet = null;
         this.anims = new List<AnimSlot>();
         this.nowMs = Window.GetTickMs();
         this.lastFrameMs = this.nowMs;
@@ -1014,10 +1023,42 @@ class App {
         needsRedraw = true;
     }
 
-    /// 将应用样式表重新叠加到当前皮肤的样式表之上。
+    /// 安装图表主题包 `Gui.Component.Chart/themes/<name>.css`（图表
+    /// 自己的皮肤，纯 CSS 配置，由组件的 ChartTheme 负责发现与读取）。
+    /// 主题包编译成一块独立的样式表，解析时垫在内置基线之上、
+    /// Gui 皮肤之下：皮肤写过的 chart 规则优先，主题包只补基线
+    /// 没定义的部分，与皮肤/appCss 互不合并。名称为 "default" 或
+    /// "" 时卸载主题包。找不到主题包时保持现状并返回 false。
+    bool UseChartTheme(string name) {
+        string css = ChartTheme.Css(name);
+        if (name != "" && name != "default" && css == "") { return false; }
+        this.chartThemeName = css == "" ? "" : name;
+        this.chartSheet = css == "" ? null : StyleSheet.FromCss(css);
+        bgThemeGen = bgThemeGen + 1;
+        backdropDirty = true;
+        this.NoteRedrawWhy("UseChartTheme");
+        needsRedraw = true;
+        return true;
+    }
+
+    /// 当前图表主题包名（未安装时为 ""）。
+    string ChartThemeName() { return this.chartThemeName; }
+
+    /// 将应用样式表重新叠加到当前皮肤的样式表之上。叠加层
+    /// （皮肤包 → UseCss 底表 → appCss）每次都从干净基底重建：
+    /// 卸载/切换无法"反合并"，皮肤包的缓存 sheet 也只作只读
+    /// 合并源、不再被原地污染。图表主题包不在此处——它是
+    /// app.chartSheet 里独立的一块，由 Style 解析时垫在皮肤之下。
+    /// 调用频率极低（UseSkin/UseCss/UseAppCss/ReloadSkin），
+    /// 重建成本可忽略，且不做指纹早退——换肤与热重载后必须重建。
     void ApplyAppCss() {
-        if (appCss == "") { return; }
-        if (sheet == null) { sheet = new StyleSheet(); }
+        StyleSheet fresh = new StyleSheet();
+        if (skinName != "") {
+            Skin s = Skin.Load(skinName);
+            if (s.IsLoaded()) { fresh.MergeSheet(s.sheet); }
+        } else if (useCssSheet != null) {
+            fresh.MergeSheet(useCssSheet);
+        }
         // 应用 CSS 认得当前主题 token 与皮肤的 :root 变量：写
         // `color: var(--text-primary)` 的应用样式表跟着皮肤走，而不是
         // 展开成空值（var() 过去只在同一份源文本内查找）。这些外来
@@ -1027,20 +1068,24 @@ class App {
         List<string> vv = new List<string>();
         Css.CollectVars(Style.RootFromTheme(theme), vn, vv);
         int themeVarCount = vn.Count;
-        if (sheet.vars != null) {
-            for (int i = 0; i < sheet.vars.Count(); i = i + 1) {
-                vn.Add(sheet.vars.KeyAt(i));
-                vv.Add(sheet.vars.ValAt(i).AsString(""));
+        if (fresh.vars != null) {
+            for (int i = 0; i < fresh.vars.Count(); i = i + 1) {
+                vn.Add(fresh.vars.KeyAt(i));
+                vv.Add(fresh.vars.ValAt(i).AsString(""));
             }
         }
         // Theme metrics are physical; inherited skin declarations are logical.
-        sheet.MergeSheet(Css.ParseWithSources(appCss, vn, vv, themeVarCount));
+        if (appCss != "") {
+            fresh.MergeSheet(Css.ParseWithSources(appCss, vn, vv, themeVarCount));
+        }
+        sheet = fresh;
     }
 
     /// 直接安装样式表（应用内编写的 CSS 文本，或以
     /// 资源形式提供的 CSS），无需皮肤文件夹。
     void UseCss(string css) {
-        sheet = StyleSheet.FromCss(css);
+        useCssSheet = StyleSheet.FromCss(css);
+        sheet = useCssSheet;
         this.ApplyAppCss();
         bgThemeGen = bgThemeGen + 1;
         fxSnapValid = false;

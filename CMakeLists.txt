@@ -2022,6 +2022,18 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
       -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_chart_symbol${_exe_ext}
       -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
 
+  # 图表主题包（Gui.Component.Chart/themes，图表自己的皮肤层）：
+  # UseChartTheme 叠加 chart::series-N/axis/grid 规则，"default" 卸载
+  # 后恢复跟随 Gui 皮肤；未知包名被拒且当前主题不变。
+  add_test(NAME conformance_gui_chart_theme
+    COMMAND ${CMAKE_COMMAND}
+      -DZANC=$<TARGET_FILE:zanc>
+      -DSRC=${CMAKE_SOURCE_DIR}/tests/gui/chart_theme_test.zan
+      "-DZANC_ARGS=--auto-stdlib${_gui_driver_tail}"
+      -DEXPECTED=${CMAKE_SOURCE_DIR}/tests/conformance/gui_chart_theme.out
+      -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_chart_theme${_exe_ext}
+      -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
+
   # 堆叠面积带边界亚像素 AA 回归（用户报告 Line4 条带边缘毛刺）：
   # 带边界此前用整数 YOf 计算并被量化到整行，FillBandFx 的亚像素
   # 光栅化拿不到 1/256 精度，缓坡每列硬跳一行成阶梯锯齿。修复后

@@ -87,6 +87,8 @@ partial class Charts {
     static int navSelRow;
     static Button langEn;
     static Button langZh;
+    static SelectBox themeBox;
+    static List<string> themeNames;
     static List<ChartsDemo> demos;
     static ChartOption heat;
     static int heatSlot;
@@ -624,6 +626,33 @@ partial class Charts {
             .RenderInside(app, new Rect(area.x + sw - pad - lgTotal, lgY,
                 lgTotal, lgH));
 
+        // 图表主题下拉：Gui.Component.Chart/themes/<名>.css 图表自己
+        // 的皮肤层（与 Gui 皮肤独立）。包列表来自 ChartTheme.Names() 的发现结果
+        // （磁盘 + 内嵌资源），这里只喂名字；"default" = 跟随皮肤。
+        if (Charts.themeBox == null) {
+            Charts.themeNames = new List<string>();
+            Charts.themeNames.Add("default");
+            List<string> found = ChartTheme.Names();
+            for (int ti = 0; ti < found.Count; ti = ti + 1) {
+                if (!Charts.themeNames.Contains(found[ti])) { Charts.themeNames.Add(found[ti]); }
+            }
+            Charts.themeBox = new SelectBox(Charts.T("Chart theme", "图表主题"), false);
+            for (int ti = 0; ti < Charts.themeNames.Count; ti = ti + 1) {
+                Charts.themeBox.AddOption(Charts.themeNames[ti]);
+            }
+            Charts.themeBox.Select(0);
+            Charts.themeBox.Change.Add(() => {
+                int pick = Charts.themeBox.Selected();
+                if (pick < 0 || pick >= Charts.themeNames.Count) { return; }
+                Charts.app.UseChartTheme(Charts.themeNames[pick]);
+                Charts.app.RequestRedraw();
+            });
+        }
+        int thH = app.Scale(22);
+        int thY = area.y + app.Scale(44);
+        Charts.themeBox.Size = "small";
+        Charts.themeBox.Render(app, area.x + pad, thY, sw - pad * 2);
+
         // 行文本随语言切换重建；列表本体（行、悬停、选中、滚动、
         // 滚动条）全部是 ListView 的职责，这里只喂矩形。
         if (Charts.lang.Get() != Charts.navLang) {
@@ -631,7 +660,7 @@ partial class Charts {
             Charts.RebuildNavRows();
             Charts.nav.Bind(Charts.navRows);
         }
-        int listTop = area.y + app.Scale(52);
+        int listTop = thY + thH + app.Scale(10);
         int listBottom = area.y + area.height - app.Scale(8);
         Charts.nav.RenderInside(app, new Rect(area.x, listTop, sw,
             listBottom - listTop));
