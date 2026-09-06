@@ -12516,8 +12516,12 @@ class Gallery {
             cols.Add(DataColumn.Field(DataColumn.Avg(DataColumn.Range(
                 DataColumn.Spinner(DataColumn.Percent(DataColumn.Numeric("Score", app.Scale(90))), 1.0),
                 0.0, 100.0)), "score"));
+            // Salary demos the header-menu Conditional Formatting panel:
+            // right-click the header -> 条件格式 -> 数据条/色阶/高亮规则
+            // (0xFF2E6ADB = preset blue).
             cols.Add(DataColumn.Field(DataColumn.Sum(DataColumn.Editable(
-                DataColumn.Money(DataColumn.Numeric("Salary", app.Scale(120)), "$"))), "salary"));
+                DataColumn.DataBar(DataColumn.Money(DataColumn.Numeric("Salary", app.Scale(120)), "$"),
+                                   0xFF2E6ADB))), "salary"));
             cols.Add(DataColumn.Field(DataColumn.Dropdown(DataColumn.Text("Dept", app.Scale(120)),
                                          Gallery.DeptChoices(), true), "dept"));
             cols.Add(DataColumn.Field(DataColumn.Text("City", app.Scale(110)), "city"));

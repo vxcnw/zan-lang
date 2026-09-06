@@ -82,9 +82,11 @@ partial class DataTable {
         if (mx < x) { mx = x; }
         if (my < y) { my = y; }
 
-        // 接管滚轮并吞掉整个菜单的点击，
-        // 空隙和下层页面不被滚动或穿透（菜单项随后注册）
+        // 接管滚轮；菜单矩形吞掉自身区域的点击。菜单外的表格
+        // 空隙/页面由全视口遮罩挡住，点击外部只关闭菜单，
+        // 不会同时穿透到菜单后面的单元格（选区/编辑误触发）。
         app.CaptureWheel(mx, my, mw, mh);
+        app.BlockHitsRect(x, y, viewW, viewH);
         app.BlockHitsRect(mx, my, mw, mh);
         c.FillRoundRect(mx, my, mw, mh, t.borderRadiusMedium, sMenu.BgOr(0));
         c.DrawRoundRect(mx, my, mw, mh, t.borderRadiusMedium, sMenu.BorderOr(0), 1);
@@ -513,6 +515,184 @@ partial class DataTable {
     /// 右键点击列表头打开 DevExpress/ag-Grid 风格菜单：
     /// 排序、自动适配宽度、隐藏列、恢复所有列，以及跳转到
     /// 集合筛选弹窗。布局镜像 RenderContextMenu（游动 iy）。
+    /// 条件格式预设色板（DevExpress 风格渐变/纯色数据条与色阶）：
+    /// 12 组渐变色 + 8 组纯色，仅用于头菜单的色板与套用默认值。
+    static int[] CfPresetColors() {
+        int[] ps = new int[20];
+        ps[0] = DataTable.Rgb(46, 106, 219);     // blue
+        ps[1] = DataTable.Rgb(64, 158, 255);     // light blue
+        ps[2] = DataTable.Rgb(46, 168, 106);     // green
+        ps[3] = DataTable.Rgb(230, 190, 44);     // yellow
+        ps[4] = DataTable.Rgb(235, 140, 40);     // orange
+        ps[5] = DataTable.Rgb(58, 186, 156);     // mint
+        ps[6] = DataTable.Rgb(142, 96, 214);     // violet
+        ps[7] = DataTable.Rgb(206, 68, 126);     // raspberry
+        ps[8] = DataTable.Rgb(240, 110, 92);     // coral
+        ps[9] = DataTable.Rgb(214, 62, 58);      // red
+        ps[10] = DataTable.Rgb(88, 96, 110);     // gray
+        ps[11] = DataTable.Rgb(84, 62, 168);     // indigo
+        ps[12] = ps[0];
+        ps[13] = ps[1];
+        ps[14] = ps[2];
+        ps[15] = ps[3];
+        ps[16] = ps[4];
+        ps[17] = ps[5];
+        ps[18] = ps[6];
+        ps[19] = ps[7];
+        return ps;
+    }
+
+    /// 数据条菜单项：行左侧画该颜色的条形图标。
+    static int CfBarItem(App app, int mx, int iy, int mw, int ih, int color,
+                         string label) {
+        Canvas c = app.canvas;
+        Theme t = app.theme;
+        int id = app.focus.AllocId();
+        bool hov = app.focus.IsHovered(id);
+        ContextMenu.PaintItem(app, mx, iy, mw, ih, label, "", hov);
+        int sw = app.Scale(30);
+        int sh = ih - app.Scale(12);
+        int sx = mx + app.Scale(10);
+        int sy = iy + app.Scale(6);
+        c.FillRoundRect(sx, sy, sw, sh, app.Scale(2), DataTable.ColorAlpha(color, 210));
+        app.hitTester.RegisterRect(id, mx, iy, mw, ih, 0);
+        return iy + ih;
+    }
+
+    /// 色阶菜单项：行左侧画该颜色对的双色渐变小条。
+    static int CfScaleItem(App app, int mx, int iy, int mw, int ih, int c0,
+                           int c1, string label) {
+        Canvas c = app.canvas;
+        int id = app.focus.AllocId();
+        bool hov = app.focus.IsHovered(id);
+        ContextMenu.PaintItem(app, mx, iy, mw, ih, label, "", hov);
+        int sw = app.Scale(30);
+        int sh = ih - app.Scale(12);
+        int sx = mx + app.Scale(10);
+        int sy = iy + app.Scale(6);
+        int steps = 6;
+        for (int i = 0; i < steps; i = i + 1) {
+            int seg = sw / steps;
+            c.FillRect(sx + i * seg, sy, seg + 1, sh,
+                       DataTable.LerpColor(c0, c1, i, steps - 1));
+        }
+        app.hitTester.RegisterRect(id, mx, iy, mw, ih, 0);
+        return iy + ih;
+    }
+
+    /// 条件格式子面板：mode 1 数据条 / 2 色阶 / 3 大于 / 4 小于。
+    /// 在锚点右侧绘制预设列表并处理点击；命中应用该列 cf 配置。
+    /// 返回 true 表示面板本帧吞掉了点击（主菜单保持打开）。
+    static bool RenderCfPanel(App app, int ax, int ay, int mw, int ih, int sepH,
+                              StyleBox sMenu, DataTableState st, int col, int mode,
+                              List<DataColumn> cols, DataSource src) {
+        Canvas c = app.canvas;
+        Theme t = app.theme;
+        int[] ps = DataTable.CfPresetColors();
+        int n;
+        if (mode == 1 || mode == 2) { n = 8; }
+        else { n = 4; }
+        int panelW = app.Scale(210);
+        int panelH = ih * n + sepH + app.Scale(8);
+        int px = ax + mw + app.Scale(2);
+        int py = ay;
+        if (py + panelH > app.window.GetHeight()) { py = app.window.GetHeight() - panelH - app.Scale(2); }
+        if (py < 0) { py = 0; }
+        app.CaptureWheel(px, py, panelW, panelH);
+        c.FillRoundRect(px, py, panelW, panelH, t.borderRadiusMedium, sMenu.BgOr(0));
+        c.DrawRoundRect(px, py, panelW, panelH, t.borderRadiusMedium, sMenu.BorderOr(0), 1);
+
+        int iy = py + app.Scale(4);
+        bool hit = false;
+        for (int i = 0; i < n; i = i + 1) {
+            if (i == 4) {
+                c.FillRect(px + app.Scale(8), iy + sepH / 2, panelW - app.Scale(16), 1, sMenu.BgOr(0));
+                iy = iy + sepH;
+            }
+            // 数据条：上 4 组渐变（双端同色由渲染层做 alpha 梯度），
+            // 下 4 组纯色；色阶/高亮：全部用预设对。
+            int ci = i < 4 ? i : i + 4;
+            int c0 = ps[ci];
+            int c1 = ps[ci + 4 > 11 ? ci - 4 : ci + 4];
+            if (mode == 1) {
+                if (i < 4) { c1 = c0; }
+                iy = DataTable.CfBarItem(app, px, iy, panelW, ih, c0,
+                    DataTable.T(i < 4 ? "Gradient Fill" : "Solid Fill",
+                                i < 4 ? "渐变" : "纯色")
+                    + " " + DataTable.SwatchName(ci));
+            } else if (mode == 2) {
+                iy = DataTable.CfScaleItem(app, px, iy, panelW, ih, c0, c1,
+                    DataTable.SwatchName(ci));
+            } else {
+                iy = DataTable.CfBarItem(app, px, iy, panelW, ih, c0,
+                    DataTable.SwatchName(ci));
+            }
+            int ri = i;
+            if (DataTable.CtxHit(app, px, iy - ih, panelW, ih)) {
+                hit = true;
+                if (mode == 1) {
+                    cols[col].cfMode = 1;
+                    cols[col].cfColor = c0;
+                } else if (mode == 2) {
+                    cols[col].cfMode = 2;
+                    cols[col].cfColor = c0;
+                    cols[col].cfColor2 = c1;
+                } else if (mode == 3) {
+                    cols[col].cfMode = 3;
+                    cols[col].cfThreshold = DataTable.MedianThreshold(app, st, cols, src, col);
+                    cols[col].cfColor = c0;
+                } else {
+                    cols[col].cfMode = 4;
+                    cols[col].cfThreshold = DataTable.MedianThreshold(app, st, cols, src, col);
+                    cols[col].cfColor = c0;
+                }
+            }
+        }
+        if (hit) {
+            st.hdrCtxOpen = false;
+            st.cfSubOpen = 0;
+            app.RequestRedraw();
+        }
+        // 面板外点击关闭子面板（主菜单保留）
+        if (app.EventKind() == 3 && !app.LongPressFired()
+            && !(app.mouseX >= px && app.mouseX < px + panelW
+                 && app.mouseY >= py && app.mouseY < py + panelH)) {
+            st.cfSubOpen = 0;
+            app.RequestRedraw();
+        }
+        return hit;
+    }
+
+    /// 高亮规则的默认阈值：列数值的平均值（空列回退 0）。
+    static int MedianThreshold(App app, DataTableState st, List<DataColumn> cols,
+                               DataSource src, int col) {
+        double sum = 0.0;
+        int n = 0;
+        for (int oi = 0; oi < st.order.Count; oi = oi + 1) {
+            double v = src.CellReal(st.order[oi], col);
+            sum = sum + v;
+            n = n + 1;
+        }
+        if (n == 0) { return 0; }
+        return (int)(sum / (double)n + 0.5);
+    }
+
+    /// 预设色的显示名（蓝/浅蓝/绿/…）。
+    static string SwatchName(int i) {
+        if (i == 0) { return DataTable.T("Blue", "蓝"); }
+        if (i == 1) { return DataTable.T("Light Blue", "浅蓝"); }
+        if (i == 2) { return DataTable.T("Green", "绿"); }
+        if (i == 3) { return DataTable.T("Yellow", "黄"); }
+        if (i == 4) { return DataTable.T("Orange", "橙"); }
+        if (i == 5) { return DataTable.T("Mint", "薄荷"); }
+        if (i == 6) { return DataTable.T("Violet", "紫"); }
+        if (i == 7) { return DataTable.T("Raspberry", "梅红"); }
+        if (i == 8) { return DataTable.T("Coral", "珊瑚"); }
+        if (i == 9) { return DataTable.T("Red", "红"); }
+        if (i == 10) { return DataTable.T("Gray", "灰"); }
+        return DataTable.T("Indigo", "靛");
+    }
+
     static void RenderHeaderMenu(App app, int x, int y, int viewW, int viewH,
                                  List<DataColumn> cols, DataSource src, DataTableState st) {
         int col = st.hdrCtxCol;
@@ -554,9 +734,11 @@ partial class DataTable {
         if (mx < x) { mx = x; }
         if (my < y) { my = y; }
 
-        // 接管滚轮并吞掉整个菜单的点击，
-        // 空隙和下层页面不被滚动或穿透（菜单项随后注册）
+        // 接管滚轮；菜单矩形吞掉自身区域的点击。菜单外的表头
+        // 空隙/页面由全视口遮罩挡住，点击外部只关闭菜单，
+        // 不会同时穿透到菜单后面的表头/单元格。
         app.CaptureWheel(mx, my, mw, mh);
+        app.BlockHitsRect(x, y, viewW, viewH);
         app.BlockHitsRect(mx, my, mw, mh);
         c.FillRoundRect(mx, my, mw, mh, t.borderRadiusMedium, sMenu.BgOr(0));
         c.DrawRoundRect(mx, my, mw, mh, t.borderRadiusMedium, sMenu.BorderOr(0), 1);
@@ -693,13 +875,55 @@ partial class DataTable {
             iy = iy + ih;
         }
 
+        // ---- 条件格式（仅数值列）：主项点击展开子面板，再点收起 ----
+        if (canAgg) {
+            c.FillRect(mx + app.Scale(8), iy + sepH / 2, mw - app.Scale(16), 1, sGrid.BgOr(0));
+            iy = iy + sepH;
+            int cfY = iy;
+            int cfH = ih;
+            int cfMark = 0;
+            if (cols[col].cfMode == 1) { cfMark = 1; }
+            else if (cols[col].cfMode == 2) { cfMark = 2; }
+            else if (cols[col].cfMode >= 3) { cfMark = 3; }
+            string cfLbl = DataTable.T("Conditional Formatting", "条件格式");
+            if (cfMark == 1) { cfLbl = cfLbl + " · " + DataTable.T("Data Bars", "数据条"); }
+            else if (cfMark == 2) { cfLbl = cfLbl + " · " + DataTable.T("Color Scales", "色阶"); }
+            else if (cfMark == 3) { cfLbl = cfLbl + " · " + DataTable.T("Highlight Rules", "高亮规则"); }
+            int idCf = app.focus.AllocId();
+            ContextMenu.PaintItem(app, mx, cfY, mw, cfH, cfLbl, "▶", app.focus.IsHovered(idCf));
+            app.hitTester.RegisterRect(idCf, mx, cfY, mw, cfH, 0);
+            // 点击主项：无子面板则展开对应组，已有子面板再点同组则收起
+            if (DataTable.CtxHit(app, mx, cfY, mw, cfH)) {
+                int want = 0;
+                if (st.cfSubOpen == 0) {
+                    want = cols[col].cfMode;
+                    if (want == 0) { want = 1; }
+                }
+                st.cfSubOpen = want;
+                app.RequestRedraw();
+            }
+            iy = iy + cfH;
+            if (st.cfSubOpen != 0) {
+                DataTable.RenderCfPanel(app, mx, cfY, mw, ih, sepH, sMenu, st, col,
+                                        st.cfSubOpen, cols, src);
+            }
+        }
+
         // 点击外部关闭菜单。终结长按的那次手指抬起
         // （app.LongPressFired，标志下次按下才复位）不算
         // "外部点击"——否则触摸长按刚打开菜单就被松手关掉。
-        if (app.EventKind() == 3 && !app.LongPressFired()
-            && !(app.mouseX >= mx && app.mouseX < mx + mw && app.mouseY >= my && app.mouseY < my + mh)) {
-            st.hdrCtxOpen = false;
-            app.RequestRedraw();
+        // 子面板打开时：面板自己管理其区域外的点击（点击主菜单
+        // 或面板外只收起子面板，不闪没整个菜单）。
+        bool insideAny = app.mouseX >= mx && app.mouseX < mx + mw
+            && app.mouseY >= my && app.mouseY < my + mh;
+        if (app.EventKind() == 3 && !app.LongPressFired() && !insideAny) {
+            if (st.cfSubOpen != 0) {
+                st.cfSubOpen = 0;
+                app.RequestRedraw();
+            } else {
+                st.hdrCtxOpen = false;
+                app.RequestRedraw();
+            }
         }
     }
 

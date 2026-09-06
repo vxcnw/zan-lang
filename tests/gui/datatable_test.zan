@@ -109,6 +109,23 @@ class Program {
         Console.WriteLine(DataTable.ApplySummaryTemplate("literal", "2.33", 2.3333));
         Console.WriteLine(DataTable.ApplySummaryTemplate("{0}", "2.33", 2.3333));
 
+        // ---- 条件格式预设：色板顺序稳定（数据条/色阶子面板共用），
+        // 渐变前 4 组 + 纯色后 4 组；色名可查；均值阈值取平均并四舍五入 ----
+        int[] cps = DataTable.CfPresetColors();
+        Console.WriteLine(Convert.ToString(cps[0]) + "," + Convert.ToString(cps.Length));
+        Console.WriteLine(DataTable.SwatchName(0));
+        Console.WriteLine(DataTable.SwatchName(11));
+        List<DataRow> cfRows = new List<DataRow>();
+        cfRows.Add(Row("a", "1", "10"));
+        cfRows.Add(Row("b", "1", "20"));
+        cfRows.Add(Row("c", "1", "30"));
+        DataTableState cfSt = new DataTableState();
+        DataTable.EnsureInit(cfSt, cols, new RowListSource(cfRows));
+        DataTable.Recompute(cfSt, cols, new RowListSource(cfRows));
+        // cols[2] = qty（整数列）：均值 20 -> 阈值 20
+        Console.WriteLine(Convert.ToString(DataTable.MedianThreshold(null, cfSt, cols,
+            new RowListSource(cfRows), 2)));
+
         // ---- date columns: parse, render, sort and bucket ----
         // A date column keys on days since the epoch, so a chronological order
         // holds across a year boundary where a string compare would not.

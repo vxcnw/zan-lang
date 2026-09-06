@@ -634,8 +634,8 @@ class DataColumn {
     }
 
     /// 汇总由其他列聚合值派生的数值列
-    /// （不逐行扫描）。`op` 为 0 百分比 / 1 比值 / 2 差值 / 3 和 / 4 积；
-    /// `a` 和 `b` 是源列索引。
+    /// （不逐行扫描）。`op` 为 0 百分比 / 1 比值 / 2 差值 / 3 和 / 4 积 /
+    /// 5 千分比（A*1000/B）；`a` 和 `b` 是源列索引。
     static DataColumn Derived(string title, int width, int op, int a, int b) {
         DataColumn c = new DataColumn(title, width);
         c.numeric = true;
@@ -645,6 +645,15 @@ class DataColumn {
         c.deriveA = a;
         c.deriveB = b;
         return c;
+    }
+
+    /// 在既有列上设置派生汇总（老 DevExpress CustomSummaryCalculate
+    /// 等位：页脚由其它 sum 列的聚合值现算）。op 同 Derived。
+    static void Derive(DataColumn c, int op, int a, int b) {
+        c.summary = 6;
+        c.deriveOp = op;
+        c.deriveA = a;
+        c.deriveB = b;
     }
 
     // ---- 页脚聚合配置器（为该列显示总计行） ----
@@ -1169,6 +1178,7 @@ class DataTableState {
     int hdrCtxCol;             // 表头上下文菜单针对的列
     int hdrCtxX;               // 表头上下文菜单锚点 X
     int hdrCtxY;               // 表头上下文菜单锚点 Y
+    int cfSubOpen;             // 头菜单条件格式子面板：0 收起，1..4 同 cfMode
     string toast;              // 临时状态消息（复制/导出反馈）
     int toastFrames;           // toast 剩余显示帧数
 
@@ -1501,6 +1511,7 @@ class DataTableState {
         this.hdrCtxCol = -1;
         this.hdrCtxX = 0;
         this.hdrCtxY = 0;
+        this.cfSubOpen = 0;
         this.toast = "";
         this.toastFrames = 0;
         this.showFilterRow = false;
