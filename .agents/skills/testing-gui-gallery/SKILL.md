@@ -54,6 +54,11 @@ Maximize before recording:
 `DISPLAY=:0 wmctrl -r "Zan GUI Components" -b add,maximized_vert,maximized_horz`
 Resize test: `DISPLAY=:0 wmctrl -r "Zan GUI Components" -e 0,100,80,1300,900`.
 
+Screenshots: capture the gallery window itself, anchored to the launched PID
+(`import -window <hwnd>`; window title is `Zan GUI Components`) — see the
+`testing-gui-screenshot` skill. Never judge a display grab: on this box the
+screen usually has other windows on top.
+
 ## UI navigation notes
 
 - Left column is the component nav; clicking an entry switches the detail page.

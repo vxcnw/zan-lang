@@ -33,6 +33,10 @@ Gotchas:
 - `CopyFromScreen` grabs whatever is on top of that screen rect. If the IDE is not
   foreground, screenshots show unrelated windows. `SetForegroundWindow` before the
   shots and don't trust pixels from a run where the IDE lost focus.
+  Better: `win-shot.ps1` in the `testing-gui-screenshot` skill captures a window
+  **by PID** via `PrintWindow` even when it is occluded/background — no
+  foreground dance needed, and it prints the captured title so you can verify
+  what you got (plus `AMBIGUOUS` when two instances share a title).
 - The Chinese assertions inside the `.txt` driver script *do* work (UiDriver reads
   UTF-8), e.g. `assert probe log contains 发布产物打包完成`.
 

@@ -80,6 +80,11 @@ wrapping and vertical scrolling paths.
 
 ## Judging GraphView-style canvas output from pixels
 
+Capture the probe window itself, anchored to the PID you launched — see the
+`testing-gui-screenshot` skill for the capture commands and the verify-before-
+judging rules (a display grab here shows whatever else is on :0, and a stale
+probe instance from an earlier run shares the probe's title).
+
 - Layering: read the y coordinates — nodes in the same layer must share a y.
 - Edge colour is semantic: `t.primary` (teal) when the source node is `done`,
   `t.divider` (grey) otherwise. `zoom` into a 60x30 px box around a single edge;
