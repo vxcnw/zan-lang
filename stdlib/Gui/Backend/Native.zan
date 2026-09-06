@@ -852,6 +852,24 @@ class Window {
         #endif
     }
 
+    /// <summary>运行期加高自绘标题栏保留带（设备像素，只增不减）：
+    /// 原生拖动条带与标题按钮布局同步加高。仅 Windows 后端支持
+    /// 运行期加高；其余后端维持启动时的缺省保留带。</summary>
+    void SetTitlebarHeight(int devicePx) {
+        #if WINDOWS
+        Win32Shell.SetTitlebarHeight(devicePx);
+        #endif
+    }
+
+    /// <summary>登记标题栏左侧客户区保护带宽度（设备像素）：
+    /// 条带内 [0, width) 的按下交给客户区（应用按钮命中区），
+    /// 不当作窗口拖动。仅 Windows 后端实现。</summary>
+    void SetCaptionZone(int width) {
+        #if WINDOWS
+        Win32Shell.SetCaptionZone((nint)handle, width);
+        #endif
+    }
+
     /// <summary>单个标题按钮的宽度（设备像素）。</summary>
     static int CaptionButtonWidth() {
         #if WINDOWS

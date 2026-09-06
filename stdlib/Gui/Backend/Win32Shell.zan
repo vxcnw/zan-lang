@@ -313,6 +313,8 @@ class Win32Shell {
     // 系统按钮在子窗口打开的瞬间就不再作为客户区参与命中测试。
     static List<nint> capHwnd;
     static List<int> capCount;
+    static List<nint> zoneHwnd;
+    static List<int> zoneWidth;
     // 不可调整大小的窗口（设计里的 resizable = false）。外壳是无
     // 边框的，尺寸手柄全靠 WM_NCHITTEST 给出，所以“不能拉”
     // 就是不再把边缘报成手柄，并挡住双击标题栏 / 最大化。
@@ -419,6 +421,8 @@ class Win32Shell {
         Win32Shell.TimeBeginPeriod(1);
         Win32Shell.capHwnd = new List<nint>();
         Win32Shell.capCount = new List<int>();
+        Win32Shell.zoneHwnd = new List<nint>();
+        Win32Shell.zoneWidth = new List<int>();
         Win32Shell.fixedHwnd = new List<nint>();
         Win32Shell.dpi = 96;
         Win32Shell.titlebarH = 32;
@@ -815,7 +819,8 @@ class Win32Shell {
         int cb = 12 * Win32Shell.dpi / 96;
         bool maxed = Win32Shell.IsMaximized(hwnd);
         bool inButtons = y < Win32Shell.titlebarH
-            && x >= w - Win32Shell.CaptionButtonsOf(hwnd) * Win32Shell.buttonW;
+            && (x >= w - Win32Shell.CaptionButtonsOf(hwnd) * Win32Shell.buttonW
+                || x < Win32Shell.CaptionZoneOf(hwnd));
         if (!maxed && !inButtons && Win32Shell.ResizableOf(hwnd)) {
             bool onLeft = x < b;
             bool onRight = x >= w - b;
@@ -1546,6 +1551,31 @@ class Win32Shell {
         return 5;
     }
 
+    /// 为窗口登记标题栏左侧客户区保护带宽度（设备像素）：
+    /// 条带内 [0, width) 的按下交给客户区（应用按钮命中区），
+    /// 不当作窗口拖动；0 = 缺省（只有右侧按钮区交给客户区）。
+    static void SetCaptionZone(nint hwnd, int width) {
+        Win32Shell.Init();
+        if (width < 0) { width = 0; }
+        for (int i = 0; i < Win32Shell.zoneHwnd.Count; i = i + 1) {
+            if (Win32Shell.zoneHwnd[i] == hwnd) {
+                Win32Shell.zoneWidth[i] = width;
+                return;
+            }
+        }
+        Win32Shell.zoneHwnd.Add(hwnd);
+        Win32Shell.zoneWidth.Add(width);
+    }
+
+    /// `hwnd` 的标题栏客户区保护带宽度（未登记默认 0）。
+    static int CaptionZoneOf(nint hwnd) {
+        Win32Shell.Init();
+        for (int i = 0; i < Win32Shell.zoneHwnd.Count; i = i + 1) {
+            if (Win32Shell.zoneHwnd[i] == hwnd) { return Win32Shell.zoneWidth[i]; }
+        }
+        return 0;
+    }
+
     /// 窗口是否允许用户拖边框 / 最大化改变尺寸（默认允许）。
     static bool ResizableOf(nint hwnd) {
         Win32Shell.Init();
@@ -1654,6 +1684,13 @@ class Win32Shell {
                 return;
             }
         }
+        for (int i = 0; i < Win32Shell.zoneHwnd.Count; i = i + 1) {
+            if (Win32Shell.zoneHwnd[i] == hwnd) {
+                Win32Shell.zoneHwnd.RemoveAt(i);
+                Win32Shell.zoneWidth.RemoveAt(i);
+                return;
+            }
+        }
         if (Win32Shell.toolHwnd != null) {
             for (int i = Win32Shell.toolHwnd.Count - 1; i >= 0; i = i - 1) {
                 if (Win32Shell.toolHwnd[i] == hwnd) { Win32Shell.toolHwnd.RemoveAt(i); }
@@ -1665,6 +1702,13 @@ class Win32Shell {
     static int TitlebarHeight() {
         Win32Shell.Init();
         return Win32Shell.titlebarH;
+    }
+
+    /// 运行期加高自绘标题栏保留带（设备像素，只增不减）：命中
+    /// 测试的拖动条带与标题按钮布局读到的是同一个 titlebarH。
+    static void SetTitlebarHeight(int devicePx) {
+        Win32Shell.Init();
+        if (devicePx > Win32Shell.titlebarH) { Win32Shell.titlebarH = devicePx; }
     }
 
     /// 单个标题按钮的保留宽度（设备像素，默认 46@96）。
