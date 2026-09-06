@@ -157,6 +157,34 @@ class Program {
         DataTable.Recompute(cfSt, cols, cfSrc);
         Console.WriteLine("cleared=" + Convert.ToString(qty.cfMode));
 
+        // ---- 右键菜单应用的规则存状态槽（menuCf*）：列每帧重建
+        // （新实例）也不丢；EnsureColumnSlots 回写并置脏，min/max
+        // 名次缓存随之重建；清除只清槽位，列上工厂预设不受影响 ----
+        cfSt.menuCfMode[2] = 1;                 // 数据条
+        cfSt.menuCfColor[2] = DataTable.CfPresetColors()[9];
+        cols[2] = DataColumn.Numeric("qty", 80);   // 模拟每帧重建的新列实例
+        DataTable.EnsureColumnSlots(cfSt, cols);
+        Console.WriteLine("slotBar=" + Convert.ToString(cols[2].cfMode)
+            + "," + Convert.ToString(cfSt.dirty));
+        DataTable.Recompute(cfSt, cols, cfSrc);
+        Console.WriteLine("slotBarRange=" + Convert.ToString(cfSt.cfMinR[2])
+            + "," + Convert.ToString(cfSt.cfMaxR[2]));
+        cfSt.menuCfMode[2] = 2;                 // 色阶
+        cfSt.menuCfColor[2] = DataTable.CfPresetColors()[0];
+        cfSt.menuCfColor2[2] = DataTable.CfPresetColors()[4];
+        cols[2] = DataColumn.Numeric("qty", 80);   // 新帧新实例
+        DataTable.EnsureColumnSlots(cfSt, cols);
+        Console.WriteLine("slotScale=" + Convert.ToString(cols[2].cfMode)
+            + "/" + Convert.ToString(cols[2].cfColor2 == DataTable.CfPresetColors()[4] ? 1 : 0));
+        cfSt.menuCfMode[2] = 0;                 // 清除：槽位空，工厂预设恢复生效
+        cols[2] = DataColumn.DataBar(DataColumn.Numeric("qty", 80), 0x2E6ADB);
+        DataTable.EnsureColumnSlots(cfSt, cols);
+        Console.WriteLine("slotClear=" + Convert.ToString(cols[2].cfMode));
+        DataColumn described = DataColumn.Describe(
+            DataColumn.Numeric("Score", 120), "0-100 分");
+        Console.WriteLine("describe=" + Convert.ToString(described.description.Length > 0 ? 1 : 0)
+            + "," + Convert.ToString(described.description));
+
         // ---- date columns: parse, render, sort and bucket ----
         // A date column keys on days since the epoch, so a chronological order
         // holds across a year boundary where a string compare would not.

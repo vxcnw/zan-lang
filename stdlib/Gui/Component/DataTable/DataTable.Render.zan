@@ -1384,6 +1384,36 @@ partial class DataTable {
             if (titleW < 0) { titleW = 0; }
             app.hitTester.RegisterRectL(titleId, titleX, titleTop, titleW, titleRowH, 0,
                                         DataTable.ColTitle(cols, i));
+
+            // 表头列标题的悬停提示：列声明了 description 时，指针
+            // 在标题上停稳 (DefaultDelayMs) 弹出两行式提示——
+            // 列名 + 完整说明。与单元格截断提示的惯例一致：
+            // 指针停稳前持续请求该区域重绘供计时器走帧，触摸设备
+            // 没有悬停，菜单/拖拽/编辑进行中一律不打扰。
+            // 说明文本以 \n 分段时用 RequestBox 直接多行展示。
+            if (cols[i].description.Length > 0 && !touchUi
+                && !st.editing && !st.ctxOpen && !st.hdrCtxOpen && !st.chartOpen
+                && !st.colChooserOpen && st.openMenu < 0 && !st.rangeDrag
+                && !st.rowSelDrag && st.dragRow < 0 && st.dragCol < 0) {
+                bool hdrHover = app.mouseX >= titleX && app.mouseX < titleX + titleW
+                                && app.mouseY >= titleTop
+                                && app.mouseY < titleTop + titleRowH;
+                if (hdrHover) {
+                    int tipNowMs = Window.GetTickMs();
+                    if (st.hdrTipCol != i) {
+                        st.hdrTipCol = i;
+                        st.hdrTipSinceMs = tipNowMs;
+                    }
+                    if (tipNowMs - st.hdrTipSinceMs < Tooltip.DefaultDelayMs()) {
+                        app.RequestAnimationFrameIn(0, titleX, titleTop, titleW, titleRowH);
+                    } else if (app.hitTester.HitTest(app.mouseX, app.mouseY) == titleId) {
+                        Tooltip.RequestBox(app, titleX, titleTop, titleW, titleRowH,
+                                           DataTable.ColTitle(cols, i) + "\n"
+                                           + cols[i].description,
+                                           Tooltip.Bottom(), app.Scale(320));
+                    }
+                } else if (st.hdrTipCol == i) { st.hdrTipCol = -1; }
+            } else if (st.hdrTipCol == i) { st.hdrTipCol = -1; }
             if (st.dragCol == i && app.focus.pressedId >= 0) {
                 int dd = app.mouseX - st.dragColStartX;
                 if (dd < 0) { dd = 0 - dd; }

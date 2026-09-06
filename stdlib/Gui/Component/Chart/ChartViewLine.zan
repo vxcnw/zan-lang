@@ -298,6 +298,7 @@ partial class ChartView {
                                          List<ChartSeries> series, int baseIdx,
                                          int g) {
         if (f == null || labels == null || labels.Count < 1 || series == null) { return; }
+        if (ChartView.HoverBlocked(app)) { return; }
         int mx = app.mouseX;
         int my = app.mouseY;
         if (mx < f.plotX || mx >= f.plotX + f.plotW
@@ -663,6 +664,7 @@ partial class ChartView {
                                      List<ChartSeries> series, int baseIdx,
                                      int g, int maxV) {
         if (f == null || labels == null || labels.Count < 1 || maxV < 1) { return; }
+        if (ChartView.HoverBlocked(app)) { return; }
         int mx = app.mouseX;
         int my = app.mouseY;
         if (mx < f.plotX || mx >= f.plotX + f.plotW

@@ -158,6 +158,11 @@ class DataColumn {
     // 不可能与列失去同步。
     string band;
 
+    // 表头悬停提示：指针在列标题上停留 DefaultDelayMs 后弹出
+    // 的完整说明（两行式：标题=列名，描述=本字段）。空串 =
+    // 不弹提示。
+    string description;
+
     DataColumn(string title, int width) {
         this.title = title;
         this.field = "";
@@ -216,6 +221,7 @@ class DataColumn {
         this.editMax = 0.0;
         this.freeze = 0;
         this.band = "";
+        this.description = "";
     }
 
     /// 为列命名，使其可通过 `DataTable.Col(cols, name)` 访问
@@ -227,6 +233,17 @@ class DataColumn {
     /// ```
     static DataColumn Field(DataColumn c, string name) {
         c.field = name; return c;
+    }
+
+    /// 设置表头悬停提示的描述文本。与其他构建器一样可组合：
+    ///
+    /// ```zan
+    /// cols.Add(DataColumn.Describe(
+    ///     DataColumn.Numeric("Score", 120), "0-100 分，越高越好"));
+    /// ```
+    /// 指针在列标题上停留约半秒后弹出两行提示（列名 + 此文本）。
+    static DataColumn Describe(DataColumn c, string text) {
+        c.description = text; return c;
     }
 
     /// 让列启用内联编辑（双击/第二次单击单元格，或按
@@ -1158,6 +1175,17 @@ class DataTableState {
     // 与 min/max 同周期重建（Recompute -> ComputeColStats）。
     List<int> cfRank;
 
+    // ---- 条件格式：右键菜单应用的规则 ----
+    // 调用方常每帧重建列（新 DataColumn 实例），菜单 dispatch
+    // 写进列对象的改动会在下一帧丢失。规则因此落在状态槽里，
+    // EnsureColumnSlots 每帧回写到当前列集：mode 0 表示"菜单
+    // 未启用"，列上工厂预设的规则照常生效；用户清除只清菜单槽。
+    List<int> menuCfMode;       // 每列：0 无，同 cfMode 取值
+    List<int> menuCfColor;
+    List<int> menuCfColor2;
+    List<int> menuCfThreshold;
+    List<bool> menuCfRankPct;
+
     // ---- 分页 ----
     bool paged;
     SignalInt pageModel;       // 从 1 起的当前页码，绑定到 Pagination 控件
@@ -1197,6 +1225,8 @@ class DataTableState {
     int tipOi;                 // 悬停提示正在跟踪的显示槽位（-1 无）
     int tipCol;                // 悬停提示正在跟踪的列索引
     int tipSinceMs;            // 指针进入该单元格的时刻（毫秒时钟）
+    int hdrTipCol;             // 表头悬停提示正在跟踪的列（-1 无）
+    int hdrTipSinceMs;         // 指针进入该列表头的时刻（毫秒时钟）
     int dragRow;               // 正在拖拽重排的行的顺序索引位置（-1 无）
     int dragStartY;            // 行按下时的指针 Y 坐标
     bool dragMoved;            // 指针移动足够远，变为重排拖拽
@@ -1534,6 +1564,11 @@ class DataTableState {
         this.cfMinR = new List<double>();
         this.cfMaxR = new List<double>();
         this.cfRank = new List<int>();
+        this.menuCfMode = new List<int>();
+        this.menuCfColor = new List<int>();
+        this.menuCfColor2 = new List<int>();
+        this.menuCfThreshold = new List<int>();
+        this.menuCfRankPct = new List<bool>();
         this.paged = false;
         this.pageModel = new SignalInt(1);
         this.pageRows = 0;
@@ -1550,6 +1585,8 @@ class DataTableState {
         this.tipOi = -1;
         this.tipCol = -1;
         this.tipSinceMs = 0;
+        this.hdrTipCol = -1;
+        this.hdrTipSinceMs = 0;
         this.dragRow = -1;
         this.dragStartY = 0;
         this.dragMoved = false;

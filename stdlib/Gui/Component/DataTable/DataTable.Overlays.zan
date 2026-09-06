@@ -594,33 +594,46 @@ partial class DataTable {
     /// 契约——子面板里不再嵌孙级）：高亮规则 3 项 + 前/后规则
     /// 4 项 + 分隔 + 数据条 8 预设 + 分隔 + 色阶 8 预设 + 分隔 +
     /// 清除规则；当前生效规则所在组带 ✓（父项不勾选）。
-    static List<MenuItem> BuildCfChildren(DataColumn dc) {
+    /// 勾选状态读"生效规则"：菜单槽位优先（用户最近通过菜单
+    /// 设置的规则，跨每帧列重建持久），槽位为 0 时看列自身的
+    /// 工厂预设。
+    static List<MenuItem> BuildCfChildren(DataColumn dc, DataTableState st, int col) {
         int[] ps = DataTable.CfPresetColors();
+        // 生效规则快照：槽位（菜单应用）优先，否则列上的预设。
+        int cfMode = dc.cfMode;
+        int cfColor = dc.cfColor;
+        int cfColor2 = dc.cfColor2;
+        bool cfRankPct = dc.cfRankPct;
+        if (col >= 0 && col < st.menuCfMode.Count && st.menuCfMode[col] != 0) {
+            cfMode = st.menuCfMode[col];
+            cfColor = st.menuCfColor[col];
+            cfColor2 = st.menuCfColor2[col];
+            cfRankPct = st.menuCfRankPct[col];
+        }
         List<MenuItem> kids = new List<MenuItem>();
 
-        // 高亮规则：大于/小于均值；勾选标在"大于均值"行（颜色
+        // 高亮规则：大于/小于均值；勾选标在对应行（颜色
         // 用首列蓝，与旧面板默认一致）。
-        bool hiOn = dc.cfMode == 3 || dc.cfMode == 4;
         kids.Add(MenuItem.Item(DataTable.T("Greater Than Average", "大于均值")
-                               + (dc.cfMode == 3 ? "  ✓" : ""), "",
+                               + (cfMode == 3 ? "  ✓" : ""), "",
                                DataTable.HdrActCfGreater));
         kids.Add(MenuItem.Item(DataTable.T("Less Than Average", "小于均值")
-                               + (dc.cfMode == 4 ? "  ✓" : ""), "",
+                               + (cfMode == 4 ? "  ✓" : ""), "",
                                DataTable.HdrActCfLess));
         kids.Add(MenuItem.Separator());
 
         // 前/后规则（名次缓存随 Recompute 重建）。
         kids.Add(MenuItem.Item(DataTable.T("Top 10 Items", "前 10 项")
-                               + (dc.cfMode == 5 && !dc.cfRankPct ? "  ✓" : ""), "",
+                               + (cfMode == 5 && !cfRankPct ? "  ✓" : ""), "",
                                DataTable.HdrActCfTopN));
         kids.Add(MenuItem.Item(DataTable.T("Top 10 %", "前 10 %")
-                               + (dc.cfMode == 5 && dc.cfRankPct ? "  ✓" : ""), "",
+                               + (cfMode == 5 && cfRankPct ? "  ✓" : ""), "",
                                DataTable.HdrActCfTopPct));
         kids.Add(MenuItem.Item(DataTable.T("Bottom 10 Items", "后 10 项")
-                               + (dc.cfMode == 6 && !dc.cfRankPct ? "  ✓" : ""), "",
+                               + (cfMode == 6 && !cfRankPct ? "  ✓" : ""), "",
                                DataTable.HdrActCfBottomN));
         kids.Add(MenuItem.Item(DataTable.T("Bottom 10 %", "后 10 %")
-                               + (dc.cfMode == 6 && dc.cfRankPct ? "  ✓" : ""), "",
+                               + (cfMode == 6 && cfRankPct ? "  ✓" : ""), "",
                                DataTable.HdrActCfBottomPct));
         kids.Add(MenuItem.Separator());
 
@@ -631,7 +644,7 @@ partial class DataTable {
             string lbl = DataTable.T(i < 4 ? "Gradient Fill" : "Solid Fill",
                                     i < 4 ? "渐变" : "纯色")
                 + " " + DataTable.SwatchName(ci);
-            if (dc.cfMode == 1 && dc.cfColor == ps[ci]) { lbl = lbl + "  ✓"; }
+            if (cfMode == 1 && cfColor == ps[ci]) { lbl = lbl + "  ✓"; }
             kids.Add(MenuItem.Item(lbl, "", DataTable.HdrActCfBar0 + i));
         }
         kids.Add(MenuItem.Separator());
@@ -642,13 +655,13 @@ partial class DataTable {
             int c0 = ps[ci];
             int c1 = ps[ci + 4 > 11 ? ci - 4 : ci + 4];
             string lbl = DataTable.SwatchName(ci);
-            if (dc.cfMode == 2 && dc.cfColor == c0 && dc.cfColor2 == c1) { lbl = lbl + "  ✓"; }
+            if (cfMode == 2 && cfColor == c0 && cfColor2 == c1) { lbl = lbl + "  ✓"; }
             kids.Add(MenuItem.Item(lbl, "", DataTable.HdrActCfScale0 + i));
         }
 
         kids.Add(MenuItem.Separator());
         string clearLbl = DataTable.T("Clear Rules", "清除规则");
-        if (dc.cfMode != 0) { clearLbl = clearLbl + "  ✓"; }
+        if (cfMode != 0) { clearLbl = clearLbl + "  ✓"; }
         kids.Add(MenuItem.Item(clearLbl, "close", DataTable.HdrActCfClear));
         return kids;
     }
@@ -698,36 +711,56 @@ partial class DataTable {
             st.hitCol = col; st.ColumnResize.Raise();
         } else if (act >= DataTable.HdrActCfBar0 && act < DataTable.HdrActCfBar0 + 8) {
             // 数据条：前 4 组渐变、后 4 组纯色（双端同色）。
+            // 规则写进状态槽（EnsureColumnSlots 每帧回写列）：
+            // 列对象可能每帧被调用方重建，直接写实例会丢。
             int[] ps = DataTable.CfPresetColors();
             int i = act - DataTable.HdrActCfBar0;
             int ci = i < 4 ? i : i + 4;
-            cols[col].cfMode = 1;
-            cols[col].cfColor = ps[ci];
+            st.menuCfMode[col] = 1;
+            st.menuCfColor[col] = ps[ci];
+            st.dirty = true;
         } else if (act >= DataTable.HdrActCfScale0 && act < DataTable.HdrActCfScale0 + 8) {
             int[] ps = DataTable.CfPresetColors();
             int i = act - DataTable.HdrActCfScale0;
             int ci = i < 4 ? i : i + 4;
-            cols[col].cfMode = 2;
-            cols[col].cfColor = ps[ci];
-            cols[col].cfColor2 = ps[ci + 4 > 11 ? ci - 4 : ci + 4];
+            st.menuCfMode[col] = 2;
+            st.menuCfColor[col] = ps[ci];
+            st.menuCfColor2[col] = ps[ci + 4 > 11 ? ci - 4 : ci + 4];
+            st.dirty = true;
         } else if (act == DataTable.HdrActCfGreater || act == DataTable.HdrActCfLess) {
-            cols[col].cfMode = act == DataTable.HdrActCfGreater ? 3 : 4;
-            cols[col].cfThreshold = DataTable.MedianThreshold(app, st, cols, src, col);
+            st.menuCfMode[col] = act == DataTable.HdrActCfGreater ? 3 : 4;
+            st.menuCfThreshold[col] = DataTable.MedianThreshold(app, st, cols, src, col);
             int[] ps = DataTable.CfPresetColors();
-            cols[col].cfColor = ps[0];
+            st.menuCfColor[col] = ps[0];
+            st.dirty = true;
         } else if (act >= DataTable.HdrActCfTopN && act <= DataTable.HdrActCfBottomPct) {
             int[] ps = DataTable.CfPresetColors();
-            DataColumn dc = cols[col];
-            if (act == DataTable.HdrActCfTopN) { DataColumn.TopRules(dc, 10, ps[0]); }
-            else if (act == DataTable.HdrActCfTopPct) { DataColumn.TopRules(dc, 0 - 10, ps[0]); }
-            else if (act == DataTable.HdrActCfBottomN) { DataColumn.BottomRules(dc, 10, ps[4]); }
-            else { DataColumn.BottomRules(dc, 0 - 10, ps[4]); }
+            if (act == DataTable.HdrActCfTopN) {
+                st.menuCfMode[col] = 5;
+                st.menuCfThreshold[col] = 10;
+                st.menuCfRankPct[col] = false;
+            } else if (act == DataTable.HdrActCfTopPct) {
+                st.menuCfMode[col] = 5;
+                st.menuCfThreshold[col] = 10;
+                st.menuCfRankPct[col] = true;
+            } else if (act == DataTable.HdrActCfBottomN) {
+                st.menuCfMode[col] = 6;
+                st.menuCfThreshold[col] = 10;
+                st.menuCfRankPct[col] = false;
+            } else {
+                st.menuCfMode[col] = 6;
+                st.menuCfThreshold[col] = 10;
+                st.menuCfRankPct[col] = true;
+            }
+            st.menuCfColor[col] = act >= DataTable.HdrActCfBottomN ? ps[4] : ps[0];
             // 名次缓存随下一次 Recompute 重建。
             st.dirty = true;
-            DataTable.Recompute(st, cols, src);
         } else if (act == DataTable.HdrActCfClear) {
-            cols[col].cfMode = 0;
-            cols[col].cfRankPct = false;
+            // 只清菜单槽：mode 0 时 EnsureColumnSlots 不回写，
+            // 列上工厂预设的规则自然恢复生效。
+            st.menuCfMode[col] = 0;
+            st.menuCfRankPct[col] = false;
+            st.dirty = true;
         }
     }
 
@@ -749,6 +782,9 @@ partial class DataTable {
             st.hdrMenuOpen.Set(false);
             st.hdrMenuSub.Set(0 - 1);
             DataTable.DispatchHeaderAction(app, st, cols, src, col, act);
+            // 菜单可能改了规则/聚合/名次缓存依赖的状态：
+            // 本帧立即重算，数据条/色阶的 min/max 不用过期。
+            if (st.dirty) { DataTable.Recompute(st, cols, src); }
             app.RequestRedraw();
         }
         if (!st.hdrCtxOpen) { return; }
@@ -820,7 +856,7 @@ partial class DataTable {
         if (canAgg) {
             items.Add(MenuItem.Separator());
             items.Add(MenuItem.Submenu(DataTable.T("Conditional Formatting", "条件格式"),
-                                       "flag", DataTable.BuildCfChildren(cols[col])));
+                                       "flag", DataTable.BuildCfChildren(cols[col], st, col)));
         }
 
         app.AddOverlay(OverlayPopup.RichMenu(st.hdrCtxX, st.hdrCtxY, items,
