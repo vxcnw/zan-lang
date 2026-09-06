@@ -160,6 +160,9 @@ class LegendApp {
         else if (page == 26) { BuildAchievements(); }
         else if (page == 27) { BuildShop(); }
         else if (page == 28 || page == 30) { BuildSettings(); }
+        else if (page == 1) { BuildArena(); }
+        else if (page == 4) { BuildEscort(); }
+        else if (page == 24 || page == 25) { BuildTitle(); }
         else { BuildOnlinePage(); }
     }
     void BuildWelcome() {
@@ -470,6 +473,46 @@ class LegendApp {
         Panel help = Col("frame"); help.With(Text("操作说明", "cyan", 24)); Note(help, "单击装备选中；双击穿戴。\n左侧装备格选择锻造槽位。\n锁定保护回收、献祭。\n暂停挂机会暂停离线战斗。\n离线最多结算24小时。"); grid.With(help); content.With(grid);
         Note(content, "本地存档：" + saves.path + "\n当前为还原中的工程，不是完整运营服务端。");
     }
+    void BuildArena() {
+        content.With(Text("PK竞技场 · 本地对手", "yellow strong", 28));
+        pageInfo = Text("", "cyan", 48); pageInfo.Named("arena-status"); content.With(pageInfo);
+        Panel intro = Col("frame"); intro.With(Text("当前战力：" + Rules.N(g.Power()), "green", 32));
+        Note(intro, "竞技场暂未接入服务器，以下为可重复验证的本地 NPC 对手；胜负、次数与战功都会写入本地存档。"); content.With(intro);
+        Grid rivals = Grid.Of(3); rivals.Gap(8);
+        for (int i = 0; i < 3; i = i + 1) {
+            int n = i; Panel rival = Col("frame"); rival.Named("arena-rival-" + Rules.N(i));
+            rival.With(Art(i == 0 ? "monster" : (i == 1 ? "horn" : "sword"), 64, 64));
+            rival.With(Text("NPC 对手 " + Rules.N(i + 1), "strong", 28));
+            rival.With(Text("挑战倍率 " + Rules.N(100 + i * g.B("arena_power_rival")) + "%\n胜利：战功 +" + Rules.N(g.B("arena_win_merit")) + "、金币 +" + Rules.N(g.B("arena_win_gold")) + "\n失败：战功 +" + Rules.N(g.B("arena_lose_merit")), "secondary", 64));
+            Button fight = Btn("挑战（消耗1次）", "arena-fight-" + Rules.N(i), () => { g.Arena(n); Rebuild(); }); fight.Disabled = g.arenaTries <= 0; rival.With(fight); rivals.With(rival);
+        }
+        content.With(rivals); detail = Text("", "secondary", 0); detail.Named("arena-notice"); content.With(detail);
+    }
+    void BuildEscort() {
+        content.With(Text("押镖 · 离线收益", "yellow strong", 28));
+        pageInfo = Text("", "cyan", 64); pageInfo.Named("escort-status"); content.With(pageInfo);
+        Panel route = Col("frame"); route.With(Art("reward", 64, 64));
+        route.With(Text("镖车从本地营地出发，完成后自动发放金币与声望。等级、营地等级会影响最终金币；关闭游戏期间也会继续倒计时。", "secondary", 72));
+        Button start = Btn("发起押镖 · 消耗 " + Rules.N(g.B("escort_gold")) + " 金币", "escort-start", () => { g.Escort(); Rebuild(); }); start.Disabled = g.escortLeft > 0 || g.escortTries <= 0; route.With(start); content.With(route);
+        detail = Text("", "secondary", 0); detail.Named("escort-notice"); content.With(detail);
+    }
+    void BuildTitle() {
+        bool rankPage = page == 24;
+        content.With(Text(rankPage ? "爵位" : "称谓展示", "yellow strong", 28));
+        pageInfo = Text("", "cyan", 64); pageInfo.Named(rankPage ? "rank-status" : "title-status"); content.With(pageInfo);
+        Panel card = Col("frame"); card.With(Art(rankPage ? "horn" : "portrait", 72, 72));
+        if (rankPage) {
+            DataRow rule = GameTables.current.growth.At(2);
+            card.With(Text("本地爵位成长 · 当前等级 " + Rules.N(g.title) + " / " + Rules.N(rule.Int("max_level")), "strong", 36));
+            card.With(Text("每级提升全属性百分比；消耗声望 " + Rules.N(rule.Int("merit")) + " + 等级成长费用，并按配置扣除金币。", "secondary", 64));
+            Button upgrade = Btn(g.title >= rule.Int("max_level") ? "已达上限" : "提升爵位", "title-upgrade", () => { g.Train(2); Rebuild(); }); upgrade.Disabled = g.title >= rule.Int("max_level"); card.With(upgrade);
+        } else {
+            card.With(Text("当前称谓等级 " + Rules.N(g.title), "strong", 36));
+            card.With(Text("称谓加成已作用于战斗属性。原始多页称谓库与全服展示依赖服务端，目前保留本地成长结果，不伪造称谓列表。", "secondary", 64));
+            card.With(Btn("前往爵位提升", "title-go-rank", () => { Navigate(24); }));
+        }
+        content.With(card); detail = Text("", "secondary", 0); detail.Named("title-notice"); content.With(detail);
+    }
     void BuildOnlinePage() {
         content.With(Text(pages[page], "yellow strong", 28));
         string header = "角色                      等级                 状态                 操作";
@@ -503,6 +546,9 @@ class LegendApp {
             else { cellLabels[i].Text = ""; cellImages[i].SetShown(false);  cells[i].Class = i >= (vault ? 48 : g.capacity) ? "item-locked" : "item-cell"; }
         }
         for (int i = 0; i < 12; i = i + 1) { if (gearLabels[i] != null) { Equipment e = g.equipped[i]; gearLabels[i].Text = e == null ? Rules.Slots()[i] : (e.locked ? "锁 " : "") + "×" + Rules.N(e.coefficient); gearImages[i].SetShown(e != null); if (e != null) { gearImages[i].Src = EquipmentArtPath(e); } } }
+        if (page == 1 && pageInfo != null) { pageInfo.Text = "今日剩余次数：" + Rules.N(g.arenaTries) + "\n累计胜场：" + Rules.N(g.arenaWins) + " · 当前战功：" + Rules.N(g.merit); detail.Text = g.notice; }
+        if (page == 4 && pageInfo != null) { pageInfo.Text = "今日剩余次数：" + Rules.N(g.escortTries) + "\n" + (g.escortLeft > 0 ? "运输中 · 剩余 " + Rules.N(g.escortLeft) + " 秒\n预计金币：" + Rules.N(g.escortReward) : "当前没有运输中的镖车"); detail.Text = g.notice; }
+        if ((page == 24 || page == 25) && pageInfo != null) { pageInfo.Text = "当前称谓/爵位等级：" + Rules.N(g.title) + "\n战斗属性称谓加成：" + Rules.N(g.title) + " × 配置比例"; detail.Text = g.notice; }
         if (page == 0 && pageInfo != null) { pageInfo.Text = "当前地点：" + GameTables.current.Map(g.floor).Text("name") + " · " + (g.mode != 0 ? "正在挑战，暂不可传送" : (g.active ? "自动战斗中" : "战斗已暂停")); }
         if (page == 20) {
             pageInfo.Text = "攻击：" + g.StatPair("attack") + "\n魔法：" + g.StatPair("magic") + "\n道术：" + g.StatPair("tao") + "\n防御：" + g.StatPair("defense") + "\n魔防：" + g.StatPair("magic_defense") + "\n生命：" + Rules.N(g.MaxHp()) + "\n法力：" + Rules.N(g.MaxMp()) + "\n战力：" + Rules.N(g.Power());
