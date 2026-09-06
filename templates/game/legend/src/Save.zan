@@ -16,7 +16,7 @@ class SaveStore {
         return dir + "/hero-v2.json";
     }
     static JsonValue Encode(Game g) {
-        JsonValue j = JsonValue.NewObject(); Rules.Put(j, "version", 3);
+        JsonValue j = JsonValue.NewObject(); Rules.Put(j, "version", 4);
         Rules.Put(j, "job", g.job);
         Rules.Put(j, "level", g.level);
         Rules.Put(j, "xp", g.xp);
@@ -44,6 +44,9 @@ class SaveStore {
         Rules.Put(j, "quest", g.quest);
         Rules.Put(j, "capacity", g.capacity);
         Rules.Put(j, "filter", g.filter);
+        Rules.Put(j, "filterCoefficient", g.filterCoefficient);
+        Rules.Put(j, "filterMinLevel", g.filterMinLevel);
+        Rules.Put(j, "filterJobOnly", g.filterJobOnly ? 1 : 0);
         Rules.Put(j, "seed", g.seed);
         Rules.Put(j, "hp", g.hp);
         Rules.Put(j, "mp", g.mp);
@@ -96,7 +99,7 @@ class SaveStore {
     }
     static Game Decode(string text) {
         JsonValue j = JsonValue.Parse(text);
-        if (!j.IsObject() || (j.Int("version", 0) != 2 && j.Int("version", 0) != 3) || !j.Has("savedAt") || !j.Has("job")) { throw new Exception("Unsupported or incomplete save"); }
+        if (!j.IsObject() || (j.Int("version", 0) != 2 && j.Int("version", 0) != 3 && j.Int("version", 0) != 4) || !j.Has("savedAt") || !j.Has("job")) { throw new Exception("Unsupported or incomplete save"); }
         Game g = new Game();
         g.job = Rules.Clamp(j.Int("job", g.job), -1, 2);
         g.level = Rules.Clamp(j.Int("level", g.level), 1, GameTables.current.levels.rows.Count);
@@ -134,6 +137,9 @@ class SaveStore {
         g.quest = Rules.Clamp(j.Int("quest", g.quest), 0, GameTables.current.quests.rows.Count);
         g.capacity = Rules.Clamp(j.Int("capacity", g.capacity), g.B("initial_capacity"), g.B("max_capacity"));
         g.filter = Rules.Clamp(j.Int("filter", g.filter), 0, 4);
+        g.filterCoefficient = Rules.Clamp(j.Int("filterCoefficient", g.filterCoefficient), 1, g.B("equipment_coefficient_max"));
+        g.filterMinLevel = Rules.Clamp(j.Int("filterMinLevel", g.filterMinLevel), 0, GameTables.current.levels.rows.Count);
+        g.filterJobOnly = j.Int("filterJobOnly", g.filterJobOnly ? 1 : 0) == 1;
         g.seed = Rules.Clamp(j.Int("seed", g.seed), 1, 2147483646);
         g.hp = Rules.Clamp(j.Int("hp", g.hp), 0, 1000000000);
         g.mp = Rules.Clamp(j.Int("mp", g.mp), 0, 1000000000);

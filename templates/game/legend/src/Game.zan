@@ -32,6 +32,7 @@ class Game {
     int quest;
     int capacity = GameTables.Value("initial_capacity");
     int filter;
+    int filterCoefficient = 1; int filterMinLevel; bool filterJobOnly;
     int seed = 170927;
     bool active = true;
     bool autoPush = true;
@@ -199,14 +200,14 @@ class Game {
         int roll = Random(total); int tier = 0;
         foreach (DataRow q in GameTables.current.qualities.rows) { roll = roll - q.Int("weight"); if (roll < 0) { tier = q.Int("id"); break; } }
         if (tier < guaranteed) { tier = guaranteed; }
-        if (bag.Count >= capacity) { Log("背包已满，掉落未拾取。"); return; }
-        if (applyFilter && tier < filter) { return; }
         total = 0;
         foreach (DataRow row in GameTables.current.drops.rows) { if (row.Int("pool") == pool) { total = total + row.Int("weight"); } }
         roll = Random(total); int itemId = 0;
         foreach (DataRow row in GameTables.current.drops.rows) { if (row.Int("pool") == pool) { roll = roll - row.Int("weight"); if (roll < 0) { itemId = row.Int("item_id"); break; } } }
         Equipment e = CreateItem(itemId, tier, level);
         if ((e.slot == 4 || e.slot == 6) && Random(2) == 1) { e.slot = e.slot + 1; }
+        if (applyFilter && !KeepDrop(e)) { return; }
+        if (bag.Count >= capacity) { Log("背包已满，掉落未拾取。"); return; }
         bag.Add(e); Log("拾获 " + e.Name() + " · " + Rules.Quality(e.tier));
     }
     void Victory() {
@@ -376,6 +377,20 @@ class Game {
         }
         Log("已按部位穿戴最高强度装备；锁定装备不会被分解。");
     }
+    bool KeepDrop(Equipment e) {
+        if (e == null || e.tier < filter || e.coefficient < filterCoefficient || (filterMinLevel > 0 && e.level < filterMinLevel)) { return false; }
+        DataRow d = GameTables.current.items.At(e.definitionId); int required = d.Int("required_job");
+        return !filterJobOnly || required < 0 || required == job;
+    }
+    void CycleFilterLevel() {
+        if (filterMinLevel == 0) { filterMinLevel = 10; }
+        else if (filterMinLevel == 10) { filterMinLevel = 20; }
+        else if (filterMinLevel == 20) { filterMinLevel = 40; }
+        else if (filterMinLevel == 40) { filterMinLevel = 60; }
+        else if (filterMinLevel == 60) { filterMinLevel = 80; }
+        else { filterMinLevel = 0; }
+    }
+    void CycleFilterCoefficient() { filterCoefficient = filterCoefficient >= B("equipment_coefficient_max") ? 1 : filterCoefficient + 1; }
     int ElementNeed(int id) { DataRow e = GameTables.current.elements.At(id); return e.Int("xp_base") + elementRanks[id] * e.Int("xp_step"); }
     void InjectElement(int id) {
         if (job < 0 || id < 0 || id >= 5) { return; }

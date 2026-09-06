@@ -423,7 +423,12 @@ class LegendApp {
     void BuildSettings() {
         content.With(Text(page == 28 ? "帮助 · 操作与现有规则" : "设置", "yellow strong", 28)); Grid grid = Grid.Of(2); grid.Gap(8);
         Panel battle = Col("frame"); battle.With(Text("挂机设置", "cyan", 24)); battle.With(Btn(g.active ? "☑ 自动战斗" : "☐ 自动战斗", "settings-active", () => { g.active = !g.active; Rebuild(); })); battle.With(Btn(g.autoPush ? "☑ 自动推层" : "☐ 自动推层", "settings-push", () => { g.autoPush = !g.autoPush; Rebuild(); })); battle.With(Btn(g.autoPotion ? "☑ 自动用药" : "☐ 自动用药", "settings-potion", () => { g.autoPotion = !g.autoPotion; Rebuild(); })); grid.With(battle);
-        Panel filter = Col("frame"); filter.With(Text("拾取过滤", "cyan", 24)); filter.With(Btn("过滤：" + Rules.Quality(g.filter), "filter", () => { g.filter = (g.filter + 1) % 5; Rebuild(); })); Note(filter, "低于阈值不拾取；满包掉落丢弃。\n不会自动售卖或回收。"); grid.With(filter);
+        Panel filter = Col("frame"); filter.With(Text("拾取过滤", "cyan", 24));
+        filter.With(Btn("最低品质：" + Rules.Quality(g.filter), "filter-quality", () => { g.filter = (g.filter + 1) % 5; Rebuild(); }));
+        filter.With(Btn("最低系数：" + Rules.N(g.filterCoefficient), "filter-coefficient", () => { g.CycleFilterCoefficient(); Rebuild(); }));
+        filter.With(Btn("最低等级：" + (g.filterMinLevel == 0 ? "不限" : Rules.N(g.filterMinLevel)), "filter-level", () => { g.CycleFilterLevel(); Rebuild(); }));
+        filter.With(Btn(g.filterJobOnly ? "☑ 只保留本职业" : "☐ 只保留本职业", "filter-job", () => { g.filterJobOnly = !g.filterJobOnly; Rebuild(); }));
+        Note(filter, "品质、系数、装备等级和职业可独立组合；过滤掉的装备不会占用背包。\n不会自动售卖或回收。"); grid.With(filter);
         Panel save = Col("frame"); save.With(Text("存档", "cyan", 24)); save.With(Btn("立即保存", "settings-save", () => { Changed(); })); Note(save, "每15秒、每次操作和正常退出保存。主文件损坏尝试备份；两份均损坏时禁止覆盖。"); grid.With(save);
         Panel help = Col("frame"); help.With(Text("操作说明", "cyan", 24)); Note(help, "单击装备选中；双击穿戴。\n左侧装备格选择锻造槽位。\n锁定保护回收、献祭。\n暂停挂机会暂停离线战斗。\n离线最多结算24小时。"); grid.With(help); content.With(grid);
         Note(content, "本地存档：" + saves.path + "\n当前为还原中的工程，不是完整运营服务端。");

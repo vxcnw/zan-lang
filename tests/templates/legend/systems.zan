@@ -48,7 +48,20 @@ class LegendSystemTests {
         Check(g.elementPool == pool && g.elementRanks[4] == 100, "element max does not spend xp");
         int dragon = -1;
         foreach (DataRow item in GameTables.current.items.rows) { if (item.Text("name") == "屠龙") { dragon = item.Int("id"); } }
-        Check(dragon >= 0, "reference named equipment exists"); g.bag.Clear(); Equipment e = g.CreateItem(dragon,0,1); g.bag.Add(e);
+        Check(dragon >= 0, "reference named equipment exists");
+        g.filter = 1; g.filterCoefficient = 4; g.filterMinLevel = 20; g.filterJobOnly = true;
+        Equipment filtered = g.CreateItem(dragon, 1, 40); filtered.coefficient = 4;
+        Check(g.KeepDrop(filtered), "pickup filters keep matching universal equipment");
+        filtered.coefficient = 3; Check(!g.KeepDrop(filtered), "pickup coefficient filter rejects weak equipment");
+        filtered.coefficient = 4; filtered.level = 10; Check(!g.KeepDrop(filtered), "pickup level filter rejects low-level equipment");
+        int otherJobItem = -1;
+        foreach (DataRow item in GameTables.current.items.rows) { if (item.Int("slot") >= 0 && item.Int("required_job") >= 0 && item.Int("required_job") != g.job) { otherJobItem = item.Int("id"); break; } }
+        Check(otherJobItem >= 0, "job-specific equipment exists");
+        Equipment offJob = g.CreateItem(otherJobItem, 1, 40); offJob.coefficient = 4;
+        Check(!g.KeepDrop(offJob), "pickup job filter rejects off-job equipment");
+        g.filterJobOnly = false; Check(g.KeepDrop(offJob), "pickup job filter can be disabled");
+        g.filter = 0; g.filterCoefficient = 1; g.filterMinLevel = 0;
+        g.bag.Clear(); Equipment e = g.CreateItem(dragon,0,1); g.bag.Add(e);
         Check(g.RecyclePrice(e,0) == 1000000, "reference dragon gold price");
         int gold = g.gold; int iron = g.iron; e.locked = true; g.RecycleAs(e,0);
         Check(g.bag.Count == 1 && g.gold == gold, "locked recycle atomic"); e.locked = false;
@@ -61,8 +74,10 @@ class LegendSystemTests {
             e = g.CreateItem(dragon,0,1); g.bag.Add(e); int old = g.RecycleBalance(c); int reward = g.RecyclePrice(e,c); g.RecycleAs(e,c);
             Check(g.bag.Count == 0 && g.RecycleBalance(c) == old + reward && g.gold == gold && g.iron == iron, "separate non-gold currency " + c.ToString());
         }
+        g.filter = 3; g.filterCoefficient = 5; g.filterMinLevel = 40; g.filterJobOnly = true;
         g.savedAt = 1700000120; Game loaded = SaveStore.Decode(SaveStore.Encode(g).ToJson());
         Check(loaded.secretFloor == g.secretFloor && loaded.secrets == g.secrets && !loaded.active, "secret save roundtrip");
+        Check(loaded.filter == 3 && loaded.filterCoefficient == 5 && loaded.filterMinLevel == 40 && loaded.filterJobOnly, "pickup filters save roundtrip");
         Check(loaded.elementPool == g.elementPool && loaded.elementSeconds == 61 && loaded.elementRanks[0] == 1 && loaded.elementRanks[4] == 100, "elements save roundtrip");
         Check(loaded.reputation == g.reputation && loaded.redPackets == g.redPackets && loaded.recyclePoints == g.recyclePoints, "recycle wallets persisted");
         JsonValue broken = SaveStore.Encode(g); broken.Set("elementRanks",JsonValue.NewArray()); bool rejected = false;
