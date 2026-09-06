@@ -5391,6 +5391,56 @@
     },
     {
       "category": "Data Display",
+      "name": "ListItem",
+      "demos": [],
+      "props": [
+        {
+          "name": "text",
+          "type": "string",
+          "deflt": "-",
+          "desc": {
+            "en": "Title text (bindable).",
+            "zh": ""
+          }
+        },
+        {
+          "name": "desc",
+          "type": "string",
+          "deflt": "\"\"",
+          "desc": {
+            "en": "Optional second line; empty hides it.",
+            "zh": ""
+          }
+        },
+        {
+          "name": "selected",
+          "type": "bool",
+          "deflt": "false",
+          "desc": {
+            "en": "Selected state: text recolors via listitem::title:selected. The host (ListView band) paints the background.",
+            "zh": ""
+          }
+        },
+        {
+          "name": "class",
+          "type": "string",
+          "deflt": "-",
+          "desc": {
+            "en": "header turns the row into a muted group caption with extra top padding.",
+            "zh": ""
+          }
+        }
+      ],
+      "events": [],
+      "desc": {
+        "en": "A two-line list row: title + optional subtitle with symmetric padding, ellipsis truncation and state-driven selected colors. Use it as the row content of ListView template rows (ListItem.Header for group captions).",
+        "zh": "两行列表行：标题 + 可选副标题，上下留白对称、超宽省略号截断、选中配色走状态规则。作 ListView 模板行的标准行内容（ListItem.Header 作分组标题）。"
+      },
+      "code": "ListView<Item> nav = new ListView<Item>(\n    it => it.header ? ListItem.Header(it.text)\n                    : new ListItem(it.text, it.desc) { Selected = it.sel });\nnav.Bind(rows);            // rows: the caller's own list\nnav.OnSelect(OpenDemo);    // selection band comes from the list",
+      "json": "{\n  \"type\": \"ListItem\",\n  \"name\": \"item\",\n  \"text\": \"Standard\",\n  \"desc\": \"Title + optional subtitle\",\n  \"selected\": false\n}"
+    },
+    {
+      "category": "Data Display",
       "name": "VirtualList",
       "demos": [],
       "props": [

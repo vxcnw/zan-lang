@@ -208,6 +208,40 @@ class GalleryNavRow {
     }
 }
 
+/// ListItem 演示的行数据：分组标题或两行行（可选选中态）。
+class GalleryItemRow {
+    bool header;
+    bool sel;
+    string text;
+    string desc;
+
+    static GalleryItemRow Head(string text) {
+        GalleryItemRow r = new GalleryItemRow();
+        r.header = true;
+        r.sel = false;
+        r.text = text;
+        r.desc = "";
+        return r;
+    }
+
+    static GalleryItemRow Row(string text, string desc, bool sel) {
+        GalleryItemRow r = new GalleryItemRow();
+        r.header = false;
+        r.sel = sel;
+        r.text = text;
+        r.desc = desc;
+        return r;
+    }
+
+    /// 行模板：视觉都在 ListItem 里，这里只做映射。
+    static Control View(GalleryItemRow r) {
+        if (r.header) { return ListItem.Header(r.text); }
+        ListItem it = new ListItem(r.text, r.desc);
+        it.Selected = r.sel;
+        return it;
+    }
+}
+
 /// One catalog entry: which category it belongs to, its display name, a short
 /// description, and the code snippet shown (and copied) in the detail pane.
 class Comp {
@@ -877,6 +911,9 @@ class Gallery {
     static List<string> demoQuotePrices;
     static List<string> demoQuoteChanges;
     static ListView<string> demoList;
+    // ListItem 演示：数据 + 列表（行模板把行映射成 ListItem/Header）。
+    static List<GalleryItemRow> demoItemRows;
+    static ListView<GalleryItemRow> demoItemList;
     // 倒计时演示：实例必须跨帧存活（剩余值长在控件上，每帧 new
     // 等于每帧重摆），Finish 状态行单独持有。
     static Countdown demoCountdownA;
@@ -4571,6 +4608,7 @@ class Gallery {
         if (name == "Collapse") { return 190; }
         if (name == "Table") { return 225; }
         if (name == "ListView") { return 335; }
+        if (name == "ListItem") { return 300; }
         if (name == "Calendar") { return 430; }
         if (name == "Carousel") { return 300; }
         if (name == "Layer") { return 360; }
@@ -8011,6 +8049,38 @@ class Gallery {
             Gallery.demoList.RenderInside(app, new Rect(
                 px, py - app.Scale(16), app.Scale(300),
                 items.Count * app.theme.heightLarge));
+        } else if (name == "ListItem") {
+            // 两行列表行：标题 + 副标题、分组标题档由 listitem 样式
+            // 规则给出；选中行由 ListView 画选中带（默认灰底不换
+            // 字，两种皮肤都可读）。行走 ListView 模板通道，和真实
+            // 侧栏的用法一致。
+            if (Gallery.demoItemRows == null) {
+                Gallery.demoItemRows = new List<GalleryItemRow>();
+                Gallery.demoItemRows.Add(GalleryItemRow.Head(
+                    Gallery.T("Group A", "分组 A")));
+                Gallery.demoItemRows.Add(GalleryItemRow.Row(
+                    Gallery.T("Standard", "标准两行行"),
+                    Gallery.T("Title + optional subtitle, symmetric padding",
+                              "标题 + 可选副标题，上下留白对称"), false));
+                Gallery.demoItemRows.Add(GalleryItemRow.Row(
+                    Gallery.T("Selected", "选中行"),
+                    Gallery.T("The list paints the selection band",
+                              "选中行由列表画选中带"), true));
+                Gallery.demoItemRows.Add(GalleryItemRow.Head(
+                    Gallery.T("Group B", "分组 B")));
+                Gallery.demoItemRows.Add(GalleryItemRow.Row(
+                    Gallery.T("Overflow", "超宽截断"),
+                    Gallery.T("A subtitle longer than the row is ellipsized",
+                              "超过行宽的副标题按省略号截断"), false));
+            }
+            if (Gallery.demoItemList == null) {
+                Gallery.demoItemList = new ListView<GalleryItemRow>(
+                    r => GalleryItemRow.View(r));
+                Gallery.demoItemList.Class = "flat";
+                Gallery.demoItemList.Bind(Gallery.demoItemRows);
+            }
+            Gallery.demoItemList.RenderInside(app, new Rect(
+                px, py - app.Scale(16), app.Scale(320), app.Scale(230)));
         } else if (name == "Table") {
             List<string> columns = new List<string>();
             columns.Add(Gallery.T("Task", "任务"));

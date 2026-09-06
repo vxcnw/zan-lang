@@ -1,0 +1,93 @@
+using System;
+using Gui;
+using Gui.Widget;
+
+/// ListItem 的无窗口回归，两类最容易断的契约。
+///
+/// 1. 测量：副标题行与对称的上下内边距计入高度（两行行必须比
+///    单行高），分组标题档与普通行不同高，且重复测量不漂移
+///    （样式缓存不得改变结果）——ListView 模板行的行高直接
+///    来自这里，测错就是整列行距错乱。
+/// 2. 选中配色契约：默认选中不换字（灰带配正常文字两种皮肤
+///    都可读），但 `selected` 状态钩子必须接通——应用把选中带
+///    画成主色时，一行应用 CSS 就能把行内文字换成反色。状态
+///    规则没接上时选中行是主色带上的白字白底（charts 导航事故）。
+class Program {
+    static int fails;
+
+    static void EqInt(string what, int got, int want) {
+        if (got == want) { return; }
+        fails = fails + 1;
+        Console.WriteLine($"FAIL {what}: got {got} want {want}");
+    }
+
+    static void EqStr(string what, string got, string want) {
+        if (got == want) { return; }
+        fails = fails + 1;
+        Console.WriteLine($"FAIL {what}: got '{got}' want '{want}'");
+    }
+
+    static void Main() {
+        fails = 0;
+        App app = new App("listitem-regression", 400, 300);
+
+        ListItem one = new ListItem("Standard");
+        ListItem two = new ListItem("Standard", "with a subtitle");
+        ListItem head = ListItem.Header("Group");
+        app.BeginFrame();
+
+        one.MeasureTree(app);
+        int oneH = one.prefH;
+        two.MeasureTree(app);
+        int twoH = two.prefH;
+        head.MeasureTree(app);
+        int headH = head.prefH;
+
+        // 副标题让行更高；分组标题与普通行不同高。
+        EqInt("two-line taller than one-line", twoH > oneH ? 1 : 0, 1);
+        EqInt("header height differs from row", headH == oneH ? 1 : 0, 0);
+
+        // 高度稳定：重复测量（样式已缓存）不得漂移。
+        two.MeasureTree(app);
+        EqInt("measure stable", two.prefH, twoH);
+
+        // 默认选中不换字：选中带（bg-tertiary）配正常文字在两种
+        // 皮肤下都可读；默认反色会在浅带配白字、深带配深字，两
+        // 种皮肤都不可读（charts 导航事故）。
+        ListItem plain = new ListItem("A", "b");
+        ListItem sel = new ListItem("A", "b");
+        sel.Selected = true;
+        int plainTitle = plain.TitleStyle(app).FgOr(0);
+        int selTitle = sel.TitleStyle(app).FgOr(0);
+        int plainDesc = plain.DescStyle(app).FgOr(0);
+        int selDesc = sel.DescStyle(app).FgOr(0);
+        EqInt("default selected keeps title color", selTitle, plainTitle);
+        EqInt("default selected keeps desc color", selDesc, plainDesc);
+        EqInt("normal title is primary text", plainTitle,
+              app.theme.textPrimary);
+
+        // 分组标题是弱色小字档。
+        EqInt("header caption is tertiary", head.TitleStyle(app).FgOr(0),
+              app.theme.textTertiary);
+
+        // 状态钩子必须接通：应用把选中带画成主色时，一行应用 CSS
+        // 就能把行内文字换成反色（charts 导航的用法）。UseAppCss
+        // 递增样式代数，重解析必须立即看到新规则。
+        app.UseAppCss("listitem::title:selected, listitem::desc:selected"
+                      + " { color: var(--text-inverse); }");
+        EqInt("app css recolors selected title", sel.TitleStyle(app).FgOr(0),
+              app.theme.textInverse);
+        EqInt("app css recolors selected desc", sel.DescStyle(app).FgOr(0),
+              app.theme.textInverse);
+        EqInt("app css leaves plain title", plain.TitleStyle(app).FgOr(0),
+              app.theme.textPrimary);
+
+        // 序列化与 CSS 选择器名。
+        EqStr("kind", plain.Kind(), "ListItem");
+        EqStr("style type", plain.StyleType(), "listitem");
+
+        if (fails == 0) { Console.WriteLine("listitem ok"); }
+        else { Console.WriteLine("listitem FAILURES "
+            + Convert.ToString(fails)); }
+    }
+}

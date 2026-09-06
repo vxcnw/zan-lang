@@ -2001,6 +2001,18 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
       -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_watermark${_exe_ext}
       -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
 
+  # ListItem 两行列表行：测量契约（副标题行/对称留白计入高度、
+  # 重复测量稳定）与 selected 状态的配色解析——状态规则断掉时
+  # 选中行是主色带上的白字白底（charts 导航事故的病根）。
+  add_test(NAME conformance_gui_listitem
+    COMMAND ${CMAKE_COMMAND}
+      -DZANC=$<TARGET_FILE:zanc>
+      -DSRC=${CMAKE_SOURCE_DIR}/tests/gui/listitem_test.zan
+      "-DZANC_ARGS=--auto-stdlib${_gui_driver_tail}"
+      -DEXPECTED=${CMAKE_SOURCE_DIR}/tests/conformance/gui_listitem.out
+      -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_listitem${_exe_ext}
+      -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
+
   add_test(NAME conformance_gui_chart_symbol
     COMMAND ${CMAKE_COMMAND}
       -DZANC=$<TARGET_FILE:zanc>

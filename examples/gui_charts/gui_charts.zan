@@ -81,7 +81,12 @@ partial class Charts {
     static App app;
     static SignalInt lang;
     static SignalInt selected;
-    static ScrollView navView;
+    static ListView<ChartsNavRow> nav;
+    static List<ChartsNavRow> navRows;
+    static int navLang = 0 - 1;
+    static int navSelRow;
+    static Button langEn;
+    static Button langZh;
     static List<ChartsDemo> demos;
     static ChartOption heat;
     static int heatSlot;
@@ -97,8 +102,19 @@ partial class Charts {
         Charts.app = app;
         Charts.lang = new SignalInt(1);
         Charts.selected = new SignalInt(0);
-        Charts.navView = new ScrollView();
         Charts.BuildCatalog();
+        Charts.InitNav();
+        // 列表选中与示例选中从第一帧起就是一回事（否则首例只
+        // 有反色文字、没有主色带）。
+        Charts.SelectDemo(Charts.selected.Get());
+
+        // 选中行用主色带（默认皮肤只给灰底）；带子加深到主色
+        // 的应用需自己把行内文字换成反色——ListItem 默认不换字，
+        // 两种皮肤下灰底 + 正常文字都可读。颜色全部走 token。
+        app.UseAppCss("listrow:selected { background: var(--primary); }"
+            + "listrow:hover { background: var(--bg-hover); }"
+            + "listitem::title:selected, listitem::desc:selected"
+            + " { color: var(--text-inverse); }");
 
         if (Environment.ArgCount() > 0) {
             string want = Environment.ArgAt(0);
@@ -107,7 +123,7 @@ partial class Charts {
             // 类目匹配把同名词的第一项抢过去。
             for (int i = 0; i < Charts.demos.Count; i = i + 1) {
                 if (want == Charts.demos[i].id) {
-                    Charts.selected.Set(i);
+                    Charts.SelectDemo(i);
                     hit = true;
                     break;
                 }
@@ -116,7 +132,7 @@ partial class Charts {
                 for (int i = 0; i < Charts.demos.Count; i = i + 1) {
                     ChartsDemo d = Charts.demos[i];
                     if (want == d.en || want == d.zh || want == d.cat) {
-                        Charts.selected.Set(i);
+                        Charts.SelectDemo(i);
                         break;
                     }
                 }
@@ -581,104 +597,106 @@ partial class Charts {
         c.DrawText(area.x + pad, area.y + app.Scale(20),
             "CHARTS", t.textTertiary, t.fontSizeSmall);
 
-        int lgW = app.Scale(34);
+        // EN/中 切换：两个真实 Button，当前语言挂 primary 类。
         int lgH = app.Scale(20);
+        int lgW = app.Scale(36);
         int lgY = area.y + app.Scale(15);
-        int enX = area.x + sw - pad - lgW * 2 - app.Scale(2);
-        int zhX = area.x + sw - pad - lgW;
-        int curLang = Charts.lang.Get();
-        Charts.RenderLangChip(app, c, t, enX, lgY, lgW, lgH, "EN", curLang == 0);
-        Charts.RenderLangChip(app, c, t, zhX, lgY, lgW, lgH, "中", curLang == 1);
-        if (app.window.EventKind() == 3) {
-            if (app.mouseX >= enX && app.mouseX < enX + lgW
-                    && app.mouseY >= lgY && app.mouseY < lgY + lgH) {
-                Charts.lang.Set(0); app.RequestRedraw();
-            } else if (app.mouseX >= zhX && app.mouseX < zhX + lgW
-                    && app.mouseY >= lgY && app.mouseY < lgY + lgH) {
-                Charts.lang.Set(1); app.RequestRedraw();
-            }
+        if (Charts.langEn == null) {
+            Charts.langEn = new Button("EN");
+            Charts.langEn.Prefer(lgW, lgH);
+            Charts.langEn.OnClick(() => {
+                Charts.lang.Set(0);
+                Charts.app.RequestRedraw();
+            });
+            Charts.langZh = new Button("中");
+            Charts.langZh.Prefer(lgW, lgH);
+            Charts.langZh.OnClick(() => {
+                Charts.lang.Set(1);
+                Charts.app.RequestRedraw();
+            });
         }
+        bool zh = Charts.lang.Get() == 1;
+        Charts.langEn.Class = zh ? "" : "primary";
+        Charts.langZh.Class = zh ? "primary" : "";
+        int lgTotal = lgW * 2 + app.Scale(4);
+        Panel.Row().Gap(app.Scale(4))
+            .With(Charts.langEn).With(Charts.langZh)
+            .RenderInside(app, new Rect(area.x + sw - pad - lgTotal, lgY,
+                lgTotal, lgH));
 
-        List<ChartsNavRow> rows = new List<ChartsNavRow>();
+        // 行文本随语言切换重建；列表本体（行、悬停、选中、滚动、
+        // 滚动条）全部是 ListView 的职责，这里只喂矩形。
+        if (Charts.lang.Get() != Charts.navLang) {
+            Charts.navLang = Charts.lang.Get();
+            Charts.RebuildNavRows();
+            Charts.nav.Bind(Charts.navRows);
+        }
+        int listTop = area.y + app.Scale(52);
+        int listBottom = area.y + area.height - app.Scale(8);
+        Charts.nav.RenderInside(app, new Rect(area.x, listTop, sw,
+            listBottom - listTop));
+    }
+
+    /// 建列表、灌行、接选中事件。只调一次。
+    static void InitNav() {
+        Charts.nav = new ListView<ChartsNavRow>(r => Charts.NavRowView(r));
+        Charts.nav.Class = "flat";
+        Charts.RebuildNavRows();
+        Charts.nav.Bind(Charts.navRows);
+        Charts.nav.OnSelect(Charts.NavPicked);
+    }
+
+    /// 按当前语言重建行数据（类目表头 + 示例条目交错）。
+    static void RebuildNavRows() {
+        Charts.navRows = new List<ChartsNavRow>();
         string lastCat = "";
         for (int i = 0; i < Charts.demos.Count; i = i + 1) {
             ChartsDemo d = Charts.demos[i];
             if (d.cat != lastCat) {
-                rows.Add(ChartsNavRow.Header(Charts.CatLabel(d.cat)));
+                Charts.navRows.Add(ChartsNavRow.Header(Charts.CatLabel(d.cat)));
                 lastCat = d.cat;
             }
-            rows.Add(ChartsNavRow.Entry(i, Charts.NameOf(d), Charts.T(d.den, d.zhd)));
+            Charts.navRows.Add(ChartsNavRow.Entry(i, Charts.NameOf(d),
+                Charts.T(d.den, d.zhd)));
         }
-
-        int listTop = area.y + app.Scale(52);
-        int listBottom = area.y + area.height - app.Scale(8);
-        // 两行行高：标题 + 参考站副标题（区分同名示例）。
-        int rowH = app.Scale(48);
-        int viewH = listBottom - listTop;
-        int contentH = rows.Count * rowH;
-
-        Rect view = new Rect(area.x, listTop, sw, viewH);
-        int dy = Charts.navView.Begin(app, view, contentH);
-
-        int sel = Charts.selected.Get();
-        bool click = app.window.EventKind() == 3;
-        // 左右留白对称：行块从 pad 到「滚动条前 pad」——滚动条
-        // （barW 8 + inset 2）之外再留 2px 呼吸，两侧视觉等宽。
-        int gut = app.Scale(12);
-        int sx = area.x + pad;
-        int swid = sw - pad * 2 - gut;
-        int bandH = rowH - app.Scale(8);
-        for (int idx = 0; idx < rows.Count; idx = idx + 1) {
-            int ry = listTop + idx * rowH - dy;
-            if (ry + rowH > listTop && ry < listBottom) {
-                ChartsNavRow row = rows[idx];
-                if (row.header) {
-                    c.DrawText(sx, ry + app.Scale(17), row.text,
-                        t.textTertiary, t.fontSizeSmall);
-                } else {
-                    bool selRow = row.demoIndex == sel;
-                    bool hot = !app.PointerCaptured()
-                        && app.mouseX >= area.x && app.mouseX < area.x + sw
-                        && app.mouseY >= listTop && app.mouseY < listBottom
-                        && app.mouseY >= ry && app.mouseY < ry + rowH;
-                    if (selRow) {
-                        c.FillRoundRect(sx, ry + app.Scale(4), swid, bandH,
-                            app.Scale(4), t.primary);
-                    } else if (hot) {
-                        c.FillRoundRect(sx, ry + app.Scale(4), swid, bandH,
-                            app.Scale(4), t.bgHover);
-                    }
-                    // 标题一行、描述一行；超宽在裁剪区内截断。
-                    c.PushClip(sx, ry + app.Scale(4), swid, bandH);
-                    int tc = t.textPrimary;
-                    int dc = t.textTertiary;
-                    if (selRow) { tc = t.textInverse; dc = t.textInverse; }
-                    c.DrawText(sx + app.Scale(8), ry + app.Scale(10),
-                        row.text, tc, t.fontSizeSmall);
-                    if (row.desc.Length > 0) {
-                        c.DrawText(sx + app.Scale(8), ry + app.Scale(28),
-                            row.desc, dc, t.fontSizeTiny);
-                    }
-                    c.PopClip();
-                    if (click && hot && !selRow) {
-                        Charts.selected.Set(row.demoIndex);
-                        app.RequestRedraw();
-                    }
-                }
-            }
-        }
-
-        Charts.navView.End(app, view);
     }
 
-    static void RenderLangChip(App app, Canvas c, Theme t, int x, int y,
-                                int w, int h, string label, bool active) {
-        int bg = t.bgTertiary;
-        int fg = t.textSecondary;
-        if (active) { bg = t.primary; fg = t.textInverse; }
-        c.FillRoundRect(x, y, w, h, app.Scale(4), bg);
-        int tw = Canvas.MeasureText(label, t.fontSizeSmall);
-        c.DrawText(x + (w - tw) / 2, y + app.Scale(3), label, fg, t.fontSizeSmall);
+    /// 行模板：两行行的视觉（对称留白、字号、选中配色、省略号）
+    /// 都在 stdlib 的 ListItem 里，这里只做数据到控件的映射。
+    static Control NavRowView(ChartsNavRow r) {
+        if (r.header) { return ListItem.Header(r.text); }
+        ListItem it = new ListItem(r.text, r.desc);
+        it.Selected = Charts.selected.Get() == r.demoIndex;
+        return it;
+    }
+
+    /// 列表选中回调：映射回示例下标；类目行不可选中，弹回
+    /// 当前示例行。重建行让标题/副标题换上选中配色。
+    static void NavPicked() {
+        int r = Charts.nav.SelectedIndex();
+        if (r < 0 || r >= Charts.navRows.Count) { return; }
+        ChartsNavRow row = Charts.navRows[r];
+        if (row.header) {
+            Charts.nav.SelectIndex(Charts.navSelRow);
+            return;
+        }
+        Charts.navSelRow = r;
+        Charts.selected.Set(row.demoIndex);
+        Charts.nav.Refresh();
+        Charts.app.RequestRedraw();
+    }
+
+    /// 按示例下标选中导航行（深链入口）。
+    static void SelectDemo(int demoIdx) {
+        Charts.selected.Set(demoIdx);
+        for (int i = 0; i < Charts.navRows.Count; i = i + 1) {
+            ChartsNavRow r = Charts.navRows[i];
+            if (!r.header && r.demoIndex == demoIdx) {
+                Charts.navSelRow = i;
+                Charts.nav.SelectIndex(i);
+                break;
+            }
+        }
     }
 
     static void RenderPreview(App app, Canvas c, Theme t, Rect area, int sw) {

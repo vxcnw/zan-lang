@@ -852,6 +852,17 @@ listview::cell.secondary { color: var(--text-secondary); }
 listrow:hover { background: var(--bg-secondary); }
 listrow:selected { background: var(--bg-tertiary); }
 
+/* ---- ListItem：两行列表行（ListView 模板行的标准内容） ------------
+ * 标题 + 可选副标题；上下留白对称。默认选中只由宿主的选中带
+ * 表达（bg-tertiary 底配正常文字，两种皮肤都可读）；把选中带
+ * 画成主色的应用需一并覆盖 ::title:selected/::desc:selected
+ * 为反色。.header 是分组标题档：弱色小字、上方多留白把组隔开。 */
+listitem { background: transparent; padding: 4 12; gap: 4; }
+listitem::title { color: var(--text-primary); font-size: var(--font-size-small); }
+listitem::desc { color: var(--text-tertiary); font-size: var(--font-size-tiny); }
+listitem.header { padding: 10 12 2 12; }
+listitem.header::title { color: var(--text-tertiary); }
+
 /* ---- 穿梭框 Transfer：两栏复选列表 + 中缝移动 ---- */
 transfer {
   background: var(--bg-primary);
