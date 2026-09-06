@@ -349,7 +349,9 @@ partial class ChartView {
         int hoverK = 0 - 1;
         int mx0 = app.mouseX;
         int my0 = app.mouseY;
-        if (my0 >= bodyY) {
+        // 指针被上层弹层/抽屉接管时扇区不再悬停高亮/出卡（悬停穿透）。
+        bool hoverAllowed = my0 >= bodyY && !ChartView.HoverBlocked(app);
+        if (hoverAllowed) {
             for (int kh = slices.Count - 1; kh >= 0; kh = kh - 1) {
                 PieSlice sh = slices[kh];
                 int ringH = sh.ring;
@@ -602,6 +604,8 @@ partial class ChartView {
             int mx = app.mouseX;
             int my = app.mouseY;
             if (my < bodyY) { return; }
+            // 指针被上层弹层/抽屉接管时扇区命中/emphasis/tooltip 整体静默。
+            if (ChartView.HoverBlocked(app)) { return; }
             int ddx = mx - cx;
             int ddy = my - cy;
             int dist = ChartView.ISqrt(ddx * ddx + ddy * ddy);
@@ -1010,8 +1014,10 @@ partial class ChartView {
         // ECharts gauge 系列的单数据点）。
         int mx = app.mouseX;
         int my = app.mouseY;
+        // 指针被上层弹层/抽屉接管时命中与 tooltip 整体静默（悬停穿透）。
+        bool gaugeHover = !ChartView.HoverBlocked(app);
         int hit = o.series.Count - 1;
-        while (hit >= 0) {
+        while (hit >= 0 && gaugeHover) {
             ChartSeries hs = o.series[hit];
             if (!hs.hidden && hs.type == ChartType.Gauge) {
                 GaugeOption hitGauge = hs.gauge;
@@ -1116,6 +1122,7 @@ partial class ChartView {
         if (o.showTooltip) {
             int mx = app.mouseX;
             int my = app.mouseY;
+            if (ChartView.HoverBlocked(app)) { return; }
             int ddx = mx - cx;
             int ddy = my - cy;
             int dist = ChartView.ISqrt(ddx * ddx + ddy * ddy);
@@ -1280,6 +1287,7 @@ partial class ChartView {
         // 完全同域：idx 按行高取整行。
         int mx = app.mouseX;
         int my = app.mouseY;
+        if (ChartView.HoverBlocked(app)) { return; }
         if (mx >= x + pad && mx < x + w - pad - legendW
             && my >= top && my < y + h - pad) {
             int idx = (my - top) / rowH;
@@ -1518,6 +1526,7 @@ c.DrawText(labelX, labelY, lblF, Style.Part(app, "chart",
             int mx = app.mouseX;
             int my = app.mouseY;
             if (my < bodyY) { return; }
+            if (ChartView.HoverBlocked(app)) { return; }
             int ddx = mx - cx;
             int ddy = my - cy;
             int dist = ChartView.ISqrt(ddx * ddx + ddy * ddy);

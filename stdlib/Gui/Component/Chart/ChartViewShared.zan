@@ -290,6 +290,11 @@ partial class ChartView {
         int my = app.mouseY;
         int n = labels.Count;
         if (n < 1) { return; }
+        // 指针被上层弹层/抽屉/遮罩接管时本图不再悬停：图表在帧内
+        // 渲染较早，几何判定不知道上层已把指针收走，照常画十字线
+        // 并请求提示卡片的话，卡片会在 PresentFrame 末尾叠到弹层
+        // 上面（悬停穿透）。
+        if (app.PointerCaptured()) { return; }
         int idx = 0 - 1;
         bool inside = mx >= f.plotX && mx < f.plotX + f.plotW
             && my >= f.plotY && my < f.plotY + f.plotH;
@@ -474,6 +479,12 @@ partial class ChartView {
     /// 翻转到左侧。
     static void TooltipCard(App app, int px, int py, int maxRight,
                             List<TooltipRow> rows) {
+        // 指针被上层弹层/抽屉接管时不收请求——所有图表形态的
+        // 悬停tooltip 都经此入队，这里是统一的最后一道闸；
+        // 卡片由 PresentFrame 末尾的 FlushTooltips 绘制，若只在
+        // 绘制端拦，请求帧与弹层打开帧竞速仍会闪出一张叠在
+        // 弹层上面的卡。
+        if (app.PointerCaptured()) { return; }
         if (rows.Count < 1) { return; }
         // 调用方的列表可能是跨帧复用的缓冲，拷贝一份快照
         // （new List<T>(src) 拷贝构造，元素随 src 保留）。
@@ -489,6 +500,9 @@ partial class ChartView {
         if (ChartView.tipRows == null || ChartView.tipRows.Count < 1) { return; }
         List<TooltipRow> rows = ChartView.tipRows;
         ChartView.tipRows = null;
+        // 双保险：请求帧之后指针若已被弹层接管（抽屉恰在本帧打开、
+        // 弹层盖住了图表），卡片不再越过弹层画出去。
+        if (app.PointerCaptured()) { return; }
         Canvas c = app.canvas;
         Theme t = app.theme;
         int fs = Style.FontFallback(app, "small");
@@ -772,6 +786,8 @@ partial class ChartView {
         int my = app.mouseY;
         if (mx < f.plotX || mx >= f.plotX + f.plotW
             || my < f.plotY || my >= f.plotY + f.plotH) { return; }
+        // 指针被上层弹层/抽屉接管时不再命中与出卡（悬停穿透）。
+        if (app.PointerCaptured()) { return; }
         int bestD = 0;
         ChartHit best = null;
         int grab = app.Scale(10);

@@ -263,6 +263,14 @@ partial class ChartView {
         }
     }
 
+    /// 指针被上层弹层/抽屉/遮罩接管时，图表悬停命中整体静默：
+    /// 命中点的 tooltip 卡在 PresentFrame 末尾统一绘制，会叠到
+    /// 弹层上面（悬停穿透）。入口在此统一拦截，各 Offer*/PointsHover
+    /// 无需重复判断。
+    static bool HoverBlocked(App app) {
+        return app == null || app.PointerCaptured();
+    }
+
     /// 混合 Cartesian 图在渲染结束后才复算部分 overlay 命中。
     /// 系列索引与主体绘制顺序一致：后面的系列视觉上覆盖前面的
     /// 系列；较早系列的延迟命中不能反过来遮掉已经命中的后层。
@@ -306,6 +314,7 @@ partial class ChartView {
                                        int g, ChartElementType elementType,
                                        bool forceTopmost) {
         if (f == null || labels == null || labels.Count < 1 || series == null) { return; }
+        if (ChartView.HoverBlocked(app)) { return; }
         int mx = app.mouseX;
         int my = app.mouseY;
         if (mx < f.plotX || mx >= f.plotX + f.plotW
