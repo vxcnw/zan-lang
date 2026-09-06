@@ -303,7 +303,15 @@ class LegendApp {
                 detailsScroll.With(Text(skill.Text("name") + " Lv." + Rules.N(g.skill) + "/" + Rules.N(skill.Int("max_level")), "cyan", 28));
                 detailsScroll.With(Text("冷却 " + Rules.N(skill.Int("cooldown")) + " 秒 · 法力 " + Rules.N(skill.Int("mana")) + " · 升级金币 " + Rules.N(skill.Int("train_gold") * g.skill) + " / 黑铁 " + Rules.N(skill.Int("train_iron") * g.skill), "secondary small", 0));
                 detailsScroll.With(Btn("升级技能", "growth-up-0", () => { g.Train(0); Rebuild(); }));
-            } else { detailsScroll.With(Text("天书系统尚未接入，不扣资源。", "secondary small", 28)); }
+            } else {
+                Equipment book = g.equipped[11]; string bookStatus = "当前未穿戴天书。";
+                if (book != null) { bookStatus = "当前天书：" + book.Name() + "\n" + book.Detail(); }
+                detailsScroll.With(Text("天书传承 · 选择背包天书作为材料，传入已穿戴天书", "yellow small", 24));
+                detailsScroll.With(Text(bookStatus, "cyan small", 0));
+                Button inherit = Btn("传承选中天书", "tianshu-inherit", () => { g.InheritTianShu(selected); selected = -1; Rebuild(); });
+                inherit.Disabled = vault; detailsScroll.With(inherit);
+                detailsScroll.With(Text("规则：只转移更高系数；目标天书的品阶与强化保留；成功后消耗材料。锁定或较低系数材料不会被消耗。", "secondary small", 0));
+            }
             detailsScroll.With(detail);
         }
     }

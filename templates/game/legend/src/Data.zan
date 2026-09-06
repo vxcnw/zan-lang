@@ -34,6 +34,7 @@ class Equipment {
         int value = Definition().Int(key);
         DataRow rule = GameTables.current.attributes.Get(key);
         long scaled = (long)value * GameTables.current.qualities.At(tier).Int("stat_pct") * coefficient / 100;
+        if (slot == 11) { scaled = scaled + (long)GameTables.current.TianShuBonus(key) * coefficient; }
         return Rules.Bounded(scaled * (100 + upgrade * rule.Int("upgrade_pct")) / 100);
     }
     int Score(string school) {

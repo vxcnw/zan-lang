@@ -336,6 +336,17 @@ class Game {
         gemRanks[id] = gemRanks[id] + 1;
         Log(r.Text("name") + "提升至 " + Rules.N(gemRanks[id]) + "级，属性已生效。");
     }
+    void InheritTianShu(int index) {
+        // The worn book is the destination; the selected bag book is consumed only after every check passes.
+        if (job < 0 || index < 0 || index >= bag.Count) { return; }
+        Equipment source = bag[index]; Equipment target = equipped[11];
+        if (target == null || source == null || source.slot != 11 || target.slot != 11) { Log("需要穿戴目标天书，并在背包选择传承材料。"); return; }
+        if (source.locked) { Log("传承材料已锁定，请先解锁。"); return; }
+        if (source.coefficient <= target.coefficient) { Log("传承材料系数必须高于当前天书，未消耗。"); return; }
+        int before = target.coefficient; target.coefficient = source.coefficient;
+        bag.RemoveAt(index); hp = Rules.Clamp(hp, 0, MaxHp()); mp = Rules.Clamp(mp, 0, MaxMp());
+        Log("天书传承成功：系数 " + Rules.N(before) + " → " + Rules.N(target.coefficient) + "，材料已消耗。");
+    }
     void TrainInner(int slot) {
         if (job < 0 || slot < 0 || slot >= 8) { return; }
         DataRow r = GameTables.current.innerPower.At(slot);

@@ -100,6 +100,21 @@ class GameTables {
     DataTable elements; DataTable recycle; DataTable recyclePrices;
     DataTable innerPower; DataTable gems; DataTable attributes; DataTable quests; DataTable rebirth; DataTable growth; DataTable encounters;
     int Rule(string id) { return balance.Get(id).Int("value"); }
+    int TianShuBonus(string key) {
+        if (key == "hp") { return Rule("tianshu_hp_per_coefficient"); }
+        if (key == "mp") { return Rule("tianshu_mp_per_coefficient"); }
+        if (key == "attack_min") { return Rule("tianshu_attack_min_per_coefficient"); }
+        if (key == "attack_max") { return Rule("tianshu_attack_max_per_coefficient"); }
+        if (key == "magic_min") { return Rule("tianshu_magic_min_per_coefficient"); }
+        if (key == "magic_max") { return Rule("tianshu_magic_max_per_coefficient"); }
+        if (key == "tao_min") { return Rule("tianshu_tao_min_per_coefficient"); }
+        if (key == "tao_max") { return Rule("tianshu_tao_max_per_coefficient"); }
+        if (key == "defense_min") { return Rule("tianshu_defense_min_per_coefficient"); }
+        if (key == "defense_max") { return Rule("tianshu_defense_max_per_coefficient"); }
+        if (key == "magic_defense_min") { return Rule("tianshu_magic_defense_min_per_coefficient"); }
+        if (key == "magic_defense_max") { return Rule("tianshu_magic_defense_max_per_coefficient"); }
+        return 0;
+    }
     static int Value(string id) { return current.Rule(id); }
     static void Initialize(string directory) { GameTables candidate = Read(directory); current = candidate; }
     static GameTables Read(string dir) {
