@@ -59,6 +59,32 @@
 > 本机验证：适配器确实接进 rv32 对象（nm 见 4 个 `__zan_w32ir_*.v0` 本地包装）、
 > bare 分支主机编译导出全部 8 契约符号、smoke 除并行会话两个 gui AA 用例外全绿；
 > `idf.py build` 与上真机需要带 ESP-IDF 的机器，README 的状态节写明了这一边界。
+>
+> **2026-09-07 更新 5：QEMU 全系统实测落地——rv32 裸机真正跑起来，体积/内存/CPU
+> 三项拿到实测数**。`examples/rv32_qemu/` 是一套在 `qemu-system-riscv32 -M virt`
+> 上从 `_start` 跑到 finisher 退出的裸机套件：crt0.S（gp 装载、栈卫兵涂写、bss
+> 清零、CLINT 比较器装填、picolibc 的 `__libc_init_array`）、bsp.c（NS16550A
+> UART——picolibc tinystdio 归档里没有 stdout 对象，由板卡用
+> `FDEV_SETUP_STREAM` 提供；CLINT mtime 覆写 weak `zan_timer_now_ms`；poll()
+> 用 mtimecmp+MTIE+wfi 让 `Task.Delay` 真睡眠；rv32imc 没有 A 扩展，zan 对象
+> 实际引用的 4 个 `__atomic_*` 用关中断临界区实现；exit() 打印栈高水位并写
+> sifive_test finisher 让 QEMU 自动退出）、link.ld（0x80000000、gp 窗口、
+> .init_array 保留给 stdio 构造器）。Ubuntu 工具链 gcc-riscv64-unknown-elf +
+> picolibc（rv32imac/ilp32 多库）+ qemu-system-misc，`build.sh`/`run.sh` 一键
+> （WSL+Windows zanc.exe 混用时脚本内做 wslpath 转换）。hello.zan（5 tick、
+> 间隔 1 s `Task.Delay`）实测：**体积** flash 载荷 4,608 B（Berkeley text
+> 4,504 + data 96；--gc-sections 后 libc/libgcc 侧大头是整数 printf 与
+> `__udivdi3`/`__umoddi3`）；**内存** bss 65,632 B——64 KiB 是垫片确定性池
+> （`-DZAN_BARE_HEAP_BYTES` 可调，其余静态仅 96 B）+ 32 KiB 栈预留，栈卫兵
+> 实测高水位 112 B（随程序复杂度增长，退出时自动打印）；**CPU** 整轮墙钟
+> 4.106 s 对应 4×1 s 延时，QEMU 进程主机 CPU 约 45 ms（≈1%）——poll() 的
+> wfi 睡眠生效，await 不忙等，tick 精度即 mtime（10 MHz）精度。顺带修了
+> zanc 对 LLVM 23 的适配缺口：LLVM 23 移除了 Os/Oz 优化级，`--publish` 直接
+> LLVM ERROR——optimizer.c 改走 O2 管线 + optsize/minsize 函数属性（clang
+> -Os/-Oz 的现行编码），旧 LLVM 编译定义分流不受影响。边界照实说：QEMU virt
+> 核是 rv32imac，套件用该多库链接而 zanc 产物仍是 rv32imc（真机 C3/C6 走
+> ESP-IDF 工具链，第 4 步样例的验证边界不变）；原子只实现了本探针引用的
+> 4 个，宽程序按符号契约表补齐。
 
 ## 1. 实测：一个 hello world 的成本
 

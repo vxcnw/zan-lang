@@ -34,7 +34,27 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
+#if defined(__has_include)
+#if __has_include(<stdio.h>)
 #include <stdio.h>
+#define ZAN_SHIM_HAVE_STDIO 1
+#endif
+#endif
+#ifndef ZAN_SHIM_HAVE_STDIO
+/* headerless rv32 toolchain (no sysroot): declare just what we call */
+typedef __builtin_va_list zan_va_list;
+int vsnprintf(char *s, unsigned long n, const char *fmt, zan_va_list ap);
+#define va_list zan_va_list
+#endif
+
+/* Stub symbols are weak so a board bring-up (QEMU kit, Arduino core, ...)
+ * can override them with strong definitions while still linking this file
+ * for the allocator. */
+#if defined(__ELF__)
+#define ZAN_SHIM_WEAK __attribute__((weak))
+#else
+#define ZAN_SHIM_WEAK
+#endif
 
 /* ---- deterministic pool allocator -----------------------------------
  * First fit with a free list, 8-byte aligned (rv32 long long / double).
@@ -130,19 +150,20 @@ void *realloc(void *p, size_t n) {
 
 /* ---- single-thread stubs -------------------------------------------- */
 
-int poll(void *fds, unsigned long nfds, int timeout) {
+ZAN_SHIM_WEAK int poll(void *fds, unsigned long nfds, int timeout) {
     (void)fds; (void)nfds; (void)timeout;
     return 0;                    /* nothing ready: pump falls to timers */
 }
 
-int pthread_mutex_lock(void *m) { (void)m; return 0; }
-int pthread_mutex_unlock(void *m) { (void)m; return 0; }
-unsigned long pthread_self(void) { return 1; }
+ZAN_SHIM_WEAK int pthread_mutex_lock(void *m) { (void)m; return 0; }
+ZAN_SHIM_WEAK int pthread_mutex_unlock(void *m) { (void)m; return 0; }
+ZAN_SHIM_WEAK unsigned long pthread_self(void) { return 1; }
 
-char *getenv(const char *name) { (void)name; return NULL; }
+ZAN_SHIM_WEAK char *getenv(const char *name) { (void)name; return NULL; }
 
 /* ---- snprintf ABI wrapper ------------------------------------------- */
 
+#ifdef ZAN_SHIM_HAVE_STDIO
 int zan_w32_snprintf(char *s, long long n, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
@@ -150,3 +171,13 @@ int zan_w32_snprintf(char *s, long long n, const char *fmt, ...) {
     va_end(ap);
     return r;
 }
+#else
+/* rv32ilp32: long long is a register pair either way; forward by ABI */
+int zan_w32_snprintf(char *s, long long n, const char *fmt, ...) {
+    __builtin_va_list ap;
+    __builtin_va_start(ap, fmt);
+    int r = vsnprintf(s, (unsigned long)n, fmt, ap);
+    __builtin_va_end(ap);
+    return r;
+}
+#endif

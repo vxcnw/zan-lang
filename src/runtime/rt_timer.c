@@ -482,21 +482,21 @@ static volatile long long g_live;
 
 /* Weak on bare metal so a target with no usable CLOCK_MONOTONIC (or that
  * wants esp_timer ticks directly) overrides the clock wholesale. Everywhere
- * else the runtime object owns the symbol like before. */
+ * else the runtime object owns the symbol like before. Libcs whose headers
+ * hide CLOCK_MONOTONIC (picolibc without POSIX feature tests) still compile:
+ * the stub returns 0 and the board's override is mandatory there. */
 #if defined(ZAN_BARE_METAL)
 __attribute__((weak))
 #endif
 long long zan_timer_now_ms(void) {
 #if defined(_WIN32)
     return (long long)GetTickCount64();
-#elif defined(__APPLE__)
+#elif defined(CLOCK_MONOTONIC)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 #else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    return 0;                  /* no monotonic clock: board overrides */
 #endif
 }
 
