@@ -853,10 +853,10 @@ partial class DataTable {
         nItems = nItems + 1;                  // 隐藏列
         if (anyHidden) { nItems = nItems + 1; }
         nItems = nItems + 1;                  // 列选择器
-        if (canAgg) { nItems = nItems + 1; }  // 合计主项（聚合预设收进子面板）
+        if (canAgg) { nItems = nItems + 2; }  // 合计主项 + 条件格式主项（预设均收进子面板）
         if (canFilter) { nItems = nItems + 1; }
         int nSep = 3;                         // 排序后、自动适配后、分组后
-        if (canAgg) { nSep = nSep + 1; }      // 聚合项之前
+        if (canAgg) { nSep = nSep + 2; }      // 聚合项之前、条件格式项之前
         if (canFilter) { nSep = nSep + 1; }   // 筛选项之前
         int mh = ih * nItems + sepH * nSep + app.Scale(8);
 
