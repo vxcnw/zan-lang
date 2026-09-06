@@ -18,8 +18,9 @@ description: Zan GUI (stdlib/Gui) 的审美与排版规范——对齐、间距�
 - 把老程序迁移/复刻到 Zan、或参照现有产品做同族工具:先读 `app-migration`
   skill(复刻不创造、映射账本、行为/体验保真、验证闭环)——本文件管"好看",
   还原度纪律在那里。
-- 用 Zan 写游戏(帧循环/门控渲染/HUD 合成/手感/移动端):先读 `game-dev`
-  skill;游戏内面板间距照样走本文件的 4 的倍数档位。
+- 游戏:实时/帧循环类(动作、手感、HUD 合成、失焦、移动端触屏)先读
+  `game-dev` skill;文字/棋类/回合制/放置等控件驱动的游戏照常用本文件的
+  排版规范即可。游戏内面板间距都走 4 的倍数档位。
 - 立即模式心智模型/控件目录:`docs/agent-kb/gui-development.md`
 - 样式解析规则:`docs/GUI_STYLE_RESOLUTION.md`;Tailwind 原子类全集:`docs/GUI_TAILWIND.md`
 
