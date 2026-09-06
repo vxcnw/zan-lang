@@ -449,7 +449,16 @@ static bool pkg_safe_namespace_path(const char *s) {
 
 static bool pkg_is_dir(const char *path) {
 #ifdef _WIN32
-    DWORD a = GetFileAttributesA(path);
+    /* namespace_path arrives with '/' separators (the auto-stdlib using-scan
+     * normalises dots to '/'), while the prefix built here uses '\'. Win32
+     * accepts '/' OR '\' consistently, but REJECTS a '\' immediately
+     * followed by a '/' ("...\stdlib\System/Scripting" → path-not-found), so
+     * normalise every separator before the attribute query. */
+    char norm[1024];
+    snprintf(norm, sizeof(norm), "%s", path);
+    for (char *p = norm; *p; p++)
+        if (*p == '/') *p = '\\';
+    DWORD a = GetFileAttributesA(norm);
     return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY) != 0;
 #else
     struct stat st;
