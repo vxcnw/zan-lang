@@ -32,14 +32,14 @@ class WuweiApp {
     static int MenuPage=0; static int LoadStep=0; static bool Ready=false;
     static List<Label> MenuAchievementLabels=new List<Label>();
     static List<Label> ProfileLabels=new List<Label>();
-    static int BagFilter=0; static int BagTotal=0; static int CodexPage=0;
+    static int BagFilter=0; static int BagTotal=0; static int CodexPage=0; static int AchPage=0; static int MenuAwardPage=0;
     static List<Image> BagImages=new List<Image>(); static List<Label> BagDetails=new List<Label>();
     static Label GearText; static Label CraftText; static Progress CraftBar; static Label EndingText;
     static List<Label> TaskLabels=new List<Label>(); static List<Button> TaskButtons=new List<Button>();
     static List<Label> TalentLabels=new List<Label>();
     static List<string> GearSlots=new List<string>(); static List<Label> EquippedLabels=new List<Label>(); static List<Button> UnequipButtons=new List<Button>();
     static List<Label> AchievementLabels=new List<Label>(); static List<Label> VaultLabels=new List<Label>(); static List<Button> VaultButtons=new List<Button>(); static List<Label> ArenaLabels=new List<Label>(); static List<Button> ArenaButtons=new List<Button>(); static Label ArenaStatus;
-    static List<Label> CodexLabels=new List<Label>(); static Label CodexCounter;
+    static List<Label> CodexLabels=new List<Label>(); static Label CodexCounter; static Label AchCounter; static Label MenuAwardCounter;
     static List<Button> Nav=new List<Button>();
     static List<Button> Tabs=new List<Button>(); static List<int> TabPages=new List<int>(); static List<int> TabSections=new List<int>();
     static List<Button> CraftButtons=new List<Button>(); static List<string> CraftKeys=new List<string>();
@@ -142,7 +142,10 @@ class WuweiApp {
         Flex r=Flex.Row().Center().AlignCenter();r.Gap(gap);r.With(c);return r;
     }
     static Flex MakePager(string prevName,string nextName,Label counter,Action prev,Action next) {
-        Flex pager=Flex.Row().Center().AlignCenter();pager.Gap(12);
+        // 一行 flex 的高度由内容测量兜底，但 ScrollColumn.Arrange 首帧只看
+        // StyleHeight()/prefH——未测量完的 pager 高 0，整行被跳过（按钮
+        // 注册了探针却点不到）。声明高度把它钉住，与按钮 40px 行档一致。
+        Flex pager=Flex.Row().Center().AlignCenter();pager.Gap(12);Size(pager,0,44);
         pager.With(RowButton(prevName,"上一页",prev,"ghost",96));
         Size(counter,0,40);pager.With(counter);
         pager.With(RowButton(nextName,"下一页",next,"ghost",96));
@@ -249,9 +252,17 @@ class WuweiApp {
         Panel audio=RowBox();Size(audio,0,44);audio.With(RowButton("menuVolumeDown","音量 −10",()=>{ChangeVolume(-10);},"secondary",120));audio.With(RowButton("menuMute","静音 / 恢复",()=>{Music.SetMuted(!Music.Muted());SaveMusic();},"secondary",150));audio.With(RowButton("menuVolumeUp","音量 +10",()=>{ChangeVolume(10);},"secondary",120));MenuSettings.With(audio);MenuSettings.With(Wrap("音乐设置独立保存。返回菜单不会创建或改写任何仙缘存档。","muted",72));
         MenuAchievements=MenuPanel("menuAwards","游戏成就");MenuAchievements.With(Wrap("当前仙缘的修行足迹 · 尚未开始时展示成就目标，不创建存档。","muted",48));
         for(int i=0;i<Model.AchievementCount();i=i+1){Label label=Wrap("","muted",80);MenuAchievementLabels.Add(label);MenuAchievements.With(label);}
+        MenuAwardCounter=Text("","muted",32);
+        MenuAchievements.With(MakePager("menuAwardsPrev","menuAwardsNext",MenuAwardCounter,()=>{if(MenuAwardPage>0){MenuAwardPage=MenuAwardPage-1;}Refresh();},()=>{if((MenuAwardPage+1)*AchPerPage()<Model.AchievementCount()){MenuAwardPage=MenuAwardPage+1;}Refresh();}));
         // 弹窗宿主排最后：绘制顺序在全部菜单内容之上，DockFill 全窗。
         Dialogs=new DialogHost();Dialogs.name="dialogHost";DialogHost.Pump=PumpDeleteDialog;Dialogs.DockFill();Menu.With(Dialogs);
         RefreshProfiles();
+    }
+    static int AchPerPage() { return 4; }
+    static void ClampAchPages() {
+        int count=Model.AchievementCount();
+        if(MenuAwardPage*AchPerPage()>=count){MenuAwardPage=count>0?(count-1)/AchPerPage():0;}
+        if(AchPage*AchPerPage()>=count){AchPage=count>0?(count-1)/AchPerPage():0;}
     }
     static string MapKey(int mode) { return mode==0?"wild":(mode==1?"danger":"extreme"); }
     static int MapCount(int mode) { int n=0;for(int i=0;i<Model.Data.Maps.Count;i=i+1){if(Model.Data.Maps[i].Text("mode")==MapKey(mode)){n=n+1;}}return n; }
@@ -277,7 +288,9 @@ class WuweiApp {
     }
     static ScrollColumn NewPage() { ScrollColumn p=new ScrollColumn();p.name="pageScroll"+Number(Pages.Count);p.logGap=12;p.DockFill();Pages.Add(p);return p; }
     static void PageHead(ScrollColumn p,string title,string subtitle) {
-        p.With(Text(title,"page-title",40));p.With(Text(subtitle,"page-sub",24));
+        // 页名在子导航选项卡上已有，页面里只留一行副标题交代玩法，
+        // 不再重复一张 40px 大标题（用户明确要求）。
+        p.With(Text(subtitle,"page-sub",24));
     }
     static void BuildCultivate() {
         ScrollColumn p=NewPage();PageHead(p,"闭关","闭关会消耗修为经验并转化为闭关进度；只有闭关进度圆满才能提升层数。");
@@ -289,8 +302,11 @@ class WuweiApp {
         QiRateText=Text("","muted",22);info.With(QiRateText);
         head.With(info);
         Image icon=Art("icon_mind_skill.webp",120);icon.Fit="contain";icon.Class="card-art";Size(icon,120,120);head.With(icon);
-        Panel card=Column("card");Size(card,0,312);card.With(head);
+        // 主卡按一屏预算定高(视口 633 逻辑高，副标题 22 + 行距 12)：
+        // 卡撑满剩余 599，卡内 Spacer 把按钮行压到卡底。
+        Panel card=Column("card");Size(card,0,597);card.With(head);
         QiBar=new Progress(0,1);QiBar.ShowText(false);Size(QiBar,0,24);card.With(QiBar);
+        card.With(Spacer());
         Flex act=Flex.Row().AlignCenter();act.Gap(12);Size(act,0,40);
         RestBtn=RowButton("rest","出关休息",()=>{Model.StopActivity();Model.Say("已出关，静养气血",true);Refresh();},"secondary",150);act.With(RestBtn);
         act.With(GrowSpace());
@@ -301,25 +317,27 @@ class WuweiApp {
     static void BuildSkills() {
         ScrollColumn p=NewPage();PageHead(p,"功法","参悟消耗修为经验并需要一定时间；功法提升后永久生效。");
         Grid g=Grid.Of(3);g.logGap=12;
-        for(int s=0;s<3;s=s+1){int slot=s;Panel card=Column("card");Size(card,0,112);Label title=Text("","section",28);SkillNames.Add(title);card.With(title);SkillButtons.Add(RowButton("skill"+Number(s),"参悟",()=>{SkillAction(slot);},"secondary",0));card.With(SkillButtons[s]);g.With(card);}
+        for(int s=0;s<3;s=s+1){int slot=s;Panel card=Column("card");Size(card,0,540);Label title=Text("","section",28);SkillNames.Add(title);card.With(title);card.With(Spacer());SkillButtons.Add(RowButton("skill"+Number(s),"参悟",()=>{SkillAction(slot);},"secondary",0));card.With(SkillButtons[s]);g.With(card);}
         p.With(g);
         SkillCounter=Text("","muted",32);
         p.With(MakePager("skillsPrev","skillsNext",SkillCounter,()=>{if(SkillPage>0){SkillPage=SkillPage-1;}Refresh();},()=>{if((SkillPage+1)*3<Model.Data.Skills.Count){SkillPage=SkillPage+1;}Refresh();}));
     }
     static void BuildBreakthrough() {
         ScrollColumn p=NewPage();PageHead(p,"破境","本境十二层且闭关进度圆满后，服用对应破境丹突破。");
-        Panel card=Column("card");Size(card,0,272);p.With(card);
+        Panel card=Column("card");Size(card,0,597);p.With(card);
         Image icon=Art("alchemy_breakthrough_pill.webp",110);icon.Fit="contain";icon.Class="card-art";Size(icon,110,110);card.With(CenterRow(icon,12));
+        card.With(Spacer());
         BreakInfo=Text("","jade",28);card.With(CenterRow(BreakInfo,12));
         card.With(CenterRow(Text("每层突破消耗一枚对应破境丹，闭关进度圆满后方可尝试。","muted",24),12));
         BreakBtn=RowButton("breakthrough","尝试破境",()=>{Result(Model.Breakthrough());},"primary",220);card.With(CenterRow(BreakBtn,12));
     }
     static void BuildQuests() {
         ScrollColumn p=NewPage();PageHead(p,"主线任务","神秘老人的传音将引导你熟悉修行、历练、杂学与万宝。");
-        QuestTitle=Wrap("","gold",48);p.With(QuestTitle);
-        Panel speech=Column("card");Size(speech,0,272);p.With(speech);
+        QuestTitle=Wrap("","gold",56);p.With(QuestTitle);
+        Panel speech=Column("card");Size(speech,0,519);p.With(speech);
         QuestBody=Wrap("","",80);speech.With(QuestBody);
         QuestBar=new Progress(0,1);QuestBar.ShowText(false);Size(QuestBar,0,16);speech.With(QuestBar);
+        speech.With(Spacer());
         QuestReward=Wrap("","kicker",44);speech.With(QuestReward);
         Claim=RowButton("questClaim","领取仙缘",()=>{Result(Model.ClaimQuest());},"primary",180);speech.With(Claim);
     }
@@ -327,23 +345,27 @@ class WuweiApp {
         // Explicit card/flex heights: text and art measure taller than their
         // Size() hints, and a Grid cell clamps to the card's measurement —
         // without headroom the bottom button gets squeezed flat.
-        for(int s=0;s<3;s=s+1){int slot=s;Panel c=Column("card");Size(c,0,380);Image art=Art("qingzhu_ridge.webp",120);art.Fit="cover";art.Class="card-art";imgs.Add(art);Flex iw=CenterRow(art,0);Size(iw,0,120);c.With(iw);Label name=Text("","section",28);names.Add(name);c.With(name);Label detail=Wrap("","muted",124);details.Add(detail);c.With(detail);Button b=RowButton(pfx+Number(s),"前往历练",()=>{MapAction(mode,slot);},"secondary",0);btns.Add(b);c.With(b);g.With(c);}
+        for(int s=0;s<3;s=s+1){int slot=s;Panel c=Column("card");Size(c,0,FillRegionCardH());Image art=Art("qingzhu_ridge.webp",120);art.Fit="cover";art.Class="card-art";imgs.Add(art);Flex iw=CenterRow(art,0);Size(iw,0,120);c.With(iw);Label name=Text("","section",28);names.Add(name);c.With(name);c.With(Spacer());Label detail=Wrap("","muted",124);details.Add(detail);c.With(detail);Button b=RowButton(pfx+Number(s),"前往历练",()=>{MapAction(mode,slot);},"secondary",0);btns.Add(b);c.With(b);g.With(c);}
     }
+    // 野外页还要放战斗面板(190)，卡片 341；险地/绝境只有一张网格，
+    // 卡片撑满一屏剩余的 543。卡内 Spacer 把详情压向卡底按钮上方。
+    static int FillRegionCardH() { return Mode==0?339:540; }
+    static int Mode=0;
     static void BuildRegions() {
         ScrollColumn wild=NewPage();PageHead(wild,"野外","选择一处地域，角色将持续战斗并带回装备与材料。");
-        Grid g=Grid.Of(3);g.logGap=12;FillRegionCards(g,MapImages,MapNames,MapDetails,MapButtons,0,"map");wild.With(g);
+        Mode=0;Grid g=Grid.Of(3);g.logGap=12;FillRegionCards(g,MapImages,MapNames,MapDetails,MapButtons,0,"map");wild.With(g);
         MapCounter=Text("","muted",32);
         wild.With(MakePager("mapsPrev","mapsNext",MapCounter,()=>{if(MapPage>0){MapPage=MapPage-1;}Refresh();},()=>{if((MapPage+1)*3<MapCount(0)){MapPage=MapPage+1;}Refresh();}));
-        Panel battle=Column("card");battle.With(CombatText=Text("","section",28));
+        Panel battle=Column("card");Size(battle,0,190);battle.With(CombatText=Text("","section",28));
         battle.With(Text("自身气血","kicker",22));HpBar=new Progress(100,1);HpBar.ShowText(false);Size(HpBar,0,16);battle.With(HpBar);
         battle.With(Text("敌人气血","kicker",22));WorkBar=new Progress(0,1);WorkBar.ShowText(false);Size(WorkBar,0,16);battle.With(WorkBar);
         BattleStopBtn=RowButton("battleStop","收剑归山",()=>{Model.StopActivity();Model.Say("已离开战场，静养气血",true);Refresh();},"secondary",160);battle.With(CenterRow(BattleStopBtn,12));wild.With(battle);
         ScrollColumn danger=NewPage();PageHead(danger,"险地","点击地区查看盘踞的强敌，胜后带回更好的装备。");
-        Grid gd=Grid.Of(3);gd.logGap=12;FillRegionCards(gd,MapDImages,MapDNames,MapDDetails,MapDButtons,1,"mapd");danger.With(gd);
+        Mode=1;Grid gd=Grid.Of(3);gd.logGap=12;FillRegionCards(gd,MapDImages,MapDNames,MapDDetails,MapDButtons,1,"mapd");danger.With(gd);
         MapDCounter=Text("","muted",32);
         danger.With(MakePager("mapdPrev","mapdNext",MapDCounter,()=>{if(MapDPage>0){MapDPage=MapDPage-1;}Refresh();},()=>{if((MapDPage+1)*3<MapCount(1)){MapDPage=MapDPage+1;}Refresh();}));
         ScrollColumn extreme=NewPage();PageHead(extreme,"绝境","每次挑战包含九波连战：前八波为野外与险地强敌，第九波为镇守 Boss。");
-        Grid ge=Grid.Of(3);ge.logGap=12;FillRegionCards(ge,MapEImages,MapENames,MapEDetails,MapEButtons,2,"mape");extreme.With(ge);
+        Mode=2;Grid ge=Grid.Of(3);ge.logGap=12;FillRegionCards(ge,MapEImages,MapENames,MapEDetails,MapEButtons,2,"mape");extreme.With(ge);
         MapECounter=Text("","muted",32);
         extreme.With(MakePager("mapePrev","mapeNext",MapECounter,()=>{if(MapEPage>0){MapEPage=MapEPage-1;}Refresh();},()=>{if((MapEPage+1)*3<MapCount(2)){MapEPage=MapEPage+1;}Refresh();}));
     }
@@ -352,7 +374,7 @@ class WuweiApp {
         CraftText=Wrap("","jade",28);p.With(CraftText);
         CraftBar=new Progress(0,1);CraftBar.ShowText(false);Size(CraftBar,0,12);p.With(CraftBar);
         Grid g=Grid.Of(3);g.logGap=12;
-        for(int s=0;s<3;s=s+1){int slot=s;Panel c=Column("card");Size(c,0,296);Image image=Art("herb_dew_grass.webp",100);image.Fit="contain";image.Class="card-art";RecipeImages.Add(image);Flex iw=CenterRow(image,0);Size(iw,0,100);c.With(iw);Label name=Text("","section",28);RecipeNames.Add(name);c.With(CenterRow(name,0));Label detail=Wrap("","muted",56);RecipeDetails.Add(detail);c.With(detail);RecipeButtons.Add(RowButton("recipe"+Number(s),"开始制作",()=>{RecipeAction(slot);},"secondary",150));c.With(CenterRow(RecipeButtons[s],0));g.With(c);}
+        for(int s=0;s<3;s=s+1){int slot=s;Panel c=Column("card");Size(c,0,415);Image image=Art("herb_dew_grass.webp",100);image.Fit="contain";image.Class="card-art";RecipeImages.Add(image);Flex iw=CenterRow(image,0);Size(iw,0,100);c.With(iw);Label name=Text("","section",28);RecipeNames.Add(name);c.With(CenterRow(name,0));c.With(Spacer());Label detail=Wrap("","muted",56);RecipeDetails.Add(detail);c.With(detail);RecipeButtons.Add(RowButton("recipe"+Number(s),"开始制作",()=>{RecipeAction(slot);},"secondary",150));c.With(CenterRow(RecipeButtons[s],0));g.With(c);}
         p.With(g);
         RecipeCounter=Text("","muted",32);
         p.With(MakePager("recipesPrev","recipesNext",RecipeCounter,()=>{if(RecipePage>0){RecipePage=RecipePage-1;}Refresh();},()=>{if((RecipePage+1)*3<RecipeCount()){RecipePage=RecipePage+1;}Refresh();}));
@@ -372,17 +394,25 @@ class WuweiApp {
     }
     static void BuildInventory() {
         ScrollColumn p=NewPage();PageHead(p,"行囊","鼠标悬停查看详情；装备后提升攻防气血。");
-        GearText=Wrap("","jade",56);p.With(GearText);
+        GearText=Wrap("","jade",32);p.With(GearText);
         Panel filters=RowBox();Size(filters,0,44);List<string> names=new List<string>();names.Add("全部");names.Add("装备");names.Add("丹药");names.Add("灵材");names.Add("符阵 / 其他");for(int i=0;i<5;i=i+1){int f=i;Button fb=RowButton("bagFilter"+Number(i),names[i],()=>{FilterBag(f);},"ghost",0);filters.With(fb);}p.With(filters);
         GearSlots.Add("weapon");GearSlots.Add("head");GearSlots.Add("robe");GearSlots.Add("boots");GearSlots.Add("bracers");GearSlots.Add("amulet");GearSlots.Add("ring");
-        for(int i=0;i<GearSlots.Count;i=i+1){string slot=GearSlots[i];Flex row=CardRow(52);Label label=Text("","muted",24);EquippedLabels.Add(label);row.With(label);row.With(GrowSpace());UnequipButtons.Add(RowButton("unequip"+Number(i),"卸下",()=>{if(!Model.Unequip(slot)){Model.Say("行囊已满或此栏未装备，无法卸下",false);}Refresh();},"ghost",112));row.With(UnequipButtons[i]);p.With(row);}
-        for(int s=0;s<3;s=s+1){int slot=s;Panel card=Column("card");Panel row=Panel.Row();row.logGap=12;Image art=Art("alchemy_heal_pill.webp",90);Size(art,90,104);BagImages.Add(art);art.Fit="contain";art.Class="card-art";row.With(art);Panel detail=Column("");detail.Grow();Label name=Text("","section",24);BagNames.Add(name);detail.With(name);Label description=Wrap("","muted",72);BagDetails.Add(description);detail.With(description);row.With(detail);card.With(row);Panel actions=RowBox();Size(actions,0,44);BagUse.Add(RowButton("itemUse"+Number(s),"使用 / 装备",()=>{UseAction(slot);},"secondary",160));actions.With(BagUse[s]);BagSell.Add(RowButton("itemSell"+Number(s),"售出一件",()=>{SellAction(slot);},"ghost",132));actions.With(BagSell[s]);BagRecycle.Add(RowButton("recycle"+Number(s),"分解装备",()=>{if(slot<BagIds.Count){if(!Model.RecycleGear(BagIds[slot])){Model.Say("仅可分解行囊中的装备",false);}Refresh();}},"ghost",132));actions.With(BagRecycle[s]);card.With(actions);p.With(card);}
+        // 七栏装备位两列栅格收纳：单列七行会把页高顶出视口，两列
+        // 四行省回一屏高度，行内容不变。
+        Grid gearGrid=Grid.Of(2);gearGrid.logGap=10;
+        for(int i=0;i<GearSlots.Count;i=i+1){string slot=GearSlots[i];Flex row=CardRow(44);Label label=Text("","muted",24);EquippedLabels.Add(label);row.With(label);row.With(GrowSpace());UnequipButtons.Add(RowButton("unequip"+Number(i),"卸下",()=>{if(!Model.Unequip(slot)){Model.Say("行囊已满或此栏未装备，无法卸下",false);}Refresh();},"ghost",112));row.With(UnequipButtons[i]);gearGrid.With(row);}
+        p.With(gearGrid);
+        // 物品卡三张并排（Grid.Of(3)）：竖排三张必超一屏；卡高 196
+        // 让装备栏、物品行与分页器一起恰好收进一屏，滚动条消失。
+        Grid bagGrid=Grid.Of(3);bagGrid.logGap=12;
+        for(int s=0;s<3;s=s+1){int slot=s;Panel card=Column("card");Size(card,0,196);Panel row=Panel.Row();row.logGap=12;Image art=Art("alchemy_heal_pill.webp",90);Size(art,90,104);BagImages.Add(art);art.Fit="contain";art.Class="card-art";row.With(art);Panel detail=Column("");detail.Grow();Label name=Text("","section",24);BagNames.Add(name);detail.With(name);Label description=Wrap("","muted",60);BagDetails.Add(description);detail.With(description);row.With(detail);card.With(row);Panel actions=RowBox();Size(actions,0,44);BagUse.Add(RowButton("itemUse"+Number(s),"使用 / 装备",()=>{UseAction(slot);},"secondary",160));actions.With(BagUse[s]);BagSell.Add(RowButton("itemSell"+Number(s),"售出一件",()=>{SellAction(slot);},"ghost",132));actions.With(BagSell[s]);BagRecycle.Add(RowButton("recycle"+Number(s),"分解装备",()=>{if(slot<BagIds.Count){if(!Model.RecycleGear(BagIds[slot])){Model.Say("仅可分解行囊中的装备",false);}Refresh();}},"ghost",132));actions.With(BagRecycle[s]);card.With(actions);bagGrid.With(card);}
+        p.With(bagGrid);
         BagCounter=Text("","muted",32);
         p.With(MakePager("bagPrev","bagNext",BagCounter,()=>{if(BagPage>0){BagPage=BagPage-1;}Refresh();},()=>{if((BagPage+1)*3<BagTotal){BagPage=BagPage+1;}Refresh();}));
     }
     static void BuildMarket() {
         ScrollColumn p=NewPage();PageHead(p,"坊市","坊市每隔一段时间换一批货品，购入修行所需。");
-        for(int s=0;s<3;s=s+1){int slot=s;Flex row=CardRow(60);Label name=Wrap("","",28);MarketNames.Add(name);row.With(name);row.With(GrowSpace());MarketBuy.Add(RowButton("buy"+Number(s),"购买",()=>{BuyAction(slot);},"secondary",124));row.With(MarketBuy[s]);p.With(row);}
+        for(int s=0;s<3;s=s+1){int slot=s;Flex row=CardRow(172);Label name=Wrap("","",28);MarketNames.Add(name);row.With(name);row.With(GrowSpace());MarketBuy.Add(RowButton("buy"+Number(s),"购买",()=>{BuyAction(slot);},"secondary",124));row.With(MarketBuy[s]);p.With(row);}
         MarketCounter=Text("","muted",32);
         p.With(MakePager("marketPrev","marketNext",MarketCounter,()=>{if(MarketPage>0){MarketPage=MarketPage-1;}Refresh();},()=>{if((MarketPage+1)*3<Model.Data.Market.Count){MarketPage=MarketPage+1;}Refresh();}));
     }
@@ -393,23 +423,30 @@ class WuweiApp {
         for(int s=0;s<Model.Data.Sects.Count;s=s+1){int index=s;Row r=Model.Data.Sects[s];Flex row=CardRow(60);row.With(Text(r.Name,"section",32));row.With(GrowSpace());SectButtons.Add(RowButton("sect"+Number(s),"拜入宗门",()=>{Result(Model.JoinSect(index));},"secondary",156));row.With(SectButtons[s]);affairs.With(row);}
         SectTrainBtn=RowButton("sectTrain","研习宗门心法 · 520 贡献",()=>{if(!Model.TrainSect()){Model.Say("请先加入宗门，并积累520贡献",false);}Refresh();},"secondary",280);affairs.With(SectTrainBtn);
         affairs.With(Text("宗门委托 · 达标后领取，可重复完成","section",32));
-        for(int s=0;s<Model.Data.SectTasks.Count;s=s+1){int index=s;Flex row=CardRow(72);Label detail=Wrap("","muted",48);TaskLabels.Add(detail);row.With(detail);row.With(GrowSpace());TaskButtons.Add(RowButton("sectTask"+Number(s),"领取贡献",()=>{Result(Model.ClaimSectTask(index));},"secondary",140));row.With(TaskButtons[s]);affairs.With(row);}
+        // 六条委托两列栅格三行收纳，行高随剩余屏高定，行内容不变。
+        Grid taskGrid=Grid.Of(2);taskGrid.logGap=10;
+        for(int s=0;s<Model.Data.SectTasks.Count;s=s+1){int index=s;Flex row=CardRow(84);Label detail=Wrap("","muted",48);TaskLabels.Add(detail);row.With(detail);row.With(GrowSpace());TaskButtons.Add(RowButton("sectTask"+Number(s),"领取贡献",()=>{Result(Model.ClaimSectTask(index));},"secondary",140));row.With(TaskButtons[s]);taskGrid.With(row);}
+        affairs.With(taskGrid);
         ScrollColumn vault=NewPage();PageHead(vault,"宗门宝库","以贡献兑换当前宗门的专属装备、功法与丹药。");
-        for(int i=0;i<MaxSectRows(Model.Data.SectVault);i=i+1){int index=i;Flex row=CardRow(72);Label label=Wrap("","muted",48);VaultLabels.Add(label);row.With(label);row.With(GrowSpace());VaultButtons.Add(RowButton("vault"+Number(i),"兑换",()=>{Result(Model.ExchangeSectVault(index));},"secondary",124));row.With(VaultButtons[i]);vault.With(row);}
+        // 宝库只有三行：行高撑到一屏剩余高度，兑换行不再挤在页面上沿。
+        for(int i=0;i<MaxSectRows(Model.Data.SectVault);i=i+1){int index=i;Flex row=CardRow(190);Label label=Wrap("","muted",48);VaultLabels.Add(label);row.With(label);row.With(GrowSpace());VaultButtons.Add(RowButton("vault"+Number(i),"兑换",()=>{Result(Model.ExchangeSectVault(index));},"secondary",124));row.With(VaultButtons[i]);vault.With(row);}
         ScrollColumn arena=NewPage();PageHead(arena,"宗门擂台","擂台定期开放五分钟，可挑战宗门内各级高手。");
         ArenaStatus=Wrap("","jade",60);arena.With(ArenaStatus);
-        for(int i=0;i<MaxSectRows(Model.Data.Arena);i=i+1){int index=i;Flex row=CardRow(72);Label label=Wrap("","muted",48);ArenaLabels.Add(label);row.With(label);row.With(GrowSpace());ArenaButtons.Add(RowButton("arena"+Number(i),"挑战",()=>{Result(Model.ArenaFightOpponent(index));},"secondary",124));row.With(ArenaButtons[i]);arena.With(row);}
+        // 六名对手分两列栅格，行高撑满一屏剩余空间。
+        Grid arenaGrid=Grid.Of(2);arenaGrid.logGap=10;
+        for(int i=0;i<MaxSectRows(Model.Data.Arena);i=i+1){int index=i;Flex row=CardRow(160);Label label=Wrap("","muted",48);ArenaLabels.Add(label);row.With(label);row.With(GrowSpace());ArenaButtons.Add(RowButton("arena"+Number(i),"挑战",()=>{Result(Model.ArenaFightOpponent(index));},"secondary",124));row.With(ArenaButtons[i]);arenaGrid.With(row);}
+        arena.With(arenaGrid);
     }
     static void BuildPrestige() {
         ScrollColumn p=NewPage();PageHead(p,"轮回","寿元已尽或飞升之后，可携因果与永久天赋再续一世。");
         EndingText=Wrap("","jade",100);p.With(EndingText);KarmaText=Text("","jade",32);p.With(KarmaText);p.With(Wrap("转生会重置本世境界、物品与宗门。因果和永久天赋保留，下一世走得更远。此操作需再次确认。","muted",52));
-        for(int s=0;s<Model.Data.Talents.Count;s=s+1){int index=s;Flex row=CardRow(60);Label talent=Wrap("","section",32);TalentLabels.Add(talent);row.With(talent);row.With(GrowSpace());TalentButtons.Add(RowButton("talent"+Number(s),"以因果升华",()=>{Result(Model.UpgradeTalent(index));},"secondary",156));row.With(TalentButtons[s]);p.With(row);}
+        for(int s=0;s<Model.Data.Talents.Count;s=s+1){int index=s;Flex row=CardRow(70);Label talent=Wrap("","section",32);TalentLabels.Add(talent);row.With(talent);row.With(GrowSpace());TalentButtons.Add(RowButton("talent"+Number(s),"以因果升华",()=>{Result(Model.UpgradeTalent(index));},"secondary",156));row.With(TalentButtons[s]);p.With(row);}
         PrestigeButton=RowButton("prestige","转生 · 再续仙缘",()=>{Rebirth();},"secondary",220);p.With(PrestigeButton);
     }
     static void BuildSettings() {
         ScrollColumn p=NewPage();PageHead(p,"系统 · 守护这段仙缘","本地存档 · 自动保存 · 离线收益");
         Flex rename=Flex.Row().AlignCenter();rename.Gap(12);Size(rename,0,44);ProfileName=new Input();ProfileName.name="profileName";ProfileName.Class="grow";rename.With(ProfileName);rename.With(RowButton("renameProfile","保存仙缘名",()=>{string name=ProfileName.GetText();if(name.Length>0 && name.Length<=40){JourneyName=name;SaveNow();}else{Model.Say("仙缘名请输入1至40个字符",false);Refresh();}},"secondary",150));p.With(rename);
-        Panel card=Column("card");Size(card,0,220);SaveText=Wrap(SaveStatus,"notice",64);card.With(SaveText);card.With(RowButton("save","立即保存",()=>{SaveNow();},"primary",160));card.With(Wrap("每30秒自动保存。离开游戏前可手动保存；离线最多结算八小时，沿用离开时的活动。","muted",64));p.With(card);
+        Panel card=Column("card");Size(card,0,215);SaveText=Wrap(SaveStatus,"notice",64);card.With(SaveText);card.With(RowButton("save","立即保存",()=>{SaveNow();},"primary",160));card.With(Spacer());card.With(Wrap("每30秒自动保存。离开游戏前可手动保存；离线最多结算八小时，沿用离开时的活动。","muted",64));p.With(card);
         HealSetting=RowButton("autoHeal","自动服药：开启",()=>{Model.AutoHeal=!Model.AutoHeal;Refresh();},"secondary",200);p.With(HealSetting);
         p.With(Wrap("气血低于35%时自动使用行囊中的回春丹。关闭后需在行囊页手动服药。","muted",48));
         MusicStatus=Text("","jade",32);p.With(MusicStatus);Panel audio=RowBox();Size(audio,0,44);audio.With(RowButton("volumeDown","音量 −10",()=>{ChangeVolume(-10);},"secondary",120));audio.With(RowButton("musicMute","静音 / 恢复",()=>{Music.SetMuted(!Music.Muted());SaveMusic();},"secondary",120));audio.With(RowButton("volumeUp","音量 +10",()=>{ChangeVolume(10);},"secondary",120));p.With(audio);
@@ -418,18 +455,29 @@ class WuweiApp {
     }
     static void BuildCodex() {
         ScrollColumn p=NewPage();PageHead(p,"山海图鉴 · 留下每一步","历练胜绩与万物收集 · 每一份努力都有回响");
-        p.With(Text("仙途成就","section",32));for(int i=0;i<Model.AchievementCount();i=i+1){Label achievement=Wrap("","muted",80);AchievementLabels.Add(achievement);p.With(achievement);}p.With(Text("万物图录","section",32));
-        for(int i=0;i<6;i=i+1){Label label=Wrap("","section",84);CodexLabels.Add(label);p.With(label);}
+        // 成就 4/页、图录 6/卷各自分页；条目两列栅格收纳，页高恰好一屏。
+        p.With(Text("仙途成就","section",28));
+        Grid ag=Grid.Of(2);ag.logGap=12;
+        for(int i=0;i<Model.AchievementCount();i=i+1){Label achievement=Wrap("","muted",66);AchievementLabels.Add(achievement);ag.With(achievement);}
+        p.With(ag);
+        AchCounter=Text("","muted",32);
+        p.With(MakePager("achPrev","achNext",AchCounter,()=>{if(AchPage>0){AchPage=AchPage-1;}Refresh();},()=>{if((AchPage+1)*AchPerPage()<Model.AchievementCount()){AchPage=AchPage+1;}Refresh();}));
+        p.With(Text("万物图录","section",28));
+        Grid cg=Grid.Of(2);cg.logGap=12;
+        for(int i=0;i<6;i=i+1){Label label=Wrap("","section",66);CodexLabels.Add(label);cg.With(label);}
+        p.With(cg);
         CodexCounter=Text("","muted",32);
         p.With(MakePager("codexPrev","codexNext",CodexCounter,()=>{if(CodexPage>0){CodexPage=CodexPage-1;}Refresh();},()=>{if((CodexPage+1)*6<Model.Data.Enemies.Count+Model.Data.Items.Count){CodexPage=CodexPage+1;}Refresh();}));
     }
     static void Refresh() {
         if(Model==null || Model.Data==null){return;}
         PublishProbes();
+        ClampAchPages();
         Shell.visible=!InMenu;Menu.visible=InMenu;
         Landing.visible=MenuPage==0;Slots.visible=MenuPage==1;MenuSettings.visible=MenuPage==2;MenuAchievements.visible=MenuPage==3;
         MenuMusicStatus.Text="音量 "+Number(Music.Volume())+"% · "+(Music.Muted()?"已静音":Music.IsPlaying()?"播放中":"未播放")+(Music.Error()!=""?" · "+Music.Error():"");
-        for(int i=0;i<MenuAchievementLabels.Count;i=i+1){Row a=Model.AchievementRow(i);if(a!=null){MenuAchievementLabels[i].Text=(Model.AchievementUnlocked(i)?"已达成 · ":"未达成 · ")+a.Name+"\n"+a.Text("desc");}}
+        for(int i=0;i<MenuAchievementLabels.Count;i=i+1){Row a=Model.AchievementRow(i);if(a!=null){MenuAchievementLabels[i].Text=(Model.AchievementUnlocked(i)?"已达成 · ":"未达成 · ")+a.Name+"\n"+a.Text("desc");MenuAchievementLabels[i].visible=i/AchPerPage()==MenuAwardPage;}}
+        MenuAwardCounter.Text="第 "+Number(MenuAwardPage+1)+" / "+Number((Model.AchievementCount()+AchPerPage()-1)/AchPerPage())+" 页";
         for(int i=0;i<Nav.Count;i=i+1){Nav[i].Class=(!InMenu && Section==i)?"navsec navsec-current medium":"navsec medium";}
         for(int i=0;i<SectionBars.Count;i=i+1){SectionBars[i].visible=!InMenu && Section==i;}
         for(int i=0;i<Tabs.Count;i=i+1){string want=(!InMenu && Page==TabPages[i])?"tab tab-current grow medium":"tab grow medium";if(Tabs[i].Class!=want){Tabs[i].Class=want;}}
@@ -513,7 +561,8 @@ class WuweiApp {
         return detail+(cost?"":"\n无需材料 · 可持续采集");
     }
     static void RefreshCodex() {
-        for(int i=0;i<AchievementLabels.Count;i=i+1){Row a=Model.AchievementRow(i);if(a!=null){AchievementLabels[i].Text=(Model.AchievementUnlocked(i)?"已达成 · ":"修行中 · ")+a.Name+"  "+Number(Model.AchievementProgress(i))+" / "+a.Text("target")+"\n"+a.Text("desc");}}
+        for(int i=0;i<AchievementLabels.Count;i=i+1){Row a=Model.AchievementRow(i);if(a!=null){AchievementLabels[i].Text=(Model.AchievementUnlocked(i)?"已达成 · ":"修行中 · ")+a.Name+"  "+Number(Model.AchievementProgress(i))+" / "+a.Text("target")+"\n"+a.Text("desc");AchievementLabels[i].visible=i/AchPerPage()==AchPage;}}
+        AchCounter.Text="第 "+Number(AchPage+1)+" / "+Number((Model.AchievementCount()+AchPerPage()-1)/AchPerPage())+" 页";
         for(int i=0;i<6;i=i+1){int index=CodexPage*6+i;if(index<Model.Data.Enemies.Count){Row e=Model.Data.Enemies[index];CodexLabels[i].Text=e.Name+" · 已击败 "+Number(Model.Count(Model.EnemyKills,e.Id))+"次\n气血 "+e.Text("hp")+" · 攻击 "+e.Text("atk")+" · 掉落 "+ItemName(e.Text("drop"));}else{index=index-Model.Data.Enemies.Count;if(index<Model.Data.Items.Count){Row r=Model.Data.Items[index];CodexLabels[i].Text=r.Name+" · 持有 "+Number(Model.ItemCount(r.Id))+"件\n"+r.Text("desc");}else{CodexLabels[i].Text="本卷终";}}}
         CodexCounter.Text="第 "+Number(CodexPage+1)+" / "+Number((Model.Data.Enemies.Count+Model.Data.Items.Count+5)/6)+"卷";
     }
