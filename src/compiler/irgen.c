@@ -2198,111 +2198,6 @@ zan_status_t zan_irgen_init(zan_irgen_t *g, zan_arena_t *arena,
         LLVMBuildRet(g->builder, user_ptr);
     }
 
-    /* ARC runtime for strings: tolerant retain/release guarded by STRING_MAGIC.
-     * Non-string/bare pointers and sentinel literals are ignored. */
-    {
-        LLVMTypeRef i64t = LLVMInt64TypeInContext(g->ctx);
-        LLVMTypeRef i8p = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
-        LLVMTypeRef retain_type = LLVMFunctionType(LLVMVoidTypeInContext(g->ctx), (LLVMTypeRef[]){ i8p }, 1, 0);
-        g->rt_str_retain = LLVMAddFunction(g->mod, "zan_rt_str_retain", retain_type);
-        LLVMBasicBlockRef bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_retain, "entry");
-        LLVMPositionBuilderAtEnd(g->builder, bb);
-        LLVMValueRef obj = LLVMGetParam(g->rt_str_retain, 0);
-        LLVMValueRef is_null = zan_icmp(g->builder, LLVMIntEQ, obj, LLVMConstNull(i8p), "isnull");
-        LLVMBasicBlockRef ret_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_retain, "ret");
-        LLVMBasicBlockRef cont_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_retain, "cont");
-        LLVMBuildCondBr(g->builder, is_null, ret_bb, cont_bb);
-        LLVMPositionBuilderAtEnd(g->builder, cont_bb);
-        LLVMValueRef neg8 = LLVMConstInt(i64t, (uint64_t)ZAN_OBJ_SITE_OFF, 1);
-        LLVMValueRef magic_ptr = LLVMBuildGEP2(g->builder, LLVMInt8TypeInContext(g->ctx), obj, &neg8, 1, "magicp");
-        emit_header_read_guard(g, g->rt_str_retain, magic_ptr, ret_bb);
-        LLVMValueRef magic_iptr = LLVMBuildBitCast(g->builder, magic_ptr, LLVMPointerType(i64t, 0), "magicip");
-        LLVMValueRef magic = LLVMBuildLoad2(g->builder, i64t, magic_iptr, "magic");
-        LLVMValueRef has_magic = zan_hdr_is_string(g, magic, "hasmagic");
-        LLVMBasicBlockRef retain_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_retain, "retain");
-        LLVMBuildCondBr(g->builder, has_magic, retain_bb, ret_bb);
-        LLVMPositionBuilderAtEnd(g->builder, retain_bb);
-        LLVMValueRef neg16 = LLVMConstInt(i64t, (uint64_t)ZAN_OBJ_RC_OFF, 1);
-        LLVMValueRef rc_ptr = LLVMBuildGEP2(g->builder, LLVMInt8TypeInContext(g->ctx), obj, &neg16, 1, "rcptr");
-        LLVMValueRef rc_iptr = LLVMBuildBitCast(g->builder, rc_ptr, LLVMPointerType(i64t, 0), "rciptr");
-        LLVMValueRef rc = LLVMBuildLoad2(g->builder, i64t, rc_iptr, "rc");
-        LLVMValueRef is_sent = zan_icmp(g->builder, LLVMIntEQ, rc,
-            LLVMConstInt(i64t, ZAN_STRING_SENTINEL_RC, 0), "issent");
-        LLVMBasicBlockRef add_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_retain, "add");
-        LLVMBuildCondBr(g->builder, is_sent, ret_bb, add_bb);
-        LLVMPositionBuilderAtEnd(g->builder, add_bb);
-        emit_arc_freed_use_check(g, g->rt_str_retain, rc, obj,
-                                 ZAN_ARC_FAULT_USE_STR,
-                                 "retain through a stale reference (string was "
-                                 "freed: missing retain when stored)");
-        LLVMValueRef rc_pre = LLVMBuildAtomicRMW(g->builder, LLVMAtomicRMWBinOpAdd,
-            rc_iptr, LLVMConstInt(i64t, 1, 0), LLVMAtomicOrderingMonotonic, 0);
-        emit_arc_underflow_check(g, g->rt_str_retain, rc_pre, obj, NULL,
-                                 ZAN_ARC_FAULT_STR_RETAIN,
-                                 "retain of an already-freed string");
-        LLVMBuildBr(g->builder, ret_bb);
-        LLVMPositionBuilderAtEnd(g->builder, ret_bb);
-        LLVMBuildRetVoid(g->builder);
-    }
-
-    {
-        LLVMTypeRef i64t = LLVMInt64TypeInContext(g->ctx);
-        LLVMTypeRef i8p = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
-        LLVMTypeRef release_type = LLVMFunctionType(LLVMVoidTypeInContext(g->ctx), (LLVMTypeRef[]){ i8p }, 1, 0);
-        g->rt_str_release = LLVMAddFunction(g->mod, "zan_rt_str_release", release_type);
-        LLVMBasicBlockRef bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_release, "entry");
-        LLVMPositionBuilderAtEnd(g->builder, bb);
-        LLVMValueRef obj = LLVMGetParam(g->rt_str_release, 0);
-        LLVMValueRef is_null = zan_icmp(g->builder, LLVMIntEQ, obj, LLVMConstNull(i8p), "isnull");
-        LLVMBasicBlockRef ret_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_release, "ret");
-        LLVMBasicBlockRef cont_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_release, "cont");
-        LLVMBuildCondBr(g->builder, is_null, ret_bb, cont_bb);
-        LLVMPositionBuilderAtEnd(g->builder, cont_bb);
-        LLVMValueRef neg8 = LLVMConstInt(i64t, (uint64_t)ZAN_OBJ_SITE_OFF, 1);
-        LLVMValueRef magic_ptr = LLVMBuildGEP2(g->builder, LLVMInt8TypeInContext(g->ctx), obj, &neg8, 1, "magicp");
-        emit_header_read_guard(g, g->rt_str_release, magic_ptr, ret_bb);
-        LLVMValueRef magic_iptr = LLVMBuildBitCast(g->builder, magic_ptr, LLVMPointerType(i64t, 0), "magicip");
-        LLVMValueRef magic = LLVMBuildLoad2(g->builder, i64t, magic_iptr, "magic");
-        LLVMValueRef has_magic = zan_hdr_is_string(g, magic, "hasmagic");
-        LLVMBasicBlockRef rel_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_release, "release");
-        LLVMBuildCondBr(g->builder, has_magic, rel_bb, ret_bb);
-        LLVMPositionBuilderAtEnd(g->builder, rel_bb);
-        LLVMValueRef neg16 = LLVMConstInt(i64t, (uint64_t)ZAN_OBJ_RC_OFF, 1);
-        LLVMValueRef rc_ptr = LLVMBuildGEP2(g->builder, LLVMInt8TypeInContext(g->ctx), obj, &neg16, 1, "rcptr");
-        LLVMValueRef rc_iptr = LLVMBuildBitCast(g->builder, rc_ptr, LLVMPointerType(i64t, 0), "rciptr");
-        LLVMValueRef rc = LLVMBuildLoad2(g->builder, i64t, rc_iptr, "rc");
-        LLVMValueRef is_sent = zan_icmp(g->builder, LLVMIntEQ, rc,
-            LLVMConstInt(i64t, ZAN_STRING_SENTINEL_RC, 0), "issent");
-        LLVMBasicBlockRef dec_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_release, "dec");
-        LLVMBuildCondBr(g->builder, is_sent, ret_bb, dec_bb);
-        LLVMPositionBuilderAtEnd(g->builder, dec_bb);
-        emit_arc_freed_use_check(g, g->rt_str_release, rc, obj,
-                                 ZAN_ARC_FAULT_USE_STR,
-                                 "release through a stale reference "
-                                 "(string was already freed)");
-        LLVMValueRef rc_old = LLVMBuildAtomicRMW(g->builder, LLVMAtomicRMWBinOpSub, rc_iptr,
-            LLVMConstInt(i64t, 1, 0), LLVMAtomicOrderingAcquireRelease, 0);
-        emit_arc_underflow_check(g, g->rt_str_release, rc_old, obj, NULL,
-                                 ZAN_ARC_FAULT_STR_RELEASE,
-                                 "release of an already-freed string");
-        LLVMValueRef rc1 = zan_sub(g->builder, rc_old, LLVMConstInt(i64t, 1, 0), "rc1");
-        LLVMValueRef is_zero = zan_icmp(g->builder, LLVMIntEQ, rc1, LLVMConstInt(i64t, 0, 0), "iszero");
-        LLVMBasicBlockRef free_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_release, "dofree");
-        LLVMBuildCondBr(g->builder, is_zero, free_bb, ret_bb);
-        LLVMPositionBuilderAtEnd(g->builder, free_bb);
-        LLVMValueRef header_ptr = LLVMBuildGEP2(g->builder, LLVMInt8TypeInContext(g->ctx), obj, &neg16, 1, "hdr");
-        LLVMTypeRef free_fn_type = LLVMFunctionType(LLVMVoidTypeInContext(g->ctx),
-            (LLVMTypeRef[]){ i8p }, 1, 0);
-        if (g->arc_guard) emit_arc_quarantine(g, obj, rc_iptr);
-        else zan_call2(g->builder, free_fn_type, g->fn_free, &header_ptr, 1, "");
-        {
-            emit_leak_counter_add(g, g->g_live, -1);
-        }
-        LLVMBuildBr(g->builder, ret_bb);
-        LLVMPositionBuilderAtEnd(g->builder, ret_bb);
-        LLVMBuildRetVoid(g->builder);
-    }
-
     /* ARC runtime for arrays: tolerant retain/release guarded by
      * ZAN_ARRAY_RC_MAGIC in the array prefix (see zan_abi.h). A pointer that
      * did not come from zan_array_alloc -- an extern's buffer, a span base, a
@@ -2310,7 +2205,9 @@ zan_status_t zan_irgen_init(zan_irgen_t *g, zan_arena_t *arena,
      * so the two are safe to call on any array-typed value. Elements are not
      * touched here: a release site whose element type is itself rc-managed
      * goes through the per-type wrapper (__zan_arr_release_*), which drops the
-     * elements just before this decrement takes the count to zero. */
+     * elements just before this decrement takes the count to zero.
+     * Emitted before the string pair so the string retain/release can forward
+     * byte[]/char[] values that crossed the byte[]<->string boundary to them. */
     for (int rel = 0; rel < 2; rel++) {
         LLVMTypeRef i64t = LLVMInt64TypeInContext(g->ctx);
         LLVMTypeRef i8t = LLVMInt8TypeInContext(g->ctx);
@@ -2377,6 +2274,125 @@ zan_status_t zan_irgen_init(zan_irgen_t *g, zan_arena_t *arena,
             }
             LLVMBuildBr(g->builder, ret_bb);
         }
+        LLVMPositionBuilderAtEnd(g->builder, ret_bb);
+        LLVMBuildRetVoid(g->builder);
+    }
+
+    /* ARC runtime for strings: tolerant retain/release guarded by STRING_MAGIC.
+     * Non-string/bare pointers and sentinel literals are ignored -- except a
+     * managed array: a byte[] implicitly read as a `string` (the shared
+     * pointer carrier) arrives here when the value is stored into an owning
+     * string slot. Ignoring it would leave the slot pointing at a buffer whose
+     * real refcount was never bumped, freed as soon as the source temporary
+     * dies; forward to the array pair so the retain/release lands on the true
+     * header. */
+    {
+        LLVMTypeRef i64t = LLVMInt64TypeInContext(g->ctx);
+        LLVMTypeRef i8p = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
+        LLVMTypeRef retain_type = LLVMFunctionType(LLVMVoidTypeInContext(g->ctx), (LLVMTypeRef[]){ i8p }, 1, 0);
+        g->rt_str_retain = LLVMAddFunction(g->mod, "zan_rt_str_retain", retain_type);
+        LLVMBasicBlockRef bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_retain, "entry");
+        LLVMPositionBuilderAtEnd(g->builder, bb);
+        LLVMValueRef obj = LLVMGetParam(g->rt_str_retain, 0);
+        LLVMValueRef is_null = zan_icmp(g->builder, LLVMIntEQ, obj, LLVMConstNull(i8p), "isnull");
+        LLVMBasicBlockRef ret_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_retain, "ret");
+        LLVMBasicBlockRef cont_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_retain, "cont");
+        LLVMBuildCondBr(g->builder, is_null, ret_bb, cont_bb);
+        LLVMPositionBuilderAtEnd(g->builder, cont_bb);
+        LLVMValueRef neg8 = LLVMConstInt(i64t, (uint64_t)ZAN_OBJ_SITE_OFF, 1);
+        LLVMValueRef magic_ptr = LLVMBuildGEP2(g->builder, LLVMInt8TypeInContext(g->ctx), obj, &neg8, 1, "magicp");
+        emit_header_read_guard(g, g->rt_str_retain, magic_ptr, ret_bb);
+        LLVMValueRef magic_iptr = LLVMBuildBitCast(g->builder, magic_ptr, LLVMPointerType(i64t, 0), "magicip");
+        LLVMValueRef magic = LLVMBuildLoad2(g->builder, i64t, magic_iptr, "magic");
+        LLVMValueRef has_magic = zan_hdr_is_string(g, magic, "hasmagic");
+        LLVMBasicBlockRef retain_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_retain, "retain");
+        LLVMBasicBlockRef arr_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_retain, "arrfwd");
+        LLVMBuildCondBr(g->builder, has_magic, retain_bb, arr_bb);
+        LLVMPositionBuilderAtEnd(g->builder, arr_bb);
+        zan_call2(g->builder, retain_type, g->rt_arr_retain, &obj, 1, "");
+        LLVMBuildBr(g->builder, ret_bb);
+        LLVMPositionBuilderAtEnd(g->builder, retain_bb);
+        LLVMValueRef neg16 = LLVMConstInt(i64t, (uint64_t)ZAN_OBJ_RC_OFF, 1);
+        LLVMValueRef rc_ptr = LLVMBuildGEP2(g->builder, LLVMInt8TypeInContext(g->ctx), obj, &neg16, 1, "rcptr");
+        LLVMValueRef rc_iptr = LLVMBuildBitCast(g->builder, rc_ptr, LLVMPointerType(i64t, 0), "rciptr");
+        LLVMValueRef rc = LLVMBuildLoad2(g->builder, i64t, rc_iptr, "rc");
+        LLVMValueRef is_sent = zan_icmp(g->builder, LLVMIntEQ, rc,
+            LLVMConstInt(i64t, ZAN_STRING_SENTINEL_RC, 0), "issent");
+        LLVMBasicBlockRef add_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_retain, "add");
+        LLVMBuildCondBr(g->builder, is_sent, ret_bb, add_bb);
+        LLVMPositionBuilderAtEnd(g->builder, add_bb);
+        emit_arc_freed_use_check(g, g->rt_str_retain, rc, obj,
+                                 ZAN_ARC_FAULT_USE_STR,
+                                 "retain through a stale reference (string was "
+                                 "freed: missing retain when stored)");
+        LLVMValueRef rc_pre = LLVMBuildAtomicRMW(g->builder, LLVMAtomicRMWBinOpAdd,
+            rc_iptr, LLVMConstInt(i64t, 1, 0), LLVMAtomicOrderingMonotonic, 0);
+        emit_arc_underflow_check(g, g->rt_str_retain, rc_pre, obj, NULL,
+                                 ZAN_ARC_FAULT_STR_RETAIN,
+                                 "retain of an already-freed string");
+        LLVMBuildBr(g->builder, ret_bb);
+        LLVMPositionBuilderAtEnd(g->builder, ret_bb);
+        LLVMBuildRetVoid(g->builder);
+    }
+
+    {
+        LLVMTypeRef i64t = LLVMInt64TypeInContext(g->ctx);
+        LLVMTypeRef i8p = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
+        LLVMTypeRef release_type = LLVMFunctionType(LLVMVoidTypeInContext(g->ctx), (LLVMTypeRef[]){ i8p }, 1, 0);
+        g->rt_str_release = LLVMAddFunction(g->mod, "zan_rt_str_release", release_type);
+        LLVMBasicBlockRef bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_release, "entry");
+        LLVMPositionBuilderAtEnd(g->builder, bb);
+        LLVMValueRef obj = LLVMGetParam(g->rt_str_release, 0);
+        LLVMValueRef is_null = zan_icmp(g->builder, LLVMIntEQ, obj, LLVMConstNull(i8p), "isnull");
+        LLVMBasicBlockRef ret_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_release, "ret");
+        LLVMBasicBlockRef cont_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_release, "cont");
+        LLVMBuildCondBr(g->builder, is_null, ret_bb, cont_bb);
+        LLVMPositionBuilderAtEnd(g->builder, cont_bb);
+        LLVMValueRef neg8 = LLVMConstInt(i64t, (uint64_t)ZAN_OBJ_SITE_OFF, 1);
+        LLVMValueRef magic_ptr = LLVMBuildGEP2(g->builder, LLVMInt8TypeInContext(g->ctx), obj, &neg8, 1, "magicp");
+        emit_header_read_guard(g, g->rt_str_release, magic_ptr, ret_bb);
+        LLVMValueRef magic_iptr = LLVMBuildBitCast(g->builder, magic_ptr, LLVMPointerType(i64t, 0), "magicip");
+        LLVMValueRef magic = LLVMBuildLoad2(g->builder, i64t, magic_iptr, "magic");
+        LLVMValueRef has_magic = zan_hdr_is_string(g, magic, "hasmagic");
+        LLVMBasicBlockRef rel_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_release, "release");
+        LLVMBasicBlockRef arr_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_release, "arrfwd");
+        LLVMBuildCondBr(g->builder, has_magic, rel_bb, arr_bb);
+        LLVMPositionBuilderAtEnd(g->builder, arr_bb);
+        zan_call2(g->builder, release_type, g->rt_arr_release, &obj, 1, "");
+        LLVMBuildBr(g->builder, ret_bb);
+        LLVMPositionBuilderAtEnd(g->builder, rel_bb);
+        LLVMValueRef neg16 = LLVMConstInt(i64t, (uint64_t)ZAN_OBJ_RC_OFF, 1);
+        LLVMValueRef rc_ptr = LLVMBuildGEP2(g->builder, LLVMInt8TypeInContext(g->ctx), obj, &neg16, 1, "rcptr");
+        LLVMValueRef rc_iptr = LLVMBuildBitCast(g->builder, rc_ptr, LLVMPointerType(i64t, 0), "rciptr");
+        LLVMValueRef rc = LLVMBuildLoad2(g->builder, i64t, rc_iptr, "rc");
+        LLVMValueRef is_sent = zan_icmp(g->builder, LLVMIntEQ, rc,
+            LLVMConstInt(i64t, ZAN_STRING_SENTINEL_RC, 0), "issent");
+        LLVMBasicBlockRef dec_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_release, "dec");
+        LLVMBuildCondBr(g->builder, is_sent, ret_bb, dec_bb);
+        LLVMPositionBuilderAtEnd(g->builder, dec_bb);
+        emit_arc_freed_use_check(g, g->rt_str_release, rc, obj,
+                                 ZAN_ARC_FAULT_USE_STR,
+                                 "release through a stale reference "
+                                 "(string was already freed)");
+        LLVMValueRef rc_old = LLVMBuildAtomicRMW(g->builder, LLVMAtomicRMWBinOpSub, rc_iptr,
+            LLVMConstInt(i64t, 1, 0), LLVMAtomicOrderingAcquireRelease, 0);
+        emit_arc_underflow_check(g, g->rt_str_release, rc_old, obj, NULL,
+                                 ZAN_ARC_FAULT_STR_RELEASE,
+                                 "release of an already-freed string");
+        LLVMValueRef rc1 = zan_sub(g->builder, rc_old, LLVMConstInt(i64t, 1, 0), "rc1");
+        LLVMValueRef is_zero = zan_icmp(g->builder, LLVMIntEQ, rc1, LLVMConstInt(i64t, 0, 0), "iszero");
+        LLVMBasicBlockRef free_bb = LLVMAppendBasicBlockInContext(g->ctx, g->rt_str_release, "dofree");
+        LLVMBuildCondBr(g->builder, is_zero, free_bb, ret_bb);
+        LLVMPositionBuilderAtEnd(g->builder, free_bb);
+        LLVMValueRef header_ptr = LLVMBuildGEP2(g->builder, LLVMInt8TypeInContext(g->ctx), obj, &neg16, 1, "hdr");
+        LLVMTypeRef free_fn_type = LLVMFunctionType(LLVMVoidTypeInContext(g->ctx),
+            (LLVMTypeRef[]){ i8p }, 1, 0);
+        if (g->arc_guard) emit_arc_quarantine(g, obj, rc_iptr);
+        else zan_call2(g->builder, free_fn_type, g->fn_free, &header_ptr, 1, "");
+        {
+            emit_leak_counter_add(g, g->g_live, -1);
+        }
+        LLVMBuildBr(g->builder, ret_bb);
         LLVMPositionBuilderAtEnd(g->builder, ret_bb);
         LLVMBuildRetVoid(g->builder);
     }
