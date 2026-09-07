@@ -529,6 +529,11 @@ class ListView<T> : Control {
         if (rowW < 0) { rowW = 0; }
         int pad = t.paddingMedium;
         List<int> ws = this.ColumnWidths(rowW - pad * 2);
+        // 选中/悬停带与轨道之间留一道缝（同 ArrangeRows）：高亮若
+        // 正好贴着 rowW 右缘，会和紧随其后的滚动条轨道连成一条色带。
+        int hotW = rowW;
+        if (overflow) { hotW = rowW - app.Scale(4); }
+        if (hotW < 0) { hotW = 0; }
 
         int first = off / rowH;
         int last = (off + viewH) / rowH;
@@ -539,10 +544,10 @@ class ListView<T> : Control {
             int ry = viewY + i * rowH - off;
             int id = this.RowInteract(app, i, bx, ry, rowW, rowH);
             if (i == sel || (multi && this.IsMarked(i))) {
-                c.FillRect(bx, ry, rowW, rowH, rowSelected.BgOr(rowNormal.BgOr(0)));
+                c.FillRect(bx, ry, hotW, rowH, rowSelected.BgOr(rowNormal.BgOr(0)));
             }
             else if (app.focus.IsHovered(id)) {
-                c.FillRect(bx, ry, rowW, rowH, rowHover.BgOr(0));
+                c.FillRect(bx, ry, hotW, rowH, rowHover.BgOr(0));
             }
             if (i > first || off > 0) { c.FillRect(bx, ry, rowW, 1, divider.BgOr(0)); }
             int rowFont = cellFont;
@@ -598,6 +603,11 @@ class ListView<T> : Control {
         StyleBox rowNormal = Style.Full(app, "listrow", "", "", Style.SNormal());
         StyleBox rowSelected = Style.Full(app, "listrow", "", "", Style.SSelected());
         StyleBox rowHover = Style.Full(app, "listrow", "", "", Style.SHover());
+        // 选中/悬停带与轨道之间留一道缝：高亮若正好贴着 rowW 右缘，
+        // 会和紧随其后的滚动条轨道连成一条色带，看着像没让位。
+        int hotW = rowW;
+        if (overflow) { hotW = rowW - app.Scale(4); }
+        if (hotW < 0) { hotW = 0; }
         int y = viewY - off;
         for (int i = 0; i < children.Count; i = i + 1) {
             Control row = children[i];
@@ -607,11 +617,11 @@ class ListView<T> : Control {
             if (row.visible) {
                 int id = this.RowInteract(app, i, bx, y, rowW, rh);
                 if (i == sel || (multi && this.IsMarked(i))) {
-                    app.canvas.FillRect(bx, y, rowW, rh,
+                    app.canvas.FillRect(bx, y, hotW, rh,
                         rowSelected.BgOr(rowNormal.BgOr(0)));
                 }
                 else if (app.focus.IsHovered(id)) {
-                    app.canvas.FillRect(bx, y, rowW, rh, rowHover.BgOr(0));
+                    app.canvas.FillRect(bx, y, hotW, rh, rowHover.BgOr(0));
                 }
             }
             y = y + rh;
