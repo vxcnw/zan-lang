@@ -217,38 +217,65 @@ partial class Charts {
         };
     }
 
+    /// ECharts funnel3.html 数据（咨询 30 / 订单 10，与 funnel.html
+    /// 的 40/20 不同）。
+    static List<ChartSeries> FunnelStages3() {
+        return new List<ChartSeries>{
+            ChartSeries.Funnel(Charts.T("Show", "展现"), new List<int>{ 100 }),
+            ChartSeries.Funnel(Charts.T("Click", "点击"), new List<int>{ 80 }),
+            ChartSeries.Funnel(Charts.T("Visit", "访问"), new List<int>{ 60 }),
+            ChartSeries.Funnel(Charts.T("Consult", "咨询"), new List<int>{ 30 }),
+            ChartSeries.Funnel(Charts.T("Order", "订单"), new List<int>{ 10 })
+        };
+    }
+
     static void Funnel1(App app, int x, int y, int w, int h) {
-        ChartOption o = ChartOption.Of(Charts.T("Conversion", "漏斗图"),
+        // ECharts2 funnel.html 1:1：展现100/点击80/访问60/咨询40/
+        // 订单20，gap 10；tooltip "{c}%" 以值标签近似（数据满刻度
+        // 100，数值即百分比）。labelLine/白边未消费。
+        ChartOption o = ChartOption.Of(Charts.T("Funnel", "漏斗图"),
             null, Charts.FunnelStages());
+        o.titleSub = Charts.T("Fictional data", "纯属虚构");
+        o.series[0].funnelGap = 10;
         Charts.Show(app, o, x, y, w, h);
     }
 
     static void Funnel2(App app, int x, int y, int w, int h) {
+        // ECharts2 funnel2.html（预期/实际双漏斗）的架构近似：官方
+        // 同面板叠加（系列 maxSize 80% + 白边），此处左右分栏。
+        // 实际数据 80/50/30/10/5 与官方一致；label formatter
+        // {b}预期/{c}% 未消费（标签为 名称+值）。
         ChartOption a = ChartOption.Of(Charts.T("Expected", "预期"),
             null, Charts.FunnelStages());
         List<ChartSeries> actual = new List<ChartSeries>{
-            ChartSeries.Funnel(Charts.T("Show", "展现"), new List<int>{ 100 }),
-            ChartSeries.Funnel(Charts.T("Click", "点击"), new List<int>{ 70 }),
-            ChartSeries.Funnel(Charts.T("Visit", "访问"), new List<int>{ 48 }),
-            ChartSeries.Funnel(Charts.T("Consult", "咨询"), new List<int>{ 28 }),
-            ChartSeries.Funnel(Charts.T("Order", "订单"), new List<int>{ 12 })
+            ChartSeries.Funnel(Charts.T("Show", "展现"), new List<int>{ 80 }),
+            ChartSeries.Funnel(Charts.T("Click", "点击"), new List<int>{ 50 }),
+            ChartSeries.Funnel(Charts.T("Visit", "访问"), new List<int>{ 30 }),
+            ChartSeries.Funnel(Charts.T("Consult", "咨询"), new List<int>{ 10 }),
+            ChartSeries.Funnel(Charts.T("Order", "订单"), new List<int>{ 5 })
         };
         ChartOption b = ChartOption.Of(Charts.T("Actual", "实际"), null, actual);
         Charts.Split2(app, a, b, x, y, w, h);
     }
 
     static void Funnel3(App app, int x, int y, int w, int h) {
-        ChartOption down = ChartOption.Of(Charts.T("Descending", "降序漏斗"),
-            null, Charts.FunnelStages());
+        // ECharts2 funnel3.html：2×2 四联（漏斗/金字塔 × 2，数据
+        // 咨询30/订单10）。官方单面板以系列 x/y/width/height 定位、
+        // 下列 label position:left 未消费，此处 Split4 四子图还原。
+        ChartOption down = ChartOption.Of(Charts.T("Funnel", "漏斗图"),
+            null, Charts.FunnelStages3());
         List<ChartSeries> up = new List<ChartSeries>{
             ChartSeries.Pyramid(Charts.T("Show", "展现"), new List<int>{ 100 }),
             ChartSeries.Pyramid(Charts.T("Click", "点击"), new List<int>{ 80 }),
             ChartSeries.Pyramid(Charts.T("Visit", "访问"), new List<int>{ 60 }),
-            ChartSeries.Pyramid(Charts.T("Consult", "咨询"), new List<int>{ 40 }),
-            ChartSeries.Pyramid(Charts.T("Order", "订单"), new List<int>{ 20 })
+            ChartSeries.Pyramid(Charts.T("Consult", "咨询"), new List<int>{ 30 }),
+            ChartSeries.Pyramid(Charts.T("Order", "订单"), new List<int>{ 10 })
         };
-        ChartOption pyr = ChartOption.Of(Charts.T("Ascending", "升序金字塔"), null, up);
-        Charts.Split2(app, down, pyr, x, y, w, h);
+        ChartOption pyr = ChartOption.Of(Charts.T("Pyramid", "金字塔"), null, up);
+        Charts.Split4(app, down, pyr,
+            ChartOption.Of(Charts.T("Funnel", "漏斗图"), null, Charts.FunnelStages3()),
+            ChartOption.Of(Charts.T("Pyramid", "金字塔"), null, up),
+            x, y, w, h);
     }
 
     static void Funnel4(App app, int x, int y, int w, int h) {

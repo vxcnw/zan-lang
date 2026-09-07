@@ -588,6 +588,20 @@ partial class Charts {
         Charts.ShowN(app, b, 1, x, y + hh + gap, w, hh);
     }
 
+    /// 2×2 四联（ECharts funnel3.html 四系列象限布局的近似：
+    /// 官方在单面板内以系列 x/y/width/height 定位，此处以四子图
+    /// 分栏还原——同数据、降序/升序交替）。
+    static void Split4(App app, ChartOption a, ChartOption b,
+                       ChartOption cc, ChartOption d, int x, int y, int w, int h) {
+        int gap = app.Scale(12);
+        int hw = (w - gap) / 2;
+        int hh = (h - gap) / 2;
+        Charts.ShowN(app, a, 0, x, y, hw, hh);
+        Charts.ShowN(app, b, 1, x + hw + gap, y, hw, hh);
+        Charts.ShowN(app, cc, 2, x, y + hh + gap, hw, hh);
+        Charts.ShowN(app, d, 3, x + hw + gap, y + hh + gap, hw, hh);
+    }
+
     static List<string> Week() {
         return new List<string>{
             Charts.T("Mon", "周一"), Charts.T("Tue", "周二"),
