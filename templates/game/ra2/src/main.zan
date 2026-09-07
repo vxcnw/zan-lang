@@ -1052,17 +1052,22 @@ class Ra2App {
             // menu, setup, then a rendered frame of the first map.
             frames = frames + 1;
             if (selfTest) {
-                // The readback lags the presented frame by one, so the menu
-                // dump lands two frames after the menu was first drawn.
+                // Screenshot dumps read the renderer's pixels, which lag the
+                // frame being drawn; each one closes the frame first so the
+                // capture is that frame's finished draw, then reopens.
                 if (frames == 3) {
+                    host.End();
                     Ra2App.DumpScreen("build/ra2_shot_menu.bmp", host.Renderer());
+                    host.Begin(16, 20, 16);
                 }
                 if (frames == 4) { shell.OpenSkirmish(); }
                 // Linger on setup so a preview is actually built, then step
                 // the selection once so the rebuild path runs too.
                 if (frames == 6) { shell.SelectMap(1); }
                 if (frames == 7) {
+                    host.End();
                     Ra2App.DumpScreen("build/ra2_shot_skirmish.bmp", host.Renderer());
+                    host.Begin(16, 20, 16);
                 }
                 if (frames == 8) { shell.StartGame(); }
                 // Once the game is running, arm the second build (a power
