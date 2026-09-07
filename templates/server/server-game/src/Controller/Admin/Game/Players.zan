@@ -201,10 +201,12 @@ class Players : AdminController {
                 gifted = "已发放物品并推送";
             }
         } else {
+            p.hp = Fight.ClampHp(p);
             int n = await this.Player.Update()
                 .Set(a => a.nickname, nickname)
                 .Set(a => a.realmId, realmId)
                 .Set(a => a.level, level)
+                .Set(a => a.hp, p.hp)
                 .Set(a => a.job, job)
                 .Set(a => a.gold, gold)
                 .Set(a => a.gems, gems)
@@ -235,7 +237,7 @@ class Players : AdminController {
             int _b = await dao.SetStatus(acc.id, accStatus,
                 accStatus == 0 ? banReason : "");
             if (accStatus == 0) {
-                World.Kick(acc.id, "账号已被封禁：" + banReason);
+                await World.Kick(acc.id, "账号已被封禁：" + banReason);
                 changed = "已封禁账号并踢下线";
             } else {
                 changed = "账号已解封";
@@ -254,7 +256,7 @@ class Players : AdminController {
     async void Kick() {
         int id = this.InInt("id", 0);
         Player p = await this.Reach(id);
-        bool hit = World.Kick(p.accountId, "GM 强制下线");
+        bool hit = await World.Kick(p.accountId, "GM 强制下线");
         await this.Note("踢下线",
             "#" + Convert.ToString(id) + " " + p.username, hit,
             hit ? "" : "该账号不在线");

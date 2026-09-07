@@ -471,6 +471,7 @@ class Fight {
     static string Use(Session s, int itemId) {
         ZanWeb.Model.Game.Item it = Fight.ById(itemId);
         if (it == null || it.kind != 0) { return "这不是可使用的物品"; }
+        if (s.row.hp >= Fight.MaxHp(s.row)) { return "血量已满"; }
         if (!Fight.BagTake(s, itemId, 1)) { return "背包里没有这件物品"; }
         s.row.hp = s.row.hp + it.hp;
         int max = Fight.MaxHp(s.row);

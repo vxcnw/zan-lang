@@ -76,14 +76,17 @@ class World {
     /* 在线会话快照：GM 页与广播使用（Values 返回当前集合的快照列表）。 */
     static List<Session> All() { return World.byCid.Values; }
 
-    /* 登录成功登记会话；同账号旧连接被顶号（先推送再关连接，清理走
-       onClose）。此时 row 为空——进区另有 EnterWorld。 */
-    static void Enter(Session s, long now) {
+    /* 登录成功登记会话；同账号旧连接被顶号：推送后立即 Leave 收敛
+       （角色/背包当场落库，连接本体由 worker 懒收口）——半开连接不再
+       挂着旧 row，避免 ByChar/Gift 误命中死会话。此时新会话 row 为空，
+       进区另有 EnterWorld。 */
+    static async void Enter(Session s, long now) {
         Session old = World.ByAccount(s.accountId);
         if (old != null && old.cid != s.cid) {
             old.kicked = true;
             Gateway.Send(old.conn, Gateway.Ev("kick", "该账号在别处登录"));
             old.conn.Close();
+            await World.Leave(old.cid);
         }
         World.byCid.Add(s.cid, s);
         World.byAccount.Add(s.accountId, s);
@@ -160,19 +163,22 @@ class World {
         s.row.job = job;
         s.row.mapId = mapId;
         if (nickname.Length > 0) { s.row.nickname = nickname; }
+        s.row.hp = Fight.ClampHp(s.row);
         s.dirty = true;
         Gateway.PushState(s);
         return true;
     }
 
     /* 踢出账号（封禁/顶号/GM 踢线）；返回 false 表示不在线。推送 kick
-       事件后关连接，真正的清理与落库在 onClose → Leave。 */
-    static bool Kick(int accountId, string reason) {
+       后立即 Leave：角色与背包当场落库、会话移出世界（连接本体由
+       worker 懒收口，之后的清理是幂等空转）。 */
+    static async bool Kick(int accountId, string reason) {
         Session s = World.ByAccount(accountId);
         if (s == null) { return false; }
         s.kicked = true;
         Gateway.Send(s.conn, Gateway.Ev("kick", reason));
         s.conn.Close();
+        await World.Leave(s.cid);
         return true;
     }
 
@@ -231,7 +237,7 @@ class World {
             await Task.Delay(Cfg.Game.tickMs);
             long now = WebApp.NowSeconds();
             elapsed = elapsed + Cfg.Game.tickMs;
-            World.Sweep(now);
+            await World.Sweep(now);
             Gateway.SweepIdle(now);
             Fight.Tick(now);
             if (elapsed >= Cfg.Game.flushSeconds * 1000) {
@@ -244,10 +250,10 @@ class World {
         }
     }
 
-    /* 心跳超时：kickSeconds 内没有任何消息（含 hb）的会话按断线处理。
-       连接收口是懒的（worker 在下一拍才关），kicked 会话等 onClose 清理，
-       这里跳过，别每秒重踢刷屏。 */
-    static void Sweep(long now) {
+    /* 心跳超时：kickSeconds 内没有任何消息（含 hb）的会话按断线处理：
+       推 kick、立即 Leave 落库并移出世界（连接本体由 worker 懒收口）。
+       kicked 会话跳过，别每秒重踢刷屏。 */
+    static async void Sweep(long now) {
         List<Session> rows = World.All();
         for (int i = 0; i < rows.Count; i = i + 1) {
             Session s = rows[i];
@@ -259,6 +265,8 @@ class World {
                 s.kicked = true;
                 Gateway.Send(s.conn, Gateway.Ev("kick", "心跳超时"));
                 s.conn.Close();
+                await World.Leave(s.cid);
+                continue;
             }
         }
     }

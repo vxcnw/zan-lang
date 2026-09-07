@@ -79,7 +79,7 @@ src/Controller/Index/       首页：区服列表（开放/维护、实时在线
 src/Controller/Admin/Game/  GM 页：Realms（区服）/ Players（角色）/ Online（在线）/ Announces（公告）
 src/Framework/Schema.zan    建表 + 种子（3 区服、内置角色、5 图、13 种物品、6 个刷怪点、欢迎公告）
 views/                  视图（与控制器一一对应；Account/Index/Admin 三套布局）
-tools/e2e.py            端到端自检：注册/找回 + 完整协议 + GM + 战斗闭环（106 项断言）
+tools/e2e.py            端到端自检：注册/找回 + 完整协议 + GM + 战斗闭环（114 项断言）
 ```
 
 ## 快速开始
@@ -135,9 +135,11 @@ zanc src/main.zan src/**/*.zan --auto-stdlib -o server-game.exe
   （半价、下限 1 金）→ 换钱买药/买装备 → 打更高级的怪。新手图稻草人
   `dropRate=10000` 首杀必掉，入门丝滑。
 - **挂机**：`auto` 挂上模板 id 后，每 `tickMs` 世界拍给在线会话打一
-  回合并推 `ev fight`，关掉或下线即停；被踢会话不参与 tick。
+  回合并推 `ev fight`，关掉或下线即停；跨图自动暂停（找不到目标静默
+  空转），回到怪的地图续打；被踢会话不参与 tick。
 - **死亡**：`hp<=0` 立即回新手村（地图 1），保留一半血量、关闭挂机，
-  推 `ev die`；不掉装备不掉级，死亡惩罚留给二开。
+  推 `ev die`；不掉装备不掉级，死亡惩罚留给二开。GM 改等级会把血量
+  钳到新上限（升不溢出、降不悬空）。
 - **背包**：在线态是会话里的并行表（同物品合并计数），`bagDirty` 由
   flush 整包重写；`use`/`equip`/`takeoff`/`buy`/`sell`/GM 发放都走
   同一套 `BagAdd/BagTake`，穿上的装备不在背包里（装备位在角色行）。
@@ -169,7 +171,7 @@ zanc src/main.zan src/**/*.zan --auto-stdlib -o server-game.exe
 | `{"op":"hunt","mob":tpl}` | `{"ok":1,"fight","self"}`（一回合：dmg/mdmg/killed/exp/gold/drop） |
 | `{"op":"auto","mob":tpl,"on":0/1}` | `{"ok":1,"auto"}`；on=1 起 tick 挂机，每回合另推 `ev fight` |
 | `{"op":"bag"}` | `{"ok":1,"items":[{id,name,kind,count,atk,def,heal,price,minLevel}],"self"}` |
-| `{"op":"use","item":id}` | `{"ok":1,"self"}`（消耗品回血，0 件答错） |
+| `{"op":"use","item":id}` | `{"ok":1,"self"}`（消耗品回血；满血答错不消耗） |
 | `{"op":"equip","item":id}` / `{"op":"takeoff","slot":"weapon"/"armor"}` | `{"ok":1,"self"}`（按 kind 落位，minLevel 门槛，原装备回包） |
 | `{"op":"shop"}` | `{"ok":1,"shop":[在售物品（消耗品/装备，材料不卖）]}` |
 | `{"op":"buy","item":id,"count"}` | `{"ok":1,"self"}`（金币即时扣，1-99 件） |
@@ -224,6 +226,7 @@ $ nc 127.0.0.1 7100
 | 进区 | 按角色离线时长结算挂机收益（按秒折算、封顶），与 `lastLoginAt` 合并为一条 UPDATE；同时从 `game_bag` 装载背包 |
 | 离线发物品 | GM 直写 `game_bag`（同物品合并行），下次登录可见 |
 | 封禁 | 立即 UPDATE 账号表 + 在线则 `ev kick` 踢线 |
+| 踢线/顶号/心跳超时 | `ev kick` 后立即 Leave：角色与背包当场落库、会话移出世界（连接本体由 worker 懒收口） |
 
 `game_account / game_realm / game_player / game_map / game_announce /
 game_mob / game_item / game_bag` 八张表由 `Schema.Ensure` 建表；种子三个
@@ -253,17 +256,18 @@ game_mob / game_item / game_bag` 八张表由 `Schema.Ensure` 建表；种子三
 ## 端到端自检
 
 `tools/e2e.py`（标准库 urllib/socket，无第三方依赖）对运行中的服务端跑
-**106 项断言**：网页注册/重复注册、找回密码三步与 5 次答错锁定、TCP
+**114 项断言**：网页注册/重复注册、找回密码三步与 5 次答错锁定、TCP
 注册/登录/选区/建角/进区全流程、维护区拒绝、每区一角色与区内昵称唯一、
 按区收窄的聊天/走位/同图查询、换区后角色状态保持、GM 区服 CRUD（含
 维护门控与删除保护）、GM 发奖/封禁/踢线实时推送、公告推送、按秒折算的
 离线结算，以及**战斗闭环全程**——新手图稻草人首杀必升级必掉兽皮、商店
 目录与买药扣款、过图门槛、多钩猫反击与嗑药回血、GM 补金币/发铁剑
 （`ev drop` 实时推）、穿脱武器攻防变化、卖皮半价回收、自动挂机逐 tick
-推 `ev fight`、30 级打赤月恶魔三回合倒下回城半血、flush 后 hp/经验/
-穿戴/背包落库核验。在服务端目录里运行（它会读 `data/app.db` 验证落库），
-跑之前删掉 `data/app.db*` 重启服务端，保证注册流程从空表开始；用法详见
-文件头。
+推 `ev fight`、跨图自动暂停回图续打、30 级打赤月恶魔三回合倒下回城
+半血、GM 降级钳血与满血拒药、flush 后 hp/经验/穿戴/背包落库核验。
+**114 项断言**。在服务端目录里运行（它会读 `data/app.db` 验证落库），
+跑之前删掉 `data/app.db*` 重启服务端，保证注册流程从空表开始；用法
+详见文件头。
 
 ## 局域网多人
 

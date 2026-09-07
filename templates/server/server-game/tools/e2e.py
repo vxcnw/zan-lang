@@ -7,9 +7,11 @@ character state kept, GM realm CRUD with maintain gating, account ban +
 kick, online grant pushes, announce push, pro-rata capped offline
 settlement, then the full hunt loop -- mob list, manual hunt with
 exp/levelup/gold/drops, shop buy/sell, potion use, weapon equip/takeoff,
-per-tick auto-hunt events, death respawn in town, GM item gift (online
-push + offline grant) and DB persistence of hp/exp/equipped weapon/bag --
-106 assertions. Stdlib urllib/socket only.
+per-tick auto-hunt events (auto pauses out of the mob's map and resumes
+back on it), death respawn in town, GM item gift (online push + offline
+grant), GM level change clamping hp, full-hp potion refusal, and DB
+persistence of hp/exp/equipped weapon/bag -- 114 assertions. Stdlib
+urllib/socket only.
 
 Run from the SERVER directory against a FRESH data/app.db:
   1. stop server, delete data/app.db*, start server
@@ -592,11 +594,28 @@ r = h.ok_for(lambda m: "self" in m)
 ok(pelt_n > 0 and r["self"]["gold"] == gold1 + pelt_n * 15,
    "selling pelts pays half price")
 
-# 自动挂机：开 → 每拍 ev fight → 关
+# 自动挂机：开 → 每拍 ev fight → 跨图自动暂停 → 回图续打 → 关
 h.send({"op": "auto", "mob": cat, "on": 1})
 r = h.ok_for(lambda m: "auto" in m)
 ok(r["auto"] == cat, "auto-hunt toggles on")
-time.sleep(4)
+time.sleep(3)
+h.send({"op": "move", "map": 1})
+r = h.ok_for(lambda m: "self" in m and m["self"]["map"] == 1)
+ok(r is not None, "auto hunter moves to town")
+while h.reply_for(lambda m: m.get("ev") == "fight", timeout=2) is not None:
+    pass
+time.sleep(3)
+ok(h.reply_for(lambda m: m.get("ev") == "fight", timeout=2) is None,
+   "auto pauses while out of the mob's map")
+h.pending.clear()
+h.send({"op": "state"})
+r = h.reply_for(lambda m: m.get("ev") == "state")
+ok(r["self"]["auto"] == cat, "auto stays armed across maps")
+h.send({"op": "move", "map": 2})
+r = h.ok_for(lambda m: "self" in m and m["self"]["map"] == 2)
+m = h.reply_for(lambda m: m.get("ev") == "fight", timeout=4)
+ok(m is not None, "auto resumes back on the mob's map")
+time.sleep(2)
 h.send({"op": "auto", "mob": cat, "on": 0})
 r = h.ok_for(lambda m: "auto" in m)
 ok(r["auto"] == 0, "auto-hunt toggles off")
@@ -608,7 +627,7 @@ while True:
         break
     if m.get("ev") == "fight":
         fights += 1
-ok(fights >= 2, "auto-hunt pushes fight events each tick")
+ok(fights >= 1, "auto-hunt pushes fight events each tick")
 
 # 死亡：GM 送到 30 级赤月峡谷，auto 打 BOSS 三回合内倒下回城
 st, j, _ = gm("/admin/game/players/save", {
@@ -631,6 +650,27 @@ r = h.reply_for(lambda m: m.get("ev") == "state")
 ok(died and r["self"]["map"] == 1 and r["self"]["auto"] == 0
    and r["self"]["hp"] == r["self"]["maxhp"] // 2,
    "death respawns player in town with half hp, auto off")
+
+# GM 降级：hp 钳到新上限；满血嗑药被拒且不消耗
+st, j, _ = gm("/admin/game/players/save", {
+    "id": str(hunter_uid), "nickname": "小猎手", "realmId": "1", "job": "0",
+    "level": "2", "gold": str(gold0), "gems": "0", "mapId": "1",
+    "accountStatus": "1", "banReason": ""}, cookie)
+ok(j.get("code") == "0000", "GM demotes hunter for clamp check")
+h.pending.clear()
+h.send({"op": "state"})
+r = h.reply_for(lambda m: m.get("ev") == "state")
+ok(r["self"]["level"] == 2 and r["self"]["maxhp"] == 100
+   and r["self"]["hp"] == r["self"]["maxhp"],
+   "GM level change clamps hp to new cap")
+h.send({"op": "use", "item": shop["金创药(小)"]})
+r = h.reply_for(lambda m: m.get("ok") == 0)
+ok(r is not None and "血量已满" in (r.get("err") or ""),
+   "full-hp potion use refused")
+h.send({"op": "bag"})
+r = h.ok_for(lambda m: "items" in m)
+pot = [i for i in r["items"] if i["name"] == "金创药(小)"]
+ok(len(pot) == 1 and pot[0]["count"] >= 1, "refused potion not consumed")
 
 # 落库：背包/装备/血量随 flush 写入
 time.sleep(11)

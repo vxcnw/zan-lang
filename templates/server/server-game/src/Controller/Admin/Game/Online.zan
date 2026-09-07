@@ -73,7 +73,7 @@ class Online : AdminController {
         Session s = World.ByCid(cid);
         if (s == null) { this.Fail(404, "0404", "该会话已不在线"); }
         string who = s.username;
-        World.Kick(s.accountId, "GM 强制下线");
+        await World.Kick(s.accountId, "GM 强制下线");
         await this.Note("在线踢下线", "#" + Convert.ToString(cid)
             + " " + who, true, "");
         this.Saved("已断开该会话");
