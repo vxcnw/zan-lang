@@ -1087,6 +1087,11 @@ class ChartSeries {
     string step;     // ECharts line.step: "" | "start" | "middle" | "end"
     string sort;     // ECharts funnel.sort："descending"（默认）| "ascending"（金字塔）
     string roseType; // ECharts pie.roseType："" | "radius" | "area"（玫瑰图）
+    ChartPosition center;   // ECharts pie.center：['25%', 200]——null = 未设，
+                            //   多系列共享圆心；Px 的 y 相对绘图区顶
+    ChartScalar radius;     // ECharts pie.radius 外径：'55%' | 80（null = 未设，
+                            //   % 相对 min(绘图区宽,高)/2）
+    ChartScalar radiusInner; // radius [min, max] 的 min（环内径，null = 未设）
     int startAngle;  // ECharts pie.startAngle：数学角（0=3点钟，逆时针增）。
                      // 默认 90 = 12 点钟起始；内部换算为顺时针偏移 90-值。
     int selectedOffset; // ECharts pie.selectedOffset：选中扇区外偏像素（默认 10）
@@ -1556,6 +1561,9 @@ class ChartSeries {
         s.color = src.color; s.hidden = src.hidden; s.smooth = src.smooth;
         s.areaStyle = src.areaStyle; s.step = src.step; s.sort = src.sort;
         s.roseType = src.roseType; s.startAngle = src.startAngle;
+        s.center = ChartPosition.Clone(src.center);
+        s.radius = ChartScalar.Clone(src.radius);
+        s.radiusInner = ChartScalar.Clone(src.radiusInner);
         s.selectedOffset = src.selectedOffset; s.barWidth = src.barWidth;
         s.barGapPct = src.barGapPct; s.symbol = src.symbol;
         s.symbolSize = src.symbolSize; s.symbolSizeFn = src.symbolSizeFn;
@@ -2779,6 +2787,16 @@ class ChartOption {
                 cs.step = s.Str("step", cs.step);
                 cs.sort = s.Str("sort", cs.sort);
                 cs.roseType = s.Str("roseType", cs.roseType);
+                // pie.center / pie.radius（ECharts：['25%', 200] 与
+                // '55%' | 80 | [110, 140]）。
+                cs.center = ChartOption.ParsePoint(s.Get("center"), cs.center);
+                JsonValue pieR = s.Get("radius");
+                if (pieR != null && pieR.IsArray() && pieR.Count() >= 2) {
+                    cs.radiusInner = ChartOption.ParseScalar(pieR.At(0), cs.radiusInner);
+                    cs.radius = ChartOption.ParseScalar(pieR.At(1), cs.radius);
+                } else if (pieR != null) {
+                    cs.radius = ChartOption.ParseScalar(pieR, cs.radius);
+                }
                 cs.startAngle = s.Int("startAngle", cs.startAngle);
                 cs.selectedOffset = s.Int("selectedOffset", cs.selectedOffset);
                 cs.barWidth = s.Int("barWidth", cs.barWidth);
