@@ -215,9 +215,10 @@ class WorldObject {
     void SetMoveAttack(int x, int y) { this.maX = x; this.maY = y; }
     void ClearMoveAttack() { this.maX = -1; this.maY = -1; }
 
-    /// <summary>Compass direction the unit faces: 0 south, 1 SW, 2 west,
-    /// 3 NW, 4 north, 5 NE, 6 east, 7 SE. Derived from the last move step so
-    /// the renderer can pick the right sprite facing.</summary>
+    /// <summary>Compass direction the unit faces, on the TS/RA2 ring: 0
+    /// north, 1 NE, 2 east, 3 SE, 4 south, 5 SW, 6 west, 7 NW. Derived from
+    /// the last move step so the renderer can pick the right sprite
+    /// facing.</summary>
     int Facing() { return this.facing; }
     void SetFacing(int f) {
         if (f < 0) { f = 0; }
@@ -226,35 +227,25 @@ class WorldObject {
     }
 
     /// <summary>Maps a step direction (dx,dy in cell space) onto the eight
-    /// compass directions, matching the SHP layout's block order (0=S, 1=SW,
-    /// 2=W, 3=NW, 4=N, 5=NE, 6=E, 7=SE).
+    /// compass directions of the TS/RA2 ring (0=N, 1=NE, 2=E, 3=SE, 4=S,
+    /// 5=SW, 6=W, 7=NW).
     ///
     /// A cell step is not a screen step: the isometric projection turns cell
     /// +x into screen down-right and +y into screen down-left. Convert first,
-    /// then snap the screen vector to the compass rose.</summary>
+    /// then snap the screen vector to the compass rose by its dominant axis,
+    /// with diagonals when neither axis dominates. The old half-step
+    /// comparisons classified (1,0) as south; the dominant-axis test puts
+    /// every step on its true octant.</summary>
     static int FacingOf(int dx, int dy) {
-        // Screen-space components (scaled by half the projection constants,
-        // so +x -> (1,1/2) and +y -> (-1,1/2) on the screen axes).
-        int sx = dx - dy;   // horizontal (right positive)
-        int sy = (dx + dy) * 2;   // vertical (down positive), doubled
-        if (sy > 0) {
-            if (sx > sy * 2) { return 6; }        // east
-            if (sx > sy / 2) { return 5; }        // NE
-            if (sx > 0 - sy / 2) { return 0; }    // south
-            if (sx > 0 - sy * 2) { return 1; }    // SW
-            return 2;                              // west
-        }
-        if (sy < 0) {
-            int ny = 0 - sy;
-            if (sx > ny * 2) { return 6; }        // east
-            if (sx > ny / 2) { return 5; }        // NE
-            if (sx > 0 - ny / 2) { return 4; }    // north
-            if (sx > 0 - ny * 2) { return 3; }    // NW
-            return 2;                              // west
-        }
-        if (sx > 0) { return 6; }
-        if (sx < 0) { return 2; }
-        return 0;
+        int sx = dx - dy;          // screen right
+        int sy = (dx + dy) * 2;    // screen down
+        if (sx == 0 && sy == 0) { return 4; }
+        int ax = sx < 0 ? 0 - sx : sx;
+        int ay = sy < 0 ? 0 - sy : sy;
+        if (ax > ay * 2) { return sx > 0 ? 2 : 6; }    // east / west
+        if (ay > ax * 2) { return sy > 0 ? 4 : 0; }    // south / north
+        if (sx > 0) { return sy > 0 ? 3 : 1; }         // SE / NE
+        return sy > 0 ? 5 : 7;                         // SW / NW
     }
 
     /// <summary>The planned route as "x,y x,y ...", for tests to inspect.</summary>

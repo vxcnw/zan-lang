@@ -537,6 +537,17 @@ class Rules {
             "200,200,100,50,50,50,1,1,1,100,100"));
         r.warheads.Add(Warhead.Create("PJABWH",
             "100,100,100,50,25,25,25,40,15,100,100"));
+        // Tank-gun and tesla warheads, the shipped [Verses] tables.
+        r.warheads.Add(Warhead.Create("ApocAP",
+            "25,25,25,75,100,100,100,100,70,60,100"));
+        r.warheads.Add(Warhead.Create("UltraAP",
+            "2,2,2,100,40,100,2,2,2,2,100"));
+        r.warheads.Add(Warhead.Create("Electric",
+            "100,100,100,85,100,100,50,50,50,200,100"));
+        r.warheads.Add(Warhead.Create("CometWH",
+            "100,100,100,75,50,50,200,200,200,100,100"));
+        r.warheads.Add(Warhead.Create("FlakTWH",
+            "150,125,100,60,10,10,30,20,10,100,100"));
 
         // -- weapons: damage, ROF ticks, range cells, warhead ----------------
         r.weapons.Add(Weapon.Create("M60", 15, 20, 4, r.WarheadNamed("SA")));
@@ -590,6 +601,25 @@ class Rules {
             r.WarheadNamed("AP")));
         r.weapons.Add(Weapon.Create("120mm", 90, 65, 6,
             r.WarheadNamed("AP")));
+        // The wider vehicle arsenal, shipped values. V3Launcher's damage
+        // rides its spawned rocket in the original; this engine resolves
+        // shots directly, so the launcher carries the rocket's payload.
+        r.weapons.Add(Weapon.Create("120mmx", 100, 80, 6,
+            r.WarheadNamed("ApocAP")));
+        r.weapons.Add(Weapon.Create("MammothTusk", 50, 80, 8,
+            r.WarheadNamed("HE")));
+        r.weapons.Add(Weapon.Create("V3Launcher", 200, 150, 18,
+            r.WarheadNamed("HE")));
+        r.weapons.Add(Weapon.Create("TankBolt", 135, 75, 4,
+            r.WarheadNamed("Electric")));
+        r.weapons.Add(Weapon.Create("SABOT", 150, 70, 5,
+            r.WarheadNamed("UltraAP")));
+        r.weapons.Add(Weapon.Create("Comet", 100, 100, 10,
+            r.WarheadNamed("CometWH")));
+        r.weapons.Add(Weapon.Create("FlakTrackGun", 25, 25, 5,
+            r.WarheadNamed("FlakTWH")));
+        r.weapons.Add(Weapon.Create("HoverMissile", 25, 50, 6,
+            r.WarheadNamed("HE")));
 
         // -- the roster -------------------------------------------------------
         // Order matters: each side's menu ids come from filtering this list,
@@ -651,6 +681,22 @@ class Rules {
             ArmorClass.Heavy(), r.WeaponNamed("105mm"), "GAWEAP", 1,
             "GTNK.VXL");
         r.units.Add(mtnk);
+        // The rest of the allied motor pool in factory-menu order: the IFV's
+        // missile rack, the Tank Destroyer's armour-piercing SABOT and the
+        // Prism Tank's long-range beam.
+        r.units.Add(UnitDef.Create("FV", "甲弹斗车", 600, 200, 10,
+            ArmorClass.Light(), r.WeaponNamed("HoverMissile"), "GAWEAP", 1,
+            "FV.VXL"));
+        UnitDef tnkd = UnitDef.Create("TNKD", "坦克杀手", 900, 400, 5,
+            ArmorClass.Heavy(), r.WeaponNamed("SABOT"), "GAWEAP", 1,
+            "TNKD.VXL");
+        tnkd.AddPrereq("RADAR");
+        r.units.Add(tnkd);
+        UnitDef sref = UnitDef.Create("SREF", "棱镜坦克", 1200, 150, 4,
+            ArmorClass.Light(), r.WeaponNamed("Comet"), "GAWEAP", 1,
+            "SREF.VXL");
+        sref.AddPrereq("TECH");
+        r.units.Add(sref);
 
         // Soviet infantry, plus the terror drone the war factory turns out.
         UnitDef shk = UnitDef.Create("SHK", "磁暴步兵", 500, 130, 4,
@@ -689,11 +735,35 @@ class Rules {
         boris.AddPrereq("TECH");
         r.units.Add(boris);
         // The Rhino, the Soviet answer to the Grizzly: one speed slower,
-        // 200 more hit points, a harder-hitting 120mm.
+        // 200 more hit points, a harder-hitting 120mm. Behind it the factory
+        // turns out the Flak Track, the V3 rocket carrier, the Tesla tank
+        // and the Apocalypse; the terror drone keeps the menu's last slot.
         UnitDef htnk = UnitDef.Create("HTNK", "犀牛坦克", 900, 400, 6,
             ArmorClass.Heavy(), r.WeaponNamed("120mm"), "NAWEAP", 2,
             "HTNK.VXL");
         r.units.Add(htnk);
+        r.units.Add(UnitDef.Create("HTK", "防空履带车", 500, 180, 8,
+            ArmorClass.Heavy(), r.WeaponNamed("FlakTrackGun"), "NAWEAP", 2,
+            "HTK.VXL"));
+        UnitDef v3 = UnitDef.Create("V3", "V3导弹车", 800, 150, 4,
+            ArmorClass.Light(), r.WeaponNamed("V3Launcher"), "NAWEAP", 2,
+            "V3.VXL");
+        v3.AddPrereq("RADAR");
+        r.units.Add(v3);
+        UnitDef ttnk = UnitDef.Create("TTNK", "磁能坦克", 1200, 300, 6,
+            ArmorClass.Heavy(), r.WeaponNamed("TankBolt"), "NAWEAP", 2,
+            "TTNK.VXL");
+        ttnk.AddPrereq("RADAR");
+        r.units.Add(ttnk);
+        // The Apocalypse: the ship's Image key borrows the MTNK voxel, the
+        // biggest model in the install, with the twin 120mmx and the Tusk
+        // missiles of the shipped rules.
+        UnitDef apoc = UnitDef.Create("APOC", "天啟坦克", 1750, 800, 4,
+            ArmorClass.Heavy(), r.WeaponNamed("120mmx"), "NAWEAP", 2,
+            "MTNK.VXL");
+        apoc.SetSecondary(r.WeaponNamed("MammothTusk"));
+        apoc.AddPrereq("TECH");
+        r.units.Add(apoc);
         r.units.Add(UnitDef.Create("DRON", "恐怖机器人", 500, 100, 10,
             ArmorClass.Special1(), r.WeaponNamed("DroneJump"), "NAWEAP", 2,
             "DRON.SHP"));

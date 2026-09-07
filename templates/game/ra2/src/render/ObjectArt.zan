@@ -110,7 +110,9 @@ class ObjectArt {
         }
         int frame = 0;
         if (moving) {
-            frame = 14 + facing * 6 + (animFrame % 6);
+            // Walk blocks run S, SW, W, NW, N, NE, E, SE -- the facing ring
+            // rotated four places, since facing 0 is north.
+            frame = 14 + ((facing + 4) % 8) * 6 + (animFrame % 6);
         } else {
             frame = 8 + (animFrame % 6);
         }
@@ -172,12 +174,13 @@ class ObjectArt {
     }
 
     /// <summary>Bakes one compass facing of a voxel model with the map's 2:1
-    /// dimetric projection. The model's rest pose looks down the screen
-    /// diagonal, so the facing steps yaw one step past south; voxel depth
-    /// orders the draw, and each voxel is lit from its empty neighbours --
-    /// a hull face pointing at open sky catches the screen light, shaded
-    /// faces fall dark. The original stores a normal table per voxel for its
-    /// own lighting; the occupancy gradient reproduces the same read without
+    /// dimetric projection. Facings follow the TS/RA2 ring (0=N, 1=NE, 2=E,
+    /// 3=SE, 4=S, 5=SW, 6=W, 7=NW, clockwise); each facing turns the model
+    /// 45 degrees counter-clockwise on screen from north. Voxel depth orders
+    /// the draw, and each voxel is lit from its empty neighbours -- a hull
+    /// face pointing at open sky catches the screen light, shaded faces fall
+    /// dark. The original stores a normal table per voxel for its own
+    /// lighting; the occupancy gradient reproduces the same read without
     /// shipping that table through the render path.</summary>
     static Texture BakeFacing(VxlImage img, Palette pal, int facing) {
         VxlLimb l = img.Main();
@@ -185,7 +188,7 @@ class ObjectArt {
         int sx = l.SizeX();
         int sy = l.SizeY();
         int sz = l.SizeZ();
-        double yaw = ((double)facing + 1.0) * 3.14159265358979 / 4.0;
+        double yaw = (6.0 - (double)facing) * 3.14159265358979 / 4.0;
         double cos = Math.Cos(yaw);
         double sin = Math.Sin(yaw);
 

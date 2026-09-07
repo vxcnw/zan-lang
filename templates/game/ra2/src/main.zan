@@ -1077,6 +1077,15 @@ class Ra2App {
                             + Convert.ToString(o.Y()) + " hp="
                             + Convert.ToString(o.Hp()));
                     }
+                    // March the grizzly along the cell diagonal -- the game's
+                    // south, straight down the screen -- so the facing the
+                    // bake shows provably tracks the direction the unit
+                    // drives.
+                    if (ta >= 0 && game != null) {
+                        WorldObject o = world.ObjectAt(ta);
+                        world.SelectAt(o.X(), o.Y());
+                        game.OnRightClick(o.X() + 4, o.Y() + 4);
+                    }
                 }
                 if (frames == 12) {
                     // Dump before the fast-forward so the parked tanks are
