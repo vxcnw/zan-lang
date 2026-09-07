@@ -177,6 +177,10 @@ class JsonDoc {
         pos = pos + 1;
         pos = JsonDoc.SkipWs(pos, buf, len);
         if (pos < len && (buf[pos] & 255) == 125) {
+            // 空对象：首对下标必须置 -1。它此刻指向 pr.Count，即
+            // 之后任何对象将要落下的键对——Get 沿链会串进别人的键
+            // （{"a":{},"b":1} 上 Get(a,"b") 命中 b）。-1 让链立即终止。
+            sl[at].a = (long)5 | ((long)-1 << 8);
             sl[at].b = (long)1 << 31;
             return pos + 1;
         }
