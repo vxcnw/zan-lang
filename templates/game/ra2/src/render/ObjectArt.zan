@@ -14,14 +14,25 @@ class ObjectArt {
     Vfs vfs;
     AssetDb db;
     Palette unitPal;
+    // The allied unit palette: unitPal with the remap slots recoloured from
+    // soviet red to the allied player colour. Built on first use.
+    Palette alliedPal;
     Palette theaterPal;
 
-    // SHP name + frame -> decoded texture. Frame 0 of a building's SHP is the
-    // complete structure; the later frames are the construction animation. A
-    // missing name is cached as null, which is distinct from "not looked up".
+    // SHP name + frame + palette -> decoded texture. The palette is part of
+    // the key: unit sprites decode under a per-side palette (the remap
+    // slots differ), so two sides share a name and frame but not the pixels.
+    // Frame 0 of a building's SHP is the complete structure; the later
+    // frames are the construction animation. A missing name is cached as
+    // null, which is distinct from "not looked up".
     List<string> shpNames;
     List<int> shpFrames;
+    List<Palette> shpPals;
     List<Texture> shpCache;
+
+    // SHP name -> frame count, for the construction-stage mapping.
+    List<string> countNames;
+    List<int> countVals;
 
     // Vehicle voxel art: the parsed models, then one baked texture per
     // (model, facing). A bake is a few thousand voxel projections, so the
@@ -30,6 +41,7 @@ class ObjectArt {
     List<VxlImage> vxlCache;
     List<string> vehNames;
     List<int> vehFacings;
+    List<int> vehSides;
     List<Texture> vehTex;
 
     static ObjectArt Create(Vfs vfs, AssetDb db) {
@@ -38,11 +50,15 @@ class ObjectArt {
         a.db = db;
         a.shpNames = new List<string>();
         a.shpFrames = new List<int>();
+        a.shpPals = new List<Palette>();
         a.shpCache = new List<Texture>();
+        a.countNames = new List<string>();
+        a.countVals = new List<int>();
         a.vxlNames = new List<string>();
         a.vxlCache = new List<VxlImage>();
         a.vehNames = new List<string>();
         a.vehFacings = new List<int>();
+        a.vehSides = new List<int>();
         a.vehTex = new List<Texture>();
         // Unit palettes, best fit first: unittem.pal is the temperate unit
         // palette the merged art expects; unit.pal and unitsno.pal share the
@@ -51,6 +67,7 @@ class ObjectArt {
         a.unitPal = db.PaletteNamed("unittem.pal");
         if (a.unitPal == null) { a.unitPal = db.PaletteNamed("unit.pal"); }
         if (a.unitPal == null) { a.unitPal = db.PaletteNamed("unitsno.pal"); }
+        a.alliedPal = null;
         // Buildings use the temperate theater palette. Using the unit palette
         // made every structure render with wrong colours -- the yard's olive
         // green came out as bright white.
@@ -101,12 +118,13 @@ class ObjectArt {
     /// 14+ the eight facing directions' walk cycles in blocks of six (S, SW,
     /// W, NW, N, NE, E, SE). Walking cycles the block of the unit's facing;
     /// idle cycles the south-facing idle frames.</summary>
-    Texture UnitTexture(UnitType ut, bool moving, int animFrame, int facing) {
+    Texture UnitTexture(UnitType ut, bool moving, int animFrame, int facing,
+                        int side) {
         if (ut == null) { return null; }
         string name = ut.ShpName();
         if (name == null || name.Length == 0) { return null; }
         if (ObjectArt.IsVxlName(name)) {
-            return this.VehicleTexture(name, facing);
+            return this.VehicleTexture(name, facing, side);
         }
         int frame = 0;
         if (moving) {
@@ -120,7 +138,7 @@ class ObjectArt {
         // back to frame 0 rather than reading past the end.
         int count = this.ShapeFrameCount(name);
         if (frame >= count) { frame = 0; }
-        return this.ShapeTextureFrame(name, frame, this.unitPal);
+        return this.ShapeTextureFrame(name, frame, this.UnitPalFor(side));
     }
 
     /// <summary>Whether a unit art name names a voxel model rather than an
@@ -142,32 +160,86 @@ class ObjectArt {
     /// shows the unit's own field art: the voxel hull baked at the
     /// south-west facing (the cameo viewpoint) for vehicles, the still pose
     /// for infantry.</summary>
-    Texture UnitIconTexture(UnitType ut) {
+    Texture UnitIconTexture(UnitType ut, int side) {
         if (ut == null) { return null; }
         string name = ut.ShpName();
         if (name == null || name.Length == 0) { return null; }
         if (ObjectArt.IsVxlName(name)) {
-            return this.VehicleTexture(name, 5);
+            return this.VehicleTexture(name, 5, side);
         }
         if (this.ShapeFrameCount(name) <= 0) { return null; }
-        return this.ShapeTextureFrame(name, 0, this.unitPal);
+        return this.ShapeTextureFrame(name, 0, this.UnitPalFor(side));
+    }
+
+    /// <summary>The unit palette for a side. Remappable art stores its
+    /// player-colour pixels in palette slots 16..31, and the raw palette
+    /// carries the soviet red ramp there; the allied side gets those slots
+    /// recoloured to its player colour (the rules [Colors] Gold entry, the
+    /// first skirmish slot's default) so friend and foe read apart on the
+    /// field. The soviet palette is the file as shipped.</summary>
+    Palette UnitPalFor(int side) {
+        if (side != Side2.Allied() || this.unitPal == null) {
+            return this.unitPal;
+        }
+        if (this.alliedPal == null) {
+            int hue = 30;
+            int sat = 100;
+            IniSection colors = this.db.Rules().Section("Colors");
+            if (colors != null) {
+                List<int> hsv = ObjectArt.ParseHsvTriple(colors.Get("Gold"));
+                if (hsv.Count == 3) {
+                    hue = hsv[0];
+                    sat = hsv[1];
+                }
+            }
+            this.alliedPal = this.unitPal.Remapped(hue, sat);
+        }
+        return this.alliedPal;
+    }
+
+    /// <summary>"32,100,255" -> 32,100,255. Stops at an inline ';' comment;
+    /// returns whatever numbers were found, so a malformed value degrades to
+    /// the caller's fallback.</summary>
+    static List<int> ParseHsvTriple(string s) {
+        List<int> vals = new List<int>();
+        if (s == null) { return vals; }
+        int cur = 0;
+        bool any = false;
+        for (int i = 0; i < s.Length; i = i + 1) {
+            int c = s[i] & 0xFF;
+            if (c >= 48 && c <= 57) {
+                cur = cur * 10 + (c - 48);
+                any = true;
+            } else if (c == 59) {
+                break;
+            } else if (any) {
+                vals.Add(cur);
+                cur = 0;
+                any = false;
+            }
+        }
+        if (any) { vals.Add(cur); }
+        return vals;
     }
 
     /// <summary>The baked texture for a vehicle at one of the eight compass
-    /// facings, rendered on first use and cached.</summary>
-    Texture VehicleTexture(string name, int facing) {
+    /// facings, rendered on first use and cached. The side picks the unit
+    /// palette, so the remappable voxels bake in their owner's colour.</summary>
+    Texture VehicleTexture(string name, int facing, int side) {
         for (int i = 0; i < this.vehNames.Count; i = i + 1) {
-            if (this.vehNames[i] == name && this.vehFacings[i] == facing) {
+            if (this.vehNames[i] == name && this.vehFacings[i] == facing
+             && this.vehSides[i] == side) {
                 return this.vehTex[i];
             }
         }
         Texture tex = null;
         VxlImage img = this.VxlNamed(name);
-        if (img != null && this.unitPal != null) {
-            tex = ObjectArt.BakeFacing(img, this.unitPal, facing);
+        if (img != null && this.UnitPalFor(side) != null) {
+            tex = ObjectArt.BakeFacing(img, this.UnitPalFor(side), facing);
         }
         this.vehNames.Add(name);
         this.vehFacings.Add(facing);
+        this.vehSides.Add(side);
         this.vehTex.Add(tex);
         return tex;
     }
@@ -333,10 +405,13 @@ class ObjectArt {
     }
 
     /// <summary>How many frames a shape carries, 0 when absent. Drives the
-    /// construction animation mapping.</summary>
+    /// construction animation mapping. Kept in its own cache: the texture
+    /// cache's "frame" slot holds a frame index, not a count, so a name-only
+    /// lookup there could hand back a frame number as a count.</summary>
     int ShapeFrameCount(string shpName) {
-        int i = this.IndexOfName(this.shpNames, shpName);
-        if (i >= 0) { return this.shpFrames[i]; }
+        for (int i = 0; i < this.countNames.Count; i = i + 1) {
+            if (this.countNames[i] == shpName) { return this.countVals[i]; }
+        }
         int n = 0;
         List<int> len = new List<int>();
         len.Add(0);
@@ -345,15 +420,15 @@ class ObjectArt {
             ShpImage shp = ShpImage.Parse(raw, len[0]);
             n = shp.FrameCount();
         }
-        this.shpNames.Add(shpName);
-        this.shpFrames.Add(n);
-        this.shpCache.Add(null);
+        this.countNames.Add(shpName);
+        this.countVals.Add(n);
         return n;
     }
 
     Texture ShapeTextureFrame(string shpName, int frame, Palette pal) {
         for (int i = 0; i < this.shpNames.Count; i = i + 1) {
-            if (this.shpNames[i] == shpName && this.shpFrames[i] == frame) {
+            if (this.shpNames[i] == shpName && this.shpFrames[i] == frame
+             && this.shpPals[i] == pal) {
                 return this.shpCache[i];
             }
         }
@@ -373,6 +448,7 @@ class ObjectArt {
         }
         this.shpNames.Add(shpName);
         this.shpFrames.Add(frame);
+        this.shpPals.Add(pal);
         this.shpCache.Add(tex);
         return tex;
     }
@@ -571,7 +647,8 @@ class ObjectRenderer {
             // Units draw their real sprite when the install has the art,
             // otherwise the side-coloured placeholder.
             u = o.UnitType();
-            tex = art.UnitTexture(u, o.HasRoute(), o.AnimFrame(), o.Facing());
+            tex = art.UnitTexture(u, o.HasRoute(), o.AnimFrame(), o.Facing(),
+                                  o.Side());
         }
         if (tex != null) {
             // The sprite's box is drawn around the cell apex; the building's

@@ -132,9 +132,9 @@ class Program {
         // and the real sprite when it does (the dog).
         UnitCatalog ucat = UnitCatalog.Create();
         Console.WriteLine("unit_art=" + Convert.ToString(
-            art.UnitTexture(ucat.TypeFor(Side2.Allied(), 0), false, 0, 0) == null));
+            art.UnitTexture(ucat.TypeFor(Side2.Allied(), 0), false, 0, 0, Side2.Allied()) == null));
         Console.WriteLine("dog_art=" + Convert.ToString(
-            art.UnitTexture(ucat.TypeFor(Side2.Allied(), 1), false, 0, 0) == null));
+            art.UnitTexture(ucat.TypeFor(Side2.Allied(), 1), false, 0, 0, Side2.Allied()) == null));
 
         // Renderer: a unit on a clear canvas and a structure, selected, so the
         // ring must appear. The unit is in front (larger x+y), so it paints
