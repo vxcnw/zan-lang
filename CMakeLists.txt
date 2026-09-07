@@ -2053,6 +2053,20 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
       -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_chart_fillaa${_exe_ext}
       -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
 
+  # ChildWindow 保留树 × 宿主阴影带坐标回归：带 SetWindowShadow 的
+  # 异形宿主把内容轮廓推离画布原点 (ShapeOffX, ShapeOffY)，Render
+  # 此前把树 Arrange 在画布 (0, top)，整树压进阴影带一圈带宽。修复
+  # 后树从内容原点起摆；用例同时断言普通宿主（off=0）行为不变
+  # （修复前树原点 x=0 压带 → 修复后 == ShapeOffX）。
+  add_test(NAME conformance_gui_childwindow_shape
+    COMMAND ${CMAKE_COMMAND}
+      -DZANC=$<TARGET_FILE:zanc>
+      -DSRC=${CMAKE_SOURCE_DIR}/tests/gui/childwindow_shape_test.zan
+      "-DZANC_ARGS=--auto-stdlib${_gui_driver_tail}"
+      -DEXPECTED=${CMAKE_SOURCE_DIR}/tests/conformance/gui_childwindow_shape.out
+      -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_childwindow_shape${_exe_ext}
+      -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
+
   # 图表主题包（Gui.Component.Chart/themes，图表自己的皮肤层）：
   # UseChartTheme 叠加 chart::series-N/axis/grid 规则，"default" 卸载
   # 后恢复跟随 Gui 皮肤；未知包名被拒且当前主题不变。

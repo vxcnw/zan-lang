@@ -326,7 +326,11 @@ class ChildWindow {
             if (root != null) {
                 SyncFromModel();
                 root.MeasureTree(host);
-                root.Arrange(0, top, host.ClientWidth(),
+                // 阴影带外扩的异形宿主把内容轮廓推离画布原点
+                // (ShapeOffX, ShapeOffY)：保留树从内容原点起摆，绘制、
+                // 命中区与画布坐标三方才对齐（普通宿主两值恒 0，无感）。
+                root.Arrange(host.ShapeOffX(), top + host.ShapeOffY(),
+                             host.ClientWidth(),
                              host.ClientHeight() - top);
                 root.RenderTree(host);
             }

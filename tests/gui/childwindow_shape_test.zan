@@ -1,0 +1,132 @@
+using System;
+using Gui;
+using Gui.Widget;
+
+/// ChildWindow 保留树与宿主阴影带的坐标回归（真实 App 离屏渲染）。
+///
+/// 阴影带（SetWindowShadow）把异形宿主的 OS 表面向四周外扩 off，
+/// 内容轮廓相对画布原点偏移 (ShapeOffX, ShapeOffY)。ChildWindow.Render
+/// 此前把保留控件树 Arrange 在画布 (0, top)：带阴影带的宿主里整棵树
+/// 压进左侧/顶侧阴影带一圈带宽（绘制、命中区与画布坐标三方错位，
+/// 与异形标题栏按钮修齐前同型）。修复后树从内容原点起摆。
+///
+/// 本用例开两个子窗口宿主：一个设形状+阴影带，断言其树内自绘控件
+/// 的排版原点恰好等于 ShapeOffX（>= ShapeOffY）；一个普通宿主，
+/// 断言偏移为 0 时行为不变（原点仍在画布 0）。像素判定只读画布，
+/// 跨栅格化后端成立。
+class MarkerBox : Control {
+    static int paints;
+    static int lastBx;
+    static int lastBy;
+    MarkerBox() { this.InitControl("marker", 0); }
+    override void OnMeasure(App app) {
+        prefW = app.Scale(60);
+        prefH = app.Scale(40);
+    }
+    override void OnPaint(App app) {
+        paints = paints + 1;
+        lastBx = bx;
+        lastBy = by;
+        app.canvas.FillRect(bx, by, bw, bh, 0xFF00FF00);
+    }
+}
+
+class ShapeChild : ChildWindow {
+    override string Title() { return "shape-child"; }
+    override int Width() { return 300; }
+    override int Height() { return 200; }
+    void OpenShaped(App parent) {
+        this.OpenHost(parent);
+        MarkerBox marker = new MarkerBox();
+        Panel root = Panel.Column() { Children = { marker } };
+        root.Pad(0);
+        this.SetRoot(root, null);
+        this.Wire();
+        host.SetWindowShape("1,0,0,300,200,16");
+        host.SetWindowShadow(10);
+        host.RequestRedraw();
+    }
+}
+
+class PlainChild : ChildWindow {
+    override string Title() { return "plain-child"; }
+    override int Width() { return 300; }
+    override int Height() { return 200; }
+    void OpenPlain(App parent) {
+        this.OpenHost(parent);
+        MarkerBox marker = new MarkerBox();
+        Panel root = Panel.Column() { Children = { marker } };
+        root.Pad(0);
+        this.SetRoot(root, null);
+        this.Wire();
+        host.RequestRedraw();
+    }
+}
+
+class ChildWindowShapeTest {
+    static int fails;
+
+    static void True(string what, bool got) {
+        if (got) { return; }
+        fails = fails + 1;
+        Console.WriteLine("FAIL " + what);
+    }
+
+    static int Greens(App a) {
+        int greens = 0;
+        for (int y = 0; y < a.canvas.Height(); y = y + 3) {
+            for (int x = 0; x < a.canvas.Width(); x = x + 3) {
+                if ((a.canvas.GetPixel(x, y) & 0x00FFFFFF) == 0x00FF00) {
+                    greens = greens + 1;
+                }
+            }
+        }
+        return greens;
+    }
+
+    static void Main() {
+        fails = 0;
+        App parent = new App("cw-shape-test", 100, 100);
+        parent.Show();
+
+        // ---- 带阴影带的异形宿主：树落在内容原点 ----
+        ShapeChild sh = new ShapeChild();
+        sh.OpenShaped(parent);
+        App h1 = sh.Host();
+        for (int i = 0; i < 6; i = i + 1) {
+            parent.PumpGuarded();
+            h1.PumpGuarded();
+            sh.Render();
+        }
+        int offX = h1.ShapeOffX();
+        int offY = h1.ShapeOffY();
+        True("shadow band applied", offX > 0 && offY > 0);
+        True("host resized to band bbox",
+            h1.canvas.Width() > 300 * h1.dpiScale / 100);
+        True("marker painted", MarkerBox.paints > 0);
+        True("tree lands on content origin x", MarkerBox.lastBx == offX);
+        True("tree lands below content top", MarkerBox.lastBy >= offY);
+        True("content painted", Greens(h1) > 100);
+
+        // ---- 普通宿主：off=0，行为不变 ----
+        int paintsBefore = MarkerBox.paints;
+        PlainChild pl = new PlainChild();
+        pl.OpenPlain(parent);
+        App h2 = pl.Host();
+        for (int i = 0; i < 4; i = i + 1) {
+            parent.PumpGuarded();
+            h2.PumpGuarded();
+            pl.Render();
+        }
+        True("plain host has no offset",
+            h2.ShapeOffX() == 0 && h2.ShapeOffY() == 0);
+        True("plain marker painted", MarkerBox.paints > paintsBefore);
+        True("plain tree at canvas origin", MarkerBox.lastBx == 0);
+        True("plain content painted", Greens(h2) > 100);
+
+        sh.Close();
+        pl.Close();
+        Console.WriteLine("childwindow-shape:"
+            + Convert.ToString(fails == 0 ? 1 : 0));
+    }
+}
