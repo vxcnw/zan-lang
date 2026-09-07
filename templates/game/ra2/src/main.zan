@@ -604,6 +604,10 @@ class Ra2App {
         // shows the game's artwork rather than something drawn here.
         ShellArt art = ShellArt.Load(host.Renderer(), vfs);
         Console.WriteLine("shell art title=" + Convert.ToString(art.HasTitle()));
+        // The menu text: the install's own CSF table (RA2MD.CSF on a Yuri's
+        // Revenge install, RA2.CSF otherwise), so the buttons carry the
+        // original labels. Screens falls back to transcribed text without it.
+        Strings ui = Strings.Load(vfs);
 
         // Loaded lazily when a game starts, and torn down when it ends, so the
         // menu does not hold a map's worth of textures.
@@ -771,7 +775,7 @@ class Ra2App {
             host.Begin(16, 20, 16);
 
             if (shell.CurrentScene() == 0) {
-                int act = Screens.DrawMainMenu(host.Renderer(), art,
+                int act = Screens.DrawMainMenu(host.Renderer(), art, ui,
                     Ra2App.ViewW(), Ra2App.ViewH(), mouseX, mouseY, clicked);
                 if (act == 1) { shell.OpenSkirmish(); }
                 if (act == 2) { host.Quit(); }
@@ -783,7 +787,8 @@ class Ra2App {
                     previewIndex = shell.MapIndex();
                 }
                 int act = Screens.DrawSkirmish(host.Renderer(), shell, maps,
-                    preview, Ra2App.ViewW(), Ra2App.ViewH(), mouseX, mouseY, clicked);
+                    preview, ui, Ra2App.ViewW(), Ra2App.ViewH(), mouseX, mouseY,
+                    clicked);
                 if (act == 1) { shell.StartGame(); }
                 if (act == 2) { shell.Back(); }
             } else {
@@ -808,8 +813,10 @@ class Ra2App {
                     // so its click orders a move immediately.
                     // The catalogs come from the Rules: the transcribed RA2
                     // defaults, with the install's own RULES.INI layered on
-                    // top when the data dir carries one.
-                    Rules rules = Rules.Load(db.Rules());
+                    // top when the data dir carries one. The install's CSF
+                    // string table rides along so sidebar labels read the
+                    // original text (RA2MD.CSF, falling back to RA2.CSF).
+                    Rules rules = Rules.LoadWith(db.Rules(), db.Strings());
                     world = World.Create(map.Terrain(),
                                          StructureCatalog.CreateWith(rules),
                                          UnitCatalog.CreateWith(rules));
@@ -1056,6 +1063,7 @@ class Ra2App {
         }
         if (preview != null) { preview.Close(); }
         art.Close();
+        ui.Close();
         host.Close();
         db.Close();
     }

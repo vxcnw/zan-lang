@@ -28,12 +28,18 @@ class AssetDb {
         l.Add("expandmd03.mix");
         l.Add("expandmd02.mix");
         l.Add("expandmd01.mix");
+        l.Add("expandmd99.mix");
         l.Add("ra2md.mix");
         l.Add("ra2.mix");
+        l.Add("langmd.mix");
         l.Add("language.mix");
         l.Add("multi.mix");
+        l.Add("multimd.mix");
         l.Add("maps01.mix");
+        l.Add("maps02.mix");
+        l.Add("mapsmd03.mix");
         l.Add("theme.mix");
+        l.Add("thememd.mix");
         return l;
     }
 
@@ -79,9 +85,30 @@ class AssetDb {
         db.shpNames = new List<string>();
         db.shpCache = new List<ShpImage>();
         db.rules = db.LoadIni("RULES.INI");
+        db.rules = AssetDb.LayerIni(db.rules, db.LoadIni("RULESMD.INI"));
         db.art = db.LoadIni("ART.INI");
+        db.art = AssetDb.LayerIni(db.art, db.LoadIni("ARTMD.INI"));
         db.strings = db.LoadCsf("RA2.CSF");
+        CsfTable mdStrings = db.LoadCsf("RA2MD.CSF");
+        if (mdStrings != null) { db.strings = mdStrings; }
         return db;
+    }
+
+    /// <summary>Layers an expansion INI over its base: the expansion's keys
+    /// override, everything else keeps the base value -- the same last-wins
+    /// rule the Westwood engine applies.</summary>
+    static IniDocument LayerIni(IniDocument baseDoc, IniDocument over) {
+        if (over == null || over.Count() == 0) { return baseDoc; }
+        if (baseDoc == null || baseDoc.Count() == 0) { return over; }
+        for (int s = 0; s < over.Count(); s = s + 1) {
+            Ra2.Formats.IniSection src = over.SectionAt(s);
+            Ra2.Formats.IniSection dst = baseDoc.Require(src.Name());
+            for (int e = 0; e < src.Count(); e = e + 1) {
+                Ra2.Formats.IniEntry entry = src.EntryAt(e);
+                dst.Set(entry.Key(), entry.Value());
+            }
+        }
+        return baseDoc;
     }
 
     Vfs Files() { return this.vfs; }

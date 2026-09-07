@@ -57,6 +57,11 @@ class Prog {
 
         // ---- CRC32 known vector (0xCBF43926 as signed int) ----
         Check(Crc32.Compute("123456789".ToBytes(), 0, 9, 0) == -873187034);
+        // String overload: was silently corrupt while string->byte[] conversion
+        // misindexed (every element read as the first). Golden = CRC32("ABCD").
+        Check(Crc32.Compute("ABCD", 0, 4, 0) == -619241307);
+        // Offset slice over a string: CRC32("BC").
+        Check(Crc32.Compute("xABCD", 2, 2, 0) == 1816342354);
 
         // ---- GZip ----
         byte[] gz = GZip.Compress(text, 6);

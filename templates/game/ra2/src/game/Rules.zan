@@ -192,6 +192,7 @@ class UnitDef {
     void SetArmor(int armor) { this.armor = armor; }
     void SetShp(string shp) { this.shp = shp; }
     void SetPrimary(Weapon w) { this.primary = w; }
+    void SetLabel(string label) { this.label = label; }
 
     /// <summary>Cells the unit covers per tick. RA2's speed classes map to
     /// foot soldiers at one cell and fast movers (dogs, terror drones) at
@@ -276,6 +277,7 @@ class BuildingDef {
     void SetHp(int hp) { this.hp = hp; }
     void SetPower(int power) { this.power = power; }
     void SetDrain(int drain) { this.drain = drain; }
+    void SetLabel(string label) { this.label = label; }
 }
 
 /// <summary>The whole ruleset: every warhead, weapon, soldier and building of
@@ -290,6 +292,7 @@ class Rules {
     List<UnitDef> units;
     List<BuildingDef> buildings;   // both sides interleaved, menu order per side
     List<BuildingDef> civs;        // neutral structures from the map
+    CsfTable strings;              // the install's UI text, or null
 
     // Tech-tree aliases, the [General] Prerequisite* lists.
     List<string> preqPower;
@@ -784,6 +787,16 @@ class Rules {
         return r;
     }
 
+    /// <summary>Load with the install's string table alongside the rules, so
+    /// sidebar labels read exactly what the original game showed.</summary>
+    static Rules LoadWith(IniDocument ini, CsfTable strings) {
+        Rules r = Rules.Default();
+        r.strings = strings;
+        if (ini == null || ini.Count() == 0) { return r; }
+        r.ApplyIni(ini);
+        return r;
+    }
+
     void ApplyIni(IniDocument ini) {
         // Warheads first: weapons relink against them below.
         for (int i = 0; i < this.warheads.Count; i = i + 1) {
@@ -869,6 +882,30 @@ class Rules {
             this.aiTech = Rules.CsvOr(ai, "BuildTech", this.aiTech);
             this.aiRadar = Rules.CsvOr(ai, "BuildRadar", this.aiRadar);
             this.aiDefense = Rules.CsvOr(ai, "BuildDefense", this.aiDefense);
+        }
+        // Sidebar names come from the install's own string table, the same
+        // labels the original menu showed: each unit/building's UIName points
+        // at a CSF label (Name:E1 -> 美国大兵). Only overrides; anything the
+        // table lacks keeps the transcribed default.
+        if (this.strings != null) {
+            for (int i = 0; i < this.units.Count; i = i + 1) {
+                UnitDef d = this.units[i];
+                IniSection s = ini.Section(d.Reg());
+                if (s == null) { continue; }
+                string ui = s.Get("UIName");
+                if (ui.Length == 0) { continue; }
+                string text = this.strings.Lookup(ui);
+                if (text != null && text.Length > 0) { d.SetLabel(text); }
+            }
+            for (int i = 0; i < this.buildings.Count; i = i + 1) {
+                BuildingDef d = this.buildings[i];
+                IniSection s = ini.Section(d.Reg());
+                if (s == null) { continue; }
+                string ui = s.Get("UIName");
+                if (ui.Length == 0) { continue; }
+                string text = this.strings.Lookup(ui);
+                if (text != null && text.Length > 0) { d.SetLabel(text); }
+            }
         }
     }
 

@@ -58,13 +58,46 @@ class ShellArt {
 ///
 /// The screens read a Shell and call its transitions; they hold no state of
 /// their own beyond hit-test rectangles, so the flow stays testable without a
-/// window.
+/// window. Every label comes from the install's CSF table when one is
+/// mounted -- the exact strings the original menu showed (遭遇战, 選項,
+/// 退出遊戲) -- falling back to the transcribed text without one.
+class Strings {
+    CsfTable table;
+
+    static Strings Load(Vfs vfs) {
+        Strings s = new Strings();
+        s.table = null;
+        List<int> len = new List<int>();
+        len.Add(0);
+        byte[] raw = vfs.Read("RA2MD.CSF", len);
+        if (len[0] == 0) {
+            raw = vfs.Read("RA2.CSF", len);
+        }
+        if (len[0] > 0) { s.table = CsfTable.Parse(raw, len[0]); }
+        return s;
+    }
+
+    /// <summary>The CSF text for <paramref name="label"/>, or the fallback
+    /// when the table is missing or the label absent.</summary>
+    string Or(string label, string fallback) {
+        if (this.table == null) { return fallback; }
+        string v = this.table.Lookup(label);
+        if (v == null || v.Length == 0) { return fallback; }
+        return v;
+    }
+
+    bool Loaded() { return this.table != null; }
+
+    void Close() { this.table = null; }
+}
+
 class Screens {
     static int PanelW() { return 420; }
 
     /// <summary>Main menu over the game's own title art. Returns the action
     /// the click landed on: 0 none, 1 skirmish, 2 quit.</summary>
-    static int DrawMainMenu(SdlRenderer r, ShellArt art, int viewW, int viewH,
+    static int DrawMainMenu(SdlRenderer r, ShellArt art, Strings ui,
+                            int viewW, int viewH,
                             int mouseX, int mouseY, bool clicked) {
         // The stock TITLE.PCX is very dark; lift it a touch so the menu reads
         // as a scene rather than a black screen.
@@ -94,19 +127,27 @@ class Screens {
         int by = 310;
         int gap = 22;
 
+        // The original menu's button labels, from the CSF table the install
+        // ships: GUI:Skirmish 遭遇戰, GUI:SinglePlayerMenu 單人遊戲,
+        // GUI:SelectMultiplayerGame, GUI:ExitGame 退出遊戲.
+        string skirmishLabel = ui.Or("GUI:Skirmish", "遭遇战");
+        string singleLabel = ui.Or("GUI:SinglePlayerMenu", "单人游戏");
+        string multiLabel = ui.Or("GUI:SelectMultiplayerGame", "多人游戏");
+        string exitLabel = ui.Or("GUI:ExitGame", "退出");
+
         int action = 0;
         bool hovSkirmish = Ra2UiButton(r, mouseX, mouseY, bx, by, bw, bh,
-                                       "遭遇战", true);
+                                       skirmishLabel, true);
         if (hovSkirmish && clicked) { action = 1; }
 
         // Campaign and multiplayer are not implemented; they are drawn
         // disabled rather than hidden so the menu reads like the real one and
         // the gap is honest.
-        Screens.DisabledButton(r, bx, by + bh + gap, bw, bh, "战役（未实现）");
-        Screens.DisabledButton(r, bx, by + (bh + gap) * 2, bw, bh, "多人游戏（未实现）");
+        Screens.DisabledButton(r, bx, by + bh + gap, bw, bh, singleLabel);
+        Screens.DisabledButton(r, bx, by + (bh + gap) * 2, bw, bh, multiLabel);
 
         bool hovQuit = Ra2UiButton(r, mouseX, mouseY, bx, by + (bh + gap) * 3,
-                                   bw, bh, "退出", false);
+                                   bw, bh, exitLabel, false);
         if (hovQuit && clicked) { action = 2; }
 
         Text.Draw(r, "Esc 退出  F11 全屏", 20, viewH - 34, 2, 150, 158, 172, 255);
@@ -154,10 +195,11 @@ class Screens {
     /// <summary>Skirmish setup: map list on the left, side pick and a preview
     /// of the selected map on the right. Returns 0 none, 1 start, 2 back.</summary>
     static int DrawSkirmish(SdlRenderer r, Shell shell, List<string> maps,
-                            SdlTexture preview, int viewW, int viewH,
-                            int mouseX, int mouseY, bool clicked) {
+                            SdlTexture preview, Strings ui, int viewW,
+                            int viewH, int mouseX, int mouseY, bool clicked) {
         KitUi.Backdrop(r, null, viewW, viewH);
-        Text.DrawShadow(r, "遭遇战", 40, 40, 4, 236, 208, 120, 3);
+        Text.DrawShadow(r, ui.Or("GUI:Skirmish", "遭遇战"), 40, 40, 4,
+                        236, 208, 120, 3);
 
         int listX = 40;
         int listY = 120;
@@ -191,10 +233,12 @@ class Screens {
             if (hov && clicked) { shell.SelectMapAt(idx); }
         }
 
-        // Side picker.
+        // Side picker. The side names come from the CSF's Name:Allies /
+        // Name:Soviets -- the exact words the original skirmish screen used.
         int sideX = viewW - 460;
         KitUi.Panel(r, sideX - 12, listY - 14, 420, 200, 22, 26, 36, 210);
-        Text.Draw(r, "阵营", sideX + 8, listY, 3, 236, 208, 120, 255);
+        Text.Draw(r, ui.Or("GUI:Side", "阵营"), sideX + 8, listY, 3,
+                  236, 208, 120, 255);
         int sw = 180;
         int sh = 62;
         int sy = listY + 60;
@@ -203,9 +247,9 @@ class Screens {
         if (shell.SideIndex() == Side.Allied()) { alliedKind = 2; }
         else { sovietKind = 2; }
         bool hovA = KitUi.Button(r, mouseX, mouseY, sideX + 8, sy, sw, sh,
-                              "盟军", 3, alliedKind);
+                              ui.Or("Name:Allies", "盟军"), 3, alliedKind);
         bool hovS = KitUi.Button(r, mouseX, mouseY, sideX + 8 + sw + 20, sy, sw, sh,
-                              "苏联", 3, sovietKind);
+                              ui.Or("Name:Soviets", "苏联"), 3, sovietKind);
         if (clicked) {
             if (hovA) { shell.SetSide(Side.Allied()); }
             if (hovS) { shell.SetSide(Side.Soviet()); }
@@ -231,9 +275,10 @@ class Screens {
         int bh = 62;
         int by = viewH - 100;
         int action = 0;
-        bool hovBack = KitUi.Button(r, mouseX, mouseY, 40, by, bw, bh, "返回", 3, 0);
+        bool hovBack = KitUi.Button(r, mouseX, mouseY, 40, by, bw, bh,
+            ui.Or("GUI:Back", "返回"), 3, 0);
         bool hovGo = KitUi.Button(r, mouseX, mouseY, viewW - 40 - bw, by, bw, bh,
-                               "开始", 3, 1);
+                               ui.Or("GUI:StartGame", "开始"), 3, 1);
         if (clicked) {
             if (hovBack) { action = 2; }
             if (hovGo) { action = 1; }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 
 namespace Ra2.Formats;
 
@@ -58,23 +59,29 @@ class MixArchive {
     /// running CRC32 over it, and the padding is not zeros: it is the length
     /// remainder followed by repeats of the byte at the last 4-byte boundary.
     /// Getting that wrong yields hashes that miss every real file.
+    ///
+    /// The name is copied into a byte[] before the CRC: the implicit
+    /// string-to-byte[] conversion misindexes (every element reads as the
+    /// first), and the stdlib Crc32's own note documents how hex literals
+    /// above 0x7FFFFFFF sign-extend — both traps this hash already fell into.
     static long HashName(string name) {
         string s = name.ToUpper();
         int l = s.Length;
-        int a = l >> 2;
-        if ((l & 3) != 0) {
-            StringBuilder sb = new StringBuilder();
-            sb.Append(s);
-            sb.Append(MixArchive.CharOf(l - (a << 2)));
-            string padSrc = s.Substring(a << 2, 1);
-            int i = 3 - (l & 3);
-            while (i > 0) {
-                sb.Append(padSrc);
-                i = i - 1;
-            }
-            s = sb.ToString();
+        int padded = l;
+        if ((l & 3) != 0) { padded = l + 4 - (l & 3); }
+        byte[] buf = new byte[padded];
+        for (int i = 0; i < l; i = i + 1) {
+            buf[i] = (byte)(s[i] & 0xFF);
         }
-        return MixArchive.Crc32(s, s.Length);
+        if (padded > l) {
+            int padLen = l - ((l >> 2) << 2);
+            buf[l] = (byte)padLen;
+            byte padSrc = buf[(l >> 2) << 2];
+            for (int i = l + 1; i < padded; i = i + 1) {
+                buf[i] = padSrc;
+            }
+        }
+        return (long)Crc32.Compute(buf) & 0xFFFFFFFFL;
     }
 
     // A one-character string holding the given byte value. Appending a char
@@ -83,22 +90,6 @@ class MixArchive {
         byte[] one = new byte[1];
         one[0] = (byte)(v & 0xFF);
         return one.ToStr(0, 1);
-    }
-
-    /// Standard reflected CRC32 (polynomial 0xEDB88320), accumulated in a
-    /// `long` and masked to 32 bits: `int` is 32 bits, so the intermediate
-    /// shifts would overflow it.
-    static long Crc32(string buf, int len) {
-        long crc = 0xFFFFFFFF;
-        for (int i = 0; i < len; i = i + 1) {
-            long c = (crc ^ ((long)buf[i] & 0xFF)) & 0xFF;
-            for (int k = 0; k < 8; k = k + 1) {
-                if ((c & 1) != 0) { c = 0xEDB88320 ^ (c >> 1); }
-                else { c = c >> 1; }
-            }
-            crc = ((crc >> 8) & 0x00FFFFFF) ^ c;
-        }
-        return (crc ^ 0xFFFFFFFF) & 0xFFFFFFFF;
     }
 
     /// <summary>Opens an archive on disk, reading only its header.</summary>
