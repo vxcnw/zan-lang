@@ -2857,6 +2857,9 @@ class Gallery {
                         Gallery.tipsOn.Set(true);
                     } else if (st == "photos") {
                         Gallery.photosOpen.Set(true);
+                    } else if (st == "form") {
+                        // page 层嵌表单的演示窗口（式样/居中验证用）。
+                        Gallery.SpawnFormWindow(app);
                     } else {
                         Gallery.SpawnLayer(app);
                         if (st == "two") { Gallery.SpawnLayer(app); }
@@ -3902,6 +3905,42 @@ class Gallery {
         // 画不出来时第一件事就是看它，不用再靠减法猜谁在抛。
         UiDriver.SetProbe("frame.err",
             Gallery.app != null ? Gallery.app.LastFrameError() : "");
+        // 弹层生命周期探针：clickid/像素复核之外的第三只眼——脚本点击
+        // Alert/Confirm 后断言 probe 即可确证 LayerState 真的开了/关了，
+        // 把「命中解析」与「弹层状态」两个阶段分开归因。
+        string popSt;
+        if (Gallery.dlgAlert.open) { popSt = "alert"; }
+        else if (Gallery.dlgConfirm.open) { popSt = "confirm"; }
+        else if (Gallery.dlgPrompt.open) { popSt = "prompt"; }
+        else if (Gallery.photosOpen.Get()) { popSt = "photos"; }
+        else { popSt = Gallery.popupResult; }
+        UiDriver.SetProbe("popup.state", popSt);
+        // form 窗口几何探针（SizeToContent 诊断）：窗口与正文树逐层
+        // 边界 + 测量尺寸，一次 dump 全见。
+        if (Gallery.formWin != null && Gallery.formWin.open
+            && Gallery.formWin.view != null) {
+            LayerState fw = Gallery.formWin;
+            string dump = "win " + fw.x + "," + fw.y + " " + fw.w + "x" + fw.h;
+            Control v = fw.view;
+            dump = dump + " | view " + v.bx + "," + v.by + " " + v.bw + "x"
+                + v.bh + " pref " + v.prefW + "x" + v.prefH + " kind "
+                + v.Kind();
+            for (int i = 0; i < v.ChildCount(); i = i + 1) {
+                Control cc = v.children[i];
+                dump = dump + " | c" + i + " " + cc.Kind() + " "
+                    + cc.bx + "," + cc.by + " " + cc.bw + "x" + cc.bh
+                    + " pref " + cc.prefW + "x" + cc.prefH;
+                for (int j = 0; j < cc.ChildCount() && j < 4; j = j + 1) {
+                    Control gc = cc.children[j];
+                    dump = dump + " ; g" + j + " " + gc.Kind() + " "
+                        + gc.bx + "," + gc.by + " " + gc.bw + "x" + gc.bh
+                        + " pref " + gc.prefW + "x" + gc.prefH;
+                }
+            }
+            UiDriver.SetProbe("form.geom", dump);
+        } else {
+            UiDriver.SetProbe("form.geom", "closed");
+        }
     }
 
     /// Left navigation: category headers interleaved with clickable component
@@ -13131,6 +13170,9 @@ class Gallery {
     /// （Input + TextArea + Button）。控件树在点击回调里中途构造，
     /// 必须包在 Layer.BeginBody()/EndBody() 里领 Layer body 保留段
     /// 的 id，否则重演「信号污染」。单实例：已开着就不再开。
+    /// 尺寸与位置走 LayerState.SizeToContent（layui area/offset:'auto'）：
+    /// 宽随表单自然宽度、高随正文自然高度，默认画布居中，
+    /// 超高时正文自动包 ScrollColumn 滚动。
     static void SpawnFormWindow(App app) {
         if (Gallery.formWin != null && Gallery.formWin.open) { return; }
         Layer.BeginBody();
@@ -13142,19 +13184,11 @@ class Gallery {
         form.With(Gallery.formNote);
         form.With(Gallery.formOk);
         Layer.EndBody();
-        int fw = app.Scale(380);
-        int fh = app.Scale(300);
-        int fx = app.Scale(300);
-        int fy = app.Scale(140);
-        int aw = app.canvas.Width();
-        int ah = app.canvas.Height();
-        if (fx + fw > aw) { fx = (aw - fw) / 2; }
-        if (fy + fh > ah) { fy = (ah - fh) / 2; }
-        if (fx < app.Scale(8)) { fx = app.Scale(8); }
-        Gallery.formWin = new LayerState("Form window",
-            fx, fy, fw, fh);
+        Gallery.formWin = new LayerState("Form window", 0, 0,
+            app.Scale(380), app.Scale(300));
         Gallery.formWin.body = "Embedded components (page layer).";
         Gallery.formWin.SetBody(form);
+        Gallery.formWin.SizeToContent(app, 380, 560);
         Gallery.formWin.Open();
         Gallery.demoLayers.Add(Gallery.formWin);
     }

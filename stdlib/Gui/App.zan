@@ -2718,6 +2718,12 @@ class App {
         window.SetPosition(x, y);
     }
 
+    /// 把 OS 窗口客户区调整为 (w, h) 逻辑像素：登录小窗长成主窗口
+    /// 这类形态切换用。画布随 WM_SIZE 自动重铺。
+    void SetClientSize(int w, int h) {
+        window.SetClientSize(w, h);
+    }
+
     /// 将 OS 窗口在其显示器工作区居中。
     void CenterWindow() {
         window.Center();
@@ -3458,6 +3464,13 @@ class App {
         partialBlocked = true;
         partialPending = false;
         needsRedraw = true;
+        // 上一整帧留下的 fx 快照（槽位 7）从此不可信：状态请求的重绘
+        // 可能是「擦除」性质的（模态蒙版消失、弹层关闭），旧快照恰好
+        // 保存着蒙版在屏的画面。请求若未被及时渲染，事件循环睡到 fx
+        // 拍时 FxPresent 会整窗恢复这份快照，把已被关闭的蒙版重新钉回
+        // 屏幕上（gallery「Esc 后蒙版滞留约 0.5 秒」的根因）。作废它，
+        // fx 拍就不再恢复，直到下一整帧重建为止。
+        fxSnapValid = false;
         // 由状态（而非单纯悬停移动）请求的重绘可能触及任意
         // 像素，因此它会取消悬停移动在同一事件处理中
         // 早些时候武装的损伤裁剪帧。

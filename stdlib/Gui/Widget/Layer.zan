@@ -95,6 +95,19 @@ class LayerState {
     // >0 时打开这么多毫秒后自动关闭（layui 的 time），经 Layer.Close
     // 走统一路径（同样触发 Closed）。
     int AutoCloseMs;
+    // SizeToContent 打开的窗口保持画布居中（layui offset:'auto'）：
+    // 深链/点击回调可能在画布定型前创建窗口，出生时算好的居中会随
+    // 画布尺寸变化失效；渲染沿按当前画布重新居中，用户拖动/缩放/
+    // 最大化一次后让位（此后是用户自己的摆放）。
+    bool autoCenter;
+    // SizeToContent 的原始参数（逻辑 px，渲染沿按当前 DPI 现算设备
+    // 值）：深链在画布/DPI 定型前就可能建窗（此时 dpiScale 还是
+    // 100），出生时量出的几何是错的，真正的定宽高在渲染沿重算。
+    int sizeMinW;
+    int sizeMaxH;
+    // 超高时包住 view 的滚动列（SizeToContent 现算时才可能建立）；
+    // 渲染与命中都走 wrap，view 始终是宿主 SetBody 的原树。
+    Control wrap;
 
     // Layer 专用保留 id 段的游标（seq 域，id = 1000000 + 段内序号）。
     static int winSeq;
@@ -165,6 +178,10 @@ class LayerState {
         this.wasOpen = false;
         this.openedRaised = false;
         this.AutoCloseMs = 0;
+        this.autoCenter = false;
+        this.sizeMinW = 0;
+        this.sizeMaxH = 0;
+        this.wrap = null;
         WidgetId.SetSeq(outer);
     }
 
@@ -240,6 +257,84 @@ class LayerState {
         view = v;
     }
 
+    /// layui `area:'auto'` + `offset:'auto'` 的组件层等价物：按正文
+    /// 控件树的自然测量尺寸定窗宽高（minW 兜底窄表单），在画布上
+    /// 居中；正文自然高度超过可用正文高度时自动包一层 ScrollColumn，
+    /// 超出部分交给滚动条。SetBody 之后、Open 之前调用一次；
+    /// maxH > 0 时额外压低正文高度上限（弹窗不顶满视口）。
+    ///
+    /// 参数是逻辑 px（内部按 DPI 换算）。深链可能在画布/DPI 定型前
+    /// 建窗，这里只记参数；真正的量测与定几何在渲染沿
+    /// ApplySizeToContent 现算（此时画布、DPI、主题都已是真值）。
+    void SizeToContent(App app, int minW, int maxH) {
+        sizeMinW = minW;
+        sizeMaxH = maxH;
+        this.ApplySizeToContent(app);
+    }
+
+    /// SizeToContent 的现算体（LayerState 成员）：量正文树 → 定窗
+    /// 宽高 → 居中。窗口渲染沿也会调用它（画布定型/重算窗口尺寸），
+    /// 保证深链建窗与 DPI 切换后几何都正确。
+    void ApplySizeToContent(App app) {
+        if (view == null) { return; }
+        view.MeasureTree(app);
+        int contentW = view.prefW;
+        int contentH = view.prefH;
+        int aw = app.canvas.Width();
+        int ah = app.canvas.Height();
+        int bar = Layer.BarH(app);
+        int footH = 0;
+        if (footer) { footH = Layer.FooterH(app); }
+        // 与 RenderLayerBody 的正文几何同一套衬距：左右 20、顶 16、
+        // 底 8；正文文本占一行时控件树整体下移 28。
+        int padT = app.Scale(16);
+        int padB = app.Scale(8);
+        int padX = app.Scale(40);
+        int textH = 0;
+        if (body != "") { textH = app.Scale(28); }
+        int availBody = ah - app.titlebarH - app.Scale(32)
+            - bar - padT - padB - textH - footH;
+        if (availBody < app.Scale(60)) { availBody = app.Scale(60); }
+        int maxH = sizeMaxH;
+        if (maxH > 0) { maxH = app.Scale(maxH); }
+        if (maxH > 0 && availBody > maxH) { availBody = maxH; }
+        bool scrolling = contentH > availBody
+            && view.Kind() != "ScrollColumn";
+        if (scrolling) {
+            ScrollColumn sc = new ScrollColumn();
+            sc.With(view);
+            wrap = sc;
+        } else {
+            wrap = null;
+        }
+        int w = contentW + padX;
+        int minW = sizeMinW;
+        if (minW > 0) { minW = app.Scale(minW); }
+        if (w < minW) { w = minW; }
+        if (w > aw - app.Scale(32)) { w = aw - app.Scale(32); }
+        int bodyH = contentH;
+        if (scrolling) { bodyH = availBody; }
+        int h = bar + padT + textH + bodyH + padB + footH;
+        if (h > ah - app.titlebarH - app.Scale(16)) {
+            h = ah - app.titlebarH - app.Scale(16);
+        }
+        int wx = (aw - w) / 2;
+        int wy = (ah - h) / 2;
+        if (wy < app.titlebarH) { wy = app.titlebarH; }
+        if (wy + h > ah) { wy = ah - h; }
+        this.w = w;
+        this.h = h;
+        this.x = wx;
+        this.y = wy;
+        // 居中后的几何同时作为最大化/最小化还原的基准。
+        sx = x;
+        sy = y;
+        sw = w;
+        sh = h;
+        // 打开期间跟随画布重新居中，画布定型后窗口不偏在角落。
+        autoCenter = true;
+    }
+
     void Open() {
         open = true;
         action = 0;
@@ -307,6 +402,10 @@ class Layer {
     // ---- 打开注册表（键盘语义与 CloseLast/CloseAll 的次序依据） ----
     // Open() 时按打开顺序入表（末尾最上），关闭后惰性剔除。
     static List<LayerState> zorder;
+    // CloseLast/CloseAll 翻开 open 标志后置位：下一次渲染沿结束后由
+    // 渲染路径兑现成 app.RequestRedraw()（CloseLast 没有 App 参数，
+    // 无法就地请求）。保证遮罩/窗口消失的那一帧真的被渲染上屏。
+    static bool requestRedraw;
     // ---- photos 的键盘会话状态：RenderPhotos 每帧刷新， ----
     // Key() 借此判断照片层是否仍在屏上（250ms 内算活着）。
     static int photosTick;
@@ -383,6 +482,14 @@ class Layer {
         LayerState top = Layer.TopmostDialog();
         if (top != null) {
             top.action = 2;
+            // action 由调用方在同一帧的渲染沿读走并置 open=false，但很多
+            // 宿主（gallery 的对话框 pass、IDE 的 RenderDocDialogs）只翻
+            // open 标志、不请求重绘。Esc 帧本身渲染时对话框还开着（键盘
+            // 消费在 RenderDialog 画遮罩之前，遮罩照画上屏），下一帧若没
+            // 人请求，事件循环就睡到 fx 拍——恢复的快照又把遮罩钉在屏上，
+            // 直到 500ms 后 HUD/动画拍才真正擦掉，正是「Esc 后蒙版滞留」。
+            // 这里同样没有 App，置位交 FlushCloseRedraw 兑现。
+            Layer.requestRedraw = true;
             return true;
         }
         if (Window.GetTickMs() - Layer.photosTick < 250) {
@@ -401,6 +508,10 @@ class Layer {
             LayerState s = Layer.zorder[i];
             if (s.open && (kind < 0 || s.kind == kind)) {
                 s.open = false;
+                // 关闭沿必须有人重绘：遮罩/窗口的像素只会在下一帧的渲染
+                // 里消失，这里不请求的话事件循环睡到 fx 拍，快照把旧画面
+                // 钉在屏上（与 Close/CloseTopmostDialog 同因）。
+                Layer.requestRedraw = true;
                 return true;
             }
             i = i - 1;
@@ -416,10 +527,15 @@ class Layer {
     /// 由 CloseLast(-1) 的兜底分支请求关闭。
     static void CloseAll(int kind) {
         Layer.PruneZorder();
+        bool any = false;
         for (int i = 0; i < Layer.zorder.Count; i = i + 1) {
             LayerState s = Layer.zorder[i];
-            if (s.open && (kind < 0 || s.kind == kind)) { s.open = false; }
+            if (s.open && (kind < 0 || s.kind == kind)) {
+                s.open = false;
+                any = true;
+            }
         }
+        if (any) { Layer.requestRedraw = true; }
     }
 
     /// 键盘语义（宿主在 key-down 事件里调用；对话框与 photos 的渲染
@@ -440,6 +556,8 @@ class Layer {
             LayerState top = Layer.TopmostDialog();
             if (top != null && top.promptFormType != 2) {
                 top.action = 1;
+                // 与 Esc 同理：Enter 确认沿宿主可能只翻 open 标志，
+                // 这里替它把下一帧的整窗重绘挂上，遮罩不当屏。
                 app.RequestRedraw();
                 return true;
             }
@@ -980,7 +1098,13 @@ class Layer {
             return true;
         }
         // Esc（Layer.Key 置的关闭请求）：下一帧在渲染开头兑现。
-        if (wantClose) { return true; }
+        // 返回 true 前把重绘挂上：宿主收到 true 才会翻 photosOpen，
+        // 但它不一定自己请求重绘；photos 全屏像素的消失必须由下一帧
+        // 渲染兑现，否则 fx 快照把照片层钉在屏上直到某个无关动画拍。
+        if (wantClose) {
+            app.RequestRedraw();
+            return true;
+        }
         return false;
     }
 
@@ -1160,10 +1284,22 @@ class Layer {
         for (int k = 0; k < list.Count; k = k + 1) {
             Layer.RenderActive(app, list[k], k == active);
         }
+        Layer.FlushCloseRedraw(app);
     }
 
     static void Render(App app, LayerState s) {
         Layer.RenderActive(app, s, true);
+        Layer.FlushCloseRedraw(app);
+    }
+
+    /// CloseLast/CloseAll 翻开 open 标志时没有 App 可请求重绘；渲染沿
+    /// 结束后在这里兑现（无论该层走的是哪条渲染路径——宿主可能只渲染
+    /// 这一个层就返回）。CloseTopmostDialog/Key/Close 已就地请求。
+    static void FlushCloseRedraw(App app) {
+        if (Layer.requestRedraw) {
+            Layer.requestRedraw = false;
+            app.RequestRedraw();
+        }
     }
 
     static void RenderActive(App app, LayerState s, bool active) {
@@ -1190,6 +1326,26 @@ class Layer {
         int top = app.titlebarH;
         int bar = Layer.BarH(app);
         int rad = t.borderRadiusLarge;
+
+        // SizeToContent 的现算：窗口可能在画布/DPI 定型（深链启动、
+        // 首帧）前建窗，出生几何不可信。渲染沿按当前画布重新量测定
+        // 尺寸并居中；用户拖动/缩放/最大化过一次即让位（此后是用户
+        // 自己的摆放）。
+        if (s.sizeMinW > 0 && s.state == 0 && !s.dragging && !s.sizing) {
+            s.ApplySizeToContent(app);
+        }
+        if (s.autoCenter && s.state == 0 && !s.dragging && !s.sizing) {
+            int cx = (W - s.w) / 2;
+            int cy = (H - s.h) / 2;
+            if (cy < top) { cy = top; }
+            if (s.x != cx || s.y != cy) {
+                s.x = cx;
+                s.y = cy;
+                s.sx = cx;
+                s.sy = cy;
+                app.RequestRedraw();
+            }
+        }
 
         int ex = s.x;
         int ey = s.y;
@@ -1261,6 +1417,9 @@ class Layer {
             s.dragging = true;
             s.grabDx = mx - s.x;
             s.grabDy = my - s.y;
+            // 用户接手摆放：自动居中/重定尺寸都让位。
+            s.autoCenter = false;
+            s.sizeMinW = 0;
         }
         if (ek == 1 && s.dragging) {
             s.x = mx - s.grabDx;
@@ -1293,6 +1452,8 @@ class Layer {
                     s.sx = s.x; s.sy = s.y; s.sw = s.w; s.sh = s.h;
                 }
                 s.state = 1;
+                s.autoCenter = false;
+                s.sizeMinW = 0;
             }
             app.RequestRedraw();
         } else if (active && Ui.Clicked(app, s.minId)) {
@@ -1335,6 +1496,9 @@ class Layer {
                 s.rStartH = s.h;
                 s.grabDx = mx;
                 s.grabDy = my;
+                // 用户接手摆放：自动居中/重定尺寸都让位。
+                s.autoCenter = false;
+                s.sizeMinW = 0;
             }
         }
         if (ek == 1 && s.sizing) {
@@ -1411,14 +1575,34 @@ class Layer {
             if (s.body != "") {
                 c.DrawText(bx, byy, s.body, bodyStyle.fg, bodyFont);
             }
-            // page 层的嵌入式控件树：占满正文剩余空间（正文文本在
-            // 上方时下移一行）。树由宿主构造一次（BeginBody/EndBody
+            // page 层的嵌入式控件树：正文视口给不足（固定尺寸窗口 /
+            // SizeToContent 压到 maxH）时包进滚动列——超高滚动、
+            // 不压缩控件本身（FitSize 的停靠钳制会把控件压扁）；视口
+            // 够高时树按自身测量高渲染，多余空间留白。正文文本在上方
+            // 时树整体下移一行。树由宿主构造一次（BeginBody/EndBody
             // 领保留段 id），这里每帧原样渲染。
             if (s.view != null) {
                 int vy = byy;
                 if (s.body != "") { vy = byy + app.Scale(28); }
-                s.view.RenderInside(app, new Rect(bx, vy,
-                    ew - app.Scale(40), bodyBottom - vy - app.Scale(8)));
+                int vw = ew - app.Scale(40);
+                int vh = bodyBottom - vy - app.Scale(8);
+                if (vh < 0) { vh = 0; }
+                Control body = s.view;
+                if (s.wrap == null && body.prefH > vh
+                    && body.Kind() != "ScrollColumn") {
+                    // 正文视口给不足（固定尺寸窗口 / 内容超过 maxH）：
+                    // 包滚动列，超出视口的部分交给滚动条，
+                    // 不压缩控件本身（FitSize 的停靠钳制会压扁）。
+                    ScrollColumn sc = new ScrollColumn();
+                    sc.With(body);
+                    s.wrap = sc;
+                }
+                if (s.wrap != null) {
+                    body = s.wrap;
+                } else if (body.prefH > vh) {
+                    vh = body.prefH;
+                }
+                body.RenderInside(app, new Rect(bx, vy, vw, vh));
             }
             if (s.action == 1) {
                 app.canvas.DrawStyledText(
@@ -1526,6 +1710,23 @@ class Layer {
         if (s.kind == 2 && s.promptInput != null) {
             int iy = bodyY + app.Scale(30);
             s.promptInput.Render(app, x + pad, iy, w - pad * 2, t.heightMedium);
+        }
+
+        // 模态对话框的嵌入式正文控件树：宿主构造一次（BeginBody/EndBody
+        // 领保留段 id），这里每帧原样渲染。与 page 层的 SetBody 同一约定，
+        // 表单类对话框（登录、建角）由此在居中模态里放 Input/Button。
+        if (s.view != null) {
+            int vy = bodyY;
+            if (s.body != "") { vy = bodyY + app.Scale(28); }
+            int actionH = s.twoButtons || s.altText != ""
+                ? t.heightMedium + app.Scale(24) : 0;
+            int vh = y + h - pad - actionH - vy;
+            if (vh > 0) {
+                c.PushClip(x + pad, vy, w - pad * 2, vh);
+                s.view.RenderInside(app, new Rect(x + pad, vy,
+                    w - pad * 2, vh));
+                c.PopClip();
+            }
         }
 
         // 右对齐的操作条：[alt] [cancel] [ok]。每个按钮至少保持
