@@ -1055,8 +1055,11 @@ partial class ChartView {
                 int pointerR = ChartView.GaugeScalar(app, gauge.pointer.length, radius);
                 int px = cx + ChartView.GaugeX(pointerAngle) * pointerR / 1000;
                 int py = cy + ChartView.GaugeY(pointerAngle) * pointerR / 1000;
+                // ECharts2 pointer.color 默认 'auto' = 轴线色阶当前
+                // 段色；除显式 pointer.color 外不接受系列色 ——
+                // 物化副本的 s.color 恒为调色板色，掺进来会把
+                // auto 劫持成调色板色（gauge1 指针发青的根因）。
                 int pointerColor = gauge.pointer.color;
-                if (pointerColor == 0) { pointerColor = s.color; }
                 if (pointerColor == 0) { pointerColor = ChartView.GaugeColor(gauge, perMille); }
                 // ECharts 指针：细长矛头形，轮毂处最宽，
                 // 尖端收成一点。以一系列抗锯齿圆盘光栅化成锥体，

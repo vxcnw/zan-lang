@@ -937,10 +937,11 @@ class GaugePointer {
     int shadowColor;
     int shadowBlur;
 
-    /// 构造默认指针：长 60%、宽 6px、默认色。
+    /// 构造默认指针：ECharts2 默认长 80%、宽 8px；
+    /// color 0 = 'auto'（跟随轴线色阶段色，见 DrawGauge）。
     static GaugePointer Create() {
         return new GaugePointer {
-            length = ChartScalar.Pct(60), width = 6, color = 0, shadowColor = 0, shadowBlur = 0
+            length = ChartScalar.Pct(80), width = 8, color = 0, shadowColor = 0, shadowBlur = 0
         };
     }
 

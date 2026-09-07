@@ -139,9 +139,9 @@ partial class Charts {
         // ECharts 多仪表盘：每个 gauge 系列自带 center/radius，
         // 两个表盘左右并排（不设 center 会叠在同一圆心）。
         ChartSeries speed = ChartSeries.Gauge(Charts.T("Speed", "转速"), 72);
-        speed.GaugeLayout(30, 62, 62);
+        speed.GaugeLayout(28, 55, 45);
         ChartSeries fuel = ChartSeries.Gauge(Charts.T("Fuel", "油量"), 38);
-        fuel.GaugeLayout(72, 62, 62);
+        fuel.GaugeLayout(72, 55, 45);
         ChartOption o = ChartOption.Of(Charts.T("Cluster", "多仪表盘"),
             null, new List<ChartSeries>{ speed, fuel });
         Charts.Show(app, o, x, y, w, h);
