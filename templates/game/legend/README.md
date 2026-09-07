@@ -45,13 +45,7 @@
 - `data/navigation.csv`：路由名称、图标和显示标签；`label` 中的字面量 `\n` 表示两行分组，不改变路由名称。
 - `data/equipment_art.csv`：装备定义 ID 到图标路径；外观层次不代表随机品质。
 
-素材处理脚本仅供开发使用，依赖 Pillow、NumPy；发布的 Zan 游戏不需要 Python。
-
-```powershell
-C:/Python311/python.exe templates/game/legend/tools/prepare_equipment.py --preview _scratch/legend/equipment-preview.png
-```
-
-该命令从已保存的三张素材源图重新生成 36 张 PNG 和基础 ID 映射，会覆盖手工修改过的映射；定制图标后请先保存自己的映射表。
+素材处理脚本仅供开发使用；发布的 Zan 游戏不需要 Python。历史 Image2/参考裁切素材及其生成脚本已移除，真实素材来自 `D:\game\迷你传奇` 资源包提取（`tools/minimir/`），逐步替换 `data/*_art.csv` 指向的原图。
 
 
 ### 拾取过滤

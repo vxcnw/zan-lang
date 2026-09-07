@@ -24,8 +24,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Altar test compilation failed' }
     & "$root/build/legend-altar-test.exe"
     if ($LASTEXITCODE -ne 0) { throw 'Altar gameplay regression failed' }
-    & $Python "$root/tests/templates/legend/test_equipment_art.py"
-    if ($LASTEXITCODE -ne 0) { throw 'Equipment artwork regression failed' }
+    & $Python "$root/tests/templates/legend/test_extract_wzl.py"
+    if ($LASTEXITCODE -ne 0) { throw 'WZL extractor regression failed' }
     & $Python "$root/tests/templates/legend/test_definitions.py"
     if ($LASTEXITCODE -ne 0) { throw 'Definition regression failed' }
 } finally { Pop-Location }
