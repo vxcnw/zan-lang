@@ -1196,6 +1196,9 @@ class ChartSeries {
     bool chordSortSub;      // ECharts chord.sortSub：子弧按值降序
     int chordGapDeg;        // 外环节点间隙（度）；-1 = 自动（2，拥挤归 0）
     int chordRingWidthPct;  // 外环宽（占半径 %）；0 = 默认 22
+    List<List<int>> matrix; // ECharts2 chord.matrix：n×n 权重阵；非空时与
+                            //   data[i].name 组成节点（含对角自环），展开为
+                            //   links 渲染（links 非空时优先用 links）
     string funnelAlign;     // ECharts funnel.funnelAlign：""=center | left | right
     int funnelGap;          // 漏斗层间隙 px；-1 = 默认 3
     bool funnelPercent;     // 标签/提示行值后追加「（x%）」转化率
@@ -1269,6 +1272,7 @@ class ChartSeries {
         s.chordSortSub = false;
         s.chordGapDeg = 0 - 1;
         s.chordRingWidthPct = 0;
+        s.matrix = new List<List<int>>();
         s.funnelAlign = "";
         s.funnelGap = 0 - 1;
         s.funnelPercent = false;
@@ -1482,6 +1486,19 @@ class ChartSeries {
         return s;
     }
 
+    /// ECharts2 chord 矩阵形式：matrix[i][j] = 节点 i → j 的权重
+    ///（对角 = 自环），节点名/逐点色取 data（按行序补齐 ChartData）。
+    static ChartSeries ChordMatrix(string name, List<string> nodes,
+                                   List<List<int>> matrix) {
+        ChartSeries s = ChartSeries.Of(name, ChartType.Chord, new List<int>());
+        for (int i = 0; i < nodes.Count; i = i + 1) {
+            ChartData d = ChartData.Named(0, nodes[i]);
+            s.data.Add(d);
+        }
+        s.matrix = matrix;
+        return s;
+    }
+
     /// 力导向图系列：节点从 links 的 from/to 推导。
     static ChartSeries Force(string name, List<ChartLink> links) {
         ChartSeries s = ChartSeries.Of(name, ChartType.Force, new List<int>());
@@ -1645,6 +1662,14 @@ class ChartSeries {
         s.forceLinkColor = src.forceLinkColor; s.chordRibbonType = src.chordRibbonType;
         s.chordSort = src.chordSort; s.chordSortSub = src.chordSortSub;
         s.chordGapDeg = src.chordGapDeg; s.chordRingWidthPct = src.chordRingWidthPct;
+        s.matrix = new List<List<int>>();
+        for (int mi = 0; mi < src.matrix.Count; mi = mi + 1) {
+            List<int> row = new List<int>();
+            for (int mj = 0; mj < src.matrix[mi].Count; mj = mj + 1) {
+                row.Add(src.matrix[mi][mj]);
+            }
+            s.matrix.Add(row);
+        }
         s.funnelAlign = src.funnelAlign; s.funnelGap = src.funnelGap;
         s.funnelPercent = src.funnelPercent; s.wcMinFontSize = src.wcMinFontSize;
         s.wcMaxFontSize = src.wcMaxFontSize; s.wcRotate = src.wcRotate;
@@ -3015,6 +3040,20 @@ class ChartOption {
                     cs.chordSortSub = ch.Bool("sortSub", cs.chordSortSub);
                     cs.chordGapDeg = ch.Int("gap", cs.chordGapDeg);
                     cs.chordRingWidthPct = ch.Int("ringWidth", cs.chordRingWidthPct);
+                }
+                // ECharts2 chord.matrix：n×n 权重阵（节点名取 data[i].name）。
+                JsonValue mx = s.Get("matrix");
+                if (mx != null && mx.IsArray()) {
+                    for (int mri = 0; mri < mx.Count(); mri = mri + 1) {
+                        JsonValue mrow = mx.At(mri);
+                        List<int> row = new List<int>();
+                        if (mrow != null && mrow.IsArray()) {
+                            for (int mci = 0; mci < mrow.Count(); mci = mci + 1) {
+                                row.Add(mrow.At(mci).AsInt(0));
+                            }
+                        }
+                        cs.matrix.Add(row);
+                    }
                 }
                 cs.funnelAlign = s.Str("funnelAlign", cs.funnelAlign);
                 cs.funnelGap = s.Int("funnelGap", cs.funnelGap);

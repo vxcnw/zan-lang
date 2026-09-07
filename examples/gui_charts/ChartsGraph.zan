@@ -32,8 +32,23 @@ partial class Charts {
     }
 
     static void Chord1(App app, int x, int y, int w, int h) {
-        ChartOption o = ChartOption.Of(Charts.T("Traffic flow", "流量来源 → 页面"),
-            null, new List<ChartSeries>{ ChartSeries.Chord(Charts.T("Flow", "流量"), Charts.WebFlow()) });
+        // ECharts 2.2.7 chord1.html：矩阵和弦 + sort ascending /
+        // sortSub descending / label.show=false。差异记录：节点名
+        // 标签当前总是绘制（label.show=false 未消费）；showScale
+        // 刻度尺未实现。
+        List<string> groups = new List<string>{
+            "group1", "group2", "group3", "group4" };
+        List<List<int>> mx = new List<List<int>>{
+            new List<int>{ 11975, 5871, 8916, 2868 },
+            new List<int>{ 1951, 10048, 2060, 6171 },
+            new List<int>{ 8010, 16145, 8090, 8045 },
+            new List<int>{ 1013, 990, 940, 6907 } };
+        ChartSeries c = ChartSeries.ChordMatrix(
+            Charts.T("Chord", "测试数据"), groups, mx);
+        c.chordSort = 2;
+        c.chordSortSub = true;
+        ChartOption o = ChartOption.Of(Charts.T("Standard chord", "标准和弦图"),
+            null, new List<ChartSeries>{ c });
         Charts.Show(app, o, x, y, w, h);
     }
 
@@ -68,9 +83,24 @@ partial class Charts {
     }
 
     static void Chord5(App app, int x, int y, int w, int h) {
+        // ECharts 2.2.7 chord.html（个性化）：矩阵 + g1 红节点、
+        // 红节点标签、sort/sortSub descending。差异记录：clockWise
+        // false（ ribbon 手性）与 showScale 刻度尺未实现；g1 的
+        // ribbon 用节点红而非参考的绿色 lineStyle。
+        List<string> groups = new List<string>{ "g1", "g2", "g3", "g4" };
+        List<List<int>> mx = new List<List<int>>{
+            new List<int>{ 11975, 5871, 8916, 2868 },
+            new List<int>{ 1951, 10048, 2060, 6171 },
+            new List<int>{ 8010, 16145, 8090, 8045 },
+            new List<int>{ 1013, 990, 940, 6907 } };
+        ChartSeries c = ChartSeries.ChordMatrix(
+            Charts.T("Chord", "测试数据"), groups, mx);
+        c.chordSort = 1;
+        c.chordSortSub = true;
+        c.data[0].color = Chart.Rgb(255, 30, 30);
+        c.label.color = Chart.Rgb(255, 0, 0);
         ChartOption o = ChartOption.Of(Charts.T("Styled chord", "和弦图个性化"),
-            null, new List<ChartSeries>{ ChartSeries.Chord(Charts.T("Flow", "流量"), Charts.WebFlow()) });
-        o.showLegend = false;
+            null, new List<ChartSeries>{ c });
         Charts.Show(app, o, x, y, w, h);
     }
 

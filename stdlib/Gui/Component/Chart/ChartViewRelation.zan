@@ -59,9 +59,29 @@ partial class ChartView {
         int pad = t.paddingMedium;
         int top = ChartView.PanelHead(app, x, y, w, h, o.title);
         ChartSeries lead = ChartView.LeadSeries(o);
-        if (lead == null || lead.links.Count < 1) { return; }
+        if (lead == null) { return; }
+        // ECharts2 chord.matrix：行序展开为 links（对角 = 自环），
+        // 节点名 = data[i].name（缺名回退 node-i）；links 非空时优先。
+        List<ChartLink> links = lead.links;
+        if (links.Count < 1 && lead.matrix.Count > 0) {
+            links = new List<ChartLink>();
+            for (int i = 0; i < lead.matrix.Count; i = i + 1) {
+                string from = "";
+                if (i < lead.data.Count) { from = lead.data[i].name; }
+                if (from.Length < 1) { from = "node-" + Convert.ToString(i); }
+                List<int> row = lead.matrix[i];
+                for (int j = 0; j < row.Count; j = j + 1) {
+                    if (row[j] <= 0) { continue; }
+                    string to = "";
+                    if (j < lead.data.Count) { to = lead.data[j].name; }
+                    if (to.Length < 1) { to = "node-" + Convert.ToString(j); }
+                    links.Add(ChartLink.Of(from, to, row[j]));
+                }
+            }
+        }
+        if (links.Count < 1) { return; }
 
-        ChordLayout layout = ChordLayout.Of(lead.links, lead.chordSort,
+        ChordLayout layout = ChordLayout.Of(links, lead.chordSort,
             lead.chordSortSub, lead.chordGapDeg);
         int nn = layout.nodes.Count;
         if (nn < 1) { return; }
@@ -101,7 +121,7 @@ partial class ChartView {
                 bool hid = false;
                 if (i < nodeHid.Count) { hid = nodeHid[i]; }
                 Chart.DrawLegendChip(app, xCur, yCur, cw, rowH,
-                    Chart.Palette(t, i), naL.name, hid, key);
+                    ChartView.ChordNodeColor(lead, t, i, naL.name), naL.name, hid, key);
                 xCur = xCur + cw + app.Scale(8);
                 bodyY = yCur + rowH + app.Scale(4);
             }
@@ -195,7 +215,8 @@ partial class ChartView {
             ChordRibbon rb = layout.ribbons[i];
             if (rb.from < nodeHid.Count && nodeHid[rb.from]) { continue; }
             if (rb.to < nodeHid.Count && nodeHid[rb.to]) { continue; }
-            int col = Chart.Palette(t, rb.from);
+            int col = ChartView.ChordNodeColor(lead, t, rb.from,
+                layout.nodes[rb.from].name);
             bool related = i == hoverRibbon
                 || rb.from == hoverNode || rb.to == hoverNode;
             int alpha = 90;
@@ -224,7 +245,7 @@ partial class ChartView {
             int a1 = na.a1;
             if (a1 > a0 + sweepMax) { a1 = a0 + sweepMax; }
             if (a1 > a0) {
-                int ncol = Chart.Palette(t, i);
+                int ncol = ChartView.ChordNodeColor(lead, t, i, na.name);
                 c.FillSector(cx, cy, rInner, r, a0, a1, ncol);
                 if (i == hoverNode || (hoverRibbon >= 0
                     && (layout.ribbons[hoverRibbon].from == i
@@ -241,9 +262,15 @@ partial class ChartView {
             int lxN = ChartView.FillX(cx, r + gapL, mid);
             int lyN = Canvas.CenterTextYAt(ChartView.FillY(cy, r + gapL, mid), fsN);
             if (ChartView.FillDx(mid) < 0) { lxN = lxN - twN; }
+            // 节点标签色：系列 label.color 显式时优先
+            //（ECharts itemStyle.normal.label.color），否则主题。
+            int lblCol = lead.label.color;
+            if (lblCol == 0) {
+                lblCol = Style.Part(app, "chart", "label", "", "", "",
+                                    Style.SNormal()).FgOr(0);
+            }
             ChartView.DrawTextClamped(c, lxN, lyN, nm,
-                Style.Part(app, "chart", "label", "", "", "", Style.SNormal()).FgOr(0),
-                fsN, boxX, boxY, boxW, boxH);
+                lblCol, fsN, boxX, boxY, boxW, boxH);
         }
 
         if (o.showTooltip) {
@@ -264,7 +291,7 @@ partial class ChartView {
                         if (i < nodeHid.Count && nodeHid[i]) { continue; }
                         List<TooltipRow> rows = new List<TooltipRow>{
                             TooltipRow.Of(0, o.title),
-                            TooltipRow.Of(Chart.Palette(t, i),
+                            TooltipRow.Of(ChartView.ChordNodeColor(lead, t, i, na.name),
                                 na.name + "  " + Convert.ToString(na.weight)) };
                         ChartView.TooltipCard(app, mx, my, x + w, rows);
                         return;
@@ -364,6 +391,17 @@ partial class ChartView {
             px.Add(ChartView.FillX(cx, r, a));
             py.Add(ChartView.FillY(cy, r, a));
         }
+    }
+
+    /// 弦图节点 i 的颜色：data 中同名项的 color 显式优先
+    ///（ECharts chord.data[i].itemStyle.normal.color），否则调色板。
+    static int ChordNodeColor(ChartSeries s, Theme t, int i, string name) {
+        for (int di = 0; di < s.data.Count; di = di + 1) {
+            if (s.data[di].color != 0 && s.data[di].name == name) {
+                return s.data[di].color;
+            }
+        }
+        return Chart.Palette(t, i);
     }
 
     /// 把以 (cx,cy) 为控制点的二次贝塞尔（(x1,y1)→(x2,y2)）按
@@ -611,7 +649,7 @@ partial class ChartView {
             ForceNode nd = layout.nodes[hoverNode];
             List<TooltipRow> rows = new List<TooltipRow>{
                 TooltipRow.Of(0, o.title),
-                TooltipRow.Of(Chart.Palette(t, hoverNode),
+                TooltipRow.Of(ChartView.ChordNodeColor(lead, t, hoverNode, nd.name),
                     nd.name + "  " + Convert.ToString(nd.weight)) };
             ChartView.TooltipCard(app, app.mouseX, app.mouseY, x + w, rows);
         }
