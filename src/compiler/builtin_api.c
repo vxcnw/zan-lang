@@ -143,6 +143,8 @@ static const zan_builtin_member_t members_nativemem[] = {
     { "ScanNotAnyOf", 'M', "long ScanNotAnyOf(nint ptr, long offset, string acceptSet, long limit)" },
     { "FindNotAnyOf", 'M', "long FindNotAnyOf(nint ptr, long offset, string rejectSet, long limit)" },
     { "Load64", 'M', "long Load64(nint ptr, long offset)" },
+    { "AsI64",  'M', "long AsI64(double value)" },
+    { "AsF64",  'M', "double AsF64(long bits)" },
     { "GetString", 'M', "string GetString(nint ptr)" },
     { "PutString", 'M', "void PutString(nint ptr, string text)" },
 };

@@ -500,6 +500,25 @@ static bool emit_native_memory_call(zan_irgen_t *g, zan_ast_node_t *expr,
         return true;
     }
 
+    /* AsI64(d) / AsF64(v) -> bitcasts between long and double: reinterprets
+     * the bits with no value conversion. The pair lets a 16-byte tape slot
+     * hold a double in its long field (JsonTape kind-7 numbers) and gives
+     * bit-level packing/hashing loops a direct primitive instead of a
+     * 24-byte struct or a memory round trip. */
+    if (is_call_to(expr, "NativeMemory", "AsI64") &&
+        expr->call.args.count == 1) {
+        LLVMValueRef v = nm_arg(g, expr, 0, locals);
+        *out = LLVMBuildBitCast(g->builder, v, i64t, "nm.asi64");
+        return true;
+    }
+    if (is_call_to(expr, "NativeMemory", "AsF64") &&
+        expr->call.args.count == 1) {
+        LLVMTypeRef dblt = LLVMDoubleTypeInContext(g->ctx);
+        LLVMValueRef v = nm_arg(g, expr, 0, locals);
+        *out = LLVMBuildBitCast(g->builder, v, dblt, "nm.asf64");
+        return true;
+    }
+
     /* ScanNotByte(p, off, b, n) -> strspn(p + off, one-char set {b}): the
      * length of the leading run of bytes equal to `b`, clamped to [0, n].
      * This is the whitespace-skip and digit-run inner loop of every parser:
