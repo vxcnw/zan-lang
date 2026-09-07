@@ -23,6 +23,15 @@ class ObjectArt {
     List<int> shpFrames;
     List<Texture> shpCache;
 
+    // Vehicle voxel art: the parsed models, then one baked texture per
+    // (model, facing). A bake is a few thousand voxel projections, so the
+    // eight facings a vehicle uses are rendered once and reused.
+    List<string> vxlNames;
+    List<VxlImage> vxlCache;
+    List<string> vehNames;
+    List<int> vehFacings;
+    List<Texture> vehTex;
+
     static ObjectArt Create(Vfs vfs, AssetDb db) {
         ObjectArt a = new ObjectArt();
         a.vfs = vfs;
@@ -30,6 +39,11 @@ class ObjectArt {
         a.shpNames = new List<string>();
         a.shpFrames = new List<int>();
         a.shpCache = new List<Texture>();
+        a.vxlNames = new List<string>();
+        a.vxlCache = new List<VxlImage>();
+        a.vehNames = new List<string>();
+        a.vehFacings = new List<int>();
+        a.vehTex = new List<Texture>();
         // Unit palettes, best fit first: unittem.pal is the temperate unit
         // palette the merged art expects; unit.pal and unitsno.pal share the
         // same 256-slot layout, so either works as a fallback when the
@@ -91,6 +105,9 @@ class ObjectArt {
         if (ut == null) { return null; }
         string name = ut.ShpName();
         if (name == null || name.Length == 0) { return null; }
+        if (ObjectArt.IsVxlName(name)) {
+            return this.VehicleTexture(name, facing);
+        }
         int frame = 0;
         if (moving) {
             frame = 14 + facing * 6 + (animFrame % 6);
@@ -102,6 +119,196 @@ class ObjectArt {
         int count = this.ShapeFrameCount(name);
         if (frame >= count) { frame = 0; }
         return this.ShapeTextureFrame(name, frame, this.unitPal);
+    }
+
+    /// <summary>Whether a unit art name names a voxel model rather than an
+    /// SHP sprite. Case folded, so Image= overrides of any case match.</summary>
+    static bool IsVxlName(string name) {
+        int dot = name.Length - 4;
+        if (dot < 0) { return false; }
+        string want = ".VXL";
+        for (int i = 0; i < 4; i = i + 1) {
+            if ((name[dot + i] & 0xDF) != (want[i] & 0xDF)) { return false; }
+        }
+        return true;
+    }
+
+    /// <summary>The baked texture for a vehicle at one of the eight compass
+    /// facings, rendered on first use and cached.</summary>
+    Texture VehicleTexture(string name, int facing) {
+        for (int i = 0; i < this.vehNames.Count; i = i + 1) {
+            if (this.vehNames[i] == name && this.vehFacings[i] == facing) {
+                return this.vehTex[i];
+            }
+        }
+        Texture tex = null;
+        VxlImage img = this.VxlNamed(name);
+        if (img != null && this.unitPal != null) {
+            tex = ObjectArt.BakeFacing(img, this.unitPal, facing);
+        }
+        this.vehNames.Add(name);
+        this.vehFacings.Add(facing);
+        this.vehTex.Add(tex);
+        return tex;
+    }
+
+    /// <summary>The parsed voxel model for an art name, cached; null when the
+    /// install does not carry the file or it is not a VXL.</summary>
+    VxlImage VxlNamed(string name) {
+        for (int i = 0; i < this.vxlNames.Count; i = i + 1) {
+            if (this.vxlNames[i] == name) { return this.vxlCache[i]; }
+        }
+        VxlImage img = null;
+        List<int> len = new List<int>();
+        len.Add(0);
+        byte[] raw = this.vfs.Read(name, len);
+        if (len[0] > 0) {
+            img = VxlImage.Parse(raw, len[0]);
+            if (img.LimbCount() == 0) { img = null; }
+        }
+        this.vxlNames.Add(name);
+        this.vxlCache.Add(img);
+        return img;
+    }
+
+    /// <summary>Bakes one compass facing of a voxel model with the map's 2:1
+    /// dimetric projection. The model's rest pose looks down the screen
+    /// diagonal, so the facing steps yaw one step past south; voxel depth
+    /// orders the draw, and each voxel is lit from its empty neighbours --
+    /// a hull face pointing at open sky catches the screen light, shaded
+    /// faces fall dark. The original stores a normal table per voxel for its
+    /// own lighting; the occupancy gradient reproduces the same read without
+    /// shipping that table through the render path.</summary>
+    static Texture BakeFacing(VxlImage img, Palette pal, int facing) {
+        VxlLimb l = img.Main();
+        if (l == null) { return null; }
+        int sx = l.SizeX();
+        int sy = l.SizeY();
+        int sz = l.SizeZ();
+        double yaw = ((double)facing + 1.0) * 3.14159265358979 / 4.0;
+        double cos = Math.Cos(yaw);
+        double sin = Math.Sin(yaw);
+
+        // Project every filled voxel once; the extents size the canvas and
+        // the depth key orders the painter sort.
+        int n = 0;
+        int total = sx * sy * sz;
+        int[] gx = new int[total];
+        int[] gy = new int[total];
+        int[] gz = new int[total];
+        int[] keys = new int[total];
+        double minPx = 0.0; double maxPx = 0.0;
+        double minPy = 0.0; double maxPy = 0.0;
+        bool any = false;
+        for (int y = 0; y < sy; y = y + 1) {
+            for (int x = 0; x < sx; x = x + 1) {
+                for (int z = 0; z < sz; z = z + 1) {
+                    if (l.VoxelAt(x, y, z) < 0) { continue; }
+                    double cx = (double)(x - sx / 2);
+                    double cy = (double)(y - sy / 2);
+                    double rx = cx * cos - cy * sin;
+                    double ry = cx * sin + cy * cos;
+                    double px = (rx - ry) * 0.866;
+                    double py = (rx + ry) * 0.5 - (double)z * 0.86;
+                    if (!any) {
+                        minPx = px; maxPx = px; minPy = py; maxPy = py;
+                        any = true;
+                    } else {
+                        if (px < minPx) { minPx = px; }
+                        if (px > maxPx) { maxPx = px; }
+                        if (py < minPy) { minPy = py; }
+                        if (py > maxPy) { maxPy = py; }
+                    }
+                    gx[n] = x; gy[n] = y; gz[n] = z;
+                    // Painter key: rx+ry, quantised to sixteenths of a voxel.
+                    keys[n] = (int)((rx + ry) * 16.0);
+                    n = n + 1;
+                }
+            }
+        }
+        if (n == 0) { return null; }
+
+        int pad = 4;
+        int w = (int)((maxPx - minPx) * 2.0) + pad * 2 + 1;
+        int h = (int)((maxPy - minPy) * 2.0) + pad * 2 + 1;
+        Texture tex = Texture.Create(w, h);
+
+        // Counting sort by depth key, ascending: farthest drawn first.
+        int kmin = 1 << 30;
+        int kmax = -(1 << 30);
+        for (int i = 0; i < n; i = i + 1) {
+            if (keys[i] < kmin) { kmin = keys[i]; }
+            if (keys[i] > kmax) { kmax = keys[i]; }
+        }
+        int span = kmax - kmin + 1;
+        int[] counts = new int[span + 1];
+        for (int i = 0; i < n; i = i + 1) {
+            counts[keys[i] - kmin] = counts[keys[i] - kmin] + 1;
+        }
+        int acc = 0;
+        for (int i = 0; i < span; i = i + 1) {
+            int c = counts[i];
+            counts[i] = acc;
+            acc = acc + c;
+        }
+        int[] order = new int[n];
+        for (int i = 0; i < n; i = i + 1) {
+            order[counts[keys[i] - kmin]] = i;
+            counts[keys[i] - kmin] = counts[keys[i] - kmin] + 1;
+        }
+
+        // Stamp far-to-near. Lighting from the occupancy gradient: a voxel
+        // facing empty space gets a normal along that axis, lit by a screen
+        // light from the upper left.
+        double lx = -0.5; double ly = -0.5; double lz = 0.7;
+        for (int i = 0; i < n; i = i + 1) {
+            int vi = order[i];
+            int x = gx[vi]; int y = gy[vi]; int z = gz[vi];
+            int nx = ObjectArt.Face(l, x - 1, y, z)
+                   - ObjectArt.Face(l, x + 1, y, z);
+            int ny = ObjectArt.Face(l, x, y - 1, z)
+                   - ObjectArt.Face(l, x, y + 1, z);
+            int nz = ObjectArt.Face(l, x, y, z - 1)
+                   - ObjectArt.Face(l, x, y, z + 1);
+            int n2 = nx * nx + ny * ny + nz * nz;
+            if (n2 == 0) { nx = 0; ny = 0; nz = 1; n2 = 1; }
+            double nl = Math.Sqrt((double)n2);
+            double dot = ((double)nx * lx + (double)ny * ly
+                        + (double)nz * lz) / nl;
+            double shade = 0.45 + 0.55 * dot;
+            if (shade < 0.15) { shade = 0.15; }
+            if (shade > 1.0) { shade = 1.0; }
+            int color = l.VoxelAt(x, y, z);
+            int r = (int)((double)pal.R8(color) * shade);
+            int g = (int)((double)pal.G8(color) * shade);
+            int b = (int)((double)pal.B8(color) * shade);
+            double cx = (double)(x - sx / 2);
+            double cy = (double)(y - sy / 2);
+            double rx = cx * cos - cy * sin;
+            double ry = cx * sin + cy * cos;
+            int px = (int)(((rx - ry) * 0.866 - minPx) * 2.0) + pad;
+            int py = (int)(((rx + ry) * 0.5 - (double)z * 0.86 - minPy) * 2.0)
+                   + pad;
+            // Diamond stamp, two screen pixels per voxel unit, so a voxel
+            // covers its projected footprint without scanline gaps.
+            for (int dy = -2; dy <= 2; dy = dy + 1) {
+                int half = 2 - (dy < 0 ? 0 - dy : dy);
+                for (int dx = 0 - half; dx <= half; dx = dx + 1) {
+                    int tx = px + dx;
+                    int ty = py + dy;
+                    if (tx >= 0 && ty >= 0 && tx < w && ty < h) {
+                        tex.SetPixel(ty * w + tx, r, g, b, 255);
+                    }
+                }
+            }
+        }
+        return tex;
+    }
+
+    /// <summary>1 when a voxel is filled, 0 for empty or out of bounds --
+    /// the occupancy sample the lighting gradient differentiates.</summary>
+    static int Face(VxlLimb l, int x, int y, int z) {
+        return l.VoxelAt(x, y, z) >= 0 ? 1 : 0;
     }
 
     /// <summary>How many frames a shape carries, 0 when absent. Drives the
@@ -161,6 +368,10 @@ class ObjectArt {
             if (this.shpCache[i] != null) { this.shpCache[i].Close(); }
         }
         this.shpCache = new List<Texture>();
+        for (int i = 0; i < this.vehTex.Count; i = i + 1) {
+            if (this.vehTex[i] != null) { this.vehTex[i].Close(); }
+        }
+        this.vehTex = new List<Texture>();
     }
 }
 

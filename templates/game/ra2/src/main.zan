@@ -65,6 +65,17 @@ class Ra2App {
         b[at + 3] = (byte)((v >> 24) & 0xFF);
     }
 
+    /// <summary>A side's unit id for a rules registry key, -1 when the side
+    /// cannot build it. Lets the selftest name a unit instead of hardcoding
+    /// menu positions.</summary>
+    static int UnitIdOfReg(World world, int side, string reg) {
+        for (int i = 0; i < world.Units().ListFor(side).Count; i = i + 1) {
+            UnitType t = world.Units().TypeFor(side, i);
+            if (t != null && t.Reg() == reg) { return i; }
+        }
+        return -1;
+    }
+
     static void PutI32(byte[] b, int at, int v) {
         b[at] = (byte)(v & 0xFF);
         b[at + 1] = (byte)((v >> 8) & 0xFF);
@@ -1026,8 +1037,52 @@ class Ra2App {
                 // ticks so the enemy AI builds, trains and starts attacking.
                 // The printed state proves the skirmish is actually running.
                 if (frames == 10 && game != null) { game.OnClickBuild(1); }
-                if (frames == 11 && game != null) { game.OnClickCell(12, 12); }
+                if (frames == 11 && game != null) {
+                    game.OnClickCell(12, 12);
+                    // Park one tank per side beside the player's base so the
+                    // voxel bake lands in the frame dump; the printed ids
+                    // prove the roster-to-catalog wiring end to end.
+                    int mtnk = Ra2App.UnitIdOfReg(world, 0, "MTNK");
+                    int htnk = Ra2App.UnitIdOfReg(world, 1, "HTNK");
+                    List<int> at = new List<int>();
+                    int bx = 10;
+                    int by = 10;
+                    if (map.StartCell(0, at) && at.Count >= 2) {
+                        bx = at[0] + 3;
+                        by = at[1] + 2;
+                    }
+                    int ta = -1;
+                    int tb = -1;
+                    for (int r = 0; r < 10 && ta < 0; r = r + 1) {
+                        ta = world.SpawnUnit(0, mtnk, bx + r, by);
+                        if (ta < 0) { ta = world.SpawnUnit(0, mtnk, bx, by + r); }
+                    }
+                    for (int r = 0; r < 10 && tb < 0; r = r + 1) {
+                        tb = world.SpawnUnit(1, htnk, bx + r, by + 2);
+                        if (tb < 0) { tb = world.SpawnUnit(1, htnk, bx, by + 2 + r); }
+                    }
+                    Console.WriteLine("selftest tanks mtnk="
+                        + Convert.ToString(ta) + " htnk=" + Convert.ToString(tb));
+                    if (ta >= 0) {
+                        WorldObject o = world.ObjectAt(ta);
+                        Console.WriteLine("selftest mtnk at "
+                            + Convert.ToString(o.X()) + ","
+                            + Convert.ToString(o.Y()) + " hp="
+                            + Convert.ToString(o.Hp()));
+                    }
+                    if (tb >= 0) {
+                        WorldObject o = world.ObjectAt(tb);
+                        Console.WriteLine("selftest htnk at "
+                            + Convert.ToString(o.X()) + ","
+                            + Convert.ToString(o.Y()) + " hp="
+                            + Convert.ToString(o.Hp()));
+                    }
+                }
                 if (frames == 12) {
+                    // Dump before the fast-forward so the parked tanks are
+                    // captured without combat effects over them.
+                    Ra2App.DumpScreen("build/ra2_shot_tanks.bmp",
+                                      host.Renderer());
                     int stepped = 0;
                     while (stepped < 200 && game != null && game.Result() == 0) {
                         game.Tick();

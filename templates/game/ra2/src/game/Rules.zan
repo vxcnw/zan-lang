@@ -529,6 +529,14 @@ class Rules {
         r.warheads.Add(bomb);
         r.warheads.Add(Warhead.Create("SapperWH",
             "0,0,0,0,0,0,100,100,100,0,0"));
+        // YR additions: the guardian GI's missiles and Boris's AK hit armour
+        // with very different verse tables than the rifles they sit beside.
+        r.warheads.Add(Warhead.Create("GUARDWH",
+            "20,20,20,100,50,100,10,10,10,100,100"));
+        r.warheads.Add(Warhead.Create("BORISWH",
+            "200,200,100,50,50,50,1,1,1,100,100"));
+        r.warheads.Add(Warhead.Create("PJABWH",
+            "100,100,100,50,25,25,25,40,15,100,100"));
 
         // -- weapons: damage, ROF ticks, range cells, warhead ----------------
         r.weapons.Add(Weapon.Create("M60", 15, 20, 4, r.WarheadNamed("SA")));
@@ -568,6 +576,20 @@ class Rules {
             r.WarheadNamed("Shock")));
         r.weapons.Add(Weapon.Create("FlakWeapon", 40, 20, 12,
             r.WarheadNamed("FlakWH")));
+        // YR additions, the shipped [Weapon] values.
+        r.weapons.Add(Weapon.Create("MissileLauncher", 40, 40, 8,
+            r.WarheadNamed("GUARDWH")));
+        r.weapons.Add(Weapon.Create("AKM", 65, 20, 7,
+            r.WarheadNamed("BORISWH")));
+        r.weapons.Add(Weapon.Create("MP5", 30, 20, 6,
+            r.WarheadNamed("SA")));
+        r.weapons.Add(Weapon.Create("PsychicJab", 25, 15, 5,
+            r.WarheadNamed("PJABWH")));
+        // Tank guns, the shipped [105mm] / [120mm] damage, ROF and range.
+        r.weapons.Add(Weapon.Create("105mm", 75, 30, 6,
+            r.WarheadNamed("AP")));
+        r.weapons.Add(Weapon.Create("120mm", 90, 65, 6,
+            r.WarheadNamed("AP")));
 
         // -- the roster -------------------------------------------------------
         // Order matters: each side's menu ids come from filtering this list,
@@ -576,6 +598,10 @@ class Rules {
         // vehicle art, so the Allied war runs entirely on foot.
         r.units.Add(UnitDef.Create("E1", "美国大兵", 200, 125, 4,
             ArmorClass.None(), r.WeaponNamed("M60"), "GAPILE", 1, "GI.SHP"));
+        UnitDef ggi = UnitDef.Create("GGI", "重装大兵", 400, 100, 3,
+            ArmorClass.None(), r.WeaponNamed("M60"), "GAPILE", 1, "GGI.SHP");
+        ggi.SetSecondary(r.WeaponNamed("MissileLauncher"));
+        r.units.Add(ggi);
         r.units.Add(UnitDef.Create("E2", "动员兵", 100, 125, 4,
             ArmorClass.Flak(), r.WeaponNamed("M1Carbine"), "NAHAND", 2,
             "CONS.SHP"));
@@ -592,6 +618,13 @@ class Rules {
             ArmorClass.Flak(), r.WeaponNamed("AWP"), "GAPILE", 1, "SNIPE.SHP");
         snipe.AddPrereq("RADAR");
         r.units.Add(snipe);
+        // The SEAL, the allied commando: MP5 rounds and the same C4 charge
+        // Tanya carries, an hour earlier in the tech ladder.
+        UnitDef seal = UnitDef.Create("SEAL", "海豹部队", 1000, 200, 6,
+            ArmorClass.None(), r.WeaponNamed("MP5"), "GAPILE", 1, "SEAL.SHP");
+        seal.SetSecondary(r.WeaponNamed("Sapper"));
+        seal.AddPrereq("TECH");
+        r.units.Add(seal);
         UnitDef spy = UnitDef.Create("SPY", "间谍", 1000, 100, 4,
             ArmorClass.Flak(), null, "GAPILE", 1, "SPY.SHP");
         spy.SetRole(UnitRole.Spy());
@@ -602,13 +635,22 @@ class Rules {
             "CLEG.SHP");
         cleg.AddPrereq("TECH");
         r.units.Add(cleg);
-        UnitDef tanya = UnitDef.Create("TANYA", "谭雅", 1000, 125, 5,
+        // The regkey is TANY, the shipped section name, so the install's own
+        // stats and UIName override the transcribed defaults.
+        UnitDef tanya = UnitDef.Create("TANY", "谭雅", 1000, 125, 5,
             ArmorClass.Flak(), r.WeaponNamed("DoublePistols"), "GAPILE", 1,
             "TANY.SHP");
         tanya.SetSecondary(r.WeaponNamed("Sapper"));
         tanya.SetMindImmune(true);
         tanya.AddPrereq("TECH");
         r.units.Add(tanya);
+        // The Grizzly, the allied main battle tank: a 105mm AP gun behind
+        // heavy armour, turned out by the war factory. Art is the voxel
+        // model the install names under its Image key, GTNK.
+        UnitDef mtnk = UnitDef.Create("MTNK", "灰熊坦克", 700, 300, 7,
+            ArmorClass.Heavy(), r.WeaponNamed("105mm"), "GAWEAP", 1,
+            "GTNK.VXL");
+        r.units.Add(mtnk);
 
         // Soviet infantry, plus the terror drone the war factory turns out.
         UnitDef shk = UnitDef.Create("SHK", "磁暴步兵", 500, 130, 4,
@@ -638,6 +680,20 @@ class Rules {
         yuri.SetSecondary(r.WeaponNamed("PsiWave"));
         yuri.AddPrereq("TECH");
         r.units.Add(yuri);
+        // Boris, the Soviet answer to Tanya: an AK that chews vehicles and a
+        // hero's immunity to mind control. His flare marker needs the
+        // airstrike system, so he fights with the rifle alone for now.
+        UnitDef boris = UnitDef.Create("BORIS", "精英战斗兵", 1500, 200, 5,
+            ArmorClass.Flak(), r.WeaponNamed("AKM"), "NAHAND", 2, "BORIS.SHP");
+        boris.SetMindImmune(true);
+        boris.AddPrereq("TECH");
+        r.units.Add(boris);
+        // The Rhino, the Soviet answer to the Grizzly: one speed slower,
+        // 200 more hit points, a harder-hitting 120mm.
+        UnitDef htnk = UnitDef.Create("HTNK", "犀牛坦克", 900, 400, 6,
+            ArmorClass.Heavy(), r.WeaponNamed("120mm"), "NAWEAP", 2,
+            "HTNK.VXL");
+        r.units.Add(htnk);
         r.units.Add(UnitDef.Create("DRON", "恐怖机器人", 500, 100, 10,
             ArmorClass.Special1(), r.WeaponNamed("DroneJump"), "NAWEAP", 2,
             "DRON.SHP"));
@@ -670,6 +726,14 @@ class Rules {
             "GAPILE.SHP", 2, 2, 500, 500, 0, 10, ArmorClass.Wood(), 1);
         gapile.AddPrereq("POWER");
         r.buildings.Add(gapile);
+        // The allied war factory, same ladder slot the soviet one holds. It
+        // produces nothing yet -- vehicle art is voxel and the renderer does
+        // not read VXL -- but the build menu then matches the original's.
+        BuildingDef gaweap = BuildingDef.Create("GAWEAP", "战车工厂",
+            "GAWEAP.SHP", 3, 2, 1000, 2000, 0, 25, ArmorClass.Wood(), 1);
+        gaweap.AddPrereq("PROC");
+        gaweap.AddPrereq("BARRACKS");
+        r.buildings.Add(gaweap);
         BuildingDef nahand = BuildingDef.Create("NAHAND", "兵营",
             "NAHAND.SHP", 2, 2, 500, 500, 0, 10, ArmorClass.Wood(), 2);
         nahand.AddPrereq("POWER");
@@ -797,6 +861,21 @@ class Rules {
         return r;
     }
 
+    /// <summary>The extension an Image= override keeps: a voxel unit stays
+    /// voxel, a shape unit stays shape, so [APOC] Image=HTNK under a voxel
+    /// default resolves to HTNK.VXL while infantry resolve to .SHP.</summary>
+    static string ArtExtension(string shp) {
+        if (shp == null) { return ".SHP"; }
+        int dot = shp.Length - 4;
+        if (dot < 0) { return ".SHP"; }
+        bool vxl = true;
+        string want = ".VXL";
+        for (int i = 0; i < 4; i = i + 1) {
+            if ((shp[dot + i] & 0xDF) != (want[i] & 0xDF)) { vxl = false; break; }
+        }
+        return vxl ? ".VXL" : ".SHP";
+    }
+
     void ApplyIni(IniDocument ini) {
         // Warheads first: weapons relink against them below.
         for (int i = 0; i < this.warheads.Count; i = i + 1) {
@@ -838,7 +917,9 @@ class Rules {
             string armor = s.Get("Armor");
             if (armor.Length > 0) { d.SetArmor(ArmorClass.Parse(armor)); }
             string image = s.Get("Image");
-            if (image.Length > 0) { d.SetShp(image + ".SHP"); }
+            if (image.Length > 0) {
+                d.SetShp(image + Rules.ArtExtension(d.Shp()));
+            }
             string primary = s.Get("Primary");
             if (primary.Length > 0 && this.WeaponNamed(primary) != null) {
                 d.SetPrimary(this.WeaponNamed(primary));
