@@ -6,8 +6,10 @@ namespace Gui;
 /// <summary>
 /// 富上下文菜单的一个条目（参见 <see cref="OverlayPopup.RichMenu"/>）。
 /// `kind`：0 = 可点击项，1 = 分隔线，2 = 分组标题，3 = 子菜单
-/// 父项（悬停时其 `children` 在侧面板中展开）。`action` 是
-/// 选择叶子项时写回调用方结果信号的值。
+/// 父项（悬停时其 `children` 在侧面板中展开，孙级同理再展开一层）。
+/// `action` 是选择叶子项时写回调用方结果信号的值。
+/// `swatch`/`swatch2` 是可选项的色块（ARGB；0 = 无）：单色画一枚
+/// 圆角色块，双色左右对拼（色阶预设）——画在图标列，替代图标位。
 /// </summary>
 class MenuItem {
     int kind;
@@ -19,6 +21,8 @@ class MenuItem {
     int action;
     bool disabled;
     bool danger;
+    int swatch;
+    int swatch2;
     List<MenuItem> children;
 
     /// 可点击项工厂（各静态构造的公共底座）。
@@ -33,6 +37,16 @@ class MenuItem {
         m.disabled = false;
         m.danger = false;
         m.children = new List<MenuItem>();
+        return m;
+    }
+
+    /// 带色块的可点击项：`c0` 必给；`c1` 非 0 时画双色对拼
+    /// 色块（色阶类预设），为 0 时单色。色块占用图标列。
+    static MenuItem SwatchItem(string label, string icon, int action,
+                               int c0, int c1) {
+        MenuItem m = MenuItem.Item(label, icon, action);
+        m.swatch = c0;
+        m.swatch2 = c1;
         return m;
     }
 

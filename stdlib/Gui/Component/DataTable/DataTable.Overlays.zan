@@ -75,9 +75,12 @@ partial class DataTable {
         st.toastFrames = 90;
     }
 
-    /// 懒领取菜单的稳定 id 块与结果信号（每状态一次）。
+    /// 懒领取菜单的稳定 id 块与结果信号（每状态一次）。表头菜单
+    /// 用 384：主面板 +256 起还有孙级色板（RichMenu 内部约定），
+    /// 只给 256 会与紧跟其后的行菜单块（ctx）的行 id 数值相撞，
+    /// 两个菜单同开时悬停/按压按 id 匹配会串。
     static void EnsureMenuIds(DataTableState st) {
-        if (st.hdrMenuBaseId < 0) { st.hdrMenuBaseId = WidgetId.Block(256); }
+        if (st.hdrMenuBaseId < 0) { st.hdrMenuBaseId = WidgetId.Block(384); }
         if (st.ctxMenuBaseId < 0) { st.ctxMenuBaseId = WidgetId.Block(256); }
     }
 
@@ -98,6 +101,7 @@ partial class DataTable {
         st.hdrMenuOpen.Set(true);
         st.hdrMenuResult.Set(0 - 1);
         st.hdrMenuSub.Set(0 - 1);
+        st.hdrMenuSub2.Set(0 - 1);
         st.hdrMenuScroll.Set(0);
     }
 
@@ -630,10 +634,11 @@ partial class DataTable {
         return kids;
     }
 
-    /// 条件格式子菜单（扁平布局，对齐 RichMenu 的一层子菜单
-    /// 契约——子面板里不再嵌孙级）：高亮规则 3 项 + 前/后规则
-    /// 4 项 + 分隔 + 数据条 8 预设 + 分隔 + 色阶 8 预设 + 分隔 +
-    /// 清除规则；当前生效规则所在组带 ✓（父项不勾选）。
+    /// 条件格式子菜单（两级分组，对齐 RichMenu 的两层子菜单
+    /// 契约）：高亮规则 / 前·后规则 / 数据条 / 色阶四个孙级面板，
+    /// 加清除规则直项。色板项带色块（MenuItem.SwatchItem）——
+    /// 数据条单色块，色阶双色对拼；当前生效规则所在叶子行带 ✓
+    /// （父项只作展开入口，同合计子菜单）。
     /// 勾选状态读"生效规则"：菜单槽位优先（用户最近通过菜单
     /// 设置的规则，跨每帧列重建持久），槽位为 0 时看列自身的
     /// 工厂预设。
@@ -654,50 +659,62 @@ partial class DataTable {
 
         // 高亮规则：大于/小于均值；勾选标在对应行（颜色
         // 用首列蓝，与旧面板默认一致）。
-        kids.Add(MenuItem.Item(DataTable.T("Greater Than Average", "大于均值")
-                               + (cfMode == 3 ? "  ✓" : ""), "",
-                               DataTable.HdrActCfGreater));
-        kids.Add(MenuItem.Item(DataTable.T("Less Than Average", "小于均值")
-                               + (cfMode == 4 ? "  ✓" : ""), "",
-                               DataTable.HdrActCfLess));
-        kids.Add(MenuItem.Separator());
+        List<MenuItem> hl = new List<MenuItem>();
+        hl.Add(MenuItem.Item(DataTable.T("Greater Than Average", "大于均值")
+                             + (cfMode == 3 ? "  ✓" : ""), "",
+                             DataTable.HdrActCfGreater));
+        hl.Add(MenuItem.Item(DataTable.T("Less Than Average", "小于均值")
+                             + (cfMode == 4 ? "  ✓" : ""), "",
+                             DataTable.HdrActCfLess));
+        kids.Add(MenuItem.Submenu(DataTable.T("Highlight Rules", "高亮规则"),
+                                  "eye", hl));
 
         // 前/后规则（名次缓存随 Recompute 重建）。
-        kids.Add(MenuItem.Item(DataTable.T("Top 10 Items", "前 10 项")
-                               + (cfMode == 5 && !cfRankPct ? "  ✓" : ""), "",
-                               DataTable.HdrActCfTopN));
-        kids.Add(MenuItem.Item(DataTable.T("Top 10 %", "前 10 %")
-                               + (cfMode == 5 && cfRankPct ? "  ✓" : ""), "",
-                               DataTable.HdrActCfTopPct));
-        kids.Add(MenuItem.Item(DataTable.T("Bottom 10 Items", "后 10 项")
-                               + (cfMode == 6 && !cfRankPct ? "  ✓" : ""), "",
-                               DataTable.HdrActCfBottomN));
-        kids.Add(MenuItem.Item(DataTable.T("Bottom 10 %", "后 10 %")
-                               + (cfMode == 6 && cfRankPct ? "  ✓" : ""), "",
-                               DataTable.HdrActCfBottomPct));
+        List<MenuItem> tb = new List<MenuItem>();
+        tb.Add(MenuItem.Item(DataTable.T("Top 10 Items", "前 10 项")
+                             + (cfMode == 5 && !cfRankPct ? "  ✓" : ""), "",
+                             DataTable.HdrActCfTopN));
+        tb.Add(MenuItem.Item(DataTable.T("Top 10 %", "前 10 %")
+                             + (cfMode == 5 && cfRankPct ? "  ✓" : ""), "",
+                             DataTable.HdrActCfTopPct));
+        tb.Add(MenuItem.Item(DataTable.T("Bottom 10 Items", "后 10 项")
+                             + (cfMode == 6 && !cfRankPct ? "  ✓" : ""), "",
+                             DataTable.HdrActCfBottomN));
+        tb.Add(MenuItem.Item(DataTable.T("Bottom 10 %", "后 10 %")
+                             + (cfMode == 6 && cfRankPct ? "  ✓" : ""), "",
+                             DataTable.HdrActCfBottomPct));
+        kids.Add(MenuItem.Submenu(DataTable.T("Top/Bottom Rules", "前/后规则"),
+                                  "sort", tb));
         kids.Add(MenuItem.Separator());
 
         // 数据条：4 组渐变 + 4 组纯色（渐变双端同色由渲染层做
-        // alpha 梯度），当前列的数据条色带 ✓。
+        // alpha 梯度），每项带单色块；当前列的数据条色带 ✓。
+        List<MenuItem> bars = new List<MenuItem>();
         for (int i = 0; i < 8; i = i + 1) {
             int ci = i < 4 ? i : i + 4;
             string lbl = DataTable.T(i < 4 ? "Gradient Fill" : "Solid Fill",
                                     i < 4 ? "渐变" : "纯色")
                 + " " + DataTable.SwatchName(ci);
             if (cfMode == 1 && cfColor == ps[ci]) { lbl = lbl + "  ✓"; }
-            kids.Add(MenuItem.Item(lbl, "", DataTable.HdrActCfBar0 + i));
+            bars.Add(MenuItem.SwatchItem(lbl, "", DataTable.HdrActCfBar0 + i,
+                                         ps[ci], 0));
         }
-        kids.Add(MenuItem.Separator());
+        kids.Add(MenuItem.Submenu(DataTable.T("Data Bars", "数据条"),
+                                  "chart-bar", bars));
 
-        // 色阶：双色渐变预设对。
+        // 色阶：双色渐变预设对，每项带双色对拼色块。
+        List<MenuItem> scales = new List<MenuItem>();
         for (int i = 0; i < 8; i = i + 1) {
             int ci = i < 4 ? i : i + 4;
             int c0 = ps[ci];
             int c1 = ps[ci + 4 > 11 ? ci - 4 : ci + 4];
             string lbl = DataTable.SwatchName(ci);
             if (cfMode == 2 && cfColor == c0 && cfColor2 == c1) { lbl = lbl + "  ✓"; }
-            kids.Add(MenuItem.Item(lbl, "", DataTable.HdrActCfScale0 + i));
+            scales.Add(MenuItem.SwatchItem(lbl, "", DataTable.HdrActCfScale0 + i,
+                                           c0, c1));
         }
+        kids.Add(MenuItem.Submenu(DataTable.T("Color Scales", "色阶"),
+                                  "color", scales));
 
         kids.Add(MenuItem.Separator());
         string clearLbl = DataTable.T("Clear Rules", "清除规则");
@@ -823,6 +840,7 @@ partial class DataTable {
             st.hdrCtxOpen = false;
             st.hdrMenuOpen.Set(false);
             st.hdrMenuSub.Set(0 - 1);
+            st.hdrMenuSub2.Set(0 - 1);
             DataTable.DispatchHeaderAction(app, st, cols, src, col, act);
             // 菜单可能改了规则/聚合/名次缓存依赖的状态：
             // 本帧立即重算，数据条/色阶的 min/max 不用过期。
@@ -906,7 +924,7 @@ partial class DataTable {
 
         app.AddOverlay(OverlayPopup.RichMenu(st.hdrCtxX, st.hdrCtxY, items,
             st.hdrMenuBaseId, st.hdrMenuResult, st.hdrMenuOpen, st.hdrMenuSub,
-            st.hdrMenuScroll, 14, app.Scale(230)));
+            st.hdrMenuScroll, 14, app.Scale(230), st.hdrMenuSub2));
         // RichMenu 的开关信号是唯一事实来源：组件因外部点击/
         // Escape/失焦关闭时镜像回 hdrCtxOpen。
         st.hdrCtxOpen = st.hdrMenuOpen.Get();

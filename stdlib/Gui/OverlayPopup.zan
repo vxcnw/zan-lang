@@ -37,6 +37,11 @@ class OverlayPopup {
     List<MenuItem> menuItems;
     SignalInt result;
     SignalInt subOpen;
+    // 孙级子菜单（子面板里 kind=3 行再展开的一层）。宿主不传时
+    // 指向私有哑信号（写它无人读），richSub2 才是「启用孙级」
+    // 的门；偏移由宿主跨帧持有，与 subOpen 同寿命。
+    SignalInt subOpen2;
+    bool richSub2;
 
     // 富菜单滚动：弹窗每帧重建，偏移由宿主跨帧持有。richMaxRows
     // 限制主面板可见的可点击行数，长菜单出滚动条（滚轮 + 拖动）；
@@ -52,10 +57,11 @@ class OverlayPopup {
     Control host;
 
     /// 富上下文菜单：包含 `items`（参见 MenuItem）的浮动面板，
-    /// 支持图标、分隔线、分组标题和一层悬停展开的
+    /// 支持图标、分隔线、分组标题和两层悬停展开的
     /// 子菜单。选中的叶子 `action` 写入 `result`；
     /// 选择、外部按压或 Escape 都会关闭面板。`baseId` 必须是稳定的
-    /// 至少 256 个 id 的连续块（WidgetId.Block(256)）。
+    /// 至少 256 个 id 的连续块（WidgetId.Block(256)）；走孙级扩展版
+    /// 时要 384（主面板 +128 = 子面板，+256 = 孙面板）。
     static OverlayPopup RichMenu(int x, int y, List<MenuItem> items, int baseId,
                                  SignalInt result, SignalBool openFlag,
                                  SignalInt subOpen) {
@@ -70,6 +76,19 @@ class OverlayPopup {
                                  SignalInt result, SignalBool openFlag,
                                  SignalInt subOpen, SignalInt scroll,
                                  int maxRows, int minW) {
+        return OverlayPopup.RichMenu(x, y, items, baseId, result, openFlag,
+            subOpen, scroll, maxRows, minW, null);
+    }
+
+    /// 孙级扩展版：`subOpen2` 持有子面板里展开的孙级行
+    /// （-1 无，宿主跨帧持有并在菜单开/关时复位）。子面板里的
+    /// kind=3 行悬停时再展开一层面板；不用孙级传 null。
+    static OverlayPopup RichMenu(int x, int y, List<MenuItem> items, int baseId,
+                                 SignalInt result, SignalBool openFlag,
+                                 SignalInt subOpen, SignalInt scroll,
+                                 int maxRows, int minW, SignalInt subOpen2) {
+        // 终点重载：就地构造。不能委托回 10 参版——两个重载
+        // 会互相调用成死递归，菜单一开即栈溢出。
         OverlayPopup p = new OverlayPopup();
         p.rich = true;
         p.x = x;
@@ -86,6 +105,8 @@ class OverlayPopup {
         p.richScroll = scroll;
         p.richMaxRows = maxRows;
         p.richMinW = minW;
+        p.subOpen2 = subOpen2 != null ? subOpen2 : new SignalInt(0 - 1);
+        p.richSub2 = subOpen2 != null;
         return p;
     }
 
@@ -1285,7 +1306,28 @@ class OverlayPopup {
                     c.FillRect(px + 1, rowY, pw - 2, rowH, hoverBg);
                 }
                 if (vis) {
-                    if (m.icon != "") {
+                    if (m.swatch != 0) {
+                        // 色块（替代图标位，占同一列）：单色一枚圆角
+                        // 块；swatch2 非 0 时右半覆盖第二色（clip 出
+                        // 直边拼缝，两角仍是圆的），读作双色渐变预设。
+                        int chipS = t.iconSizeSmall - 2;
+                        if (chipS < 8) { chipS = 8; }
+                        int chipX = px + padH + 1;
+                        int chipY = rowY + (rowH - chipS) / 2;
+                        int chipR = app.Scale(3);
+                        if (chipR < 2) { chipR = 2; }
+                        c.FillRoundRect(chipX, chipY, chipS, chipS, chipR,
+                                        m.swatch);
+                        if (m.swatch2 != 0 && m.swatch2 != m.swatch) {
+                            c.PushClip(chipX + chipS / 2, chipY,
+                                       chipS - chipS / 2, chipS);
+                            c.FillRoundRect(chipX, chipY, chipS, chipS, chipR,
+                                            m.swatch2);
+                            c.PopClip();
+                        }
+                        c.DrawRoundRect(chipX, chipY, chipS, chipS, chipR,
+                                        menuBorder, 1);
+                    } else if (m.icon != "") {
                         c.DrawGlyphIn(m.icon, px + padH, rowY,
                             t.iconSizeSmall, rowH, t.iconSizeSmall, fg);
                     }
@@ -1427,17 +1469,18 @@ class OverlayPopup {
         int cwd = 0;
         int chd = 0;
         bool childOpen = false;
+        List<MenuItem> childKids = null;
         if (newSub >= 0 && newSub < n && items[newSub].kind == 3) {
-            List<MenuItem> ck = items[newSub].children;
-            cwd = OverlayPopup.RichWidth(app, ck);
-            chd = OverlayPopup.RichHeight(app, ck);
+            childKids = items[newSub].children;
+            cwd = OverlayPopup.RichWidth(app, childKids);
+            chd = OverlayPopup.RichHeight(app, childKids);
             cx = px + pw - app.Scale(4);
             if (cx + cwd > cw - margin) { cx = px - cwd + app.Scale(4); }
             cy = OverlayPopup.RichRowTop(app, items, newSub, py + app.Scale(6))
                 - scrollY;
             if (cy + chd > ch - margin) { cy = ch - margin - chd; }
             if (cy < margin) { cy = margin; }
-            childOver = OverlayPopup.PaintRichPanel(app, ck, cx, cy, cwd, chd,
+            childOver = OverlayPopup.PaintRichPanel(app, childKids, cx, cy, cwd, chd,
                 baseId + 128, 0, 0);
             childOpen = true;
         } else {
@@ -1446,6 +1489,74 @@ class OverlayPopup {
             // 的滚动条 id 顶得漂移，拖动中 IsPressed 突然失配中断
             // 拖动，等 id 回来又按 jump-to-mouse 瞬移——来回跳跃。
             app.focus.AllocId();
+        }
+
+        // ---- 孙级面板（richSub2 门控）：子面板里的
+        // kind=3 行悬停再展开一层。开合状态由宿主跨帧持有；子面板
+        // 没开或换了父行就地关闭。关闭时同样烧掉一个 barrier id，
+        // 保持覆盖层 id 流稳定（理由同子面板）。----
+        int grandOver = 0 - 1;
+        int gx = 0;
+        int gy = 0;
+        int gw = 0;
+        int gh = 0;
+        bool grandOpen = false;
+        List<MenuItem> grandKids = null;
+        if (richSub2) {
+            int curSub2 = subOpen2.Get();
+            bool overChildSub = childOpen && childOver >= 0
+                && childOver < childKids.Count && childKids[childOver].kind == 3;
+            // 当前已开的孙面板矩形（按 curSub2 的几何摆位），指针
+            // 进面板即保持——与子面板「悬停父项或其子面板都保持」
+            // 同一条规则。
+            bool hadGrand = childOpen && curSub2 >= 0
+                && curSub2 < childKids.Count && childKids[curSub2].kind == 3;
+            int hx = 0;
+            int hy = 0;
+            int hw = 0;
+            int hh = 0;
+            if (hadGrand) {
+                List<MenuItem> hk = childKids[curSub2].children;
+                hw = OverlayPopup.RichWidth(app, hk);
+                hh = OverlayPopup.RichHeight(app, hk);
+                hx = cx + cwd - app.Scale(4);
+                if (hx + hw > cw - margin) { hx = cx - hw + app.Scale(4); }
+                hy = OverlayPopup.RichRowTop(app, childKids, curSub2,
+                    cy + app.Scale(6));
+                if (hy + hh > ch - margin) { hy = ch - margin - hh; }
+                if (hy < margin) { hy = margin; }
+            }
+            bool overGrand = hadGrand && app.mouseX >= hx
+                && app.mouseX < hx + hw && app.mouseY >= hy
+                && app.mouseY < hy + hh;
+
+            int newSub2 = curSub2;
+            if (!childOpen || newSub != curSub) { newSub2 = 0 - 1; }
+            else if (overChildSub) { newSub2 = childOver; }
+            else if (overGrand) { newSub2 = curSub2; }
+            else if (childOver >= 0) { newSub2 = 0 - 1; }
+            if (newSub2 != curSub2) {
+                subOpen2.Set(newSub2);
+                app.RequestRedraw();
+            }
+
+            if (childOpen && newSub2 >= 0 && newSub2 < childKids.Count
+                && childKids[newSub2].kind == 3) {
+                grandKids = childKids[newSub2].children;
+                gw = OverlayPopup.RichWidth(app, grandKids);
+                gh = OverlayPopup.RichHeight(app, grandKids);
+                gx = cx + cwd - app.Scale(4);
+                if (gx + gw > cw - margin) { gx = cx - gw + app.Scale(4); }
+                gy = OverlayPopup.RichRowTop(app, childKids, newSub2,
+                    cy + app.Scale(6));
+                if (gy + gh > ch - margin) { gy = ch - margin - gh; }
+                if (gy < margin) { gy = margin; }
+                grandOver = OverlayPopup.PaintRichPanel(app, grandKids, gx, gy,
+                    gw, gh, baseId + 256, 0, 0);
+                grandOpen = true;
+            } else {
+                app.focus.AllocId();
+            }
         }
 
         // 滚动条：画在行之上，命中区在行之后注册，拖动优先于行点击。
@@ -1479,13 +1590,23 @@ class OverlayPopup {
         // 停留不变，ClickFrameCurrent 同时挡住陈旧释放的重放。
         if (kind == 3 && btn == 0 && !onBar && app.ClickFrameCurrent()
             && !app.ClickClaimed()) {
-            if (childOpen && childOver >= 0
+            if (grandOpen && grandOver >= 0 && grandOver < grandKids.Count) {
+                MenuItem gcm = grandKids[grandOver];
+                if (gcm.kind == 0 && !gcm.disabled) {
+                    result.Set(gcm.action);
+                    openFlag.Set(false);
+                    subOpen.Set(0 - 1);
+                    subOpen2.Set(0 - 1);
+                    app.RequestRedraw();
+                }
+            } else if (childOpen && childOver >= 0
                 && childOver < items[newSub].children.Count) {
                 MenuItem hcm = items[newSub].children[childOver];
                 if (hcm.kind == 0 && !hcm.disabled) {
                     result.Set(hcm.action);
                     openFlag.Set(false);
                     subOpen.Set(0 - 1);
+                    subOpen2.Set(0 - 1);
                     app.RequestRedraw();
                 }
             } else if (overRow >= 0 && overRow < n) {
@@ -1494,6 +1615,7 @@ class OverlayPopup {
                     result.Set(hm.action);
                     openFlag.Set(false);
                     subOpen.Set(0 - 1);
+                    subOpen2.Set(0 - 1);
                     app.RequestRedraw();
                 }
             }
@@ -1505,14 +1627,19 @@ class OverlayPopup {
         // 帧停留不变，ClickFrameCurrent 同时挡住陈旧释放重放。
         bool releaseOwned = kind == 2
             || (app.ClickFrameCurrent() && !app.ClickClaimed());
-        if (leftEvt && releaseOwned && !inMain && !inChild && !onBar) {
+        bool inGrand = grandOpen && app.mouseX >= gx && app.mouseX < gx + gw
+            && app.mouseY >= gy && app.mouseY < gy + gh;
+        if (leftEvt && releaseOwned && !inMain && !inChild && !inGrand
+            && !onBar) {
             openFlag.Set(false);
             subOpen.Set(0 - 1);
+            subOpen2.Set(0 - 1);
             app.RequestRedraw();
         }
         if (kind == 4 && app.window.EventKeyCode() == 27) {
             openFlag.Set(false);
             subOpen.Set(0 - 1);
+            subOpen2.Set(0 - 1);
             app.RequestRedraw();
         }
         // 窗口失焦（事件 9，或本帧查询到焦点已不在本窗口）时
@@ -1520,6 +1647,7 @@ class OverlayPopup {
         if (kind == 9 || !app.window.IsFocused()) {
             openFlag.Set(false);
             subOpen.Set(0 - 1);
+            subOpen2.Set(0 - 1);
             app.RequestRedraw();
         }
     }

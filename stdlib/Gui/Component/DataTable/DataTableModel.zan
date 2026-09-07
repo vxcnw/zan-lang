@@ -1295,6 +1295,7 @@ class DataTableState {
     SignalInt hdrMenuResult;   // 表头菜单选中的 action 码（-1 无）
     SignalBool hdrMenuOpen;    // RichMenu 开关（镜像 hdrCtxOpen）
     SignalInt hdrMenuSub;      // 表头菜单子菜单展开行（-1 无）
+    SignalInt hdrMenuSub2;     // 表头菜单孙级展开行（-1 无，条件格式两级色板）
     SignalInt hdrMenuScroll;   // 表头菜单滚动偏移（跨帧持有）
     int ctxMenuBaseId;         // 行菜单稳定 id 块
     SignalInt ctxMenuResult;   // 行菜单选中的 action 码（-1 无）
@@ -1647,6 +1648,7 @@ class DataTableState {
         this.hdrMenuResult = new SignalInt(0 - 1);
         this.hdrMenuOpen = new SignalBool(false);
         this.hdrMenuSub = new SignalInt(0 - 1);
+        this.hdrMenuSub2 = new SignalInt(0 - 1);
         this.hdrMenuScroll = new SignalInt(0);
         this.ctxMenuBaseId = -1;
         this.ctxMenuResult = new SignalInt(0 - 1);
