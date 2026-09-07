@@ -80,7 +80,11 @@ ZanIDE禁止任何自绘必须全部用标准库组件来完成
    when the compiler/runtime/stdlib itself changed; `standard` (399) only
    before committing compiler/stdlib/runtime work; `full` (1035 —
    determinism/leakcheck twins + self-hosting) release gate only, tens of
-   minutes — never casually. Narrow further with `-Match`/`-R` when a change
+   minutes — never casually. A compiler/runtime/stdlib change is exactly such
+   a checkpoint (see rule 10): fixing a compiler defect or design flaw MUST be
+   backed by ctest — at least the affected `smoke` cases, `standard` before the
+   fix is committed; a hand-run probe alone does not verify a compiler fix.
+   Narrow further with `-Match`/`-R` when a change
    is local (a generics/ARC change: `-R "generic|leakcheck_generic"`).
    **Nothing else may build while tests run**: the cases share
    `build\zanc.exe` and the stdlib stamp, so a concurrent
@@ -98,7 +102,9 @@ ZanIDE禁止任何自绘必须全部用标准库组件来完成
     hides the root cause and spreads through the standard library.
     Procedure: reduce it to a minimal probe in `_scratch/`, find the root cause
     in `src/compiler/` or `src/runtime/`, fix it, add a `tests/conformance/`
-    case, and only then write the natural Zan code. If the fix is genuinely out
+    case, run the affected ctest tier (rule 8 — a compiler/runtime fix counts
+    as verified only once its tier passes), and only then write the natural Zan
+    code. If the fix is genuinely out
     of scope for the current task, do not silently work around it: record it in
     `TASKS.md` with the probe and the root cause, say so explicitly, and get
     agreement before shipping any temporary shape.
