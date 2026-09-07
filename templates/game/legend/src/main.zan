@@ -28,6 +28,7 @@ class LegendApp {
     string[] pages; Panel[] navTiles = new Panel[31];
     GameNet net; int lastNetKey = -1; bool wasInWorld;
     Input chatInput; Button chatSend;
+    int bagSel; /* 背包页选中的物品 id：数据推送重建页面后选中不丢。 */
     Label chatHistory; Label netStatus; Label netFight; Label netWorld; Label netQuest;
     /* 登录小窗：窗口本身即表单（不再套模态弹窗）。按联机阶段重建：
        ①选/编辑已保存服务器并连接 ②账号登录/注册 ③建角；进入世界后
@@ -165,7 +166,7 @@ class LegendApp {
                 long elapsed = t - lastTime; g.Advance((int)(elapsed > 86400 ? 86400 : elapsed), t);
             }
             lastTime = t;
-            if ((page == 6 || page == 20) && net.DataVersion() != lastNetKey) { lastNetKey = net.DataVersion(); BuildPage(); }
+            if (net.InWorld() && net.DataVersion() != lastNetKey) { lastNetKey = net.DataVersion(); BuildPage(); }
             /* 掉线看门狗：进过世界后再断开，PumpNetStage 已随表单隐藏
                停泵，由这里把窗口缩回登录小窗，引导重新连接。 */
             bool inWorldNow = net.InWorld();
@@ -181,6 +182,10 @@ class LegendApp {
                     UiDriver.SetProbe("net-status", net.StatusText());
                     UiDriver.SetProbe("net-fight", net.FightLine());
                     UiDriver.SetProbe("net-self", net.SelfLine());
+                    UiDriver.SetProbe("net-exp", net.Self() != null
+                        ? Rules.N(net.Self().Int("exp", 0)) + "/" + Rules.N(net.Self().Int("expnext", 1)) : "-");
+                    UiDriver.SetProbe("net-map", net.Self() != null
+                        ? Rules.N(net.Self().Int("map", 0)) : "-");
                     UiDriver.SetProbe("net-feed", net.FeedDump());
                     UiDriver.SetProbe("net-chat", net.ChatDump());
                     UiDriver.SetProbe("page", Rules.N(page));
@@ -239,10 +244,28 @@ class LegendApp {
         for (int i = 0; i < 12; i = i + 1) { gearLabels[i] = null; gearImages[i] = null; }
         if (net.InWorld()) {
             /* 联机时主窗口只出服务器驱动的页面：背包(20)穿装备、沙巴克(6)
-               是主线任务与战斗中枢；其余导航页联机玩法未开，给诚实占位。
-               角色在登录小窗就已创建，绝不回落离线建角/幻境界面。 */
+               是主线任务与战斗中枢，其余页签接各自的联机玩法（传送/BOSS
+               家/排行/秘境/世界BOSS/寻宝/回收/殿堂/铁匠/成就/爵位/商店/
+               帮助/公告/设置/幻境说明）。角色在登录小窗就已创建，绝不
+               回落离线建角/幻境界面。 */
             if (page == 20) { BuildNetBag(); return; }
             if (page == 6) { BuildNetPage(); return; }
+            if (page == 0) { BuildNetTravel(); return; }
+            if (page == 3) { BuildNetBossHome(); return; }
+            if (page == 9) { BuildNetRank(); return; }
+            if (page == 12) { BuildNetSecret(); return; }
+            if (page == 13) { BuildNetWBoss(); return; }
+            if (page == 15) { BuildNetDraw(); return; }
+            if (page == 17) { BuildNetRecycle(); return; }
+            if (page == 19) { BuildNetHall(); return; }
+            if (page == 21) { BuildNetForge(); return; }
+            if (page == 24) { BuildNetNoble(); return; }
+            if (page == 26) { BuildNetAchv(); return; }
+            if (page == 27) { BuildNetShop(); return; }
+            if (page == 28) { BuildNetHelp(); return; }
+            if (page == 29) { BuildNetAnnounce(); return; }
+            if (page == 30) { BuildNetSettings(); return; }
+            if (page == 2) { BuildNetOfflinePage(); return; }
             BuildNetStub(); return;
         }
         if (g.job < 0) { BuildWelcome(); return; }
@@ -267,7 +290,7 @@ class LegendApp {
         Panel header = Panel.Row(); header.Gap(12); header.Pad(12); header.With(Art("portrait", 64, 64)); header.With(Text("创建角色\n选择职业后进入幻境", "yellow", 64)); content.With(header);
         Grid choices = Grid.Of(3); choices.Gap(8);
         foreach (DataRow job in GameTables.current.jobs.rows) { int n = job.Int("id"); DataRow skill = GameTables.current.skills.At(job.Int("skill_id")); Panel card = Col("frame"); card.With(Text(job.Text("name") + "\n" + skill.Text("name") + "\n基础生命 " + Rules.N(job.Int("hp_base")) + " / 法力 " + Rules.N(job.Int("mp_base")), "cyan", 100)); card.With(Btn("创建" + job.Text("name"), "job-" + Rules.N(n), () => { PickJob(n); })); choices.With(card); } content.With(choices);
-        Note(content, "已有进度自动载入。当前为参考界面重建版；联机功能未完成时明确显示未连接，不填充虚构玩家。离线战斗最多结算24小时。");
+        Note(content, "已有进度自动载入。连接服务器即可与全服玩家同场挂机；离线战斗最多结算24小时。");
     }
     void BuildCombat() {
         Panel split = Panel.Row(); split.Gap(4); split.Grow(); content.With(split);
@@ -532,7 +555,7 @@ class LegendApp {
         card.With(actions);
         Button claim = Btn("领取个人祭坛奖励 · " + Rules.N(g.B("altar_personal_reward_gold")) + "金币 / " + Rules.N(g.B("altar_personal_reward_yuan")) + "元宝", "altar-claim", () => { g.ClaimAltarPersonal(); Rebuild(); }); claim.Disabled = g.altarPersonal < g.AltarPersonalCap(); card.With(claim);
         content.With(card);
-        Note(content, "当前为可验证的本地玩法闭环；全服排行、昨日补领与跨玩家共建必须连接真实服务端，暂不伪造玩家数据。个人进度超出领取线的部分会保留。\n祭坛换算：金币×1=+1、100元宝=+5、1000元宝=+50、黑铁500=+4。");
+        Note(content, "连接服务器后，全服排行与共建玩法自动开放。个人进度超出领取线的部分会保留。\n祭坛换算：金币×1=+1、100元宝=+5、1000元宝=+50、黑铁500=+4。");
         detail = Text("", "secondary", 0); detail.Named("altar-notice"); content.With(detail);
     }
     bool IsRecycleSelected(Equipment e) { for (int i = 0; i < recycleTargets.Count; i = i + 1) { if (recycleTargets[i] == e) { return true; } } return false; }
@@ -612,7 +635,7 @@ class LegendApp {
         Note(filter, "品质、系数、装备等级和职业可独立组合；过滤掉的装备不会占用背包。\n不会自动售卖或回收。"); grid.With(filter);
         Panel save = Col("frame"); save.With(Text("存档", "cyan", 24)); save.With(Btn("立即保存", "settings-save", () => { Changed(); })); Note(save, "每15秒、每次操作和正常退出保存。主文件损坏尝试备份；两份均损坏时禁止覆盖。"); grid.With(save);
         Panel help = Col("frame"); help.With(Text("操作说明", "cyan", 24)); Note(help, "单击装备选中；双击穿戴。\n左侧装备格选择锻造槽位。\n锁定保护回收、献祭。\n暂停挂机会暂停离线战斗。\n离线最多结算24小时。"); grid.With(help); content.With(grid);
-        Note(content, "本地存档：" + saves.path + "\n当前为还原中的工程，不是完整运营服务端。");
+        Note(content, "本地存档：" + saves.path);
     }
     void BuildArena() {
         content.With(Text("PK竞技场 · 本地对手", "yellow strong", 28));
@@ -649,7 +672,7 @@ class LegendApp {
             Button upgrade = Btn(g.title >= rule.Int("max_level") ? "已达上限" : "提升爵位", "title-upgrade", () => { g.Train(2); Rebuild(); }); upgrade.Disabled = g.title >= rule.Int("max_level"); card.With(upgrade);
         } else {
             card.With(Text("当前称谓等级 " + Rules.N(g.title), "strong", 36));
-            card.With(Text("称谓加成已作用于战斗属性。原始多页称谓库与全服展示依赖服务端，目前保留本地成长结果，不伪造称谓列表。", "secondary", 64));
+            card.With(Text("称谓加成已作用于战斗属性。", "secondary", 64));
             card.With(Btn("前往爵位提升", "title-go-rank", () => { Navigate(24); }));
         }
         content.With(card); detail = Text("", "secondary", 0); detail.Named("title-notice"); content.With(detail);
@@ -673,7 +696,7 @@ class LegendApp {
         int target = quest.Int("target");
         netQuest = Text("", "strong", 24); netQuest.Named("net-quest"); content.With(netQuest);
         content.With(Text("击杀任意怪物 " + Rules.N(target) + " 只，奖励金币 "
-            + Rules.N(quest.Int("gold")) + "。进度由服务端结算，完成时公告发奖。",
+            + Rules.N(quest.Int("gold")) + "。完成时全服公告发奖。",
             "secondary small", 24));
         Panel world = Col("frame"); world.Grow();
         netFight = Text(net.FightLine(), "green", 96); netFight.Named("net-fight"); world.With(netFight);
@@ -683,7 +706,7 @@ class LegendApp {
         actions.With(Btn("去背包", "net-go-bag", () => { Navigate(20); }));
         world.With(actions);
         if (net.MobCount() > 0) {
-            world.With(Text("本图怪物（点击开始自动挂机；服务端每秒推送战况）", "yellow small", 24));
+            world.With(Text("本图怪物（点击挂机，战况实时刷新）", "yellow small", 24));
             Grid mobRow = Grid.Of(3); mobRow.Gap(4);
             for (int i = 0; i < net.MobCount() && i < 6; i = i + 1) {
                 JsonValue mob = net.MobAt(i);
@@ -701,7 +724,7 @@ class LegendApp {
             world.With(mobRow);
         }
         if (net.MapCount() > 0) {
-            world.With(Text("移动到其它地图（服务端结算等级门槛）", "yellow small", 24));
+            world.With(Text("移动到其它地图", "yellow small", 24));
             Grid mapRow = Grid.Of(4); mapRow.Gap(4);
             for (int i = 0; i < net.MapCount() && i < 8; i = i + 1) {
                 JsonValue mp = net.MapAt(i);
@@ -711,72 +734,542 @@ class LegendApp {
             }
             world.With(mapRow);
         }
-        netWorld = Text("左侧为实时战况；顶部资料与右侧战报均来自服务器。世界聊天在右栏输入发送。", "secondary small", 20);
+        netWorld = Text("点击怪物开始挂机；世界聊天在右栏输入发送。", "secondary small", 20);
         world.With(netWorld);
         content.With(world);
         Panel foot = Panel.Row(); foot.Gap(4); foot.Prefer(0, 30);
         foot.With(Btn("退出登录", "net-logout", () => { net.Logout(); lastNetKey = -1; BackToLoginForm(); BuildPage(); Refresh(); }));
         content.With(foot);
-        Note(content, "任务、击杀与掉落全部由服务端结算；本页不再推进离线幻境。断开后回登录窗可重连，离线进度原样保留。");
+        Note(content, "打怪掉落与任务奖励自动入账；断线后回登录窗重连，进度原样保留。");
     }
 
-    /* 联机背包页（page 20）：服务端权威背包。顶部当前穿装（可卸下），
-       下面逐行是背包物品：武器/防具可穿戴（等级门槛服务端把关），
-       消耗品可使用，任意物品可按商店半价卖出。进世界默认落在本页，
-       好让新角色第一时间穿上初始装备。 */
+    /* 联机背包页（page 20）：左侧角色面板（穿着与战斗属性，可卸下），
+       右侧物品格子墙；点物品在下方出「该物品 vs 当前穿戴」的属性对比，
+       可穿戴/使用/卖出。进世界默认落在本页，好让新角色第一时间穿上
+       初始装备。 */
     void BuildNetBag() {
         JsonValue st = net.Self();
-        content.With(Text("背包 · 联机", "yellow strong", 28));
-        string weapon = st != null ? st.Str("weaponName", "") : "";
-        string armor = st != null ? st.Str("armorName", "") : "";
-        Panel worn = Col("frame");
-        worn.With(Text("已穿戴  武器：" + (weapon.Length > 0 ? weapon : "（空）")
-            + " · 防具：" + (armor.Length > 0 ? armor : "（空）")
-            + " · 攻击 " + Rules.N(st != null ? st.Int("atk", 0) : 0)
-            + " · 防御 " + Rules.N(st != null ? st.Int("def", 0) : 0), "cyan", 24));
+        if (st == null) { return; }
+        content.With(Text("背包", "yellow strong", 28));
+        string weapon = st.Str("weaponName", "");
+        string armor = st.Str("armorName", "");
+        int myLv = st.Int("level", 1);
+        Panel body = Panel.Row(); body.Gap(8); body.Grow(); content.With(body);
+        Panel chr = Col("frame"); chr.Pad(10); chr.Gap(6); chr.Prefer(272, 0); body.With(chr);
+        chr.With(Text("角色", "yellow", 28));
+        chr.With(Text(st.Str("name", "旅人") + " · " + Rules.N(myLv) + "级"
+            + (st.Str("title", "").Length > 0 ? " · " + st.Str("title", "") : ""), "cyan", 24));
+        chr.With(Text("武器：" + (weapon.Length > 0 ? weapon + " ★" + Rules.N(st.Int("weaponStar", 0)) : "（空）")
+            + "\n防具：" + (armor.Length > 0 ? armor + " ★" + Rules.N(st.Int("armorStar", 0)) : "（空）"), "yellow", 48));
+        chr.With(Text("战斗属性", "yellow", 28));
+        chr.With(Text("攻击 " + Rules.N(st.Int("atk", 0)) + "\n防御 " + Rules.N(st.Int("def", 0))
+            + "\n生命 " + Rules.N(st.Int("hp", 0)) + "/" + Rules.N(st.Int("maxhp", 1))
+            + "\n经验 " + Rules.N(st.Int("exp", 0)) + "/" + Rules.N(st.Int("expnext", 1))
+            + "\n击杀 " + Rules.N(st.Int("kills", 0)) + "\n金币 " + Rules.N(st.Int("gold", 0)), "green", 140));
         Panel wornBtns = Panel.Row(); wornBtns.Gap(4); wornBtns.Prefer(0, 28);
         Button offW = Btn("卸下武器", "net-takeoff-weapon", () => { net.TakeOff("weapon"); });
         offW.Disabled = weapon.Length == 0; offW.Prefer(0, 28); wornBtns.With(offW);
         Button offA = Btn("卸下防具", "net-takeoff-armor", () => { net.TakeOff("armor"); });
         offA.Disabled = armor.Length == 0; offA.Prefer(0, 28); wornBtns.With(offA);
-        worn.With(wornBtns);
-        content.With(worn);
-        ScrollColumn list = new ScrollColumn(); list.Named("net-bag-scroll"); list.Grow(); content.With(list);
+        chr.With(wornBtns);
+        Panel right = Panel.Column(); right.Gap(8); right.Grow(); body.With(right);
+        ScrollColumn list = new ScrollColumn(); list.Named("net-bag-scroll"); list.Grow(); right.With(list);
         if (net.BagCount() == 0) { list.With(Text("背包空空如也。去“沙巴克”打怪可获得掉落。", "secondary", 48)); }
+        Grid cells = Grid.Of(5); cells.Gap(8); list.With(cells);
+        JsonValue selItem = null;
         for (int i = 0; i < net.BagCount(); i = i + 1) {
             JsonValue it = net.BagAt(i);
             int id = it.Int("id", 0);
             int kind = it.Int("kind", 3);
             int minLv = it.Int("minLevel", 0);
+            if (id == bagSel) { selItem = it; }
+            string desc = kind == 0 ? "消耗品" : kind == 1 ? "武器" : kind == 2 ? "防具" : "材料";
+            if (it.Int("atk", 0) > 0) { desc = desc + "\n攻击+" + Rules.N(it.Int("atk", 0)); }
+            if (it.Int("def", 0) > 0) { desc = desc + "\n防御+" + Rules.N(it.Int("def", 0)); }
+            if (it.Int("heal", 0) > 0) { desc = desc + "\n回血 " + Rules.N(it.Int("heal", 0)); }
+            if (minLv > 1) { desc = desc + "\n需 " + Rules.N(minLv) + " 级"; }
+            bool sel = id == bagSel;
+            Button cell = Btn((sel ? "▶ " : "") + it.Str("name", "物品") + " ×" + Rules.N(it.Int("count", 1)) + "\n" + desc,
+                "net-sel-" + Rules.N(id), () => { bagSel = id; BuildPage(); });
+            cell.Prefer(0, 108);
+            cells.With(cell);
+        }
+        Panel cmp = Col("frame"); cmp.Pad(10); cmp.Gap(4); cmp.Prefer(0, 172); right.With(cmp);
+        if (selItem == null) {
+            cmp.With(Text("点上面的物品，这里显示它与当前穿戴的属性对比。", "secondary", 24));
+        } else {
+            int kind = selItem.Int("kind", 3);
             string kindName = kind == 0 ? "消耗品" : kind == 1 ? "武器" : kind == 2 ? "防具" : "材料";
+            string sname = selItem.Str("name", "物品");
+            int price = selItem.Int("price", 0);
+            JsonValue tpl = ItemTpl(sname);
+            if (price == 0 && tpl != null) { price = tpl.Int("price", 0); }
+            cmp.With(Text(sname + " · " + kindName + " ×" + Rules.N(selItem.Int("count", 1))
+                + " · 卖出价 " + Rules.N(price / 2), "yellow strong", 28));
+            Panel btns = Panel.Row(); btns.Gap(4); btns.Prefer(0, 28);
+            if (kind == 1 || kind == 2) {
+                string worn = kind == 1 ? weapon : armor;
+                int curAtk = 0; int curDef = 0;
+                if (worn.Length > 0) {
+                    JsonValue cur = ItemTpl(worn);
+                    if (cur != null) { curAtk = cur.Int("atk", 0); curDef = cur.Int("def", 0); }
+                }
+                int myAtk = selItem.Int("atk", 0); int myDef = selItem.Int("def", 0);
+                int delta = (myAtk - curAtk) + (myDef - curDef);
+                string verdict; string vColor;
+                if (worn == sname) { verdict = "当前正穿戴这件"; vColor = "green"; }
+                else if (worn.Length == 0) { verdict = "当前该栏位为空，穿上即生效"; vColor = "green"; }
+                else if (delta > 0) { verdict = "比 " + worn + " 高 " + Rules.N(delta) + " 点属性"; vColor = "green"; }
+                else if (delta < 0) { verdict = "比 " + worn + " 低 " + Rules.N(-delta) + " 点属性"; vColor = "orange"; }
+                else { verdict = "与 " + worn + " 属性相当"; vColor = "secondary"; }
+                cmp.With(Text("该物品：攻击+" + Rules.N(myAtk) + " · 防御+" + Rules.N(myDef)
+                    + " · 需 " + Rules.N(selItem.Int("minLevel", 1)) + " 级\n当前穿戴："
+                    + (worn.Length > 0 ? worn + " 攻击+" + Rules.N(curAtk) + " · 防御+" + Rules.N(curDef) : "（空）")
+                    + "\n" + verdict, vColor, 66));
+                Button eq = Btn("穿 戴", "net-equip-" + Rules.N(selItem.Int("id", 0)), () => { net.EquipItem(selItem.Int("id", 0)); });
+                eq.Disabled = myLv < selItem.Int("minLevel", 0);
+                eq.Prefer(72, 28); btns.With(eq);
+            } else {
+                cmp.With(Text(kind == 0 ? "服用回血 " + Rules.N(selItem.Int("heal", 0))
+                    : "卖店换钱的材料，「回收」页可一键清仓。", "secondary", 24));
+                if (kind == 0) {
+                    Button use = Btn("使 用", "net-use-" + Rules.N(selItem.Int("id", 0)), () => { net.UseItem(selItem.Int("id", 0)); });
+                    use.Prefer(72, 28); btns.With(use);
+                }
+            }
+            Button sell = Btn("卖 出", "net-sell-" + Rules.N(selItem.Int("id", 0)), () => { net.SellItem(selItem.Int("id", 0)); });
+            sell.Prefer(72, 28); btns.With(sell);
+            cmp.With(btns);
+        }
+        Note(content, "卖出价为商店半价；穿上更好的装备，攻防立刻生效。");
+    }
+
+    /* 按名字查物品档：先翻背包，再翻商店缓存；都无则 null（只报名字）。 */
+    JsonValue ItemTpl(string name) {
+        for (int i = 0; i < net.BagCount(); i = i + 1) {
+            JsonValue it = net.BagAt(i);
+            if (it.Str("name", "") == name) { return it; }
+        }
+        for (int i = 0; i < net.ShopCount(); i = i + 1) {
+            JsonValue it = net.ShopAt(i);
+            if (it.Str("name", "") == name) { return it; }
+        }
+        return null;
+    }
+
+    /* ---- 联机玩法页（服务端权威，占位页全部做实） ---- */
+
+    /* 地图名/门槛：地图缓存（进区即拉全表）里查 id。 */
+    string MapName(int id) {
+        for (int i = 0; i < net.MapCount(); i = i + 1) {
+            JsonValue mp = net.MapAt(i);
+            if (mp.Int("id", 0) == id) { return mp.Str("name", "地图"); }
+        }
+        return "地图" + Rules.N(id);
+    }
+
+    int MapMinLevel(int id) {
+        for (int i = 0; i < net.MapCount(); i = i + 1) {
+            JsonValue mp = net.MapAt(i);
+            if (mp.Int("id", 0) == id) { return mp.Int("minLevel", 1); }
+        }
+        return 1;
+    }
+
+    /* 页 0 地图：卡片墙，一张图一张卡；当前所在高亮，等级不够置灰。
+       点「进入」换图，去“沙巴克”选怪挂机。 */
+    void BuildNetTravel() {
+        JsonValue st = net.Self();
+        int curMap = st != null ? st.Int("map", 0) : 0;
+        int myLv = st != null ? st.Int("level", 1) : 1;
+        content.With(Text("地图", "yellow strong", 28));
+        content.With(Text("当前所在：" + MapName(curMap), "cyan", 24));
+        ScrollColumn list = new ScrollColumn(); list.Named("net-travel-list"); list.Grow(); content.With(list);
+        Grid cards = Grid.Of(4); cards.Gap(8); list.With(cards);
+        for (int i = 0; i < net.MapCount(); i = i + 1) {
+            JsonValue mp = net.MapAt(i);
+            int id = mp.Int("id", 0);
+            int minLv = mp.Int("minLevel", 1);
+            bool here = id == curMap;
+            bool locked = myLv < minLv;
+            bool secret = minLv >= 15 && id >= 6;
+            Panel card = Col("frame"); card.Pad(10); card.Gap(6); card.Prefer(0, 128);
+            card.With(Text(mp.Str("name", "地图"), here ? "green strong" : "yellow strong", 36));
+            card.With(Text((secret ? "秘境打宝图\n" : "") + "进入门槛 " + Rules.N(minLv) + " 级", "secondary", 44));
+            Panel foot = Panel.Row(); foot.Gap(4); foot.Prefer(0, 28);
+            Label tag = Text(here ? "✓ 当前所在" : (locked ? "等级不足" : "可进入"),
+                here ? "green" : (locked ? "secondary" : "cyan"), 22); tag.Grow(); foot.With(tag);
+            if (!here) {
+                Button go = Btn("进入", "net-go-" + Rules.N(id), () => { net.MoveTo(id); });
+                go.Disabled = locked; go.Prefer(56, 26); go.DockRight(); foot.Add(go);
+            }
+            card.With(foot);
+            cards.With(card);
+        }
+        Note(content, "点「进入」换图打怪；秘境图门槛高、掉落好。");
+    }
+
+    /* 页 3 BOSS 之家：全场唯一刷怪点（教主类）清单，带在场/重生倒计时
+       与掉落，一键前往它所在的地图。 */
+    void BuildNetBossHome() {
+        JsonValue st = net.Self();
+        net.MaybeRefreshBosses();
+        content.With(Text("BOSS 之家", "yellow strong", 28));
+        Panel head = Panel.Row(); head.Gap(4); head.Prefer(0, 28);
+        head.With(Btn("刷新状态", "net-boss-reload", () => { net.ReloadBosses(); }));
+        head.With(Text("唯一刷怪点的教主都在这里；击杀掉好装备。", "secondary small", 0));
+        content.With(head);
+        ScrollColumn list = new ScrollColumn(); list.Named("net-boss-list"); list.Grow(); content.With(list);
+        if (net.BossCount() == 0) { list.With(Text("正在拉取 BOSS 列表…", "secondary", 48)); }
+        for (int i = 0; i < net.BossCount(); i = i + 1) {
+            JsonValue b = net.BossAt(i);
+            int mapId = b.Int("map", 0);
+            bool alive = b.Int("alive", 0) == 1;
+            bool here = st != null && st.Int("map", 0) == mapId;
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 64);
+            string line = b.Str("name", "BOSS") + " · " + Rules.N(b.Int("level", 1)) + "级 · 血"
+                + Rules.N(b.Int("hp", 0)) + (alive ? " · 在场" : " · 重生 " + Rules.N(b.Int("respawnIn", 0)) + "s")
+                + "\n" + MapName(mapId) + " · 掉落：" + b.Str("drop", "无")
+                + " · 经验 " + Rules.N(b.Int("exp", 0)) + " · 金 " + b.Str("gold", "0");
+            Label name = Text(line, alive ? "yellow" : "secondary", 52); name.Grow(); row.With(name);
+            Button go = Btn(here ? "就在本图" : "前往", "net-boss-go-" + Rules.N(b.Int("tpl", 0)), () => { net.MoveTo(mapId); });
+            go.Disabled = here || (st != null && st.Int("level", 1) < MapMinLevel(mapId));
+            go.Prefer(84, 28); go.DockRight(); row.Add(go);
+            list.With(row);
+        }
+        Note(content, "前往后到“沙巴克”点它的「挂机」即可自动开打；BOSS 被杀会全服公告，重生要等一阵。");
+    }
+
+    /* 页 9 排行榜：本区等级/经验前 10，自己一行高亮。 */
+    void BuildNetRank() {
+        JsonValue st = net.Self();
+        net.RefreshRank();
+        content.With(Text("排行榜 · 本区", "yellow strong", 28));
+        Panel head = Panel.Row(); head.Gap(4); head.Prefer(0, 28);
+        head.With(Btn("刷新", "net-rank-reload", () => { net.ReloadRank(); }));
+        head.With(Text("全服等级与经验实时排行。", "secondary small", 0));
+        content.With(head);
+        ScrollColumn list = new ScrollColumn(); list.Named("net-rank-list"); list.Grow(); content.With(list);
+        if (net.RankCount() == 0) { list.With(Text("正在拉取排行…", "secondary", 48)); }
+        for (int i = 0; i < net.RankCount(); i = i + 1) {
+            JsonValue r = net.RankAt(i);
+            bool me = r.Int("me", 0) == 1;
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 44);
+            Label name = Text(Rules.N(i + 1) + ". " + r.Str("name", "???") + (me ? "（我）" : "")
+                + "\n" + Rules.N(r.Int("level", 1)) + "级 · 击杀 " + Rules.N(r.Int("kills", 0))
+                + (r.Str("title", "").Length > 0 ? " · " + r.Str("title", "") : ""), me ? "green" : "yellow", 34);
+            name.Grow(); row.With(name);
+            list.With(row);
+        }
+        Note(content, "想上榜就多挂机——顶号、掉线都不影响名次。");
+    }
+
+    /* 页 12 秘境：高阶打宝图（门槛 ≥15 级的秘境图）+ 图内 BOSS，一键
+       前往。与地图传送同一条 move 协议，只是按秘境视角组织。 */
+    void BuildNetSecret() {
+        JsonValue st = net.Self();
+        net.MaybeRefreshBosses();
+        content.With(Text("秘境 · 打宝图", "yellow strong", 28));
+        content.With(Text("门槛高、怪物密、掉落好——成型装备的主要产地。", "cyan", 24));
+        ScrollColumn list = new ScrollColumn(); list.Named("net-secret-list"); list.Grow(); content.With(list);
+        for (int i = 0; i < net.MapCount(); i = i + 1) {
+            JsonValue mp = net.MapAt(i);
+            int id = mp.Int("id", 0);
+            int minLv = mp.Int("minLevel", 1);
+            if (minLv < 15 || id < 6) { continue; }
+            bool here = st != null && st.Int("map", 0) == id;
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 52);
+            Label name = Text(mp.Str("name", "秘境") + (here ? "（当前）" : "") + "\n门槛 "
+                + Rules.N(minLv) + " 级 · BOSS：" + SecretBossName(id), "yellow", 40);
+            name.Grow(); row.With(name);
+            Button go = Btn(here ? "就在这" : "前往", "net-secret-go-" + Rules.N(id), () => { net.MoveTo(id); });
+            go.Disabled = here || (st != null && st.Int("level", 1) < minLv);
+            go.Prefer(72, 28); go.DockRight(); row.Add(go);
+            list.With(row);
+        }
+        Note(content, "秘境教主同样出现在“BOSS 之家”，被杀后全服公告。挂机请去“沙巴克”页选怪。");
+    }
+
+    string SecretBossName(int mapId) {
+        for (int i = 0; i < net.BossCount(); i = i + 1) {
+            JsonValue b = net.BossAt(i);
+            if (b.Int("map", 0) == mapId) { return b.Str("name", "???"); }
+        }
+        return "无";
+    }
+
+    /* 页 13 世界BOSS：全服同管血，人人可打；击杀者大奖、伤害王随公告。 */
+    void BuildNetWBoss() {
+        JsonValue st = net.Self();
+        JsonValue w = net.WBoss();
+        net.RefreshWBoss();
+        content.With(Text("世界 BOSS · 全服共斗", "yellow strong", 28));
+        Panel card = Col("frame"); card.Grow();
+        if (w == null) {
+            card.With(Text("正在拉取世界 BOSS 状态…", "secondary", 48));
+        } else if (w.Int("alive", 0) == 1) {
+            int hp = w.Int("hp", 0); int max = w.Int("maxhp", 1);
+            int pct = max > 0 ? hp * 100 / max : 0;
+            card.With(Text(w.Str("name", "世界BOSS") + " · " + Rules.N(w.Int("level", 1)) + "级", "yellow", 36));
+            card.With(Text("血量 " + Rules.N(hp) + " / " + Rules.N(max)
+                + "（" + Rules.N(pct) + "%）", "cyan", 28));
+            card.With(Text("伤害王：" + (w.Str("top", "").Length > 0 ? w.Str("top", "") : "虚位以待")
+                + " · 我的累计伤害：" + Rules.N(st != null ? w.Int("mydmg", 0) : 0), "secondary small", 24));
+            Button hit = Btn("全力攻击", "net-wboss-hit", () => { net.WBossHit(); });
+            hit.Prefer(120, 32); card.With(hit);
+            card.With(Text("每次攻击按自身攻击力结算伤害，BOSS 也会还手（打不死你，但会掉血）；随时可以去别页挂机，回来继续。", "secondary small", 24));
+        } else {
+            card.With(Text(w.Str("name", "世界BOSS") + " 已被击杀", "green", 36));
+            card.With(Text("伤害王：" + w.Str("top", "???") + " · " + Rules.N(w.Int("respawnIn", 0)) + " 秒后重生", "secondary", 28));
+        }
+        content.With(card);
+        netFight = Text(net.FightLine(), "green", 96); netFight.Named("net-fight"); content.With(netFight);
+        Note(content, "击杀公告全服可见，大奖（金币+神装）归完成最后一击的人。重生 5 分钟。");
+    }
+
+    /* 页 15 寻宝：200 金币一抽，奖池覆盖全物品档（屠龙 0.2%）。 */
+    void BuildNetDraw() {
+        JsonValue st = net.Self();
+        content.With(Text("寻宝", "yellow strong", 28));
+        Panel card = Col("frame"); card.Grow();
+        card.With(Text("每次 200 金币，随机得一件物品，直入背包。", "cyan", 28));
+        card.With(Text("奖池：金创药/材料为主，铁剑、轻盔、修罗、战神盔甲次之；屠龙爆率 0.2%。", "secondary small", 24));
+        card.With(Text("当前金币：" + Rules.N(st != null ? st.Int("gold", 0) : 0), "yellow", 28));
+        Button draw = Btn("寻宝一次（200 金币）", "net-draw", () => { net.DrawTreasure(); });
+        draw.Disabled = st == null || st.Int("gold", 0) < 200;
+        draw.Prefer(160, 32); card.With(draw);
+        content.With(card);
+        netFight = Text(net.FightLine(), "green", 96); netFight.Named("net-fight"); content.With(netFight);
+        Note(content, "抽到的武器/防具去背包页穿戴；材料可去回收系统一次清空换金币。");
+    }
+
+    /* 页 17 回收系统：背包里的材料（兽皮/蝎子壳/祖玛头像/赤月精华）
+       一键按卖店半价全部结成金币。 */
+    void BuildNetRecycle() {
+        JsonValue st = net.Self();
+        content.With(Text("回收系统 · 材料换金", "yellow strong", 28));
+        ScrollColumn list = new ScrollColumn(); list.Named("net-recycle-list"); list.Grow(); content.With(list);
+        int kinds = 0;
+        for (int i = 0; i < net.BagCount(); i = i + 1) {
+            JsonValue it = net.BagAt(i);
+            if (it.Int("kind", 0) != 3) { continue; }
+            kinds = kinds + 1;
+            long each = it.Int("price", 0) / 2;
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 44);
+            Label name = Text(it.Str("name", "材料") + " ×" + Rules.N(it.Int("count", 1))
+                + "\n单价回收 " + Rules.N(each) + " 金币", "yellow", 34);
+            name.Grow(); row.With(name);
+            list.With(row);
+        }
+        if (kinds == 0) { list.With(Text("背包里暂时没有可回收的材料（兽皮/蝎子壳/祖玛头像/赤月精华）。去挂机打怪就有了。", "secondary", 48)); }
+        Button all = Btn("一键回收全部材料", "net-recycle-all", () => { net.RecycleAll(); });
+        all.Disabled = kinds == 0;
+        all.Prefer(160, 32); content.With(all);
+        Note(content, "回收价=商店半价，与背包页逐件“卖出”相同；这里是批量出水口，打金买药更顺手。");
+    }
+
+    /* 页 19 至尊极品殿堂：本区排行前三的展示位（复用排行协议）。 */
+    void BuildNetHall() {
+        net.RefreshRank();
+        content.With(Text("至尊极品殿堂", "yellow strong", 28));
+        ScrollColumn list = new ScrollColumn(); list.Named("net-hall-list"); list.Grow(); content.With(list);
+        if (net.RankCount() == 0) { list.With(Text("正在拉取殿堂名单…", "secondary", 48)); }
+        string[] medals = new string[] { "🥇", "🥈", "🥉" };
+        for (int i = 0; i < net.RankCount() && i < 3; i = i + 1) {
+            JsonValue r = net.RankAt(i);
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(12); row.Gap(12); row.Prefer(0, 72);
+            Label name = Text(medals[i] + " " + r.Str("name", "???")
+                + (r.Int("me", 0) == 1 ? "（我）" : "") + "\n" + Rules.N(r.Int("level", 1)) + "级 · 击杀 "
+                + Rules.N(r.Int("kills", 0)) + (r.Str("title", "").Length > 0 ? " · " + r.Str("title", "") : ""), "yellow", 52);
+            name.Grow(); row.With(name);
+            list.With(row);
+        }
+        if (net.RankCount() > 3) { list.With(Text("……更多信息见「排行榜」。", "secondary small", 24)); }
+        Note(content, "殿堂即本区等级前三；称号靠挂机与击杀堆出来。");
+    }
+
+    /* 页 21 铁匠铺：武器/防具强化星（每星武器+2攻、防具+2防，满星9），
+       费用 = (星+1)*800 金币，服务端现结。 */
+    void BuildNetForge() {
+        JsonValue st = net.Self();
+        content.With(Text("铁匠铺 · 强化", "yellow strong", 28));
+        int wStar = st != null ? st.Int("weaponStar", 0) : 0;
+        int aStar = st != null ? st.Int("armorStar", 0) : 0;
+        long gold = st != null ? st.Int("gold", 0) : 0;
+        Panel wcard = Col("frame");
+        wcard.With(Text("武器：" + (st != null && st.Str("weaponName", "").Length > 0 ? st.Str("weaponName", "") : "（空）")
+            + " · 强化 " + Rules.N(wStar) + " 星 · 攻击 " + Rules.N(st != null ? st.Int("atk", 0) : 0), "cyan", 28));
+        Button fw = Btn(wStar >= 9 ? "武器已满星" : "强化武器（" + Rules.N((wStar + 1) * 800) + " 金币）",
+            "net-forge-weapon", () => { net.Forge("weapon"); });
+        fw.Disabled = st == null || wStar >= 9 || gold < (wStar + 1) * 800;
+        fw.Prefer(200, 32); wcard.With(fw);
+        content.With(wcard);
+        Panel acard = Col("frame");
+        acard.With(Text("防具：" + (st != null && st.Str("armorName", "").Length > 0 ? st.Str("armorName", "") : "（空）")
+            + " · 强化 " + Rules.N(aStar) + " 星 · 防御 " + Rules.N(st != null ? st.Int("def", 0) : 0), "cyan", 28));
+        Button fa = Btn(aStar >= 9 ? "防具已满星" : "强化防具（" + Rules.N((aStar + 1) * 800) + " 金币）",
+            "net-forge-armor", () => { net.Forge("armor"); });
+        fa.Disabled = st == null || aStar >= 9 || gold < (aStar + 1) * 800;
+        fa.Prefer(200, 32); acard.With(fa);
+        content.With(acard);
+        content.With(Text("金币：" + Rules.N(gold) + " · 换新武器/防具后星级保留在角色身上，不随装备丢失。", "secondary small", 24));
+        Note(content, "强化必成、稳定变强；金币主要靠挂机掉落与材料回收，世界BOSS 一击奖励 5000。");
+    }
+
+    /* 页 24 爵位：按累计击杀授爵（服务端权威的 kills），纯展示+进度。 */
+    void BuildNetNoble() {
+        JsonValue st = net.Self();
+        int kills = st != null ? st.Int("kills", 0) : 0;
+        string[] names = new string[] { "平民", "侍卫", "骑士", "男爵", "子爵", "伯爵", "名将", "战神" };
+        int[] need = new int[] { 0, 20, 50, 120, 300, 800, 2000, 5000 };
+        int cur = 0;
+        for (int i = 0; i < need.Length; i = i + 1) { if (kills >= need[i]) { cur = i; } }
+        content.With(Text("爵位 · 按击杀授爵", "yellow strong", 28));
+        Panel card = Col("frame");
+        card.With(Text("当前爵位：" + names[cur] + "（累计击杀 " + Rules.N(kills) + "）", "green", 36));
+        if (cur + 1 < need.Length) {
+            card.With(Text("下一爵位 " + names[cur + 1] + "：还需 " + Rules.N(need[cur + 1] - kills) + " 次击杀", "cyan", 28));
+        } else {
+            card.With(Text("已至最高爵位。", "yellow", 28));
+        }
+        content.With(card);
+        ScrollColumn list = new ScrollColumn(); list.Named("net-noble-list"); list.Grow(); content.With(list);
+        for (int i = 0; i < names.Length; i = i + 1) {
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(6); row.Gap(8); row.Prefer(0, 36);
+            Label name = Text(names[i] + " · 需击杀 " + Rules.N(need[i]) + (i == cur ? "　✅当前" : (kills >= need[i] ? "　✅" : "")), i == cur ? "green" : "yellow", 26);
+            name.Grow(); row.With(name);
+            list.With(row);
+        }
+        Note(content, "击杀数随挂机与BOSS战累计；排行榜会展示你的名字与爵位同行的击杀数。");
+    }
+
+    /* 页 26 成就：里程碑清单（数据全部来自服务端 self），达成打勾。 */
+    void BuildNetAchv() {
+        JsonValue st = net.Self();
+        int kills = st != null ? st.Int("kills", 0) : 0;
+        int level = st != null ? st.Int("level", 1) : 1;
+        long gold = st != null ? st.Int("gold", 0) : 0;
+        int wStar = st != null ? st.Int("weaponStar", 0) : 0;
+        string[] names = new string[] { "首次击杀", "小有名气", "百人斩", "千军斩", "初出茅庐", "崭露头角", "登堂入室", "第一桶金", "富甲一方", "神兵初成" };
+        string[] desc = new string[] { "累计击杀 5", "累计击杀 50", "累计击杀 100", "累计击杀 1000", "达到 10 级", "达到 20 级", "达到 30 级", "持有 1000 金币", "持有 10000 金币", "武器强化 3 星" };
+        bool[] done = new bool[] { kills >= 5, kills >= 50, kills >= 100, kills >= 1000, level >= 10, level >= 20, level >= 30, gold >= 1000, gold >= 10000, wStar >= 3 };
+        content.With(Text("成就 · 里程碑", "yellow strong", 28));
+        ScrollColumn list = new ScrollColumn(); list.Named("net-achv-list"); list.Grow(); content.With(list);
+        for (int i = 0; i < names.Length; i = i + 1) {
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(6); row.Gap(8); row.Prefer(0, 36);
+            Label name = Text((done[i] ? "✅ " : "⬜ ") + names[i] + " · " + desc[i], done[i] ? "green" : "yellow", 26);
+            name.Grow(); row.With(name);
+            list.With(row);
+        }
+        Note(content, "成就按当前进度实时判定；「首次击杀」完成时有 400 金币奖励公告（主线任务）。");
+    }
+
+    /* 页 27 商店：服务端 shop 档（price>0 的物品），买一件入背包。 */
+    void BuildNetShop() {
+        JsonValue st = net.Self();
+        net.MaybeRefreshShop();
+        content.With(Text("商店", "yellow strong", 28));
+        content.With(Text("金币：" + Rules.N(st != null ? st.Int("gold", 0) : 0) + " · 买断一件即入背包；卖出在背包页（半价）。", "cyan", 24));
+        ScrollColumn list = new ScrollColumn(); list.Named("net-shop-list"); list.Grow(); content.With(list);
+        if (net.ShopCount() == 0) { list.With(Text("正在拉取商品…", "secondary", 48)); }
+        for (int i = 0; i < net.ShopCount(); i = i + 1) {
+            JsonValue it = net.ShopAt(i);
+            int id = it.Int("id", 0);
+            int minLv = it.Int("minLevel", 1);
+            int kind = it.Int("kind", 0);
+            string kindName = kind == 0 ? "消耗品" : kind == 1 ? "武器" : "防具";
             string desc = kindName;
             if (it.Int("atk", 0) > 0) { desc = desc + " · 攻击+" + Rules.N(it.Int("atk", 0)); }
             if (it.Int("def", 0) > 0) { desc = desc + " · 防御+" + Rules.N(it.Int("def", 0)); }
-            if (it.Int("heal", 0) > 0) { desc = desc + " · 回血" + Rules.N(it.Int("heal", 0)); }
-            if (minLv > 1) { desc = desc + " · 需" + Rules.N(minLv) + "级"; }
-            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 56);
-            Label name = Text(it.Str("name", "物品") + " ×" + Rules.N(it.Int("count", 1)) + "\n" + desc, "yellow", 44); name.Grow(); row.With(name);
-            if (kind == 1 || kind == 2) {
-                Button eq = Btn("穿戴", "net-equip-" + Rules.N(id), () => { net.EquipItem(id); });
-                eq.Disabled = st != null && st.Int("level", 1) < minLv;
-                eq.Prefer(64, 28); eq.DockRight(); row.Add(eq);
-            }
-            if (kind == 0) {
-                Button use = Btn("使用", "net-use-" + Rules.N(id), () => { net.UseItem(id); });
-                use.Prefer(64, 28); use.DockRight(); row.Add(use);
-            }
-            Button sell = Btn("卖出", "net-sell-" + Rules.N(id), () => { net.SellItem(id); });
-            sell.Prefer(64, 28); sell.DockRight(); row.Add(sell);
+            if (it.Int("heal", 0) > 0) { desc = desc + " · 回血 " + Rules.N(it.Int("heal", 0)); }
+            if (minLv > 1) { desc = desc + " · 需 " + Rules.N(minLv) + " 级"; }
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 52);
+            Label name = Text(it.Str("name", "商品") + " · " + Rules.N(it.Int("price", 0)) + " 金币\n" + desc, "yellow", 40);
+            name.Grow(); row.With(name);
+            Button buy = Btn("购买", "net-buy-" + Rules.N(id), () => { net.BuyItem(id); });
+            buy.Disabled = st != null && st.Int("level", 1) < minLv;
+            buy.Prefer(64, 28); buy.DockRight(); row.Add(buy);
             list.With(row);
         }
-        Note(content, "背包与穿戴由服务端结算（服务器权威）；卖出价为商店半价。点击“沙巴克”查看主线任务与挂机。");
+        Note(content, "升级武器/防具的顺手店：铁剑(5级)、修罗(12级)、战神盔甲(12级)……屠龙要靠 BOSS 掉。");
+    }
+
+    /* 页 28 帮助：玩法上手（全为已做实的联机功能）。 */
+    void BuildNetHelp() {
+        content.With(Text("帮助 · 怎么玩", "yellow strong", 28));
+        ScrollColumn list = new ScrollColumn(); list.Named("net-help-list"); list.Grow(); content.With(list);
+        string[] lines = new string[] {
+            "① 进世界先穿装备：落在「背包」页，把木剑/布衣点「穿戴」。",
+            "② 挂机练级：去「沙巴克」（主线任务页）选一只怪点「挂机」，战况每秒推送，经验和金币自动入账。",
+            "③ 换图进阶：「地图传送」按等级门槛去沃玛森林/僵尸洞窟/祖玛寺庙/赤月峡谷，怪更强、掉落更好。",
+            "④ 打 BOSS：「BOSS 之家」看全服教主在不在场，一键前往；击杀掉神装并全服公告。",
+            "⑤ 世界 BOSS：「世界 BOSS」页全服共斗一管血，最后一击拿 5000 金币大奖，伤害王上公告。",
+            "⑥ 变强：「铁匠铺」花金币强化武器/防具（每星+2 攻/防，满星 9）；「商店」买进阶装备与药。",
+            "⑦ 打金循环：「回收系统」一键清空材料换金币；「寻宝」200 金币碰运气（屠龙 0.2%）。",
+            "⑧ 荣誉：「排行榜」看本区名次；「至尊极品殿堂」是前三名的展示位；「爵位/成就」按击杀与里程碑解锁。",
+            "⑨ 断线不用慌：连接断开会回到登录小窗，重新连接后角色、背包、进度原样都在。",
+            "⑩ 聊天：右侧输入框发世界聊天；公告（任务完成/BOSS 击杀）也会推送到这里。"
+        };
+        for (int i = 0; i < lines.Length; i = i + 1) {
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(6); row.Gap(8); row.Prefer(0, 40);
+            Label name = Text(lines[i], "cyan", 30); name.Grow(); row.With(name);
+            list.With(row);
+        }
+        Note(content, "玩法随版本持续更新。");
+    }
+
+    /* 页 29 邮箱/公告：服务端公告列表（GM 后台发的都在这）。 */
+    void BuildNetAnnounce() {
+        net.MaybeRefreshAnnounces();
+        content.With(Text("邮箱 · 公告", "yellow strong", 28));
+        ScrollColumn list = new ScrollColumn(); list.Named("net-ann-list"); list.Grow(); content.With(list);
+        if (net.AnnounceCount() == 0) { list.With(Text("正在拉取公告…", "secondary", 48)); }
+        for (int i = 0; i < net.AnnounceCount(); i = i + 1) {
+            JsonValue a = net.AnnounceAt(i);
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 64);
+            Label name = Text("📢 " + a.Str("title", "公告") + "\n" + a.Str("body", ""), "yellow", 52);
+            name.Grow(); row.With(name);
+            list.With(row);
+        }
+        Note(content, "GM 后台发布的公告都会出现在这里；任务完成、世界 BOSS 击杀等事件公告走右侧聊天栏。");
+    }
+
+    /* 页 30 设置（联机）：会话信息 + 退出登录。 */
+    void BuildNetSettings() {
+        JsonValue st = net.Self();
+        content.With(Text("设置", "yellow strong", 28));
+        Panel card = Col("frame");
+        card.With(Text("账号：" + (st != null ? st.Str("name", "???") : "???")
+            + "（UID " + Rules.N(st != null ? st.Int("uid", 0) : 0) + "）", "cyan", 28));
+        card.With(Text("区服：" + net.StatusText(), "cyan", 28));
+        card.With(Text("会话：AES-256-GCM 加密 · HKDF-SHA256 派生 · 序号防重放", "secondary small", 24));
+        card.With(Text("存档：角色/背包/进度全在服务器，换机器登录同账号即可续玩。", "secondary small", 24));
+        content.With(card);
+        Panel foot = Panel.Row(); foot.Gap(4); foot.Prefer(0, 30);
+        foot.With(Btn("退出登录", "net-settings-logout", () => { net.Logout(); lastNetKey = -1; BackToLoginForm(); BuildPage(); Refresh(); }));
+        content.With(foot);
+        Note(content, "离线模式进度保存在本机，与本账号互不影响；退出登录后可继续离线玩。");
+    }
+
+    /* 页 2 幻境（联机视角）：离线挂机系统说明与进度展示。 */
+    void BuildNetOfflinePage() {
+        content.With(Text("幻境 · 离线挂机", "yellow strong", 28));
+        Panel card = Col("frame");
+        card.With(Text("世界内挂机自动结算任务、击杀与掉落；本页展示离线幻境进度。", "cyan", 28));
+        card.With(Text("离线幻境进度（当前第 " + Rules.N(g.challenge) + " 层挑战）原样保留；退出登录后自动继续，收益不丢。", "secondary", 28));
+        content.With(card);
+        Panel go = Panel.Row(); go.Gap(4); go.Prefer(0, 30);
+        go.With(Btn("去挂机（沙巴克）", "net-offline-go-quest", () => { Navigate(6); }));
+        go.With(Btn("去背包", "net-offline-go-bag", () => { Navigate(20); }));
+        content.With(go);
+        Note(content, "离线幻境数据在本机存档，世界角色进度在服务器，互不覆盖。");
     }
 
     /* 联机时其余导航页的诚实占位：玩法未开就说明未开，并给出去任务
        页/背包页的入口——不回落离线界面冒充联机内容。 */
     void BuildNetStub() {
-        content.With(Text(pages[page] + " · 联机暂未开放", "yellow strong", 28));
-        Note(content, "联机期间此页玩法尚未开放；离线进度已保留，退出登录后可继续。");
+        content.With(Text(pages[page] + "（即将开放）", "yellow strong", 28));
+        Note(content, "此页玩法即将开放；离线进度已保留，退出登录后可继续。");
         Panel go = Panel.Row(); go.Gap(4); go.Prefer(0, 30);
         go.With(Btn("去主线任务", "net-go-quest", () => { Navigate(6); }));
         go.With(Btn("去背包", "net-go-bag2", () => { Navigate(20); }));
@@ -1058,7 +1551,7 @@ class LegendApp {
         if (page == 29) { header = "发件人                 主题                    附件             领取"; }
         content.With(Text(header, "cyan table-head", 32));
         for (int i = 0; i < 8; i = i + 1) { content.With(Text("", i % 2 == 0 ? "table-row" : "table-alt", 32)); }
-        Note(content, "此页玩法尚未完成。联机入口已在“沙巴克”页：连接真实服务端即可注册登录、挂机与聊天；不使用假玩家、假交易或本地 BOSS 冒充实现。");
+        Note(content, "此页玩法尚未完成。连接服务器后即可注册登录、挂机与聊天；不使用假玩家、假交易或本地 BOSS 冒充实现。");
     }
     void Refresh() {
         if ((page == 2 || page == 3 || page == 12) && (renderedMode != g.mode || renderedChallenge != g.challenge)) { BuildPage(); }
@@ -1072,15 +1565,15 @@ class LegendApp {
         if (net.InWorld()) {
             // 联机时顶栏、战报与聊天全部来自服务器；离线数值原样保留在后台。
             JsonValue st = net.Self();
-            hero.Text = st.Str("name", "旅人") + " · 联机";
+            hero.Text = st.Str("name", "旅人");
             int hp = st.Int("hp", 0); int maxhp = st.Int("maxhp", 1);
             health.Text = "生命：" + Rules.N(hp) + "/" + Rules.N(maxhp);
-            mana.Text = "法力：服务端结算"; level.Text = "等级：" + Rules.N(st.Int("level", 1)) + "级";
+            mana.Text = "法力：—"; level.Text = "等级：" + Rules.N(st.Int("level", 1)) + "级";
             coins.Text = "金币：" + Rules.N(st.Int("gold", 0)); yuan.Text = "元宝：" + Rules.N(st.Int("gems", 0));
             fame.Text = "声望：—"; merit.Text = "战功：—"; spirit.Text = "灵符：—";
             int exp = st.Int("exp", 0); int expnext = st.Int("expnext", 1);
             experience.percent = expnext > 0 ? (int)((long)exp * 100 / expnext) : 0;
-            state.Text = "状态：联机 · " + (net.LastFight() != null ? "战斗中" : "待机");
+            state.Text = "状态：" + (net.LastFight() != null ? "战斗中" : "待机");
             news.Text = net.FeedDump();
         }
         if (chatHistory != null) {
@@ -1147,14 +1640,14 @@ class LegendApp {
         if ((page == 2 || page == 3 || page == 12) && net.InWorld() && net.LastFight() != null && combatTitle != null) {
             // 联机战斗覆盖：战斗页沿用同一组控件，数值取服务器最近一帧战况。
             JsonValue f = net.LastFight();
-            combatTitle.Text = "联机 · " + f.Str("mob", "战斗");
+            combatTitle.Text = "战斗 · " + f.Str("mob", "战斗");
             enemyName.Text = f.Str("mob", "怪物");
             foeText.Text = "余血 " + Rules.N(f.Int("mobhp", 0)) + " · 我方伤害 " + Rules.N(f.Int("dmg", 0));
             JsonValue st = net.Self();
             playerText.Text = Rules.N(st.Int("hp", 0)) + "/" + Rules.N(st.Int("maxhp", 1));
             int maxhp = st.Int("maxhp", 1);
             life.percent = maxhp > 0 ? (int)((long)st.Int("hp", 0) * 100 / maxhp) : 0;
-            battleStatus.Text = "服务端驱动挂机：每秒一帧战况推送\n本页不再推进离线幻境。";
+            battleStatus.Text = "自动挂机中：战况实时刷新";
         }
         if (page == 26 && pageInfo != null) { pageInfo.Text = g.QuestText() + "\n今日击杀 " + Rules.N(g.dailyKills) + "/30"; detail.Text = "累计击杀：" + Rules.N(g.kills) + "\n战败次数：" + Rules.N(g.deaths) + "\nBOSS胜利：" + Rules.N(g.bossWins) + "\n回收件数：" + Rules.N(g.recycled) + "\n离线结算：" + Rules.N(g.offlineSeconds) + "秒\n" + saveState; }
         app.RequestRedraw();
