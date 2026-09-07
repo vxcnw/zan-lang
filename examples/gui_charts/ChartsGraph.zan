@@ -209,6 +209,58 @@ partial class Charts {
         Charts.Show(app, o, x, y, w, h);
     }
 
+    static void Force7(App app, int x, int y, int w, int h) {
+        // 现代官方 gallery「德国队效力联盟」：三家俱乐部为大节点，
+        // 球员为小节点，linkStyle.curveness 0.2 曲线连线（内核
+        // forceCurveness）。沿连线旋转的边标签未支持（偏差）；
+        // 官方 legend 三枚队徽以节点色近似，图例关闭。
+        ChartSeries f = ChartSeries.Force(Charts.T("Bundesliga", "德国队效力联盟"),
+            new List<ChartLink>{
+                ChartLink.Of("穆勒", "拜仁慕尼黑", 3),
+                ChartLink.Of("格策", "拜仁慕尼黑", 2),
+                ChartLink.Of("拉姆", "拜仁慕尼黑", 3),
+                ChartLink.Of("诺伊尔", "拜仁慕尼黑", 2),
+                ChartLink.Of("博阿滕", "拜仁慕尼黑", 2),
+                ChartLink.Of("克罗伊斯", "多特蒙德", 2),
+                ChartLink.Of("胡梅尔斯", "多特蒙德", 3),
+                ChartLink.Of("魏登费勒", "多特蒙德", 2),
+                ChartLink.Of("杜尔姆", "多特蒙德", 1),
+                ChartLink.Of("格罗斯克罗伊茨", "多特蒙德", 2),
+                ChartLink.Of("厄齐尔", "阿森纳", 3),
+                ChartLink.Of("波多尔斯基", "阿森纳", 2),
+                ChartLink.Of("默特萨克", "阿森纳", 2)
+            });
+        f.forceCurveness = 200;
+        f.forceMinRadius = 9;
+        f.forceMaxRadius = 16;
+        f.forceLinkColor = Chart.Rgb(120, 130, 140);
+        string[] names = new string[]{
+            "拜仁慕尼黑", "多特蒙德", "阿森纳", "穆勒", "格策", "拉姆",
+            "诺伊尔", "博阿滕", "克罗伊斯", "胡梅尔斯", "魏登费勒",
+            "杜尔姆", "格罗斯克罗伊茨", "厄齐尔", "波多尔斯基", "默特萨克" };
+        int[] sizes = new int[]{ 46, 40, 36, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        int[] cols = new int[]{
+            Chart.Rgb(178, 148, 198), Chart.Rgb(240, 170, 100), Chart.Rgb(70, 180, 170),
+            Chart.Rgb(200, 90, 90), Chart.Rgb(230, 160, 90), Chart.Rgb(150, 170, 90),
+            Chart.Rgb(90, 170, 170), Chart.Rgb(110, 130, 190), Chart.Rgb(190, 120, 150),
+            Chart.Rgb(120, 150, 110), Chart.Rgb(210, 180, 100), Chart.Rgb(100, 140, 200),
+            Chart.Rgb(170, 140, 100), Chart.Rgb(90, 180, 150), Chart.Rgb(220, 130, 140),
+            Chart.Rgb(140, 140, 200) };
+        for (int i = 0; i < names.Length; i = i + 1) {
+            ChartData d = ChartData.Named(5, names[i]);
+            d.color = cols[i];
+            if (sizes[i] > 0) {
+                d.size = sizes[i];
+                d.sizeSet = true;
+            }
+            f.data.Add(d);
+        }
+        ChartOption o = ChartOption.Of(Charts.T("Bundesliga graph", "德国队效力联盟"),
+            null, new List<ChartSeries>{ f });
+        o.showLegend = false;
+        Charts.Show(app, o, x, y, w, h);
+    }
+
     static List<ChartMapRegion> FourRegions(int n, int e, int s, int wgt) {
         return new List<ChartMapRegion>{
             ChartMapRegion.Of(Charts.T("North", "北区"), n, new List<ChartMapRing>{

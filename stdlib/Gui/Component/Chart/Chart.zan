@@ -1712,10 +1712,34 @@ class Chart {
     /// 两边的行高/换行才能对齐。
     static List<int> LegendPrimIdx(List<ChartSeries> series) {
         List<int> prim = new List<int>();
+        // 混搭面板（ECharts2 同 option 混排）：与主体不同族的
+        // Pie/Gauge/Funnel 系列经 DrawOverlaySeries 叠绘在笛卡尔
+        // 坐标系上，不占图例项；piePerPoint 饼在散点核内逐点绘制，
+        // 同样不占。legend.data 白名单存在时只列白名单内的名字。
+        ChartOption lo = Chart.legendOpt;
+        ChartType leadT = series.Count > 0 ? series[0].type : ChartType.Line;
+        if (lo != null && lo.series.Count > 0) {
+            leadT = lo.series[0].type;
+            if (leadT == ChartType.Pie && lo.series[0].piePerPoint) {
+                leadT = ChartType.Scatter;
+            }
+        }
         for (int ui = 0; ui < series.Count; ui = ui + 1) {
+            ChartSeries cs = series[ui];
+            bool ov = (cs.type == ChartType.Pie || cs.type == ChartType.Gauge
+                || cs.type == ChartType.Funnel) && cs.type != leadT;
+            if (cs.type == ChartType.Pie && cs.piePerPoint) { ov = true; }
+            if (lo != null && ov) { continue; }
+            if (lo != null && lo.legendData.Count > 0) {
+                bool white = false;
+                for (int wl = 0; wl < lo.legendData.Count; wl = wl + 1) {
+                    if (lo.legendData[wl] == cs.name) { white = true; break; }
+                }
+                if (!white) { continue; }
+            }
             bool dup = false;
             for (int uj = 0; uj < prim.Count; uj = uj + 1) {
-                if (series[prim[uj]].name == series[ui].name) { dup = true; break; }
+                if (series[prim[uj]].name == cs.name) { dup = true; break; }
             }
             if (!dup) { prim.Add(ui); }
         }

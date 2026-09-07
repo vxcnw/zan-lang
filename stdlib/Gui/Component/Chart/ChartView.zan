@@ -1048,6 +1048,11 @@ partial class ChartView {
         if (o.series.Count < 1) { return "empty"; }
         ChartType t = ChartView.LeadType(o);
         ChartSeries leadS = ChartView.LeadSeries(o);
+        if (t == ChartType.Pie && leadS != null && leadS.piePerPoint) {
+            // 以饼代点（mix7）：饼几何由散点面板按点坐标逐个绘制，
+            // 面板本身仍是散点坐标系。
+            t = ChartType.Scatter;
+        }
         if (t == ChartType.Pie) {
             if (leadS != null && leadS.roseType.Length > 0) { return "rose"; }
             return "pie";
@@ -1077,7 +1082,20 @@ partial class ChartView {
             return "empty";
         }
         if (t == ChartType.Bar) {
+            // ECharts stack 是系列级声明：任一柱系列带堆叠组即按
+            // 堆叠布局走（DrawBars 按 stackName 分组，未入组的系列
+            // 各自成列）——不能只看 lead（mix2 lead 直接访问未入组）。
             bool stacked = (leadS != null && leadS.stack != 0);
+            if (!stacked) {
+                for (int si = 0; si < o.series.Count; si = si + 1) {
+                    if (!o.series[si].hidden && o.series[si].type == ChartType.Bar
+                        && (o.series[si].stack != 0
+                            || o.series[si].stackName.Length > 0)) {
+                        stacked = true;
+                        break;
+                    }
+                }
+            }
             bool hbar = (leadS != null && leadS.hbar);
             if (stacked && hbar) { return "barStackedHbar"; }
             if (stacked) { return "barStacked"; }
@@ -1420,6 +1438,59 @@ partial class ChartView {
             ChartView.DrawLines(app, x, y, w, h, option, g);
         } else {
             ChartView.DrawEmptyState(app, x, y, w, h, option);
+        }
+        // 同 option 混搭（ECharts2 每系列自带坐标系/几何）：面板按
+        // 主导系列画完后，pie / gauge / funnel 系列按自身 center/
+        // radius 叠加绘制（mix2 柱状饼、mix3 地图玫瑰饼、mix11
+        // 仪表盘+双漏斗、mix12 折线饼图）。
+        ChartView.DrawOverlaySeries(app, x, y, w, h, option, g, kind);
+    }
+
+    /// 混搭覆盖层：把与面板主导类型不同的 pie/gauge/funnel 系列
+    /// 逐条再画一遍。覆盖层 option 置 overlay=true（渲染器跳过
+    /// 面板底/头），交互键沿用 o.iwid（悬停/命中与整板一致）。
+    static void DrawOverlaySeries(App app, int x, int y, int w, int h,
+                                  ChartOption o, int g, string kind) {
+        for (int i = 0; i < o.series.Count; i = i + 1) {
+            ChartSeries s = o.series[i];
+            if (s.hidden) { continue; }
+            bool pieMain = kind == "pie" || kind == "rose";
+            if (s.type == ChartType.Pie && !pieMain && !s.piePerPoint) {
+                ChartOption tmp = ChartOption.Create();
+                tmp.overlay = true;
+                tmp.iwid = o.iwid;
+                tmp.showLegend = false;
+                tmp.showTooltip = o.showTooltip;
+                tmp.pieLabels = o.pieLabels;
+                tmp.series = new List<ChartSeries>();
+                tmp.series.Add(s);
+                ChartView.DrawPie(app, x, y, w, h, tmp, tmp.pieLabels, g);
+            } else if (s.type == ChartType.Gauge && kind != "gauge") {
+                ChartOption tmp = ChartOption.Create();
+                tmp.overlay = true;
+                tmp.iwid = o.iwid;
+                tmp.showLegend = false;
+                tmp.showTooltip = o.showTooltip;
+                tmp.series = new List<ChartSeries>();
+                tmp.series.Add(s);
+                ChartView.DrawGauge(app, x, y, w, h, tmp, g);
+            } else if (s.type == ChartType.Funnel && kind != "funnel"
+                       && s.center != null && s.radius != null) {
+                // ECharts funnel.x/width 折算为「中心 x + 全宽 radius」
+                //（mix11 预期/实际双漏斗并列在右半区）。
+                ChartOption tmp = ChartOption.Create();
+                tmp.overlay = true;
+                tmp.iwid = o.iwid;
+                tmp.showLegend = false;
+                tmp.showTooltip = o.showTooltip;
+                tmp.series = new List<ChartSeries>();
+                tmp.series.Add(s);
+                int fw = ChartView.GaugeScalar(app, s.radius, w);
+                if (fw < app.Scale(40)) { fw = app.Scale(40); }
+                int fcx = x + ChartView.GaugeScalar(app, s.center.x, w);
+                ChartView.DrawFunnel(app, fcx - fw / 2, y, fw, h, tmp, g,
+                    s.sort == "ascending");
+            }
         }
     }
 }

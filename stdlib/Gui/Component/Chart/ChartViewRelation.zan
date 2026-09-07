@@ -622,7 +622,9 @@ partial class ChartView {
         }
 
         // 边：先画普通边，再盖悬停高亮；linkSymbol 'arrow' 在
-        // 目标端画箭头（ECharts force.linkSymbol）。
+        // 目标端画箭头（ECharts force.linkSymbol）。curveness > 0
+        // 时画二次贝塞尔弯曲连线（控制点取弦中点垂直偏移
+        // curveness×弦长），箭头沿曲线末端切向。
         int alpha = 120 * g / 1000;
         for (int i = 0; i < layout.edges.Count; i = i + 1) {
             ForceEdge e = layout.edges[i];
@@ -631,12 +633,26 @@ partial class ChartView {
             int col = linkCol0;
             if (col == 0) { col = Chart.Palette(t, e.a); }
             int w2 = 1 + app.Scale(2) * e.val / maxVal;
-            c.DrawLine(px[e.a], py[e.a],
-                px[e.b], py[e.b],
-                Chart.WithAlpha(col, alpha), w2);
-            if (lead.forceLinkSymbol == "arrow" && g > 100) {
-                ChartView.DrawForceArrow(c, px[e.a], py[e.a], px[e.b], py[e.b],
-                    nodeR, col);
+            int dxe = px[e.b] - px[e.a];
+            int dye = py[e.b] - py[e.a];
+            int lene = ChartView.ISqrt(dxe * dxe + dye * dye);
+            if (lead.forceCurveness > 0 && lene > 1) {
+                int cxq = (px[e.a] + px[e.b]) / 2 + (0 - dye) * lead.forceCurveness / 1000;
+                int cyq = (py[e.a] + py[e.b]) / 2 + dxe * lead.forceCurveness / 1000;
+                ChartView.StrokeQuad(c, px[e.a], py[e.a], cxq, cyq,
+                    px[e.b], py[e.b], Chart.WithAlpha(col, alpha), w2);
+                if (lead.forceLinkSymbol == "arrow" && g > 100) {
+                    ChartView.DrawForceArrow(c, cxq, cyq, px[e.b], py[e.b],
+                        nodeR, col);
+                }
+            } else {
+                c.DrawLine(px[e.a], py[e.a],
+                    px[e.b], py[e.b],
+                    Chart.WithAlpha(col, alpha), w2);
+                if (lead.forceLinkSymbol == "arrow" && g > 100) {
+                    ChartView.DrawForceArrow(c, px[e.a], py[e.a], px[e.b], py[e.b],
+                        nodeR, col);
+                }
             }
         }
         if (hoverNode >= 0) {
@@ -645,9 +661,19 @@ partial class ChartView {
                 if (e.a != hoverNode && e.b != hoverNode) { continue; }
                 int col = linkCol0;
                 if (col == 0) { col = Chart.Palette(t, e.a); }
-                c.DrawLine(px[e.a], py[e.a],
-                    px[e.b], py[e.b],
-                    col, app.Scale(3));
+                int dxe = px[e.b] - px[e.a];
+                int dye = py[e.b] - py[e.a];
+                int lene = ChartView.ISqrt(dxe * dxe + dye * dye);
+                if (lead.forceCurveness > 0 && lene > 1) {
+                    int cxq = (px[e.a] + px[e.b]) / 2 + (0 - dye) * lead.forceCurveness / 1000;
+                    int cyq = (py[e.a] + py[e.b]) / 2 + dxe * lead.forceCurveness / 1000;
+                    ChartView.StrokeQuad(c, px[e.a], py[e.a], cxq, cyq,
+                        px[e.b], py[e.b], col, app.Scale(3));
+                } else {
+                    c.DrawLine(px[e.a], py[e.a],
+                        px[e.b], py[e.b],
+                        col, app.Scale(3));
+                }
             }
         }
 

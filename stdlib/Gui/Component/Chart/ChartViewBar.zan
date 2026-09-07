@@ -99,11 +99,12 @@ partial class ChartView {
 
         ChartView.PushPlotClip(app, f.plotX, f.plotY, f.plotW, f.plotH);
 
-        // 可见柱状族序列数量（折线族覆盖层不占槽位）
+        // 可见柱状族序列数量（折线族与 pie/gauge/funnel 混搭覆盖
+        // 系列都不占槽位）
         int nsVis = 0;
         for (int cs = 0; cs < ns; cs = cs + 1) {
             ChartSeries sc = series[cs];
-            if (!sc.hidden && !ChartView.IsLineFamily(sc.type)) { nsVis = nsVis + 1; }
+            if (!sc.hidden && ChartView.IsBarFamily(sc.type)) { nsVis = nsVis + 1; }
         }
         if (nsVis < 1) { nsVis = 1; }
 
@@ -114,7 +115,7 @@ partial class ChartView {
             List<string> grp = new List<string>();
             for (int gsi = 0; gsi < ns; gsi = gsi + 1) {
                 ChartSeries sc = series[gsi];
-                if (!sc.hidden && !ChartView.IsLineFamily(sc.type)) {
+                if (!sc.hidden && ChartView.IsBarFamily(sc.type)) {
                     if (ChartView.GroupIndex(grp, sc.stackName) < 0) { grp.Add(sc.stackName); }
                 }
             }
@@ -137,7 +138,7 @@ partial class ChartView {
             for (int ti = 0; ti < ng; ti = ti + 1) { topSi.Add(0 - 1); }
             for (int ts = 0; ts < ns; ts = ts + 1) {
                 ChartSeries tc = series[ts];
-                if (!tc.hidden && !ChartView.IsLineFamily(tc.type)) {
+                if (!tc.hidden && ChartView.IsBarFamily(tc.type)) {
                     int g2 = ChartView.GroupIndex(grp, tc.stackName);
                     if (g2 < 0) { g2 = 0; }
                     topSi[g2] = ts;
@@ -148,7 +149,7 @@ partial class ChartView {
                 for (int a2 = 0; a2 < ng; a2 = a2 + 1) { accs[a2] = 0; negAccs[a2] = 0; }
                 for (int si = 0; si < ns; si = si + 1) {
                     ChartSeries sc = series[si];
-                    if (!sc.hidden && !ChartView.IsLineFamily(sc.type)) {
+                    if (!sc.hidden && ChartView.IsBarFamily(sc.type)) {
                         int gi = ChartView.GroupIndex(grp, sc.stackName);
                         if (gi < 0) { gi = 0; }
                         int v = 0;
@@ -384,7 +385,7 @@ partial class ChartView {
                         // ECharts 双数值轴柱形（bar13）：值对系列，
                         // 柱画在 x 值处、从零线长到 y。
                         ChartView.DrawValueXBars(app, f, s, si, i0, i1, g, o);
-                    } else {
+                    } else if (ChartView.IsBarFamily(s.type)) {
                         int zeroY = f.YOf(0, ax);
                         for (int i = 0; i < n; i = i + 1) {
                             int oi = i0 + i;

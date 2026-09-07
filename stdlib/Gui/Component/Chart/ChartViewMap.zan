@@ -405,7 +405,13 @@ partial class ChartView {
                 if (!Chart.DRangeOk(app, o, o.iwid, vMin, vMax, lead.regions[p.region].value)) {
                     col = Chart.Rgb(204, 204, 204);
                 }
-                if (!p.hole) { ChartView.PolyOutline(c, p.points, col); }
+                // 同色描边走两遍：相邻省界共享边各画一次，单次
+                // 抗锯齿合成后仍有缝隙（背景透出成「虫洞」），
+                // 两次覆盖后接缝基本密封且轮廓不增粗。
+                if (!p.hole) {
+                    ChartView.PolyOutline(c, p.points, col);
+                    ChartView.PolyOutline(c, p.points, col);
+                }
                 if (!p.hole) {
                     string nm = lead.regions[p.region].name;
                     if (nm.Length > 0) {

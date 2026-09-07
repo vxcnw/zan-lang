@@ -466,8 +466,14 @@ partial class ChartView {
                     ChartView.FillPolyAlpha(c, lx, ly, col, 70);
                 }
                 if (lx.Count > 1) {
+                    // lineStyle.width 可覆写默认 2（官方 radar.html 的
+                    // 28 年细线扇面用 width 1）。
+                    int lw = app.Scale(2);
+                    if (s.itemStyle.normal.lineStyle.width > 0) {
+                        lw = app.Scale(s.itemStyle.normal.lineStyle.width);
+                    }
                     if (dashed) {
-                        ChartView.DrawDashed(c, lx, ly, col, app.Scale(2),
+                        ChartView.DrawDashed(c, lx, ly, col, lw,
                                              dashLen, gapLen);
                     } else {
                         List<int> fx = new List<int>();
@@ -476,7 +482,7 @@ partial class ChartView {
                             fx.Add(lx[k] * 256);
                             fy.Add(ly[k] * 256);
                         }
-                        c.DrawPolylineFx(fx, fy, col, app.Scale(2));
+                        c.DrawPolylineFx(fx, fy, col, lw);
                     }
                 }
             }

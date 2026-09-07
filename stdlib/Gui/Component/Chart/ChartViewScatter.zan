@@ -310,6 +310,51 @@ partial class ChartView {
                 }
             }
         }
+        // 以饼代点（ECharts2 mix7「饼图代替散点」）：同 option 内
+        // 所有 piePerPoint 系列按下标配对——圆心取首个系列
+        // points[i] 的值坐标（与点绘制同一映射），半径取
+        // points[i].size，扇区值取各系列 points[i].z、各用系列色。
+        List<ChartSeries> pps = new List<ChartSeries>();
+        for (int rp = 0; rp < o.series.Count; rp = rp + 1) {
+            if (!o.series[rp].hidden && o.series[rp].piePerPoint) {
+                pps.Add(o.series[rp]);
+            }
+        }
+        if (pps.Count > 0) {
+            ChartSeries pb = pps[0];
+            int pj = i0;
+            while (pj <= i1 && pj < pb.points.Count) {
+                int pcx = Chart.ValueXF(plotX, plotW, xLo, maxXN,
+                    pb.points[pj].x, pb.pointG);
+                int pcy = Chart.ValueYF(plotY, plotH, yLo, maxYN,
+                    pb.points[pj].y, pb.pointG);
+                int pr = pb.points[pj].sizeSet ? pb.points[pj].size / 2 : rad;
+                if (pr < 1) { pr = 1; }
+                long pz = 0;
+                for (int pq = 0; pq < pps.Count; pq = pq + 1) {
+                    if (pj < pps[pq].points.Count && pps[pq].points[pj].z > 0) {
+                        pz = pz + pps[pq].points[pj].z;
+                    }
+                }
+                if (pz > 0) {
+                    int acc = 0;
+                    for (int pq2 = 0; pq2 < pps.Count; pq2 = pq2 + 1) {
+                        if (pj >= pps[pq2].points.Count) { continue; }
+                        int zv = pps[pq2].points[pj].z;
+                        if (zv <= 0) { continue; }
+                        int a0p = (int)((long)acc * 360 / pz);
+                        acc = acc + zv;
+                        int a1p = (int)((long)acc * 360 / pz);
+                        int colp = pps[pq2].color;
+                        if (colp == 0) { colp = Chart.Palette(t, pq2); }
+                        if (a1p > a0p) {
+                            c.FillSector(pcx, pcy, 0, pr, a0p, a1p, colp);
+                        }
+                    }
+                }
+                pj = pj + 1;
+            }
+        }
         c.PopClip();
 
         // 系列 markPoint/markLine（scatter1 的 Max/Min 标注 +

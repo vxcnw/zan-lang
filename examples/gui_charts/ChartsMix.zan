@@ -3,180 +3,490 @@ using Gui;
 using Gui.Component.Chart;
 
 partial class Charts {
+    /// ECharts2 mix1（折柱混搭）：蒸发量/降水量双柱 + 平均温度
+    /// 折线（右轴 °C），双 y 轴 水量/温度。数值按官方小数四舍五入。
     static void Mix1(App app, int x, int y, int w, int h) {
-        ChartSeries bars = ChartSeries.Bar(Charts.T("Evaporation", "蒸发量"),
-            new List<int>{ 2, 5, 8, 23, 26, 77, 136, 162, 33, 20, 6, 3 });
-        ChartSeries line = ChartSeries.Line(Charts.T("Precipitation", "降水量"),
+        ChartSeries ev = ChartSeries.Bar(Charts.T("Evaporation", "蒸发量"),
+            new List<int>{ 2, 5, 7, 23, 26, 77, 136, 162, 33, 20, 6, 3 });
+        ChartSeries pr = ChartSeries.Bar(Charts.T("Precipitation", "降水量"),
             new List<int>{ 3, 6, 9, 26, 29, 71, 176, 182, 49, 19, 6, 2 });
-        line.axisIndex = 1;
+        ChartSeries tp = ChartSeries.Line(
+            Charts.T("Average temperature", "平均温度"),
+            new List<int>{ 2, 2, 3, 5, 6, 10, 20, 23, 23, 17, 12, 6 });
+        tp.axisIndex = 1;
         ChartOption o = ChartOption.Of(Charts.T("Line + bar", "折柱混搭"),
-            Charts.Months(), new List<ChartSeries>{ bars, line });
-        o.Y(ChartAxis.ValueTitled(Charts.T("mm", "蒸发 mm")));
-        o.Y(ChartAxis.ValueTitled(Charts.T("mm rain", "降水 mm")));
+            Charts.Months(), new List<ChartSeries>{ ev, pr, tp });
+        ChartAxis y0 = ChartAxis.ValueTitled(Charts.T("Water", "水量"));
+        y0.labelFormatter = "{value} ml";
+        ChartAxis y1 = ChartAxis.ValueTitled(Charts.T("Temp", "温度"));
+        y1.labelFormatter = "{value} °C";
+        o.Y(y0);
+        o.Y(y1);
         Charts.Show(app, o, x, y, w, h);
     }
 
-    static void Mix2(App app, int x, int y, int w, int h) {
-        ChartSeries lo = ChartSeries.StackedArea(Charts.T("Low", "下限"),
-            new List<int>{ 10, 12, 14, 11, 13, 15, 12 });
-        ChartSeries span = ChartSeries.StackedArea(Charts.T("Range", "区间"),
-            new List<int>{ 8, 10, 6, 12, 9, 7, 11 });
-        ChartSeries mid = ChartSeries.Line(Charts.T("Mean", "均值"),
-            new List<int>{ 14, 17, 17, 17, 17, 18, 17 });
-        ChartOption o = ChartOption.Of(Charts.T("Range mix", "折柱混搭（范围）"),
-            Charts.Week(), new List<ChartSeries>{ lo, span, mid });
-        Charts.Show(app, o, x, y, w, h);
-    }
-
+    /// ECharts2 mix2（柱状饼混搭）：直接访问 独柱 + 广告 堆叠柱×3
+    /// + 搜索引擎 折线，同一 option 内嵌 搜索引擎细分 饼
+    /// （center/radius 像素定位，覆盖层绘制）。
     static void Mix3(App app, int x, int y, int w, int h) {
-        ChartOption bars = ChartOption.Of(Charts.T("By month", "逐月"),
-            Charts.Months(), new List<ChartSeries>{
-                ChartSeries.Bar(Charts.T("Sales", "销量"),
-                    new List<int>{ 2, 5, 8, 23, 26, 77, 136, 162, 33, 20, 6, 3 })
-            });
-        ChartOption pie = ChartOption.Of(Charts.T("Share", "占比"),
-            null, new List<ChartSeries>{
-                ChartSeries.Named("q", ChartType.Pie, new List<ChartData>{
-                    ChartData.Named(335, "Q1"), ChartData.Named(310, "Q2"),
-                    ChartData.Named(234, "Q3"), ChartData.Named(135, "Q4")
-                }) });
-        pie.donutPct = 0;
-        pie.pieLabels = true;
-        pie.showLegend = false;
-        int gap = app.Scale(12);
-        int pw = w * 38 / 100;
-        Charts.ShowN(app, bars, 0, x, y, w - pw - gap, h);
-        Charts.ShowN(app, pie, 1, x + w - pw, y, pw, h);
-    }
-
-    static void Mix4(App app, int x, int y, int w, int h) {
-        List<ChartPoint> pts = new List<ChartPoint>();
-        List<ChartPoint> trend = new List<ChartPoint>();
-        for (int i = 0; i < 12; i = i + 1) {
-            int v = 20 + (i * 7) % 40;
-            trend.Add(ChartPoint.Of(i, v));
-            pts.Add(ChartPoint.Of(i, v + ((i * 11) % 9) - 4));
-        }
-        ChartSeries line = ChartSeries.OfPoints(Charts.T("Trend", "趋势"), trend);
-        line.type = ChartType.Line;
-        ChartOption o = ChartOption.Of(Charts.T("Line + scatter", "折线散点混搭"),
-            null, new List<ChartSeries>{
-                ChartSeries.OfPoints(Charts.T("Samples", "样本"), pts),
-                line
-            });
-        o.X(ChartAxis.ValueRange(0, 11));
+        ChartSeries dir = ChartSeries.Bar(Charts.T("Direct", "直接访问"),
+            new List<int>{ 320, 332, 301, 334, 390, 330, 320 });
+        ChartSeries mail = ChartSeries.Bar(Charts.T("Mail", "邮件营销"),
+            new List<int>{ 120, 132, 101, 134, 90, 230, 210 });
+        ChartSeries aff = ChartSeries.Bar(Charts.T("Affiliate", "联盟广告"),
+            new List<int>{ 220, 182, 191, 234, 290, 330, 310 });
+        ChartSeries vid = ChartSeries.Bar(Charts.T("Video", "视频广告"),
+            new List<int>{ 150, 232, 201, 154, 190, 330, 410 });
+        mail.stackName = "ad";
+        aff.stackName = "ad";
+        vid.stackName = "ad";
+        ChartSeries se = ChartSeries.Line(Charts.T("Search", "搜索引擎"),
+            new List<int>{ 862, 1018, 964, 1026, 1679, 1600, 1570 });
+        ChartSeries seg = ChartSeries.Named("seg", ChartType.Pie, new List<ChartData>{
+            ChartData.Named(1048, "百度"), ChartData.Named(251, "谷歌"),
+            ChartData.Named(147, "必应"), ChartData.Named(102, "其他") });
+        seg.center = ChartPosition.Of(ChartScalar.Px(160), ChartScalar.Px(130));
+        seg.radius = ChartScalar.Px(50);
+        seg.radiusInner = ChartScalar.Px(0);
+        seg.labelShow = true;
+        ChartOption o = ChartOption.Of(Charts.T("Bar + pie", "柱状饼混搭"),
+            Charts.Week(), new List<ChartSeries>{ dir, mail, aff, vid, se, seg });
+        // 图例只列笛卡尔系列（官方 legend 含饼项，此处覆盖层饼
+        // 不进面板图例——偏差）。
+        o.legendData = new List<string>{
+            Charts.T("Direct", "直接访问"), Charts.T("Mail", "邮件营销"),
+            Charts.T("Affiliate", "联盟广告"), Charts.T("Video", "视频广告"),
+            Charts.T("Search", "搜索引擎") };
+        ChartAxis y1 = ChartAxis.Value();
+        y1.position = "right";
+        o.Y(y1);
         Charts.Show(app, o, x, y, w, h);
     }
 
-    static void Mix5(App app, int x, int y, int w, int h) {
-        ChartOption pie = ChartOption.Of(Charts.T("Mix", "散饼"),
-            null, new List<ChartSeries>{
-                ChartSeries.Named("a", ChartType.Pie, new List<ChartData>{
-                    ChartData.Named(40, "A"), ChartData.Named(30, "B"),
-                    ChartData.Named(20, "C"), ChartData.Named(10, "D")
-                }) });
-        pie.donutPct = 0;
-        pie.pieLabels = true;
-        List<ChartPoint> pts = new List<ChartPoint>();
-        for (int i = 0; i < 30; i = i + 1) {
-            pts.Add(ChartPoint.Of((i * 17) % 90, (i * 13) % 80));
-        }
-        ChartOption sc = ChartOption.Of(Charts.T("Cloud", "散点"),
-            null, new List<ChartSeries>{ ChartSeries.OfPoints("p", pts) });
-        Charts.Split2(app, sc, pie, x, y, w, h);
-    }
-
-    static void Mix6(App app, int x, int y, int w, int h) {
-        List<string> days = new List<string>{
-            "1/24", "1/25", "1/28", "1/29", "1/30", "1/31",
-            "2/1", "2/4", "2/5", "2/6", "2/7", "2/8" };
-        List<int> ma = new List<int>{
-            2316, 2320, 2328, 2342, 2352, 2361, 2379, 2396, 2404, 2410, 2409, 2409 };
-        ChartOption k = ChartOption.Of(Charts.T("K + MA5", "K + MA5"),
-            days, new List<ChartSeries>{
-                ChartSeries.OfCandles("K", Charts.KSample()),
-                ChartSeries.Line("MA5", ma)
-            });
-        ChartOption vol = ChartOption.Of(Charts.T("Volume", "成交量"),
-            days, new List<ChartSeries>{
-                ChartSeries.Bar(Charts.T("Vol", "成交量"),
-                    new List<int>{ 232, 191, 247, 259, 282, 185, 219, 228, 241, 210, 198, 226 })
-            });
-        vol.showLegend = false;
-        Charts.SplitV(app, k, vol, x, y, w, h);
-    }
-
-    static void Mix7(App app, int x, int y, int w, int h) {
-        ChartOption line = ChartOption.Of(Charts.T("Trend", "趋势"),
-            Charts.Week(), new List<ChartSeries>{
-                ChartSeries.Line(Charts.T("Visits", "访问"),
-                    new List<int>{ 820, 932, 901, 934, 1290, 1330, 1320 })
-            });
-        ChartOption pie = ChartOption.Of(Charts.T("%", "占比"),
-            null, new List<ChartSeries>{
-                ChartSeries.Named("s", ChartType.Pie, Charts.PieTraffic()) });
-        pie.donutPct = 50;
-        pie.pieLabels = true;
-        pie.showLegend = false;
-        int gap = app.Scale(12);
-        int pw = w * 40 / 100;
-        Charts.ShowN(app, line, 0, x, y, w - pw - gap, h);
-        Charts.ShowN(app, pie, 1, x + w - pw, y, pw, h);
-    }
-
+    /// ECharts2 mix3（地图饼图混搭）：2011 全国 GDP 中国地图 +
+    /// 右侧玫瑰饼（北京/上海/广东＝图例缺省选中三省）。官方点击
+    /// 省份联动刷新饼图——画廊为静态面板，饼固定为缺省三省。
     static void Mix8(App app, int x, int y, int w, int h) {
-        ChartOption map = ChartOption.Of(Charts.T("Region", "地域"),
-            null, new List<ChartSeries>{
-                ChartSeries.OfRegions("r", Charts.FourRegions(40, 25, 60, 15)) });
-        ChartOption pie = ChartOption.Of(Charts.T("Share", "构成"),
-            null, new List<ChartSeries>{
-                ChartSeries.Named("s", ChartType.Pie, new List<ChartData>{
-                    ChartData.Named(40, Charts.T("North", "北区")),
-                    ChartData.Named(25, Charts.T("East", "东区")),
-                    ChartData.Named(60, Charts.T("South", "南区")),
-                    ChartData.Named(15, Charts.T("West", "西区"))
-                }) });
-        pie.donutPct = 0;
-        pie.pieLabels = true;
-        pie.showLegend = false;
-        Charts.Split2(app, map, pie, x, y, w, h);
+        string[] names = new string[]{
+            "西藏", "青海", "宁夏", "海南", "甘肃", "贵州", "新疆", "云南",
+            "重庆", "吉林", "山西", "天津", "江西", "广西", "陕西", "黑龙江",
+            "内蒙古", "安徽", "北京", "福建", "上海", "湖北", "湖南", "四川",
+            "辽宁", "河北", "河南", "浙江", "山东", "江苏", "广东" };
+        int[] gdps = new int[]{
+            606, 1670, 2102, 2523, 5020, 5702, 6610, 8893,
+            10011, 10569, 11238, 11307, 11703, 11721, 12512, 12582,
+            14360, 15301, 16252, 17560, 19196, 19632, 19670, 21027,
+            22227, 24516, 26931, 32319, 45362, 49110, 53210 };
+        List<ChartMapRegion> src = MapChinaData.Regions();
+        List<ChartMapRegion> regions = new List<ChartMapRegion>();
+        for (int i = 0; i < src.Count; i = i + 1) {
+            ChartMapRegion r = src[i];
+            int v = 0;
+            for (int k = 0; k < names.Length; k = k + 1) {
+                if (r.name == names[k]) { v = gdps[k]; }
+            }
+            regions.Add(ChartMapRegion.Of(r.name, v, r.rings));
+        }
+        ChartSeries map = ChartSeries.OfRegions(
+            Charts.T("GDP 2011", "2011全国GDP分布"), regions);
+        ChartSeries rose = ChartSeries.Named("rose", ChartType.Pie,
+            new List<ChartData>{
+                ChartData.Named(16252, "北京"), ChartData.Named(19196, "上海"),
+                ChartData.Named(53210, "广东") });
+        rose.roseType = "area";
+        rose.center = ChartPosition.Of(ChartScalar.Pct(74), ChartScalar.Pct(48));
+        rose.radius = ChartScalar.Px(120);
+        rose.radiusInner = ChartScalar.Px(30);
+        ChartOption o = ChartOption.Of(
+            Charts.T("2011 GDP (100M CNY)", "2011全国GDP（亿元）"),
+            null, new List<ChartSeries>{ map, rose });
+        o.titleSub = Charts.T("National Bureau of Statistics", "数据来自国家统计局");
+        o.showLegend = false;
+        o.VisualRange(0, 55000, new List<int>{
+            Chart.Rgb(228, 241, 214), Chart.Rgb(110, 176, 92),
+            Chart.Rgb(52, 94, 141) });
+        Charts.Show(app, o, x, y, w, h);
     }
 
-    /// ECharts mix9（connect）：同组两张图共享交互态——在任一张
-    /// 上拖 dataZoom 或悬停十字线，另一张同帧跟随。
+    /// ECharts2 mix4（折线散点混搭）：30 天随机折线 + 200 个三维
+    /// 随机散点（z→dataRange 色 lightgreen/yellow，z/10→尺寸）。
+    /// 官方 Math.random 以固定种子 Park-Miller 确定性重放。
+    static void Mix4(App app, int x, int y, int w, int h) {
+        int seed = 7;
+        List<ChartPoint> pts = new List<ChartPoint>();
+        for (int i = 0; i < 200; i = i + 1) {
+            seed = (int)((long)seed * 16807 % 2147483647);
+            int day = seed % 30 + 1;
+            seed = (int)((long)seed * 16807 % 2147483647);
+            int vy = seed % 31;
+            seed = (int)((long)seed * 16807 % 2147483647);
+            int vz = seed % 100;
+            ChartPoint p = ChartPoint.Sized(day, vy, vz / 10);
+            p.z = vz;
+            pts.Add(p);
+        }
+        List<ChartPoint> lp = new List<ChartPoint>();
+        for (int j = 0; j < 30; j = j + 1) {
+            seed = (int)((long)seed * 16807 % 2147483647);
+            lp.Add(ChartPoint.Of(j + 1, seed % 31));
+        }
+        ChartSeries sc = ChartSeries.OfPoints(Charts.T("Scatter", "散点"), pts);
+        ChartSeries ln = ChartSeries.OfLinePoints(Charts.T("Line", "折线"), lp);
+        ChartOption o = ChartOption.Of(Charts.T("Line + scatter", "折线散点混搭"),
+            null, new List<ChartSeries>{ sc, ln });
+        o.animate = false;
+        o.X(ChartAxis.ValueRange(1, 30));
+        o.VisualRange(0, 100, new List<int>{
+            Chart.Rgb(144, 238, 144), Chart.Rgb(255, 255, 0) });
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// ECharts2 mix7（饼图代替散点）：两组同坐标的随机点逐点画
+    /// 双色小饼（半径 = z1+z2）。piePerPoint 系列在散点坐标系里
+    /// 由渲染器按下标配对成饼。官方 random 固定种子重放。
+    static void Mix5(App app, int x, int y, int w, int h) {
+        int seed = 11;
+        List<ChartPoint> p1 = new List<ChartPoint>();
+        List<ChartPoint> p2 = new List<ChartPoint>();
+        for (int i = 0; i < 40; i = i + 1) {
+            seed = (int)((long)seed * 16807 % 2147483647);
+            int sx = seed % 21 - 10;
+            seed = (int)((long)seed * 16807 % 2147483647);
+            int sy = seed % 21 - 10;
+            seed = (int)((long)seed * 16807 % 2147483647);
+            int z1 = seed % 21;
+            seed = (int)((long)seed * 16807 % 2147483647);
+            int z2 = seed % 16;
+            ChartPoint a = ChartPoint.Of(sx, sy);
+            a.z = z1;
+            a.size = (z1 + z2) * 2;
+            a.sizeSet = true;
+            p1.Add(a);
+            ChartPoint b = ChartPoint.Of(sx, sy);
+            b.z = z2;
+            p2.Add(b);
+        }
+        ChartSeries s1 = ChartSeries.OfPoints("s1", p1);
+        s1.type = ChartType.Pie;
+        s1.piePerPoint = true;
+        s1.color = Chart.WithAlpha(Chart.Rgb(255, 69, 0), 128);
+        ChartSeries s2 = ChartSeries.OfPoints("s2", p2);
+        s2.type = ChartType.Pie;
+        s2.piePerPoint = true;
+        s2.color = Chart.WithAlpha(Chart.Rgb(30, 144, 255), 128);
+        ChartOption o = ChartOption.Of(
+            Charts.T("Pies as scatter", "饼图代替散点"),
+            null, new List<ChartSeries>{ s1, s2 });
+        o.titleSub = Charts.T("Mix", "混搭");
+        o.animate = false;
+        ChartAxis x2 = ChartAxis.Value();
+        x2.ticks = 2;
+        ChartAxis y2 = ChartAxis.Value();
+        y2.ticks = 2;
+        o.X(x2);
+        o.Y(y2);
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// ECharts2 mix6（销售数据）：本周/上周双折线（上周虚线无点）
+    /// + 上周2 透明堆叠柱（宽 6）+ 变化 堆叠柱（第 3/4 点红）＝
+    /// 浮动涨落柱。图例白名单只有 本周/上周（官方 legend.data）。
+    static void Mix2(App app, int x, int y, int w, int h) {
+        ChartSeries cur = ChartSeries.Line(Charts.T("This week", "本周"),
+            new List<int>{ 400, 374, 251, 300, 420, 400, 440 });
+        ChartSeries prev = ChartSeries.Line(Charts.T("Last week", "上周"),
+            new List<int>{ 320, 332, 301, 334, 360, 330, 350 });
+        prev.showSymbol = 0;
+        prev.itemStyle.normal.lineStyle.type = "dashed";
+        prev.itemStyle.normal.lineStyle.width = 1;
+        ChartSeries base2 = ChartSeries.Bar(Charts.T("Last week 2", "上周2"),
+            new List<int>{ 320, 332, 251, 300, 360, 330, 350 });
+        base2.stackName = "1";
+        base2.barWidth = 6;
+        base2.color = Chart.WithAlpha(Chart.Rgb(255, 255, 255), 0);
+        List<ChartData> delta = new List<ChartData>{
+            ChartData.Of(80), ChartData.Of(42),
+            ChartData.Colored(50, Chart.Rgb(255, 0, 0)),
+            ChartData.Colored(34, Chart.Rgb(255, 0, 0)),
+            ChartData.Of(60), ChartData.Of(70), ChartData.Of(90) };
+        ChartSeries chg = ChartSeries.Named(Charts.T("Delta", "变化"),
+            ChartType.Bar, delta);
+        chg.stackName = "1";
+        chg.barWidth = 6;
+        ChartOption o = ChartOption.Of(Charts.T("Sales data", "销售数据"),
+            Charts.Week(), new List<ChartSeries>{ cur, prev, base2, chg });
+        o.titleSub = Charts.T("Fictional", "纯属虚构");
+        o.legendData = new List<string>{
+            Charts.T("This week", "本周"), Charts.T("Last week", "上周") };
+        ChartAxis y0 = ChartAxis.Value();
+        y0.min = 200;
+        y0.max = 450;
+        o.Y(y0);
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// ECharts2 mix9（Connect 多图联动）：左饼 某站点用户访问来源
+    /// + 右五系列总量堆叠柱，ConnectGroup 同组共享交互态。
     static void Mix9(App app, int x, int y, int w, int h) {
         int group = Charts.KeyOf(Charts.selected.Get(), 0);
-        ChartOption a = ChartOption.Of(Charts.T("A", "图 A"),
-            Charts.Week(), new List<ChartSeries>{
-                ChartSeries.Line("A", new List<int>{ 120, 132, 101, 134, 90, 230, 210 })
-            });
+        ChartSeries src = ChartSeries.Named("src", ChartType.Pie,
+            new List<ChartData>{
+                ChartData.Named(335, Charts.T("Direct", "直接访问")),
+                ChartData.Named(310, Charts.T("Mail", "邮件营销")),
+                ChartData.Named(234, Charts.T("Affiliate", "联盟广告")),
+                ChartData.Named(135, Charts.T("Video", "视频广告")),
+                ChartData.Named(1548, Charts.T("Search", "搜索引擎")) });
+        src.name = Charts.T("Access source", "访问来源");
+        src.radius = ChartScalar.Pct(55);
+        ChartOption pie = ChartOption.Of(
+            Charts.T("User access source", "某站点用户访问来源"),
+            null, new List<ChartSeries>{ src });
+        pie.titleSub = Charts.T("Fictional", "纯属虚构");
+        pie.titleAlign = "center";
+        pie.legendOrient = "vertical";
+        pie.legendX = "left";
+        pie.ConnectGroup(group);
+        string[] names = new string[]{
+            Charts.T("Direct", "直接访问"), Charts.T("Mail", "邮件营销"),
+            Charts.T("Affiliate", "联盟广告"), Charts.T("Video", "视频广告"),
+            Charts.T("Search", "搜索引擎") };
+        int[][] cols = new int[][]{
+            new int[]{ 320, 332, 301, 334, 390, 330, 320 },
+            new int[]{ 120, 132, 101, 134, 90, 230, 210 },
+            new int[]{ 220, 182, 191, 234, 290, 330, 310 },
+            new int[]{ 150, 232, 201, 154, 190, 330, 410 },
+            new int[]{ 820, 932, 901, 934, 1290, 1330, 1320 } };
+        List<ChartSeries> bars = new List<ChartSeries>();
+        for (int i = 0; i < 5; i = i + 1) {
+            List<int> vals = Mix9Row(i);
+            ChartSeries b = ChartSeries.Bar(names[i], vals);
+            b.stackName = "total";
+            bars.Add(b);
+        }
+        ChartOption bar = ChartOption.Of("", Charts.Week(), bars);
+        bar.ConnectGroup(group);
+        Charts.Split2(app, pie, bar, x, y, w, h);
+    }
+
+    /// ECharts2 mix12（某楼盘销售情况）：平滑面积折线（首尾占位
+    /// 点 symbol none）+ 白色遮罩环 + 占比细环（覆盖层）。官方细环
+    /// 由悬停点驱动，画廊静态取峰值日 周五 : 90（占总量 35%）。
+    static void Mix7(App app, int x, int y, int w, int h) {
+        // data [30,20,54,21,90,30,10]，gap = max-min = 80：
+        // 首尾各垫一个 data[端点]+gap 的占位项把线拉到面板边缘。
+        List<ChartData> vals = new List<ChartData>{
+            ChartData.Named(110, "占位"), ChartData.Named(110, Charts.T("Mon", "周一")),
+            ChartData.Named(100, Charts.T("Tue", "周二")),
+            ChartData.Named(134, Charts.T("Wed", "周三")),
+            ChartData.Named(101, Charts.T("Thu", "周四")),
+            ChartData.Named(170, Charts.T("Fri", "周五")),
+            ChartData.Named(110, Charts.T("Sat", "周六")),
+            ChartData.Named(90, Charts.T("Sun", "周日")),
+            ChartData.Named(90, "占位") };
+        vals[0].symbol = "none";
+        vals[8].symbol = "none";
+        ChartSeries sales = ChartSeries.Named("sales", ChartType.Line, vals);
+        sales.name = Charts.T("Sales", "销量");
+        sales.symbol = "emptyCircle";
+        sales.symbolSize = 6;
+        sales.areaStyle = true;
+        ChartOption o = ChartOption.Of(
+            Charts.T("Housing sales", "某楼盘销售情况"),
+            new List<string>{
+                "占位", Charts.T("Mon", "周一"), Charts.T("Tue", "周二"),
+                Charts.T("Wed", "周三"), Charts.T("Thu", "周四"),
+                Charts.T("Fri", "周五"), Charts.T("Sat", "周六"),
+                Charts.T("Sun", "周日"), "占位" },
+            new List<ChartSeries>{ sales });
+        o.titleSub = Charts.T("Fictional · line-pie interactive mix",
+            "纯属虚构 折线饼图交互混搭实例");
+        o.titleAlign = "center";
+        o.xAxes[0].show = false;
+        ChartAxis y0 = ChartAxis.Value();
+        y0.show = false;
+        o.Y(y0);
+        o.legendOrient = "vertical";
+        o.legendX = "left";
+        o.legendSelectedMode = "false";
+        // 图例只列销量（官方还列 占比；覆盖层饼不进面板图例——偏差）。
+        o.legendData = new List<string>{ Charts.T("Sales", "销量") };
+        // 遮罩环：白色 donut（clickable:false，tooltip 关）。
+        ChartSeries mask = ChartSeries.Named("mask", ChartType.Pie,
+            new List<ChartData>{
+                ChartData.Colored(100, Chart.Rgb(255, 255, 255)) });
+        mask.center = ChartPosition.Of(ChartScalar.Pct(50), ChartScalar.Pct(55));
+        mask.radius = ChartScalar.Px(180);
+        mask.radiusInner = ChartScalar.Px(100);
+        // 占比细环：静态展示峰值日；官方 formatter "{b} : {c}\n( {d}% )"。
+        ChartSeries pct = ChartSeries.Named("pct", ChartType.Pie,
+            new List<ChartData>{
+                ChartData.Colored(90, Chart.Rgb(30, 144, 255)),
+                ChartData.Colored(165, Chart.Rgb(255, 255, 255)) });
+        pct.data[0].name = Charts.T("Fri", "周五");
+        pct.data[0].labelText = Charts.T("Fri : 90 ( 35% )", "周五 : 90\n( 35% )");
+        pct.data[1].name = Charts.T("Other", "其他");
+        pct.center = ChartPosition.Of(ChartScalar.Pct(50), ChartScalar.Pct(55));
+        pct.radius = ChartScalar.Px(125);
+        pct.radiusInner = ChartScalar.Px(110);
+        o.series.Add(mask);
+        o.series.Add(pct);
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// ECharts2 mix8（Connect 多图联动）：上/下两块 上证指数 K 线
+    /// 同组联动（官方 option2 隐藏图例、x 轴置顶——此处共用 K 板
+    /// 形态，dataZoom/十字线经 ConnectGroup 同帧跟随）。
+    static void Mix10(App app, int x, int y, int w, int h) {
+        int group = Charts.KeyOf(Charts.selected.Get(), 0);
+        ChartOption a = Charts.KPanel();
         a.ConnectGroup(group);
-        ChartOption b = ChartOption.Of(Charts.T("B", "图 B"),
-            Charts.Week(), new List<ChartSeries>{
-                ChartSeries.Bar("B", new List<int>{ 220, 182, 191, 234, 290, 330, 310 })
-            });
+        ChartOption b = Charts.KPanel();
+        b.showLegend = false;
         b.ConnectGroup(group);
         Charts.SplitV(app, a, b, x, y, w, h);
     }
 
-    static void Mix10(App app, int x, int y, int w, int h) {
-        ChartOption a = ChartOption.Of(Charts.T("Left", "左图"),
-            Charts.Week(), new List<ChartSeries>{
-                ChartSeries.Bar("x", new List<int>{ 20, 40, 30, 50, 45, 60, 55 })
-            });
-        ChartOption b = ChartOption.Of(Charts.T("Right", "右图"),
-            Charts.Week(), new List<ChartSeries>{
-                ChartSeries.Line("y", new List<int>{ 20, 40, 30, 50, 45, 60, 55 })
-            });
-        Charts.Split2(app, a, b, x, y, w, h);
+    /// ECharts2 mix10（折线K线混搭）：上证指数 K 线 + 成交金额
+    /// 折线（次轴，万）＋ markPoint 最大/最小 + markLine 平均值。
+    /// 官方金额以 元 计、formatter 除以一万——此处直接以 万 入库。
+    static void Mix6(App app, int x, int y, int w, int h) {
+        List<int> amt = new List<int>{
+            1356, 803, 1169, 1249, 1249, 1162, 1256, 1525, 1271, 1046,
+            1093, 990, 1037, 1063, 972, 1266, 876, 776, 1059, 883,
+            1159, 1115, 1430, 1167, 1254, 1261, 884, 739, 1006, 777,
+            692, 1016, 815, 755, 1140, 1048, 860, 854, 918, 857,
+            1076, 734, 670, 776, 688, 737, 731, 711, 621, 562,
+            582, 670, 600, 619, 954, 822, 822, 790, 845, 653,
+            599, 783, 816, 790, 814, 912, 813, 792, 757, 667,
+            1023, 1112, 1288, 1130, 1153, 1111, 920, 999, 1204, 1143,
+            1035, 1007, 916, 924, 711, 753, 811, 797 };
+        ChartSeries k = ChartSeries.OfCandles(
+            Charts.T("Shanghai Composite", "上证指数"), Charts.K1Data());
+        ChartSeries line = ChartSeries.Line(
+            Charts.T("Turnover (10k)", "成交金额(万)"), amt);
+        line.axisIndex = 1;
+        line.showSymbol = 0;
+        line.color = Chart.Rgb(30, 144, 255);
+        ChartMarkPoint mpMax = ChartMarkPoint.Max(Charts.T("Max", "最大值"));
+        mpMax.color = Chart.Rgb(30, 144, 255);
+        mpMax.size = 5;
+        mpMax.sizeSet = true;
+        ChartMarkPoint mpMin = ChartMarkPoint.Min(Charts.T("Min", "最小值"));
+        mpMin.color = Chart.Rgb(30, 144, 255);
+        mpMin.size = 5;
+        mpMin.sizeSet = true;
+        line.MarkPoint(mpMax);
+        line.MarkPoint(mpMin);
+        ChartMarkLine ml = ChartMarkLine.Average(Charts.T("Average", "平均值"));
+        ml.color = Chart.Rgb(30, 144, 255);
+        line.MarkLine(ml);
+        ChartOption o = ChartOption.Of(
+            Charts.T("SSE 2013 H1", "2013年上半年上证指数"),
+            Charts.KDates(), new List<ChartSeries>{ k, line });
+        o.legendData = new List<string>{
+            Charts.T("Turnover (10k)", "成交金额(万)"),
+            Charts.T("Shanghai Composite", "上证指数") };
+        o.zoom = true;
+        o.DataZoom(50, 100);
+        o.gridRight = 52;
+        ChartAxis y1 = ChartAxis.Value();
+        y1.labelFormatter = "{value} 万";
+        o.Y(ChartAxis.Value());
+        o.Y(y1);
+        Charts.Show(app, o, x, y, w, h);
     }
 
+    /// ECharts2 mix11（商业BI类图表）：完成率仪表盘（center 25%/55%，
+    /// 值 50）+ 右半区 预期/实际 双漏斗同位叠放（x 45% 宽 45%）。
+    /// 实际漏斗 maxSize 80% 收窄嵌在预期之内，层间 2px 白缝（对应
+    /// 官方 borderColor #fff borderWidth 2）；预期阶段名外标右侧。
     static void Mix11(App app, int x, int y, int w, int h) {
-        ChartOption g = ChartOption.Of(Charts.T("KPI", "完成率"),
-            null, new List<ChartSeries>{ ChartSeries.Gauge(Charts.T("Done", "完成"), 82) });
-        ChartOption f = ChartOption.Of(Charts.T("Funnel", "转化"),
-            null, Charts.FunnelStages());
-        Charts.Split2(app, g, f, x, y, w, h);
+        ChartSeries g = ChartSeries.Gauge(Charts.T("Done", "完成"), 50);
+        g.gauge.center = ChartPosition.Of(ChartScalar.Pct(25), ChartScalar.Pct(55));
+        g.gauge.splitNumber = 10;
+        g.gauge.detail.formatter = "{value}%";
+        ChartOption o = ChartOption.Of(
+            Charts.T("Business BI charts", "商业BI类图表"),
+            null, new List<ChartSeries>{ g });
+        o.titleSub = Charts.T("Fictional", "纯属虚构");
+        // 预期漏斗（名称外标，值降序：展现100 点击80 访问60 咨询40 订单20；
+        // 官方 label.formatter '{b}预期' → 阶段名即「展现预期」等）。
+        ChartSeries fe = ChartSeries.Named("expect", ChartType.Funnel,
+            new List<ChartData>{
+                ChartData.Named(100, "展现预期"), ChartData.Named(80, "点击预期"),
+                ChartData.Named(60, "访问预期"), ChartData.Named(40, "咨询预期"),
+                ChartData.Named(20, "订单预期") });
+        fe.center = ChartPosition.Of(ChartScalar.Pct(67), ChartScalar.Pct(50));
+        fe.radius = ChartScalar.Pct(45);
+        fe.funnelLabelOut = true;
+        // 实际漏斗（内标数值：展现80 点击50 访问30 咨询10 订单5）。
+        ChartSeries fa = ChartSeries.Named("actual", ChartType.Funnel,
+            new List<ChartData>{
+                ChartData.Of(80), ChartData.Of(50), ChartData.Of(30),
+                ChartData.Of(10), ChartData.Of(5) });
+        fa.center = ChartPosition.Of(ChartScalar.Pct(67), ChartScalar.Pct(50));
+        fa.radius = ChartScalar.Pct(45);
+        fa.maxSizePct = 80;
+        fa.funnelGap = 2;
+        o.series.Add(fe);
+        o.series.Add(fa);
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// mix9 堆叠柱第 row 行（直接访问/邮件营销/联盟广告/视频广告/
+    /// 搜索引擎，周一..周日）。
+    static List<int> Mix9Row(int row) {
+        List<int> vals = new List<int>();
+        if (row == 0) {
+            int[] src = new int[]{ 320, 332, 301, 334, 390, 330, 320 };
+            for (int i = 0; i < 7; i = i + 1) { vals.Add(src[i]); }
+        } else if (row == 1) {
+            int[] src = new int[]{ 120, 132, 101, 134, 90, 230, 210 };
+            for (int i = 0; i < 7; i = i + 1) { vals.Add(src[i]); }
+        } else if (row == 2) {
+            int[] src = new int[]{ 220, 182, 191, 234, 290, 330, 310 };
+            for (int i = 0; i < 7; i = i + 1) { vals.Add(src[i]); }
+        } else if (row == 3) {
+            int[] src = new int[]{ 150, 232, 201, 154, 190, 330, 410 };
+            for (int i = 0; i < 7; i = i + 1) { vals.Add(src[i]); }
+        } else {
+            int[] src = new int[]{ 820, 932, 901, 934, 1290, 1330, 1320 };
+            for (int i = 0; i < 7; i = i + 1) { vals.Add(src[i]); }
+        }
+        return vals;
+    }
+
+    /// k1 同源交易日（2013 上半年 88 根）。
+    static List<string> KDates() {
+        return new List<string>{
+            "2013/1/24", "2013/1/25", "2013/1/28", "2013/1/29", "2013/1/30", "2013/1/31",
+            "2013/2/1", "2013/2/4", "2013/2/5", "2013/2/6", "2013/2/7", "2013/2/8",
+            "2013/2/18", "2013/2/19", "2013/2/20", "2013/2/21", "2013/2/22", "2013/2/25",
+            "2013/2/26", "2013/2/27", "2013/2/28", "2013/3/1", "2013/3/4", "2013/3/5",
+            "2013/3/6", "2013/3/7", "2013/3/8", "2013/3/11", "2013/3/12", "2013/3/13",
+            "2013/3/14", "2013/3/15", "2013/3/18", "2013/3/19", "2013/3/20", "2013/3/21",
+            "2013/3/22", "2013/3/25", "2013/3/26", "2013/3/27", "2013/3/28", "2013/3/29",
+            "2013/4/1", "2013/4/2", "2013/4/3", "2013/4/8", "2013/4/9", "2013/4/10",
+            "2013/4/11", "2013/4/12", "2013/4/15", "2013/4/16", "2013/4/17", "2013/4/18",
+            "2013/4/19", "2013/4/22", "2013/4/23", "2013/4/24", "2013/4/25", "2013/4/26",
+            "2013/5/2", "2013/5/3", "2013/5/6", "2013/5/7", "2013/5/8", "2013/5/9",
+            "2013/5/10", "2013/5/13", "2013/5/14", "2013/5/15", "2013/5/16", "2013/5/17",
+            "2013/5/20", "2013/5/21", "2013/5/22", "2013/5/23", "2013/5/24", "2013/5/27",
+            "2013/5/28", "2013/5/29", "2013/5/30", "2013/5/31", "2013/6/3", "2013/6/4",
+            "2013/6/5", "2013/6/6", "2013/6/7", "2013/6/13"
+        };
+    }
+
+    /// mix8 的单块 K 面板（上证指数 + dataZoom 50–100）。
+    static ChartOption KPanel() {
+        ChartSeries k = ChartSeries.OfCandles(
+            Charts.T("Shanghai Composite", "上证指数"), Charts.K1Data());
+        ChartOption o = ChartOption.Of(
+            Charts.T("SSE 2013 H1", "2013年上半年上证指数"),
+            Charts.KDates(), new List<ChartSeries>{ k });
+        o.zoom = true;
+        o.DataZoom(50, 100);
+        return o;
     }
 
     static void Comp1(App app, int x, int y, int w, int h) {

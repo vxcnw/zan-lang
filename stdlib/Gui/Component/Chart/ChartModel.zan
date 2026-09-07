@@ -1192,6 +1192,11 @@ class ChartSeries {
     ChartLineStyle treeLine; // ECharts2 tree itemStyle.normal.lineStyle：
                              //   color/type(curve|solid|broken|dashed|dotted)/
                              //   shadow*；color 0 且 type "" = 现状直角网格色
+    bool piePerPoint; // ECharts2 mix7「以饼代点」：散点坐标系里逐点画
+                      //   小饼。同 option 内所有 piePerPoint 系列按下标
+                      //   配对——圆心取首个系列 points[i] 的 (x,y) 值
+                      //   坐标，半径取 points[i].size，扇区值取各系列
+                      //   points[i].z、各用系列色
     string custom;   // ChartType.Custom 的扩展渲染器："box" | "error" |
     string selectedMode; // ECharts map.selectedMode（Sanitized）：""/"single" | "multiple" | "false"
                      //   "sankey" | "waterfall" | "sunburst" | "radialBars" | "venn" | ""
@@ -1213,8 +1218,12 @@ class ChartSeries {
                             //   data[i].name 组成节点（含对角自环），展开为
                             //   links 渲染（links 非空时优先用 links）
     string funnelAlign;     // ECharts funnel.funnelAlign：""=center | left | right
-    int funnelGap;          // 漏斗层间隙 px；-1 = 默认 3
+    int funnelGap;          // 漏斗层间隙 px；-1 = 默认 0（官方层间无缝衔接）
     bool funnelPercent;     // 标签/提示行值后追加「（x%）」转化率
+    int maxSizePct;         // ECharts funnel.maxSize '80%'：最宽层占宽百分比（0=100）
+    bool funnelLabelOut;    // 阶段名外标：层右端标注（官方 label.formatter '{b}预期'）
+    int forceCurveness;     // ECharts force.linkStyle.normal.curveness ×1000
+                            //（0 = 直线；200 = 0.2，二次贝塞尔弯曲连线）
     int wcMinFontSize;      // wordCloud sizeRange[0] px；0 = 默认 Scale(11)
     int wcMaxFontSize;      // wordCloud sizeRange[1] px；0 = 默认自适应
     string wcRotate;        // wordCloud.rotate："vary" = 横向/竖向交替；"" = 现状
@@ -1274,6 +1283,7 @@ class ChartSeries {
         s.treeOrient = "";
         s.treeLine = ChartLineStyle.Of(0, 0);
         s.treeLine.type = "";
+        s.piePerPoint = false;
         s.custom = "";
         s.selectedMode = "";
         s.forceScaling = 100;
@@ -1292,6 +1302,9 @@ class ChartSeries {
         s.funnelAlign = "";
         s.funnelGap = 0 - 1;
         s.funnelPercent = false;
+        s.maxSizePct = 0;
+        s.funnelLabelOut = false;
+        s.forceCurveness = 0;
         s.wcMinFontSize = 0;
         s.wcMaxFontSize = 0;
         s.wcRotate = "";
@@ -1676,6 +1689,7 @@ class ChartSeries {
         s.backgroundColor = src.backgroundColor; s.innerPct = src.innerPct;
         s.hbar = src.hbar; s.treeOrient = src.treeOrient; s.custom = src.custom;
         s.treeLine = ChartLineStyle.Clone(src.treeLine);
+        s.piePerPoint = src.piePerPoint;
         s.selectedMode = src.selectedMode; s.forceScaling = src.forceScaling;
         s.forceGravity = src.forceGravity; s.forceMinRadius = src.forceMinRadius;
         s.forceMaxRadius = src.forceMaxRadius; s.forceNodeColor = src.forceNodeColor;
@@ -1694,6 +1708,8 @@ class ChartSeries {
         }
         s.funnelAlign = src.funnelAlign; s.funnelGap = src.funnelGap;
         s.funnelPercent = src.funnelPercent; s.wcMinFontSize = src.wcMinFontSize;
+        s.maxSizePct = src.maxSizePct; s.funnelLabelOut = src.funnelLabelOut;
+        s.forceCurveness = src.forceCurveness;
         s.wcMaxFontSize = src.wcMaxFontSize; s.wcRotate = src.wcRotate;
         s.wcRotateList = src.wcRotateList;
         s.itemStyle = ChartItemStyle.Clone(src.itemStyle);
@@ -1896,6 +1912,9 @@ class ChartOption {
     int gaugeMax;     // Gauge / 径向条形图的满刻度值（默认 100）
     bool pieLabels;   // 在饼/环扇区上绘制百分比标签
     bool pieRings;    // 多系列嵌套环饼图
+    bool overlay;     // 混搭覆盖层 option（DrawOverlaySeries 内部构造）：
+                      //   跳过面板底/头，直接在同一面板上叠加绘制
+                      //   （ECharts2 同 option 混排 pie/gauge/funnel + 笛卡尔）
     List<int> radarMax; // 雷达每轴满刻度（空 = 从数据推导）
     string radarShape;  // ECharts radar.shape："circle"（默认=现状）| "polygon"
     bool radarSplitArea; // ECharts radar.splitArea.show：环带交替色
@@ -1967,6 +1986,7 @@ class ChartOption {
         o.smooth = src.smooth; o.gradient = src.gradient; o.rounded = src.rounded;
         o.animMs = src.animMs; o.donutPct = src.donutPct; o.gaugeMax = src.gaugeMax;
         o.pieLabels = src.pieLabels; o.pieRings = src.pieRings;
+        o.overlay = src.overlay;
         o.radarShape = src.radarShape; o.radarSplitArea = src.radarSplitArea;
         o.legendOrient = src.legendOrient; o.legendSelectedMode = src.legendSelectedMode;
         o.legendX = src.legendX;
@@ -2035,6 +2055,7 @@ class ChartOption {
         o.gaugeMax = 100;
         o.pieLabels = false;
         o.pieRings = false;
+        o.overlay = false;
         o.radarMax = new List<int>();
         o.radarShape = "circle";
         o.radarSplitArea = false;
@@ -3082,6 +3103,9 @@ class ChartOption {
                 cs.funnelAlign = s.Str("funnelAlign", cs.funnelAlign);
                 cs.funnelGap = s.Int("funnelGap", cs.funnelGap);
                 cs.funnelPercent = s.Bool("funnelPercent", cs.funnelPercent);
+                cs.maxSizePct = s.Int("maxSizePct", cs.maxSizePct);
+                cs.funnelLabelOut = s.Bool("funnelLabelOut", cs.funnelLabelOut);
+                cs.forceCurveness = s.Int("forceCurveness", cs.forceCurveness);
                 JsonValue sr = s.Get("sizeRange");
                 if (sr != null && sr.IsArray() && sr.Count() >= 2) {
                     cs.wcMinFontSize = sr.At(0).AsInt(cs.wcMinFontSize);

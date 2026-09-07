@@ -115,15 +115,51 @@ partial class Charts {
     }
 
     static void Radar4(App app, int x, int y, int w, int h) {
-        ChartSeries a = ChartSeries.Polar("A", new List<int>{ 80, 60, 90, 70, 50, 40 });
-        a.areaStyle = true;
-        ChartSeries b = ChartSeries.Polar("B", new List<int>{ 50, 80, 60, 90, 70, 55 });
-        b.areaStyle = true;
-        ChartSeries c = ChartSeries.Polar("C", new List<int>{ 30, 40, 50, 40, 60, 80 });
-        c.areaStyle = true;
-        ChartOption o = ChartOption.Of(Charts.T("Wormhole", "虫洞雷达"),
-            Charts.RadarDims(), new List<ChartSeries>{ a, b, c });
-        o.RadarMax(new List<int>{ 100, 100, 100, 100, 100, 100 });
+        // ECharts2 radar.html（浏览器占比变化）1:1：五维 IE8/IE9+/
+        // Chrome/Firefox/Safari，2001..2028 共 28 个年份系列叠成一个
+        // 黄→红渐变扇面（线宽 1、无填充、无符号、polygon 网格 +
+        // 灰环带）。官方 Math.random 以固定种子 Park-Miller 确定性
+        // 重放；官方指标 max 2 → ×100 整数域。标题 y:'bottom' 未
+        // 支持（内核偏差），右对齐近似。
+        List<ChartSeries> years = new List<ChartSeries>();
+        int seed = 7;
+        for (int i = 0; i < 28; i = i + 1) {
+            seed = (int)((long)seed * 16807 % 2147483647);
+            int noise = seed % 21;
+            int ie8 = 195 - 9 * i + noise;
+            if (ie8 < 0) { ie8 = 0; }
+            int ie9 = 0;
+            if (i >= 5) {
+                ie9 = 130 - 5 * (i - 5) * (i - 5) / 8 + noise;
+                if (ie9 < 0) { ie9 = 0; }
+            }
+            int chrome = 0;
+            if (i >= 7) {
+                chrome = (i - 7) * 11 + noise;
+                if (chrome > 200) { chrome = 200; }
+            }
+            int ff = 30 + 6 * i - i * i / 8 + noise;
+            if (ff < 5) { ff = 5; }
+            int safari = 12 + noise;
+            ChartSeries yr = ChartSeries.Polar(Convert.ToString(2001 + i),
+                new List<int>{ ie8, ie9, chrome, ff, safari });
+            int t2 = i * 1000 / 27;
+            yr.color = Chart.Rgb(255 - 37 * t2 / 1000,
+                205 - 180 * t2 / 1000, 30 * t2 / 1000);
+            yr.symbol = "none";
+            yr.itemStyle.normal.lineStyle.width = 1;
+            years.Add(yr);
+        }
+        List<string> dims = new List<string>{
+            "IE8", "IE9+", "Chrome", "Firefox", "Safari" };
+        ChartOption o = ChartOption.Of(
+            Charts.T("Browser share trends", "浏览器占比变化"),
+            dims, years);
+        o.titleSub = Charts.T("Purely fictional", "纯属虚构");
+        o.titleAlign = "right";
+        o.radarShape = "polygon";
+        o.radarSplitArea = true;
+        o.RadarMax(new List<int>{ 200, 200, 200, 200, 200 });
         Charts.Show(app, o, x, y, w, h);
     }
 

@@ -439,6 +439,12 @@ partial class ChartView {
         }
 
         ChartView.PushPlotClip(app, f.plotX, f.plotY, f.plotW, f.plotH);
+        // 折线面板里柱状族系列的堆叠累计（ECharts stack 分组）：
+        // 共享 stackName 的柱系列同槽叠置，transparent 底 + 变化顶的
+        // 浮动柱（mix6 销售数据）靠它成立。下标 = 类目槽位。
+        List<long> barStackAcc = new List<long>();
+        List<string> barStackNames = new List<string>();
+        for (int bz = 0; bz < n; bz = bz + 1) { barStackAcc.Add(0); }
         for (int si = 0; si < series.Count; si = si + 1) {
             ChartSeries s = series[si];
             if (!s.hidden) {
@@ -460,20 +466,44 @@ partial class ChartView {
 
                 // 折线图中的柱状族序列在折线下方绘制柱条
                 // （柱线混合），类似 ECharts 的系列类型混用。
+                // stackName 分组堆叠：同组柱从累计基线升起（barWidth
+                // 系列级覆盖；mix6 上周2 透明柱 + 变化 柱）。
                 if (ChartView.IsBarFamily(s.type)) {
+                    int gi = -1;
+                    if (s.stackName.Length > 0) {
+                        gi = ChartView.GroupIndex(barStackNames, s.stackName);
+                        if (gi < 0) {
+                            barStackNames.Add(s.stackName);
+                            gi = barStackNames.Count - 1;
+                        }
+                    }
                     for (int bi = 0; bi < n; bi = bi + 1) {
                         int cellW = f.CatWidth(bi, n);
                         int bw = cellW / 2;
+                        if (s.barWidth > 0) {
+                            bw = app.Scale(s.barWidth);
+                            if (bw > cellW) { bw = cellW; }
+                        }
                         int bx0 = (cellW - bw) / 2;
                         int oi = i0 + bi;
                         if (oi >= s.Count()) { continue; }
                         int v = s.Value(oi) * g / 1000;
-                        int by = f.YOf(v, ax);
-                        int bh = f.ZeroBase(ax) - by;
-                        if (bh < 0) { bh = 0; }
                         int col = s.color;
                         if (oi < s.data.Count && s.data[oi].color != 0) { col = s.data[oi].color; }
-                        ChartView.BarCell(c, f.CatLeft(bi, n) + bx0, by, bw, bh, app.Scale(2), col, o.gradient);
+                        if (gi < 0) {
+                            int by = f.YOf(v, ax);
+                            int bh = f.ZeroBase(ax) - by;
+                            if (bh < 0) { bh = 0; }
+                            ChartView.BarCell(c, f.CatLeft(bi, n) + bx0, by, bw, bh, app.Scale(2), col, o.gradient);
+                        } else {
+                            long baseV = barStackAcc[bi];
+                            barStackAcc[bi] = baseV + v;
+                            int by = f.YOf((int)(baseV + v), ax);
+                            int bbot = f.YOf((int)baseV, ax);
+                            int bh = bbot - by;
+                            if (bh < 0) { bh = 0; }
+                            ChartView.BarCell(c, f.CatLeft(bi, n) + bx0, by, bw, bh, app.Scale(2), col, o.gradient);
+                        }
                     }
                 } else if (s.type == ChartType.Scatter) {
                     // 散点覆盖层：每个类别槽位一个点
@@ -490,7 +520,7 @@ partial class ChartView {
                             scol, s.itemStyle.normal.borderColor,
                             s.itemStyle.normal.borderWidth);
                     }
-                } else {
+                } else if (ChartView.IsLineFamily(s.type)) {
                     // 一次性收集（增长后的）绘图点，填充与描边复用。
                     // 坐标模式：0 = 类目 X（默认）；1 = 值对 points（X 按
                     // 数值轴映射）；2 = 轴互换（类目在 Y，值在 X）。

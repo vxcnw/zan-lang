@@ -347,7 +347,10 @@ partial class ChartView {
         Theme t = app.theme;
         int pad = t.paddingMedium;
         ChartView.ApplyDataLegend(app, o);
-        int top = ChartView.PanelHead(app, x, y, w, h, o.title);
+        // 覆盖层 option（DrawOverlaySeries）：面板底/头由主导系列
+        // 画过，这里只叠加几何（mix2/mix3/mix12 同图内嵌饼）。
+        int top = y + pad;
+        if (!o.overlay) { top = ChartView.PanelHead(app, x, y, w, h, o.title); }
         PieLayout layout = PieLayout.Of(t, o);
         List<PieSlice> slices = layout.slices;
         long total = layout.totalWide;
@@ -739,7 +742,9 @@ partial class ChartView {
         }
 
         // 环形图中心标注：选中扇区名优先，否则累计值。
-        if (ringCount == 1 && layout.ringInner.Count > 0) {
+        // 混搭覆盖层（多个饼叠在同一面板）不画，避免多环
+        // 中心文本互相叠印；官方在 hover 时才显示。
+        if (!o.overlay && ringCount == 1 && layout.ringInner.Count > 0) {
             int centerInner = geoRi[0];
             if (centerInner > app.Scale(18) && total > 0) {
                 string tot = Convert.ToString(total);
@@ -936,7 +941,9 @@ partial class ChartView {
         Canvas c = app.canvas;
         Theme t = app.theme;
         int pad = t.paddingMedium;
-        int top = ChartView.PanelHead(app, x, y, w, h, o.title);
+        // 覆盖层 option：不重画面板底/头（mix11 仪表盘+漏斗同图）。
+        int top = y + pad;
+        if (!o.overlay) { top = ChartView.PanelHead(app, x, y, w, h, o.title); }
         int bodyX = x + pad;
         int bodyY = top;
         int bodyW = w - pad * 2;
@@ -1350,7 +1357,9 @@ partial class ChartView {
         Canvas c = app.canvas;
         Theme t = app.theme;
         int pad = t.paddingMedium;
-        int top = ChartView.PanelHead(app, x, y, w, h, o.title);
+        // 覆盖层 option：不重画面板底/头（mix11 双漏斗与仪表盘同图）。
+        int top = y + pad;
+        if (!o.overlay) { top = ChartView.PanelHead(app, x, y, w, h, o.title); }
 
         ChartView.ApplyDataLegend(app, o);
         List<ChartStage> stages = ChartView.GatherStages(app, o.series);
@@ -1383,8 +1392,14 @@ partial class ChartView {
         int cx = x + pad + areaW / 2;
         if (fAlign == "left") { cx = x + pad; }
         else if (fAlign == "right") { cx = x + pad + areaW; }
-        int gapPx = app.Scale(3);
+        int gapPx = 0;
         if (fGap >= 0) { gapPx = app.Scale(fGap); }
+        // maxSize（ECharts funnel.maxSize '80%'）：最宽层占宽上限，
+        // 双漏斗同位叠放时内层收窄露出外层（mix11 预期/实际）。
+        int maxW = areaW;
+        if (fs0 != null && fs0.maxSizePct > 0 && fs0.maxSizePct < 100) {
+            maxW = areaW * fs0.maxSizePct / 100;
+        }
         int rowH = areaH / n;
 
         for (int i2 = 0; i2 < n; i2 = i2 + 1) {
@@ -1395,8 +1410,8 @@ partial class ChartView {
             int nextIdx = idx + 1;
             if (pyramid) { nextIdx = idx - 1; }
             if (nextIdx >= 0 && nextIdx < n) { vBot = stages[nextIdx].val; }
-            int wTop = vTop * areaW / maxV * g / 1000;
-            int wBot = vBot * areaW / maxV * g / 1000;
+            int wTop = vTop * maxW / maxV * g / 1000;
+            int wBot = vBot * maxW / maxV * g / 1000;
             int ry = top + i2 * rowH;
             int col = stages[idx].color;
             int strip = rowH - gapPx;
@@ -1431,10 +1446,24 @@ partial class ChartView {
             string lbl = stages[idx].name;
             if (lbl.Length == 0) { lbl = Convert.ToString(stages[idx].val); }
             if (fPct) { lbl = lbl + ChartView.FunnelPct(stages, idx); }
-            c.DrawTextCentered(cx - areaW / 2, ry + rowH / 2 - Canvas.FontHeight(Style.FontFallback(app, "small")) / 2,
-                areaW, Canvas.FontHeight(Style.FontFallback(app, "small")), lbl,
-                Style.Part(app, "chart", "value", "", "", "", Style.SNormal()).FgOr(0),
-                Style.FontFallback(app, "small"));
+            if (fs0 != null && fs0.funnelLabelOut && stages[idx].name.Length > 0) {
+                // 外标：阶段名画在层右端之外（官方 label.formatter
+                // '{b}预期' 在漏斗右侧竖排一列，labelLine 关闭）。
+                int ox = cx + (wTop > wBot ? wTop : wBot) / 2 + app.Scale(6);
+                if (ox + app.Scale(60) > x + w - pad) {
+                    ox = x + w - pad - app.Scale(60);
+                }
+                c.DrawText(ox, ry + (rowH - Canvas.FontHeight(
+                    Style.FontFallback(app, "small"))) / 2, lbl,
+                    Style.Part(app, "chart", "label", "", "", "",
+                        Style.SNormal()).FgOr(0),
+                    Style.FontFallback(app, "small"));
+            } else {
+                c.DrawTextCentered(cx - areaW / 2, ry + rowH / 2 - Canvas.FontHeight(Style.FontFallback(app, "small")) / 2,
+                    areaW, Canvas.FontHeight(Style.FontFallback(app, "small")), lbl,
+                    Style.Part(app, "chart", "value", "", "", "", Style.SNormal()).FgOr(0),
+                    Style.FontFallback(app, "small"));
+            }
         }
 
         if (o.showLegend) {
