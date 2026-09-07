@@ -924,6 +924,60 @@ partial class ChartView {
         return widest;
     }
 
+    /// 树图父子边折线点集（屏幕坐标）：type 语义同 ECharts2
+    /// lineStyle.type——""/"broken" 三段直角、solid 直线、curve
+    /// 三次贝塞尔（控制点在深度中点，12 段采样）、dashed/dotted
+    /// 直角折线（虚线由调用方 DrawDashed 实现）。
+    static void TreeEdgePoints(List<int> xs, List<int> ys,
+                               int p0, int p1, int q0, int q1,
+                               bool horiz, string type) {
+        xs.Clear();
+        ys.Clear();
+        if (type == "solid") {
+            int sx = horiz ? p1 : p0;
+            int sy = horiz ? p0 : p1;
+            int ex = horiz ? q1 : q0;
+            int ey = horiz ? q0 : q1;
+            xs.Add(sx); ys.Add(sy);
+            xs.Add(ex); ys.Add(ey);
+            return;
+        }
+        if (type == "curve") {
+            // 三次贝塞尔（span/depth 二维各自插值）：P0=父、
+            // C1=(父 span, 深度中点)、C2=(子 span, 深度中点)、
+            // P3=子——出入边都沿深度方向，在中点平滑转向。
+            // 权重和恒 1e9，12 段采样。
+            int mid = (p1 + q1) / 2;
+            for (int i = 0; i <= 12; i = i + 1) {
+                int tt = i * 1000 / 12;
+                int mt = 1000 - tt;
+                long w0 = (long)mt * mt * mt;
+                long w1 = 3L * mt * mt * tt;
+                long w2 = 3L * mt * tt * tt;
+                long w3 = (long)tt * tt * tt;
+                int spanC = (int)((w0 * p0 + w1 * p0 + w2 * q0 + w3 * q0) / 1000000000);
+                int depC = (int)((w0 * p1 + w1 * mid + w2 * mid + w3 * q1) / 1000000000);
+                if (horiz) { xs.Add(depC); ys.Add(spanC); }
+                else { xs.Add(spanC); ys.Add(depC); }
+            }
+            return;
+        }
+        // broken / dashed / dotted：三段直角。
+        if (horiz) {
+            int mid = (p1 + q1) / 2;
+            xs.Add(p1); ys.Add(p0);
+            xs.Add(mid); ys.Add(p0);
+            xs.Add(mid); ys.Add(q0);
+            xs.Add(q1); ys.Add(q0);
+        } else {
+            int mid = (p1 + q1) / 2;
+            xs.Add(p0); ys.Add(p1);
+            xs.Add(p0); ys.Add(mid);
+            xs.Add(q0); ys.Add(mid);
+            xs.Add(q0); ys.Add(q1);
+        }
+    }
+
     /// 词云放置尝试：矩形 (x,y,w,h) 与已放置词条是否都不相交。
     static bool WordCloudFits(List<WordCloudItem> placed, int x, int y, int w, int h) {
         for (int i = 0; i < placed.Count; i = i + 1) {
@@ -1388,10 +1442,40 @@ partial class ChartView {
         if (lead != null) { col = lead.color; }
         if (col == 0) { col = Chart.Palette(t, 0); }
         int nodeCol = Chart.WithAlpha(col, alpha);
-        int linkCol = Chart.WithAlpha(Style.Part(app, "chart", "grid", "", "", "",
-            Style.SNormal()).BgOr(0), alpha);
+        // 边样式：treeLine 显式 color/type 优先；都未设置时透传
+        // itemStyle.normal.lineStyle（ECharts2 JSON 通道）；再退回
+        // 现状网格色直角线。
+        int eCol = 0;
+        string eType = "";
+        int eW = 0;
+        int eShadow = 0;
+        if (lead != null) {
+            eCol = lead.treeLine.color;
+            eType = lead.treeLine.type;
+            eW = lead.treeLine.width;
+            eShadow = lead.treeLine.shadowColor;
+            if (eCol == 0 && eType.Length < 1) {
+                eCol = lead.itemStyle.normal.lineStyle.color;
+                eType = lead.itemStyle.normal.lineStyle.type;
+                if (eW == 0) { eW = lead.itemStyle.normal.lineStyle.width; }
+            }
+        }
+        if (eW < 1) { eW = 1; }
+        int linkCol = Chart.WithAlpha(eCol == 0
+            ? Style.Part(app, "chart", "grid", "", "", "", Style.SNormal()).BgOr(0)
+            : eCol, alpha);
         int lblCol = Chart.WithAlpha(Style.Part(app, "chart", "label", "", "", "",
             Style.SNormal()).FgOr(0), alpha);
+        // shadowColor 的近似：右下偏移 app.Scale(2) 的暗色底层线
+        // （Canvas 无模糊，ECharts2 shadowBlur 3/offset(3,5) 以此代）。
+        int shCol = eShadow == 0
+            ? 0 : Chart.WithAlpha(eShadow, 90 * alpha / 255);
+        List<int> exs = new List<int>();
+        List<int> eys = new List<int>();
+        List<int> shXs = new List<int>();
+        List<int> shYs = new List<int>();
+        int ewpx = app.Scale(eW);
+        int s2 = app.Scale(2);
 
         int i = 0;
         while (i < layout.Count) {
@@ -1415,16 +1499,24 @@ partial class ChartView {
                 int p1 = dep0 + pDep;
                 int q0 = span0 + cSpan;
                 int q1 = dep0 + cDep;
-                if (horiz) {
-                    int mid = (p1 + q1) / 2;
-                    c.DrawLine(p1, p0, mid, p0, linkCol, app.Scale(1));
-                    c.DrawLine(mid, p0, mid, q0, linkCol, app.Scale(1));
-                    c.DrawLine(mid, q0, q1, q0, linkCol, app.Scale(1));
+                ChartView.TreeEdgePoints(exs, eys, p0, p1, q0, q1, horiz, eType);
+                if (shCol != 0) {
+                    shXs.Clear();
+                    shYs.Clear();
+                    for (int si = 0; si < exs.Count; si = si + 1) {
+                        shXs.Add(exs[si] + s2);
+                        shYs.Add(eys[si] + s2);
+                    }
+                    c.DrawPolyline(shXs, shYs, shCol, ewpx);
+                }
+                if (eType == "dashed") {
+                    ChartView.DrawDashed(c, exs, eys, linkCol, ewpx,
+                        app.Scale(6), app.Scale(4));
+                } else if (eType == "dotted") {
+                    ChartView.DrawDashed(c, exs, eys, linkCol, ewpx,
+                        app.Scale(2), app.Scale(2));
                 } else {
-                    int mid = (p1 + q1) / 2;
-                    c.DrawLine(p0, p1, p0, mid, linkCol, app.Scale(1));
-                    c.DrawLine(p0, mid, q0, mid, linkCol, app.Scale(1));
-                    c.DrawLine(q0, mid, q0, q1, linkCol, app.Scale(1));
+                    c.DrawPolyline(exs, eys, linkCol, ewpx);
                 }
             }
             i = i + 1;
@@ -1442,18 +1534,22 @@ partial class ChartView {
                 continue;
             }
             c.FillCircle(nx, ny, rad, nodeCol);
-            string lbl = ChartView.TreeNodeName(n);
-            int lw = Canvas.MeasureText(lbl, fs);
-            int lx = 0;
-            int ly = 0;
-            if (horiz) {
-                lx = nx + rad + app.Scale(6);
-                ly = Canvas.CenterTextYAt(ny, fs);
-            } else {
-                lx = nx - lw / 2;
-                ly = ny + rad + app.Scale(4);
+            // label.show（ECharts2 默认 true；tree.html 置 false 时
+            // 静态不画，悬停 emphasis 时在命中段补画）。
+            if (lead.labelShow) {
+                string lbl = ChartView.TreeNodeName(n);
+                int lw = Canvas.MeasureText(lbl, fs);
+                int lx = 0;
+                int ly = 0;
+                if (horiz) {
+                    lx = nx + rad + app.Scale(6);
+                    ly = Canvas.CenterTextYAt(ny, fs);
+                } else {
+                    lx = nx - lw / 2;
+                    ly = ny + rad + app.Scale(4);
+                }
+                c.DrawText(lx, ly, lbl, lblCol, fs);
             }
-            c.DrawText(lx, ly, lbl, lblCol, fs);
         }
         c.PopClip();
 
@@ -1508,15 +1604,30 @@ partial class ChartView {
             if (best >= 0) {
                 ChartNode hn = layout[best].node;
                 int nodeSeries = ChartView.SeriesIndexOf(o, lead);
+                // ECharts2 节点显式 value（GroupVal）优先于子树累计。
+                int hitVal = hn.Total();
+                if (hn.val > 0) { hitVal = hn.val; }
                 ChartHit th = ChartHit.Of(ChartElementType.Node,
                     nodeSeries, lead != null ? lead.name : "", best,
-                    ChartView.TreeNodeName(hn), hn.Total(), mx, my);
+                    ChartView.TreeNodeName(hn), hitVal, mx, my);
                 if (lead != null) { th.axisIndex = lead.axisIndex; }
                 ChartView.OfferActiveHit(th);
+                if (!lead.labelShow) {
+                    // emphasis.label.show = true：静态标签隐藏时悬停补画。
+                    int hSpan = ChartView.TreeSpan(layout[best], spanG, leaves);
+                    int hDep = layout[best].depth * gapDep;
+                    int hnx = horiz ? dep0 + hDep : span0 + hSpan;
+                    int hny = horiz ? span0 + hSpan : dep0 + hDep;
+                    string hl = ChartView.TreeNodeName(hn);
+                    int hlw = Canvas.MeasureText(hl, fs);
+                    int hlx = horiz ? hnx + rad + app.Scale(6) : hnx - hlw / 2;
+                    int hly = horiz ? Canvas.CenterTextYAt(hny, fs) : hny + rad + app.Scale(4);
+                    c.DrawText(hlx, hly, hl, lblCol, fs);
+                }
                 if (o.showTooltip) {
                     List<TooltipRow> rows = new List<TooltipRow>();
                     rows.Add(TooltipRow.Of(0, o.title));
-                    string tv = Convert.ToString(hn.Total());
+                    string tv = Convert.ToString(hitVal);
                     rows.Add(TooltipRow.Of(col,
                         ChartView.TreeNodeName(hn) + "  " + tv));
                     ChartView.TooltipCard(app, mx, my, x + w, rows);

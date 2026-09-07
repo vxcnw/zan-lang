@@ -97,24 +97,34 @@ partial class Charts {
     }
 
     static void Venn1(App app, int x, int y, int w, int h) {
-        ChartOption o = ChartOption.Of(Charts.T("Overlap", "转化重叠"),
+        // ECharts2 venn.html：访问 100 / 咨询 50 / 公共 20，
+        // tooltip "{b}: {c}"；labelLine.show=false（本渲染器无引导线）。
+        ChartOption o = ChartOption.Of(Charts.T("Visit vs Consult", "访问 vs 咨询"),
             null, new List<ChartSeries>{ ChartSeries.Venn("venn", new List<ChartData>{
-                ChartData.Named(60, Charts.T("Browse", "浏览商品")),
-                ChartData.Named(40, Charts.T("Cart", "加入购物车")),
-                ChartData.Named(25, Charts.T("Both", "两者都"))
+                ChartData.Named(100, Charts.T("Visit", "访问")),
+                ChartData.Named(50, Charts.T("Consult", "咨询")),
+                ChartData.Named(20, Charts.T("Shared", "公共"))
             }) });
+        o.titleSub = Charts.T("Sets of the data", "各个数据的集合");
         Charts.Show(app, o, x, y, w, h);
     }
 
     static void Treemap1(App app, int x, int y, int w, int h) {
-        ChartNode root = ChartNode.Group(Charts.T("Market", "手机份额"), new List<ChartNode>{
-            ChartNode.Leaf("Apple", 42), ChartNode.Leaf("Samsung", 28),
-            ChartNode.Leaf("Xiaomi", 14), ChartNode.Leaf("OPPO", 9),
-            ChartNode.Leaf("Other", 7)
-        });
-        ChartOption o = ChartOption.Of(Charts.T("Treemap basic", "矩形树图最简配置"),
+        // ECharts2 treemap.html：扁平 7 叶「手机占有率」，无层级。
+        ChartNode root = ChartNode.Group(Charts.T("Mobile share", "手机占有率"),
+            new List<ChartNode>{
+                ChartNode.Leaf(Charts.T("Samsung", "三星"), 6),
+                ChartNode.Leaf(Charts.T("Xiaomi", "小米"), 4),
+                ChartNode.Leaf(Charts.T("Apple", "苹果"), 4),
+                ChartNode.Leaf(Charts.T("Huawei", "华为"), 2),
+                ChartNode.Leaf(Charts.T("Lenovo", "联想"), 2),
+                ChartNode.Leaf(Charts.T("Meizu", "魅族"), 1),
+                ChartNode.Leaf(Charts.T("ZTE", "中兴"), 1)
+            });
+        ChartOption o = ChartOption.Of(Charts.T("Mobile share", "手机占有率"),
             null, new List<ChartSeries>{
-                ChartSeries.OfTree(Charts.T("Share", "份额"), ChartType.Treemap, root) });
+                ChartSeries.OfTree(Charts.T("Treemap", "矩形图"), ChartType.Treemap, root) });
+        o.titleSub = Charts.T("Fictional data", "虚构数据");
         Charts.Show(app, o, x, y, w, h);
     }
 
@@ -160,18 +170,19 @@ partial class Charts {
     }
 
     static ChartNode TreeBasic() {
-        return ChartNode.Group(Charts.T("Root", "根节点"), new List<ChartNode>{
-            ChartNode.Group(Charts.T("Node 1", "节点1"), new List<ChartNode>{
+        // ECharts2 tree.html 数据：组节点带显式 value（6/4/4/1）。
+        return ChartNode.GroupVal(Charts.T("Root", "根节点"), 6, new List<ChartNode>{
+            ChartNode.GroupVal(Charts.T("Node 1", "节点1"), 4, new List<ChartNode>{
                 ChartNode.Leaf(Charts.T("Leaf 1", "叶子节点1"), 4),
                 ChartNode.Leaf(Charts.T("Leaf 2", "叶子节点2"), 4),
                 ChartNode.Leaf(Charts.T("Leaf 3", "叶子节点3"), 2),
                 ChartNode.Leaf(Charts.T("Leaf 4", "叶子节点4"), 2),
                 ChartNode.Leaf(Charts.T("Leaf 5", "叶子节点5"), 2),
                 ChartNode.Leaf(Charts.T("Leaf 6", "叶子节点6"), 4) }),
-            ChartNode.Group(Charts.T("Node 2", "节点2"), new List<ChartNode>{
+            ChartNode.GroupVal(Charts.T("Node 2", "节点2"), 4, new List<ChartNode>{
                 ChartNode.Leaf(Charts.T("Leaf 7", "叶子节点7"), 4),
                 ChartNode.Leaf(Charts.T("Leaf 8", "叶子节点8"), 4) }),
-            ChartNode.Group(Charts.T("Node 3", "节点3"), new List<ChartNode>{
+            ChartNode.GroupVal(Charts.T("Node 3", "节点3"), 1, new List<ChartNode>{
                 ChartNode.Leaf(Charts.T("Leaf 9", "叶子节点9"), 4),
                 ChartNode.Leaf(Charts.T("Leaf 10", "叶子节点10"), 4),
                 ChartNode.Leaf(Charts.T("Leaf 11", "叶子节点11"), 2),
@@ -180,9 +191,18 @@ partial class Charts {
     }
 
     static void Tree1(App app, int x, int y, int w, int h) {
+        // ECharts2 tree.html：纵向树，#48b 曲线边 + 黑色偏移阴影，
+        // label.show=false（悬停 emphasis 显）。
+        ChartSeries s = ChartSeries.OfTreeOrient(Charts.T("Tree", "树图"),
+            Charts.TreeBasic(), "vertical");
+        s.color = Chart.Rgb(68, 136, 187);
+        s.treeLine.color = Chart.Rgb(68, 136, 187);
+        s.treeLine.type = "curve";
+        s.treeLine.shadowColor = Chart.Rgb(0, 0, 0);
+        s.treeLine.shadowBlur = 3;
+        s.labelShow = false;
         ChartOption o = ChartOption.Of(Charts.T("Tree", "树图"),
-            null, new List<ChartSeries>{
-                ChartSeries.OfTreeOrient(Charts.T("Tree", "树图"), Charts.TreeBasic(), "vertical") });
+            null, new List<ChartSeries>{ s });
         o.roam = true;
         Charts.Show(app, o, x, y, w, h);
     }

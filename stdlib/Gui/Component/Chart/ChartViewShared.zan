@@ -35,10 +35,34 @@ partial class ChartView {
         if (title.Length > 0) {
             int titleFs = Style.FontFallback(app, "large");
             int titleH = Canvas.FontHeight(titleFs);
+            // ECharts title.subtext（副标题小字）；对齐与 DrawPanelI 同法。
+            string titleSub = Chart.TitleSubText();
+            if (titleSub.Length > 0) {
+                titleH = titleH + Canvas.FontHeight(Style.FontFallback(app, "small"))
+                    + app.Scale(2);
+            }
             int titleMax = x + w - pad - Chart.toolReserve - (x + pad) - app.Scale(8);
             if (titleMax > 0) {
+                int tW = Canvas.MeasureText(title, titleFs);
+                string tal = Chart.TitleAlignMode();
+                int tx = x + pad;
+                if (tal == "center") { tx = x + pad + (titleMax - tW) / 2; }
+                else if (tal == "right") { tx = x + pad + titleMax - tW; }
+                if (tx < x + pad) { tx = x + pad; }
                 c.PushClip(x + pad, top, titleMax, titleH);
-                c.DrawText(x + pad, top, title, sPanel.FgOr(0), titleFs);
+                c.DrawText(tx, top, title, sPanel.FgOr(0), titleFs);
+                if (titleSub.Length > 0) {
+                    int subFs = Style.FontFallback(app, "small");
+                    int subW = Canvas.MeasureText(titleSub, subFs);
+                    int sx = tx;
+                    if (tal == "center") { sx = x + pad + (titleMax - subW) / 2; }
+                    else if (tal == "right") { sx = x + pad + titleMax - subW; }
+                    if (sx < x + pad) { sx = x + pad; }
+                    int subCol = Style.Part(app, "chart", "axis-title", "", "", "",
+                        Style.SNormal()).FgOr(0);
+                    c.DrawText(sx, top + Canvas.FontHeight(titleFs), titleSub,
+                        subCol, subFs);
+                }
                 c.PopClip();
             }
         }

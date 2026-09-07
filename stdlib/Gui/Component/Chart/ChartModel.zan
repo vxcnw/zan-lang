@@ -371,6 +371,14 @@ class ChartNode {
         return n;
     }
 
+    /// 带显式 value 的组节点（ECharts data 节点的 value 字段，
+    /// 不等于子树累计时以显式值为准，tooltip 用）。
+    static ChartNode GroupVal(string name, int val, List<ChartNode> children) {
+        ChartNode n = ChartNode.Group(name, children);
+        n.val = val;
+        return n;
+    }
+
     /// 形状 + 尺寸变体（force 分类符号：diamond/triangle/rectangle…）。
     static ChartNode Shaped(string name, int val, string symbol, int size) {
         ChartNode n = ChartNode.Leaf(name, val);
@@ -1181,6 +1189,9 @@ class ChartSeries {
     int innerPct;    // 饼图环形孔占外半径的百分比（0 = 实心饼）
     bool hbar;       // 柱状图布局：水平绘制（ECharts 交换 value-x/category-y）
     string treeOrient; // ECharts tree.orient："" = 垂直 | "horizontal"
+    ChartLineStyle treeLine; // ECharts2 tree itemStyle.normal.lineStyle：
+                             //   color/type(curve|solid|broken|dashed|dotted)/
+                             //   shadow*；color 0 且 type "" = 现状直角网格色
     string custom;   // ChartType.Custom 的扩展渲染器："box" | "error" |
     string selectedMode; // ECharts map.selectedMode（Sanitized）：""/"single" | "multiple" | "false"
                      //   "sankey" | "waterfall" | "sunburst" | "radialBars" | "venn" | ""
@@ -1261,6 +1272,8 @@ class ChartSeries {
         s.innerPct = 0;
         s.hbar = false;
         s.treeOrient = "";
+        s.treeLine = ChartLineStyle.Of(0, 0);
+        s.treeLine.type = "";
         s.custom = "";
         s.selectedMode = "";
         s.forceScaling = 100;
@@ -1467,9 +1480,12 @@ class ChartSeries {
     }
 
     /// 带显式布局方向的树系列（ECharts tree.orient）。
+    /// 树默认显示节点标签（ECharts label.show 默认 true），
+    /// JSON label.show=false / labelShow=false 时隐藏、悬停显。
     static ChartSeries OfTreeOrient(string name, ChartNode root, string orient) {
         ChartSeries s = ChartSeries.OfTree(name, ChartType.Tree, root);
         s.treeOrient = orient;
+        s.labelShow = true;
         return s;
     }
 
@@ -1659,6 +1675,7 @@ class ChartSeries {
         s.showSymbol = src.showSymbol; s.showBackground = src.showBackground;
         s.backgroundColor = src.backgroundColor; s.innerPct = src.innerPct;
         s.hbar = src.hbar; s.treeOrient = src.treeOrient; s.custom = src.custom;
+        s.treeLine = ChartLineStyle.Clone(src.treeLine);
         s.selectedMode = src.selectedMode; s.forceScaling = src.forceScaling;
         s.forceGravity = src.forceGravity; s.forceMinRadius = src.forceMinRadius;
         s.forceMaxRadius = src.forceMaxRadius; s.forceNodeColor = src.forceNodeColor;
