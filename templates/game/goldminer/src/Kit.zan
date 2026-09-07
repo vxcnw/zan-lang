@@ -278,9 +278,16 @@ class Host {
 
     public void OnWindowEvent(int type) {
         // 窗口事件本身也算"输入"，重绘门控据此立即渲染一帧。
-        // 焦点只记账(Focused 不再消费失焦):实时游戏失焦降帧=画面
-        // 两秒一跳;只有最小化(完全看不见)才降到 idle 节奏。
+        // 失焦/最小化不降帧(实时游戏失焦降帧=画面两秒一跳);是否
+        // 暂停世界由游戏自己决定:PauseOnUnfocus=true 时 host 把
+        // 失焦/最小化记进 unfocused,游戏读 ShouldPause() 停步逻辑。
         this.hadEvent = true;
+        bool unfocusNow = type == SdlEventType.WindowFocusLost()
+                          || type == SdlEventType.WindowMinimized();
+        bool refocusNow = type == SdlEventType.WindowFocusGained()
+                          || type == SdlEventType.WindowRestored();
+        if (unfocusNow) { this.unfocused = true; }
+        if (refocusNow) { this.unfocused = false; }
         if (type == SdlEventType.WindowMinimized()) {
             this.minimized = true;
             this.nextFrame = Sdl.Ticks() + this.frameMs;
@@ -296,6 +303,18 @@ class Host {
             this.ignoreMax = false;
             this.minimized = false;
         }
+    }
+
+    bool unfocused;
+
+    /// 失焦暂停:游戏在 Create 后置 true 即启用——窗口失焦或最小化
+    /// 期间 ShouldPause() 为真,游戏停步世界(渲染可继续画暂停幕),
+    /// 重新聚焦自动恢复。false(默认)保持失焦照常渲染。
+    public void PauseOnUnfocus() { this.pauseOnUnfocus = true; }
+    bool pauseOnUnfocus;
+
+    public bool ShouldPause() {
+        return this.pauseOnUnfocus && this.unfocused;
     }
 
     // 鼠标位置换算回设计单位（含画布分数缩放）。

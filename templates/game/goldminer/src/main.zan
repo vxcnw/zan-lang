@@ -275,6 +275,11 @@ class MinerApp {
     // ---------------------------------------------------------------
     // 逻辑推进
     // ---------------------------------------------------------------
+    // 失焦暂停:World.Step 不推进(倒计时/摆钩/收线全停),画面保持
+    // 最后一帧 + 暂停幕;点击或任意按键立即恢复。MINER_SIM/HUDSHOT
+    // 等无头通道不建窗口,不受影响。
+    public bool pauseOverlay;
+
     // MINER_PROF=1: 逐段计时走廊。启动后约 1.2s 自动发射一次(触发
     // "首次发射"的完整路径:swing 声、首个逐帧合成、首个声卡流),
     // 环绕窗口打印各段耗时。发射本身立即返回,真实开销落在后面
@@ -425,6 +430,15 @@ class MinerApp {
         }
         // 场景内 QTE 圈(圈心跟着爪走,必须画在场景层)
         if (wo.state == World.ST_QTE) { this.DrawQte(ox, oy); }        // 爆炸白闪
+        // 失焦暂停幕:世界已停步,盖一层半透明 + 提示,点击/按键恢复
+        if (this.pauseOverlay) {
+            rd.SetColor(8, 10, 16, 170);
+            rd.FillRect(0, 0, w, h);
+            Text.DrawCenteredShadow(rd, "已暂停", w / 2, h / 2 - 30, 5,
+                                    240, 226, 190, 255);
+            Text.DrawCenteredShadow(rd, "点击窗口继续", w / 2, h / 2 + 30, 3,
+                                    200, 194, 178, 220);
+        }
         // Gui HUD 降级时的场景层兜底信息(顶栏/结算/拆弹)
         if (this.hud == null && this.guiReady) { this.DrawFallbackHud(ox, oy); }
         if (wo.flashFrames > 0) {
@@ -666,6 +680,7 @@ class MinerApp {
         }
         h.LimitFps(60);
         h.SetIdleFps(2);
+        h.PauseOnUnfocus();       // 失焦暂停:倒计时/收线不偷跑,点击恢复
         // 事件驱动重绘:无变化帧不渲染(HUDSHOT/SIM 无头路径不受影响,
         // 它们不走主循环)。
         h.SetRedrawInterval(30);
@@ -713,7 +728,12 @@ class MinerApp {
             if (dt < 0) { dt = 0; }
             if (dt > 100) { dt = 100; }
             app.lastFrameAt = app.now;
-            if (prof && app.profAutoFired == 0
+            if (h.ShouldPause()) {
+                // 暂停期 dt 计时照常推进,但世界不消费——恢复瞬间不会
+                // 跳一大步(dt 钳 100ms 也兜底)。输入仍要 poll:点击/
+                // 按键是恢复暂停的途径,事件门控也让暂停幕立刻呈现。
+                h.MarkEvent();
+            } else if (prof && app.profAutoFired == 0
                     && Sdl.Ticks() - app.profT0 >= 1200) {
                 app.profAutoFired = 1;
                 Console.WriteLine("[prof] === auto-fire ===");
@@ -764,11 +784,17 @@ class MinerApp {
                     }
                 }
             }
-            if (action) { app.OnActionKey(); }
-            if (dyn) { app.OnDynamiteKey(); }
-            t1 = World.NowMs();
-            app.StepFrame(dt);
-            t2 = World.NowMs();
+            // 失焦暂停:世界停步(倒计时/摆钩/收线全冻结),暂停幕由
+            // DrawAll 画;重新聚焦自动恢复,点击/按键帧立即呈现新状态。
+            // 暂停中吞掉 action/dyn:焦点刚回来那一下的点击不应算放钩。
+            app.pauseOverlay = h.ShouldPause();
+            if (!app.pauseOverlay) {
+                if (action) { app.OnActionKey(); }
+                if (dyn) { app.OnDynamiteKey(); }
+                t1 = World.NowMs();
+                app.StepFrame(dt);
+                t2 = World.NowMs();
+            }
             // GameHud.Frame 不走 Form.Run 的 frameHook,顶栏标签须每帧直同步,
             // 否则倒计时/金币/combo 保持初始空串(截图路径 HudShotRun 已直调故正常)。
             app.SyncHud();
