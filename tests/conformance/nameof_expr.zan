@@ -1,0 +1,19 @@
+using System;
+
+namespace Probe;
+
+class Rec {
+    public string UserName;
+}
+
+class Program {
+    static void Main() {
+        Rec r = new Rec();
+        r.UserName = "hana";
+        Console.WriteLine(nameof(r));
+        Console.WriteLine(nameof(r.UserName));
+        Console.WriteLine(nameof(Rec));
+        string s = nameof(Rec.UserName);
+        Console.WriteLine(s + ":" + Convert.ToString(s.Length));
+    }
+}

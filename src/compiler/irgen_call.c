@@ -448,6 +448,19 @@ static void emit_intrinsic_drop_recv(zan_irgen_t *g, zan_ast_node_t *lobj,
 
 static LLVMValueRef emit_expr_call(zan_irgen_t *g, zan_ast_node_t *expr,
         local_scope_t *locals) {
+        /* nameof(name): compile-time spelling of the argument's final
+         * identifier — nothing is evaluated. The checker has already
+         * validated the shape and resolution. */
+        if (expr->call.callee && expr->call.callee->kind == AST_IDENTIFIER &&
+            expr->call.callee->ident.name.len == 6 &&
+            memcmp(expr->call.callee->ident.name.str, "nameof", 6) == 0 &&
+            expr->call.args.count == 1) {
+            zan_ast_node_t *na = expr->call.args.items[0];
+            if (na && na->kind == AST_IDENTIFIER)
+                return emit_string_literal_rc(g, na->ident.name);
+            if (na && na->kind == AST_MEMBER_ACCESS)
+                return emit_string_literal_rc(g, na->member.name);
+        }
         /* Reflection (irgen_reflect.c): `ti.GetFieldName(i)` and friends on a
          * TypeInfo, and `obj.GetType()` / `obj.GetFieldInt("x")` on any class
          * or struct value. A user member of the same name wins, so these are

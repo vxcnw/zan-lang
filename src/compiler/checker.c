@@ -1963,6 +1963,25 @@ zan_type_t *zan_checker_check_expr(zan_checker_t *c, zan_ast_node_t *expr) {
     }
 
     case AST_CALL: {
+        /* nameof(name): the spelling of its argument's final identifier,
+         * typed as string. The argument is still checked so an unknown
+         * name stays a compile error (C# requires the symbol to resolve).
+         * Contextual: only claimed for the bare name with exactly one
+         * identifier/member-access argument. */
+        if (expr->call.callee && expr->call.callee->kind == AST_IDENTIFIER &&
+            expr->call.callee->ident.name.len == 6 &&
+            memcmp(expr->call.callee->ident.name.str, "nameof", 6) == 0 &&
+            expr->call.args.count == 1) {
+            zan_ast_node_t *na = expr->call.args.items[0];
+            if (na && (na->kind == AST_IDENTIFIER ||
+                       na->kind == AST_MEMBER_ACCESS)) {
+                zan_checker_check_expr(c, na);
+                return c->binder->type_string;
+            }
+            zan_diag_emit(c->diag, DIAG_ERROR, expr->loc,
+                "nameof requires a single identifier or member access");
+            return c->binder->type_error;
+        }
         /* Builtin scalar instance methods (string.Trim/Substring/EndsWith/...)
          * are lowered by irgen from the member name alone; they have no symbol
          * for the checker to validate. A method group on a scalar type is
