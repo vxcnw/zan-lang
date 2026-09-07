@@ -132,6 +132,20 @@ ZanIDE禁止任何自绘必须全部用标准库组件来完成
     duplicate of already-committed content (evidence: HEAD grep / blob compare).
     Do not leave unresolved conflicts or markers for the next session. Full
     procedure: `docs/WORKSPACE_CONVENTIONS.md` §9.1.
+12. **Never revert code casually — reverting is a decision, not a debugging
+    move.** Rolling code back to make an error "go away" is forbidden by
+    default: no `git checkout` / `git restore` / `git reset --hard` to dodge a
+    build or test failure, no copying an older version of a file over the
+    current one, no `git revert` of commits you did not author, no commenting
+    out or deleting freshly committed code because it misbehaves. The default
+    is to **fix forward**: reproduce, find the root cause, repair. A revert is
+    legitimate only when (a) the user explicitly asked for it, or (b) you have
+    evidence the target code is a stale duplicate or provably broken — state
+    that evidence (`git log` / `git blame`, blob compare) in the delivery
+    notes. A revert touching another session's in-flight or committed work
+    needs the user's explicit go-ahead first; conflict scenarios follow rule
+    11. When in doubt: surface the problem, never roll back to finish cleanly.
+    Full text: `docs/WORKSPACE_CONVENTIONS.md` §10.
 
 ## Build / dev quickstart
 
