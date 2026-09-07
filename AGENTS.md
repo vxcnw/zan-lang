@@ -69,17 +69,21 @@ ZanIDE禁止任何自绘必须全部用标准库组件来完成
    work uncommitted. If `git push` fails (e.g. network), leave the commit on
    local `main` and say so. Hold the commit only when verification failed or
    the working tree mixes in unrelated in-flight changes you must not touch.
-8. **Pick a test tier; never run all 1035 tests for a small change.** The suite
-   is labelled in three tiers (`scripts\test.ps1 <tier>`, or `ctest -L <tier>`):
-   `smoke` (75 tests, ~5 s — goldens, diagnostics, ABI, runtimes, tools, GUI:
-   run it on every edit), `standard` (399 — smoke plus every conformance
-   program and library emission: the pre-commit gate, ~1 min), `full` (1035 —
-   plus the determinism/leakcheck twins and self-hosting: release gate only,
-   tens of minutes). Narrow further with `-Match`/`-R` when a change is local
-   (a generics/ARC change: `-R "generic|leakcheck_generic"`). Every test
-   artifact is keyed on the compiler binary, so relinking `zanc` invalidates
-   all of them — and **nothing else may build while tests run**: the cases
-   share `build\zanc.exe` and the stdlib stamp, so a concurrent
+8. **ctest is NOT the default verification step — never run it casually.**
+   Running ctest "to be safe" after every edit is forbidden: it burns tens of
+   minutes on this machine and relinking `zanc` invalidates every test
+   artifact. Verify a change directly instead: compile and run the affected
+   program/probe (`build\zanc.exe <file.zan> --auto-stdlib -o
+   _scratch\out.exe`), or diff the one affected golden/diagnostic. Reach for
+   ctest only at a real checkpoint, and then always the narrowest tier
+   (`scripts\test.ps1 <tier>`, or `ctest -L <tier>`): `smoke` (75 tests) only
+   when the compiler/runtime/stdlib itself changed; `standard` (399) only
+   before committing compiler/stdlib/runtime work; `full` (1035 —
+   determinism/leakcheck twins + self-hosting) release gate only, tens of
+   minutes — never casually. Narrow further with `-Match`/`-R` when a change
+   is local (a generics/ARC change: `-R "generic|leakcheck_generic"`).
+   **Nothing else may build while tests run**: the cases share
+   `build\zanc.exe` and the stdlib stamp, so a concurrent
    `build_gallery`/`build_ide` makes unrelated cases fail en masse.
 9. **Never create branches.** Do NOT create local or remote branches; commit
    directly to `main` and push. Delete any stray branch you find after making
