@@ -1,0 +1,17 @@
+// 索引器下标类型不匹配必须在 checker 报错收口：曾放行到 irgen，把 string
+// 指针当下标送进边界检查，LLVM 校验拒绝（"GEP indexes must be integers"），
+// 编译崩溃且无可用诊断。读路径在此收口。
+namespace Diag;
+class Bag {
+    string[] data = new string[8];
+    public string this[int i] {
+        get { return data[i]; }
+        set { data[i] = value; }
+    }
+}
+class Use {
+    void Go() {
+        Bag b = new Bag();
+        string s = b["k"];
+    }
+}

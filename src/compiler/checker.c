@@ -463,17 +463,30 @@ static zan_type_t *checker_index_set_target(zan_checker_t *c,
         if (!m) continue;
         if (m->kind != SYM_METHOD || m->name.len != op_name.len ||
             memcmp(m->name.str, op_name.str, op_name.len) != 0) continue;
-        if (!m->decl || m->decl->kind != AST_METHOD_DECL ||
-            m->decl->method_decl.params.count != 3) continue;
-        zan_ast_node_t *p0 = m->decl->method_decl.params.items[0];
-        zan_ast_node_t *p1 = m->decl->method_decl.params.items[1];
-        zan_ast_node_t *p2 = m->decl->method_decl.params.items[2];
-        if (p0->kind != AST_PARAM || p1->kind != AST_PARAM ||
-            p2->kind != AST_PARAM) continue;
-        zan_type_t *pt0 = zan_binder_resolve_type(c->binder, p0->param.type);
-        zan_type_t *pt1 = zan_binder_resolve_type(c->binder, p1->param.type);
-        zan_type_t *pt2 = zan_binder_resolve_type(c->binder, p2->param.type);
-        if (!checker_type_assignable(pt0, obj)) continue;
+        if (!m->decl || m->decl->kind != AST_METHOD_DECL)
+            continue;
+        /* Two declared shapes: parser-synthesized indexers carry
+         * (index..., value) with the receiver implicit (irgen prepends it
+         * when emitting the call); the legacy spelling carried
+         * (self, index, value). Accept both, index/value last. */
+        zan_ast_list_t *ps = &m->decl->method_decl.params;
+        int n = ps->count;
+        if (n < 2) continue;
+        zan_ast_node_t *pidx = ps->items[n - 2];
+        zan_ast_node_t *pval = ps->items[n - 1];
+        if (n >= 3) {
+            zan_ast_node_t *pself = ps->items[0];
+            if (pself && pself->kind == AST_PARAM && pself->param.type) {
+                zan_type_t *ptself =
+                    zan_binder_resolve_type(c->binder, pself->param.type);
+                if (ptself && ptself->kind != TYPE_TYPE_PARAM &&
+                    !checker_type_assignable(ptself, obj))
+                    continue;
+            }
+        }
+        if (pidx->kind != AST_PARAM || pval->kind != AST_PARAM) continue;
+        zan_type_t *pt1 = zan_binder_resolve_type(c->binder, pidx->param.type);
+        zan_type_t *pt2 = zan_binder_resolve_type(c->binder, pval->param.type);
         if (idx && !checker_type_assignable(pt1, idx)) continue;
         if (right && !checker_type_assignable(pt2, right)) continue;
         return pt2;
@@ -2127,13 +2140,92 @@ zan_type_t *zan_checker_check_expr(zan_checker_t *c, zan_ast_node_t *expr) {
 
     case AST_INDEX: {
         zan_type_t *obj = zan_checker_check_expr(c, expr->index.object);
-        zan_checker_check_expr(c, expr->index.index);
+        zan_type_t *idx = zan_checker_check_expr(c, expr->index.index);
         /* op_index operator: `<class instance>[i]` has the op_index method's
          * declared return type. */
         if ((obj->kind == TYPE_CLASS || obj->kind == TYPE_STRUCT) && obj->sym) {
             zan_istr_t op_name = {(char *)"op_index", 8};
-            zan_symbol_t *op = checker_find_method(obj->sym, op_name);
-            if (op && op->decl && op->decl->kind == AST_METHOD_DECL &&
+            /* Walk every op_index candidate: one overload is validated
+             * strictly, several are left to irgen's resolve_op_overload
+             * (a `static op_index(self, long)` + `static op_index(self,
+             * string)` pair is legal and the checker cannot pick). */
+            zan_symbol_t *op = NULL;
+            int op_count = 0;
+            for (zan_symbol_t *ts = obj->sym; ts;
+                 ts = (ts->type && ts->type->base_type)
+                     ? ts->type->base_type->sym : NULL) {
+                for (int mi = 0; mi < ts->member_count; mi++) {
+                    zan_symbol_t *mm = ts->members[mi];
+                    if (mm && mm->kind == SYM_METHOD &&
+                        mm->name.len == op_name.len &&
+                        memcmp(mm->name.str, op_name.str,
+                               (size_t)op_name.len) == 0) {
+                        if (!op) op = mm;
+                        op_count++;
+                    }
+                }
+            }
+            if (op_count == 1 && op && op->decl &&
+                op->decl->kind == AST_METHOD_DECL &&
+                op->decl->method_decl.return_type) {
+                /* The declared index parameters must accept what was written
+                 * between the brackets. Unvalidated, `bag["key"]` on an
+                 * `this[int]` indexer passed the checker, irgen fed the
+                 * string pointer through the bounds check as the index and
+                 * LLVM verification rejected the GEP ("GEP indexes must be
+                 * integers") — a compile crash with no usable diagnostic. */
+                zan_ast_list_t *ps = &op->decl->method_decl.params;
+                /* Parser-synthesized indexers are instance methods whose
+                 * params are exactly the indices; hand-written operator
+                 * methods are static with the receiver as items[0]. */
+                bool is_static = (op->decl->method_decl.modifiers &
+                                  MOD_STATIC) != 0;
+                int self_off = is_static ? 1 : 0;
+                int given = 1 + expr->index.extra.count;
+                int want = ps->count - self_off;
+                bool any_generic = false;
+                for (int pi = self_off; pi < ps->count; pi++) {
+                    zan_ast_node_t *pp = ps->items[pi];
+                    if (pp && pp->kind == AST_PARAM && pp->param.type) {
+                        zan_type_t *pt =
+                            zan_binder_resolve_type(c->binder, pp->param.type);
+                        if (pt && type_refs_type_param(pt)) any_generic = true;
+                    }
+                }
+                if (!any_generic && ps->count >= self_off && want != given) {
+                    zan_diag_emit(c->diag, DIAG_ERROR, expr->loc,
+                        "'%.*s' indexer takes %d index%s, but %d given",
+                        (int)obj->sym->name.len, obj->sym->name.str,
+                        want, want == 1 ? "" : "es", given);
+                    return c->binder->type_error;
+                }
+                if (!any_generic && idx && idx->kind != TYPE_ERROR &&
+                    ps->count > self_off) {
+                    zan_ast_node_t *p0 = ps->items[self_off];
+                    if (p0 && p0->kind == AST_PARAM && p0->param.type) {
+                        zan_type_t *pt0 =
+                            zan_binder_resolve_type(c->binder, p0->param.type);
+                        /* Assignment-compatible, mirroring the write path:
+                         * checker_arg_type_mismatch deliberately says
+                         * nothing about a reference reaching an integral
+                         * parameter, which is exactly the string-into-int
+                         * index case that crashed codegen. */
+                        if (pt0 && !type_refs_type_param(pt0) &&
+                            !checker_type_assignable(pt0, idx)) {
+                            zan_diag_emit(c->diag, DIAG_ERROR, expr->loc,
+                                "no '%.*s' indexer takes an index of type "
+                                "'%.*s'",
+                                (int)obj->sym->name.len, obj->sym->name.str,
+                                (int)idx->name.len, idx->name.str);
+                            return c->binder->type_error;
+                        }
+                    }
+                }
+                return zan_binder_resolve_type(c->binder,
+                    op->decl->method_decl.return_type);
+            }
+            if (op && op_count > 0 && op->decl &&
+                op->decl->kind == AST_METHOD_DECL &&
                 op->decl->method_decl.return_type) {
                 return zan_binder_resolve_type(c->binder,
                     op->decl->method_decl.return_type);
@@ -2161,8 +2253,37 @@ zan_type_t *zan_checker_check_expr(zan_checker_t *c, zan_ast_node_t *expr) {
         zan_type_t *right = zan_checker_check_expr(c, expr->binary.right);
         check_readonly_assignment(c, expr);
         zan_type_t *target = checker_assignment_target_type(c, expr->binary.left);
-        if (!target && expr->binary.left->kind == AST_INDEX)
+        if (!target && expr->binary.left->kind == AST_INDEX) {
             target = checker_index_set_target(c, expr->binary.left, right);
+            /* No op_index_set overload accepted the written index/value.
+             * Silent fallback typed the assignment through the *read*
+             * overload and irgen lowered a call with a foreign signature;
+             * say so instead when the type does declare a set indexer. */
+            if (!target) {
+                zan_type_t *iobj = zan_checker_check_expr(
+                    c, expr->binary.left->index.object);
+                if (iobj && iobj->sym &&
+                    (iobj->kind == TYPE_CLASS || iobj->kind == TYPE_STRUCT)) {
+                    zan_istr_t set_name = {(char *)"op_index_set", 12};
+                    bool has_set = false;
+                    for (int mi = 0; mi < iobj->sym->member_count; mi++) {
+                        zan_symbol_t *mm = iobj->sym->members[mi];
+                        if (mm && mm->kind == SYM_METHOD &&
+                            mm->name.len == set_name.len &&
+                            memcmp(mm->name.str, set_name.str,
+                                   (size_t)set_name.len) == 0) {
+                            has_set = true;
+                            break;
+                        }
+                    }
+                    if (has_set) {
+                        zan_diag_emit(c->diag, DIAG_ERROR, expr->loc,
+                            "no '%.*s' indexer accepts this assignment",
+                            (int)iobj->sym->name.len, iobj->sym->name.str);
+                    }
+                }
+            }
+        }
         if (!target) target = left;
         if (target)
             checker_check_assignable(c, target, right, expr->binary.right,

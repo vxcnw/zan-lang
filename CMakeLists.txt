@@ -3000,6 +3000,26 @@ add_test(NAME diag_unresolved_static_chain
     -P ${CMAKE_SOURCE_DIR}/tests/run_compile_error.cmake)
 set_tests_properties(diag_unresolved_static_chain PROPERTIES TIMEOUT 60)
 
+# 索引器下标类型不匹配：读路径曾放行到 irgen，把 string 指针当下标送进
+# 边界检查，LLVM 校验拒绝（"GEP indexes must be integers"），编译崩溃且
+# 无可用诊断；写路径曾静默 fallback 到读重载继续降调用。
+add_test(NAME diag_index_wrong_type
+  COMMAND ${CMAKE_COMMAND}
+    -DZANC=$<TARGET_FILE:zanc>
+    -DSRC=${CMAKE_SOURCE_DIR}/tests/diag/index_wrong_type.zan
+    -DOUT_EXE=${CMAKE_BINARY_DIR}/diag_index_wrong_type${_exe_ext}
+    "-DEXPECT_REGEX=no .Bag. indexer takes an index of type .string."
+    -P ${CMAKE_SOURCE_DIR}/tests/run_compile_error.cmake)
+set_tests_properties(diag_index_wrong_type PROPERTIES TIMEOUT 60)
+add_test(NAME diag_index_write_wrong_type
+  COMMAND ${CMAKE_COMMAND}
+    -DZANC=$<TARGET_FILE:zanc>
+    -DSRC=${CMAKE_SOURCE_DIR}/tests/diag/index_write_wrong_type.zan
+    -DOUT_EXE=${CMAKE_BINARY_DIR}/diag_index_write_wrong_type${_exe_ext}
+    "-DEXPECT_REGEX=no .Bag. indexer accepts this assignment"
+    -P ${CMAKE_SOURCE_DIR}/tests/run_compile_error.cmake)
+set_tests_properties(diag_index_write_wrong_type PROPERTIES TIMEOUT 60)
+
 # Source-level type and interface regressions: reject malformed inheritance,
 # mixed comparisons, invalid reference/delegate assignments, local mismatches,
 # narrowing conversions, and incomplete interface contracts before IR emission.

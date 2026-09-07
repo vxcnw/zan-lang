@@ -1,0 +1,16 @@
+// 写路径 `obj[i] = v`：op_index_set 重载存在但无一接受所写下标/值时，
+// 不得静默 fallback 到读重载继续降调用——在此报错收口。
+namespace Diag;
+class Bag {
+    string[] data = new string[8];
+    public string this[int i] {
+        get { return data[i]; }
+        set { data[i] = value; }
+    }
+}
+class Use {
+    void Go() {
+        Bag b = new Bag();
+        b["k"] = "v";
+    }
+}
