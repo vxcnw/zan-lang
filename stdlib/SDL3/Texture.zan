@@ -83,10 +83,12 @@ class SdlTexture {
     nint Handle() { return this.handle; }
 
     /// 将 RGBA 像素缓冲写入 streaming 纹理；pitch 为每行字节数（通常 = 宽×4）。
-    /// 空缓冲直接拒绝：空串过 FFI 后 SDL 仍按 pitch×高整块读，
-    /// 会读到未映射内存（进程在驱动调用里挂死/崩溃）。
+    /// 只拒绝空句柄与非正 pitch。不能再用 Length 判空：实参通常是 byte[]
+    /// 隐式转换来的别名串，其 Length 语义退化为"到首个 0 字节为止"——
+    /// 二进制像素缓冲首字节恰为 0（如左上角透明的贴图）会被误判成空缓冲,
+    /// 静默拒绝上传。缓冲不足 pitch×高属调用方违约,由驱动层报错。
     bool Update(string rgbaPixels, int pitch) {
-        if (rgbaPixels == null || rgbaPixels.Length == 0) { return false; }
+        if (rgbaPixels == null || pitch <= 0) { return false; }
         return SdlNative.zan_sdl_update_texture(this.handle, rgbaPixels, pitch) != 0;
     }
 
