@@ -51,15 +51,67 @@ partial class Charts {
     }
 
     static void Radar3(App app, int x, int y, int w, int h) {
-        ChartOption q1 = ChartOption.Of("Q1", Charts.RadarDims(),
-            new List<ChartSeries>{ ChartSeries.Polar("Q1",
-                new List<int>{ 4300, 10000, 28000, 35000, 50000, 19000 }) });
-        q1.RadarMax(new List<int>{ 6500, 16000, 30000, 38000, 52000, 25000 });
-        ChartOption q2 = ChartOption.Of("Q2", Charts.RadarDims(),
-            new List<ChartSeries>{ ChartSeries.Polar("Q2",
-                new List<int>{ 5000, 14000, 28000, 31000, 42000, 21000 }) });
-        q2.RadarMax(new List<int>{ 6500, 16000, 30000, 38000, 52000, 25000 });
-        Charts.Split2(app, q1, q2, x, y, w, h);
+        // ECharts2 radar.html（多 polar 复杂例）结构 1:1：单个
+        // option 携带 polar[]，系列用 polarIndex 绑定坐标系。
+        // polar0 = 五指标 circle 网格（绿轴线 / 黄分隔线 / 紫青
+        // 交替带 / 红色【名】），polar1 = 六科成绩单。
+        // 引擎差异（内核已知边界）：radar 值域为非负整数，参考
+        // 例的负值/小数按正值取整近似；markPoint emptyHeart 标注
+        // 与 legend.data 白名单顺序暂未消费。
+        RadarPolar p0 = RadarPolar.Create();
+        p0.indicatorText = new List<string>{
+            Charts.T("Idx 1", "指标一"), Charts.T("Idx 2", "指标二"),
+            Charts.T("Idx 3", "指标三"), Charts.T("Idx 4", "指标四"),
+            Charts.T("Idx 5", "指标五") };
+        p0.center = ChartPosition.Of(ChartScalar.Pct(25), ChartScalar.Pct(48));
+        p0.radius = ChartScalar.Pct(30);
+        p0.type = "circle";
+        p0.splitNumber = 8;
+        p0.nameColor = Chart.Rgb(255, 0, 0);
+        p0.nameFormat = "【{value}】";
+        p0.axisLineColor = Chart.Rgb(0, 128, 0);
+        p0.axisLineWidth = 2;
+        p0.splitLineColor = Chart.Rgb(255, 255, 0);
+        p0.splitLineWidth = 2;
+        p0.splitAreaColors.Add(Chart.Rgb(250, 0, 250));
+        p0.splitAreaColors.Add(Chart.Rgb(0, 200, 200));
+
+        RadarPolar p1 = RadarPolar.Create();
+        p1.indicatorText = new List<string>{
+            Charts.T("Chinese", "语文"), Charts.T("Math", "数学"),
+            Charts.T("English", "英语"), Charts.T("Physics", "物理"),
+            Charts.T("Chemistry", "化学"), Charts.T("Biology", "生物") };
+        p1.indicatorMax = new List<int>{ 150, 150, 150, 120, 108, 72 };
+        p1.center = ChartPosition.Of(ChartScalar.Pct(75), ChartScalar.Pct(48));
+        p1.radius = ChartScalar.Pct(30);
+
+        ChartSeries d1 = ChartSeries.Polar(Charts.T("Pic 1", "图一"),
+            new List<int>{ 100, 80, 40, 80, 2000 });
+        d1.symbol = "star5";
+        d1.symbolSize = 8;
+        d1.itemStyle.normal.lineStyle.type = "dashed";
+        ChartSeries d2 = ChartSeries.Polar(Charts.T("Pic 2", "图二"),
+            new List<int>{ 10, 30, 20, 100, 1000 });
+        d2.areaStyle = true;
+        ChartSeries d3 = ChartSeries.Polar(Charts.T("Pic 3", "图三"),
+            new List<int>{ 20, 30, 30, 135, 3000 });
+        d3.symbol = "none";
+        d3.itemStyle.normal.lineStyle.type = "dotted";
+
+        ChartSeries zhang = ChartSeries.Polar(Charts.T("Zhang San", "张三"),
+            new List<int>{ 120, 118, 130, 100, 99, 70 });
+        zhang.areaStyle = true;
+        zhang.polarIndex = 1;
+        ChartSeries li = ChartSeries.Polar(Charts.T("Li Si", "李四"),
+            new List<int>{ 90, 113, 140, 30, 70, 60 });
+        li.itemStyle.normal.lineStyle.type = "dashed";
+        li.polarIndex = 1;
+
+        ChartOption o = ChartOption.Of(Charts.T("Radar", "复杂雷达图"), null,
+            new List<ChartSeries>{ d1, d2, d3, zhang, li });
+        o.polars.Add(p0);
+        o.polars.Add(p1);
+        Charts.Show(app, o, x, y, w, h);
     }
 
     static void Radar4(App app, int x, int y, int w, int h) {

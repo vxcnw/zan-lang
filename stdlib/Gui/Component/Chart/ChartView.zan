@@ -828,6 +828,29 @@ partial class ChartView {
         }
         h = ChartView.FoldStr(h, o.radarShape, 26);
         h = (h * 31 + (o.radarSplitArea ? 1 : 0)) % 2000000000;
+        // 多 polar（polar[]）：几何/样式与指示器都改像素。
+        for (int pi = 0; pi < o.polars.Count; pi = pi + 1) {
+            RadarPolar p = o.polars[pi];
+            h = (h * 31 + p.startAngle + p.splitNumber + p.axisLineWidth
+                + p.splitLineWidth) % 2000000000;
+            if (p.center != null) {
+                h = (h * 31 + p.center.x.amount + (p.center.x.percent ? 7 : 0)
+                    + p.center.y.amount + (p.center.y.percent ? 11 : 0)) % 2000000000;
+            }
+            h = (h * 31 + p.radius.amount + (p.radius.percent ? 13 : 0)) % 2000000000;
+            h = (h * 31 + p.nameColor + p.axisLineColor + p.splitLineColor) % 2000000000;
+            h = ChartView.FoldStr(h, p.type, 27);
+            h = ChartView.FoldStr(h, p.nameFormat, 28);
+            for (int mi = 0; mi < p.indicatorMax.Count; mi = mi + 1) {
+                h = (h * 31 + p.indicatorMax[mi]) % 2000000000;
+            }
+            for (int ai = 0; ai < p.indicatorText.Count; ai = ai + 1) {
+                h = ChartView.FoldStr(h, p.indicatorText[ai], 29);
+            }
+            for (int ci = 0; ci < p.splitAreaColors.Count; ci = ci + 1) {
+                h = (h * 31 + p.splitAreaColors[ci]) % 2000000000;
+            }
+        }
         // legend 布局/格式与 dataRange 配置改像素，须入指纹。
         h = ChartView.FoldStr(h, o.legendOrient, 32);
         h = ChartView.FoldStr(h, o.legendFormatter, 33);

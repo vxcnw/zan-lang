@@ -70,11 +70,13 @@ class ChartKinds {
     }
 
     /// ECharts series.symbol 形状族规范化：2.2.x 全部符号形状
-    /// （circle/emptyCircle/rectangle/diamond/triangle/star/star6/
-    /// arrow/droplet/pin/emptypin）+ "none"（该点不画符号，系列级
-    /// 与数据级都合法；渲染器入口统一跳过）。未知名返回 ""
-    /// （渲染器按族默认圆点）。
+    /// （circle/emptyCircle/rectangle/diamond/triangle/star/star5/
+    /// star6/arrow/droplet/pin/emptypin）+ "none"（该点不画符号，
+    /// 系列级与数据级都合法；渲染器入口统一跳过）。未知名返回 ""
+    /// （渲染器按族默认圆点）。star5 是 star 的 ECharts2 别名
+    ///（五角星），归一到 star。
     static string SymbolSanitize(string s) {
+        if (s == "star5") { return "star"; }
         if (s == "emptyCircle" || s == "rectangle" || s == "diamond"
             || s == "triangle" || s == "circle" || s == "star"
             || s == "star6" || s == "arrow" || s == "droplet"
@@ -1064,6 +1066,63 @@ class GaugeOption {
     }
 }
 
+/// 雷达/极坐标系统（ECharts2 polar[]）：一个 option 可带多个
+/// polar，radar 系列用 polarIndex 绑定到对应坐标系。指示器
+/// （轴名+满刻度）、圆心/半径、起始角、环数、网格形状与
+/// 指示器名样式都按 polar 独立配置。
+class RadarPolar {
+    List<string> indicatorText; // 每轴指示器名；空 = 回退 option 类目（dims）
+    List<int> indicatorMax;     // 每轴满刻度；0/缺 = 从该 polar 的系列推导
+    ChartPosition center;       // 圆心（% 相对面板宽高 / px）；null = 单 polar 自动居中
+    ChartScalar radius;         // 半径（% 相对 min(areaW,areaH)/2 / px）；0 = 自动
+    int startAngle;             // 第一轴的数学角（90 = 正上，ECharts2 默认）
+    int splitNumber;            // 环数；0 = 4（与单 polar 现状一致）
+    string type;                // "" / "circle" / "polygon"；"" = 跟全局 radarShape
+    int nameColor;              // 指示器名颜色；0 = 主题轴色
+    string nameFormat;          // 指示器名模板（ECharts name.formatter 字符串版，
+                                //   "{value}" 占位；"" = 原名）
+    int axisLineColor;          // 轴线颜色；0 = 主题网格色
+    int axisLineWidth;          // 轴线宽；0 = 1
+    int splitLineColor;         // 分隔环线颜色；0 = 主题网格色
+    int splitLineWidth;         // 分隔环线宽；0 = 1
+    List<int> splitAreaColors;  // 环带交替色（约 30% 透明绘制）；空 = 跟全局
+
+    static RadarPolar Create() {
+        RadarPolar p = new RadarPolar {
+            indicatorText = new List<string>(), indicatorMax = new List<int>(),
+            center = null, radius = ChartScalar.Px(0), startAngle = 90,
+            splitNumber = 0, type = "", nameColor = 0, nameFormat = "",
+            axisLineColor = 0, axisLineWidth = 0, splitLineColor = 0,
+            splitLineWidth = 0, splitAreaColors = new List<int>()
+        };
+        return p;
+    }
+
+    static RadarPolar Clone(RadarPolar src) {
+        if (src == null) { return null; }
+        RadarPolar p = new RadarPolar {
+            indicatorText = new List<string>(), indicatorMax = new List<int>(),
+            center = ChartPosition.Clone(src.center),
+            radius = ChartScalar.Clone(src.radius),
+            startAngle = src.startAngle, splitNumber = src.splitNumber,
+            type = src.type, nameColor = src.nameColor, nameFormat = src.nameFormat,
+            axisLineColor = src.axisLineColor, axisLineWidth = src.axisLineWidth,
+            splitLineColor = src.splitLineColor, splitLineWidth = src.splitLineWidth,
+            splitAreaColors = new List<int>()
+        };
+        for (int i = 0; i < src.indicatorText.Count; i = i + 1) {
+            p.indicatorText.Add(src.indicatorText[i]);
+        }
+        for (int i = 0; i < src.indicatorMax.Count; i = i + 1) {
+            p.indicatorMax.Add(src.indicatorMax[i]);
+        }
+        for (int i = 0; i < src.splitAreaColors.Count; i = i + 1) {
+            p.splitAreaColors.Add(src.splitAreaColors[i]);
+        }
+        return p;
+    }
+}
+
 /// 一个数据系列（ECharts series[i]）。每个系列携带自己的类型，
 /// 混合图表自然实现：带折线叠加的柱状图只是
 /// 共享同一坐标系的两个不同类型系列——无需 AsKind 垫片。
@@ -1097,6 +1156,8 @@ class ChartSeries {
                      // 默认 90 = 12 点钟起始；内部换算为顺时针偏移 90-值。
     bool clockWise;  // ECharts pie.clockWise：false = 扇区从起始边逆时针铺
                      //（默认 true 顺时针）
+    int polarIndex;  // ECharts2 series.polarIndex：绑定到 option.polars[]
+                     //   的第几个坐标系（默认 0；单 polar 时忽略）
     int selectedOffset; // ECharts pie.selectedOffset：选中扇区外偏像素（默认 10）
     int barWidth;    // ECharts bar.barWidth：柱宽像素；0 = 自动
     int barGapPct;   // ECharts bar.barGap：同系列柱间距百分比；-1 = 旧固定缝
@@ -1181,6 +1242,7 @@ class ChartSeries {
         s.roseType = "";
         s.startAngle = 90;
         s.clockWise = true;
+        s.polarIndex = 0;
         s.selectedOffset = 10;
         s.barWidth = 0;
         s.barGapPct = 0 - 1;
@@ -1566,6 +1628,7 @@ class ChartSeries {
         s.areaStyle = src.areaStyle; s.step = src.step; s.sort = src.sort;
         s.roseType = src.roseType; s.startAngle = src.startAngle;
         s.clockWise = src.clockWise;
+        s.polarIndex = src.polarIndex;
         s.center = ChartPosition.Clone(src.center);
         s.radius = ChartScalar.Clone(src.radius);
         s.radiusInner = ChartScalar.Clone(src.radiusInner);
@@ -1789,6 +1852,8 @@ class ChartOption {
     List<int> radarMax; // 雷达每轴满刻度（空 = 从数据推导）
     string radarShape;  // ECharts radar.shape："circle"（默认=现状）| "polygon"
     bool radarSplitArea; // ECharts radar.splitArea.show：环带交替色
+    List<RadarPolar> polars; // ECharts2 polar[]：多雷达坐标系；空 = 单 polar
+                             //   （用上面的 radarMax/radarShape/dims 全局字段）
     // ---- legend 选项（ECharts legend）----
     string legendOrient;        // "horizontal"（默认）| "vertical"
     string legendX;             // ECharts legend.x："left"|"center"(默认)|"right"
@@ -1872,6 +1937,10 @@ class ChartOption {
         o.connectGroup = src.connectGroup; o.rampLo = src.rampLo; o.rampHi = src.rampHi;
         o.radarMax = new List<int>();
         for (int i = 0; i < src.radarMax.Count; i = i + 1) { o.radarMax.Add(src.radarMax[i]); }
+        o.polars = new List<RadarPolar>();
+        for (int i = 0; i < src.polars.Count; i = i + 1) {
+            o.polars.Add(RadarPolar.Clone(src.polars[i]));
+        }
         o.rampColors = new List<int>();
         for (int i = 0; i < src.rampColors.Count; i = i + 1) { o.rampColors.Add(src.rampColors[i]); }
         o.xAxes = new List<ChartAxis>();
@@ -1922,6 +1991,7 @@ class ChartOption {
         o.radarMax = new List<int>();
         o.radarShape = "circle";
         o.radarSplitArea = false;
+        o.polars = new List<RadarPolar>();
         o.legendOrient = "horizontal";
         o.legendX = "";
         o.legendSelectedMode = "";
@@ -2765,6 +2835,79 @@ class ChartOption {
             else { o.radarSplitArea = rj.Bool("splitArea", o.radarSplitArea); }
         }
 
+        // ECharts2 polar[]：多雷达坐标系。radius 数组的 [min,max]
+        // 形式取外径（内环雷达不支持，与单 polar 一致）。
+        JsonValue pj = v.Get("polar");
+        if (pj != null && pj.IsArray()) {
+            for (int pi = 0; pi < pj.Count(); pi = pi + 1) {
+                JsonValue ps = pj.At(pi);
+                if (ps == null || !ps.IsObject()) { continue; }
+                RadarPolar p = RadarPolar.Create();
+                p.startAngle = ps.Int("startAngle", p.startAngle);
+                p.splitNumber = ps.Int("splitNumber", p.splitNumber);
+                string ptype = ps.Str("type", "");
+                if (ptype == "circle" || ptype == "polygon") { p.type = ptype; }
+                JsonValue pc = ps.Get("center");
+                if (pc != null && pc.IsArray() && pc.Count() >= 2) {
+                    p.center = ChartOption.ParsePoint(pc,
+                        ChartPosition.Of(ChartScalar.Pct(50), ChartScalar.Pct(50)));
+                }
+                JsonValue prad = ps.Get("radius");
+                if (prad != null && prad.IsArray() && prad.Count() >= 2) {
+                    p.radius = ChartOption.ParseScalar(prad.At(1), ChartScalar.Px(0));
+                } else if (prad != null) {
+                    p.radius = ChartOption.ParseScalar(prad, ChartScalar.Px(0));
+                }
+                JsonValue ind = ps.Get("indicator");
+                if (ind != null && ind.IsArray()) {
+                    for (int ii = 0; ii < ind.Count(); ii = ii + 1) {
+                        JsonValue ax = ind.At(ii);
+                        p.indicatorText.Add(ax.Str("text", ""));
+                        p.indicatorMax.Add(ax.Int("max", 0));
+                    }
+                }
+                JsonValue nm = ps.Get("name");
+                if (nm != null && nm.IsObject()) {
+                    string fmt = nm.Str("formatter", "");
+                    if (fmt.Length > 0) { p.nameFormat = fmt; }
+                    JsonValue nts = nm.Get("textStyle");
+                    if (nts != null && nts.IsObject()) {
+                        p.nameColor = ChartOption.ParseColor(nts.Get("color"), p.nameColor);
+                    }
+                }
+                JsonValue pal = ps.Get("axisLine");
+                if (pal != null && pal.IsObject()) {
+                    JsonValue pls = pal.Get("lineStyle");
+                    if (pls != null && pls.IsObject()) {
+                        p.axisLineColor = ChartOption.ParseColor(pls.Get("color"), p.axisLineColor);
+                        p.axisLineWidth = pls.Int("width", p.axisLineWidth);
+                    }
+                }
+                JsonValue psl = ps.Get("splitLine");
+                if (psl != null && psl.IsObject()) {
+                    JsonValue psls = psl.Get("lineStyle");
+                    if (psls != null && psls.IsObject()) {
+                        p.splitLineColor = ChartOption.ParseColor(psls.Get("color"), p.splitLineColor);
+                        p.splitLineWidth = psls.Int("width", p.splitLineWidth);
+                    }
+                }
+                JsonValue psa = ps.Get("splitArea");
+                if (psa != null && psa.IsObject()) {
+                    JsonValue pas = psa.Get("areaStyle");
+                    if (pas != null && pas.IsObject()) {
+                        JsonValue pac = pas.Get("color");
+                        if (pac != null && pac.IsArray()) {
+                            for (int ci = 0; ci < pac.Count(); ci = ci + 1) {
+                                int cc = ChartOption.ParseColor(pac.At(ci), 0);
+                                if (cc != 0) { p.splitAreaColors.Add(cc); }
+                            }
+                        }
+                    }
+                }
+                o.polars.Add(p);
+            }
+        }
+
         ChartOption.ParseAxis(v.Get("xAxis"), o.xAxes, true);
         ChartOption.ParseAxis(v.Get("yAxis"), o.yAxes, false);
 
@@ -2793,6 +2936,7 @@ class ChartOption {
                 cs.sort = s.Str("sort", cs.sort);
                 cs.roseType = s.Str("roseType", cs.roseType);
                 cs.clockWise = s.Bool("clockWise", cs.clockWise);
+                cs.polarIndex = s.Int("polarIndex", cs.polarIndex);
                 // pie.center / pie.radius（ECharts：['25%', 200] 与
                 // '55%' | 80 | [110, 140]）。
                 cs.center = ChartOption.ParsePoint(s.Get("center"), cs.center);
