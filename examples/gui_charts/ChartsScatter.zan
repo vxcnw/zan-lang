@@ -247,16 +247,33 @@ partial class Charts {
         Charts.Show(app, o, x, y, w, h);
     }
 
+    /// ECharts2 scatter6「时间坐标散点图」：1500 点 [2014-10-01 起
+    /// 0..10000 分钟, y=0..30.00, z=0..100.00]，气泡直径 round(z/10)、
+    /// 颜色按 z 走 lightgreen→orange 渐变；X 轴时间刻度（整数天数
+    /// ×1000 定点），dataZoom 初始窗口 30%..70%。随机量用二次 mod
+    /// 流形替代。
     static void Scatter5(App app, int x, int y, int w, int h) {
+        List<int> ramp = new List<int>{
+            Chart.Rgb(173, 255, 47), Chart.Rgb(255, 165, 0) };
         List<ChartPoint> pts = new List<ChartPoint>();
-        for (int i = 0; i < 24; i = i + 1) {
-            pts.Add(ChartPoint.Of(i, 40 + ChartView.SinDeg(i * 15) * 20 / 1000));
+        for (int i = 0; i < 1500; i = i + 1) {
+            int m = (i * i * 13 + i * 271 + 97) % 10001;
+            int y1000 = (i * i * 7 + i * 89 + 41) % 30001;
+            int z100 = (i * i * 11 + i * 23 + 617) % 10001;
+            ChartPoint p = ChartPoint.Sized(16333000 + m * 1000 / 1440, y1000,
+                (z100 + 500) / 1000);
+            p.color = Chart.RampAt(ramp, z100 / 10);
+            pts.Add(p);
         }
-        ChartOption o = ChartOption.Of(Charts.T("Hourly samples", "时间坐标散点"),
-            null, new List<ChartSeries>{
-                ChartSeries.OfPoints(Charts.T("Temp", "气温"), pts)
-            });
-        o.X(ChartAxis.ValueRange(0, 23));
+        ChartSeries s1 = ChartSeries.OfPoints(Charts.T("series1", "series1"), pts);
+        s1.pointG = 1000;
+        ChartOption o = ChartOption.Of(Charts.T("Time scatter", "时间坐标散点图"),
+            null, new List<ChartSeries>{ s1 });
+        o.titleSub = Charts.T("dataZoom support", "dataZoom支持");
+        o.X(ChartAxis.Time());
+        o.zoom = true;
+        o.zoomStart = 30;
+        o.zoomEnd = 70;
         Charts.Show(app, o, x, y, w, h);
     }
 

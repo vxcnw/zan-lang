@@ -85,6 +85,14 @@ partial class ChartView {
         int maxYN = ysp.hi;
         int xTicksAuto = xsp.ticks;
         int yTicksAuto = ysp.ticks;
+        bool xTime = o.xAxes.Count > 0 && o.xAxes[0].type == ChartAxisType.Time;
+        if (xTime) {
+            // 时间轴不做 nice 包络：数据域即定义域，刻度交给 TimeTicks
+            // （整数天数，与折线时间轴同一套）。
+            xLo = minX;
+            maxXN = maxX;
+            xTicksAuto = 0;
+        }
         // 显式数值轴范围（ECharts xAxis/yAxis.min/max）：设了就固定
         // 定义域，数据不再参与推导——身高体重这类有自然域的散点
         // 靠它贴合原例的坐标格。
@@ -133,8 +141,7 @@ partial class ChartView {
         if (o.yAxes.Count > 0 && o.yAxes[0].ticks > 0) { yTicks = o.yAxes[0].ticks; }
         int xTicks = xTicksAuto;
         if (o.xAxes.Count > 0 && o.xAxes[0].ticks > 0) { xTicks = o.xAxes[0].ticks; }
-        int ticks = yTicks > xTicks ? yTicks : xTicks;
-        for (int k = 0; k <= ticks; k = k + 1) {
+        for (int k = 0; k <= yTicks; k = k + 1) {
             int gy = plotY + plotH - (k * plotH / yTicks);
             c.FillRect(plotX, gy, plotW, 1, sGrid.BgOr(0));
             string vs = Convert.ToString(yLo + ySpan * k / yTicks);
@@ -143,18 +150,40 @@ partial class ChartView {
             }
             int vw = Canvas.MeasureText(vs, axisFs);
             c.DrawText(plotX - app.Scale(6) - vw, Canvas.CenterTextYAt(gy, axisFs), vs, sAxis.FgOr(0), axisFs);
-            int gx = plotX + k * plotW / xTicks;
-            // ECharts splitLine 横竖两向都有。
-            c.FillRect(gx, plotY, 1, plotH, sGrid.BgOr(0));
-            string xs = Convert.ToString(xLo + xSpan * k / xTicks);
-            if (o.xAxes.Count > 0 && o.xAxes[0].labelFormatter.Length > 0) {
-                xs = o.xAxes[0].labelFormatter.Replace("{value}", xs);
+        }
+        int xDiv = maxXN - xLo;
+        if (xDiv < 1) { xDiv = 1; }
+        if (xTime) {
+            // 时间 X 轴：刻度/标签走 TimeTicks+TimeLabel（整数天数，
+            // 与折线时间轴同一套）；数据域保持紧致包络不 nice 化。
+            List<int> tts = Chart.TimeTicks(xLo, maxXN, 7);
+            for (int ti = 0; ti < tts.Count; ti = ti + 1) {
+                int gx = plotX + (tts[ti] - xLo) * plotW / xDiv;
+                string xs = Chart.TimeLabel(tts[ti]);
+                int xw = Canvas.MeasureText(xs, axisFs) + app.Scale(8);
+                if (xw < app.Scale(40)) { xw = app.Scale(40); }
+                // 末刻度若是 TimeTicks 补的域端点（正好压在绘图区右
+                // 缘），居中标签会被窗口裁半——ECharts 只标整步刻度。
+                if (ti == tts.Count - 1 && gx + xw / 2 > plotX + plotW) { continue; }
+                // ECharts splitLine 横竖两向都有。
+                c.FillRect(gx, plotY, 1, plotH, sGrid.BgOr(0));
+                c.DrawTextCentered(gx - xw / 2, plotY + plotH + app.Scale(4), xw, botGut, xs, sAxis.FgOr(0), axisFs);
             }
-            // 长标签（formatter 加了「类目」前缀之类）加宽居中框，
-            // 短标签维持原 40px 几何。
-            int xw = Canvas.MeasureText(xs, axisFs) + app.Scale(8);
-            if (xw < app.Scale(40)) { xw = app.Scale(40); }
-            c.DrawTextCentered(gx - xw / 2, plotY + plotH + app.Scale(4), xw, botGut, xs, sAxis.FgOr(0), axisFs);
+        } else {
+            for (int k = 0; k <= xTicks; k = k + 1) {
+                int gx = plotX + k * plotW / xTicks;
+                // ECharts splitLine 横竖两向都有。
+                c.FillRect(gx, plotY, 1, plotH, sGrid.BgOr(0));
+                string xs = Convert.ToString(xLo + xSpan * k / xTicks);
+                if (o.xAxes.Count > 0 && o.xAxes[0].labelFormatter.Length > 0) {
+                    xs = o.xAxes[0].labelFormatter.Replace("{value}", xs);
+                }
+                // 长标签（formatter 加了「类目」前缀之类）加宽居中框，
+                // 短标签维持原 40px 几何。
+                int xw = Canvas.MeasureText(xs, axisFs) + app.Scale(8);
+                if (xw < app.Scale(40)) { xw = app.Scale(40); }
+                c.DrawTextCentered(gx - xw / 2, plotY + plotH + app.Scale(4), xw, botGut, xs, sAxis.FgOr(0), axisFs);
+            }
         }
         c.FillRect(plotX, plotY, app.Scale(2), plotH, sAxis.BgOr(0));
         c.FillRect(plotX, plotY + plotH, plotW, app.Scale(2), sAxis.BgOr(0));
@@ -299,6 +328,11 @@ partial class ChartView {
         int yLo = ysp.lo;
         int maxXN = xsp.hi;
         int maxYN = ysp.hi;
+        if (o.xAxes.Count > 0 && o.xAxes[0].type == ChartAxisType.Time) {
+            // 时间轴与 DrawScatterCore 相同：数据域即定义域。
+            xLo = minX;
+            maxXN = maxX;
+        }
         if (o.xAxes.Count > 0 && o.xAxes[0].min != ChartOption.Auto()) {
             xLo = o.xAxes[0].min;
         }
