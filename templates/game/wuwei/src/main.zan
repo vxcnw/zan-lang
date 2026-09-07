@@ -58,6 +58,8 @@ class WuweiApp {
     static List<Image> MapEImages=new List<Image>();
     static List<Button> MapEButtons=new List<Button>();
     static List<Label> SkillNames=new List<Label>();
+    static List<Label> SkillDescs=new List<Label>();
+    static List<Image> SkillImages=new List<Image>();
     static List<Button> SkillButtons=new List<Button>();
     static List<Label> RecipeNames=new List<Label>();
     static List<Label> RecipeDetails=new List<Label>();
@@ -317,7 +319,7 @@ class WuweiApp {
     static void BuildSkills() {
         ScrollColumn p=NewPage();PageHead(p,"功法","参悟消耗修为经验并需要一定时间；功法提升后永久生效。");
         Grid g=Grid.Of(3);g.logGap=12;
-        for(int s=0;s<3;s=s+1){int slot=s;Panel card=Column("card");Size(card,0,540);Label title=Text("","section",28);SkillNames.Add(title);card.With(title);card.With(Spacer());SkillButtons.Add(RowButton("skill"+Number(s),"参悟",()=>{SkillAction(slot);},"secondary",0));card.With(SkillButtons[s]);g.With(card);}
+        for(int s=0;s<3;s=s+1){int slot=s;Panel card=Column("card");Size(card,0,540);Label title=Text("","section",28);SkillNames.Add(title);card.With(title);Image art=Art("icon_manual.webp",110);art.Fit="contain";art.Class="card-art";SkillImages.Add(art);Flex iw=CenterRow(art,0);Size(iw,0,110);card.With(iw);card.With(Spacer());Label detail=Wrap("","muted",96);SkillDescs.Add(detail);card.With(detail);SkillButtons.Add(RowButton("skill"+Number(s),"参悟",()=>{SkillAction(slot);},"secondary",0));card.With(SkillButtons[s]);g.With(card);}
         p.With(g);
         SkillCounter=Text("","muted",32);
         p.With(MakePager("skillsPrev","skillsNext",SkillCounter,()=>{if(SkillPage>0){SkillPage=SkillPage-1;}Refresh();},()=>{if((SkillPage+1)*3<Model.Data.Skills.Count){SkillPage=SkillPage+1;}Refresh();}));
@@ -478,10 +480,10 @@ class WuweiApp {
         MenuMusicStatus.Text="音量 "+Number(Music.Volume())+"% · "+(Music.Muted()?"已静音":Music.IsPlaying()?"播放中":"未播放")+(Music.Error()!=""?" · "+Music.Error():"");
         for(int i=0;i<MenuAchievementLabels.Count;i=i+1){Row a=Model.AchievementRow(i);if(a!=null){MenuAchievementLabels[i].Text=(Model.AchievementUnlocked(i)?"已达成 · ":"未达成 · ")+a.Name+"\n"+a.Text("desc");MenuAchievementLabels[i].visible=i/AchPerPage()==MenuAwardPage;}}
         MenuAwardCounter.Text="第 "+Number(MenuAwardPage+1)+" / "+Number((Model.AchievementCount()+AchPerPage()-1)/AchPerPage())+" 页";
-        for(int i=0;i<Nav.Count;i=i+1){Nav[i].Class=(!InMenu && Section==i)?"navsec navsec-current medium":"navsec medium";}
+        for(int i=0;i<Nav.Count;i=i+1){string want=(!InMenu && Section==i)?"navsec navsec-current medium":"navsec medium";if(Nav[i].Class!=want){Nav[i].Class=want;}}
         for(int i=0;i<SectionBars.Count;i=i+1){SectionBars[i].visible=!InMenu && Section==i;}
-        for(int i=0;i<Tabs.Count;i=i+1){string want=(!InMenu && Page==TabPages[i])?"tab tab-current grow medium":"tab grow medium";if(Tabs[i].Class!=want){Tabs[i].Class=want;}}
-        for(int i=0;i<CraftButtons.Count;i=i+1){string want=(!InMenu && CraftFilter==CraftKeys[i])?"tab tab-current grow medium":"tab grow medium";if(CraftButtons[i].Class!=want){CraftButtons[i].Class=want;}}
+        for(int i=0;i<Tabs.Count;i=i+1){string want=(!InMenu && Page==TabPages[i])?"tab tab-current medium":"tab medium";if(Tabs[i].Class!=want){Tabs[i].Class=want;}}
+        for(int i=0;i<CraftButtons.Count;i=i+1){string want=(!InMenu && CraftFilter==CraftKeys[i])?"tab tab-current medium":"tab medium";if(CraftButtons[i].Class!=want){CraftButtons[i].Class=want;}}
         if(InMenu){return;}
         for(int i=0;i<Pages.Count;i=i+1){Pages[i].visible=i==Page;}
         NameText.Text=JourneyName;
@@ -512,7 +514,7 @@ class WuweiApp {
         FillMapSlots(MapDImages,MapDNames,MapDDetails,MapDButtons,1,MapDPage);
         FillMapSlots(MapEImages,MapENames,MapEDetails,MapEButtons,2,MapEPage);
         SkillCounter.Text=Number(SkillPage+1)+" / "+Number((Model.Data.Skills.Count+2)/3);
-        for(int s=0;s<3;s=s+1){int si=SkillPage*3+s;SkillButtons[s].visible=si<Model.Data.Skills.Count;if(si<Model.Data.Skills.Count){Row sk=Model.Data.Skills[si];SkillNames[s].Text=sk.Name+" · "+Number(Model.Skill(sk.Id))+"层";SkillButtons[s].Text="参悟 · "+Number(Model.SkillCost(si))+"修为";SkillButtons[s].Tip=sk.Text("desc")+"\n境界需求 "+sk.Text("req")+" 层 · 上限 "+sk.Int("max_level")+" 层 · 消耗 "+Number(Model.SkillCost(si))+" 修为";SkillButtons[s].Disabled=Model.NeedsPrestige||Model.Level<sk.Int("req")||Model.Skill(sk.Id)>=sk.Int("max_level")||Model.Xp<Model.SkillCost(si);}else{SkillNames[s].Text="万法归一";SkillButtons[s].Text="参悟";SkillButtons[s].Disabled=true;}}
+        for(int s=0;s<3;s=s+1){int si=SkillPage*3+s;SkillButtons[s].visible=si<Model.Data.Skills.Count;SkillImages[s].visible=si<Model.Data.Skills.Count;if(si<Model.Data.Skills.Count){Row sk=Model.Data.Skills[si];SkillNames[s].Text=sk.Name+" · "+Number(Model.Skill(sk.Id))+"层";SkillImages[s].Src=ArtPath(sk.Text("icon"));SkillDescs[s].Text=sk.Text("desc")+"\n境界需求 "+sk.Text("req")+" 层 · 上限 "+sk.Int("max_level")+" 层";SkillButtons[s].Text="参悟 · "+Number(Model.SkillCost(si))+"修为";SkillButtons[s].Tip=sk.Text("desc")+"\n境界需求 "+sk.Text("req")+" 层 · 上限 "+sk.Int("max_level")+" 层 · 消耗 "+Number(Model.SkillCost(si))+" 修为";SkillButtons[s].Disabled=Model.NeedsPrestige||Model.Level<sk.Int("req")||Model.Skill(sk.Id)>=sk.Int("max_level")||Model.Xp<Model.SkillCost(si);}else{SkillNames[s].Text="万法归一";SkillImages[s].Src=ArtPath("icon_manual.png");SkillDescs[s].Text="功法已尽数参悟";SkillButtons[s].Text="参悟";SkillButtons[s].Disabled=true;}}
         RecipePage=ClampPage(RecipePage,RecipeCount());
         RecipeCounter.Text="第 "+Number(RecipePage+1)+" / "+Number((RecipeCount()+2)/3)+" 页";
         for(int s=0;s<3;s=s+1){int ri=RecipeRowAt(RecipePage*3+s);RecipeButtons[s].visible=ri>=0;if(ri>=0){Row r=Model.Data.Recipes[ri];RecipeNames[s].Text=r.Name;RecipeImages[s].Src=ArtPath(r.Text("image"));RecipeDetails[s].Text=r.Text("desc")+"\n杂学 "+Number(Model.ArtLevel(r.Text("skill")))+" / 需求 "+r.Text("unlock")+" · "+r.Text("duration")+"秒";RecipeButtons[s].Text=r.Text("kind")=="gather"?"开始采集":"开始制作";RecipeButtons[s].Disabled=Model.NeedsPrestige||!Model.CanCraft(ri);RecipeButtons[s].Tip=RecipeDetail(ri)+(Model.CanCraft(ri)?"":"\n材料或杂学等级不足，暂不可开始");}else{RecipeNames[s].Text="百艺尽览";RecipeDetails[s].Text="";}}
@@ -578,15 +580,16 @@ class WuweiApp {
         top.With(GrowSpace());
         StonesText=Text("","pill-strong",24);top.With(Pill("pill-strong",StonesText));
         XpText=Text("","pill-strong",24);top.With(Pill("pill-strong",XpText));
-        Panel nav=Column("sidebar");Size(nav,185,0);nav.logGap=10;wash.With(nav);nav.DockLeft();
+        Panel nav=Column("sidebar");Size(nav,185,0);nav.logGap=6;wash.With(nav);nav.DockLeft();
         Image logo=Art("logo.webp",128);logo.Fit="contain";logo.Class="nav-logo";Size(logo,0,128);nav.With(logo);
         List<string> sections=new List<string>();sections.Add("修行");sections.Add("历练");sections.Add("杂学");sections.Add("万宝");sections.Add("宗门");sections.Add("轮回");sections.Add("系统");
-        for(int i=0;i<7;i=i+1){int index=i;Button b=ActionButton("nav"+Number(i),sections[i],()=>{SelectSection(index);},"navsec");Size(b,0,52);Nav.Add(b);nav.With(b);}
+        for(int i=0;i<7;i=i+1){int index=i;Button b=ActionButton("nav"+Number(i),sections[i],()=>{SelectSection(index);},"navsec");Size(b,0,48);Nav.Add(b);nav.With(b);}
         nav.With(Spacer());
-        nav.With(Text("版本 v1.0.7","navfoot",22));
-        nav.With(Wrap("Space 开始 / 暂停\nEsc   系统页","navfoot",44));
+        nav.With(Text("无为修仙传 v1.0.7","navfoot",22));
         Panel center=Column("center");center.DockFill();center.logGap=12;wash.With(center);
         Panel subnavs=Panel.Root("subnavs");Size(subnavs,0,58);center.With(subnavs);
+        // 修行区段的三个页签靠左即可；宽区段（杂学 8 个、宗门 3 个）也一律
+        // 靠左，靠 grow 拉满会稀释页签节奏。当前项由 Refresh 上色。
         Flex bar0=NewSubnav(subnavs);AddTab(bar0,0,"闭关");AddTab(bar0,1,"功法");AddTab(bar0,2,"破境");
         SectionBars.Add(bar0);
         Flex bar1=NewSubnav(subnavs);AddTab(bar1,3,"任务");AddTab(bar1,4,"野外");AddTab(bar1,5,"险地");AddTab(bar1,6,"绝境");
@@ -618,13 +621,13 @@ class WuweiApp {
         Flex p=Flex.Row().AlignCenter();p.Class="pill "+cls;p.Gap(0);p.With(text);return p;
     }
     static Flex NewSubnav(Panel holder) {
-        Flex bar=Flex.Row().AlignCenter();bar.Class="subnav";Size(bar,0,58);bar.Gap(8);bar.DockFill();holder.With(bar);return bar;
+        Flex bar=Flex.Row().AlignCenter();bar.Class="subnav";Size(bar,0,58);bar.Gap(6);bar.DockFill();holder.With(bar);return bar;
     }
     static void AddTab(Flex subnav,int page,string label) {
-        int target=page;Button b=ActionButton("tab"+Number(page),label,()=>{SelectPage(target);},"tab");Size(b,0,42);b.Class="tab grow medium";Tabs.Add(b);TabPages.Add(page);TabSections.Add(SectionOfPage(page));subnav.With(b);
+        int target=page;Button b=ActionButton("tab"+Number(page),label,()=>{SelectPage(target);},"tab");Size(b,168,42);b.Class="tab medium";Tabs.Add(b);TabPages.Add(page);TabSections.Add(SectionOfPage(page));subnav.With(b);
     }
     static void AddCraftTab(Flex subnav,string name,string label,string key) {
-        Button b=ActionButton(name,label,()=>{CraftCategory(key);},"tab");Size(b,0,42);b.Class="tab grow medium";CraftButtons.Add(b);CraftKeys.Add(key);subnav.With(b);
+        Button b=ActionButton(name,label,()=>{CraftCategory(key);},"tab");Size(b,96,42);b.Class="tab medium";CraftButtons.Add(b);CraftKeys.Add(key);subnav.With(b);
     }
     static int SectionOfPage(int page) { return page<=2?0:page<=6?1:page==7?2:page<=9?3:page<=12?4:page==13?5:6; }
     static void Build() {

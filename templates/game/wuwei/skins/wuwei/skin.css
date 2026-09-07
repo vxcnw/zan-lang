@@ -40,20 +40,24 @@ flex.pill-strong { background: var(--primary); border: 1 solid var(--primary-pre
 label.pill-text-ink { font-size: 14; color: var(--text-secondary); }
 label.pill-strong { font-size: 14; color: #ffffff; }
 
-/* 左侧 185px 浅纸导航：与顶栏同一纸底，墨字、玉色当前项 */
-stack.sidebar { background: rgba(242,235,217,0.96); border-right: 1 solid rgba(64,64,56,0.38); padding: 20 14 18 14; }
-image.nav-logo { background: transparent; border-radius: 12; }
-button.navsec { background: rgba(51,51,46,0.05); border: 1 solid #bdb29f; color: var(--text-primary); border-radius: 6; }
-button.navsec:hover { background: #dce7da; border-color: #5f8f82; color: #2f4a3e; }
-button.navsec-current { background: #355f56; border-color: #5f8f82; color: #ffffff; }
-label.navfoot { color: var(--text-secondary); font-size: 13; }
+/* 左侧 185px 浅纸导航：与顶栏同一纸底。导航项全部去描边盒——
+ * 透明底 + 墨字承担层级，当前项以玉色填充一锤定音；框套框
+ * （纸底面板里再排一列描边按钮）是导航发丑的根源。 */
+stack.sidebar { background: rgba(242,235,217,0.96); border-right: 1 solid rgba(64,64,56,0.38); padding: 16 12 14 12; }
+image.nav-logo { background: transparent; }
+button.navsec { background: transparent; border: 0; color: var(--text-secondary); border-radius: var(--border-radius-medium); }
+button.navsec:hover { background: rgba(95,143,130,0.14); color: var(--text-primary); }
+button.navsec-current { background: var(--primary); color: #ffffff; }
+label.navfoot { color: var(--text-tertiary); font-size: 13; }
 
-/* 中栏：内缩 + 58px 子导航条 */
+/* 中栏：子导航改为"页签轨道"——整条去框去底，只留一条下缘发丝线
+ * 与内容区分界；未选中页签透明融入纸底，当前页签玉色填充。
+ * 之前"描边容器里再排一排描边小盒"的套娃是丑感来源。 */
 stack.center { padding: 14 4 14 8; }
-flex.subnav { background: rgba(242,238,222,0.94); border: 1 solid #bdb29f; border-radius: 8; padding: 8; }
-button.tab { background: rgba(242,238,222,0.86); border: 1 solid #bdb29f; border-radius: 7; }
-button.tab:hover { background: #dce7da; border-color: #5f8f82; }
-button.tab-current { background: #355f56; border-color: #5f8f82; color: #ffffff; }
+flex.subnav { background: transparent; border: 0; border-bottom: 1 solid var(--divider); border-radius: 0; padding: 8 0; }
+button.tab { background: transparent; border: 0; color: var(--text-secondary); border-radius: var(--border-radius-medium); }
+button.tab:hover { background: rgba(95,143,130,0.14); color: var(--text-primary); }
+button.tab-current { background: var(--primary); color: #ffffff; }
 label.page-title { font-size: 30; font-weight: 700; color: var(--text-primary); }
 label.page-sub { color: var(--text-secondary); font-size: var(--font-size-small); }
 
