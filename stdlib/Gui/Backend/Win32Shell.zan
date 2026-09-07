@@ -818,9 +818,18 @@ class Win32Shell {
         int b = 4 * Win32Shell.dpi / 96;
         int cb = 12 * Win32Shell.dpi / 96;
         bool maxed = Win32Shell.IsMaximized(hwnd);
-        bool inButtons = y < Win32Shell.titlebarH
-            && (x >= w - Win32Shell.CaptionButtonsOf(hwnd) * Win32Shell.buttonW
-                || x < Win32Shell.CaptionZoneOf(hwnd));
+        // 异形阴影带把内容轮廓推离窗口原点 (off, off)：命中坐标
+        // 先换算回内容坐标再判标题条，否则条带与画出来的标题栏
+        // 错开一圈带宽（按下去全错位）。无异形带时 off = 0，
+        // 行为与普通窗口完全一致。缩放手柄仍贴原始窗口边——
+        // 阴影带本身就是最好的缩放靶区。
+        int off = Win32Shell.ShapeBandPx() * Win32Shell.DpiScale() / 100;
+        int cx = x - off;
+        int cy = y - off;
+        int cw = w - off * 2;
+        bool inButtons = cy >= 0 && cy < Win32Shell.titlebarH
+            && (cx >= cw - Win32Shell.CaptionButtonsOf(hwnd) * Win32Shell.buttonW
+                || cx >= cw - Win32Shell.CaptionZoneOf(hwnd));
         if (!maxed && !inButtons && Win32Shell.ResizableOf(hwnd)) {
             bool onLeft = x < b;
             bool onRight = x >= w - b;
@@ -842,8 +851,31 @@ class Win32Shell {
             }
         }
         if (inButtons) { return 1; }
-        if (y < Win32Shell.titlebarH) { return 2; }
+        if (cy >= 0 && cy < Win32Shell.titlebarH) { return 2; }
         return 1;
+    }
+
+    /// 异形阴影带把内容轮廓推离窗口客户区原点的偏移（逻辑
+    /// 像素）。SetWindowShadow 外扩时整份规格被平移 (px,px)——
+    /// 类型 3 阴影带从 (0,0) 起、内容区域右移下移——因此非带
+    /// 区域的最小 x/y 就是这个偏移（横竖同值）。规格不含阴影带
+    /// （普通异形）或未启用异形时返回 0：命中测试按 0 换算，
+    /// 条带行为与普通窗口一致。
+    static int ShapeBandPx() {
+        if (Win32Shell.shapeMode == 0) { return 0; }
+        List<int> regs = Win32Shell.shapeRegions;
+        if (regs == null || regs.Count < 12 || regs[0] != 3) { return 0; }
+        int minX = 2147483647;
+        int minY = 2147483647;
+        int i = 6;
+        while (i + 5 < regs.Count) {
+            if (regs[i + 1] < minX) { minX = regs[i + 1]; }
+            if (regs[i + 2] < minY) { minY = regs[i + 2]; }
+            i = i + 6;
+        }
+        if (minY < minX) { minX = minY; }
+        if (minX == 2147483647 || minX < 0) { return 0; }
+        return minX;
     }
 
     /// 清除上一帧的客户端优先条带。在渲染重新注册
@@ -1551,9 +1583,10 @@ class Win32Shell {
         return 5;
     }
 
-    /// 为窗口登记标题栏左侧客户区保护带宽度（设备像素）：
-    /// 条带内 [0, width) 的按下交给客户区（应用按钮命中区），
-    /// 不当作窗口拖动；0 = 缺省（只有右侧按钮区交给客户区）。
+    /// 为窗口登记标题栏右侧客户区保护带宽度（设备像素）：标题栏
+    /// 高度以内、窗口右缘向左 width 的条带 [w-width, w) 内的按下
+    /// 交给客户区（应用按钮/胶囊命中区），不当作窗口拖动；
+    /// 0 = 缺省（只有右侧系统按钮区交给客户区）。
     static void SetCaptionZone(nint hwnd, int width) {
         Win32Shell.Init();
         if (width < 0) { width = 0; }

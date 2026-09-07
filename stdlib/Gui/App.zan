@@ -3120,7 +3120,7 @@ class App {
             int sy = Canvas.CenterTextY(offY, hbar, fsS);
             int sx = titleX + Canvas.MeasureText(title, titleFs)
                      + t.gapLarge;
-            int limit = W - pad;
+            int limit = offX + W - t.paddingLarge;
             if (showChrome) { limit = limit - ChromeButtonCount() * captionBtnW; }
             if (chromeStatus != "") {
                 int sw = Canvas.MeasureText(chromeStatus, fsS);
@@ -3175,10 +3175,16 @@ class App {
         // 不随加高的品牌栏拉高：栏的其余部分照常是原生拖动区。
         int stripH = Scale(32);
         if (stripH > hbar) { stripH = hbar; }
+        // 阴影带把内容轮廓推离画布原点 (offX, offY)：布局先按内容
+        // 宽 W 计算，再整体平移到画布坐标——绘制、命中区与原生
+        // 拖动条带三方才对得上。不偏移的话整排按钮缩进一圈阴影
+        // 带宽，右缘留出一条谁也不属于的空档。
+        int capY = this.ShapeOffY();
+        int bxo = this.ShapeOffX();
         int closeX = -bw;
-        int nextX = W;
+        int nextX = bxo + W;
         if (showCloseButton) {
-            closeX = W - bw;
+            closeX = nextX - bw;
             nextX = closeX;
         }
         int maxX = -bw;
@@ -3214,9 +3220,6 @@ class App {
         // 固定灰色。关闭按钮保留标志性的 Windows 红色。
         int capHover = capHoverStyle.BgOr(0);
         int closeRed = closeHoverStyle.BgOr(0);
-        // 阴影带把内容轮廓推离画布原点：按钮条带挂在内容区
-        // 顶部（offY），水平布局用传入的 W（已扣掉两侧 band）。
-        int capY = this.ShapeOffY();
         if (showThemeButton && themeH) {
             c.FillRect(themeX, capY, bw, stripH, capHover);
         }
@@ -3230,7 +3233,18 @@ class App {
             c.FillRect(maxX, capY, bw, stripH, capHover);
         }
         if (showCloseButton && closeH) {
-            c.FillRect(closeX, capY, bw, stripH, closeRed);
+            // 异形圆角轮廓下关闭按钮坐在右上圆角里：悬停红也按
+            // 轮廓圆角裁掉右上角，方角红块会顶出轮廓弧、盖住阴影。
+            // 半径收小 2 逻辑像素：标题栏圆角的抗锯齿边/描边在
+            // 弧外留一圈 1-2px 的浅色月牙，红若与轮廓弧完全同心
+            // 就盖不住它（火绒的红是直接填到阴影边的）。
+            if (shapeMode != 0 && shapeRadius > 0) {
+                int cr = shapeRadius > 2 ? shapeRadius - 2 : 0;
+                c.FillRoundRectIn(closeX, capY, bw, stripH,
+                                  this.Scale(cr), Corner.TR(), closeRed);
+            } else {
+                c.FillRect(closeX, capY, bw, stripH, closeRed);
+            }
         }
 
         // 标题字形以 Windows 和微信使用的
@@ -3415,9 +3429,11 @@ class App {
                 hitTester.RegisterRect(capActionIds[i], px, py, pw, ph2, 3);
                 px = px - Scale(8);
             }
-            // 原生保护带盖到最左一颗胶囊：那里的按下交给
-            // 客户区（按钮命中区），而不是当成窗口拖动。
-            window.SetCaptionZone(W - px);
+            // 原生保护带从窗口右缘盖到最左一颗胶囊：条带内的按下
+            // 交给客户区（按钮命中区），而不是当成窗口拖动。
+            // px 已是画布坐标（含左带），c.Width() - px 恰好是
+            // 右锚条带宽度（含右带）。
+            window.SetCaptionZone(c.Width() - px);
         }
         return themeId;
     }

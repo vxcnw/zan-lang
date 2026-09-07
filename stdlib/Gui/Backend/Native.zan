@@ -861,9 +861,10 @@ class Window {
         #endif
     }
 
-    /// <summary>登记标题栏左侧客户区保护带宽度（设备像素）：
-    /// 条带内 [0, width) 的按下交给客户区（应用按钮命中区），
-    /// 不当作窗口拖动。仅 Windows 后端实现。</summary>
+    /// <summary>登记标题栏右侧客户区保护带宽度（设备像素）：标题栏
+    /// 高度以内、窗口右缘向左 width 的条带 [w-width, w) 内的按下
+    /// 交给客户区（应用按钮/胶囊命中区），不当作窗口拖动。
+    /// 仅 Windows 后端实现。</summary>
     void SetCaptionZone(int width) {
         #if WINDOWS
         Win32Shell.SetCaptionZone((nint)handle, width);
