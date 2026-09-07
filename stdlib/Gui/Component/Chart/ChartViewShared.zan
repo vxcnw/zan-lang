@@ -586,7 +586,8 @@ partial class ChartView {
     }
 
     /// 窗口均值，千分固定点（不会像整数均值那样把 85/7 抹成 12）：
-    /// whole*1000 + rem*1000/cnt，中间量不超过 sum 的量级。
+    /// sum×1000/cnt（×pointG 定点序列再除 g，原始值均值 = sum/(cnt·g)，
+    /// 文本需要 avg_raw×1000 = sum×1000/(cnt·g)），中间量走 long。
     static int SeriesAvg1000(ChartSeries s, int i0, int i1) {
         int sum = 0;
         int cnt = 0;
@@ -596,9 +597,8 @@ partial class ChartView {
             cnt = cnt + 1;
         }
         if (cnt < 1) { return 0; }
-        int whole = sum / cnt;
-        int rem = sum - whole * cnt;
-        return whole * 1000 + (rem * 1000) / cnt;
+        int g = s.pointG > 1 ? s.pointG : 1;
+        return (int)(((long)sum * 1000L) / ((long)cnt * (long)g));
     }
 
     /// 均值显示串（ECharts markLine 默认标签是具体数值，不是
@@ -622,7 +622,9 @@ partial class ChartView {
     /// 均值线的 y 像素：均值可带小数，落在两个数据刻度之间。
     /// YOf 是仿射（y = B + v*C），因此 y(sum/cnt) = y(0) +
     /// (y(sum) - y(0)) / cnt——把 sum 当横向量外推再除以 cnt，
-    /// 不用浮点也能得到亚数据单位的像素位。
+    /// 不用浮点也能得到亚数据单位的像素位。×pointG 定点序列
+    /// 再除 g（sum 本身是定点和）：y(sum/(cnt·g)) =
+    /// y(0) + (y(sum)−y(0))/(cnt·g)。
     static int AverageY(ChartFrame f, ChartSeries s, int i0, int i1) {
         int sum = 0;
         int cnt = 0;
@@ -635,8 +637,9 @@ partial class ChartView {
         int y0 = f.YOf(0, s.axisIndex);
         int ySum = f.YOf(sum, s.axisIndex);
         int diff = ySum - y0;
-        int q = diff >= 0 ? (diff + cnt / 2) / cnt
-                          : 0 - ((0 - diff + cnt / 2) / cnt);
+        int den = cnt * (s.pointG > 1 ? s.pointG : 1);
+        int q = diff >= 0 ? (diff + den / 2) / den
+                          : 0 - ((0 - diff + den / 2) / den);
         return y0 + q;
     }
 
@@ -683,16 +686,19 @@ partial class ChartView {
             // 均值可带小数（104/9=11.56），整数 sum/cnt 会把线打在
             // 11 上、与标签对不上。XOfValue 仿射：x(sum/cnt) = x(0)
             // + (x(sum)-x(0))/cnt，四舍五入得亚数据单位的像素位。
+            // ×pointG 定点序列 sum 是定点和：x(sum/(cnt·g)) =
+            // x(0) + (x(sum)−x(0))/(cnt·g)。
             int lx = 0;
             if (m.kind == "average") {
                 int x0v = f.XOfValue(0);
                 int xSv = f.XOfValue(sum);
                 int diff = xSv - x0v;
-                int q = diff >= 0 ? (diff + cnt / 2) / cnt
-                                  : 0 - ((0 - diff + cnt / 2) / cnt);
+                int den = cnt * (s.pointG > 1 ? s.pointG : 1);
+                int q = diff >= 0 ? (diff + den / 2) / den
+                                  : 0 - ((0 - diff + den / 2) / den);
                 lx = x0v + q;
             } else {
-                lx = f.XOfValue(vx);
+                lx = f.XOfValue(Chart.PointV(vx, s.pointG));
             }
             int col = m.color != 0 ? m.color : Chart.Rgb(30, 144, 255);
             string lt = m.lineType.Length > 0 ? m.lineType : "dashed";
@@ -712,12 +718,14 @@ partial class ChartView {
             string lbl = m.label;
             if (lbl.Length == 0) {
                 if (m.kind == "average") {
-                    lbl = ChartView.Avg1000Text(sum * 1000 / cnt);
+                    int g = s.pointG > 1 ? s.pointG : 1;
+                    lbl = ChartView.Avg1000Text(
+                        (int)(((long)sum * 1000L) / ((long)cnt * (long)g)));
                 } else {
-                    lbl = Convert.ToString(vx);
+                    lbl = Chart.PointText(vx, s.pointG);
                 }
             } else {
-                lbl = lbl.Replace("{value}", Convert.ToString(vx));
+                lbl = lbl.Replace("{value}", Chart.PointText(vx, s.pointG));
             }
             int lw = Canvas.MeasureText(lbl, fs);
             int tx = lx - lw / 2;
@@ -893,9 +901,9 @@ partial class ChartView {
             int val = ChartView.MarkLineValue(m, s, i0, i1);
             if (val == ChartOption.Auto()) { continue; }
             // 均值线画在真实均值处（可带小数），min/max/显式线在
-            // 整数数据位上。
+            // 整数数据位上（×pointG 定点值先除回原始域）。
             int ly = isAvg ? ChartView.AverageY(f, s, i0, i1)
-                           : f.YOf(val, s.axisIndex);
+                           : f.YOf(Chart.PointV(val, s.pointG), s.axisIndex);
             int col = m.color != 0 ? m.color : s.color;
             string lt = m.lineType;
             if (lt.Length == 0) { lt = "dashed"; }
@@ -924,12 +932,12 @@ partial class ChartView {
                     lbl = ChartView.Avg1000Text(
                         ChartView.SeriesAvg1000(s, i0, i1));
                 } else {
-                    lbl = Convert.ToString(val);
+                    lbl = Chart.PointText(val, s.pointG);
                 }
             } else if (lbl.IndexOf("{value}") >= 0) {
-                lbl = lbl.Replace("{value}", Convert.ToString(val));
+                lbl = lbl.Replace("{value}", Chart.PointText(val, s.pointG));
             } else {
-                lbl = lbl + ": " + Convert.ToString(val);
+                lbl = lbl + ": " + Chart.PointText(val, s.pointG);
             }
             int fs = Style.FontFallback(app, "small");
             int lw = Canvas.MeasureText(lbl, fs);

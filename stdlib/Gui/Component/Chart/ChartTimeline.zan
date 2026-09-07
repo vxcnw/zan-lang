@@ -212,7 +212,10 @@ class ChartTimeline {
         }
         idx = ChartTimeline.Clamp(idx, n);
 
-        int playing = app.StateGet(ChartTimeline.TlPlayKey(wid), 0);
+        // 播放态：AutoPlay 过的缺省即播放中（ECharts timeline.autoPlay
+        // : true 起播），用户暂停/恢复后以存储值为准。
+        int playing = app.StateGet(ChartTimeline.TlPlayKey(wid),
+                                    this.intervalMs > 0 ? 1 : 0);
         int barH = ChartTimeline.Height(app);
         int btn = app.Scale(18);
         int pad = app.Scale(2);
@@ -314,6 +317,7 @@ class ChartTimeline {
         if (playing == 1 && this.intervalMs > 0) {
             int now = Window.GetTickMs();
             int last = app.StateGet(ChartTimeline.TlTickKey(wid), 0);
+            if (last == 0) { last = now; }
             int nxt = ChartTimeline.StepPlay(idx, n, last, now, this.intervalMs);
             if (nxt != idx) {
                 app.StateSet(ChartTimeline.TlIdxKey(wid), nxt);

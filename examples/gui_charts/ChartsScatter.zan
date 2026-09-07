@@ -277,33 +277,93 @@ partial class Charts {
         Charts.Show(app, o, x, y, w, h);
     }
 
+    /// ECharts2 scatter4「搭配时间轴」：2002..2011 全国宏观经济
+    /// 关联分析（x=房地产投资 亿元，y=GDP 亿元，各 31 省份，逐点
+    /// 省名标签 + x/y 均值红线），ChartTimeline 播放器条逐帧切换，
+    /// 数据为原例国家统计局真实值（亿元×100 定点，pointG=100）。
     static void Scatter6(App app, int x, int y, int w, int h) {
-        List<Bubble> y2000 = new List<Bubble>{
-            Bubble.Of(40, 70, 20), Bubble.Of(55, 65, 35), Bubble.Of(70, 80, 50),
-            Bubble.Of(30, 50, 12), Bubble.Of(85, 90, 60) };
-        List<Bubble> y2010 = new List<Bubble>{
-            Bubble.Of(48, 75, 24), Bubble.Of(62, 72, 40), Bubble.Of(78, 85, 55),
-            Bubble.Of(38, 58, 16), Bubble.Of(90, 92, 70) };
-        ChartOption a = ChartOption.Of("2000", null,
-            new List<ChartSeries>{ ChartSeries.OfBubbles("2000", y2000) });
-        a.X(ChartAxis.ValueRange(0, 100));
-        a.Y(ChartAxis.ValueRange(0, 100));
-        ChartOption b = ChartOption.Of("2010", null,
-            new List<ChartSeries>{ ChartSeries.OfBubbles("2010", y2010) });
-        b.X(ChartAxis.ValueRange(0, 100));
-        b.Y(ChartAxis.ValueRange(0, 100));
-        Charts.Split2(app, a, b, x, y, w, h);
+        List<string> provs = ChartsMacroData.Provinces();
+        ChartTimeline tl = ChartTimeline.Of();
+        List<string> labels = new List<string>();
+        ChartOption first = null;
+        for (int yi = 0; yi < 10; yi = yi + 1) {
+            List<ChartPoint> pts = new List<ChartPoint>();
+            List<int> es = ChartsMacroData.EstateYear(yi);
+            List<int> gs = ChartsMacroData.GdpYear(yi);
+            for (int i = 0; i < 31; i = i + 1) {
+                ChartPoint p = ChartPoint.Of(es[i], gs[i]);
+                p.name = provs[i];
+                pts.Add(p);
+            }
+            ChartSeries s1 = ChartSeries.OfPoints(Charts.T("GDP", "GDP"), pts);
+            s1.pointG = 100;
+            s1.symbolSize = 5;
+            s1.labelShow = true;
+            ChartMarkLine ya = ChartMarkLine.Average(Charts.T("y average", "y平均值"));
+            ya.color = Chart.Rgb(255, 0, 0);
+            s1.MarkLine(ya);
+            ChartMarkLine xa = ChartMarkLine.Average(Charts.T("x average", "x平均值"));
+            xa.valueIndex = 0;
+            xa.color = Chart.Rgb(255, 0, 0);
+            s1.MarkLine(xa);
+            ChartOption fr = ChartOption.Of(Charts.T(
+                    Convert.ToString(2002 + yi) + " National economy (GDP vs real estate)",
+                    Convert.ToString(2002 + yi) + "全国宏观经济关联分析（GDP vs 房地产）"),
+                null, new List<ChartSeries>{ s1 });
+            if (yi == 0) {
+                fr.titleSub = Charts.T("Data from NBS", "数据来自国家统计局");
+            }
+            ChartAxis xax = ChartAxis.ValueRange(0, 3400);
+            xax.title = Charts.T("Real estate (100M CNY)", "房地产（亿元）");
+            fr.X(xax);
+            ChartAxis yax = ChartAxis.ValueRange(0, 53500);
+            yax.title = Charts.T("GDP (100M CNY)", "GDP（亿元）");
+            fr.Y(yax);
+            tl = tl.Frame(fr);
+            labels.Add(Convert.ToString(2002 + yi));
+            if (yi == 0) { first = fr; }
+        }
+        tl = tl.Labels(labels).AutoPlay(1000);
+        // 布局：图表占上部，播放器条贴底（同 pie7）。
+        int key = Charts.KeyOf(Charts.selected.Get(), 0);
+        int barH = ChartTimeline.Height(app);
+        int idx = ChartTimeline.TimelineIdxOf(app, key, tl.FrameCount());
+        ChartView.KeyedStatic(ChartTimeline.Merge(first, tl.Current(idx)),
+            key).Render(app, x, y, w, h - barH);
+        tl.Draw(app, key, x, y + h - barH, w);
     }
 
+    /// ECharts2 dataRange1「搭配值域漫游」：500 点 [x=v+rand·v,
+    /// y=rand·v, z=v]（×100 定点 pointG=100），dataRange 竖条
+    /// lightgreen→yellow calculable 按第三维 z 着色/筛选，y 轴挂
+    /// 右侧（ECharts yAxis.position:'right'）。二次 mod 流形替代
+    /// Math.random，无标题无图例同原例。
     static void Scatter7(App app, int x, int y, int w, int h) {
-        List<Bubble> bs = new List<Bubble>();
-        for (int i = 0; i < 40; i = i + 1) {
-            bs.Add(Bubble.Of((i * 17 + 3) % 95, (i * 23 + 9) % 90, 4 + (i * 7) % 30));
+        List<ChartPoint> pts = new List<ChartPoint>();
+        for (int i = 0; i < 500; i = i + 1) {
+            int v = (i * i * 11 + i * 271 + 97) % 10001;
+            int rx = (i * i * 7 + i * 89 + 41) % 10001;
+            int ry = (i * i * 13 + i * 23 + 617) % 10001;
+            ChartPoint p = ChartPoint.Of(v + rx * v / 10000, ry * v / 10000);
+            p.z = v;
+            pts.Add(p);
         }
-        ChartOption o = ChartOption.Of(Charts.T("Range roam", "值域漫游散点"),
-            null, new List<ChartSeries>{ ChartSeries.OfBubbles(Charts.T("GDP", "GDP"), bs) });
-        o.X(ChartAxis.ValueRange(0, 100));
-        o.Y(ChartAxis.ValueRange(0, 100));
+        ChartSeries s1 = ChartSeries.OfPoints(Charts.T("scatter1", "scatter1"), pts);
+        s1.pointG = 100;
+        s1.symbolSize = 5;
+        ChartOption o = ChartOption.Of(Charts.T("", ""),
+            null, new List<ChartSeries>{ s1 });
+        o.showLegend = false;
+        ChartAxis xa = ChartAxis.Value();
+        ChartAxis ya = ChartAxis.Value();
+        ya.position = "right";
+        o.X(xa);
+        o.Y(ya);
+        o.VisualRange(0, 100, new List<int>{
+            Chart.Rgb(173, 255, 47), Chart.Rgb(255, 255, 0) });
+        o.dataRangeShow = true;
+        o.dataRangeCalculable = true;
+        o.dataRangeSplit = 5;
         Charts.Show(app, o, x, y, w, h);
     }
 

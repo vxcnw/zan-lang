@@ -122,11 +122,21 @@ partial class ChartView {
         int ySpan = maxYN - yLo;
         if (xSpan < 1) { xSpan = 1; }
         if (ySpan < 1) { ySpan = 1; }
-        int leftGut = Canvas.MeasureText(Convert.ToString(maxYN), axisFs) + app.Scale(12);
+        // ECharts yAxis.position："right" 把 y 刻度标签挂到绘图区
+        // 右侧（dataRange1 原例）；Core/Hover 布局必须一致。
+        bool yRight = o.yAxes.Count > 0 && o.yAxes[0].position == "right";
+        int yGut = Canvas.MeasureText(Convert.ToString(maxYN), axisFs) + app.Scale(12);
+        int leftGut = yRight ? app.Scale(6) : yGut;
+        int rightGut = yRight ? yGut : 0;
         int botGut = Canvas.FontHeight(axisFs) + app.Scale(8);
+        // ECharts2 value 轴 nameLocation 缺省 end：x 轴名在刻度标签
+        // 下方再占一行（Core/Hover 布局必须一致）。
+        if (o.xAxes.Count > 0 && o.xAxes[0].title.Length > 0) {
+            botGut = botGut + Canvas.FontHeight(axisFs) + app.Scale(4);
+        }
         int plotX = x + pad + leftGut;
         int plotY = top;
-        int plotW = (x + w - pad) - plotX;
+        int plotW = (x + w - pad - rightGut) - plotX;
         int plotH = (y + h - zoomH - pad - botGut) - plotY;
         if (plotW < app.Scale(20)) { plotW = app.Scale(20); }
         if (plotH < app.Scale(20)) { plotH = app.Scale(20); }
@@ -139,8 +149,20 @@ partial class ChartView {
         // 量程时用 smartSteps 的步长数（scale:true 紧致包络）。
         int yTicks = yTicksAuto;
         if (o.yAxes.Count > 0 && o.yAxes[0].ticks > 0) { yTicks = o.yAxes[0].ticks; }
+        // 显式 min/max（ValueRange 等）时 ECharts 按 splitNumber
+        // （缺省 5）等分固定域——数据域推导的刻度数不再适用。
+        if (o.yAxes.Count > 0 && o.yAxes[0].ticks <= 0
+                && (o.yAxes[0].max != ChartOption.Auto()
+                    || o.yAxes[0].min != ChartOption.Auto())) {
+            yTicks = 5;
+        }
         int xTicks = xTicksAuto;
         if (o.xAxes.Count > 0 && o.xAxes[0].ticks > 0) { xTicks = o.xAxes[0].ticks; }
+        if (o.xAxes.Count > 0 && o.xAxes[0].ticks <= 0
+                && (o.xAxes[0].max != ChartOption.Auto()
+                    || o.xAxes[0].min != ChartOption.Auto())) {
+            xTicks = 5;
+        }
         for (int k = 0; k <= yTicks; k = k + 1) {
             int gy = plotY + plotH - (k * plotH / yTicks);
             c.FillRect(plotX, gy, plotW, 1, sGrid.BgOr(0));
@@ -149,7 +171,11 @@ partial class ChartView {
                 vs = o.yAxes[0].labelFormatter.Replace("{value}", vs);
             }
             int vw = Canvas.MeasureText(vs, axisFs);
-            c.DrawText(plotX - app.Scale(6) - vw, Canvas.CenterTextYAt(gy, axisFs), vs, sAxis.FgOr(0), axisFs);
+            if (yRight) {
+                c.DrawText(plotX + plotW + app.Scale(6), Canvas.CenterTextYAt(gy, axisFs), vs, sAxis.FgOr(0), axisFs);
+            } else {
+                c.DrawText(plotX - app.Scale(6) - vw, Canvas.CenterTextYAt(gy, axisFs), vs, sAxis.FgOr(0), axisFs);
+            }
         }
         int xDiv = maxXN - xLo;
         if (xDiv < 1) { xDiv = 1; }
@@ -185,8 +211,22 @@ partial class ChartView {
                 c.DrawTextCentered(gx - xw / 2, plotY + plotH + app.Scale(4), xw, botGut, xs, sAxis.FgOr(0), axisFs);
             }
         }
-        c.FillRect(plotX, plotY, app.Scale(2), plotH, sAxis.BgOr(0));
+        // y 轴线随 position 挂左/右；x 轴线始终在底部。
+        int yaxX = yRight ? plotX + plotW - app.Scale(2) : plotX;
+        c.FillRect(yaxX, plotY, app.Scale(2), plotH, sAxis.BgOr(0));
         c.FillRect(plotX, plotY + plotH, plotW, app.Scale(2), sAxis.BgOr(0));
+        if (o.xAxes.Count > 0 && o.xAxes[0].title.Length > 0) {
+            int txw = Canvas.MeasureText(o.xAxes[0].title, axisFs);
+            c.DrawText(plotX + plotW - txw,
+                plotY + plotH + Canvas.FontHeight(axisFs) + app.Scale(6),
+                o.xAxes[0].title, sAxis.FgOr(0), axisFs);
+        }
+        if (o.yAxes.Count > 0 && o.yAxes[0].title.Length > 0) {
+            // 面板头（标题/副标题/图例）之下没有留白行，y 轴名画在
+            // 绘图区左上内侧（ECharts 轴顶端语义，不与头部相撞）。
+            c.DrawText(plotX + app.Scale(4), plotY + app.Scale(2),
+                o.yAxes[0].title, sAxis.FgOr(0), axisFs);
+        }
         if (zoomH > 0) {
             Chart.DrawZoomBar(app, plotX, plotW, y + h - app.Scale(18),
                 app.Scale(12), o.iwid, fullN);
@@ -227,7 +267,11 @@ partial class ChartView {
                         int col = s.color;
                         if (s.points[j].color != 0) { col = s.points[j].color; }
                         if (ramp) {
-                            int dv = Chart.PointV(s.points[j].y, s.pointG);
+                            // dataRange/色带按第三维 z（ECharts 多维 data
+                            // 的末维，dataRange1 的 value[2]）映射；
+                            // 未带 z 的点回落 y。
+                            int dv = Chart.PointV(s.points[j].z != 0
+                                ? s.points[j].z : s.points[j].y, s.pointG);
                             if (dv < dLo) { dv = dLo; }
                             if (dv > dHi) { dv = dHi; }
                             col = Chart.RampAt(o.rampColors, (dv - dLo) * 1000 / dSpan);
@@ -249,10 +293,18 @@ partial class ChartView {
                             if (v > 0) { jr = v; }
                         }
                         if (!Chart.DRangeOk(app, o, o.iwid, dLo, dHi,
-                                Chart.PointV(s.points[j].y, s.pointG))) {
+                                Chart.PointV(s.points[j].z != 0
+                                    ? s.points[j].z : s.points[j].y, s.pointG))) {
                             col = Chart.Rgb(204, 204, 204);
                         }
                         Chart.DrawSymbol(c, px, py, jr, shape, col, bCol, bW);
+                        // 系列 labelShow（ECharts itemStyle.normal.label.
+                        // show + formatter {b}）：逐点名字标在符号右侧。
+                        if (s.labelShow && s.points[j].name.Length > 0) {
+                            c.DrawText(px + jr + app.Scale(3),
+                                Canvas.CenterTextYAt(py, axisFs),
+                                s.points[j].name, sAxis.FgOr(0), axisFs);
+                        }
                         j = j + 1;
                     }
                 }
@@ -285,7 +337,12 @@ partial class ChartView {
                 ChartSeries s2 = o.series[r3];
                 if (s2.hidden) { continue; }
                 if (s2.marks.Count > 0) { ChartView.DrawPointsMarkPoints(app, f, s2, i0, i1); }
-                if (s2.markLines.Count > 0) { ChartView.DrawSeriesMarkLines(app, f, s2, i0, i1, o); }
+                if (s2.markLines.Count > 0) {
+                    ChartView.DrawSeriesMarkLines(app, f, s2, i0, i1, o);
+                    // valueIndex:0 的 x 轴标注线（scatter4 的 x平均值
+                    // 竖线）由专门通道绘制，DrawSeriesMarkLines 跳过它。
+                    ChartView.DrawValueXMarkLines(app, f, s2, i0, i1);
+                }
             }
         }
     }
@@ -349,11 +406,21 @@ partial class ChartView {
         int ySpan = maxYN - yLo;
         if (xSpan < 1) { xSpan = 1; }
         if (ySpan < 1) { ySpan = 1; }
-        int leftGut = Canvas.MeasureText(Convert.ToString(maxYN), axisFs) + app.Scale(12);
+        // ECharts yAxis.position："right" 把 y 刻度标签挂到绘图区
+        // 右侧（dataRange1 原例）；Core/Hover 布局必须一致。
+        bool yRight = o.yAxes.Count > 0 && o.yAxes[0].position == "right";
+        int yGut = Canvas.MeasureText(Convert.ToString(maxYN), axisFs) + app.Scale(12);
+        int leftGut = yRight ? app.Scale(6) : yGut;
+        int rightGut = yRight ? yGut : 0;
         int botGut = Canvas.FontHeight(axisFs) + app.Scale(8);
+        // ECharts2 value 轴 nameLocation 缺省 end：x 轴名在刻度标签
+        // 下方再占一行（Core/Hover 布局必须一致）。
+        if (o.xAxes.Count > 0 && o.xAxes[0].title.Length > 0) {
+            botGut = botGut + Canvas.FontHeight(axisFs) + app.Scale(4);
+        }
         int plotX = x + pad + leftGut;
         int plotY = top;
-        int plotW = (x + w - pad) - plotX;
+        int plotW = (x + w - pad - rightGut) - plotX;
         int plotH = (y + h - zoomH - pad - botGut) - plotY;
         if (plotW < app.Scale(20)) { plotW = app.Scale(20); }
         if (plotH < app.Scale(20)) { plotH = app.Scale(20); }
