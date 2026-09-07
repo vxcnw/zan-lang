@@ -1292,11 +1292,19 @@ static zan_symbol_t *find_extension_method(zan_irgen_t *g, zan_type_t *recv_ty,
         zan_ast_node_t *p0 = ps->items[0];
         if (!p0 || p0->kind != AST_PARAM || !p0->param.is_this) continue;
         zan_type_t *pt = zan_binder_resolve_type(g->binder, p0->param.type);
-        if (!pt || pt->kind != recv_ty->kind) continue;
-        if ((pt->kind == TYPE_CLASS || pt->kind == TYPE_STRUCT ||
-             pt->kind == TYPE_INTERFACE || pt->kind == TYPE_ENUM) &&
-            pt->sym != recv_ty->sym)
-            continue;
+        if (!pt) continue;
+        /* A bare type parameter (`this T item`) extends every receiver kind:
+         * the kind gate below would compare TYPE_TYPE_PARAM against e.g.
+         * TYPE_STRING and skip the candidate for every receiver, so generic
+         * extensions never resolved. Scoring keeps concrete receivers ahead
+         * (ext_method_score leaves tp receivers at base score). */
+        if (pt->kind != TYPE_TYPE_PARAM) {
+            if (pt->kind != recv_ty->kind) continue;
+            if ((pt->kind == TYPE_CLASS || pt->kind == TYPE_STRUCT ||
+                 pt->kind == TYPE_INTERFACE || pt->kind == TYPE_ENUM) &&
+                pt->sym != recv_ty->sym)
+                continue;
+        }
         int score = ext_method_score(g, m, recv_ty, call, recv_expr, locals);
         if (score > best_score) {
             best_score = score;

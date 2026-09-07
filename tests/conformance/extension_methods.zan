@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace ExtensionMethods;
 
@@ -33,6 +34,17 @@ class PointExtensions {
     }
 }
 
+class GenericExtensions {
+    // 裸类型参数接收者（`this T`）扩展"任何类型"。曾被打分前的 kind 门
+    // 整体跳过：TYPE_TYPE_PARAM 与任何具体接收者 kind 都不等，泛型扩展
+    // 因此对所有接收者都解析失败。
+    public static List<T> Singleton<T>(this T item) {
+        List<T> r = new List<T>();
+        r.Add(item);
+        return r;
+    }
+}
+
 class Program {
     static void Main() {
         int n = 21;
@@ -48,5 +60,8 @@ class Program {
         p.Y = 4;
         Console.WriteLine(p.Sum());
         Console.WriteLine(p.Scaled(10));
+
+        List<string> one = "solo".Singleton();
+        Console.WriteLine(Convert.ToString(one.Count) + ":" + one[0]);
     }
 }
