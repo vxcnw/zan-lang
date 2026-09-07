@@ -2395,6 +2395,68 @@ static void ca_hoist_spine(zan_irgen_t *g, zan_ast_node_t **slot,
     }
 }
 
+/* Address of the element selected by `expr` (an AST_INDEX node) in its
+ * container's backing buffer, for in-place stores of struct elements
+ * (`l[i].field = v`, `arr[i].field = v`): the index expression read as a
+ * value yields a temporary copy, so a field pointer into it would drop
+ * the write. Handles List (word-packed data buffer), rank-1 arrays and
+ * spans; returns NULL for any other shape so the caller can fall back.
+ * Bounds checks mirror the whole-element store paths. */
+static LLVMValueRef emit_struct_elem_ptr(zan_irgen_t *g, zan_ast_node_t *expr,
+                                         local_scope_t *locals) {
+    zan_ast_node_t *base = expr->index.object;
+    zan_type_t *bt = infer_expr_type(g, base, locals);
+    if (!bt) return NULL;
+    LLVMTypeRef i64 = LLVMInt64TypeInContext(g->ctx);
+    LLVMTypeRef i8p = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
+    LLVMValueRef idx = emit_expr(g, expr->index.index, locals);
+    if (LLVMGetTypeKind(LLVMTypeOf(idx)) == LLVMIntegerTypeKind &&
+        LLVMGetIntTypeWidth(LLVMTypeOf(idx)) < 64)
+        idx = LLVMBuildSExt(g->builder, idx, i64, "ix");
+    if (type_named(bt, "List", 4)) {
+        LLVMValueRef raw = emit_expr(g, base, locals);
+        LLVMValueRef list_ptr = LLVMBuildBitCast(g->builder, raw,
+            LLVMPointerType(g->list_struct_type, 0), "lptr");
+        LLVMValueRef count = LLVMBuildLoad2(g->builder, i64,
+            LLVMBuildStructGEP2(g->builder, g->list_struct_type, list_ptr, 0,
+                "cf"), "cnt");
+        emit_index_bounds_check(g, idx, count, expr->loc, "list");
+        idx = emit_index_safe_bounds(g, idx, count, expr->loc, "list");
+        idx = slot_word_index(g, idx, elem_slot_words(g, container_elem_type(bt)));
+        LLVMValueRef data = LLVMBuildLoad2(g->builder, LLVMPointerType(i64, 0),
+            LLVMBuildStructGEP2(g->builder, g->list_struct_type, list_ptr, 2,
+                "df"), "data");
+        LLVMValueRef ep = LLVMBuildGEP2(g->builder, i64, data, &idx, 1, "ep");
+        return LLVMBuildBitCast(g->builder, ep, i8p, "epb");
+    }
+    if (bt->kind == TYPE_ARRAY && bt->array_rank == 1) {
+        LLVMValueRef arr = emit_expr(g, base, locals);
+        emit_index_bounds_check(g, idx, zan_array_len(g, arr), expr->loc, "array");
+        idx = emit_index_safe_bounds(g, idx, zan_array_len(g, arr),
+            expr->loc, "array");
+        zan_type_t *et = container_elem_type(bt);
+        LLVMTypeRef etl = et ? map_type(g, et) : i64;
+        LLVMValueRef typed = LLVMBuildBitCast(g->builder, arr,
+            LLVMPointerType(etl, 0), "arrp");
+        LLVMValueRef ep = LLVMBuildGEP2(g->builder, etl, typed, &idx, 1, "ep");
+        return LLVMBuildBitCast(g->builder, ep, i8p, "epb");
+    }
+    if (is_span_type(bt)) {
+        LLVMValueRef sv = emit_expr(g, base, locals);
+        LLVMValueRef sbase = LLVMBuildExtractValue(g->builder, sv, 0, "spb");
+        LLVMValueRef slen = LLVMBuildExtractValue(g->builder, sv, 1, "spl");
+        emit_index_bounds_check(g, idx, slen, expr->loc, "span");
+        idx = emit_index_safe_bounds(g, idx, slen, expr->loc, "span");
+        zan_type_t *et = container_elem_type(bt);
+        LLVMTypeRef etl = et ? map_type(g, et) : i64;
+        LLVMValueRef typed = LLVMBuildBitCast(g->builder, sbase,
+            LLVMPointerType(etl, 0), "spp");
+        LLVMValueRef ep = LLVMBuildGEP2(g->builder, etl, typed, &idx, 1, "ep");
+        return LLVMBuildBitCast(g->builder, ep, i8p, "epb");
+    }
+    return NULL;
+}
+
     static LLVMValueRef emit_expr_assignment(zan_irgen_t *g, zan_ast_node_t *expr,
             local_scope_t *locals) {
             LLVMValueRef right;
@@ -3220,7 +3282,40 @@ binding_lowered:
                          * set_Prop(value) instead of the backing slot */
                         zan_symbol_t *psym = get_field_sym(cls, expr->binary.left->member.name);
                         zan_symbol_t *setter = property_setter_sym(g, psym);
-                        if (setter) {
+                        if (obj_expr->kind == AST_INDEX && cls->kind == SYM_STRUCT) {
+                            /* struct element (`l[i].field = v` / `arr[i].field =
+                             * v`): the index expression read as a value yields a
+                             * temporary copy, so a field pointer into it would
+                             * drop the store. Resolve the element's address in
+                             * the backing buffer and store in place. */
+                            zan_type_t *et = infer_expr_type(g, obj_expr, locals);
+                            LLVMTypeRef st = get_struct_llvm_type(g, cls);
+                            LLVMValueRef ep = (st && !type_is_binding(et))
+                                ? emit_struct_elem_ptr(g, obj_expr, locals) : NULL;
+                            if (ep) {
+                                LLVMValueRef sptr = LLVMBuildBitCast(g->builder, ep,
+                                    LLVMPointerType(st, 0), "ep.s");
+                                if (setter) {
+                                    emit_property_setter_call(g, setter, et, sptr,
+                                        right, obj_expr, expr->binary.right, locals);
+                                } else {
+                                    LLVMValueRef fptr = emit_field_ptr(g, cls, st,
+                                        sptr, fi, "gfld");
+                                    zan_symbol_t *gfsym = get_field_sym(cls,
+                                        expr->binary.left->member.name);
+                                    zan_type_t *gft = gfsym ? field_store_type(g,
+                                        gfsym, et) : NULL;
+                                    if (gft && is_rc_managed_type(gft)) {
+                                        emit_rc_store_field(g, gft, fptr, right,
+                                            expr->binary.right, locals,
+                                            (gfsym->modifiers & MOD_WEAK) ? 1 : 0);
+                                    } else {
+                                        zan_store_fit(g, right, fptr);
+                                    }
+                                }
+                                stored = true;
+                            }
+                        } else if (setter) {
                             zan_type_t *rct = infer_expr_type(g, obj_expr, locals);
                             LLVMValueRef rval = emit_guarded_member_object(
                                 g, expr->binary.left, locals);
@@ -4383,6 +4478,38 @@ static LLVMValueRef emit_expr_member_access(zan_irgen_t *g, zan_ast_node_t *expr
             if (cls) {
                 int fi = get_field_index(cls, expr->member.name);
                 if (fi >= 0) {
+                    /* struct element behind an indexer (`l[i].field`): read the
+                     * field straight out of the backing buffer instead of
+                     * copying the whole struct element into a temp first. */
+                    if (expr->member.object->kind == AST_INDEX &&
+                        cls->kind == SYM_STRUCT) {
+                        zan_type_t *et = infer_expr_type(g,
+                            expr->member.object, locals);
+                        LLVMTypeRef st = get_struct_llvm_type(g, cls);
+                        LLVMValueRef ep = (st && !type_is_binding(et))
+                            ? emit_struct_elem_ptr(g, expr->member.object, locals)
+                            : NULL;
+                        if (ep) {
+                            LLVMValueRef sptr = LLVMBuildBitCast(g->builder, ep,
+                                LLVMPointerType(st, 0), "ep.s");
+                            zan_symbol_t *gpsym = get_field_sym(cls,
+                                expr->member.name);
+                            zan_symbol_t *getter = property_getter_sym(g, gpsym);
+                            if (getter) {
+                                return emit_property_getter_call(g, getter, et,
+                                    sptr, expr->member.object, locals);
+                            }
+                            LLVMValueRef field_ptr = emit_field_ptr(g, cls, st,
+                                sptr, fi, "gfld");
+                            zan_type_t *fty = gpsym
+                                ? subst_type_param(gpsym->type, et) : NULL;
+                            LLVMTypeRef ft = fty ? map_type(g, fty)
+                                : LLVMInt64TypeInContext(g->ctx);
+                            return promote_loaded(g,
+                                LLVMBuildLoad2(g->builder, ft, field_ptr, "gfval"),
+                                fty);
+                        }
+                    }
                     /* A property with a custom getter is computed, not read out
                      * of a backing slot: dispatch to the synthesized getter. */
                     zan_symbol_t *psym = get_field_sym(cls, expr->member.name);

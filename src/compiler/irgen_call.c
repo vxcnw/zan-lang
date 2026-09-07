@@ -3224,6 +3224,64 @@ static LLVMValueRef emit_expr_call(zan_irgen_t *g, zan_ast_node_t *expr,
             }
         }
 
+        /* List.Reserve(n) — pre-grow the backing buffer so the next n Adds
+         * never realloc. Parsers and bulk loaders know their target size up
+         * front; Add's doubling growth otherwise memmoves the whole buffer
+         * log2(n) times (a 420k-slot parse moves ~33MB of pure copying). */
+        if (expr->call.callee && expr->call.callee->kind == AST_MEMBER_ACCESS) {
+            zan_ast_node_t *callee = expr->call.callee;
+            zan_istr_t method_name = callee->member.name;
+            if (method_name.len == 7 && memcmp(method_name.str, "Reserve", 7) == 0 &&
+                expr->call.args.count == 1) {
+                zan_ast_node_t *lobj = callee->member.object;
+                zan_type_t *ltype = infer_expr_type(g, lobj, locals);
+                if (ltype && type_named(ltype, "List", 4)) {
+                    LLVMTypeRef i64 = LLVMInt64TypeInContext(g->ctx);
+                    LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
+                    LLVMValueRef raw_ptr = emit_expr(g, lobj, locals);
+                    int recv_own = emit_intrinsic_own_recv(g, lobj, raw_ptr, locals);
+                    LLVMValueRef list_ptr = LLVMBuildBitCast(g->builder, raw_ptr,
+                        LLVMPointerType(g->list_struct_type, 0), "lptr");
+                    LLVMValueRef cap_ptr = LLVMBuildStructGEP2(g->builder,
+                        g->list_struct_type, list_ptr, 1, "capp");
+                    LLVMValueRef cap = LLVMBuildLoad2(g->builder, i64, cap_ptr, "cap");
+                    LLVMValueRef want = coerce_int_to(g,
+                        emit_expr(g, expr->call.args.items[0], locals), i64);
+                    /* negative or no-op request leaves the list untouched */
+                    LLVMValueRef need_grow = zan_icmp(g->builder, LLVMIntSGT,
+                        want, cap, "grow");
+                    LLVMBasicBlockRef grow_bb = LLVMAppendBasicBlockInContext(
+                        g->ctx, g->current_fn, "list.reserve");
+                    LLVMBasicBlockRef done_bb = LLVMAppendBasicBlockInContext(
+                        g->ctx, g->current_fn, "list.reserved");
+                    LLVMBuildCondBr(g->builder, need_grow, grow_bb, done_bb);
+                    LLVMPositionBuilderAtEnd(g->builder, grow_bb);
+                    LLVMValueRef data_field = LLVMBuildStructGEP2(g->builder,
+                        g->list_struct_type, list_ptr, 2, "df");
+                    LLVMValueRef old_data = LLVMBuildLoad2(g->builder,
+                        LLVMPointerType(i64, 0), data_field, "od");
+                    LLVMValueRef old_data_raw = LLVMBuildBitCast(g->builder,
+                        old_data, i8ptr, "odr");
+                    unsigned lwords = elem_slot_words(g, container_elem_type(ltype));
+                    LLVMValueRef new_size = zan_mul(g->builder, want,
+                        LLVMConstInt(i64, (unsigned long long)(8 * lwords), 0), "nsz");
+                    LLVMValueRef realloc_args[] = { old_data_raw, new_size };
+                    LLVMValueRef new_data_raw = zan_call2(g->builder,
+                        LLVMFunctionType(i8ptr, (LLVMTypeRef[]){ i8ptr, i64 }, 2, 0),
+                        g->fn_realloc, realloc_args, 2, "nd");
+                    zan_irgen_emit_oom_check(g, g->current_fn, new_data_raw);
+                    LLVMValueRef new_data = LLVMBuildBitCast(g->builder, new_data_raw,
+                        LLVMPointerType(i64, 0), "ndt");
+                    LLVMBuildStore(g->builder, new_data, data_field);
+                    LLVMBuildStore(g->builder, want, cap_ptr);
+                    LLVMBuildBr(g->builder, done_bb);
+                    LLVMPositionBuilderAtEnd(g->builder, done_bb);
+                    emit_intrinsic_drop_recv(g, lobj, raw_ptr, locals, recv_own);
+                    return LLVMConstInt(LLVMInt32TypeInContext(g->ctx), 0, 0);
+                }
+            }
+        }
+
         /* List.AddRange(other) — append every element of another list */
         if (expr->call.callee && expr->call.callee->kind == AST_MEMBER_ACCESS) {
             zan_ast_node_t *callee = expr->call.callee;

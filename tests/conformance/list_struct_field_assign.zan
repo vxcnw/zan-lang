@@ -1,0 +1,56 @@
+// struct 元素经下标的字段存取必须就地落到容器缓冲区：
+//   list[i].field = v / arr[i].field = v（写）
+//   list[i].field（读）
+// 曾经的实现把下标表达式读成临时拷贝，写字段落在拷贝上——
+// 赋值静默丢失（读写都多一趟整 struct 拷贝）。
+using System;
+using System.Collections.Generic;
+
+struct P {
+    public int x;
+    public int y;
+    public string tag;
+}
+
+class Program {
+    static void Main() {
+        List<P> l = new List<P>();
+        for (int i = 0; i < 3; i = i + 1) {
+            P p = new P();
+            p.x = i;
+            p.y = 0 - i;
+            p.tag = "init";
+            l.Add(p);
+        }
+        // 写：单字段直改，其余字段必须原样保留
+        l[1].x = 42;
+        l[1].y = -42;
+        l[1].tag = "patched";
+        Console.WriteLine(Convert.ToString(l[1].x));
+        Console.WriteLine(Convert.ToString(l[1].y));
+        Console.WriteLine(l[1].tag);
+        Console.WriteLine(Convert.ToString(l[0].x));
+        Console.WriteLine(Convert.ToString(l[2].x));
+        // 读：通过下标读字段（含字符串字段）
+        Console.WriteLine(Convert.ToString(l[0].y));
+        Console.WriteLine(l[2].tag);
+        // 数组元素同规则
+        P[] arr = new P[2];
+        P q = new P();
+        q.x = 7;
+        q.y = 8;
+        q.tag = "a";
+        arr[0] = q;
+        arr[1] = q;
+        arr[1].x = 70;
+        arr[1].tag = "b";
+        Console.WriteLine(Convert.ToString(arr[1].x));
+        Console.WriteLine(arr[1].tag);
+        Console.WriteLine(Convert.ToString(arr[0].x));
+        Console.WriteLine(arr[0].tag);
+        // 写入后 List 的其余元素不受牵连（下标/步长不串位）
+        Console.WriteLine(Convert.ToString(l[1].x) + "," + Convert.ToString(l[2].x));
+        // 计数不变
+        Console.WriteLine(Convert.ToString(l.Count));
+    }
+}

@@ -30,6 +30,7 @@ static const zan_builtin_member_t members_string[] = {
 static const zan_builtin_member_t members_list[] = {
     { "Count",       'P', "int Count" },
     { "Add",         'M', "void Add(T item)" },
+    { "Reserve",     'M', "void Reserve(int n)" },
     { "AddRange",    'M', "void AddRange(List<T> items)" },
     { "Insert",      'M', "void Insert(int index, T item)" },
     { "RemoveAt",    'M', "void RemoveAt(int index)" },
