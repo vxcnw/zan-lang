@@ -2,6 +2,7 @@ using System;
 using Gui;
 using Gui.Widget;
 using Gui.Backend;
+using Gui.Component.Chart;
 
 namespace Gui.Component.DataTable;
 
@@ -114,22 +115,21 @@ partial class DataTable {
         }
         int th = app.Scale(2);
         if (col.sparkKind == 2) {
-            int tint = DataTable.ColorAlpha(spark, 45);
-            int negTint = DataTable.ColorAlpha(sparkNeg, 45);
             int x = xs[0];
             int seg = 1;
             while (x < xs[n - 1]) {
                 while (seg < n - 1 && xs[seg] <= x) { seg = seg + 1; }
-                double t = 0.0;
+                // 列顶以 1/256 px 定点插值，交给 FillColumnAA 按小数
+                // 覆盖率混合边界行。整行硬跳的 1px 竖条在缓坡上是
+                // 阶梯锯齿，而且条顶与上方 AA 折线之间会露出一条
+                // 未覆盖的月牙缝。
+                int yF = ys[seg - 1] * 256;
                 if (xs[seg] > xs[seg - 1]) {
-                    t = (double)(x - xs[seg - 1]) / (double)(xs[seg] - xs[seg - 1]);
+                    yF = yF + (ys[seg] - ys[seg - 1]) * (x - xs[seg - 1]) * 256
+                        / (xs[seg] - xs[seg - 1]);
                 }
-                int y = ys[seg - 1] + (int)(t * (double)(ys[seg] - ys[seg - 1]));
-                if (y <= zeroY) {
-                    c.FillRect(x, y, 1, zeroY - y, tint);
-                } else {
-                    c.FillRect(x, zeroY, 1, y - zeroY, negTint);
-                }
+                int col = yF <= zeroY * 256 ? spark : sparkNeg;
+                ChartView.FillColumnAA(c, x, yF, zeroY, col, false, 45, 45, 45);
                 x = x + 1;
             }
         }

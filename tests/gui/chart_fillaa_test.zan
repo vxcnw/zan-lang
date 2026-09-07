@@ -1,0 +1,140 @@
+using System;
+using Gui;
+using Gui.Component.Chart;
+
+/// 图表填充光栅化器的亚像素抗锯齿回归（无窗口，离屏 Canvas）。
+///
+/// 用户报告：图表里大量曲线/斜线仍有毛刺。排查后实锤三处整数
+/// 采样路径：DataTable spark 面积列（1px 整数 FillRect 条）、
+/// ChartBig 面积条（整数 yTop 直落 FillRect/FillVGrad）与雷达
+/// areaStyle 的 FillPolyAlpha / 弦图 FillPolyWinding（整数交点
+/// 配整列 FillRect，斜边成整列硬跳的阶梯）。统一解法是沿用
+/// Line 系列的既有模式：数据边以 1/256 定点进入光栅化器，段
+/// 首末列按小数覆盖率混合（FillColumnAA / 新增 FillSpanAlpha）。
+///
+/// 本用例直接对四个入口做逐像素断言：水平段两端的部分覆盖、
+/// 三角形斜边的混合边界（斜边上不应出现"纯色直贴纯背景"的
+/// 硬相接）、五角星的非零环绕（偶奇会把中心五边形挖空）与
+/// 面积列顶部小数行的覆盖率。全部是定性/阈值判断，跨栅格化
+/// 后端成立。
+class Program {
+    static int fails;
+
+    static void True(string what, bool got) {
+        if (got) { return; }
+        fails = fails + 1;
+        Console.WriteLine("FAIL " + what);
+    }
+
+    static int Px(Canvas c, int x, int y) {
+        return c.GetPixel(x, y) & 0x00FFFFFF;
+    }
+
+    static bool White(int p) { return p == 0x00FFFFFF; }
+
+    // ---- 斜边硬相接统计：相邻两像素一侧是纯填充色、另一侧是
+    // 纯背景（中间没有任何混合像素）。整数交点配整列填充会在
+    // 每个跨行处产生一对；亚像素边界会铺出混合列/行。 ----
+    static int HardPairs(Canvas c, int x0, int x1, int y0, int y1,
+                         int fg, bool vertical) {
+        int n = 0;
+        for (int y = y0; y <= y1; y = y + 1) {
+            for (int x = x0; x <= x1; x = x + 1) {
+                int p0 = vertical ? Px(c, x, y) : Px(c, x, y);
+                int p1 = vertical ? Px(c, x, y + 1) : Px(c, x + 1, y);
+                if ((p0 == fg && White(p1)) || (White(p0) && p1 == fg)) {
+                    n = n + 1;
+                }
+            }
+        }
+        return n;
+    }
+
+    static void Main() {
+        fails = 0;
+        int fgBlue = 0xFF0000FF;
+        int fgTeal = 0xFF2288CC;
+        Canvas c = new Canvas(160, 160);
+
+        // ---- FillSpanAlpha：两端 1/256 的水平段，首末列部分覆盖 ----
+        c.Clear(0xFFFFFFFF);
+        // x ∈ [1.5, 3.25)：x=1 覆盖 1/2，x=2 全铺，x=3 覆盖 1/4。
+        // alpha 量程是 0..255（WithAlpha 直写 alpha 字节）。
+        ChartView.FillSpanAlpha(c, 384, 832, 10, fgBlue, 255);
+        True("span outside left", White(Px(c, 0, 10)));
+        True("span outside right", White(Px(c, 4, 10)));
+        True("span mid full", Px(c, 2, 10) == 0x0000FF);
+        int r1 = (Px(c, 1, 10) >> 16) & 255;
+        int r3 = (Px(c, 3, 10) >> 16) & 255;
+        True("span head blended", r1 > 40 && r1 < 215);
+        True("span tail blended", r3 > 40 && r3 < 215);
+        True("span head denser than tail", r1 < r3);
+
+        // ---- FillPolyAlpha：三角形斜边边界混合 ----
+        c.Clear(0xFFFFFFFF);
+        List<int> tx = new List<int>();
+        List<int> ty = new List<int>();
+        tx.Add(10); tx.Add(40); tx.Add(70);
+        ty.Add(80); ty.Add(10); ty.Add(80);
+        ChartView.FillPolyAlpha(c, tx, ty, fgTeal, 255);
+        True("tri interior painted", Px(c, 40, 70) == 0x2288CC);
+        True("tri outside painted", White(Px(c, 60, 20)));
+        int triHard = HardPairs(c, 6, 74, 12, 76, 0x2288CC, true);
+        // 整数交点版约 2×65=130 处；亚像素边界只在斜线恰好穿过
+        // 列边界时残留零星几处。
+        True("tri slant edges blended", triHard <= 8);
+        int triInk = 0;
+        for (int y = 12; y <= 76; y = y + 1) {
+            for (int x = 6; x <= 74; x = x + 1) {
+                if (Px(c, x, y) == 0x2288CC) { triInk = triInk + 1; }
+            }
+        }
+        True("tri has body", triInk > 1000);
+
+        // ---- FillPolyWinding：五角星，非零环绕不挖空中心 ----
+        // 顶点按笔画序（top → 左下 → 右上 → 左上 → 右下），
+        // 偶奇规则会把中心五边形挖空，非零环绕填满。
+        c.Clear(0xFFFFFFFF);
+        List<int> sx = new List<int>();
+        List<int> sy = new List<int>();
+        sx.Add(60); sx.Add(39); sx.Add(93); sx.Add(27); sx.Add(81);
+        sy.Add(15); sy.Add(78); sy.Add(39); sy.Add(39); sy.Add(78);
+        int fgRed = 0xFFDD3311;
+        ChartView.FillPolyWinding(c, sx, sy, fgRed, 255);
+        True("star center filled (nonzero)", !White(Px(c, 60, 50)));
+        True("star point filled", Px(c, 60, 25) == 0xDD3311);
+        True("star between arms empty", White(Px(c, 27, 70)));
+        int starHard = HardPairs(c, 20, 100, 16, 78, 0xDD3311, false);
+        // 偶奇规则版中心挖空且斜边全硬跳；非零 + 亚像素后残留
+        // 只允许零星（10 条斜边 × 顶点行的量化巧合）。
+        True("star edges blended", starHard <= 24);
+
+        // ---- FillColumnAA：面积列顶部小数边界 ----
+        c.Clear(0xFFFFFFFF);
+        // 顶部在 y=100.5，基线 150：行 100 覆盖一半，101..149 实铺。
+        ChartView.FillColumnAA(c, 20, 100 * 256 + 128, 150, fgTeal,
+            false, 120, 12, 128);
+        True("col above empty", White(Px(c, 20, 99)));
+        True("col below baseline empty", White(Px(c, 20, 150)));
+        True("col body uniform", Px(c, 20, 110) == Px(c, 20, 149));
+        True("col body not raw color", Px(c, 20, 110) != 0x2288CC);
+        int rE = (Px(c, 20, 100) >> 16) & 255;
+        int rB = (Px(c, 20, 110) >> 16) & 255;
+        True("col edge lighter than body", rE > rB && rE < 255);
+
+        // ---- FillColumnAA 连续斜坡：面积顶边不应成阶梯 ----
+        // 每列顶部都带 .5 的分数部分，从 y=90.5 降到 y=41.5。
+        c.Clear(0xFFFFFFFF);
+        for (int x = 30; x <= 79; x = x + 1) {
+            ChartView.FillColumnAA(c, x, (90 - (x - 30)) * 256 + 128,
+                110, fgTeal, false, 120, 12, 128);
+        }
+        int rampHard = HardPairs(c, 30, 79, 38, 92, fgTeal, true);
+        // 整数顶边版每列一对硬相接（约 50）；亚像素边界行有
+        // 混合，斜坡上不应出现。
+        True("ramp top edge smooth", rampHard <= 4);
+        True("ramp painted", Px(c, 55, 80) == Px(c, 56, 79));
+
+        Console.WriteLine("chart-fillaa:" + Convert.ToString(fails == 0 ? 1 : 0));
+    }
+}

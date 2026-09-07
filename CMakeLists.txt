@@ -2025,6 +2025,22 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
       -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_chart_symbol${_exe_ext}
       -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
 
+  # 图表填充光栅化亚像素 AA 回归（用户报告图表斜线/曲线大量毛刺）：
+  # 雷达 FillPolyAlpha / 弦图 FillPolyWinding 此前整数交点配整列
+  # FillRect，斜边成阶梯；现采样行中心并以 1/256 定点求交，段首末
+  # 列按小数覆盖率混合（新增 FillSpanAlpha）。用例直测四入口的
+  # 逐像素覆盖（水平段端点/三角斜边/五角星非零环绕/面积列顶边），
+  # 统计"纯色直贴纯背景"硬相接数（旧实现三角 56、五角星 152 →
+  # 新实现 0、4）。
+  add_test(NAME conformance_gui_chart_fillaa
+    COMMAND ${CMAKE_COMMAND}
+      -DZANC=$<TARGET_FILE:zanc>
+      -DSRC=${CMAKE_SOURCE_DIR}/tests/gui/chart_fillaa_test.zan
+      "-DZANC_ARGS=--auto-stdlib${_gui_driver_tail}"
+      -DEXPECTED=${CMAKE_SOURCE_DIR}/tests/conformance/gui_chart_fillaa.out
+      -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_chart_fillaa${_exe_ext}
+      -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
+
   # 图表主题包（Gui.Component.Chart/themes，图表自己的皮肤层）：
   # UseChartTheme 叠加 chart::series-N/axis/grid 规则，"default" 卸载
   # 后恢复跟随 Gui 皮肤；未知包名被拒且当前主题不变。

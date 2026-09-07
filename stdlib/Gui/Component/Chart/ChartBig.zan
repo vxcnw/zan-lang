@@ -240,12 +240,9 @@ class ChartBig {
             List<int> mn = st.colMin[s];
             List<int> mx = st.colMax[s];
             int cn = mn.Count;
-            int fillTop = Chart.WithAlpha(color, 120);
-            int fillBot = Chart.WithAlpha(color, 12);
 
-            int prevX = plotX;
-            int prevY = baseY;
-            bool first = true;
+            List<int> lx = new List<int>();
+            List<int> ly = new List<int>();
             for (int cc = 0; cc < cn; cc = cc + 1) {
                 int px = plotX + cc * plotW / cn;
                 int vTop = mx[cc] * g / 1000;
@@ -254,19 +251,22 @@ class ChartBig {
                 int yTop = plotY + plotH - (int)(((long)vTop - (long)st.axisLo) * (long)plotH / (long)span);
                 int yBot = plotY + plotH - (int)(((long)vBot - (long)st.axisLo) * (long)plotH / (long)span);
                 if (ChartView.HasArea(o)) {
-                    if (o.gradient) {
-                        c.FillVGrad(px, yTop, 1, baseY - yTop, fillTop, fillBot);
-                    } else {
-                        c.FillRect(px, yTop, 1, baseY - yTop,
-                            Chart.WithAlpha(color, 128));
-                    }
+                    // 面积列顶以 1/256 px 定点进 FillColumnAA，边界行
+                    // 按小数覆盖率混合；整数 yTop 的 1px 竖条在缓坡上
+                    // 是整行硬跳的阶梯。
+                    long topNum = ((long)vTop - (long)st.axisLo) * (long)plotH;
+                    int yTopF = (plotY + plotH) * 256
+                        - (int)(topNum * 256 / (long)span);
+                    ChartView.FillColumnAA(c, px, yTopF, baseY, color,
+                        o.gradient, 120, 12, 128);
                 }
                 c.FillRect(px, yTop, 1, yBot - yTop + 1, color);
-                if (!first) { c.DrawLine(prevX, prevY, px, yTop, color, app.Scale(1)); }
-                prevX = px;
-                prevY = yTop;
-                first = false;
+                lx.Add(px);
+                ly.Add(yTop);
             }
+            // 折线一笔连成：逐段 DrawLine 的端点各自实心落像素，
+            // 拐角处双重混合会亮一像素。
+            if (lx.Count > 1) { c.DrawPolyline(lx, ly, color, app.Scale(1)); }
         }
 
         int total = 0;

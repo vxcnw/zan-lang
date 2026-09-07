@@ -1193,8 +1193,10 @@ partial class ChartView {
         }
     }
 
-    /// 多边形扫描线填充（半透明，用于雷达 areaStyle）。逐行求
-    /// 边交点、排序后成对填段；顶点数少（雷达 ≤ 十几轴），
+    /// 多边形扫描线填充（半透明，用于雷达 areaStyle）。逐行在
+    /// 像素中心 (y+0.5) 求边交点（1/256 定点 x）、排序后成对填
+    /// 段；段的首末列按小数覆盖率混合——整数交点配硬 FillRect
+    /// 会让雷达斜边成整列硬跳的阶梯。顶点数少（雷达 ≤ 十几轴），
     /// O(高×边) 足够。
     static void FillPolyAlpha(Canvas c, List<int> px, List<int> py,
                               int color, int alpha) {
@@ -1209,15 +1211,21 @@ partial class ChartView {
         List<int> xs = new List<int>();
         for (int y = y0; y <= y1; y = y + 1) {
             xs.Clear();
+            // 采样行中心 y+0.5（2 倍定点避免小数）：t =
+            // (y+0.5-ya)/(yb-ya)，交点 x*256。半开区间 [min,max)
+            // 防止顶点行重复计入。
+            int yc2 = y * 2 + 1;
             for (int i2 = 0; i2 < n; i2 = i2 + 1) {
                 int j = i2 + 1;
                 if (j == n) { j = 0; }
                 int ya = py[i2];
                 int yb = py[j];
                 if (ya == yb) { continue; }
-                if ((y >= ya && y < yb) || (y >= yb && y < ya)) {
-                    xs.Add(px[i2] + (y - ya) * (px[j] - px[i2]) / (yb - ya));
-                }
+                bool inside = (yc2 >= ya * 2 && yc2 < yb * 2)
+                    || (yc2 >= yb * 2 && yc2 < ya * 2);
+                if (!inside) { continue; }
+                xs.Add(px[i2] * 256
+                    + (yc2 - ya * 2) * (px[j] - px[i2]) * 256 / (2 * (yb - ya)));
             }
             // 插入排序（xs 通常 2~4 个元素）。
             for (int a = 1; a < xs.Count; a = a + 1) {
@@ -1227,9 +1235,24 @@ partial class ChartView {
                 xs[b + 1] = v;
             }
             for (int k = 0; k + 1 < xs.Count; k = k + 2) {
-                int w = xs[k + 1] - xs[k];
-                if (w > 0) { c.FillRect(xs[k], y, w, 1, Chart.WithAlpha(color, alpha)); }
+                FillSpanAlpha(c, xs[k], xs[k + 1], y, color, alpha);
             }
+        }
+    }
+
+    /// 一条水平段的亚像素填充：两端以 1/256 px 给定，首末列按
+    /// 小数覆盖率混合，中间整列实铺。
+    static void FillSpanAlpha(Canvas c, int xF0, int xF1, int y,
+                              int color, int alpha) {
+        if (xF1 <= xF0) { return; }
+        int x0 = xF0 / 256;
+        int x1 = (xF1 - 1) / 256;
+        for (int x = x0; x <= x1; x = x + 1) {
+            int cov = 256;
+            if (x == x0) { cov = cov - (xF0 - x0 * 256); }
+            if (x == x1) { cov = cov - ((x1 + 1) * 256 - xF1); }
+            if (cov <= 0) { continue; }
+            c.FillRect(x, y, 1, 1, Chart.WithAlpha(color, alpha * cov / 256));
         }
     }
 
@@ -1249,18 +1272,23 @@ partial class ChartView {
         for (int y = y0; y <= y1; y = y + 1) {
             xs.Clear();
             ds.Clear();
+            // 与 FillPolyAlpha 同款：采样行中心 y+0.5，交点 1/256
+            // 定点，段首末列小数覆盖率混合（FillSpanAlpha）。
+            int yc2 = y * 2 + 1;
             for (int i2 = 0; i2 < n; i2 = i2 + 1) {
                 int j = i2 + 1;
                 if (j == n) { j = 0; }
                 int ya = py[i2];
                 int yb = py[j];
                 if (ya == yb) { continue; }
-                if ((y >= ya && y < yb) || (y >= yb && y < ya)) {
-                    xs.Add(px[i2] + (y - ya) * (px[j] - px[i2]) / (yb - ya));
-                    int dir = 1;
-                    if (yb < ya) { dir = 0 - 1; }
-                    ds.Add(dir);
-                }
+                bool inside = (yc2 >= ya * 2 && yc2 < yb * 2)
+                    || (yc2 >= yb * 2 && yc2 < ya * 2);
+                if (!inside) { continue; }
+                xs.Add(px[i2] * 256
+                    + (yc2 - ya * 2) * (px[j] - px[i2]) * 256 / (2 * (yb - ya)));
+                int dir = 1;
+                if (yb < ya) { dir = 0 - 1; }
+                ds.Add(dir);
             }
             for (int a = 1; a < xs.Count; a = a + 1) {
                 int v = xs[a];
@@ -1278,10 +1306,7 @@ partial class ChartView {
             for (int k = 0; k + 1 < xs.Count; k = k + 1) {
                 wind = wind + ds[k];
                 if (wind != 0) {
-                    int ww = xs[k + 1] - xs[k];
-                    if (ww > 0) {
-                        c.FillRect(xs[k], y, ww, 1, Chart.WithAlpha(color, alpha));
-                    }
+                    FillSpanAlpha(c, xs[k], xs[k + 1], y, color, alpha);
                 }
             }
         }
