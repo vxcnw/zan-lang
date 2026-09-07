@@ -1516,6 +1516,24 @@ class Win32Shell {
         Win32Shell.SetWindowPos(hwnd, 0, x, y, 0, 0, 1 | 4 | 16);
     }
 
+    /// 把窗口客户区调整为 (scaledW, scaledH) 设备像素（外框随之
+    /// 伸缩，位置不变）。WM_SIZE 走正常路径，应用的画布与布局
+    /// 下一帧自动跟上。登录小窗 → 主窗口这类形态切换用。
+    static void ResizeClient(nint hwnd, int scaledW, int scaledH) {
+        if (hwnd == 0) { return; }
+        nint rc = NativeMemory.Alloc(16);
+        new Span<int>(rc, 1)[0] = 0;
+        new Span<int>(rc + 4, 1)[0] = 0;
+        new Span<int>(rc + 8, 1)[0] = scaledW;
+        new Span<int>(rc + 12, 1)[0] = scaledH;
+        Win32Shell.AdjustWindowRect(rc, 13565952, 0);   // WS_OVERLAPPEDWINDOW
+        int frameW = Win32Shell.S32(rc, 8) - Win32Shell.S32(rc, 0);
+        int frameH = Win32Shell.S32(rc, 12) - Win32Shell.S32(rc, 4);
+        NativeMemory.Free(rc);
+        Win32Shell.SetWindowPos(hwnd, 0, 0, 0, frameW, frameH,
+                                0x2 | 0x4 | 0x10);      // NOMOVE|NOZORDER|NOACTIVATE
+    }
+
     /// 最小化窗口（SW_MINIMIZE）。
     static void Minimize(nint hwnd) { Win32Shell.ShowWindow(hwnd, 6); }
 

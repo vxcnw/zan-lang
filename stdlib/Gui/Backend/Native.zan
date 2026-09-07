@@ -297,6 +297,16 @@ class Window {
         #endif
     }
 
+    /// <summary>把窗口客户区调整为 (w, h) 逻辑像素，外框随之伸缩、
+    /// 位置不变。登录小窗 → 主窗口这类形态切换用；WM_SIZE 走正常
+    /// 路径，画布与布局下一帧自动跟上。</summary>
+    void SetClientSize(int w, int h) {
+        #if WINDOWS
+        int dpiV = Win32Shell.dpi > 0 ? Win32Shell.dpi : 96;
+        Win32Shell.ResizeClient((nint)handle, w * dpiV / 96, h * dpiV / 96);
+        #endif
+    }
+
     /// <summary>在显示器工作区上居中窗口。</summary>
     void Center() {
         #if WINDOWS
