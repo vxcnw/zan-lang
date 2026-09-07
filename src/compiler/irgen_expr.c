@@ -428,6 +428,95 @@ static bool emit_native_memory_call(zan_irgen_t *g, zan_ast_node_t *expr,
         return true;
     }
 
+    /* ScanNotAnyOf(p, off, acceptNulTerminated, n) -> strspn(p + off,
+     * accept): the length of the leading run of bytes all present in the
+     * NUL-terminated accept set, clamped to [0, n]. Generalizes
+     * ScanNotByte to multi-byte sets; a global array is emitted once per
+     * distinct set literal (deduped by pointer comparison of the bytes). */
+    if (is_call_to(expr, "NativeMemory", "ScanNotAnyOf") &&
+        expr->call.args.count == 4) {
+        LLVMValueRef p = nm_arg(g, expr, 0, locals);
+        LLVMValueRef off = nm_arg(g, expr, 1, locals);
+        zan_ast_node_t *set_ast = expr->call.args.items[2];
+        LLVMValueRef setv = emit_expr(g, set_ast, locals);
+        LLVMValueRef n = nm_arg(g, expr, 3, locals);
+        LLVMTypeRef ty = LLVMFunctionType(i64t,
+            (LLVMTypeRef[]){ i8ptr, i8ptr }, 2, 0);
+        LLVMValueRef fn = get_libc_fn(g, "strspn", ty);
+        LLVMValueRef start = nm_addr(g, p, off);
+        LLVMValueRef run = zan_call2(g->builder, ty, fn,
+            (LLVMValueRef[]){ start, setv }, 2, "nm.scanany");
+        LLVMValueRef over = zan_icmp(g->builder, LLVMIntUGT, run, n, "nm.scanany.o");
+        *out = LLVMBuildSelect(g->builder, over, n, run, "nm.scanany.r");
+        emit_release_owned_call_temp(g, set_ast, setv, locals);
+        return true;
+    }
+
+    /* FindNotAnyOf(p, off, rejectSet, n) -> strcspn(p + off, reject): the
+     * offset of the first byte present in the NUL-terminated reject set,
+     * relative to `p` (resumable), or -1 when none appears within n. This
+     * is the string-scanning half of every parser (JSON quote/escape
+     * hunting, token splitting): memchr only handles one byte; strcspn is
+     * its vectorised generalization. */
+    if (is_call_to(expr, "NativeMemory", "FindNotAnyOf") &&
+        expr->call.args.count == 4) {
+        LLVMValueRef p = nm_arg(g, expr, 0, locals);
+        LLVMValueRef off = nm_arg(g, expr, 1, locals);
+        zan_ast_node_t *set_ast = expr->call.args.items[2];
+        LLVMValueRef setv = emit_expr(g, set_ast, locals);
+        LLVMValueRef n = nm_arg(g, expr, 3, locals);
+        LLVMTypeRef ty = LLVMFunctionType(i64t,
+            (LLVMTypeRef[]){ i8ptr, i8ptr }, 2, 0);
+        LLVMValueRef fn = get_libc_fn(g, "strcspn", ty);
+        LLVMValueRef start = nm_addr(g, p, off);
+        LLVMValueRef run = zan_call2(g->builder, ty, fn,
+            (LLVMValueRef[]){ start, setv }, 2, "nm.fna");
+        /* run == n means no rejected byte inside the window: report -1 so
+         * callers can distinguish "clean to the end" from "hit at the last
+         * byte". A run > n cannot happen (strcspn stops at the NUL
+         * terminator; the window is clamped anyway). */
+        LLVMValueRef clean = zan_icmp(g->builder, LLVMIntUGE, run, n, "nm.fna.c");
+        LLVMValueRef rel = LLVMBuildSelect(g->builder, clean,
+            LLVMConstInt(i64t, (uint64_t)-1, 1), run, "nm.fna.r");
+        *out = rel;
+        emit_release_owned_call_temp(g, set_ast, setv, locals);
+        return true;
+    }
+
+    /* ScanNotByte(p, off, b, n) -> strspn(p + off, one-char set {b}): the
+     * length of the leading run of bytes equal to `b`, clamped to [0, n].
+     * This is the whitespace-skip and digit-run inner loop of every parser:
+     * the same bounds-check-per-byte cost memchr removes from Find, on the
+     * "keep scanning while equal" direction memchr does not cover. glibc
+     * implements strspn with vectorised tables, so the run disappears into
+     * one libc call. */
+    if (is_call_to(expr, "NativeMemory", "ScanNotByte") &&
+        expr->call.args.count == 4) {
+        LLVMValueRef p = nm_arg(g, expr, 0, locals);
+        LLVMValueRef off = nm_arg(g, expr, 1, locals);
+        LLVMValueRef b = nm_arg(g, expr, 2, locals);
+        LLVMValueRef n = nm_arg(g, expr, 3, locals);
+        /* accept = [b, 0]: a two-byte NUL-terminated set holding only the
+         * scanned byte (b == 0 would make an empty set and strspn 0; the
+         * caller never scans for NUL). */
+        LLVMTypeRef i8 = LLVMInt8TypeInContext(g->ctx);
+        LLVMTypeRef arr2 = LLVMArrayType(i8, 2);
+        LLVMValueRef accept = LLVMAddGlobal(g->mod, arr2, "nm.scan.accept");
+        LLVMSetLinkage(accept, LLVMPrivateLinkage);
+        LLVMSetInitializer(accept, LLVMConstArray(i8, (LLVMValueRef[]){
+            LLVMBuildTrunc(g->builder, b, i8, "nm.scan.b"),
+            LLVMConstInt(i8, 0, 0) }, 2));
+        LLVMTypeRef ty = LLVMFunctionType(i64t,
+            (LLVMTypeRef[]){ i8ptr, i8ptr }, 2, 0);
+        LLVMValueRef fn = get_libc_fn(g, "strspn", ty);
+        LLVMValueRef start = nm_addr(g, p, off);
+        LLVMValueRef run = zan_call2(g->builder, ty, fn,
+            (LLVMValueRef[]){ start, accept }, 2, "nm.scan");
+        LLVMValueRef over = zan_icmp(g->builder, LLVMIntUGT, run, n, "nm.scan.o");
+        *out = LLVMBuildSelect(g->builder, over, n, run, "nm.scan.r");
+        return true;
+    }
+
     if (is_call_to(expr, "NativeMemory", "GetString") && expr->call.args.count == 3) {
         LLVMValueRef p = nm_arg(g, expr, 0, locals);
         LLVMValueRef off = nm_arg(g, expr, 1, locals);

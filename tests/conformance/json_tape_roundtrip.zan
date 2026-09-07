@@ -1,0 +1,56 @@
+using System;
+using System.Json;
+namespace Conf;
+class Program {
+    static int Caught(string src) {
+        try {
+            JsonDoc.Parse(src);
+        } catch (JsonException e) {
+            if (Convert.ToString(e.Message).StartsWith("Malformed JSON at position ")) { return 1; }
+            return 2;
+        }
+        return 0;
+    }
+    static void Main() {
+        // Zan "\\" in a literal is one backslash, so a JSON escaped backslash
+        // is written with four. The value string below:
+        //   a"b\c<newline><tab>你好
+        string src = "{\"s\":\"a\\\"b\\\\c\n\t\u4F60\u597D\",\"i\":42,\"neg\":-17,\"big\":9007199254740993,\"f\":3.5,\"e\":1e3,\"t\":true,\"fa\":false,\"nul\":null,\"arr\":[1,[2,3],{\"k\":\"v\"},[],{}],\"obj\":{\"a\":{\"b\":{\"c\":1}}}}";
+        JsonDoc doc = JsonDoc.Parse(src);
+        Console.WriteLine(Convert.ToString(doc.KindAt(doc.root)));
+        Console.WriteLine(doc.StrAt(doc.Get(doc.root, "s"), ""));
+        Console.WriteLine(Convert.ToString(doc.IntAt(doc.Get(doc.root, "i"), 0)));
+        Console.WriteLine(Convert.ToString(doc.LongAt(doc.Get(doc.root, "big"), 0L)));
+        Console.WriteLine(Convert.ToString(doc.DoubleAt(doc.Get(doc.root, "f"), 0.0)));
+        Console.WriteLine(Convert.ToString(doc.BoolAt(doc.Get(doc.root, "t"), false)));
+        Console.WriteLine(Convert.ToString(doc.BoolAt(doc.Get(doc.root, "fa"), true)));
+        Console.WriteLine(Convert.ToString(doc.Has(doc.root, "nul")));
+        Console.WriteLine(Convert.ToString(doc.Count(doc.Get(doc.root, "arr"))));
+        // array element kinds
+        int arr = doc.Get(doc.root, "arr");
+        Console.WriteLine(Convert.ToString(doc.IntAt(doc.At(arr, 0), -1)));
+        Console.WriteLine(Convert.ToString(doc.KindAt(doc.At(arr, 1))));
+        int inner = doc.At(arr, 1);
+        Console.WriteLine(Convert.ToString(doc.IntAt(doc.At(inner, 1), -1)));
+        int on = doc.At(arr, 2);
+        Console.WriteLine(doc.StrAt(doc.Get(on, "k"), "miss"));
+        // nested object chain
+        int oa = doc.Get(doc.root, "obj");
+        int ob = doc.Get(oa, "a");
+        int oc = doc.Get(ob, "b");
+        Console.WriteLine(Convert.ToString(doc.IntAt(doc.Get(oc, "c"), -1)));
+        // malformed inputs are rejected (message carries the error position)
+        Console.WriteLine(Convert.ToString(Caught("{\"a\":}")));
+        Console.WriteLine(Convert.ToString(Caught("[1,2")));
+        Console.WriteLine(Convert.ToString(Caught("{\"a\":1} x")));
+        Console.WriteLine(Convert.ToString(Caught("nul")));
+        Console.WriteLine(Convert.ToString(Caught("")));
+        Console.WriteLine(Convert.ToString(Caught("{\"a\":1\"b\":2}")));
+        // round trip: ToJson -> parse back -> same text
+        string once = doc.ToJson();
+        JsonDoc doc2 = JsonDoc.Parse(once);
+        string twice = doc2.ToJson();
+        Console.WriteLine(Convert.ToString(twice == once));
+        Console.WriteLine(Convert.ToString(doc2.LongAt(doc2.Get(doc2.root, "big"), 0L)));
+    }
+}

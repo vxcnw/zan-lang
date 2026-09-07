@@ -138,6 +138,9 @@ static const zan_builtin_member_t members_nativemem[] = {
     { "Copy",      'M', "void Copy(nint dst, nint src, long size)" },
     { "Fill",      'M', "void Fill(nint ptr, int value, long size)" },
     { "Compare",   'M', "int Compare(nint a, nint b, long size)" },
+    { "ScanNotByte", 'M', "long ScanNotByte(nint ptr, long offset, int byte, long limit)" },
+    { "ScanNotAnyOf", 'M', "long ScanNotAnyOf(nint ptr, long offset, string acceptSet, long limit)" },
+    { "FindNotAnyOf", 'M', "long FindNotAnyOf(nint ptr, long offset, string rejectSet, long limit)" },
     { "GetString", 'M', "string GetString(nint ptr)" },
     { "PutString", 'M', "void PutString(nint ptr, string text)" },
 };

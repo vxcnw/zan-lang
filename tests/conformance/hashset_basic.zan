@@ -1,0 +1,38 @@
+using System;
+using System.Collections;
+namespace Conf;
+class Program {
+    static string N(int v) { return Convert.ToString(v); }
+    static string B(bool b) { return Convert.ToString(b); }
+    static void Main() {
+        HashSet<string> s = new HashSet<string>();
+        Console.WriteLine(B(s.Add("x")));
+        Console.WriteLine(B(s.Add("x")));
+        Console.WriteLine(B(s.Add("y")));
+        Console.WriteLine(N(s.Count()));
+        Console.WriteLine(B(s.Contains("x")));
+        Console.WriteLine(B(s.Contains("z")));
+        Console.WriteLine(B(s.Remove("x")));
+        Console.WriteLine(B(s.Remove("x")));
+        Console.WriteLine(B(s.Contains("x")));
+        Console.WriteLine(N(s.Count()));
+        // int set: add/contains/remove at scale, tombstone compaction
+        HashSet<int> n = new HashSet<int>();
+        for (int i = 0; i < 1000; i = i + 1) { n.Add(i * 3); }
+        Console.WriteLine(N(n.Count()));
+        Console.WriteLine(B(n.Contains(999)));
+        Console.WriteLine(B(n.Contains(1000)));
+        int removed = 0;
+        for (int i = 0; i < 1000; i = i + 2) { if (n.Remove(i * 3)) { removed = removed + 1; } }
+        Console.WriteLine(N(removed));
+        Console.WriteLine(N(n.Count()));
+        bool bad = false;
+        for (int i = 0; i < 1000; i = i + 1) {
+            bool want = i % 2 == 1;
+            if (n.Contains(i * 3) != want) { bad = true; }
+        }
+        Console.WriteLine(B(!bad));
+        for (int i = 0; i < 1000; i = i + 1) { if (i % 2 == 1) { n.Add(i * 3); } }
+        Console.WriteLine(N(n.Count()));
+    }
+}
