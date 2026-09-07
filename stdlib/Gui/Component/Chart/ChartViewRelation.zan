@@ -404,6 +404,31 @@ partial class ChartView {
         return Chart.Palette(t, i);
     }
 
+    /// 力导向边的目标端箭头（ECharts force.linkSymbol 'arrow'）：
+    /// 由 a→b 流向在 b 节点圆周外画实心三角，尖指向圆心。
+    static void DrawForceArrow(Canvas c, int ax, int ay, int bx, int by,
+                               int nodeR, int col) {
+        int dx = ax - bx;
+        int dy = ay - by;
+        int len = ChartView.ISqrt(dx * dx + dy * dy);
+        if (len < 1) { return; }
+        int ux = dx * 1000 / len;
+        int uy = dy * 1000 / len;
+        int ah = nodeR + 5;
+        int hw = ah * 2 / 3;
+        // 尖端落在节点圆周上（u 由 b 指向 a），底边在外侧。
+        int tipX = bx + ux * nodeR / 1000;
+        int tipY = by + uy * nodeR / 1000;
+        int bsX = bx + ux * (nodeR + ah) / 1000;
+        int bsY = by + uy * (nodeR + ah) / 1000;
+        List<int> xs = new List<int>();
+        List<int> ys = new List<int>();
+        xs.Add(tipX); ys.Add(tipY);
+        xs.Add(bsX + (0 - uy) * hw / 1000); ys.Add(bsY + ux * hw / 1000);
+        xs.Add(bsX + uy * hw / 1000); ys.Add(bsY + (0 - ux) * hw / 1000);
+        ChartView.FillPolyAlpha(c, xs, ys, col, 1000);
+    }
+
     /// 把以 (cx,cy) 为控制点的二次贝塞尔（(x1,y1)→(x2,y2)）按
     /// 16 段离散追加进 px/py（不含起点）。
     static void AppendQuadPts(List<int> px, List<int> py,
@@ -518,6 +543,19 @@ partial class ChartView {
         // symbol/size 元数据，幂等重放，对共享缓存安全）。
         ForceLayout.ApplyShapes(layout, lead.tree,
             app.Scale(lead.forceMinRadius), app.Scale(lead.forceMaxRadius));
+        // ECharts2 force 的节点即 series.data 项：按名匹配逐节点
+        // symbol/symbolSize 覆盖（同样只改元数据，幂等）。
+        for (int di = 0; di < lead.data.Count; di = di + 1) {
+            ChartData dd = lead.data[di];
+            if (dd.name.Length < 1) { continue; }
+            if (dd.symbol.Length < 1 && !dd.sizeSet) { continue; }
+            for (int i = 0; i < layout.nodes.Count; i = i + 1) {
+                if (layout.nodes[i].name != dd.name) { continue; }
+                if (dd.symbol.Length > 0) { layout.nodes[i].symbol = dd.symbol; }
+                if (dd.sizeSet && dd.size > 0) { layout.nodes[i].size = dd.size; }
+                break;
+            }
+        }
         int nn = layout.nodes.Count;
         if (nn < 1) { return; }
         // 节点屏幕坐标统一出口：补间期 = 圆周初值→终态的线性插值，
@@ -583,7 +621,8 @@ partial class ChartView {
             ChartView.OfferActiveHit(fh);
         }
 
-        // 边：先画普通边，再盖悬停高亮。
+        // 边：先画普通边，再盖悬停高亮；linkSymbol 'arrow' 在
+        // 目标端画箭头（ECharts force.linkSymbol）。
         int alpha = 120 * g / 1000;
         for (int i = 0; i < layout.edges.Count; i = i + 1) {
             ForceEdge e = layout.edges[i];
@@ -595,6 +634,10 @@ partial class ChartView {
             c.DrawLine(px[e.a], py[e.a],
                 px[e.b], py[e.b],
                 Chart.WithAlpha(col, alpha), w2);
+            if (lead.forceLinkSymbol == "arrow" && g > 100) {
+                ChartView.DrawForceArrow(c, px[e.a], py[e.a], px[e.b], py[e.b],
+                    nodeR, col);
+            }
         }
         if (hoverNode >= 0) {
             for (int i = 0; i < layout.edges.Count; i = i + 1) {
@@ -613,8 +656,8 @@ partial class ChartView {
         for (int i = 0; i < nn; i = i + 1) {
             if (i < nodeHid.Count && nodeHid[i]) { continue; }
             ForceNode nd = layout.nodes[i];
-            int col = nodeCol0;
-            if (col == 0) { col = Chart.Palette(t, i); }
+            int col = ChartView.ChordNodeColor(lead, t, i, nd.name);
+            if (col == Chart.Palette(t, i) && nodeCol0 != 0) { col = nodeCol0; }
             int nr = nodeR;
             if (nd.size > 0) { nr = app.Scale(nd.size) / 2; }
             Chart.DrawSymbol(c, px[i], py[i], nr, nd.symbol, col,
@@ -640,7 +683,7 @@ partial class ChartView {
                 bool hid = false;
                 if (i < nodeHid.Count) { hid = nodeHid[i]; }
                 Chart.DrawLegendChip(app, lx2, ly2, legendW, lh2,
-                    Chart.Palette(t, i), nd.name, hid, key);
+                    ChartView.ChordNodeColor(lead, t, i, nd.name), nd.name, hid, key);
                 ly2 = ly2 + lh2;
             }
         }

@@ -156,14 +156,55 @@ partial class Charts {
     }
 
     static void Force5(App app, int x, int y, int w, int h) {
+        // ECharts 2.2.7 force.html（乔布斯关系图）结构 1:1：金色
+        // 节点 + 家人 diamond、linkSymbol arrow、gravity 1.1 /
+        // scaling 1.2、Jobs symbolSize 60。差异记录：Jobs 的
+        // image:// 头像符号以大号金色圆近似（引擎无图片符号）；
+        // 关系名边标签与 drag 未消费。
+        ChartSeries f = ChartSeries.Force(Charts.T("Relations", "人物关系"),
+            new List<ChartLink>{
+                ChartLink.Of("丽萨-乔布斯", "乔布斯", 1),
+                ChartLink.Of("乔布斯", "丽萨-乔布斯", 1),
+                ChartLink.Of("保罗-乔布斯", "乔布斯", 2),
+                ChartLink.Of("克拉拉-乔布斯", "乔布斯", 1),
+                ChartLink.Of("劳伦-鲍威尔", "乔布斯", 2),
+                ChartLink.Of("史蒂夫-沃兹尼艾克", "乔布斯", 3),
+                ChartLink.Of("奥巴马", "乔布斯", 1),
+                ChartLink.Of("比尔-盖茨", "乔布斯", 6),
+                ChartLink.Of("乔纳森-艾夫", "乔布斯", 1),
+                ChartLink.Of("蒂姆-库克", "乔布斯", 1),
+                ChartLink.Of("龙-韦恩", "乔布斯", 1),
+                ChartLink.Of("克拉拉-乔布斯", "保罗-乔布斯", 1),
+                ChartLink.Of("奥巴马", "保罗-乔布斯", 1),
+                ChartLink.Of("奥巴马", "克拉拉-乔布斯", 1),
+                ChartLink.Of("奥巴马", "劳伦-鲍威尔", 1),
+                ChartLink.Of("奥巴马", "史蒂夫-沃兹尼艾克", 1),
+                ChartLink.Of("比尔-盖茨", "奥巴马", 6),
+                ChartLink.Of("比尔-盖茨", "克拉拉-乔布斯", 1),
+                ChartLink.Of("蒂姆-库克", "奥巴马", 1)
+            });
+        f.forceLinkSymbol = "arrow";
+        f.forceGravity = 110;
+        f.forceScaling = 120;
+        f.forceMinRadius = 15;
+        f.forceMaxRadius = 25;
+        // 节点即 data 项：金色（nodeStyle 色）、家人 diamond、
+        // Jobs 大圆（原图像符号）。
+        string[] names = new string[] { "乔布斯", "丽萨-乔布斯", "保罗-乔布斯",
+            "克拉拉-乔布斯", "劳伦-鲍威尔", "史蒂夫-沃兹尼艾克", "奥巴马",
+            "比尔-盖茨", "乔纳森-艾夫", "蒂姆-库克", "龙-韦恩" };
+        int[] values = new int[] { 10, 2, 3, 3, 7, 5, 8, 9, 4, 4, 1 };
+        for (int i = 0; i < names.Length; i = i + 1) {
+            ChartData d = ChartData.Named(values[i], names[i]);
+            d.color = Chart.Rgb(215, 164, 4);
+            if (i >= 1 && i <= 4) { d.symbol = "diamond"; }
+            f.data.Add(d);
+        }
+        f.data[0].size = 60;
+        f.data[0].sizeSet = true;
+        f.forceLinkColor = Chart.Rgb(108, 141, 174);
         ChartOption o = ChartOption.Of(Charts.T("Styled force", "力导向个性化"),
-            null, new List<ChartSeries>{ ChartSeries.Force(Charts.T("People", "成员"),
-                new List<ChartLink>{
-                    ChartLink.Of("Alice", "Bob", 12), ChartLink.Of("Alice", "Carol", 8),
-                    ChartLink.Of("Bob", "Dave", 6), ChartLink.Of("Carol", "Dave", 9),
-                    ChartLink.Of("Carol", "Eve", 5), ChartLink.Of("Dave", "Frank", 7),
-                    ChartLink.Of("Eve", "Frank", 4), ChartLink.Of("Frank", "Alice", 10)
-                }) });
+            null, new List<ChartSeries>{ f });
         o.showLegend = false;
         Charts.Show(app, o, x, y, w, h);
     }

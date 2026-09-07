@@ -1191,6 +1191,8 @@ class ChartSeries {
     int forceMaxRadius;     // ECharts force.maxRadius（px 节点半径上限）
     int forceNodeColor;     // force.nodeStyle.color；0 = 逐节点调色板
     int forceLinkColor;     // force.linkStyle.color；0 = 调色板半透明
+    string forceLinkSymbol; // force.linkSymbol："arrow" = 目标端箭头；
+                            //   ""/none = 无（现状）
     string chordRibbonType; // ECharts chord ribbonType："path" = 细线；"" = 弧带
     int chordSort;          // ECharts chord.sort：0 首现 | 1 descending | 2 ascending
     bool chordSortSub;      // ECharts chord.sortSub：子弧按值降序
@@ -1267,6 +1269,7 @@ class ChartSeries {
         s.forceMaxRadius = 0;
         s.forceNodeColor = 0;
         s.forceLinkColor = 0;
+        s.forceLinkSymbol = "";
         s.chordRibbonType = "";
         s.chordSort = 0;
         s.chordSortSub = false;
@@ -1659,7 +1662,9 @@ class ChartSeries {
         s.selectedMode = src.selectedMode; s.forceScaling = src.forceScaling;
         s.forceGravity = src.forceGravity; s.forceMinRadius = src.forceMinRadius;
         s.forceMaxRadius = src.forceMaxRadius; s.forceNodeColor = src.forceNodeColor;
-        s.forceLinkColor = src.forceLinkColor; s.chordRibbonType = src.chordRibbonType;
+        s.forceLinkColor = src.forceLinkColor;
+        s.forceLinkSymbol = src.forceLinkSymbol;
+        s.chordRibbonType = src.chordRibbonType;
         s.chordSort = src.chordSort; s.chordSortSub = src.chordSortSub;
         s.chordGapDeg = src.chordGapDeg; s.chordRingWidthPct = src.chordRingWidthPct;
         s.matrix = new List<List<int>>();
@@ -2962,6 +2967,8 @@ class ChartOption {
                 cs.roseType = s.Str("roseType", cs.roseType);
                 cs.clockWise = s.Bool("clockWise", cs.clockWise);
                 cs.polarIndex = s.Int("polarIndex", cs.polarIndex);
+                string lsym = s.Str("linkSymbol", "");
+                if (lsym == "arrow") { cs.forceLinkSymbol = "arrow"; }
                 // pie.center / pie.radius（ECharts：['25%', 200] 与
                 // '55%' | 80 | [110, 140]）。
                 cs.center = ChartOption.ParsePoint(s.Get("center"), cs.center);
