@@ -266,6 +266,11 @@ class Host {
         int now = Sdl.Ticks();
         if (now < this.nextFrame) {
             int slack = this.nextFrame - now;
+            // 暂停期循环只需跟随放宽后的重绘节拍:睡满到点,
+            // 别按 16ms 一片频繁醒来空转(降低暂停态 CPU 与功耗)。
+            if (this.ShouldPause() && this.pauseRedrawMs > ms) {
+                ms = this.pauseRedrawMs;
+            }
             if (slack > 4) { Sdl.Delay(slack - 3); }
         }
         this.nextFrame = this.nextFrame + ms;
@@ -283,15 +288,16 @@ class Host {
     }
 
     public void OnWindowEvent(int type) {
-        // 窗口事件本身也算"输入"，重绘门控据此立即渲染一帧。
         // 失焦/最小化不降帧(实时游戏失焦降帧=画面两秒一跳);是否
         // 暂停世界由游戏自己决定:PauseOnUnfocus=true 时 host 把
         // 失焦/最小化记进 unfocused,游戏读 ShouldPause() 停步逻辑。
-        this.hadEvent = true;
+        // 暂停期间窗口事件不再触发立即重绘(画面静止,低频节拍即可),
+        // 聚焦/还原事件除外——那一帧必须马上画,恢复才"秒流畅"。
         bool unfocusNow = type == SdlEventType.WindowFocusLost()
                           || type == SdlEventType.WindowMinimized();
         bool refocusNow = type == SdlEventType.WindowFocusGained()
                           || type == SdlEventType.WindowRestored();
+        if (!this.ShouldPause() || refocusNow) { this.hadEvent = true; }
         if (unfocusNow) { this.unfocused = true; }
         if (refocusNow) { this.unfocused = false; }
         if (type == SdlEventType.WindowMinimized()) {
@@ -330,6 +336,9 @@ class Host {
     public bool ShouldPause() {
         return this.pauseOnUnfocus && this.unfocused;
     }
+
+    /// 当前是否处于暂停态(供诊断账单计数;与 ShouldPause 同源)。
+    public bool Paused() { return this.ShouldPause(); }
 
     // 鼠标位置换算回设计单位（含画布分数缩放）。
     public int MouseX() {

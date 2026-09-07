@@ -291,8 +291,52 @@ class MinerApp {
     int profAutoFired;
 
     // 逐帧账单:event/step/scene/hud 各段耗时(ms,含帧尾 pacing)。
+    // MINER_PROF_CONT=1: 持续输出(1 秒汇总一行),否则只打印发射后 8 帧。
     void ProfFrame(int evMs, int stepMs, int sceneMs, int hudMs, int totalMs) {
         if (!this.prof || this.profActionAt == 0) { return; }
+        if (this.profCont) {
+            Canvas.TextStatEnable(true);   // 每秒读数会清零,开关常开
+            this.pfN = this.pfN + 1;
+            this.pfScene = this.pfScene + sceneMs;
+            this.pfHud = this.pfHud + hudMs;
+            this.pfTotal = this.pfTotal + totalMs;
+            long now = World.NowMs();
+            if (this.pfMark == 0) { this.pfMark = now; }
+            long span = now - this.pfMark;
+            if (span >= 1000) {
+                // 文本/光栅统计:9=文字光栅 us,5/6=字形图集命中/未中,
+                // 0/1=文字/测量调用次数,RasterStat(0)=最大混合图层。
+                long textUs = Canvas.TextStat(9);
+                long atlasH = Canvas.TextStat(5);
+                long atlasM = Canvas.TextStat(6);
+                int textCalls = Canvas.TextStat(0);
+                int measureCalls = Canvas.TextStat(1);
+                long measureUs = Canvas.TextStat(10);
+                int blendTopW = Canvas.RasterStat(0, 2);
+                int blendTopH = Canvas.RasterStat(0, 3);
+                Console.WriteLine("[prof1s] frames=" + Convert.ToString(this.pfN)
+                                  + " sceneMs=" + Convert.ToString(this.pfScene)
+                                  + " hudMs=" + Convert.ToString(this.pfHud)
+                                  + "  [read=" + Convert.ToString(this.pfRead)
+                                  + " upload=" + Convert.ToString(this.pfUpload)
+                                  + " tree=" + Convert.ToString(this.pfTree)
+                                  + " present=" + Convert.ToString(this.pfPresent) + "]"
+                                  + " txtUs=" + Convert.ToString(textUs)
+                                  + " txtCalls=" + Convert.ToString(textCalls)
+                                  + " mUs=" + Convert.ToString(measureUs)
+                                  + " mCalls=" + Convert.ToString(measureCalls)
+                                  + " atlasHit=" + Convert.ToString(atlasH)
+                                  + " miss=" + Convert.ToString(atlasM)
+                                  + " blendTop=" + Convert.ToString(blendTopW)
+                                  + "x" + Convert.ToString(blendTopH)
+                                  + " totalMs=" + Convert.ToString(this.pfTotal)
+                                  + " paused=" + (this.pauseOverlay ? "1" : "0"));
+                this.pfN = 0; this.pfScene = 0; this.pfHud = 0; this.pfTotal = 0;
+                this.pfRead = 0; this.pfUpload = 0; this.pfTree = 0; this.pfPresent = 0;
+                this.pfMark = now;
+            }
+            return;
+        }
         if (this.profLogCnt >= 8) { return; }
         this.profLogCnt = this.profLogCnt + 1;
         Console.WriteLine("[prof] frame f" + Convert.ToString(this.profLogCnt)
@@ -302,6 +346,74 @@ class MinerApp {
                           + " hud=" + Convert.ToString(hudMs)
                           + " total=" + Convert.ToString(totalMs));
     }
+
+    bool profCont;
+    int pfN;
+    int pfScene;
+    int pfHud;
+    int pfTotal;
+    int pfRead;
+    int pfUpload;
+    int pfTree;
+    int pfPresent;
+    long pfMark;
+
+    // 暂停期心跳账单:每满 1 秒打一行 loops/renders/composites/sleepMs。
+    int ppLoops;
+    int ppRenders;
+    int ppComposites;
+    long ppSleepMs;
+    long ppSecMark;
+
+    void ProfPauseTick(bool paused) {
+        if (!this.prof || !paused) { return; }
+        Canvas.TextStatEnable(true);
+        this.ppLoops = this.ppLoops + 1;
+        long now = World.NowMs();
+        if (this.ppSecMark == 0) { this.ppSecMark = now; }
+        long span = now - this.ppSecMark;
+        if (span >= 1000) {
+            Console.WriteLine("[pp] loops/s=" + Convert.ToString(this.ppLoops)
+                              + " renders=" + Convert.ToString(this.ppRenders)
+                              + " composites=" + Convert.ToString(this.ppComposites)
+                              + " sleepMs=" + Convert.ToString(this.ppSleepMs));
+            this.ppLoops = 0;
+            this.ppRenders = 0;
+            this.ppComposites = 0;
+            this.ppSleepMs = 0;
+            this.ppSecMark = now;
+        }
+    }
+
+    // ShouldRender 拒绝的帧计一次(睡眠时长近似=帧预算-2ms)。
+    void ppCountSleep() {
+        if (this.ppSleepMs == -1) { return; }
+        this.ppSleepMs = this.ppSleepMs + 14;
+        if (this.ppSleepMs > 100000) { this.ppSleepMs = -1; }
+    }
+
+    // 事件类型直方图(诊断:谁在击穿重绘门/触发空转)。
+    int ppEv0;
+    int ppEv0Ty;
+
+    void ppEvent(int ty) {
+        if (this.ppEvN == 0) { this.ppEv0Ty = ty; }
+        if (ty == this.ppEv0Ty) { this.ppEv0 = this.ppEv0 + 1; }
+        else { this.ppEvOther = this.ppEvOther + 1; }
+        this.ppEvN = this.ppEvN + 1;
+        long now = World.NowMs();
+        if (this.ppEvMark == 0) { this.ppEvMark = now; }
+        if (now - this.ppEvMark >= 1000) {
+            Console.WriteLine("[ppev] inputEvent/s=" + Convert.ToString(this.ppEvN)
+                              + " ty=" + Convert.ToString(this.ppEv0Ty)
+                              + " x" + Convert.ToString(this.ppEv0)
+                              + " other=" + Convert.ToString(this.ppEvOther));
+            this.ppEvN = 0; this.ppEv0 = 0; this.ppEvOther = 0; this.ppEvMark = now;
+        }
+    }
+    int ppEvN;
+    int ppEvOther;
+    long ppEvMark;
 
     public void StepFrame(int dtMs) {
         this.w.Step(dtMs);
@@ -673,7 +785,7 @@ class MinerApp {
         }
         // 无头截图
         bool shot = ProcessHost.Env("MINER_SHOT") == "1";
-        Host h = Host.CreateFull("黄金矿工", Data.W, Data.H, 2, false);
+        Host h = Host.CreateFull("黄金矿工", Data.W, Data.H, 1, false);
         if (!h.Running()) {
             Console.WriteLine("host init failed");
             return 1;
@@ -706,6 +818,7 @@ class MinerApp {
         // "只呈现场景不重绘 GUI"的廉价帧(Gui 合成契约:画布 present
         // 后不保留,凑帧呈现会把空 HUD 贴上屏)。
         int hudFrame = 0;
+        int hudSceneFrame = 0;
         int lastState = -99;
         // MINER_LIVESHOT=1: 实机合成路径自摄——第 120/600 帧各 DumpBmp
         // 一张合成结果(含 FrameScene 廉价帧),离屏验证 live 合成内容,
@@ -713,6 +826,7 @@ class MinerApp {
         bool liveShot = ProcessHost.Env("MINER_LIVESHOT") == "1";
         int liveFrame = 0;
         bool prof = app.prof = ProcessHost.Env("MINER_PROF") == "1";
+        app.profCont = ProcessHost.Env("MINER_PROF_CONT") == "1";
         long f0 = 0;
         long t1 = 0;
         long t2 = 0;
@@ -760,6 +874,7 @@ class MinerApp {
                     // 门彻底击穿(鼠标轻晃=恒 60fps),只记坐标。
                     inputEvent = true;
                     h.MarkEvent();
+                    if (app.prof) { app.ppEvent(ty); }
                 }
                 if (ty == SdlEventType.MouseButtonDown()
                     && SdlEvent.MouseButton() == SdlMouseButton.Left()) {
@@ -797,10 +912,33 @@ class MinerApp {
             }
             // GameHud.Frame 不走 Form.Run 的 frameHook,顶栏标签须每帧直同步,
             // 否则倒计时/金币/combo 保持初始空串(截图路径 HudShotRun 已直调故正常)。
-            app.SyncHud();
+            // 暂停期世界冻结、HUD 内容不变,同步也没意义——只在将要
+            // 渲染的帧做(心跳计数除外)。
+            if (!app.pauseOverlay || h.ShouldRender()) { app.SyncHud(); }
             // 门控渲染:游戏世界每帧都在动(摆钩/倒计时),到点即画;
             // 纯空转的帧只推进世界步进,省掉整段重绘+回读+合成。
-            if (!h.ShouldRender()) { h.Pace(); continue; }
+            if (!h.ShouldRender()) { h.Pace(); if (app.prof) { app.ppCountSleep(); } continue; }
+            // 场景重绘与合成解耦:合成贵(13-15ms/次),空闲摆钩帧场景
+            // 也没必要 30fps 全画——6 帧一拍让重绘+合成同步降到 10Hz。
+            if (!app.pauseOverlay) {
+                int st2 = app.w.state;
+                bool fast2 = st2 == World.ST_EXTEND || st2 == World.ST_RETRACT
+                             || st2 == World.ST_QTE || st2 == World.ST_BOMB;
+                if (!fast2) {
+                    hudSceneFrame = hudSceneFrame + 1;
+                    if (hudSceneFrame < 6) {
+                        h.Pace();
+                        if (app.prof) { app.ppCountSleep(); }
+                        continue;
+                    }
+                    hudSceneFrame = 0;
+                } else {
+                    hudSceneFrame = 0;
+                }
+            } else {
+                hudSceneFrame = 0;
+            }
+            if (app.prof) { app.ppRenders = app.ppRenders + 1; }
             // 与其他示例游戏一致:Begin 选中离屏画布并清屏,
             // End 合成回贴( hudMode 下不再 Present)。
             h.Begin(12, 10, 8);
@@ -808,12 +946,14 @@ class MinerApp {
             h.End();
             t3 = World.NowMs();
             // HUD 层:场景帧作底,Gui 控件树画在上面并合成呈现。
-            // 门控:伸钩/收钩/收线 QTE/拆弹阶段爪与物品快速移动,逐帧
-            // 合成(60fps,收钩不卡);空闲摆钩与结算静止,两帧一拍
-            // (30fps,失焦 4 帧)。状态切换与点击按键的帧立即合成。
-            // 廉价帧不呈现:Gui 的合成契约是"重绘后才能 present"——
-            // 画布内容在 present 后不保留,拿旧画布凑帧会把空 HUD
-            // 贴上屏(整条顶栏闪烁)。
+            // 合成=GPU 回读整帧+上传+整树重排+绘制,一次 13-15ms,是
+            // 全部 CPU 的 95%(实测:read 4ms+tree 8ms/帧)。分档门控:
+            // 伸钩/收钩/QTE/拆弹逐帧合成(60fps,爪与物品快速移动);
+            // 空闲摆钩/结算 6 帧一拍(10fps 合成,顶栏数字变化 10Hz 可读);
+            // 暂停期每次重绘必合成(重绘门已放宽到 2fps)。状态切换与
+            // 点击按键的帧立即合成。廉价帧不呈现:Gui 的合成契约是
+            // "重绘后才能 present"——画布内容在 present 后不保留,拿
+            // 旧画布凑帧会把空 HUD 贴上屏(整条顶栏闪烁)。
             if (app.hud != null) {
                 int st = app.w.state;
                 bool stateChanged = st != lastState;
@@ -821,15 +961,20 @@ class MinerApp {
                 bool fast = !app.pauseOverlay
                             && (st == World.ST_EXTEND || st == World.ST_RETRACT
                             || st == World.ST_QTE || st == World.ST_BOMB);
-                // 暂停中画面静止:合成同样降到低频。重绘门已被
-                // pauseRedrawMs 放宽到 2/s,这里 interval=1 即每次
-                // 重绘都合成(≈0.5/s 的暂停幕刷新);恢复聚焦的帧
-                // stateChanged 必真,立即合成回全速。
                 int interval = app.pauseOverlay ? 1
-                               : (h.Focused() ? 2 : 4);   // Focused=未最小化
+                               : (fast ? 1 : 6);
                 bool composite = stateChanged || action || dyn || inputEvent
                                  || fast || ++hudFrame >= interval;
                 if (composite) { hudFrame = 0; }
+                if (composite && app.prof) {
+                    app.ppComposites = app.ppComposites + 1;
+                    if (app.profCont) {
+                        app.pfRead = app.pfRead + app.hud.lastReadMs;
+                        app.pfUpload = app.pfUpload + app.hud.lastUploadMs;
+                        app.pfTree = app.pfTree + app.hud.lastTreeMs;
+                        app.pfPresent = app.pfPresent + app.hud.lastPresentMs;
+                    }
+                }
                 if (composite
                     && !app.hud.Frame(app.r, h.WindowHandle())) {
                     if (!hudFailLogged) {
@@ -855,6 +1000,9 @@ class MinerApp {
             if (prof) {
                 app.ProfFrame((int)(t1 - f0), (int)(t2 - t1), (int)(t3 - t2),
                               (int)(t4 - t3), (int)(World.NowMs() - f0));
+                // 暂停期心跳账单:统计每秒循环圈数/真实渲染次数/合成
+                // 次数/纯空转睡眠耗时,定位暂停态残余 CPU 的来源。
+                app.ProfPauseTick(h.Paused());
             }
         }
         app.w.Save();

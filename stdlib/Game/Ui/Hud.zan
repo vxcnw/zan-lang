@@ -223,11 +223,14 @@ class GameHud {
             this.pixH = h;
         }
         if (this.scene == null) { return false; }
+        long p0 = Sdl.Ticks();
         if (!this.ReadScene(renderer, this.scene, w, h)) {
             this.lastError = "read scene failed";
             return false;
         }
+        long p1 = Sdl.Ticks();
         int rc = Window.SceneUpload(sdlWindowHandle, this.scene, w, h);
+        long p2 = Sdl.Ticks();
         if (rc != 0) {
             this.lastError = "scene upload rc=" + Convert.ToString(rc);
             return false;
@@ -245,12 +248,24 @@ class GameHud {
             root.RenderFrame(app);
         }
         app.PresentFrame();
+        long p3 = Sdl.Ticks();
         // 合成呈现失败（如 gui 运行时与宿主不在同一 SDL3 实例）返回
         // false，宿主可据此降级回自己的直呈路径。
         if (Window.ScenePresent(sdlWindowHandle, app.canvas.SurfaceId()) != 0) {
             this.lastError = "scene present failed";
             return false;
         }
+        long p4 = Sdl.Ticks();
+        this.lastReadMs = (int)(p1 - p0);
+        this.lastUploadMs = (int)(p2 - p1);
+        this.lastTreeMs = (int)(p3 - p2);
+        this.lastPresentMs = (int)(p4 - p3);
         return true;
     }
+
+    // 最近一次 Frame 各阶段的耗时(ms,诊断用;经 MINER_PROF 通道输出)。
+    public int lastReadMs;
+    public int lastUploadMs;
+    public int lastTreeMs;
+    public int lastPresentMs;
 }
