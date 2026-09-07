@@ -483,6 +483,23 @@ static bool emit_native_memory_call(zan_irgen_t *g, zan_ast_node_t *expr,
         return true;
     }
 
+    /* Load64(p, off) -> *(int64_t *)(p + off): one unaligned 8-byte load,
+     * native (little-endian) byte order. This is the SWAR primitive: a
+     * byte-at-a-time scan pays a bounds check and a dependent branch per
+     * byte; loading 8 bytes at once lets a parser test all of them with
+     * two XORs and a subtract (the haszero trick) and advance 8 bytes per
+     * iteration. Callers own the bounds check (off + 8 <= window). */
+    if (is_call_to(expr, "NativeMemory", "Load64") &&
+        expr->call.args.count == 2) {
+        LLVMValueRef p = nm_arg(g, expr, 0, locals);
+        LLVMValueRef off = nm_arg(g, expr, 1, locals);
+        LLVMValueRef r = LLVMBuildLoad2(g->builder, i64t,
+            nm_addr(g, p, off), "nm.ld64");
+        LLVMSetAlignment(r, 1);
+        *out = r;
+        return true;
+    }
+
     /* ScanNotByte(p, off, b, n) -> strspn(p + off, one-char set {b}): the
      * length of the leading run of bytes equal to `b`, clamped to [0, n].
      * This is the whitespace-skip and digit-run inner loop of every parser:
