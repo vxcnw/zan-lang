@@ -237,7 +237,13 @@ class Host {
         int now = Sdl.Ticks();
         if (this.hadEvent || now >= this.nextRedraw) {
             this.hadEvent = false;
-            this.nextRedraw = now + this.redrawMs;
+            // 暂停中画面静止,低频刷新暂停幕即可:把重绘间隔临时放宽,
+            // CPU 让给前台程序。渲染预算仍是全速——恢复聚焦立刻变流畅。
+            int redraw = this.redrawMs;
+            if (this.ShouldPause() && this.pauseRedrawMs > redraw) {
+                redraw = this.pauseRedrawMs;
+            }
+            this.nextRedraw = now + redraw;
             return true;
         }
         int redraw = this.redrawMs;
@@ -312,6 +318,14 @@ class Host {
     /// 重新聚焦自动恢复。false(默认)保持失焦照常渲染。
     public void PauseOnUnfocus() { this.pauseOnUnfocus = true; }
     bool pauseOnUnfocus;
+
+    /// 暂停期重绘间隔(ms):画面静止时把场景重绘+HUD 合成降到此节奏,
+    /// CPU/GPU 让给前台;恢复聚焦立即回全速。0 = 不放宽。
+    public void SetPauseRedrawInterval(int ms) {
+        if (ms < 0) { ms = 0; }
+        this.pauseRedrawMs = ms;
+    }
+    int pauseRedrawMs;
 
     public bool ShouldPause() {
         return this.pauseOnUnfocus && this.unfocused;

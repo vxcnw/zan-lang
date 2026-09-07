@@ -681,6 +681,7 @@ class MinerApp {
         h.LimitFps(60);
         h.SetIdleFps(2);
         h.PauseOnUnfocus();       // 失焦暂停:倒计时/收线不偷跑,点击恢复
+        h.SetPauseRedrawInterval(500); // 暂停期画面静止,2fps 重绘暂停幕足够
         // 事件驱动重绘:无变化帧不渲染(HUDSHOT/SIM 无头路径不受影响,
         // 它们不走主循环)。
         h.SetRedrawInterval(30);
@@ -730,9 +731,8 @@ class MinerApp {
             app.lastFrameAt = app.now;
             if (h.ShouldPause()) {
                 // 暂停期 dt 计时照常推进,但世界不消费——恢复瞬间不会
-                // 跳一大步(dt 钳 100ms 也兜底)。输入仍要 poll:点击/
-                // 按键是恢复暂停的途径,事件门控也让暂停幕立刻呈现。
-                h.MarkEvent();
+                // 跳一大步(dt 钳 100ms 也兜底)。不 MarkEvent:重绘门
+                // 由 pauseRedrawMs 放宽,暂停幕低频刷新,CPU 让给前台。
             } else if (prof && app.profAutoFired == 0
                     && Sdl.Ticks() - app.profT0 >= 1200) {
                 app.profAutoFired = 1;
@@ -818,9 +818,15 @@ class MinerApp {
                 int st = app.w.state;
                 bool stateChanged = st != lastState;
                 lastState = st;
-                bool fast = st == World.ST_EXTEND || st == World.ST_RETRACT
-                            || st == World.ST_QTE || st == World.ST_BOMB;
-                int interval = h.Focused() ? 2 : 4;   // Focused=未最小化
+                bool fast = !app.pauseOverlay
+                            && (st == World.ST_EXTEND || st == World.ST_RETRACT
+                            || st == World.ST_QTE || st == World.ST_BOMB);
+                // 暂停中画面静止:合成同样降到低频。重绘门已被
+                // pauseRedrawMs 放宽到 2/s,这里 interval=1 即每次
+                // 重绘都合成(≈0.5/s 的暂停幕刷新);恢复聚焦的帧
+                // stateChanged 必真,立即合成回全速。
+                int interval = app.pauseOverlay ? 1
+                               : (h.Focused() ? 2 : 4);   // Focused=未最小化
                 bool composite = stateChanged || action || dyn || inputEvent
                                  || fast || ++hudFrame >= interval;
                 if (composite) { hudFrame = 0; }
