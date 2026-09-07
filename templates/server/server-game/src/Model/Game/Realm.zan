@@ -5,7 +5,8 @@ namespace ZanWeb.Model.Game;
 /* 区服表。state：0=开放（可登录进入）、1=维护（拒绝 enter/create，
    客户端列表置灰）。sort 决定客户端列表顺序。区服在本模板里是逻辑
    分区（同进程按 realmId 隔离广播与角色）；扩多进程时本表加 host/port
-   即可变成路由表，协议不变。 */
+   即可变成路由表，协议不变。castleLord 是沙巴克城主角色名（城池争夺
+   押上城主者），空=无主。 */
 [Table(Name = "game_realm")]
 class Realm {
     [Column(IsIdentity = true)]
@@ -18,5 +19,10 @@ class Realm {
     int state;
 
     int sort;
+
+    /* 沙巴克城主角色名（城池争夺产出，空=无主）。 */
+    [Column(StringLength = 32)]
+    string castleLord;
+
     long createdAt;
 }

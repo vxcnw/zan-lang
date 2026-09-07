@@ -35,7 +35,16 @@ class Fight {
 
     /* 数值曲线：升级所需经验 = 15*level；血量/攻防由等级、职业与装备推出。 */
     static long ExpNext(int level) {
-        return 15 * level;
+        return 44 * level * level;
+    }
+
+    /* 进度戳：等级/经验的绝对值随战况事件下发。客户端面板因此跟着每
+       一击走，不必等升级快照才刷新经验条。 */
+    static void StampProgress(Session s, JsonValue f) {
+        f.Set("level", JsonValue.NewNum(Convert.ToString(s.row.level)));
+        f.Set("expNow", JsonValue.NewNum(Convert.ToString(s.row.exp)));
+        f.Set("expNext",
+            JsonValue.NewNum(Convert.ToString(Fight.ExpNext(s.row.level))));
     }
 
     static int JobAtk(int job) {
@@ -55,27 +64,36 @@ class Fight {
         return Fight.ById(itemId);
     }
 
-    /* 攻击 = 基础 + 职业 + 武器；防御 = 基础 + 防具；血量上限 = 基础
-       + 职业 + 等级成长。全服统一公式，客户端 state 可复算。 */
+    /* 攻击 = 基础 + 职业 + 武器 + 强化星 + 五行；防御 = 基础 + 防具
+       + 强化星；血量上限 = 基础 + 职业 + 等级成长 + 五行。全服统一
+       公式，客户端 state 可复算。 */
     static int Atk(ZanWeb.Model.Game.Player row) {
         ZanWeb.Model.Game.Item weapon = Fight.Equipped(row.weaponId);
         int bonus = weapon != null ? weapon.atk : 0;
-        return 6 + row.level * 2 + Fight.JobAtk(row.job) + bonus;
+        return 6 + row.level * 2 + Fight.JobAtk(row.job) + bonus
+            + row.weaponStar * 2 + row.wuxing;
     }
 
     static int Def(ZanWeb.Model.Game.Player row) {
         ZanWeb.Model.Game.Item armor = Fight.Equipped(row.armorId);
         int bonus = armor != null ? armor.def : 0;
-        return 1 + row.level + bonus;
+        return 1 + row.level + bonus + row.armorStar * 2;
     }
 
     static int MaxHp(ZanWeb.Model.Game.Player row) {
-        return 40 + row.level * 20 + Fight.JobHp(row.job);
+        return 40 + row.level * 20 + Fight.JobHp(row.job) + row.wuxing * 5;
     }
 
     static ZanWeb.Model.Game.Item ById(int id) {
         ZanWeb.Model.Game.Item it = null;
         if (Fight.itemById.TryGetValue(id, out it)) { return it; }
+        return null;
+    }
+
+    static ZanWeb.Model.Game.Item ByName(string name) {
+        for (int i = 0; i < Fight.items.Count; i = i + 1) {
+            if (Fight.items[i].name == name) { return Fight.items[i]; }
+        }
         return null;
     }
 
@@ -195,6 +213,7 @@ class Fight {
             f.Set("exp", JsonValue.NewNum(Convert.ToString(t.exp)));
             f.Set("mobhp", JsonValue.NewNum("0"));
             Fight.OnKill(s, t, f);
+            Fight.StampProgress(s, f);
             return f;
         }
         Fight.instHp[at] = left;
@@ -209,6 +228,7 @@ class Fight {
             f.Set("die", JsonValue.NewNum("1"));
         }
         f.Set("hp", JsonValue.NewNum(Convert.ToString(s.row.hp)));
+        Fight.StampProgress(s, f);
         s.dirty = true;
         return f;
     }
@@ -264,6 +284,9 @@ class Fight {
                     "获得了 " + it.name);
                 drop.Set("item", JsonValue.NewStr(it.name));
                 drop.Set("count", JsonValue.NewNum("1"));
+                /* 背包快照随掉落走：客户端缓存即时同步，不必每掉一次
+                   再发一轮 bag 拉取（挂机时一秒一掉，省一半往返）。 */
+                drop.Set("bag", Fight.BagJson(s));
                 Gateway.Send(s.conn, drop);
                 f.Set("drop", JsonValue.NewStr(it.name));
             }
@@ -581,5 +604,224 @@ class Fight {
         s.row.gold = s.row.gold + gain;
         s.dirty = true;
         return "";
+    }
+
+    /* ---- BOSS 之家 / 铁匠铺 / 世界 BOSS / 寻宝 / 回收 / 图鉴 ---- */
+
+    /* BOSS 之家：唯一刷怪点（count=1）即 BOSS——教主类怪物都是单只
+       驻场、长重生；GM 加 BOSS 也只需把 count 设 1。带实例状态
+       （是否在场、重生倒计时）与掉落名，客户端不用二次查模板。 */
+    static JsonValue BossList(long now) {
+        JsonValue arr = JsonValue.NewArray();
+        for (int i = 0; i < Fight.mobs.Count; i = i + 1) {
+            ZanWeb.Model.Game.Mob t = Fight.mobs[i];
+            if (t == null || t.count != 1 || t.status != 1) { continue; }
+            bool alive = false;
+            long respawnIn = 0;
+            for (int j = 0; j < Fight.instTpl.Count; j = j + 1) {
+                if (Fight.instTpl[j] != t.id) { continue; }
+                if (Fight.instAlive[j]) { alive = true; break; }
+                long left = Fight.instRespawnAt[j] - now;
+                if (left > respawnIn) { respawnIn = left; }
+            }
+            JsonValue o = JsonValue.NewObject();
+            o.Set("tpl", JsonValue.NewNum(Convert.ToString(t.id)));
+            o.Set("name", JsonValue.NewStr(t.name));
+            o.Set("level", JsonValue.NewNum(Convert.ToString(t.level)));
+            o.Set("hp", JsonValue.NewNum(Convert.ToString(t.hp)));
+            o.Set("atk", JsonValue.NewNum(Convert.ToString(t.atk)));
+            o.Set("def", JsonValue.NewNum(Convert.ToString(t.def)));
+            o.Set("map", JsonValue.NewNum(Convert.ToString(t.mapId)));
+            o.Set("exp", JsonValue.NewNum(Convert.ToString(t.exp)));
+            o.Set("gold", JsonValue.NewNum(Convert.ToString(t.goldMin)
+                + "-" + Convert.ToString(t.goldMax)));
+            o.Set("alive", JsonValue.NewNum(alive ? "1" : "0"));
+            o.Set("respawnIn", JsonValue.NewNum(Convert.ToString(respawnIn)));
+            ZanWeb.Model.Game.Item drop = Fight.ById(t.dropItemId);
+            o.Set("drop", JsonValue.NewStr(drop != null ? drop.name : ""));
+            arr.Append(o);
+        }
+        return arr;
+    }
+
+    /* 铁匠铺强化：武器/防具各 0-9 星，费用 = (星+1)*800 金币；每星
+       武器 +2 攻、防具 +2 防（Fight.Atk/Def）。失败不存在——花金币
+       稳定变强，是后期金币的出水口。 */
+    static string Forge(Session s, string slot) {
+        bool weapon = slot == "weapon";
+        if (!weapon && slot != "armor") { return "未知部位"; }
+        int star = weapon ? s.row.weaponStar : s.row.armorStar;
+        if (star >= 9) { return "已经满星（9）"; }
+        long cost = (star + 1) * 1200;
+        if (s.row.gold < cost) {
+            return "金币不够（下一星需 " + Convert.ToString(cost) + "）";
+        }
+        s.row.gold = s.row.gold - cost;
+        if (weapon) { s.row.weaponStar = star + 1; }
+        else { s.row.armorStar = star + 1; }
+        s.dirty = true;
+        return "";
+    }
+
+    /* 世界 BOSS：全进程一只（重启重置），全场玩家打同一管血；击杀者
+       得大奖，累计伤害最高者随公告表扬。3 分钟重生（懒重置：查询与
+       攻击时发现到期即满血复活）。 */
+    static long wbHp = 150000;
+    static long wbMaxHp = 50000;
+    static long wbRespawnAt = 0;
+    static string wbTopName = "";
+    static long wbTopDmg = 0;
+
+    static JsonValue WBossState(long now) {
+        if (Fight.wbHp <= 0 && now >= Fight.wbRespawnAt) {
+            Fight.wbHp = Fight.wbMaxHp;
+        }
+        JsonValue o = JsonValue.NewObject();
+        o.Set("name", JsonValue.NewStr("玛雅之神·幻影"));
+        o.Set("level", JsonValue.NewNum("40"));
+        o.Set("top", JsonValue.NewStr(Fight.wbTopName));
+        o.Set("topDmg", JsonValue.NewNum(Convert.ToString(Fight.wbTopDmg)));
+        if (Fight.wbHp <= 0) {
+            long left = Fight.wbRespawnAt - now;
+            if (left < 0) { left = 0; }
+            o.Set("alive", JsonValue.NewNum("0"));
+            o.Set("respawnIn", JsonValue.NewNum(Convert.ToString(left)));
+            return o;
+        }
+        o.Set("alive", JsonValue.NewNum("1"));
+        o.Set("hp", JsonValue.NewNum(Convert.ToString(Fight.wbHp)));
+        o.Set("maxhp", JsonValue.NewNum(Convert.ToString(Fight.wbMaxHp)));
+        return o;
+    }
+
+    /* 打世界 BOSS 一轮：f 收战况（含血量进度），错误串非空即失败。 */
+    static string WBossHit(Session s, long now, JsonValue f) {
+        if (Fight.wbHp <= 0 && now >= Fight.wbRespawnAt) {
+            Fight.wbHp = Fight.wbMaxHp;
+        }
+        if (Fight.wbHp <= 0) {
+            long left = Fight.wbRespawnAt - now;
+            if (left < 0) { left = 0; }
+            return "世界BOSS尚未重生（还需 " + Convert.ToString(left) + " 秒）";
+        }
+        int dmg = Fight.Damage(Fight.Atk(s.row) * 3, 100);
+        if (dmg < 1) { dmg = 1; }
+        if (dmg > Fight.wbHp) { dmg = (int)Fight.wbHp; }
+        Fight.wbHp = Fight.wbHp - dmg;
+        s.wbDmg = s.wbDmg + dmg;
+        long gold = Fight.rng.Between(10, 45);
+        s.row.exp = s.row.exp + 200;
+        s.row.gold = s.row.gold + gold;
+        f.Set("mob", JsonValue.NewStr("暗之虹魔教主·幻影"));
+        f.Set("dmg", JsonValue.NewNum(Convert.ToString(dmg)));
+        f.Set("gold", JsonValue.NewNum(Convert.ToString(gold)));
+        f.Set("wbhp", JsonValue.NewNum(Convert.ToString(Fight.wbHp)));
+        f.Set("wbmax", JsonValue.NewNum(Convert.ToString(Fight.wbMaxHp)));
+        if (s.wbDmg > Fight.wbTopDmg) {
+            Fight.wbTopDmg = s.wbDmg;
+            Fight.wbTopName = s.row.nickname;
+        }
+        f.Set("mydmg", JsonValue.NewNum(Convert.ToString(s.wbDmg)));
+        if (Fight.wbHp <= 0) {
+            Fight.wbRespawnAt = now + 1800;
+            s.row.gold = s.row.gold + 5000;
+            ZanWeb.Model.Game.Item big = Fight.rng.NextBelow(10000) < 2500
+                ? Fight.ByName("屠龙") : Fight.ByName("霸者之刃");
+            if (big != null) { Fight.Gift(s, big.id, 1); f.Set("drop",
+                JsonValue.NewStr(big.name)); }
+            f.Set("killed", JsonValue.NewNum("1"));
+            f.Set("quest", JsonValue.NewStr("世界BOSS击杀"));
+            Gateway.AnnounceAll("世界BOSS被击杀",
+                s.row.nickname + " 的一击致命！全场伤害最高："
+                + Fight.wbTopName + "（"
+                + Convert.ToString(Fight.wbTopDmg) + " 伤害）。5 分钟后重生。");
+        }
+        Fight.StampProgress(s, f);
+        s.dirty = true;
+        return "";
+    }
+
+    /* 寻宝：200 金币抽一件，权重表覆盖全物品档，屠龙 20/9590≈0.2%。
+       结果物品名随回复（r.item）带回。 */
+    static string Draw(Session s, JsonValue r) {
+        long cost = 200;
+        if (s.row.gold < cost) { return "金币不够（每次寻宝需 200）"; }
+        string[] names = new string[] { "金创药(小量)", "金创药(中量)",
+            "食人树叶", "毒蜘蛛牙齿", "蛆卵", "铜矿", "水晶", "铁矿",
+            "黑铁矿石", "银矿", "金矿", "八荒", "半月", "偃月", "凝霜",
+            "无极棍", "炼狱", "血饮", "井中月", "龙牙", "裁决之杖",
+            "龙纹剑", "逍遥扇", "破馆珍剑", "怒斩", "霸者之刃", "屠龙" };
+        int[] weights = new int[] { 2000, 1200, 900, 900, 700, 700, 500,
+            500, 400, 300, 180, 400, 350, 300, 260, 200, 190, 150, 130,
+            90, 70, 60, 50, 40, 25, 12, 20 };
+        int total = 0;
+        for (int i = 0; i < weights.Length; i = i + 1) { total += weights[i]; }
+        int roll = Fight.rng.NextBelow(total);
+        int pick = 0;
+        for (int i = 0; i < weights.Length; i = i + 1) {
+            if (roll < weights[i]) { pick = i; break; }
+            roll -= weights[i];
+        }
+        ZanWeb.Model.Game.Item it = Fight.ByName(names[pick]);
+        if (it == null) { return "奖池物品缺失"; }
+        s.row.gold = s.row.gold - cost;
+        Fight.BagAdd(s, it.id, 1);
+        s.dirty = true;
+        r.Set("item", JsonValue.NewStr(it.name));
+        return "";
+    }
+
+    /* 回收：把背包里全部材料（kind=3）按卖店价一半一次性结成金币。 */
+    static string Recycle(Session s, JsonValue r) {
+        long gain = 0;
+        for (int i = s.bagIds.Count - 1; i >= 0; i = i - 1) {
+            ZanWeb.Model.Game.Item it = Fight.ById(s.bagIds[i]);
+            if (it == null || it.kind != 3) { continue; }
+            gain += it.price / 2 * s.bagCounts[i];
+            s.bagIds.RemoveAt(i);
+            s.bagCounts.RemoveAt(i);
+        }
+        if (gain <= 0) { return "背包里没有可回收的材料"; }
+        s.row.gold = s.row.gold + gain;
+        s.bagDirty = true;
+        s.dirty = true;
+        r.Set("gain", JsonValue.NewNum(Convert.ToString(gain)));
+        return "";
+    }
+
+    /* 图鉴：全物品档 + 全怪物档（只读， GM 后台加怪/加物即自动带出）。 */
+    static JsonValue CodexJson() {
+        JsonValue items = JsonValue.NewArray();
+        for (int i = 0; i < Fight.items.Count; i = i + 1) {
+            ZanWeb.Model.Game.Item it = Fight.items[i];
+            JsonValue o = JsonValue.NewObject();
+            o.Set("name", JsonValue.NewStr(it.name));
+            o.Set("kind", JsonValue.NewNum(Convert.ToString(it.kind)));
+            o.Set("atk", JsonValue.NewNum(Convert.ToString(it.atk)));
+            o.Set("def", JsonValue.NewNum(Convert.ToString(it.def)));
+            o.Set("heal", JsonValue.NewNum(Convert.ToString(it.hp)));
+            o.Set("price", JsonValue.NewNum(Convert.ToString(it.price)));
+            o.Set("minLevel", JsonValue.NewNum(Convert.ToString(it.minLevel)));
+            items.Append(o);
+        }
+        JsonValue mobs = JsonValue.NewArray();
+        for (int i = 0; i < Fight.mobs.Count; i = i + 1) {
+            ZanWeb.Model.Game.Mob t = Fight.mobs[i];
+            JsonValue o = JsonValue.NewObject();
+            o.Set("name", JsonValue.NewStr(t.name));
+            o.Set("level", JsonValue.NewNum(Convert.ToString(t.level)));
+            o.Set("hp", JsonValue.NewNum(Convert.ToString(t.hp)));
+            o.Set("atk", JsonValue.NewNum(Convert.ToString(t.atk)));
+            o.Set("def", JsonValue.NewNum(Convert.ToString(t.def)));
+            o.Set("map", JsonValue.NewNum(Convert.ToString(t.mapId)));
+            o.Set("boss", JsonValue.NewNum(t.count == 1 ? "1" : "0"));
+            ZanWeb.Model.Game.Item drop = Fight.ById(t.dropItemId);
+            o.Set("drop", JsonValue.NewStr(drop != null ? drop.name : ""));
+            mobs.Append(o);
+        }
+        JsonValue all = JsonValue.NewObject();
+        all.Set("items", items);
+        all.Set("mobs", mobs);
+        return all;
     }
 }

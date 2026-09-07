@@ -44,6 +44,38 @@ class Player {
        按它展示）。 */
     int kills;
 
+    /* 铁匠铺强化星级（0-9）：武器每星 +2 攻、防具每星 +2 防，见
+       Fight.Atk/Def。 */
+    int weaponStar;
+    int armorStar;
+
+    /* 称谓：玩家在已解锁列表里自选的展示名（空=不显示）。 */
+    [Column(StringLength = 32)]
+    string title;
+
+    /* 传说塔已通关层数（0=未爬）。 */
+    int towerFloor;
+
+    /* 祭坛增益到期时刻（秒）；早于当前时刻即失效。 */
+    long buffUntil;
+
+    /* 五行修炼总层数（每层 +1 攻 +5 血，Fight 结算）。 */
+    int wuxing;
+
+    /* 所属行会（game_guild.id，0=无会）。 */
+    int guildId;
+
+    /* 押镖：0=无任务；1=押送中（escortUntil 前交任务）。 */
+    int escortStage;
+    long escortUntil;
+
+    /* 师父角色名（空=未拜师）。 */
+    [Column(StringLength = 32)]
+    string masterName;
+
+    /* 竞技场积分。 */
+    int arenaPts;
+
     /* 当前所在地图（game_map.id）与坐标；移动合法性由网关校验。 */
     int mapId;
     int x;

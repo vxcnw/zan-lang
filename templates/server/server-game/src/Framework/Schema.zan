@@ -220,11 +220,28 @@ class Schema {
         }
         int maps = await db.Select<GameMap>().CountAsync();
         if (maps == 0) {
-            if (!await Schema.AddMap(db, "新手村", 1, 1)) { return false; }
-            if (!await Schema.AddMap(db, "沃玛森林", 5, 2)) { return false; }
-            if (!await Schema.AddMap(db, "僵尸洞窟", 12, 3)) { return false; }
-            if (!await Schema.AddMap(db, "祖玛寺庙", 20, 4)) { return false; }
-            if (!await Schema.AddMap(db, "赤月峡谷", 30, 5)) { return false; }
+            /* 全图 20 张：顺序对齐参考客户端的地图列表，门槛即放置
+               长线节奏（60 级毕业约 18-20 小时活跃）。 */
+            if (!await Schema.AddMap(db, "银杏小镇", 1, 1)) { return false; }
+            if (!await Schema.AddMap(db, "比奇省", 3, 2)) { return false; }
+            if (!await Schema.AddMap(db, "半兽人古墓", 8, 3)) { return false; }
+            if (!await Schema.AddMap(db, "废弃矿洞", 12, 4)) { return false; }
+            if (!await Schema.AddMap(db, "沃玛森林", 15, 5)) { return false; }
+            if (!await Schema.AddMap(db, "未知暗殿", 18, 6)) { return false; }
+            if (!await Schema.AddMap(db, "沃玛寺庙", 22, 7)) { return false; }
+            if (!await Schema.AddMap(db, "死亡棺材", 25, 8)) { return false; }
+            if (!await Schema.AddMap(db, "祖玛寺庙", 28, 9)) { return false; }
+            if (!await Schema.AddMap(db, "霸者大厅", 32, 10)) { return false; }
+            if (!await Schema.AddMap(db, "赤月峡谷", 36, 11)) { return false; }
+            if (!await Schema.AddMap(db, "重装之家", 40, 12)) { return false; }
+            if (!await Schema.AddMap(db, "魔龙岭", 44, 13)) { return false; }
+            if (!await Schema.AddMap(db, "牛魔寺庙", 46, 14)) { return false; }
+            if (!await Schema.AddMap(db, "骨魔洞窟", 49, 15)) { return false; }
+            if (!await Schema.AddMap(db, "圣域回廊", 52, 16)) { return false; }
+            if (!await Schema.AddMap(db, "镇魔神殿", 54, 17)) { return false; }
+            if (!await Schema.AddMap(db, "盘古之地", 56, 18)) { return false; }
+            if (!await Schema.AddMap(db, "上古战场", 58, 19)) { return false; }
+            if (!await Schema.AddMap(db, "诛仙伏魔殿", 60, 20)) { return false; }
         }
         int ann = await db.Select<Announce>().CountAsync();
         if (ann == 0) {
@@ -243,26 +260,71 @@ class Schema {
 
     /* 物品目录：消耗品/武器/防具可直接购买，材料（kind=3）只掉落+卖店
        ——打金换药的循环出水口。id 由插入顺序决定，怪物种子的掉落引用它。 */
+    /* 物品种子：名称与数值取自 M2.DB（StdItems 原价/上下限），
+       按「我们的版本」四类归并：0 消耗 1 武器 2 防具 3 材料。
+       生成器：_scratch/m2import.py（改数据先改那里再跑）。 */
     static async bool SeedItems(IDbConnection db) {
         int n = await db.Select<Item>().CountAsync();
         if (n > 0) { return true; }
-        /* 消耗品 */
-        if (!await Schema.AddItem(db, "金创药(小)", 0, 0, 0, 60, 20, 1)) { return false; }
-        if (!await Schema.AddItem(db, "金创药(大)", 0, 0, 0, 200, 80, 1)) { return false; }
-        /* 武器 */
+        if (!await Schema.AddItem(db, "金创药(小量)", 0, 0, 0, 20, 80, 1)) { return false; }
+        if (!await Schema.AddItem(db, "金创药(中量)", 0, 0, 0, 50, 200, 5)) { return false; }
+        if (!await Schema.AddItem(db, "强效金创药", 0, 0, 0, 90, 550, 10)) { return false; }
+        if (!await Schema.AddItem(db, "太阳水", 0, 0, 0, 30, 1000, 15)) { return false; }
+        if (!await Schema.AddItem(db, "强效太阳水", 0, 0, 0, 50, 2000, 20)) { return false; }
+        if (!await Schema.AddItem(db, "万年雪霜", 0, 0, 0, 100, 4000, 28)) { return false; }
+        if (!await Schema.AddItem(db, "疗伤药", 0, 0, 0, 100, 10000, 35)) { return false; }
         if (!await Schema.AddItem(db, "木剑", 1, 5, 0, 0, 50, 1)) { return false; }
-        if (!await Schema.AddItem(db, "铁剑", 1, 15, 0, 0, 400, 5)) { return false; }
-        if (!await Schema.AddItem(db, "修罗", 1, 35, 0, 0, 2000, 12)) { return false; }
-        if (!await Schema.AddItem(db, "屠龙", 1, 70, 0, 0, 9000, 20)) { return false; }
-        /* 防具 */
-        if (!await Schema.AddItem(db, "布衣", 2, 0, 3, 0, 40, 1)) { return false; }
-        if (!await Schema.AddItem(db, "轻盔", 2, 0, 10, 0, 350, 5)) { return false; }
-        if (!await Schema.AddItem(db, "战神盔甲", 2, 0, 25, 0, 1800, 12)) { return false; }
-        /* 材料（只卖店） */
-        if (!await Schema.AddItem(db, "兽皮", 3, 0, 0, 0, 30, 1)) { return false; }
-        if (!await Schema.AddItem(db, "蝎子壳", 3, 0, 0, 0, 60, 1)) { return false; }
-        if (!await Schema.AddItem(db, "祖玛头像", 3, 0, 0, 0, 200, 1)) { return false; }
-        return await Schema.AddItem(db, "赤月精华", 3, 0, 0, 0, 500, 1);
+        if (!await Schema.AddItem(db, "匕首", 1, 5, 0, 0, 500, 1)) { return false; }
+        if (!await Schema.AddItem(db, "青铜剑", 1, 7, 0, 0, 900, 5)) { return false; }
+        if (!await Schema.AddItem(db, "短剑", 1, 11, 0, 0, 1000, 10)) { return false; }
+        if (!await Schema.AddItem(db, "铁剑", 1, 9, 0, 0, 1200, 10)) { return false; }
+        if (!await Schema.AddItem(db, "八荒", 1, 12, 0, 0, 5000, 15)) { return false; }
+        if (!await Schema.AddItem(db, "半月", 1, 10, 0, 0, 4000, 15)) { return false; }
+        if (!await Schema.AddItem(db, "凌风", 1, 12, 0, 0, 5000, 19)) { return false; }
+        if (!await Schema.AddItem(db, "偃月", 1, 10, 0, 0, 10000, 20)) { return false; }
+        if (!await Schema.AddItem(db, "斩马刀", 1, 15, 0, 0, 6000, 20)) { return false; }
+        if (!await Schema.AddItem(db, "修罗", 1, 20, 0, 0, 10000, 22)) { return false; }
+        if (!await Schema.AddItem(db, "凝霜", 1, 13, 0, 0, 8000, 25)) { return false; }
+        if (!await Schema.AddItem(db, "无极棍", 1, 16, 0, 0, 30000, 25)) { return false; }
+        if (!await Schema.AddItem(db, "炼狱", 1, 25, 0, 0, 25000, 26)) { return false; }
+        if (!await Schema.AddItem(db, "血饮", 1, 14, 0, 0, 40000, 27)) { return false; }
+        if (!await Schema.AddItem(db, "井中月", 1, 22, 0, 0, 30000, 28)) { return false; }
+        if (!await Schema.AddItem(db, "龙牙", 1, 18, 0, 0, 85000, 28)) { return false; }
+        if (!await Schema.AddItem(db, "裁决之杖", 1, 30, 0, 0, 50000, 30)) { return false; }
+        if (!await Schema.AddItem(db, "龙纹剑", 1, 20, 0, 0, 50000, 35)) { return false; }
+        if (!await Schema.AddItem(db, "逍遥扇", 1, 13, 0, 0, 85000, 35)) { return false; }
+        if (!await Schema.AddItem(db, "破馆珍剑", 1, 32, 0, 0, 30000, 40)) { return false; }
+        if (!await Schema.AddItem(db, "怒斩", 1, 26, 0, 0, 85000, 46)) { return false; }
+        if (!await Schema.AddItem(db, "霸者之刃", 1, 32, 0, 0, 230000, 46)) { return false; }
+        if (!await Schema.AddItem(db, "屠龙", 1, 35, 0, 0, 60000, 34)) { return false; }
+        if (!await Schema.AddItem(db, "布衣", 2, 0, 2, 0, 400, 1)) { return false; }
+        if (!await Schema.AddItem(db, "轻型盔甲", 2, 0, 3, 0, 3000, 11)) { return false; }
+        if (!await Schema.AddItem(db, "中型盔甲", 2, 0, 5, 0, 6000, 16)) { return false; }
+        if (!await Schema.AddItem(db, "魔法长袍", 2, 0, 5, 0, 10000, 22)) { return false; }
+        if (!await Schema.AddItem(db, "灵魂战衣", 2, 0, 6, 0, 10000, 22)) { return false; }
+        if (!await Schema.AddItem(db, "重盔甲", 2, 0, 7, 0, 12000, 22)) { return false; }
+        if (!await Schema.AddItem(db, "幽灵战衣", 2, 0, 7, 0, 22000, 27)) { return false; }
+        if (!await Schema.AddItem(db, "恶魔长袍", 2, 0, 7, 0, 22000, 28)) { return false; }
+        if (!await Schema.AddItem(db, "钢盔甲", 2, 0, 9, 0, 45000, 40)) { return false; }
+        if (!await Schema.AddItem(db, "天魔神甲", 2, 0, 12, 0, 35000, 40)) { return false; }
+        if (!await Schema.AddItem(db, "战神盔甲", 2, 0, 9, 0, 25000, 46)) { return false; }
+        if (!await Schema.AddItem(db, "食人树叶", 3, 0, 0, 0, 50, 1)) { return false; }
+        if (!await Schema.AddItem(db, "毒蜘蛛牙齿", 3, 0, 0, 0, 50, 1)) { return false; }
+        if (!await Schema.AddItem(db, "蝎子的尾巴", 3, 0, 0, 0, 50, 1)) { return false; }
+        if (!await Schema.AddItem(db, "食人树的果实", 3, 0, 0, 0, 300, 1)) { return false; }
+        if (!await Schema.AddItem(db, "蛆卵", 3, 0, 0, 0, 500, 1)) { return false; }
+        if (!await Schema.AddItem(db, "铜矿", 3, 0, 0, 0, 500, 1)) { return false; }
+        if (!await Schema.AddItem(db, "水晶", 3, 0, 0, 0, 500, 1)) { return false; }
+        if (!await Schema.AddItem(db, "蜘蛛线", 3, 0, 0, 0, 500, 1)) { return false; }
+        if (!await Schema.AddItem(db, "血剑碎片", 3, 0, 0, 0, 500, 1)) { return false; }
+        if (!await Schema.AddItem(db, "赤月恶魔油", 3, 0, 0, 0, 500, 1)) { return false; }
+        if (!await Schema.AddItem(db, "铁矿", 3, 0, 0, 0, 1000, 1)) { return false; }
+        if (!await Schema.AddItem(db, "沃玛号角", 3, 0, 0, 0, 1000, 1)) { return false; }
+        if (!await Schema.AddItem(db, "祖玛头像", 3, 0, 0, 0, 1000, 1)) { return false; }
+        if (!await Schema.AddItem(db, "黑铁矿石", 3, 0, 0, 0, 2000, 1)) { return false; }
+        if (!await Schema.AddItem(db, "银矿", 3, 0, 0, 0, 2500, 1)) { return false; }
+        if (!await Schema.AddItem(db, "金矿", 3, 0, 0, 0, 6000, 1)) { return false; }
+        return true;
     }
 
     static async bool AddItem(IDbConnection db, string name, int kind, int atk,
@@ -283,18 +345,128 @@ class Schema {
     /* 刷怪点：每行 count 只同名怪；新手怪必掉兽皮（卖店买药的保底循环），
        高级图掉装备与贵材料。掉落按物品名解析成 id，不依赖自增序号。
        数值面向模板演示，平衡留给二开。 */
+    /* 怪物种子：M2.DB（Monster）原 hp/ac/dc/exp，按地图门槛调参：
+       普通 DC≤gate+12、HP≤300+30·gate；BOSS DC≤30+0.75·gate、
+       HP≤2500+60·gate——数值原味但战斗可赢。生成器：_scratch/m2import.py。 */
     static async bool SeedMobs(IDbConnection db) {
         int n = await db.Select<Mob>().CountAsync();
         if (n > 0) { return true; }
-        if (!await Schema.AddMob(db, "稻草人", 1, 1, 30, 5, 0, 15, 3, 8, 8, 3, "兽皮", 10000)) { return false; }
-        if (!await Schema.AddMob(db, "多钩猫", 2, 5, 120, 18, 5, 45, 15, 30, 10, 3, "蝎子壳", 3000)) { return false; }
-        if (!await Schema.AddMob(db, "沃玛战士", 2, 6, 180, 25, 8, 70, 20, 45, 12, 2, "修罗", 1500)) { return false; }
-        if (!await Schema.AddMob(db, "僵尸", 3, 12, 500, 55, 20, 220, 60, 120, 15, 3, "金创药(大)", 2500)) { return false; }
-        if (!await Schema.AddMob(db, "祖玛卫士", 4, 20, 1600, 120, 45, 800, 200, 400, 20, 2, "祖玛头像", 2000)) { return false; }
-        return await Schema.AddMob(db, "赤月恶魔", 5, 30, 6000, 300, 90, 3000, 800, 1500, 60, 1, "赤月精华", 1000);
+        if (!await Schema.AddMob(db, "鸡", 1, 5, 5, 1, 0, 5, 8, 23, 6, 6, "食人树叶", 3000)) { return false; }
+        if (!await Schema.AddMob(db, "鹿", 1, 12, 15, 4, 0, 15, 26, 73, 7, 6, "食人树叶", 2500)) { return false; }
+        if (!await Schema.AddMob(db, "羊", 1, 13, 20, 3, 0, 20, 29, 82, 7, 6, "蝎子的尾巴", 2000)) { return false; }
+        if (!await Schema.AddMob(db, "稻草人", 1, 10, 15, 2, 0, 12, 20, 57, 6, 6, "毒蜘蛛牙齿", 2000)) { return false; }
+        if (!await Schema.AddMob(db, "蛤蟆", 1, 12, 20, 5, 0, 15, 26, 73, 8, 6, "食人树的果实", 1200)) { return false; }
+        if (!await Schema.AddMob(db, "多钩猫", 2, 13, 22, 4, 0, 17, 29, 82, 8, 5, "食人树叶", 2500)) { return false; }
+        if (!await Schema.AddMob(db, "钉耙猫", 2, 13, 23, 4, 0, 18, 29, 82, 8, 5, "蛆卵", 1200)) { return false; }
+        if (!await Schema.AddMob(db, "森林雪人", 2, 16, 36, 10, 2, 30, 39, 109, 8, 5, "食人树的果实", 2000)) { return false; }
+        if (!await Schema.AddMob(db, "半兽人", 2, 15, 30, 9, 1, 25, 35, 99, 8, 5, "食人树叶", 2500)) { return false; }
+        if (!await Schema.AddMob(db, "毒蜘蛛", 2, 16, 42, 9, 2, 42, 39, 109, 9, 5, "毒蜘蛛牙齿", 3000)) { return false; }
+        if (!await Schema.AddMob(db, "狼", 2, 16, 48, 8, 0, 35, 39, 109, 9, 5, "蝎子的尾巴", 2500)) { return false; }
+        if (!await Schema.AddMob(db, "骷髅", 3, 18, 90, 10, 0, 85, 46, 128, 9, 5, "血剑碎片", 1200)) { return false; }
+        if (!await Schema.AddMob(db, "掷斧骷髅", 3, 18, 100, 9, 0, 90, 46, 128, 9, 5, "铜矿", 1500)) { return false; }
+        if (!await Schema.AddMob(db, "骷髅战士", 3, 19, 105, 15, 0, 95, 49, 138, 10, 5, "铁矿", 1000)) { return false; }
+        if (!await Schema.AddMob(db, "山洞蝙蝠", 3, 20, 25, 6, 2, 25, 53, 148, 8, 5, "食人树叶", 2000)) { return false; }
+        if (!await Schema.AddMob(db, "骷髅战将", 3, 20, 110, 13, 2, 100, 53, 148, 10, 5, "铜矿", 1500)) { return false; }
+        if (!await Schema.AddMob(db, "骷髅精灵", 3, 40, 500, 24, 5, 600, 560, 1548, 240, 1, "八荒", 500)) { return false; }
+        if (!await Schema.AddMob(db, "洞蛆", 4, 21, 65, 8, 0, 60, 57, 158, 9, 5, "蛆卵", 2500)) { return false; }
+        if (!await Schema.AddMob(db, "蝎子", 4, 18, 45, 16, 2, 45, 46, 128, 9, 5, "蝎子的尾巴", 2500)) { return false; }
+        if (!await Schema.AddMob(db, "沙虫", 4, 17, 54, 11, 0, 54, 42, 118, 9, 5, "铜矿", 1500)) { return false; }
+        if (!await Schema.AddMob(db, "红蛇", 4, 17, 50, 12, 0, 50, 42, 118, 9, 5, "水晶", 1200)) { return false; }
+        if (!await Schema.AddMob(db, "粪虫", 4, 26, 155, 17, 3, 180, 77, 213, 10, 5, "铁矿", 1200)) { return false; }
+        if (!await Schema.AddMob(db, "巨型多角虫", 4, 27, 250, 15, 0, 200, 324, 896, 240, 1, "凌风", 400)) { return false; }
+        if (!await Schema.AddMob(db, "盔甲虫", 5, 16, 50, 10, 0, 37, 39, 109, 10, 5, "食人树叶", 2000)) { return false; }
+        if (!await Schema.AddMob(db, "多角虫", 5, 16, 52, 8, 0, 32, 39, 109, 10, 5, "食人树的果实", 1500)) { return false; }
+        if (!await Schema.AddMob(db, "半兽战士", 5, 22, 100, 12, 3, 90, 61, 169, 10, 5, "铜矿", 1200)) { return false; }
+        if (!await Schema.AddMob(db, "暗黑战士", 5, 26, 165, 16, 3, 200, 77, 213, 10, 4, "铁矿", 1000)) { return false; }
+        if (!await Schema.AddMob(db, "半兽勇士", 5, 28, 300, 27, 0, 300, 85, 236, 11, 4, "黑铁矿石", 600)) { return false; }
+        if (!await Schema.AddMob(db, "雪人王", 5, 50, 1300, 41, 20, 400, 764, 2112, 300, 1, "凌风", 400)) { return false; }
+        if (!await Schema.AddMob(db, "恶灵僵尸", 6, 28, 180, 20, 1, 190, 85, 236, 10, 5, "蛆卵", 2000)) { return false; }
+        if (!await Schema.AddMob(db, "黑色恶蛆", 6, 28, 230, 15, 5, 180, 85, 236, 10, 5, "水晶", 1500)) { return false; }
+        if (!await Schema.AddMob(db, "跳跳蜂", 6, 26, 200, 18, 3, 210, 77, 213, 10, 5, "蜘蛛线", 1500)) { return false; }
+        if (!await Schema.AddMob(db, "蜜蜂", 6, 26, 200, 18, 3, 210, 77, 213, 10, 5, "蜘蛛线", 1500)) { return false; }
+        if (!await Schema.AddMob(db, "角蝇", 6, 30, 200, 1, 0, 300, 94, 259, 11, 5, "蛆卵", 1500)) { return false; }
+        if (!await Schema.AddMob(db, "楔蛾", 6, 32, 220, 18, 0, 350, 408, 1136, 300, 1, "半月", 400)) { return false; }
+        if (!await Schema.AddMob(db, "沃玛战士", 7, 30, 265, 28, 3, 260, 94, 259, 12, 5, "沃玛号角", 800)) { return false; }
+        if (!await Schema.AddMob(db, "沃玛勇士", 7, 30, 285, 28, 3, 280, 94, 259, 12, 5, "沃玛号角", 700)) { return false; }
+        if (!await Schema.AddMob(db, "沃玛战将", 7, 30, 285, 29, 3, 280, 94, 259, 12, 4, "铁矿", 1200)) { return false; }
+        if (!await Schema.AddMob(db, "火焰沃玛", 7, 31, 340, 26, 0, 290, 98, 271, 12, 4, "黑铁矿石", 600)) { return false; }
+        if (!await Schema.AddMob(db, "钳虫", 7, 31, 270, 25, 5, 250, 98, 271, 12, 4, "银矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "沃玛教主", 7, 60, 2200, 46, 17, 2500, 988, 2724, 300, 1, "修罗", 400)) { return false; }
+        if (!await Schema.AddMob(db, "骷髅长枪兵", 8, 32, 390, 30, 0, 380, 102, 284, 12, 5, "黑铁矿石", 600)) { return false; }
+        if (!await Schema.AddMob(db, "骷髅锤兵", 8, 35, 390, 35, 6, 450, 116, 321, 12, 5, "银矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "骷髅刀斧手", 8, 35, 440, 31, 9, 420, 116, 321, 12, 4, "金矿", 200)) { return false; }
+        if (!await Schema.AddMob(db, "黑野猪", 8, 35, 310, 26, 10, 380, 116, 321, 12, 5, "黑铁矿石", 600)) { return false; }
+        if (!await Schema.AddMob(db, "蝎蛇", 8, 35, 330, 28, 5, 360, 116, 321, 12, 5, "银矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "尸王", 8, 40, 500, 36, 3, 800, 560, 1548, 300, 1, "凝霜", 400)) { return false; }
+        if (!await Schema.AddMob(db, "祖玛弓箭手", 9, 40, 385, 18, 10, 370, 140, 387, 12, 5, "祖玛头像", 800)) { return false; }
+        if (!await Schema.AddMob(db, "祖玛雕像", 9, 42, 495, 32, 12, 450, 150, 414, 12, 5, "祖玛头像", 700)) { return false; }
+        if (!await Schema.AddMob(db, "红野猪", 9, 32, 330, 25, 0, 320, 102, 284, 12, 5, "黑铁矿石", 500)) { return false; }
+        if (!await Schema.AddMob(db, "牛头魔", 9, 32, 330, 25, 0, 360, 102, 284, 12, 5, "银矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "牛魔战士", 10, 33, 420, 30, 2, 400, 107, 296, 12, 5, "金矿", 250)) { return false; }
+        if (!await Schema.AddMob(db, "牛魔法师", 10, 40, 360, 28, 12, 440, 140, 387, 12, 4, "金矿", 250)) { return false; }
+        if (!await Schema.AddMob(db, "牛魔斗士", 10, 40, 460, 38, 7, 480, 140, 387, 12, 4, "黑铁矿石", 500)) { return false; }
+        if (!await Schema.AddMob(db, "大老鼠", 10, 24, 385, 23, 3, 330, 68, 190, 12, 4, "银矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "血僵尸", 10, 47, 1200, 44, 18, 800, 175, 484, 14, 4, "金矿", 300)) { return false; }
+        if (!await Schema.AddMob(db, "恶灵尸王", 10, 35, 500, 45, 4, 460, 464, 1284, 300, 1, "血饮", 400)) { return false; }
+        if (!await Schema.AddMob(db, "天狼蜘蛛", 11, 43, 500, 34, 8, 500, 155, 428, 14, 5, "蜘蛛线", 1500)) { return false; }
+        if (!await Schema.AddMob(db, "暴牙蜘蛛", 11, 43, 500, 34, 12, 400, 155, 428, 14, 5, "蜘蛛线", 1500)) { return false; }
+        if (!await Schema.AddMob(db, "钢牙蜘蛛", 11, 53, 800, 48, 13, 700, 208, 573, 14, 4, "赤月恶魔油", 800)) { return false; }
+        if (!await Schema.AddMob(db, "黑锷蜘蛛", 11, 53, 1200, 48, 11, 900, 208, 573, 14, 4, "赤月恶魔油", 800)) { return false; }
+        if (!await Schema.AddMob(db, "花吻蜘蛛", 11, 54, 750, 48, 12, 680, 213, 588, 14, 4, "赤月恶魔油", 700)) { return false; }
+        if (!await Schema.AddMob(db, "赤月恶魔", 11, 60, 4660, 57, 18, 5000, 988, 2724, 420, 1, "裁决之杖", 350)) { return false; }
+        if (!await Schema.AddMob(db, "血巨人", 12, 55, 1200, 52, 15, 1000, 219, 603, 14, 4, "金矿", 300)) { return false; }
+        if (!await Schema.AddMob(db, "血金刚", 12, 56, 900, 49, 12, 1500, 224, 618, 14, 4, "金矿", 300)) { return false; }
+        if (!await Schema.AddMob(db, "邪恶巨人", 12, 55, 1500, 52, 14, 800, 219, 603, 14, 4, "黑铁矿石", 500)) { return false; }
+        if (!await Schema.AddMob(db, "重装使者", 12, 60, 4900, 60, 10, 5000, 988, 2724, 480, 1, "天魔神甲", 350)) { return false; }
+        if (!await Schema.AddMob(db, "暗之沃玛教主", 12, 60, 3000, 60, 25, 3000, 988, 2724, 480, 1, "战神盔甲", 350)) { return false; }
+        if (!await Schema.AddMob(db, "暗之双头金刚", 12, 60, 3000, 60, 30, 3000, 988, 2724, 480, 1, "钢盔甲", 350)) { return false; }
+        if (!await Schema.AddMob(db, "千年树妖", 13, 60, 1620, 56, 10, 2000, 247, 681, 14, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "虹魔蝎卫", 13, 60, 1620, 56, 25, 2330, 247, 681, 14, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "虹魔猪卫", 13, 60, 1500, 56, 20, 2000, 247, 681, 14, 4, "黑铁矿石", 600)) { return false; }
+        if (!await Schema.AddMob(db, "暗之触龙神", 13, 55, 2200, 63, 40, 3300, 876, 2412, 480, 1, "龙纹剑", 350)) { return false; }
+        if (!await Schema.AddMob(db, "牛魔侍卫", 14, 40, 500, 44, 10, 580, 140, 387, 14, 5, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "牛魔将军", 14, 45, 750, 50, 12, 780, 165, 456, 14, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "牛魔祭司", 14, 45, 750, 42, 16, 750, 165, 456, 14, 4, "黑铁矿石", 600)) { return false; }
+        if (!await Schema.AddMob(db, "奴隶", 14, 45, 1680, 45, 0, 2000, 165, 456, 14, 4, "银矿", 500)) { return false; }
+        if (!await Schema.AddMob(db, "牛魔王", 14, 60, 3600, 64, 20, 4000, 988, 2724, 480, 1, "龙牙", 350)) { return false; }
+        if (!await Schema.AddMob(db, "月魔蜘蛛", 15, 52, 850, 27, 12, 700, 202, 558, 14, 4, "蜘蛛线", 1200)) { return false; }
+        if (!await Schema.AddMob(db, "邪恶毒蛇", 15, 50, 1100, 55, 20, 1800, 191, 528, 14, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "地狱犬", 15, 50, 1400, 61, 10, 420, 191, 528, 14, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "蜈蚣王", 15, 50, 1300, 61, 15, 600, 191, 528, 14, 4, "黑铁矿石", 500)) { return false; }
+        if (!await Schema.AddMob(db, "黄泉教主", 15, 50, 3000, 67, 18, 2500, 764, 2112, 480, 1, "逍遥扇", 350)) { return false; }
+        if (!await Schema.AddMob(db, "圣域蝙蝠", 16, 60, 500, 20, 10, 500, 247, 681, 14, 5, "金矿", 350)) { return false; }
+        if (!await Schema.AddMob(db, "圣域魔蝎", 16, 60, 500, 50, 10, 500, 247, 681, 14, 5, "金矿", 350)) { return false; }
+        if (!await Schema.AddMob(db, "圣域多钩猫", 16, 60, 500, 30, 5, 500, 247, 681, 14, 5, "银矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "圣域勇士", 16, 60, 750, 50, 10, 500, 247, 681, 14, 4, "金矿", 350)) { return false; }
+        if (!await Schema.AddMob(db, "圣域稻草人", 16, 60, 750, 50, 10, 500, 247, 681, 14, 4, "金矿", 350)) { return false; }
+        if (!await Schema.AddMob(db, "圣域牛魔", 16, 60, 750, 30, 15, 500, 247, 681, 14, 4, "黑铁矿石", 500)) { return false; }
+        if (!await Schema.AddMob(db, "圣域教主", 16, 60, 5000, 60, 10, 2000, 988, 2724, 480, 1, "怒斩", 300)) { return false; }
+        if (!await Schema.AddMob(db, "圣域钳虫", 17, 60, 1500, 40, 15, 1000, 247, 681, 14, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "圣域雕像", 17, 60, 1500, 40, 15, 1000, 247, 681, 14, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "圣域祭司", 17, 60, 1500, 50, 5, 1000, 247, 681, 14, 4, "黑铁矿石", 500)) { return false; }
+        if (!await Schema.AddMob(db, "圣域杀手", 17, 60, 1920, 50, 10, 1000, 247, 681, 14, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "圣域力士", 17, 60, 1920, 60, 10, 1000, 247, 681, 14, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "地藏王", 17, 60, 5000, 70, 20, 4000, 988, 2724, 480, 1, "破馆珍剑", 300)) { return false; }
+        if (!await Schema.AddMob(db, "圣域护法", 18, 60, 1980, 50, 15, 1000, 247, 681, 14, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "圣域月魔", 18, 60, 1980, 40, 10, 1000, 247, 681, 14, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "圣域蝎卫", 18, 60, 1980, 40, 15, 1000, 247, 681, 14, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "圣域猪卫", 18, 60, 1980, 40, 15, 1000, 247, 681, 14, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "圣域修罗", 18, 60, 1980, 60, 5, 2000, 247, 681, 14, 4, "黑铁矿石", 500)) { return false; }
+        if (!await Schema.AddMob(db, "双头血魔", 18, 55, 5000, 72, 40, 4000, 876, 2412, 480, 1, "霸者之刃", 300)) { return false; }
+        if (!await Schema.AddMob(db, "圣域将军", 19, 60, 1500, 50, 20, 1000, 247, 681, 14, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "圣域冥狼", 19, 60, 900, 45, 15, 500, 247, 681, 14, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "圣域神鹰", 19, 60, 900, 30, 5, 500, 247, 681, 14, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "米尔皇帝", 19, 60, 5980, 74, 0, 3000, 988, 2724, 480, 1, "屠龙", 200)) { return false; }
+        if (!await Schema.AddMob(db, "圣域血魔", 20, 60, 2100, 60, 10, 2000, 247, 681, 15, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "圣域金刚", 20, 60, 2100, 60, 10, 2000, 247, 681, 15, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "圣域牛魔王", 20, 60, 2100, 60, 20, 2000, 247, 681, 15, 4, "黑铁矿石", 500)) { return false; }
+        if (!await Schema.AddMob(db, "圣域魔魂", 20, 60, 2100, 60, 25, 2000, 247, 681, 15, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "圣域炎兽", 20, 60, 2100, 50, 25, 2000, 247, 681, 15, 4, "金矿", 400)) { return false; }
+        if (!await Schema.AddMob(db, "虹魔教主", 20, 60, 5000, 75, 25, 5000, 988, 2724, 600, 1, "屠龙", 200)) { return false; }
+        return true;
     }
 
-    static async bool AddMob(IDbConnection db, string name, int mapId, int level,
+static async bool AddMob(IDbConnection db, string name, int mapId, int level,
                           int hp, int atk, int def, int exp, long goldMin,
                           long goldMax, int respawnSec, int count,
                           string dropItem, int dropRate) {

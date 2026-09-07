@@ -32,7 +32,7 @@ namespace ZanWeb.Game;
      {"op":"maps"}                           {"ok":1,"maps"}
      {"op":"move","map":2}                   {"ok":1,"self"} + 本区 ev move
      {"op":"walk","x","y"}                   {"ok":1} + 本区同图 ev walk
-     {"op":"say","text"}                     {"ok":1} + 本区 ev chat
+     {"op":"say","text"}                     本区 ev chat（免回执 op，不答 ok）
      {"op":"who"}                            {"ok":1,"rows":[同图同区玩家]}
      {"op":"mobs"}                           {"ok":1,"rows":[本地图怪物]}
      {"op":"hunt","mob":模板id}              {"ok":1,"fight","self"}（打一轮）
@@ -332,6 +332,62 @@ class Gateway {
         if (op == "sell") {
             Gateway.ItemChange(conn, s,
                 Fight.Sell(s, m.Int("item", 0), m.Int("count", 1)));
+            return;
+        }
+        if (op == "bosses") {
+            JsonValue rB = Gateway.Ok();
+            rB.Set("rows", Fight.BossList(now));
+            Gateway.Send(conn, rB);
+            return;
+        }
+        if (op == "announces") { await Gateway.Announces(conn); return; }
+        if (op == "rank") { await Gateway.Rank(conn, s); return; }
+        if (op == "forge") {
+            Gateway.ItemChange(conn, s, Fight.Forge(s, m.Str("slot", "")));
+            return;
+        }
+        if (op == "wboss") {
+            JsonValue rW = Gateway.Ok();
+            rW.Set("wboss", Fight.WBossState(now));
+            if (m.Int("hit", 0) == 1) {
+                JsonValue f = JsonValue.NewObject();
+                string wbErr = Fight.WBossHit(s, now, f);
+                if (wbErr.Length > 0) {
+                    Gateway.Send(conn, Gateway.Err(wbErr));
+                    return;
+                }
+                rW.Set("fight", f);
+                Gateway.SelfInto(rW, s);
+            }
+            Gateway.Send(conn, rW);
+            return;
+        }
+        if (op == "draw") {
+            JsonValue rD = Gateway.Ok();
+            string drawErr = Fight.Draw(s, rD);
+            if (drawErr.Length > 0) {
+                Gateway.Send(conn, Gateway.Err(drawErr));
+                return;
+            }
+            Gateway.SelfInto(rD, s);
+            Gateway.Send(conn, rD);
+            return;
+        }
+        if (op == "recycle") {
+            JsonValue rR = Gateway.Ok();
+            string recErr = Fight.Recycle(s, rR);
+            if (recErr.Length > 0) {
+                Gateway.Send(conn, Gateway.Err(recErr));
+                return;
+            }
+            Gateway.SelfInto(rR, s);
+            Gateway.Send(conn, rR);
+            return;
+        }
+        if (op == "codex") {
+            JsonValue rC = Gateway.Ok();
+            rC.Set("codex", Fight.CodexJson());
+            Gateway.Send(conn, rC);
             return;
         }
         Gateway.Send(conn, Gateway.Err("未知 op: " + op));
@@ -773,7 +829,8 @@ class Gateway {
 
     /* 同图移动：坐标钳在 [0, walkMax]，向同区同图玩家播报。 */
     static void Walk(Connection conn, Session s, JsonValue m) {
-        Gateway.Send(conn, Gateway.Ok());
+        /* 不回执：客户端把 walk 当免回 op 发，若这里答 ok，会插队消耗
+           它 FIFO 里下一条真 op 的回复槽（见 Net.replySinks 注释）。 */
         int x = m.Int("x", s.row.x);
         int y = m.Int("y", s.row.y);
         if (x < 0) { x = 0; }
@@ -800,7 +857,7 @@ class Gateway {
 
     /* 区服聊天：文本钳 200 字，空文本不播。 */
     static void Say(Connection conn, Session s, string text) {
-        Gateway.Send(conn, Gateway.Ok());
+        /* 同 walk：免回 op 不答执，保护客户端回复对号入座。 */
         text = text.Trim();
         if (text.Length == 0) { return; }
         if (Fmt.CharCount(text) > 200) { text = Fmt.SubChar(text, 200); }
@@ -851,6 +908,84 @@ class Gateway {
         ev.Set("title", JsonValue.NewStr(title));
         ev.Set("body", JsonValue.NewStr(body));
         Gateway.Send(conn, ev);
+    }
+
+    /* 全区全服公告（世界 BOSS 击杀等进程级事件）：逐在线会话推送。 */
+    static void AnnounceAll(string title, string body) {
+        List<Session> rows = World.All();
+        for (int i = 0; i < rows.Count; i = i + 1) {
+            Session t = rows[i];
+            if (t.row == null) { continue; }
+            Gateway.PushAnnounce(t.conn, title, body);
+        }
+    }
+
+    /* 公告列表（客户端公告/邮箱页）：启用中的公告新到旧，最多 20 条。 */
+    static async void Announces(Connection conn) {
+        IDbConnection db = await Gateway.Db(conn);
+        if (db == null) { return; }
+        try {
+            List<ZanWeb.Model.Game.Announce> rows = await db
+                .Select<ZanWeb.Model.Game.Announce>()
+                .Where(a => a.enabled == 1)
+                .OrderByDescending(a => a.id).ToListAsync();
+            JsonValue arr = JsonValue.NewArray();
+            int n = rows.Count < 20 ? rows.Count : 20;
+            for (int i = 0; i < n; i = i + 1) {
+                JsonValue o = JsonValue.NewObject();
+                o.Set("title", JsonValue.NewStr(rows[i].title));
+                o.Set("body", JsonValue.NewStr(rows[i].body));
+                arr.Append(o);
+            }
+            JsonValue r = Gateway.Ok();
+            r.Set("rows", arr);
+            Gateway.Send(conn, r);
+        } finally {
+            Gateway.Give(conn, db);
+        }
+    }
+
+    /* 排行榜：本区按等级、经验排序的前 10（量级小，内存排序）。 */
+    static async void Rank(Connection conn, Session s) {
+        IDbConnection db = await Gateway.Db(conn);
+        if (db == null) { return; }
+        try {
+            List<ZanWeb.Model.Game.Player> rows = await db
+                .Select<ZanWeb.Model.Game.Player>()
+                .Where(a => a.realmId == s.realmId).ToListAsync();
+            for (int i = 1; i < rows.Count; i = i + 1) {
+                ZanWeb.Model.Game.Player cur = rows[i];
+                int j = i - 1;
+                while (j >= 0) {
+                    ZanWeb.Model.Game.Player left = rows[j];
+                    if (left.level > cur.level
+                        || (left.level == cur.level && left.exp >= cur.exp)) {
+                        break;
+                    }
+                    rows[j + 1] = rows[j];
+                    j = j - 1;
+                }
+                rows[j + 1] = cur;
+            }
+            JsonValue arr = JsonValue.NewArray();
+            int n = rows.Count < 10 ? rows.Count : 10;
+            for (int i = 0; i < n; i = i + 1) {
+                ZanWeb.Model.Game.Player row = rows[i];
+                JsonValue o = JsonValue.NewObject();
+                o.Set("name", JsonValue.NewStr(row.nickname));
+                o.Set("level", JsonValue.NewNum(Convert.ToString(row.level)));
+                o.Set("job", JsonValue.NewNum(Convert.ToString(row.job)));
+                o.Set("kills", JsonValue.NewNum(Convert.ToString(row.kills)));
+                o.Set("title", JsonValue.NewStr(row.title != null ? row.title : ""));
+                o.Set("me", JsonValue.NewNum(row.id == s.row.id ? "1" : "0"));
+                arr.Append(o);
+            }
+            JsonValue r = Gateway.Ok();
+            r.Set("rows", arr);
+            Gateway.Send(conn, r);
+        } finally {
+            Gateway.Give(conn, db);
+        }
     }
 
     /* ---- JSON 帮手 ---- */
@@ -905,6 +1040,12 @@ class Gateway {
         o.Set("armorName",
             JsonValue.NewStr(armor != null ? armor.name : ""));
         o.Set("kills", JsonValue.NewNum(Convert.ToString(s.row.kills)));
+        /* 成长线：强化星、五行、称谓、塔层数（铁匠铺/修炼/称谓页展示）。 */
+        o.Set("weaponStar", JsonValue.NewNum(Convert.ToString(s.row.weaponStar)));
+        o.Set("armorStar", JsonValue.NewNum(Convert.ToString(s.row.armorStar)));
+        o.Set("wuxing", JsonValue.NewNum(Convert.ToString(s.row.wuxing)));
+        o.Set("towerFloor", JsonValue.NewNum(Convert.ToString(s.row.towerFloor)));
+        o.Set("title", JsonValue.NewStr(s.row.title != null ? s.row.title : ""));
         o.Set("auto", JsonValue.NewNum(Convert.ToString(s.autoMobId)));
         return o;
     }
