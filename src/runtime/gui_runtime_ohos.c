@@ -79,7 +79,8 @@ static int  g_dpi           = 96;
 /* ---- event ring --------------------------------------------------------
  * Same flat event protocol as the SDL shell: e[0] kind, e[1] x, e[2] y,
  * e[3] button, e[4] code (keycode / wheel delta), e[5] mods, e[6] flag.
- * Kinds: 1 move, 2 down, 3 up, 7 resize (x=w y=h), 8 close, 13 wheel.
+ * Kinds: 0 wake, 1 move, 2 down, 3 up, 7 resize (x=w y=h), 8 close,
+ * 13 wheel, 14 surface (re)attached / exposed (full repaint).
  * The HAP shell pushes from the UI thread; the app thread polls. */
 typedef struct { int e[8]; iptr win; } zan_oev_t;
 #define ZAN_OQ_CAP 512
@@ -140,6 +141,11 @@ EXPORT void zan_gui_ohos_attach(void *nw, int w, int h) {
     g_window_width = w;
     g_window_height = h;
     oq_push_locked(7, w, h, 0, 0, 0);
+    /* Surface (re)attached: every pixel in it is undefined, and an idle
+     * app sitting in WaitEvent would otherwise keep sleeping — minimize/
+     * restore used to leave the page black until the first touch. Kind 14
+     * wakes the loop and forces one full-window repaint. */
+    oq_push_locked(14, 0, 0, 0, 0, 0);
     pthread_mutex_unlock(&g_oq_lock);
 
     /* Feature detection, once: direct BufferQueue on real devices, EGL
@@ -163,11 +169,17 @@ EXPORT void zan_gui_ohos_attach(void *nw, int w, int h) {
     }
 }
 
+/* Surface gone: the XComponent callback fires on EVERY background cycle
+ * (home key, app switch), not just real teardown. Queue nothing here — kind
+ * 8 would stop the App loop for good, so restore found nobody polling and
+ * the page stayed black. The app just presents no-ops while detached
+ * (present returns 1 on !attached); the attach that follows pushes kind 14
+ * to repaint. Genuine quit goes through zan_gui_close_window (kind 8) and
+ * zan_gui_ohos_shutdown (teardown after zan_hap_main returns). */
 EXPORT void zan_gui_ohos_detach(void) {
     pthread_mutex_lock(&g_oq_lock);
     g_owin.attached = 0;
     g_owin.nw = NULL;
-    oq_push_locked(8, 0, 0, 0, 0, 0);
     pthread_mutex_unlock(&g_oq_lock);
 }
 

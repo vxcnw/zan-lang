@@ -493,9 +493,14 @@ static void sdl_translate(const SDL_Event *e) {
              * from this thread is a silent no-op at best. The background
              * cycle dropped the context anyway (texture contents gone).
              * Flag the reset; the next present on the app thread recreates
-             * the texture and re-uploads the retained CPU surface in full. */
+             * the texture and re-uploads the retained CPU surface in full.
+             * Queue kind 14 too: an app parked in WaitEvent only sleeps on
+             * the zan queue (zan_watch_wait), so without a queued event it
+             * never wakes to do that present and a restored page stays
+             * black until the first touch. */
             (void)w;
             g_gl_reset_pending = 1;
+            zq_push(14, 0, 0, 0, 0, 0, w);
 #else
             sdl_represent(sdl_find(w));
 #endif
@@ -504,6 +509,29 @@ static void sdl_translate(const SDL_Event *e) {
         case SDL_EVENT_RENDER_DEVICE_RESET:
         case SDL_EVENT_RENDER_TARGETS_RESET:
             g_gl_reset_pending = 1;
+#if defined(__ANDROID__)
+            /* Same wake problem as the window events above: Android fires
+             * this when the saved EGL context died over a background cycle
+             * (SDL 3.4 android_egl_context_restore), while the app may be
+             * parked in WaitEvent. Push kind 14 so it wakes, recreates the
+             * textures and repaints in full. */
+            {
+                SDL_Window *rw = SDL_GetWindowFromID(e->render.windowID);
+                zq_push(14, 0, 0, 0, 0, 0, rw ? rw : g_main_win);
+            }
+#endif
+            break;
+        case SDL_EVENT_DID_ENTER_FOREGROUND:
+#if defined(__ANDROID__)
+            /* Mobile resume sends this instead of any window event: SDL's
+             * Android backend emits RESIZED only when the size actually
+             * changed, and RENDER_DEVICE_RESET only when the saved context
+             * died. Flag a full reset regardless (the EGLSurface is freed
+             * on pause even when the context survives, so backbuffer
+             * pixels are undefined) and wake the parked loop with 14. */
+            g_gl_reset_pending = 1;
+            zq_push(14, 0, 0, 0, 0, 0, g_main_win);
+#endif
             break;
         case SDL_EVENT_WINDOW_MOUSE_LEAVE: {
             /* Clear widget hover when the pointer leaves the window. Skipped
@@ -1289,6 +1317,13 @@ EXPORT i32 zan_gui_wait_event_timeout(i32 ms) {
 
 EXPORT i32 zan_gui_wake(void) {
     if (!g_sdl_ready) return 0;
+#if defined(__ANDROID__)
+    /* An SDL user event never wakes an Android waiter: sdl_translate maps
+     * it to nothing and the watch only runs while the Java thread pumps.
+     * The wait functions sleep on the zan queue, so deliver the documented
+     * kind-0 wake straight into it. */
+    zq_push(0, 0, 0, 0, 0, 0, g_main_win);
+#endif
     SDL_Event ev;
     memset(&ev, 0, sizeof(ev));
     ev.type = g_wake_event;

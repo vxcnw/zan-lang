@@ -4409,6 +4409,16 @@ class App {
             needsRedraw = true;
         }
 
+        // 还原/重露出表面（kind 14，移动端）：系统在最小化期间
+        // 销毁并重建了渲染表面，缓冲里的像素不可信，必须整帧
+        // 重画。这个事件也负责唤醒停在 WaitEvent 上的空闲循环
+        // ——没有它，还原后页面会一直黑到下一次触摸。
+        if (kind == 14) {
+            this.NoteRedrawWhy("exposed");
+            needsRedraw = true;
+            forceFullNext = true;
+        }
+
         if (kind == 1) {
             mouseX = window.EventX();
             mouseY = window.EventY();
@@ -4721,6 +4731,14 @@ class App {
         if (kind == 9) {
             this.NoteRedrawWhy("blur");
             needsRedraw = true;
+        }
+
+        // 还原/重露出表面（kind 14）：整帧重画（与 ProcessEvent
+        // 相同的约定）。
+        if (kind == 14) {
+            this.NoteRedrawWhy("exposed");
+            needsRedraw = true;
+            forceFullNext = true;
         }
 
         if (kind == 1) {
