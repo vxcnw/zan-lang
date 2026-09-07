@@ -168,6 +168,10 @@ mcp/toolchain/
 __pycache__/
 *.pyc
 data/
+# template data dirs are versioned game data (client CSVs, server M2.DB);
+# re-allow traversal so tracked files and the DB stay committable
+!templates/**/data/
+!templates/**/data/**
 
 # CTest dashboard output at repo root
 /Testing/

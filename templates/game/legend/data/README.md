@@ -1,9 +1,20 @@
 # 数据字典与生效范围
 
-## 两层数据
+## 数据链与生效范围
 
-- `reference/`：从用户提供的迷你传奇 `data/data.dll` 中只读提取 JSON，未执行 DLL。13 张原始表保持 ID、原字段与空值；`manifest.json` 记录来源 SHA256 和表数量。
-- 本目录 19 张运行时 CSV：启动由 `src/Tables.zan` 严格读取并校验，`src/Game.zan` 实际使用。**修改 reference 不会自动改变运行时表。**
+原版数据已入库服务端 `templates/server/server-game/data/M2.DB`（权威载体）：
+
+- 原表：`GameItem/GameMap/GameMonster/GameBoss/GameSkill/GameSc/GameTitle/
+  GameCity/GameAchieve/GameFw/GameJue/GameShuxing/GameTask`——从迷你传奇
+  `data/data.dll` 只读导出，逐字保留 ID、原字段与空值；`GameSource` 记录
+  来源 SHA256，`GameMeta` 记录各表行数。
+- 数据链：`data.dll --import_reference.py--> reference/*.csv
+  --sync_csv_to_db.py--> M2.DB`。reference CSV 入库后不再入库客户端模板，
+  需要重同步时先用 `import_reference.py` 重导出，再跑
+  `templates/server/server-game/tools/sync_csv_to_db.py`。
+- 本目录的运行时 CSV：暂由 `src/Tables.zan` 启动读取校验；正逐步改为
+  客户端走协议取服务端数据，完成后本目录仅保留资产映射并删除其余 CSV。
+  **改原版数据改 M2.DB（或重跑同步），改模板数值才改这里的 CSV。**
 
 | 表 | 主要职责 |
 |---|---|
