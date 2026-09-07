@@ -1851,6 +1851,18 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
       -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_scroll_drag_reanchor${_exe_ext}
       -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
 
+  # ListView 自带滚动条按住拖动回归：行热区让位（rowW=bw-barW）后
+  # 滑块/轨道仍可按住拖动——滚动条命中区比行后注册（顶层）且向行
+  # 内侧多伸 grab=Scale(5)；拖滚动条全程行不得被选中（松手点行）。
+  add_test(NAME conformance_gui_listview_scrollbar_drag
+    COMMAND ${CMAKE_COMMAND}
+      -DZANC=$<TARGET_FILE:zanc>
+      -DSRC=${CMAKE_SOURCE_DIR}/tests/gui/listview_scrollbar_drag_test.zan
+      "-DZANC_ARGS=--auto-stdlib${_gui_driver_tail}"
+      -DEXPECTED=${CMAKE_SOURCE_DIR}/tests/conformance/gui_listview_scrollbar_drag.out
+      -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_listview_scrollbar_drag${_exe_ext}
+      -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
+
   # VirtualList template rows: rows are built lazily (never at SetRows, only
   # when a frame needs them in the viewport) and the string-mode bookkeeping
   # stays intact across the mode switch.

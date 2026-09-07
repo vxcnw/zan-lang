@@ -213,6 +213,10 @@ class ListView<T> : Control {
     /// 选中的实体；仅在 HasSelection() 为真时有效。
     T Selected() { return data[sel]; }
 
+    /// 当前行总高（模板行 = 实测 prefH 累计，列模式 = 行数×行高）。
+    /// 滚动条几何与拖拽期望的公共推导点，测试与宿主同式复算用。
+    int ContentHeightForTest(App app) { return this.ContentHeight(app); }
+
     /// `row` 是否在数据范围内。
     bool Has(int row) { return row >= 0 && row < this.Count(); }
 
