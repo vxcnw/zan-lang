@@ -154,6 +154,9 @@ class Ra2App {
             int kind = 0;
             if (i == armed) { kind = 2; }
             bool unlocked = game.BuildUnlocked(i);
+            // The frame first: it fills its whole rect opaquely, so an icon
+            // blitted before it would be painted over.
+            Ra2App.ButtonFrame(r, mouseX, mouseY, bx, by, bw, bh, kind);
             // The building's own finished art as a small icon above its label,
             // so the menu reads as real RA2 buildings rather than text rows.
             // Locked entries hide the icon: no tech, no picture.
@@ -184,9 +187,6 @@ class Ra2App {
                 iconTex.Close();
                 labelY = by + bh - 20;
             }
-            // Ui.Button would redraw over the icon, so draw the button frame
-            // and the label separately.
-            Ra2App.ButtonFrame(r, mouseX, mouseY, bx, by, bw, bh, kind);
             Text.DrawCentered(r, StructureLabel(catalog, side, i),
                               bx + bw / 2, labelY, 1,
                               unlocked ? 236 : 96, unlocked ? 236 : 102,
@@ -202,7 +202,7 @@ class Ra2App {
                   game.LowPower() ? 232 : 170,
                   game.LowPower() ? 92 : 178,
                   game.LowPower() ? 92 : 192, 255);
-        Ra2App.DrawProduction(r, game, mouseX, mouseY);
+        Ra2App.DrawProduction(r, game, art, mouseX, mouseY);
     }
 
     /// <summary>The button's chrome without its label, so a caller can put an
@@ -293,7 +293,7 @@ class Ra2App {
     }
 
     static void DrawProduction(SdlRenderer r, GameController game,
-                               int mouseX, int mouseY) {
+                               ObjectArt art, int mouseX, int mouseY) {
         int n = Ra2App.ProdCount(game);
         if (n == 0) { return; }
         int x = Ra2App.ViewW() - 296;
@@ -308,13 +308,46 @@ class Ra2App {
             int by = Ra2App.ProdBtnY(game, i);
             UnitType u = game.World().Units().TypeFor(sel.Side(), id);
             if (u == null) { continue; }
-            string label = u.Label() + "  " + Convert.ToString(u.Cost());
+            bool unlocked = game.UnitUnlocked(id);
             int kind = 0;
             if (u.Cost() > game.Money()) { kind = 1; }
-            // Locked by the tech tree: dimmed label prefix reads the gate.
-            if (!game.UnitUnlocked(id)) { label = "?" + label; }
-            KitUi.Button(r, mouseX, mouseY, bx, by, Ra2App.ProdBtnW(),
-                      Ra2App.ProdBtnH(), label, 2, kind);
+            // The unit's field art as the button's icon, the label and the
+            // price beside it -- the build menu's treatment carried over to
+            // trainable units. Locked entries stay text-only.
+            Ra2App.ButtonFrame(r, mouseX, mouseY, bx, by, Ra2App.ProdBtnW(),
+                               Ra2App.ProdBtnH(), kind);
+            int textX = bx + 8;
+            if (unlocked) {
+                Texture icon = art.UnitIconTexture(u);
+                if (icon != null) {
+                    int iw = icon.Width();
+                    int ih = icon.Height();
+                    int maxW = 44;
+                    int maxH = Ra2App.ProdBtnH() - 10;
+                    int sc = 1;
+                    int cw = iw;
+                    int ch = ih;
+                    while ((cw > maxW || ch > maxH) && sc < 8) {
+                        sc = sc + 1;
+                        cw = iw / sc;
+                        ch = ih / sc;
+                    }
+                    SdlTexture iconTex = SdlTexture.CreateRgba32(
+                        r, iw, ih, true);
+                    iconTex.Update(icon.Pixels(), iw * 4);
+                    r.DrawTexture(iconTex, bx + 4 + (maxW - cw) / 2,
+                                  by + (Ra2App.ProdBtnH() - ch) / 2, cw, ch);
+                    iconTex.Close();
+                    textX = bx + maxW + 8;
+                }
+            }
+            string name = unlocked ? u.Label() : "?" + u.Label();
+            Text.Draw(r, name, textX, by + 7, 1,
+                      unlocked ? 228 : 96, unlocked ? 228 : 102,
+                      unlocked ? 228 : 112, 255);
+            Text.Draw(r, Convert.ToString(u.Cost()), textX, by + 21, 1,
+                      unlocked ? 236 : 96, unlocked ? 208 : 102,
+                      unlocked ? 120 : 112, 255);
             // The first queued unit's progress, drawn as a thin bar over the
             // button so the player sees training ticking.
             if (i == 0 && sel.ProdCount() > 0) {
@@ -1088,16 +1121,76 @@ class Ra2App {
                     }
                 }
                 if (frames == 12) {
+                    // Close the frame first: a mid-frame ReadPixels sees the
+                    // previous frame's buffer, not this draw.
+                    host.End();
                     // Dump before the fast-forward so the parked tanks are
                     // captured without combat effects over them.
                     Ra2App.DumpScreen("build/ra2_shot_tanks.bmp",
                                       host.Renderer());
+                    host.Begin(16, 20, 16);
+                    // Then put a producing structure on screen and select it,
+                    // so the next frame's dump shows the training panel: the
+                    // unit icons, prices and the queue progress bar it draws.
+                    // The starter base carries none, so drop a war factory
+                    // beside the start -- its panel exercises the voxel icon
+                    // bakes, which the barracks' infantry icons do not.
+                    if (game != null) {
+                        int pileId = -1;
+                        StructureCatalog cat = game.World().Catalog();
+                        for (int ci = 0; ci < cat.CountFor(0); ci = ci + 1) {
+                            StructureType ct = cat.TypeFor(0, ci);
+                            if (ct != null && ct.Reg() == "GAWEAP") {
+                                pileId = ci;
+                            }
+                        }
+                        int newId = -1;
+                        if (pileId >= 0) {
+                            List<int> sc0 = new List<int>();
+                            if (map.StartCell(0, sc0) && sc0.Count >= 2) {
+                                for (int r = 0; r < 8 && newId < 0; r = r + 1) {
+                                    newId = world.PlaceStructure(0, pileId,
+                                        sc0[0] + 2 + r, sc0[1] - 4);
+                                    if (newId < 0) {
+                                        newId = world.PlaceStructure(0, pileId,
+                                            sc0[0] - 3, sc0[1] + r);
+                                    }
+                                }
+                            }
+                        }
+                        WorldObject prod = newId >= 0
+                            ? world.ObjectAt(newId) : null;
+                        if (prod == null) {
+                            for (int oi = 0; oi < world.ObjectCount()
+                                    && prod == null; oi = oi + 1) {
+                                WorldObject o = world.ObjectAt(oi);
+                                if (o == null || o.Side() != 0
+                                 || o.Kind() != ObjKind.Structure()) { continue; }
+                                StructureType st = cat.TypeFor(0, o.BuildId());
+                                if (st != null && st.Produces() != null
+                                 && st.Produces().Count > 0) {
+                                    prod = o;
+                                }
+                            }
+                        }
+                        if (prod != null) {
+                            world.AddSelectionByObject(prod);
+                        }
+                    }
                     int stepped = 0;
                     while (stepped < 200 && game != null && game.Result() == 0) {
                         game.Tick();
                         stepped = stepped + 1;
                     }
-                    Ra2App.DumpScreen("build/ra2_shot_game_ui.bmp", host.Renderer());
+                }
+                if (frames == 13) {
+                    // Frame 13 drew the post-fast-forward world (with the
+                    // selected structure's training panel); close the frame
+                    // so the capture is this draw, then report and leave.
+                    host.End();
+                    Ra2App.DumpScreen("build/ra2_shot_game_ui.bmp",
+                                      host.Renderer());
+                    host.Begin(16, 20, 16);
                     int objCount = world == null ? -1 : world.ObjectCount();
                     int money = game == null ? -1 : game.Money();
                     int aiMoney = game == null ? -1 : game.AiMoney();
@@ -1111,8 +1204,7 @@ class Ra2App {
                         + " money=" + Convert.ToString(money)
                         + " aiMoney=" + Convert.ToString(aiMoney)
                         + " sel=" + Convert.ToString(sel)
-                        + " result=" + Convert.ToString(result)
-                        + " stepped=" + Convert.ToString(stepped));
+                        + " result=" + Convert.ToString(result));
                     host.Quit();
                 }
             }

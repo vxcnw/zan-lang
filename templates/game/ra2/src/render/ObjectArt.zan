@@ -135,6 +135,24 @@ class ObjectArt {
         return true;
     }
 
+    /// <summary>The sidebar icon for a trainable unit. The original draws the
+    /// unit's cameo portrait, a separate <c>*ICON.SHP</c> per object, but this
+    /// trimmed install carries none of them -- every <c>*ICON.SHP</c> is
+    /// absent from its mixes while the palettes survived. The button therefore
+    /// shows the unit's own field art: the voxel hull baked at the
+    /// south-west facing (the cameo viewpoint) for vehicles, the still pose
+    /// for infantry.</summary>
+    Texture UnitIconTexture(UnitType ut) {
+        if (ut == null) { return null; }
+        string name = ut.ShpName();
+        if (name == null || name.Length == 0) { return null; }
+        if (ObjectArt.IsVxlName(name)) {
+            return this.VehicleTexture(name, 5);
+        }
+        if (this.ShapeFrameCount(name) <= 0) { return null; }
+        return this.ShapeTextureFrame(name, 0, this.unitPal);
+    }
+
     /// <summary>The baked texture for a vehicle at one of the eight compass
     /// facings, rendered on first use and cached.</summary>
     Texture VehicleTexture(string name, int facing) {
