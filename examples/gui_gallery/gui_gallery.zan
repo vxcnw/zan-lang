@@ -1469,23 +1469,33 @@ class Gallery {
     // which: 1 = the DataTable demo (list source), 2 = the DataTable 1M demo
     // (virtual source). The UI guard only stops double clicks; the library's
     // single-job AtomicInt busy gate stays as the final backstop.
-    static void OnDtExportClick() { Gallery.StartExport(1); }
-    static void OnBigExportClick() { Gallery.StartExport(2); }
+    static void OnDtExportClick() { Gallery.AskExportPath(1); }
+    static void OnBigExportClick() { Gallery.AskExportPath(2); }
 
-    static void StartExport(int which) {
-        string path;
+    /// 导出前先弹保存对话框选存放路径（复用画廊的 FilePicker 实例）。
+    /// `dtExportPending` 记下「当前打开的对话框是导出存盘」——确认/
+    /// 取消都在主循环的 TakeResult 收割处闭环（见 pr 分支）。
+    static int dtExportPending;
+    static void AskExportPath(int which) {
+        if (Gallery.filePicker.IsOpen()) { return; }
+        Gallery.dtExportPending = which;
+        string def = which == 1 ? "datatable_demo.xlsx" : "datatable_1m_export.xlsx";
+        Gallery.filePicker.BeginSaveFile("", ".xlsx", def,
+            Gallery.T("Export Excel", "导出 Excel"));
+        Gallery.app.RequestRedraw();
+    }
+
+    static void StartExport(int which, string path) {
         List<DataColumn> cols;
         DataSource src;
         DataTableState st;
         if (which == 1) {
             if (Gallery.dtDemoCols == null || Gallery.demoRows == null) { return; }
-            path = "datatable_demo.xlsx";
             cols = Gallery.dtDemoCols;
             src = new RowListSource(Gallery.demoRows);
             st = Gallery.demoTableState;
         } else {
             if (Gallery.bigCols == null || Gallery.bigSource == null) { return; }
-            path = "datatable_1m_export.xlsx";
             cols = Gallery.bigCols;
             src = Gallery.bigSource;
             st = Gallery.bigTableState;
@@ -3131,6 +3141,19 @@ class Gallery {
                 Gallery.filePicker.SweepClosed();
                 if (pr == 1) {
                     Gallery.pickerResult = Gallery.filePicker.SelectedPath();
+                }
+                // 导出存盘流：确认即按所选路径启动后台导出；取消/关闭
+                // 只清 pending 标记。路径为空（用户清空了文件名仍点确
+                // 认）不导，直接回默认 toast。
+                if (Gallery.dtExportPending != 0) {
+                    int which = Gallery.dtExportPending;
+                    Gallery.dtExportPending = 0;
+                    if (pr == 1 && Gallery.pickerResult != "") {
+                        Gallery.StartExport(which, Gallery.pickerResult);
+                    } else if (pr != 1) {
+                        Gallery.Fired(Gallery.app, "DataTable",
+                            Gallery.T("Export cancelled", "已取消导出"));
+                    }
                 }
             }
 
