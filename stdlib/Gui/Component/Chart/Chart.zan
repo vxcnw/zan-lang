@@ -870,8 +870,7 @@ class Chart {
     /// 同号数据一端归零（全正 min→0、全负 max→0）与 min==max 整形。
     /// -2..15 → -5..15/4 段、0..1320 → 0..1500/6 段、0..2570 →
     /// 0..3000/6 段。固定 min/max 不走此函数（尊重不取整）。
-    static ChartSpan NiceRange(int lo, int hi) {
-        int min = lo;
+    static ChartSpan NiceRange(int lo, int hi) {        int min = lo;
         int max = hi;
         if (max < min) {
             int tmp = min;
@@ -897,6 +896,24 @@ class Chart {
             return Chart.SmartForInteger(min, max, 0);
         }
         return Chart.SmartCoreCalc(min, max);
+    }
+
+    /// ECharts2 valueAxis scale:true（不强制含 0）+ boundaryGap
+    /// [0.01,0.01] 的量程：数据域两端各外扩 1% 后对齐 nice 步长
+    /// （1/2/2.5/5×10^k，splitNumber 5 预估），一端不归零——若按
+    /// NiceRange 的非 scale 规则把全正数据零锚定，2200..2450 的
+    /// 蜡烛会被压进 0..2500 步长 500 的底部。k1 原版 → 2200..2450
+    /// 步长 50。
+    static ChartSpan ScaleRange(int lo, int hi) {
+        if (hi < lo) {
+            int tmp = lo;
+            lo = hi;
+            hi = tmp;
+        }
+        if (lo == hi) { hi = lo + 1; }
+        int pad = (hi - lo) / 100;
+        if (pad < 1) { pad = 1; }
+        return Chart.ScatterAutoRange(lo - pad, hi + pad);
     }
 
     /// 全部系列中的最大值（隐藏系列不计），下界 0。
@@ -2162,6 +2179,13 @@ class Chart {
     /// 基线/负数），用于蜡烛图、箱线图和误差图。
     static ChartFrame DrawFrameLoHi(App app, int x, int y, int w, int h, int plotTop,
                                     List<string> labels, int lo, int hi) {
+        return Chart.DrawFrameLoHiT(app, x, y, w, h, plotTop, labels, lo, hi, 5);
+    }
+
+    /// 同 DrawFrameLoHi，但 y 刻度数显式给定（smartSteps 包络的
+    /// 步长数可为 4..7，如 2200..2450 每 50 = 5 格）。
+    static ChartFrame DrawFrameLoHiT(App app, int x, int y, int w, int h, int plotTop,
+                                     List<string> labels, int lo, int hi, int ticks) {
         Canvas c = app.canvas;
         Theme t = app.theme;
         int pad = t.paddingMedium;
@@ -2187,7 +2211,7 @@ class Chart {
         StyleBox sAxis = Style.Part(app, "chart", "axis", "", "", "",
                                     Style.SNormal());
         int span = hi - lo;
-        int ticks = 5;
+        if (ticks < 1) { ticks = 5; }
         for (int k = 0; k <= ticks; k = k + 1) {
             int gy = plotY + plotH - (k * plotH / ticks);
             c.FillRect(plotX, gy, plotW, 1, sGrid.BgOr(0));
@@ -2199,9 +2223,27 @@ class Chart {
         c.FillRect(plotX, plotY, app.Scale(2), plotH, sAxis.BgOr(0));
         c.FillRect(plotX, plotY + plotH, plotW, app.Scale(2), sAxis.BgOr(0));
 
+        // 类目标签 auto 抽稀（ECharts2 axisLabel.interval 缺省 'auto'）：
+        // 宽日期标签逐个画会互相叠字，贪心让位规则与 BuildAxesR/
+        // CategoryTicks 同一套（带状模式居中在格子内、不越左缘）。
         int n = labels.Count;
         if (n > 0) {
+            int labelGap = app.Scale(6);
+            List<int> shown = new List<int>();
+            int labelRight = plotX - labelGap;
             for (int ci = 0; ci < n; ci = ci + 1) {
+                int labelW = Canvas.MeasureText(labels[ci], axisFs);
+                int cxs = plotX + ci * plotW / n;
+                int cellW = plotX + (ci + 1) * plotW / n - cxs;
+                int labelLeft = cxs + (cellW - labelW) / 2;
+                if (labelLeft < cxs) { labelLeft = cxs; }
+                if (labelLeft >= labelRight + labelGap) {
+                    shown.Add(ci);
+                    labelRight = labelLeft + labelW;
+                }
+            }
+            for (int si = 0; si < shown.Count; si = si + 1) {
+                int ci = shown[si];
                 int cxs = plotX + ci * plotW / n;
                 int cellW = plotX + (ci + 1) * plotW / n - cxs;
                 c.DrawTextCentered(cxs, plotY + plotH + app.Scale(4), cellW, botGut,

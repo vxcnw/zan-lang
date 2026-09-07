@@ -16,20 +16,26 @@ partial class ChartView {
     // ---- 蜡烛图 / 金融图（大数据时分桶到绘图宽度） ----
 
     /// 蜡烛图渲染入口：series[0].candles 只绘 dataZoom 窗口
-    /// [i0,i1]；大数据时分桶到绘图宽度（每桶取首开/末收/最高/
-    /// 最低），桶内涨跌按首尾收盘比较，颜色走 ECharts 2.x 约定
-    /// （itemStyle.normal.color/color0 = 阳/阴填充，lineStyle.
-    /// color/color0 = 阳/阴影线，缺省回落填充色）。折线族覆盖
-    /// 层（如 MA）共用价格轴并按同桶对齐。命中为 Candlestick
-    /// 事件（dataIndex = 桶首源下标，value = 桶末收盘）+
-    /// OHLC tooltip 与十字光标；右下角附 "N bars" 计数。
+    /// [i0,i1]；ECharts 2.x K 线语义逐根绘制（44 根以内不分桶）：
+    /// 2px 影线 high→low 走边框色（lineStyle.color/color0），实体
+    /// 实心填充（itemStyle.normal.color/color0）+ 边框，body 宽 =
+    /// 槽宽一半（barMaxWidth 20 缺省封顶）。首根逐项 itemStyle 覆盖
+    /// （k1 蓝色阴线）。markPoint 在窗口最高价定位 teal 气球徽标。
+    /// 量程走 valueAxis scale:true + boundaryGap[0.01] 的 smartSteps
+    /// 紧致包络（2200..2450，非零锚定）。大数据（>44 根可见）仍分
+    /// 桶（每桶首开/末收/最高/最低）。折线族覆盖层（如 MA）共用价
+    /// 格轴。命中为 Candlestick 事件（dataIndex = 桶首源下标）+
+    /// OHLC tooltip 与十字光标。
     static void DrawCandles(App app, int x, int y, int w, int h,
                             ChartOption o, int g) {
         Canvas c = app.canvas;
         Theme t = app.theme;
         List<Candle> cs = o.series[0].candles;
         int fullN = cs.Count;
-        int plotTop = ChartView.PanelHead(app, x, y, w, h, o.title);
+        // 面板头走 DrawPanelI（title+图例）：ECharts2 k1 顶部是居中
+        // 的系列图例「上证指数」，与其他视图的标题头同一套绘制。
+        int plotTop = Chart.DrawPanelI(app, x, y, w, h, o.title, o.series,
+                                      o.iwid, o.showLegend);
         if (fullN < 1) { return; }
 
         // dataZoom：窗口索引 [i0,i1]（含端点）；价格范围、
@@ -65,103 +71,171 @@ partial class ChartView {
             }
             ov0 = ov0 + 1;
         }
-        int pad2 = (hi - lo) / 20;
-        if (pad2 < 1) { pad2 = 1; }
-        lo = lo - pad2;
-        hi = hi + pad2;
+        // ECharts2 yAxis scale:true + boundaryGap[0.01,0.01]：数据域
+        // 两端各外扩 1% 再走 smartSteps nice 包络（不强制含 0）；
+        // 显式 min/max 仍固定定义域。折线覆盖层共享同一包络。
+        ChartSpan ysp;
+        if (o.yAxes.Count > 0 && o.yAxes[0].min != ChartOption.Auto()
+            && o.yAxes[0].max != ChartOption.Auto()) {
+            ysp = new ChartSpan();
+            ysp.lo = o.yAxes[0].min;
+            ysp.hi = o.yAxes[0].max;
+            ysp.ticks = 5;
+        } else {
+            ysp = Chart.ScaleRange(lo, hi);
+        }
+        int plo = ysp.lo;
+        int phi = ysp.hi;
+        int yTicks = ysp.ticks;
+        if (yTicks < 1) { yTicks = 5; }
+
         // 分类轴携带交易日日期（ECharts xAxis.data）时画到
         // 底轴：与蜡烛同宽均布，n 与蜡烛数一致时逐根对齐。
         List<string> kLabs = new List<string>();
         if (o.xAxes.Count > 0) { kLabs = o.xAxes[0].categories; }
         List<string> winLabs = Chart.WindowLabels(kLabs, i0, i1);
-        ChartFrame f = Chart.DrawFrameLoHi(app, x, y, w, h - zoomH, plotTop, winLabs, lo, hi);
+        ChartFrame f = Chart.DrawFrameLoHiT(app, x, y, w, h - zoomH, plotTop,
+            winLabs, plo, phi, yTicks);
         if (zoomH > 0) {
             Chart.DrawZoomBar(app, f.plotX, f.plotW, y + h - app.Scale(18),
                 app.Scale(12), o.iwid, fullN);
         }
-        int span = hi - lo;
+        int span = phi - plo;
         if (span < 1) { span = 1; }
 
-        int cols = f.plotW / app.Scale(5);
-        if (cols < 1) { cols = 1; }
-        if (cols > n) { cols = n; }
-        // ECharts 2.x 涨跌色约定：itemStyle.normal.color = 阳线
-        // 填充，color0 = 阴线填充；lineStyle.color / color0 分别
-        // 为阳/阴影线色，缺省回落到对应填充色。
-        int upC = Chart.Rgb(38, 166, 89);
-        int dnC = Chart.Rgb(229, 72, 77);
+        // ECharts 2.x 涨跌色约定：itemStyle.normal.color = 阳线填充，
+        // color0 = 阴线填充；lineStyle.color / color0 分别为阳/阴
+        // 边框+影线色。模块缺省（k.js）：填充 #fff/#00aa11、边框
+        // #ff3200/#00aa11——参照站 k1 的 option 显式给了 red/
+        // lightgreen + orange/green。
+        int upC = 4294967295;   // #fff
+        int dnC = Chart.Rgb(0, 170, 17);   // #00aa11
+        int lineUp = Chart.Rgb(255, 50, 0);  // #ff3200
+        int lineDn = Chart.Rgb(0, 170, 17);  // #00aa11
+        int lineWidth = 1;
         ChartSeries ksrc = o.series[0];
         if (ksrc.itemStyle.normal.color != 0) { upC = ksrc.itemStyle.normal.color; }
         if (ksrc.itemStyle.normal.color0 != 0) { dnC = ksrc.itemStyle.normal.color0; }
-        int wickUp = upC;
-        int wickDn = dnC;
-        if (ksrc.itemStyle.normal.lineStyle.color != 0) { wickUp = ksrc.itemStyle.normal.lineStyle.color; }
-        if (ksrc.itemStyle.normal.lineStyle.color0 != 0) { wickDn = ksrc.itemStyle.normal.lineStyle.color0; }
+        if (ksrc.itemStyle.normal.lineStyle.color != 0) { lineUp = ksrc.itemStyle.normal.lineStyle.color; }
+        if (ksrc.itemStyle.normal.lineStyle.color0 != 0) { lineDn = ksrc.itemStyle.normal.lineStyle.color0; }
+        if (ksrc.itemStyle.normal.lineStyle.width > 0) { lineWidth = ksrc.itemStyle.normal.lineStyle.width; }
+
+        // ECharts2 k.js：body 宽 = floor(类目槽宽/2)，barMaxWidth
+        // 缺省 20px 封顶。
+        int slotW = f.plotW / n;
+        if (slotW < 1) { slotW = 1; }
+        int bw = slotW / 2;
+        int bwMax = app.Scale(20);
+        if (bw > bwMax) { bw = bwMax; }
+        if (bw < 1) { bw = 1; }
 
         int revealAlpha = ChartView.FinanceRevealAlpha(g);
         ChartView.PushPlotClip(app, f.plotX, f.plotY, f.plotW, f.plotH);
-        for (int bc = 0; bc < cols; bc = bc + 1) {
-            int c0 = bc * n / cols;
-            int c1 = (bc + 1) * n / cols;
-            if (c1 <= c0) { c1 = c0 + 1; }
-            if (c1 > n) { c1 = n; }
-            int open = cs[i0 + c0].open;
-            int close = cs[i0 + c1 - 1].close;
-            int chi = cs[i0 + c0].high;
-            int clo = cs[i0 + c0].low;
-            int k = c0;
-            while (k < c1) {
-                if (cs[i0 + k].high > chi) { chi = cs[i0 + k].high; }
-                if (cs[i0 + k].low < clo) { clo = cs[i0 + k].low; }
-                k = k + 1;
+        // 44 根以内逐根绘制（ECharts 原语义）；更密的窗口仍分桶。
+        if (n <= 44) {
+            for (int k = 0; k < n; k = k + 1) {
+                Candle cd = cs[i0 + k];
+                int cx = f.CatMid(k, n);
+                int yHigh = f.plotY + f.plotH - (cd.high - plo) * f.plotH / span;
+                int yLow = f.plotY + f.plotH - (cd.low - plo) * f.plotH / span;
+                int yOpen = f.plotY + f.plotH - (cd.open - plo) * f.plotH / span;
+                int yClose = f.plotY + f.plotH - (cd.close - plo) * f.plotH / span;
+                bool up = cd.close >= cd.open;
+                int fill = up ? upC : dnC;
+                int line = up ? lineUp : lineDn;
+                // 逐项 itemStyle 覆盖（ECharts data[i].itemStyle，仅
+                // normal 态参与静态帧；k1 首根蓝色阴线）。宽度覆盖
+                // 只对本根生效——逐根局部副本，不回写系列缺省。
+                int clw = lineWidth;
+                ChartItemStyle pis = cd.itemStyle;
+                if (pis != null) {
+                    if (!up && pis.normal.color0 != 0) { fill = pis.normal.color0; }
+                    if (up && pis.normal.color != 0) { fill = pis.normal.color; }
+                    if (!up && pis.normal.lineStyle.color0 != 0) { line = pis.normal.lineStyle.color0; }
+                    if (up && pis.normal.lineStyle.color != 0) { line = pis.normal.lineStyle.color; }
+                    if (pis.normal.lineStyle.width > 0) { clw = pis.normal.lineStyle.width; }
+                }
+                // 影线：中心竖线 high→low，边框色（画在实体后面，
+                // 会被实心 body 盖住中段——与 canvas 描边路径一致）。
+                c.DrawLine(cx, yHigh, cx, yLow,
+                    Chart.WithAlpha(line, revealAlpha), clw);
+                // 实体：实心填充 + 边框（brushType "both"）。
+                int bodyTop = yOpen;
+                int bodyBot = yClose;
+                if (yClose < yOpen) { bodyTop = yClose; bodyBot = yOpen; }
+                int bh = bodyBot - bodyTop;
+                if (bh < clw) { bh = clw; }
+                int bx = cx - bw / 2;
+                c.FillRect(bx, bodyTop, bw, bh,
+                    Chart.WithAlpha(fill, revealAlpha));
+                c.DrawRect(bx, bodyTop, bw, bh,
+                    Chart.WithAlpha(line, revealAlpha), clw);
             }
-            int cellX0 = f.plotX + bc * f.plotW / cols;
-            int cellX1 = f.plotX + (bc + 1) * f.plotW / cols;
-            int cellW = cellX1 - cellX0;
-            int cx = cellX0 + cellW / 2;
-            int yHigh = f.plotY + f.plotH - (chi - lo) * f.plotH / span;
-            int yLow = f.plotY + f.plotH - (clo - lo) * f.plotH / span;
-            int yOpen = f.plotY + f.plotH - (open - lo) * f.plotH / span;
-            int yClose = f.plotY + f.plotH - (close - lo) * f.plotH / span;
-            int col = upC;
-            int wick = wickUp;
-            if (close < open) { col = dnC; wick = wickDn; }
-            c.DrawLine(cx, yHigh, cx, yLow,
-                Chart.WithAlpha(wick, revealAlpha), app.Scale(1));
-            int bw = cellW * 6 / 10;
-            if (bw < app.Scale(2)) { bw = app.Scale(2); }
-            int bodyTop = yOpen;
-            int bodyBot = yClose;
-            if (yClose < yOpen) { bodyTop = yClose; bodyBot = yOpen; }
-            int bh = bodyBot - bodyTop;
-            if (bh < app.Scale(1)) { bh = app.Scale(1); }
-            c.FillRoundRect(cx - bw / 2, bodyTop, bw, bh, app.Scale(1),
-                Chart.WithAlpha(col, revealAlpha));
+        } else {
+            int cols = f.plotW / app.Scale(5);
+            if (cols < 1) { cols = 1; }
+            if (cols > n) { cols = n; }
+            for (int bc = 0; bc < cols; bc = bc + 1) {
+                int c0 = bc * n / cols;
+                int c1 = (bc + 1) * n / cols;
+                if (c1 <= c0) { c1 = c0 + 1; }
+                if (c1 > n) { c1 = n; }
+                int open = cs[i0 + c0].open;
+                int close = cs[i0 + c1 - 1].close;
+                int chi = cs[i0 + c0].high;
+                int clo = cs[i0 + c0].low;
+                int k = c0;
+                while (k < c1) {
+                    if (cs[i0 + k].high > chi) { chi = cs[i0 + k].high; }
+                    if (cs[i0 + k].low < clo) { clo = cs[i0 + k].low; }
+                    k = k + 1;
+                }
+                int cellX0 = f.plotX + bc * f.plotW / cols;
+                int cellX1 = f.plotX + (bc + 1) * f.plotW / cols;
+                int cellW = cellX1 - cellX0;
+                int cx = cellX0 + cellW / 2;
+                int yHigh = f.plotY + f.plotH - (chi - plo) * f.plotH / span;
+                int yLow = f.plotY + f.plotH - (clo - plo) * f.plotH / span;
+                int yOpen = f.plotY + f.plotH - (open - plo) * f.plotH / span;
+                int yClose = f.plotY + f.plotH - (close - plo) * f.plotH / span;
+                bool up = close >= open;
+                int fill = up ? upC : dnC;
+                int line = up ? lineUp : lineDn;
+                c.DrawLine(cx, yHigh, cx, yLow,
+                    Chart.WithAlpha(line, revealAlpha), lineWidth);
+                int bw2 = cellW / 2;
+                if (bw2 > bwMax) { bw2 = bwMax; }
+                if (bw2 < 1) { bw2 = 1; }
+                int bodyTop = yOpen;
+                int bodyBot = yClose;
+                if (yClose < yOpen) { bodyTop = yClose; bodyBot = yOpen; }
+                int bh = bodyBot - bodyTop;
+                if (bh < lineWidth) { bh = lineWidth; }
+                int bx = cx - bw2 / 2;
+                c.FillRect(bx, bodyTop, bw2, bh,
+                    Chart.WithAlpha(fill, revealAlpha));
+                c.DrawRect(bx, bodyTop, bw2, bh,
+                    Chart.WithAlpha(line, revealAlpha), lineWidth);
+            }
         }
 
-        // 折线覆盖层（MA 线）绘制在同一价格轴，
-        // 与蜡烛柱对齐分桶，使均线与柱条对齐。
+        // 折线覆盖层（MA 线）绘制在同一价格轴，与蜡烛逐根对齐。
         int ov = 1;
         while (ov < o.series.Count) {
             ChartSeries s = o.series[ov];
             if (!s.hidden && ChartView.IsLineFamily(s.type)) {
                 List<int> lpx = new List<int>();
                 List<int> lpy = new List<int>();
-                for (int k2 = 0; k2 < cols; k2 = k2 + 1) {
-                    int li2 = (k2 + 1) * n / cols;
-                    if (li2 > n) { li2 = n; }
-                    if (li2 < 1) { li2 = 1; }
-                    int oi2 = i0 + li2 - 1;
+                for (int k2 = 0; k2 < n; k2 = k2 + 1) {
+                    int oi2 = i0 + k2;
                     // MA/overlay 可比蜡烛短（例如从第 N 根才有值）。
                     // dataZoom 窗口移到其尾部之后时，不能把窗口索引
                     // 直接当作系列索引读取，否则会越界；无数据的桶
                     // 留空，后续有效点仍保持原窗口的像素映射。
                     if (oi2 < 0 || oi2 >= s.Count()) { continue; }
                     int v = s.Value(oi2);
-                    int lx0 = f.plotX + k2 * f.plotW / cols;
-                    int lx1 = f.plotX + (k2 + 1) * f.plotW / cols;
-                    lpx.Add(lx0 + (lx1 - lx0) / 2);
-                    lpy.Add(f.plotY + f.plotH - (v - lo) * f.plotH / span);
+                    lpx.Add(f.CatMid(k2, n));
+                    lpy.Add(f.plotY + f.plotH - (v - plo) * f.plotH / span);
                 }
                 bool smooth = o.smooth;
                 if (s.smooth == 1) { smooth = true; } else if (s.smooth == 0) { smooth = false; }
@@ -170,32 +244,92 @@ partial class ChartView {
             }
             ov = ov + 1;
         }
+
+        // markPoint（ECharts series.markPoint）：窗口最高价的 data
+        // 项（dataIndex 命中 or kind=max）画 pin 气球徽标 + 数值
+        // 标签在上；无显式项且 o.markPoint 时自动标最高价。
+        // 徽标不裁进绘图区：pin+数值可越出顶轴（ref k1 的
+        // "2444.8" 悬在绘图区上方）——出网格裁剪，改用组件整框
+        // 裁剪防溢出到兄弟组件。
+        int maxK = 0;
+        for (int mk = 1; mk < n; mk = mk + 1) {
+            if (cs[i0 + mk].high > cs[i0 + maxK].high) { maxK = mk; }
+        }
+        c.PopClip();
+        c.PushClip(x, y, w, h);
+        if (o.markPoint || ksrc.marks.Count > 0) {
+            int mFs = Style.FontFallback(app, "small");
+            bool anyDrawn = false;
+            for (int mi = 0; mi < ksrc.marks.Count; mi = mi + 1) {
+                ChartMarkPoint m = ksrc.marks[mi];
+                if (m.valueIndex == 0) { continue; }
+                int idx = m.dataIndex;
+                if (idx < 0 || m.kind == "max") { idx = maxK; }
+                else if (m.kind == "min") {
+                    int minK = 0;
+                    for (int mk2 = 1; mk2 < n; mk2 = mk2 + 1) {
+                        if (cs[i0 + mk2].low < cs[i0 + minK].low) { minK = mk2; }
+                    }
+                    idx = minK;
+                }
+                if (idx < 0 || idx >= fullN) { continue; }
+                if (idx < i0 || idx > i1) { continue; }
+                Candle cd = cs[idx];
+                int ly = f.plotY + f.plotH - (cd.high - plo) * f.plotH / span;
+                int lx = f.CatMid(idx - i0, n);
+                int col = m.color != 0 ? m.color : Chart.Palette(t, 0);
+                // 标签缺省 ECharts formatter {value}：定点数值除以
+                // 系列定点 g 还原成显示值。
+                string lbl = m.label;
+                if (lbl.Length == 0) { lbl = m.name; }
+                if (lbl.Length == 0) {
+                    lbl = Chart.Commas(Chart.PointV(cd.high, ksrc.pointG));
+                }
+                int mrad = app.Scale(10);
+                if (m.sizeSet && m.size > 0) { mrad = m.size / 2; }
+                ChartView.CandleMarkPin(app, c, lx, ly, mrad, col, lbl, mFs, f);
+                anyDrawn = true;
+            }
+            if (!anyDrawn && o.markPoint) {
+                Candle cd = cs[i0 + maxK];
+                int ly = f.plotY + f.plotH - (cd.high - plo) * f.plotH / span;
+                int lx = f.CatMid(maxK, n);
+                string lbl = Chart.Commas(
+                    Chart.PointV(cs[i0 + maxK].high, ksrc.pointG));
+                ChartView.CandleMarkPin(app, c, lx, ly, app.Scale(10),
+                    Chart.Palette(t, 0), lbl,
+                    Style.FontFallback(app, "small"), f);
+            }
+        }
         c.PopClip();
 
-        string cap = Convert.ToString(n) + " bars";
-        int cwid = Canvas.MeasureText(cap, Style.FontFallback(app, "small"));
-        c.DrawText(x + w - t.paddingMedium - cwid, y + h - t.paddingMedium - Canvas.FontHeight(Style.FontFallback(app, "small")),
-            cap,
-            Style.Part(app, "chart", "hint", "", "", "", Style.SNormal()).FgOr(0),
-            Style.FontFallback(app, "small"));
-
         // 命中几何与 tooltip 展示解耦：关闭 tooltip 不能关闭
-        // 蜡烛桶的 Hover/MouseOut/Click 事件。桶化与 tooltip
-        // 完全同域：tIdx 按 cols 分桶，dataIndex = 窗口内源下标
-        // g0（桶首根），value = 收盘价。
+        // 蜡烛的 Hover/MouseOut/Click 事件。44 根以内命中逐根，
+        // 分桶时 dataIndex = 桶首源下标。
         int mx = app.mouseX;
         int my = app.mouseY;
         if (mx >= f.plotX && mx < f.plotX + f.plotW
             && my >= f.plotY && my < f.plotY + f.plotH && g > 0) {
-            int tIdx = (mx - f.plotX) * cols / f.plotW;
+            int tIdx = f.CatIndexAt(mx, n);
             if (tIdx < 0) { tIdx = 0; }
-            if (tIdx > cols - 1) { tIdx = cols - 1; }
-            int tI0 = tIdx * n / cols;
-            int tI1 = (tIdx + 1) * n / cols;
-            if (tI1 <= tI0) { tI1 = tI0 + 1; }
-            if (tI1 > n) { tI1 = n; }
-            int g0 = i0 + tI0;
-            int g1 = i0 + tI1 - 1;
+            if (tIdx > n - 1) { tIdx = n - 1; }
+            int g0 = i0 + tIdx;
+            int g1 = g0;
+            int topen = cs[g0].open;
+            int tclose = cs[g0].close;
+            int thi = cs[g0].high;
+            int tlo = cs[g0].low;
+            if (n > 44) {
+                int tI1 = (tIdx + 1) * n / ((f.plotW / app.Scale(5) < 1) ? 1 : (f.plotW / app.Scale(5) > n ? n : f.plotW / app.Scale(5)));
+                g1 = i0 + tI1 - 1;
+                if (g1 < g0) { g1 = g0; }
+                if (g1 >= fullN) { g1 = fullN - 1; }
+                for (int tk = g0; tk <= g1; tk = tk + 1) {
+                    if (cs[tk].high > thi) { thi = cs[tk].high; }
+                    if (cs[tk].low < tlo) { tlo = cs[tk].low; }
+                }
+                tclose = cs[g1].close;
+            }
             if (ChartView.activeEventView != null) {
                 ChartHit kh = ChartHit.Of(ChartElementType.Candlestick,
                     0, o.series[0].name, g0,
@@ -206,27 +340,15 @@ partial class ChartView {
             }
             if (o.showTooltip && g > 0) {
                 // 十字光标（ECharts axisPointer cross）：竖线吸附
-                // 桶中心，横线跟随指针，细线弱化色。
+                // 蜡烛中心，横线跟随指针，细线弱化色。
                 int crossC = Chart.WithAlpha(
                     Style.Part(app, "chart", "axis", "", "", "",
                                Style.SNormal()).FgOr(0), 150);
-                int tx0 = f.plotX + tIdx * f.plotW / cols;
-                int tx1 = f.plotX + (tIdx + 1) * f.plotW / cols;
-                int gx2 = tx0 + (tx1 - tx0) / 2;
+                int gx2 = f.CatMid(tIdx, n);
                 c.DrawLine(gx2, f.plotY, gx2, f.plotY + f.plotH - 1, crossC, 1);
                 c.DrawLine(f.plotX, my, f.plotX + f.plotW - 1, my, crossC, 1);
-                int topen = cs[g0].open;
-                int tclose = cs[g1].close;
-                int thi = cs[g0].high;
-                int tlo = cs[g0].low;
-                int tk = tI0;
-                while (tk < tI1) {
-                    if (cs[i0 + tk].high > thi) { thi = cs[i0 + tk].high; }
-                    if (cs[i0 + tk].low < tlo) { tlo = cs[i0 + tk].low; }
-                    tk = tk + 1;
-                }
-                int dirC = upC;
-                if (tclose < topen) { dirC = dnC; }
+                bool tUp = tclose >= topen;
+                int dirC = tUp ? upC : dnC;
                 List<TooltipRow> rows = new List<TooltipRow>();
                 string thdr = "#" + Convert.ToString(g0 + 1);
                 if (g1 > g0) { thdr = thdr + "-" + Convert.ToString(g1 + 1); }
@@ -237,6 +359,32 @@ partial class ChartView {
                 rows.Add(TooltipRow.Of(dirC, "C  " + Convert.ToString(tclose)));
                 ChartView.TooltipCard(app, mx, my, f.plotX + f.plotW, rows);
             }
+        }
+    }
+
+    /// 蜡烛 markPoint 的徽标：ECharts2 pin 气球，几何按参照站 k1
+    /// 像素实测锚定——气球头（宽 ≈ symbolSize，圆心在数据点上方
+    /// 3px）在上，细尾从气球顶上收窄到数据点上方 17px 的尖端；
+    /// 数值标签（如 "2444.8"）以系列色画在尾尖上方的空白处。
+    static void CandleMarkPin(App app, Canvas c, int lx, int ly, int rad,
+                              int col, string lbl, int mFs, ChartFrame f) {
+        // 气球头：圆心 (lx, ly-3)，半径 rad（symbolSize 直径）。
+        int cy = ly - app.Scale(3);
+        c.FillCircle(lx, cy, rad, col);
+        // 尾：从气球顶到尖端 (lx, ly-3-rad-8) 的细三角，底边藏进
+        // 气球头内。
+        int tipY = ly - app.Scale(3) - rad - app.Scale(8);
+        List<int> vx = new List<int>();
+        List<int> vy = new List<int>();
+        vx.Add(0); vy.Add(0 - 1000);
+        vx.Add(0 - 150); vy.Add(1000);
+        vx.Add(150); vy.Add(1000);
+        Chart.FillPoly1000(c, lx, (tipY + cy - rad) / 2, (cy - rad - tipY) / 2 + 1,
+            vx, vy, col);
+        // 数值标签：画在尾尖上方（ref 中 "2444.8" teal 字在 pin 上方）。
+        if (lbl.Length > 0) {
+            int lw = Canvas.MeasureText(lbl, mFs);
+            c.DrawText(lx - lw / 2, tipY - app.Scale(14), lbl, col, mFs);
         }
     }
 
