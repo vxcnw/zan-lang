@@ -432,6 +432,10 @@ static int expr_yields_owned_rc_value(zan_irgen_t *g, zan_ast_node_t *e,
      * receiving local must therefore treat it as owned and take that +1, or
      * the reference leaks at exit (leakcheck_cs_b06_switch_expr). */
     if (e->kind == AST_SWITCH_EXPR) return 1;
+    /* A with expression always yields a freshly allocated record
+     * (__CloneWith runs `new`), so its result is owned (+1) and the
+     * receiver must not retain again. */
+    if (e->kind == AST_WITH_EXPR) return 1;
     /* A capturing lambda, and an instance method group used as a value, each
      * allocate a fresh closure record (+1): whoever receives it owns that
      * count and must not retain again. Non-capturing lambdas and static

@@ -2253,6 +2253,9 @@ static zan_type_t *infer_expr_type_raw(zan_irgen_t *g, zan_ast_node_t *e,
         if (e->switch_expr.arms.count == 0) return NULL;
         return infer_expr_type(g, e->switch_expr.arms.items[0]->switch_arm.result,
                                locals);
+    case AST_WITH_EXPR:
+        /* `recv with { ... }` types as the receiver's (record) type. */
+        return infer_expr_type(g, e->with_expr.expr, locals);
     default:
         return NULL;
     }

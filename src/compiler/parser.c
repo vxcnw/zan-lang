@@ -1714,6 +1714,37 @@ static zan_ast_node_t *parse_postfix(zan_parser_t *p) {
             }
             parser_expect(p, TK_RBRACE);
             expr = n;
+        } else if (parser_check(p, TK_IDENT) &&
+                   p->current.str_val.len == 4 &&
+                   memcmp(p->current.str_val.str, "with", 4) == 0 &&
+                   zan_lexer_peek(p->lex).kind == TK_LBRACE) {
+            /* with expression: `recv with { field = value, ... }` (record
+             * copy). Contextual like C#: `with` is only claimed right
+             * before a `{`; an identifier named `with` elsewhere keeps
+             * working. Each entry lowers to an AST_ASSIGNMENT whose left
+             * is a bare field name. */
+            parser_advance(p); /* with */
+            parser_expect(p, TK_LBRACE);
+            zan_ast_node_t *n = zan_ast_new(p->arena, AST_WITH_EXPR, loc);
+            n->with_expr.expr = expr;
+            zan_ast_list_init(&n->with_expr.assigns);
+            while (!parser_check(p, TK_RBRACE) && !parser_check(p, TK_EOF)) {
+                parser_expect(p, TK_IDENT);
+                zan_istr_t fname = p->previous.str_val;
+                parser_expect(p, TK_EQ);
+                zan_ast_node_t *asg =
+                    zan_ast_new(p->arena, AST_ASSIGNMENT, loc);
+                asg->binary.op = TK_EQ;
+                zan_ast_node_t *lhs =
+                    zan_ast_new(p->arena, AST_IDENTIFIER, loc);
+                lhs->ident.name = fname;
+                asg->binary.left = lhs;
+                asg->binary.right = parse_expression(p);
+                zan_ast_list_push(&n->with_expr.assigns, asg, p->arena);
+                if (!parser_match(p, TK_COMMA)) break;
+            }
+            parser_expect(p, TK_RBRACE);
+            expr = n;
         } else if (parser_check(p, TK_PLUS_PLUS) || parser_check(p, TK_MINUS_MINUS)) {
             /* postfix ++/--: consume exactly one operator and stop, so
              * `x++`/`x--` lower to a single AST_POSTFIX_UNARY. */
@@ -4578,8 +4609,27 @@ static void gen_record_class(zan_ast_node_t *unit, zan_istr_t rname,
                          (int)pp->param.name.len, pp->param.name.str,
                          (int)pp->param.name.len, pp->param.name.str);
     }
+    zsrc_append(src, cap, &n, "    }\n");
+    /* __CloneWith: full-argument copy, the lowering target of
+     * `recv with { ... }` — irgen passes every positional field in order,
+     * substituted values for the fields the with-assignments name. */
+    zsrc_append(src, cap, &n, "    public %s __CloneWith(", nm);
+    for (int i = 0; i < params->count; i++) {
+        zan_ast_node_t *pp = params->items[i];
+        if (i > 0) zsrc_append(src, cap, &n, ", ");
+        n += tref_write(src + n, cap - n, pp->param.type);
+        zsrc_append(src, cap, &n, " %.*s",
+                         (int)pp->param.name.len, pp->param.name.str);
+    }
+    zsrc_append(src, cap, &n, ") {\n        return new %s(", nm);
+    for (int i = 0; i < params->count; i++) {
+        zan_ast_node_t *pp = params->items[i];
+        if (i > 0) zsrc_append(src, cap, &n, ", ");
+        zsrc_append(src, cap, &n, "%.*s",
+                         (int)pp->param.name.len, pp->param.name.str);
+    }
+    zsrc_append(src, cap, &n, ");\n    }\n");
     zsrc_append(src, cap, &n,
-        "    }\n"
         "    static bool op_eq(%s l, %s r) {\n"
         "        if (l == null) { return r == null; }\n"
         "        if (r == null) { return false; }\n"

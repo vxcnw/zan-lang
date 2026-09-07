@@ -1175,8 +1175,20 @@ static LLVMValueRef emit_expr_binary(zan_irgen_t *g, zan_ast_node_t *expr,
                                  * (the handler list retains), so drop ours.
                                  * Other operand shapes keep their existing
                                  * ownership contract. */
+                                /* Operands are call arguments in operator
+                                 * form: a freshly allocated one (+1) is a
+                                 * call-site temp released once the operator
+                                 * returns, exactly like a method-call
+                                 * argument -- otherwise `v == new Point(...)`
+                                 * leaked the new object every evaluation. A
+                                 * delegate right operand keeps its by-shape
+                                 * release; the helper guards local idents and
+                                 * borrowed operands. */
                                 if (expr_yields_delegate_value(g, expr->binary.right, locals))
                                     emit_closure_release(g, right);
+                                else
+                                    emit_release_owned_call_temp(g, expr->binary.right, right, locals);
+                                emit_release_owned_call_temp(g, expr->binary.left, left, locals);
                                 return opres;
                             }
                         }
@@ -7182,6 +7194,81 @@ static LLVMValueRef emit_expr_switch_expr(zan_irgen_t *g, zan_ast_node_t *expr,
     return LLVMBuildLoad2(g->builder, rtll, rslot, "swx.load");
 }
 
+/* `recv with { f = v, ... }` — non-destructive record copy. Lowers to a call
+ * of the record's synthesized `__CloneWith(...)` with the receiver evaluated
+ * exactly once: it is stored into a hidden local (`\x01wr`, no source
+ * identifier can contain it) that the synthesized member reads reference,
+ * then the whole thing lowers as a plain instance-method call through the
+ * normal machinery (argument typing, ARC). Fields the assignments leave out
+ * read the hidden local, so they keep the receiver's values. */
+static LLVMValueRef emit_expr_with_expr(zan_irgen_t *g, zan_ast_node_t *expr,
+                                        local_scope_t *locals) {
+    zan_istr_t cm = { (char *)"__CloneWith", 11 };
+    zan_type_t *rty = concretize(g, infer_expr_type(g, expr->with_expr.expr,
+                                                    locals));
+    if (!rty || !rty->sym ||
+        !get_method_sym(rty->sym, cm)) {
+        zan_diag_emit(g->diag, DIAG_ERROR, expr->loc,
+            "'with' requires a record receiver with a synthesized clone");
+        return LLVMConstNull(LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0));
+    }
+    static const char kWr[] = { 1, 'w', 'r' };
+    zan_istr_t hname = { (char *)kWr, 3 };
+    LLVMTypeRef rtll = map_type(g, rty);
+    LLVMValueRef recv = emit_expr(g, expr->with_expr.expr, locals);
+    LLVMValueRef rslot = emit_entry_alloca(g, rtll, "with.recv");
+    zan_store_fit(g, recv, rslot);
+    int mark = locals->count;
+    local_add(locals, hname, rslot, rty);
+
+    /* build `__wr.__CloneWith(a0, a1, ...)`: per field, the with-assignment's
+     * value or a read of the hidden local's field */
+    zan_ast_node_t *recv_id = zan_ast_new(g->arena, AST_IDENTIFIER, expr->loc);
+    recv_id->ident.name = hname;
+    zan_ast_node_t *callee = zan_ast_new(g->arena, AST_MEMBER_ACCESS, expr->loc);
+    callee->member.object = recv_id;
+    callee->member.name = cm;
+    zan_ast_node_t *call = zan_ast_new(g->arena, AST_CALL, expr->loc);
+    call->call.callee = callee;
+    zan_ast_list_init(&call->call.args);
+    zan_ast_list_init(&call->call.type_args);
+    for (int fi = 0; fi < rty->sym->member_count; fi++) {
+        zan_symbol_t *m = rty->sym->members[fi];
+        if (!m || m->kind != SYM_FIELD) continue;
+        zan_ast_node_t *arg = NULL;
+        for (int ai = 0; ai < expr->with_expr.assigns.count; ai++) {
+            zan_ast_node_t *asg = expr->with_expr.assigns.items[ai];
+            if (asg && asg->kind == AST_ASSIGNMENT &&
+                asg->binary.left->ident.name.len == m->name.len &&
+                memcmp(asg->binary.left->ident.name.str, m->name.str,
+                       (size_t)m->name.len) == 0) {
+                arg = asg->binary.right;
+                break;
+            }
+        }
+        if (!arg) {
+            arg = zan_ast_new(g->arena, AST_MEMBER_ACCESS, expr->loc);
+            zan_ast_node_t *obj =
+                zan_ast_new(g->arena, AST_IDENTIFIER, expr->loc);
+            obj->ident.name = hname;
+            arg->member.object = obj;
+            arg->member.name = m->name;
+        }
+        zan_ast_list_push(&call->call.args, arg, g->arena);
+    }
+
+    LLVMValueRef result = emit_expr(g, call, locals);
+    /* Unlike the switch-expression result slot, the receiver's ownership was
+     * never handed on: a receiver that yields an owned value (a call, a with,
+     * ...) would leak its +1 in the hidden slot. Release it conditionally —
+     * borrowed receivers (locals, fields) are untouched. */
+    LLVMValueRef recv_now = LLVMBuildLoad2(g->builder, rtll, rslot,
+                                           "with.recv.load");
+    emit_release_owned_call_temp(g, expr->with_expr.expr, recv_now, locals);
+    locals->count = mark;
+    return result;
+}
+
 /* An async frame's result slot is 64 bits wide, so `await f()` loads 64 bits no
  * matter what `f` returns. Decode them back into the callee's declared type --
  * the exact inverse of the encoding the completing coroutine applied (see
@@ -8352,6 +8439,9 @@ static LLVMValueRef emit_expr(zan_irgen_t *g, zan_ast_node_t *expr, local_scope_
     case AST_SWITCH_EXPR:
         return emit_expr_switch_expr(g, expr, locals);
 
+    case AST_WITH_EXPR:
+        return emit_expr_with_expr(g, expr, locals);
+
     case AST_POSTFIX_UNARY:
         /* x++ / x-- — postfix yields the value before the change. */
         return emit_incdec_expr(g, expr, locals, 0);
@@ -8789,6 +8879,11 @@ static void cap_scan(capture_scan_t *cs, zan_ast_node_t *n) {
             cap_scan(cs, arm->switch_arm.result);
         }
         return;
+    case AST_WITH_EXPR:
+        cap_scan(cs, n->with_expr.expr);
+        for (int ai = 0; ai < n->with_expr.assigns.count; ai++)
+            cap_scan(cs, n->with_expr.assigns.items[ai]);
+        return;
     case AST_LAMBDA:
         /* a nested lambda's own parameters shadow the enclosing names */
         for (int i = 0; i < n->lambda.params.count; i++)
@@ -9145,6 +9240,8 @@ static void body_write_collect(zan_irgen_t *g, zan_ast_node_t *n,
                               body_write_collect(g, n->query_clause.right_key, body, lam_depth); return;
     case AST_SWITCH_EXPR:     body_write_collect(g, n->switch_expr.expr, body, lam_depth);
                               body_write_collect_list(g, &n->switch_expr.arms, body, lam_depth); return;
+    case AST_WITH_EXPR:       body_write_collect(g, n->with_expr.expr, body, lam_depth);
+                              body_write_collect_list(g, &n->with_expr.assigns, body, lam_depth); return;
     case AST_SWITCH_ARM:      body_write_collect(g, n->switch_arm.pattern, body, lam_depth);
                               body_write_collect(g, n->switch_arm.when_cond, body, lam_depth);
                               body_write_collect(g, n->switch_arm.result, body, lam_depth); return;

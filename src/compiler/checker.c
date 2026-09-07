@@ -2669,6 +2669,40 @@ zan_type_t *zan_checker_check_expr(zan_checker_t *c, zan_ast_node_t *expr) {
         return has_result ? merged : c->binder->type_error;
     }
 
+    case AST_WITH_EXPR: {
+        /* `recv with { field = value, ... }` — the record's type, with every
+         * assignment validated against the record's fields. Fields the
+         * assignments leave out keep the receiver's value (irgen passes
+         * them through the synthesized __CloneWith). */
+        zan_type_t *rt = zan_checker_check_expr(c, expr->with_expr.expr);
+        if (!rt || (rt->kind != TYPE_CLASS && rt->kind != TYPE_STRUCT)) {
+            if (rt && rt->kind != TYPE_ERROR)
+                zan_diag_emit(c->diag, DIAG_ERROR, expr->loc,
+                    "'with' requires a record (class/struct) receiver, "
+                    "not '%s'", type_name(rt));
+            return c->binder->type_error;
+        }
+        for (int i = 0; i < expr->with_expr.assigns.count; i++) {
+            zan_ast_node_t *asg = expr->with_expr.assigns.items[i];
+            if (!asg || asg->kind != AST_ASSIGNMENT) continue;
+            zan_istr_t fname = asg->binary.left->ident.name;
+            zan_symbol_t *field = rt->sym
+                ? checker_find_field(rt->sym, fname) : NULL;
+            if (!field || !field->type) {
+                zan_diag_emit(c->diag, DIAG_ERROR, asg->loc,
+                    "'%.*s' has no field '%.*s' for 'with'",
+                    (int)rt->name.len, rt->name.str,
+                    (int)fname.len, fname.str);
+                zan_checker_check_expr(c, asg->binary.right);
+                continue;
+            }
+            zan_type_t *val = zan_checker_check_expr(c, asg->binary.right);
+            checker_check_assignable(c, field->type, val,
+                                     asg->binary.right, asg->loc, "with");
+        }
+        return rt;
+    }
+
     case AST_CAST_EXPR: {
         zan_type_t *src = zan_checker_check_expr(c, expr->cast.expr);
         zan_type_t *dst = zan_binder_resolve_type(c->binder, expr->cast.type);

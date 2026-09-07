@@ -1,0 +1,51 @@
+// Conformance: `recv with { field = value, ... }` — record 的非破坏性复制。
+// 降级为目标 record 合成的 __CloneWith(全参) 调用：receiver 恰好求值一次
+// （存入隐藏局部），被赋值的字段用新值、其余字段读 receiver 的现值。
+// ARC：结果恒为新建对象（owned +1），接收方不得再 retain。
+using System;
+
+record Point(int x, int y);
+record Item(string name, int qty);
+
+static class Counter {
+    public static int n;
+}
+
+static class Factory {
+    // receiver 是调用结果（带副作用）时的单次求值探针：每调一次 n+1
+    public static Point Next() {
+        Counter.n = Counter.n + 1;
+        return new Point(5, 6);
+    }
+
+    public static Point Shift(Point p) {
+        return p with { x = p.x + 100 };
+    }
+}
+
+class Program {
+    static void Main() {
+        Point a = new Point(1, 2);
+        Point b = a with { x = 10 };
+        // 原对象不受影响（非破坏）
+        Console.WriteLine(Convert.ToString(a.x) + ":" + Convert.ToString(a.y));
+        // 改写的字段取新值，未提及的字段保留原值
+        Console.WriteLine(Convert.ToString(b.x) + ":" + Convert.ToString(b.y));
+        // 值相等语义照旧：b == new Point(10, 2)
+        if (b == new Point(10, 2)) { Console.WriteLine("eq"); }
+
+        // receiver 只求值一次：n 停在 1
+        Point c = Factory.Next() with { y = 99 };
+        Console.WriteLine(Convert.ToString(Counter.n) + ":"
+            + Convert.ToString(c.x) + ":" + Convert.ToString(c.y));
+
+        // 经方法返回 with 结果
+        Point d = Factory.Shift(a);
+        Console.WriteLine(Convert.ToString(d.x) + ":" + Convert.ToString(d.y));
+
+        // string 字段
+        Item it = new Item("pen", 3);
+        Item it2 = it with { qty = 7 };
+        Console.WriteLine(it2.ToString());
+    }
+}

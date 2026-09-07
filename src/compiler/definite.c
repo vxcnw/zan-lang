@@ -337,6 +337,11 @@ static void da_expr(struct da_ctx *c, zan_ast_node_t *n) {
         da_switch_expr(c, n);
         return;
 
+    case AST_WITH_EXPR:
+        da_expr(c, n->with_expr.expr);
+        da_list(c, &n->with_expr.assigns);
+        return;
+
     case AST_LAMBDA:
     case AST_QUERY_EXPR:
         /* The body runs somewhere this analysis cannot see and may write any

@@ -116,6 +116,7 @@ typedef enum {
     AST_QUERY_JOIN,   /* query clause: join y in s on k1 equals k2 [into g] */
     AST_SWITCH_EXPR,  /* `expr switch { arm, ... }` (expression form) */
     AST_SWITCH_ARM,   /* one arm of a switch expression */
+    AST_WITH_EXPR,    /* `recv with { field = value, ... }` (record copy) */
 
     AST__COUNT,
 } zan_ast_kind_t;
@@ -376,6 +377,14 @@ struct zan_ast_node {
             zan_ast_node_t *expr;
             zan_ast_list_t arms;
         } switch_expr;
+
+        /* with expression: `recv with { field = value, ... }` — record copy.
+         * Assignments are AST_ASSIGNMENT nodes whose left is an
+         * AST_IDENTIFIER naming a record field. */
+        struct {
+            zan_ast_node_t *expr;
+            zan_ast_list_t assigns;
+        } with_expr;
 
         /* switch expression arm: `pattern => result` / `pattern when g => result` */
         struct {
