@@ -794,7 +794,7 @@ class MinerApp {
                 lastState = st;
                 bool fast = st == World.ST_EXTEND || st == World.ST_RETRACT
                             || st == World.ST_QTE || st == World.ST_BOMB;
-                int interval = h.Focused() ? 2 : 4;
+                int interval = h.Focused() ? 2 : 4;   // Focused=未最小化
                 bool composite = stateChanged || action || dyn || inputEvent
                                  || fast || ++hudFrame >= interval;
                 if (composite) { hudFrame = 0; }

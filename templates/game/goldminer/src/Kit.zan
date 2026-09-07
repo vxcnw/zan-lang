@@ -186,8 +186,8 @@ class Host {
     public int CanvasH() { return this.canvasH; }
     public bool Running() { return this.running; }
     public void Quit() { this.running = false; }
-    /// 窗口是否持有焦点且未最小化(HUD 合成节拍据此降速)。
-    public bool Focused() { return this.focused && !this.minimized; }
+    /// 窗口是否未被最小化(HUD 合成节拍据此降速;失焦不减帧)。
+    public bool Focused() { return !this.minimized; }
     public nint WindowHandle() { return this.window.Handle(); }
 
     // 帧率上限：睡到帧起始截止时刻（Present 之后不再补睡），
@@ -199,18 +199,18 @@ class Host {
         this.nextFrame = Sdl.Ticks();
     }
 
-    // 后台空闲帧距：失焦或最小化（用户当前没看着窗口）时降到该节奏，
+    // 后台空闲帧距：最小化(用户完全看不见窗口)时降到该节奏，
     // 软件光栅化场景全速重绘会把一个核跑满。重新聚焦立即恢复。
+    // 失焦但可见的窗口维持正常帧率:这是实时游戏,失焦降帧表现为
+    // 画面两秒一跳,观感就是"卡死"。
     public void SetIdleFps(int fps) {
         if (fps < 1) { fps = 1; }
         this.idleMs = 1000 / fps;
     }
 
-    bool focused = true;
-
     int EffectiveFrameMs() {
         int ms = this.frameMs;
-        if ((this.minimized || !this.focused) && this.idleMs > ms) {
+        if (this.minimized && this.idleMs > ms) {
             ms = this.idleMs;
         }
         return ms;
@@ -277,12 +277,10 @@ class Host {
     }
 
     public void OnWindowEvent(int type) {
-        // 失焦/聚焦切换后台节奏（见 SetIdleFps）：后台窗口不再是用户的
-        // 活动表面，全速重绘只烧 CPU。窗口事件本身也算"输入"，重绘
-        // 门控据此立即渲染一帧。
+        // 窗口事件本身也算"输入"，重绘门控据此立即渲染一帧。
+        // 焦点只记账(Focused 不再消费失焦):实时游戏失焦降帧=画面
+        // 两秒一跳;只有最小化(完全看不见)才降到 idle 节奏。
         this.hadEvent = true;
-        if (type == SdlEventType.WindowFocusLost()) { this.focused = false; }
-        if (type == SdlEventType.WindowFocusGained()) { this.focused = true; }
         if (type == SdlEventType.WindowMinimized()) {
             this.minimized = true;
             this.nextFrame = Sdl.Ticks() + this.frameMs;
