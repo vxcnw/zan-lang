@@ -95,6 +95,16 @@ class LayerState {
     // >0 时打开这么多毫秒后自动关闭（layui 的 time），经 Layer.Close
     // 走统一路径（同样触发 Closed）。
     int AutoCloseMs;
+    // ---- 出场动画（layui isOutAnim:true 的等价物） ----
+    // Close 时层不立即消失：open 立即为 false（宿主状态机、Esc 往返
+    // 立刻稳定，Closed 也在关闭沿照旧触发），但层进入 closing 态在
+    // 屏幕上再停留出场时长，由渲染沿推 exitP 淡出并加速上滑，走完
+    // 自动摘除。
+    bool closing;
+    int closeMs;
+    // 关闭沿是否已触发 Closed（Layer.Close 就地触发；宿主直接翻
+    // open=false 的由渲染沿的关闭沿补触发——只触发一次）。
+    bool closedRaised;
     // SizeToContent 打开的窗口保持画布居中（layui offset:'auto'）：
     // 深链/点击回调可能在画布定型前创建窗口，出生时算好的居中会随
     // 画布尺寸变化失效；渲染沿按当前画布重新居中，用户拖动/缩放/
@@ -178,6 +188,9 @@ class LayerState {
         this.wasOpen = false;
         this.openedRaised = false;
         this.AutoCloseMs = 0;
+        this.closing = false;
+        this.closeMs = 0;
+        this.closedRaised = false;
         this.autoCenter = false;
         this.sizeMinW = 0;
         this.sizeMaxH = 0;
@@ -340,9 +353,12 @@ class LayerState {
         action = 0;
         openMs = Window.GetTickMs();
         // 重新武装生命周期回调：Opened 等入场走完再触发一次，
-        // Closed 在下一次关闭沿触发。
+        // Closed 在下一次关闭沿触发。打断未走完的出场动画。
         wasOpen = true;
         openedRaised = false;
+        closedRaised = false;
+        closing = false;
+        closeMs = 0;
         if (state == 2) { state = 0; }
         // 进打开注册表（按打开顺序，末尾最上）——键盘语义
         // （Esc/Enter）与 CloseLast/CloseAll 依赖这份次序。
@@ -420,11 +436,21 @@ class Layer {
         if (Layer.zorder == null) { Layer.zorder = new List<LayerState>(); }
     }
 
-    /// 剔除已关闭的注册项（随渲染路径惰性调用）。
+    /// 剔除已关闭的注册项（随渲染路径惰性调用）。出场动画没走完
+    /// （closing）与还没轮到启动出场（wasOpen——宿主刚翻 open=false、
+    /// 本帧渲染沿才会 BeginExit）的保留——RenderStack 的收场扫描要从
+    /// 这里找到它们补画淡出帧（宿主驱动的对话框 open=false 后不再被
+    /// Layer.Render 画到）；先剪后扫会把它们剪没，对话框就瞬间消失。
+    /// 5 秒兜底：宿主若从此不再渲染该层，注册表也不被永久占用。
     static void PruneZorder() {
         Layer.EnsureZorder();
+        int now = Window.GetTickMs();
         for (int i = Layer.zorder.Count - 1; i >= 0; i = i - 1) {
-            if (!Layer.zorder[i].open) { Layer.zorder.RemoveAt(i); }
+            LayerState s = Layer.zorder[i];
+            if (s.open) { continue; }
+            if (s.wasOpen && now - s.openMs <= 5000) { continue; }
+            if (s.closing && now - s.closeMs <= 2000) { continue; }
+            Layer.zorder.RemoveAt(i);
         }
     }
 
@@ -452,19 +478,33 @@ class Layer {
         return false;
     }
 
-    /// 规范关闭入口：立即清拖动/缩放状态并触发 Closed（不必等下一帧
-    /// 渲染）。直接置 open=false 的宿主也没问题——关闭沿会在该层
-    /// 下一次渲染时补触发 Closed（正好一次）。
+    /// 规范关闭入口（layui isOutAnim:true 的等价物）：open 立即为
+    /// false（宿主状态机、Esc 往返立刻稳定），层进入 closing 态——
+    /// 渲染沿还会把它在屏幕上淡出+上滑收场。Closed 仍在关闭沿立即
+    /// 触发（回调时序与无出场动画时完全一致，出场纯粹是收场动画）。
+    /// 直接置 open=false 的宿主走同一条路（关闭沿在渲染时启动出场，
+    /// 并在那里补触发 Closed）。
     static void Close(App app, LayerState s) {
         if (!s.open) { return; }
         s.open = false;
         s.dragging = false;
         s.sizing = false;
-        if (s.wasOpen) {
-            s.wasOpen = false;
+        s.closing = true;
+        s.closeMs = Window.GetTickMs();
+        if (!s.closedRaised) {
+            s.closedRaised = true;
             s.Closed.Raise();
         }
-        app.RequestRedraw();
+        Layer.requestRedraw = true;
+    }
+
+    /// 关闭沿（!open 且 wasOpen）的第一帧：启动出场动画。
+    static void BeginExit(LayerState s) {
+        s.wasOpen = false;
+        s.closing = true;
+        s.closeMs = Window.GetTickMs();
+        s.dragging = false;
+        s.sizing = false;
     }
 
     /// 弹出完成回调：入场进度到 1000（或无入场）的第一帧触发一次。
@@ -1239,6 +1279,59 @@ class Layer {
         return p;
     }
 
+    /// 出场动画时长（layui isOutAnim ~300ms 的量级）。
+    static int ExitMs() { return 240; }
+
+    /// 出场进度（0..1000）：closing 层在关闭沿之后的淡出/位移进度，
+    /// 非 closing 层恒 1000。渲染路径用它衰减 shade 与表面。
+    static int ExitP(LayerState s) {
+        if (!s.closing || s.closeMs <= 0) { return 1000; }
+        return App.Ease(Layer.Clamp01((Window.GetTickMs() - s.closeMs)
+            * 1000 / Layer.ExitMs()));
+    }
+
+    /// 出场衰减：按 a‰ 乘法衰减颜色的既有 alpha（a=1000 原样返回）。
+    /// Style.Fade 是「设为 a‰」的绝对语义，对 0x22000000 阴影、遮罩
+    /// ov.bg 这类预透明色，a=1000 时会跳成全不透明——淡出必须用
+    /// 乘法衰减。
+    static int MulAlpha(int color, int a) {
+        if (a >= 1000) { return color; }
+        if (a <= 0) { return 0; }
+        int rgb = color % 16777216;
+        if (rgb < 0) { rgb = rgb + 16777216; }
+        int al = (color - rgb) / 16777216 + 256;
+        return (al * a / 1000) * 16777216 + rgb;
+    }
+
+    /// !open 层的关闭沿：第一帧启动出场并补触发 Closed（Layer.Close
+    /// 路径已在 Close 里触发过，closedRaised 拦住二次触发），其后画
+    /// 淡出/上滑收场帧（模态对话框走整屏遮罩+表面，页面窗口走窗口
+    /// 自身），走完请求整帧重绘擦净。返回 true 表示本帧处理了该层
+    /// （调用方不必再画它）。
+    static bool ClosingFrame(App app, LayerState s) {
+        if (s.wasOpen) {
+            Layer.BeginExit(s);
+            if (!s.closedRaised) {
+                s.closedRaised = true;
+                s.Closed.Raise();
+            }
+        }
+        if (!s.closing) { return false; }
+        int outP = Layer.ExitP(s);
+        if (outP < 1000) {
+            if (s.modal) { Layer.RenderDialogExit(app, s, outP); }
+            else { Layer.RenderClosing(app, s, outP); }
+            // 遮罩淡出覆盖整屏，动画损伤区按整画布申请（窗口矩形
+            // 不够——下一帧遮罩变浅的每一处像素都要重画）。
+            app.RequestAnimationFrameIn(16, 0, 0,
+                                        app.canvas.Width(), app.canvas.Height());
+            return true;
+        }
+        s.closing = false;
+        app.RequestRedraw();
+        return true;
+    }
+
     /// 从后往前绘制页面窗口堆栈（最后一个 = 最顶层）。点击
     /// 任一窗口都会将其置顶；只有指针下最顶层的窗口（或被拖动者）
     /// 才消费鼠标事件。
@@ -1284,6 +1377,17 @@ class Layer {
         for (int k = 0; k < list.Count; k = k + 1) {
             Layer.RenderActive(app, list[k], k == active);
         }
+        // 宿主驱动的模态对话框（Layer.Render 单层路径）关闭后宿主不再
+        // 调 Render；这里从打开注册表把尚在出场的对话框补画收场帧
+        // （页面之上、toast 之下），走完由 ClosingFrame 触发 Closed。
+        if (Layer.zorder != null) {
+            for (int k = 0; k < Layer.zorder.Count; k = k + 1) {
+                LayerState zs = Layer.zorder[k];
+                if (!zs.open && zs.modal && (zs.closing || zs.wasOpen)) {
+                    Layer.ClosingFrame(app, zs);
+                }
+            }
+        }
         Layer.FlushCloseRedraw(app);
     }
 
@@ -1305,11 +1409,9 @@ class Layer {
     static void RenderActive(App app, LayerState s, bool active) {
         if (!s.open) {
             // 关闭沿：无论谁置的 open=false（X、宿主、CloseLast/CloseAll、
-            // 自动关闭），该层下一次渲染时在这里触发一次 Closed。
-            if (s.wasOpen) {
-                s.wasOpen = false;
-                s.Closed.Raise();
-            }
+            // 自动关闭），第一帧启动出场动画；出场期间继续渲染该层的
+            // 收场帧（淡出+上滑），走完触发一次 Closed 并真正摘除。
+            Layer.ClosingFrame(app, s);
             return;
         }
         if (s.AutoCloseMs > 0 && s.openMs > 0
@@ -1360,7 +1462,7 @@ class Layer {
             ew = app.Scale(260); eh = bar;
         }
 
-        // 入场：上升 + 回稳。
+        // 入场：上升 + 回稳。出场：继续上升加速离场（位移同曲线反向）。
         int entP = Layer.Entrance(app, s);
         ey = ey - (1000 - entP) * app.Scale(10) / 1000;
         if (entP >= 1000) { Layer.NotifyOpened(s); }
@@ -1558,6 +1660,57 @@ class Layer {
         Layer.RenderLayerBody(app, s, ex, ey, ew, eh, bar);
     }
 
+    /// 出场收场帧（closing 层专用）：与 RenderActive 的画法同一套
+    /// 表面/标题栏/正文，但不注册任何命中区（层已在逻辑上关闭，
+    /// 点击应穿透到页面）、不画交互按钮的点击态，整体按 outP
+    /// 淡出并加速上滑（layui isOutAnim 的等价物）。
+    static void RenderClosing(App app, LayerState s, int outP) {
+        Canvas c = app.canvas;
+        Theme t = app.theme;
+        int top = app.titlebarH;
+        int bar = Layer.BarH(app);
+        int rad = t.borderRadiusLarge;
+        int ex = s.x;
+        int ew = s.w;
+        int eh = s.h;
+        int ey = s.y;
+        if (s.state == 2) {
+            List<int> mp = new List<int>();
+            Layer.MinPos(app, s, mp);
+            ex = mp[0]; ey = mp[1];
+            ew = app.Scale(260); eh = bar;
+        }
+        // 上滑离场：与入场同一曲线同一幅度（outP 越大越接近原位——
+        // 这里用 (1000-outP) 反向叠加，出场即向上漂走）。
+        ey = ey - outP * app.Scale(10) / 1000;
+        // 表面与阴影整体淡出（乘法衰减——阴影/遮罩是预透明色）。
+        int a = 1000 - outP;
+        c.FillRoundRect(ex - app.Scale(1), ey + app.Scale(6), ew + app.Scale(2),
+                        eh, rad + app.Scale(4), Layer.MulAlpha(0x22000000, a));
+        c.FillRoundRect(ex + app.Scale(1), ey + app.Scale(3), ew - app.Scale(2),
+                        eh, rad + app.Scale(2), Layer.MulAlpha(0x33000000, a));
+        StyleBox win = Style.Of(app, "layer", "", Style.SNormal());
+        StyleBox tbs = Style.Part(app, "layer", "titlebar", "", "", "",
+                                  Style.SNormal());
+        app.FillGlass(ex, ey, ew, eh, rad, win.bg, a);
+        c.FillRoundRect(ex, ey, ew, bar, rad, Layer.MulAlpha(tbs.bg, a));
+        c.FillRect(ex, ey + bar - rad, ew, rad, Layer.MulAlpha(tbs.bg, a));
+        int stripH = tbs.borderBottomW;
+        if (stripH <= 0) { stripH = app.Scale(2); }
+        c.FillRect(ex, ey + bar - stripH, ew, stripH,
+                   Layer.MulAlpha(tbs.borderBottomColor, a));
+        int icoS = t.iconSizeSmall;
+        int titleFont = tbs.FontOr(Style.FontFallback(app, "medium"));
+        c.DrawGlyph("grid", ex + app.Scale(14), ey + (bar - icoS) / 2, icoS,
+                    Layer.MulAlpha(tbs.accent, a));
+        c.DrawText(ex + app.Scale(14) + icoS + t.gapSmall,
+                   Canvas.CenterTextY(ey, bar, titleFont),
+                   s.title, Layer.MulAlpha(tbs.fg, a), titleFont);
+        Layer.RenderLayerBody(app, s, ex, ey, ew, eh, bar);
+        // 出场帧不擦正文背后的页面：页面在这一帧照常整绘（closing 层
+        // 不再注册命中/拦截），所以遮罩/窗口自然从页面之上淡走。
+    }
+
     /// Layer 正文文本 + 可选的底部按钮（最小化时跳过）。
     static void RenderLayerBody(App app, LayerState s, int ex, int ey, int ew, int eh, int bar) {
         Canvas c = app.canvas;
@@ -1643,10 +1796,8 @@ class Layer {
     /// 1 (OK)、2 (Cancel) 或 3 (关闭 X)；调用方读取后关闭。
     static void RenderDialog(App app, LayerState s) {
         Canvas c = app.canvas;
-        Theme t = app.theme;
         int W = c.Width();
         int H = c.Height();
-        int rad = t.borderRadiusLarge;
 
         int entP = Layer.Entrance(app, s);
         if (entP >= 1000) { Layer.NotifyOpened(s); }
@@ -1672,18 +1823,53 @@ class Layer {
 
         // 变暗的背景遮罩。吞掉其下方的点击，使模态真正模态化
         // （点击遮罩或对话框正文不再穿透到页面）。
-        string cls = Layer.RoleClass(s.dtype + 2);
         StyleBox ov = Style.Part(app, "dialog", "overlay", "", "", "",
                                  Style.SNormal());
-        StyleBox surf = Style.Part(app, "dialog", "surface", "", "", "",
-                                   Style.SNormal());
         c.FillRect(0, 0, W, H, ov.bg);
         int shadeId = app.BlockHitsBelow();
         NativeLayer.Occlude(app, 0, 0, W, H);
+        Layer.PaintDialog(app, s, x, y, w, h, 1000, shadeId);
+    }
 
+    /// 模态对话框的出场收场帧：整屏遮罩与表面按 outP 淡出并上滑
+    /// （页面窗口 RenderClosing 的对话框对应物，由 ClosingFrame 驱动）。
+    /// 不注册命中、不消费点击——对话框逻辑上已关闭，页面立即恢复可点。
+    static void RenderDialogExit(App app, LayerState s, int outP) {
+        Canvas c = app.canvas;
+        int W = c.Width();
+        int H = c.Height();
+        int a = 1000 - outP;
+        int w = app.Scale(s.w);
+        int h = app.Scale(s.h);
+        int availW = W - app.Scale(16) * 2;
+        if (w > availW) { w = availW; }
+        int availH = H - app.Scale(16) * 2;
+        if (h > availH) { h = availH; }
+        int x = (W - w) / 2;
+        int y = (H - h) / 2 - outP * app.Scale(12) / 1000;
+        StyleBox ov = Style.Part(app, "dialog", "overlay", "", "", "",
+                                 Style.SNormal());
+        c.FillRect(0, 0, W, H, Layer.MulAlpha(ov.bg, a));
+        NativeLayer.Occlude(app, 0, 0, W, H);
+        Layer.PaintDialog(app, s, x, y, w, h, a, 0);
+    }
+
+    /// 对话框的表面绘制：阴影/玻璃/图标标题/正文/嵌入树/操作条/关闭
+    /// 钮。打开帧（a=1000）与出场收场帧（a<1000，MulAlpha 乘法衰减
+    /// 预透明色）共用；shadeId 是打开帧 BlockHitsBelow 的返回值供
+    /// shadeClose 判定，收场帧传 0。嵌入树/按钮自带配色无法外挂
+    /// alpha，与入场动画一样按不透明绘制。
+    static void PaintDialog(App app, LayerState s, int x, int y, int w, int h,
+                            int a, int shadeId) {
+        Canvas c = app.canvas;
+        Theme t = app.theme;
+        int rad = t.borderRadiusLarge;
+        string cls = Layer.RoleClass(s.dtype + 2);
+        StyleBox surf = Style.Part(app, "dialog", "surface", "", "", "",
+                                   Style.SNormal());
         c.FillRoundRect(x + surf.shadowDx, y + surf.shadowDy, w, h, rad,
-                        surf.shadow);
-        app.FillGlass(x, y, w, h, rad, surf.bg, 1000);
+                        Layer.MulAlpha(surf.shadow, a));
+        app.FillGlass(x, y, w, h, rad, surf.bg, a);
 
         StyleBox icoStyle = Style.Part(app, "dialog", "icon", "", cls, "",
                                        Style.SNormal());
@@ -1694,9 +1880,10 @@ class Layer {
 
         int pad = t.paddingLarge;
         int ico = t.iconSizeLarge;
-        c.DrawGlyph(iconName, x + pad, y + pad, ico, icoStyle.fg);
+        c.DrawGlyph(iconName, x + pad, y + pad, ico,
+                    Layer.MulAlpha(icoStyle.fg, a));
         c.DrawText(x + pad + ico + t.gapMedium, y + pad, s.title,
-                   titleStyle.fg, titleFont);
+                   Layer.MulAlpha(titleStyle.fg, a), titleFont);
 
         int bodyY = y + pad + ico + t.gapMedium;
         if (s.body != "") {
@@ -1704,7 +1891,7 @@ class Layer {
                                             "", Style.SNormal());
             int bodyFont = bodyStyle.FontOr(Style.FontFallback(app, "medium"));
             c.DrawText(x + pad + ico + t.gapMedium, bodyY, s.body,
-                       bodyStyle.fg, bodyFont);
+                       Layer.MulAlpha(bodyStyle.fg, a), bodyFont);
         }
 
         if (s.kind == 2 && s.promptInput != null) {
@@ -1762,19 +1949,19 @@ class Layer {
         if (altBtn != null) {
             Rect altSlot = actions.Slot(bws[bi]);
             int altId = altBtn.Render(app, altSlot.x, altSlot.y, altSlot.width);
-            if (Ui.Clicked(app, altId)) { s.action = 4; }
+            if (a >= 1000 && Ui.Clicked(app, altId)) { s.action = 4; }
             bi = bi + 1;
         }
         if (s.twoButtons) {
             Rect cancelSlot = actions.Slot(bws[bi]);
             int cancelId = cancelBtn.Render(app, cancelSlot.x, cancelSlot.y,
                                             cancelSlot.width);
-            if (Ui.Clicked(app, cancelId)) { s.action = 2; }
+            if (a >= 1000 && Ui.Clicked(app, cancelId)) { s.action = 2; }
             bi = bi + 1;
         }
         Rect okSlot = actions.Slot(bws[bi]);
         int okId = okBtn.Render(app, okSlot.x, okSlot.y, okSlot.width);
-        if (Ui.Clicked(app, okId)) { s.action = 1; }
+        if (a >= 1000 && Ui.Clicked(app, okId)) { s.action = 1; }
 
         int closeId = s.closeId;
         int closeX = x + w - t.heightMedium;
@@ -1785,22 +1972,27 @@ class Layer {
                                          closeState);
         if (closeStyle.bg != 0) {
             c.FillRoundRect(closeX, closeY, t.heightMedium, t.heightMedium,
-                            t.borderRadiusLarge, closeStyle.bg);
+                            t.borderRadiusLarge,
+                            Layer.MulAlpha(closeStyle.bg, a));
         }
         c.DrawGlyphIn("close", closeX, closeY, t.heightMedium,
-                            t.heightMedium, t.iconSizeSmall, closeStyle.fg);
-        app.hitTester.RegisterRect(closeId, closeX, closeY, t.heightMedium, t.heightMedium, 0);
-        if (app.EventKind() == 3
-            && app.ClickTarget() == closeId) {
-            s.action = 3;
-        }
-        // shadeClose：按下与抬起都落在遮罩、且不在对话框矩形内，
-        // 视为取消（action 2，由调用方关闭）。
-        if (s.shadeClose && app.EventKind() == 3
-            && app.ClickTarget() == shadeId
-            && app.PressTarget() == shadeId
-            && !Layer.Inside(app.mouseX, app.mouseY, x, y, w, h)) {
-            s.action = 2;
+                            t.heightMedium, t.iconSizeSmall,
+                            Layer.MulAlpha(closeStyle.fg, a));
+        if (a >= 1000) {
+            app.hitTester.RegisterRect(closeId, closeX, closeY,
+                                       t.heightMedium, t.heightMedium, 0);
+            if (app.EventKind() == 3
+                && app.ClickTarget() == closeId) {
+                s.action = 3;
+            }
+            // shadeClose：按下与抬起都落在遮罩、且不在对话框矩形内，
+            // 视为取消（action 2，由调用方关闭）。
+            if (s.shadeClose && app.EventKind() == 3
+                && app.ClickTarget() == shadeId
+                && app.PressTarget() == shadeId
+                && !Layer.Inside(app.mouseX, app.mouseY, x, y, w, h)) {
+                s.action = 2;
+            }
         }
     }
 
