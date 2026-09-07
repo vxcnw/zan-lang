@@ -523,35 +523,34 @@ class Deflate {
     }
 
     /// 从低位起写 n 位（LSB 优先；块头、附加位等非 Huffman 字段用）。
+    /// 按整字节打包：寄存器里一次对齐后按字节 OR 进缓冲，替代
+    /// 逐位读-改-写——每输出字节 8 次数组往返是本实现的主要 CPU
+    /// 去向。写入的位序列与逐位版本完全一致，压缩结果逐字节相同。
     static void WriteBits(byte[] out2, ref int bitPos, int v, int n) {
-        for (int i = 0; i < n; i = i + 1) {
-            int byteIdx = bitPos >> 3;
-            int bitIdx = bitPos & 7;
-            int b = out2[byteIdx] & 255;
-            if (((v >> i) & 1) != 0) {
-                b = b | (1 << bitIdx);
-            }
-            out2[byteIdx] = (byte)b;
-            bitPos = bitPos + 1;
+        if (n == 0) { return; }
+        int byteIdx = bitPos >> 3;
+        int bitIdx = bitPos & 7;
+        int w = (v & ((1 << n) - 1)) << bitIdx;
+        int nb = ((bitIdx + n) + 7) >> 3;
+        for (int k = 0; k < nb; k = k + 1) {
+            out2[byteIdx + k] = (byte)((out2[byteIdx + k] & 255)
+                | ((w >> (k << 3)) & 255));
         }
+        bitPos = bitPos + n;
     }
 
     /// 写入 `v` 的低 `n` 位，最高有效位在前。RFC 1951 中
     /// Huffman 码按 MSB 优先，而其他字段（块头、附加位、
     /// LEN/NLEN）按 LSB 优先 —— 因此编码必须走这个函数。
+    /// 位序倒装先在寄存器里完成（首个写出的位 = v 的最高
+    /// 有效位），再走统一的整字节 LSB 打包。
     static void WriteBitsMsb(byte[] out2, ref int bitPos, int v, int n) {
-        int i = n - 1;
-        while (i >= 0) {
-            int byteIdx = bitPos >> 3;
-            int bitIdx = bitPos & 7;
-            int b = out2[byteIdx] & 255;
-            if (((v >> i) & 1) != 0) {
-                b = b | (1 << bitIdx);
-            }
-            out2[byteIdx] = (byte)b;
-            bitPos = bitPos + 1;
-            i = i - 1;
+        if (n == 0) { return; }
+        int r = 0;
+        for (int i = 0; i < n; i = i + 1) {
+            r = (r << 1) | ((v >> i) & 1);
         }
+        Deflate.WriteBits(out2, ref bitPos, r, n);
     }
 
     /// 返回 buf 前 len 字节的拷贝。
