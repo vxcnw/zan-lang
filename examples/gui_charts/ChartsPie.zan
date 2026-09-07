@@ -58,67 +58,102 @@ partial class Charts {
         Charts.Show(app, o, x, y, w, h);
     }
 
+    static List<ChartData> PieRose() {
+        return new List<ChartData>{
+            ChartData.Named(10, "rose1"), ChartData.Named(5, "rose2"),
+            ChartData.Named(15, "rose3"), ChartData.Named(25, "rose4"),
+            ChartData.Named(20, "rose5"), ChartData.Named(35, "rose6"),
+            ChartData.Named(30, "rose7"), ChartData.Named(40, "rose8")
+        };
+    }
+
+    /// pie4 南丁格尔玫瑰图（ECharts2 pie4）：同一 option 两个 pie
+    /// 系列——半径模式（radius [20,110]，center ['25%',200]）与面积
+    /// 模式（radius [30,110]，center ['75%',200]，sort ascending）。
+    /// ref 的 px 半径/圆心按其 350px 容器折算成百分比
+    /// （110/175≈63%，y 200/350≈57%）。
     static void Pie4(App app, int x, int y, int w, int h) {
-        ChartSeries s = ChartSeries.Named(Charts.T("Radius", "半径"), ChartType.Pie,
-            new List<ChartData>{
-                ChartData.Named(40, "rose1"), ChartData.Named(38, "rose2"),
-                ChartData.Named(32, "rose3"), ChartData.Named(30, "rose4"),
-                ChartData.Named(28, "rose5"), ChartData.Named(26, "rose6"),
-                ChartData.Named(22, "rose7"), ChartData.Named(18, "rose8")
-            });
-        s.roseType = "radius";
+        ChartSeries r1 = ChartSeries.Named(Charts.T("Radius mode", "半径模式"),
+            ChartType.Pie, Charts.PieRose());
+        r1.roseType = "radius";
+        r1.center = ChartPosition.Of(ChartScalar.Pct(25), ChartScalar.Pct(57));
+        r1.radius = ChartScalar.Pct(63);
+        r1.radiusInner = ChartScalar.Pct(11);
+        ChartSeries r2 = ChartSeries.Named(Charts.T("Area mode", "面积模式"),
+            ChartType.Pie, Charts.PieRose());
+        r2.roseType = "area";
+        r2.sort = "ascending";
+        r2.center = ChartPosition.Of(ChartScalar.Pct(75), ChartScalar.Pct(57));
+        r2.radius = ChartScalar.Pct(63);
+        r2.radiusInner = ChartScalar.Pct(17);
         ChartOption o = ChartOption.Of(Charts.T("Nightingale rose", "南丁格尔玫瑰图"),
-            null, new List<ChartSeries>{ s });
-        o.donutPct = 0;
-        o.pieLabels = true;
+            null, new List<ChartSeries>{ r1, r2 });
+        o.pieLabels = false;
         Charts.Show(app, o, x, y, w, h);
     }
 
+    /// pie5 The App World（ECharts2 pie5）：一个 option 十个 pie 系列
+    /// 的迷你环阵，逐系列 center（5 列 × 2 行）+ radius [40,55] 覆盖；
+    /// 每系列两片：值片（调色板）+ 浅灰 other 占位（ref #ccc）。
     static void Pie5(App app, int x, int y, int w, int h) {
         string[] names = new string[]{
-            "Safari", "Firefox", "Chrome", "IE",
-            "Opera", "Android", "iOS", Charts.T("Others", "其他") };
-        int[] vals = new int[]{ 53, 27, 40, 18, 22, 35, 48, 12 };
-        int gap = app.Scale(8);
-        int cols = 4;
-        int rows = 2;
-        int cw = (w - gap * (cols - 1)) / cols;
-        int ch = (h - gap * (rows - 1)) / rows;
-        if (cw < app.Scale(40)) { cw = app.Scale(40); }
-        if (ch < app.Scale(40)) { ch = app.Scale(40); }
-        int restCol = Chart.Rgb(230, 232, 236);
-        for (int i = 0; i < 8; i = i + 1) {
-            int col = i % cols;
-            int row = i / cols;
+            "GoogleMaps", "Facebook", "Youtube", "Google+", "Weixin",
+            "Twitter", "Skype", "Messenger", "Whatsapp", "Instagram" };
+        int[] vals = new int[]{ 54, 44, 35, 30, 27, 22, 22, 22, 17, 11 };
+        int restCol = Chart.Rgb(204, 204, 204);
+        List<ChartSeries> ss = new List<ChartSeries>();
+        for (int i = 0; i < 10; i = i + 1) {
             ChartData hi = ChartData.Named(vals[i], names[i]);
-            hi.selected = true;
             hi.color = Chart.Palette(app.theme, i);
             ChartData rest = ChartData.Named(100 - vals[i], "");
             rest.color = restCol;
             ChartSeries s = ChartSeries.Named(names[i], ChartType.Pie,
                 new List<ChartData>{ hi, rest });
-            ChartOption o = ChartOption.Of(names[i], null,
-                new List<ChartSeries>{ s });
-            o.donutPct = 68;
-            o.pieLabels = false;
-            o.showLegend = false;
-            o.animate = false;
-            int px = x + col * (cw + gap);
-            int py = y + row * (ch + gap);
-            Charts.ShowQuiet(app, o, i + 1, px, py, cw, ch);
+            int col = i % 5;
+            int row = i / 5;
+            s.center = ChartPosition.Of(ChartScalar.Pct(10 + col * 20),
+                ChartScalar.Pct(row == 0 ? 34 : 74));
+            s.radius = ChartScalar.Pct(20);
+            s.radiusInner = ChartScalar.Pct(15);
+            ss.Add(s);
         }
+        ChartOption o = ChartOption.Of(Charts.T("The App World", "The App World"),
+            null, ss);
+        o.pieLabels = false;
+        o.showLegend = false;
+        Charts.Show(app, o, x, y, w, h);
     }
 
+    /// pie6 你幸福吗（ECharts2 pie6）：三个 pie 系列各一层同心环，
+    /// clockWise=false 逆时针铺；占位片以面板底色近似 ref 的
+    /// rgba(0,0,0,0) 真透明（内核 color 0 是"未设"哨兵）。ref 的
+    /// px 半径 [125,150]/[100,125]/[75,100] 按 175px 半径折算为
+    /// 86/71、71/57、57/43 百分比。
     static void Pie6(App app, int x, int y, int w, int h) {
-        ChartSeries s = ChartSeries.Named(Charts.T("Source", "访问来源"), ChartType.Pie,
-            Charts.PieTraffic());
-        s.data[4].selected = true;
-        s.selectedOffset = 0;
+        string[] names = new string[]{
+            Charts.T("68% feel fine", "68%的人表示过的不错"),
+            Charts.T("29% under pressure", "29%的人表示生活压力很大"),
+            Charts.T("3% surname Zeng", "3%的人表示“我姓曾”") };
+        int[] vals = new int[]{ 68, 29, 3 };
+        int[] outs = new int[]{ 86, 71, 57 };
+        int[] ins = new int[]{ 71, 57, 43 };
+        int restCol = Chart.Rgb(240, 241, 243);
+        List<ChartSeries> ss = new List<ChartSeries>();
+        for (int i = 0; i < 3; i = i + 1) {
+            ChartData hi = ChartData.Named(vals[i], names[i]);
+            hi.color = Chart.Palette(app.theme, i);
+            ChartData rest = ChartData.Named(100 - vals[i], "");
+            rest.color = restCol;
+            ChartSeries s = ChartSeries.Named(names[i], ChartType.Pie,
+                new List<ChartData>{ hi, rest });
+            s.clockWise = false;
+            s.radius = ChartScalar.Pct(outs[i]);
+            s.radiusInner = ChartScalar.Pct(ins[i]);
+            ss.Add(s);
+        }
         ChartOption o = ChartOption.Of(Charts.T("Are you happy?", "你幸福吗？"),
-            null, new List<ChartSeries>{ s });
-        o.donutPct = 62;
+            null, ss);
         o.pieLabels = false;
-        o.showLegend = true;
         Charts.Show(app, o, x, y, w, h);
     }
 
