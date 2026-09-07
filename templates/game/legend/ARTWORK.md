@@ -79,3 +79,20 @@ python templates/game/legend/tools/prepare_monsters.py --preview _scratch/legend
 测试覆盖：36 种形象及全部 picture 引用、源文件哈希、成品尺寸/透明度/基线/边距、图片不重复、无高不透明度洋红边缘残留，以及从母版重新处理的像素一致性。实际游戏已截图检查普通稻草人、赤月恶魔 BOSS、秘境巨魔王的切换及透明合成。
 
 **范围说明：本套是可直接用于现有放置战斗界面的静态精灵，不包含移动、攻击、受击、死亡多帧动画；装备与其他界面素材也不在此次怪物套装范围内。**
+
+## 迷你传奇资源包提取（M2 picture 编号的真实素材源）
+
+`D:\game\迷你传奇` 的 10 个 `data/*.dll` 资源包已完成加密破解与全量提取：
+**6843 条目 → 6058 PNG + 87 GIF + 671 JPG + 19 WAV，0 失败**。物品图标
+（`items.csv` 的 `picture` 列，1–2819）与 `item/00001.png…02819.png` 一一
+对应，怪物/BOSS/地图卡也有真实原图可用，逐步替换上面的参考裁切与 Image2
+生成素材。
+
+- 工具与算法文档：`tools/minimir/`（`extract_minimir.py` 自包含提取器 +
+  `README.md` 完整逆向记录：包对象布局、按 4096 字节分块的 RC4 链、ZMS
+  目录格式）。密钥来自运行中进程堆对象的只读转储，不附加调试器。
+- 复现：`python templates/game/legend/tools/minimir/extract_minimir.py`
+  （默认输出 `_scratch/minimir/extract_full/<pack>/`，`_scratch` 会被清理，
+  需要时重跑即可，全量约 30 秒）。
+- 接入状态：客户端图标管线（背包格子/图鉴/怪物立绘用真实原图）尚未切换，
+  完成前 Image2 怪物套装与参考裁切仍是运行素材。
