@@ -10,28 +10,43 @@ partial class Charts {
             Charts.T("Dev", "研发"), Charts.T("Market", "市场") };
     }
 
+    /// radar2（ECharts2 罗纳尔多 vs 舍普琴科）：六维球员数据，
+    /// 每项 max 100，两系列带面积填充。
     static void Radar1(App app, int x, int y, int w, int h) {
-        ChartOption o = ChartOption.Of(Charts.T("Budget vs spending", "预算 vs 开销"),
-            Charts.RadarDims(), new List<ChartSeries>{
-                ChartSeries.Polar(Charts.T("Budget", "预算"),
-                    new List<int>{ 4300, 10000, 28000, 35000, 50000, 19000 }),
-                ChartSeries.Polar(Charts.T("Spending", "开销"),
-                    new List<int>{ 5000, 14000, 28000, 31000, 42000, 21000 })
-            });
-        o.RadarMax(new List<int>{ 6500, 16000, 30000, 38000, 52000, 25000 });
+        List<string> dims = new List<string>{
+            Charts.T("Attack", "进攻"), Charts.T("Defense", "防守"),
+            Charts.T("Stamina", "体能"), Charts.T("Speed", "速度"),
+            Charts.T("Strength", "力量"), Charts.T("Skill", "技巧") };
+        ChartSeries shev = ChartSeries.Polar(Charts.T("Shevchenko", "舍普琴科"),
+            new List<int>{ 97, 42, 88, 94, 90, 86 });
+        shev.areaStyle = true;
+        ChartSeries ron = ChartSeries.Polar(Charts.T("Ronaldo", "罗纳尔多"),
+            new List<int>{ 97, 32, 74, 95, 88, 92 });
+        ron.areaStyle = true;
+        ChartOption o = ChartOption.Of(
+            Charts.T("Ronaldo vs Shevchenko", "罗纳尔多 vs 舍普琴科"),
+            dims, new List<ChartSeries>{ shev, ron });
+        o.RadarMax(new List<int>{ 100, 100, 100, 100, 100, 100 });
         Charts.Show(app, o, x, y, w, h);
     }
 
+    /// radar（ECharts2 radar.html 成绩单侧）：六科成绩各带 max
+    ///（150/150/150/120/108/72），张三填充 + 李四虚线（此处静态
+    /// 近似为普通线）。ref 的动态渐变/【指标】formatter/markPoint
+    /// 花活不进静态 demo。
     static void Radar2(App app, int x, int y, int w, int h) {
-        ChartSeries bud = ChartSeries.Polar(Charts.T("Budget", "预算"),
-            new List<int>{ 4300, 10000, 28000, 35000, 50000, 19000 });
-        bud.areaStyle = true;
-        ChartSeries act = ChartSeries.Polar(Charts.T("Spending", "开销"),
-            new List<int>{ 5000, 14000, 28000, 31000, 42000, 21000 });
-        act.areaStyle = true;
-        ChartOption o = ChartOption.Of(Charts.T("Filled radar", "填充雷达图"),
-            Charts.RadarDims(), new List<ChartSeries>{ bud, act });
-        o.RadarMax(new List<int>{ 6500, 16000, 30000, 38000, 52000, 25000 });
+        List<string> dims = new List<string>{
+            Charts.T("Chinese", "语文"), Charts.T("Math", "数学"),
+            Charts.T("English", "英语"), Charts.T("Physics", "物理"),
+            Charts.T("Chemistry", "化学"), Charts.T("Biology", "生物") };
+        ChartSeries zhang = ChartSeries.Polar(Charts.T("Zhang San", "张三"),
+            new List<int>{ 120, 118, 130, 100, 99, 70 });
+        zhang.areaStyle = true;
+        ChartSeries li = ChartSeries.Polar(Charts.T("Li Si", "李四"),
+            new List<int>{ 90, 113, 140, 30, 70, 60 });
+        ChartOption o = ChartOption.Of(Charts.T("Report card", "成绩单"),
+            dims, new List<ChartSeries>{ zhang, li });
+        o.RadarMax(new List<int>{ 150, 150, 150, 120, 108, 72 });
         Charts.Show(app, o, x, y, w, h);
     }
 
