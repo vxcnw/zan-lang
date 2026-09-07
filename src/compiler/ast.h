@@ -465,6 +465,11 @@ struct zan_ast_node {
             bool has_getter;
             bool has_setter;
             bool has_init;
+            /* `this[...]` index parameter list; NULL unless the property is
+             * an indexer. Every indexer property is named "Item", so the
+             * binder exempts indexer/indexer name collisions and lets the
+             * synthesized op_index signature check catch true duplicates. */
+            zan_ast_list_t *indexer_params;
         } field_decl;
 
         /* generic constraint clause: where T : C1, C2 */

@@ -3872,6 +3872,14 @@ ordinary_member:
         n->field_decl.has_getter = has_getter;
         n->field_decl.has_setter = has_setter;
         n->field_decl.has_init = has_init;
+        /* Keep the index parameter list on the property node: the binder
+         * exempts two "Item" properties from the name-only duplicate check
+         * when both are indexers — their identity is the synthesized
+         * op_index signature, which still rejects identical signatures. */
+        zan_ast_list_t *iparams =
+            (zan_ast_list_t *)zan_arena_alloc(p->arena, sizeof(zan_ast_list_t));
+        *iparams = idx_params;
+        n->field_decl.indexer_params = iparams;
 
         /* Synthesize instance op_index(index...) / op_index_set(index..., value)
          * methods. A custom getter body needs a real method for `obj[i]` to

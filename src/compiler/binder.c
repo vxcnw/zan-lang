@@ -247,6 +247,19 @@ static void check_member_name_clash(zan_binder_t *b, zan_symbol_t *type_sym,
          * when the full parameter list matches too (C# CS0111, overloads
          * stay legal); enum members collide on name alone. */
         if (m_is_data && a_is_data) {
+            /* Every indexer property is named "Item" by construction, and C#
+             * overloads them by index signature — exempt indexer/indexer
+             * pairs here; a true duplicate (same index types) is still
+             * rejected when the synthesized op_index methods collide on
+             * name + parameter types below. */
+            zan_ast_node_t *ad = added->decl;
+            zan_ast_node_t *md = m->decl;
+            if (ad && ad->kind == AST_PROPERTY_DECL &&
+                ad->field_decl.indexer_params &&
+                md && md->kind == AST_PROPERTY_DECL &&
+                md->field_decl.indexer_params) {
+                continue;
+            }
             zan_diag_emit(b->diag, DIAG_ERROR, added->decl->loc,
                           "duplicate '%.*s' in '%.*s': a %s with this name "
                           "is already declared",
