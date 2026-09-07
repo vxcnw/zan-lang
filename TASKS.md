@@ -949,10 +949,10 @@ leakcheck 子集全部通过；生成 IR 不含 `setjmp`/`longjmp`/`__zan_eh_tmp
 | A43-B18 | `init` 访问器、`readonly struct` / `ref struct` | 09 | ✅ 已修（2026-08-08，`cs_b18_init.zan`） |
 | A43-B19 | 可空元素数组 `int?[]` | a11b | ✅ 已修（2026-08-08，`cs_b19_nullable_arr.zan`） |
 | A43-B20 | `nameof(expr)` | — | ✅ 已修（2026-09-08，`b8d35b69`，`nameof_expr.zan`）。上下文关键字形态（裸名 + 恰一个实参）被 checker/irgen 认领，parser 与 AST 零改动；取实参末段标识符拼写（`r.UserName`→`UserName`），不求值；实参仍走 checker，未知名字照旧编译错误（对齐 C# 符号可解析要求） |
-| A43-B21 | `event` 事件成员 | — | [ ] 未做。Gui 各组件手搓委托列表。建议形状：`event D Name;` 降为私有委托字段 + add/remove 合成方法，`obj.Name += h` 降 add 调用；前置依赖是 delegate 值上的 combine（`+`/`+=`）语义，当前 delegate 只有字段存取与直接调用 |
+| A43-B21 | `event` 事件成员 | — | ✅ 已有（2026-09-08 核验）。字段式事件早已可用：`public event Action Click;`（`tests/conformance/events.zan`、`event_delegate.zan`、`event_receiver_handlers.zan` 全绿，含 leakcheck），`+=/-=` 订阅经 op_add 委托 combine。初判"未做"有误——已实测核销 |
 | A43-B22 | `yield return` / 迭代器 | — | [ ] 未做。惰性序列需手写类实现。降级技术与 async 同款状态机（`irgen_async.c` 有成熟先例）：方法改写为枚举器类，MoveNext 保存续点；前置依赖是 stdlib 的 IEnumerable/IEnumerator 接口对 |
-| A43-B23 | `record` / `with` 表达式 | — | [ ] 未做。不可变数据载体 + 非破坏性修改；可由合成 Equals/GetHashCode/ToString 与 clone-derive 降级 |
-| A43-B24 | `partial` 类 | — | [ ] 未做。同名类多文件声明合并（binder 合并成员表）；IDE 自托管代码当前按一类一文件组织，收益中等 |
+| A43-B23 | `record` / `with` 表达式 | — | ✅ 已修（2026-09-08，`7b6d8a1c`，`record_with_expr.zan`）。`record` 位置记录早已落地（合成 ctor/op_eq/ToString）；本轮补 `with` 表达式：上下文关键字解析、checker 字段校验、合成 `__CloneWith` 非破坏复制、隐藏槽保证接收者单次求值、ARC owned 交接；顺手修既有 bug——操作符重载调用不释放新分配实参（`v == new Point(...)` 每求值漏 1 对象） |
+| A43-B24 | `partial` 类 | — | ✅ 已有（2026-09-08 核验）。上下文关键字 `partial` 解析与跨文件同类名合并早已可用（`tests/conformance/partial_types.zan` 全绿，含 leakcheck）。初判"未做"有误——已实测核销 |
 
 
 ## A43-C1 类型化查询的跨语句组装（dbgen，2026-08-08 前提更新，待重新验证）
