@@ -3982,10 +3982,16 @@ class Gallery {
         Rect view = new Rect(area.x, listTop, sw, viewH);
         int dy = Gallery.navView.Begin(app, view, contentH);
 
+        // 溢出时行区给滚动条让位：滚动条带画在视口右缘，行高亮
+        // 与热区若仍占满整个侧栏宽，选中色会一直延伸进轨道。
+        int rowW = sw;
+        if (Gallery.navView.Overflowing()) { rowW = sw - app.Scale(10); }
+        if (rowW < 0) { rowW = 0; }
+
         int sel = Gallery.selected.Get();
         bool click = app.ClickAvailable();
         int sx = area.x + pad;
-        int swid = sw - pad * 2;
+        int swid = rowW - pad * 2;
         for (int idx = 0; idx < rows.Count; idx = idx + 1) {
             int ry = listTop + idx * rowH - dy;
             if (ry + rowH > listTop && ry < listBottom) {
@@ -3998,7 +4004,7 @@ class Gallery {
                     // 按住拖动是滚动手势：悬停高亮冻结，不逐行点亮
                     //（否则手指拖着走，行跟着亮，像鼠标划过）。
                     bool hot = !app.PointerCaptured() && !app.PointerPressed()
-                        && app.mouseX >= area.x && app.mouseX < area.x + sw
+                        && app.mouseX >= area.x && app.mouseX < area.x + rowW
                         && app.mouseY >= listTop && app.mouseY < listBottom
                         && app.mouseY >= ry && app.mouseY < ry + rowH;
                     if (selRow) {
@@ -4018,8 +4024,9 @@ class Gallery {
                     // "空白"上（pressOnBlocker，5ff8eca5），释放会被
                     // ClickAvailable 同源拒绝——导航从此点不动。
                     // 登记（同 DataTable 行的做法）让按下帧 hitId>=0。
+                    // 热区与行区同宽：滚动条带留给自己。
                     app.hitTester.RegisterRect(app.focus.AllocId(),
-                        area.x, ry, sw, rowH, 0);
+                        area.x, ry, rowW, rowH, 0);
                     if (click && hot) {
                         Gallery.selected.Set(row.compIndex);
                         Gallery.codeScroll.Set(0);

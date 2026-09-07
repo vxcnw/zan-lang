@@ -521,6 +521,8 @@ class ListView<T> : Control {
         if (scroll.Get() < 0) { scroll.Set(0); }
         int off = scroll.Get();
         bool overflow = contentH > viewH;
+        // 行区给滚动条让位：条带画在视口右缘，行高亮/文本若仍占满
+        // 整个盒子宽度，就会被轨道压在下面（选中色一直延伸进条带）。
         int barW = app.Scale(10);
         int rowW = bw;
         if (overflow) { rowW = bw - barW; }
@@ -584,6 +586,9 @@ class ListView<T> : Control {
         if (scroll.Get() > maxOff) { scroll.Set(maxOff); }
         if (scroll.Get() < 0) { scroll.Set(0); }
         int off = scroll.Get();
+        // 行区给滚动条让位（与 PaintColumnRows 同一规则）：模板行
+        // 的排布宽度与命中矩形都收窄到滚动条带左侧，行的选中/悬停
+        // 高亮就不会延伸进轨道。
         bool overflow = contentH > viewH;
         int barW = app.Scale(10);
         int rowW = bw;
