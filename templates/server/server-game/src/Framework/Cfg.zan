@@ -132,6 +132,14 @@ class GameCfg {
     int offlineCapHours;
     /* 坐标上限：walk 的 x/y 钳在 [0, walkMax]。*/
     int walkMax;
+    /* 网关会话加密的共享 secret：与客户端约定的口令，派生每连接
+       AES-256-GCM 密钥（Secure.zan）。空 = 加密握手不可用（只明文）。*/
+    string secret;
+    /* 1 = 拒绝未加密会话（hello 之外的所有明文 op 一律拒绝）。*/
+    int requireEnc;
+    /* 服务器连接密码：hello 的 pass 字段须与此一致，否则拒绝并断开。
+       空 = 不设门禁。给玩家口令用，与加密 secret 分开。*/
+    string gatePass;
 
     static GameCfg Defaults() {
         GameCfg c = new GameCfg();
@@ -143,6 +151,9 @@ class GameCfg {
         c.offlineGoldPerHour = 500;
         c.offlineCapHours = 12;
         c.walkMax = 511;
+        c.secret = "zan-game-dev-secret";
+        c.requireEnc = 0;
+        c.gatePass = "";
         return c;
     }
 }
@@ -315,5 +326,8 @@ class Cfg {
         Cfg.Game.offlineGoldPerHour = g.Long("offlineGoldPerHour", Cfg.Game.offlineGoldPerHour);
         Cfg.Game.offlineCapHours = g.Int("offlineCapHours", Cfg.Game.offlineCapHours);
         Cfg.Game.walkMax = g.Int("walkMax", Cfg.Game.walkMax);
+        Cfg.Game.secret = g.Str("secret", Cfg.Game.secret);
+        Cfg.Game.requireEnc = g.Int("requireEnc", Cfg.Game.requireEnc);
+        Cfg.Game.gatePass = g.Str("gatePass", Cfg.Game.gatePass);
     }
 }

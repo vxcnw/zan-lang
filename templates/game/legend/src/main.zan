@@ -3,11 +3,13 @@ using System.IO;
 using System.Diagnostics;
 using Gui;
 using Gui.Widget;
+using Gui.Backend;
 using Legend;
 
 // Live standard-library widgets; reference artwork is decoration, never a UI screenshot.
 class LegendApp {
     Game g; SaveStore saves; Form form; App app; Panel content;
+    Panel shellChat; Panel shellMain;
     Label hero; Label health; Label mana; Label level; Label coins; Label yuan;
     Label fame; Label merit; Label spirit; Label news; Label state;
     Label detail; Label pageInfo; Label foeText; Label playerText; Label combatTitle; Label enemyName; Label battleStatus;
@@ -24,6 +26,23 @@ class LegendApp {
     long lastTime; long lastSave; string saveState = "";
     DataTable equipmentArtData; DataTable navigationData; DataTable artData; DataTable monsterArtData; DataTable encounterArtData;
     string[] pages; Panel[] navTiles = new Panel[31];
+    GameNet net; int lastNetKey = -1; bool wasInWorld;
+    Input chatInput; Button chatSend;
+    Label chatHistory; Label netStatus; Label netFight; Label netWorld; Label netQuest;
+    /* 登录小窗：窗口本身即表单（不再套模态弹窗）。按联机阶段重建：
+       ①选/编辑已保存服务器并连接 ②账号登录/注册 ③建角；进入世界后
+       表单隐藏、小窗长成主窗口。PumpNetStage 周期跟随阶段。*/
+    Panel netForm; Label netHint;
+    /* 已保存服务器：servers.txt 每行 host|连接密码。*/
+    List<string> srvHosts = new List<string>(); List<string> srvPasses = new List<string>();
+    int srvSel; int netPhase = -1;
+    Input dUser; Input dPass; Input dChar; Input dHost; Input dGatePass;
+    Checkbox dRemember;
+    Button dRegister; Button dLogin; Button dCreate; Button[] dJobs = new Button[3];
+    int dJob; int dialogMode;
+    int netJob; int netRealmPicked = 1;
+    /* 登录记忆：login.txt 两行——上次账号、上次连接的服务器地址。*/
+    string rememberPath; string serversPath;
     string ArtPath(string name) { return artData.Get(name).Text("path"); }
     string EquipmentArtPath(Equipment e) { return equipmentArtData.At(e.definitionId).Text("path"); }
     string CompareEquipment(Equipment e) {
@@ -108,11 +127,19 @@ class LegendApp {
         string dataDir = KnownFolders.GetEnv("LEGEND_DATA_DIR");
         if (dataDir.Length == 0) { dataDir = "data"; }
         GameTables.Initialize(dataDir); LoadArtwork(dataDir); saves = new SaveStore(SaveStore.DefaultPath());
+        rememberPath = SaveStore.DefaultPath().Replace("hero-v2.json", "login.txt");
+        serversPath = SaveStore.DefaultPath().Replace("hero-v2.json", "servers.txt");
         long now = DateTime.UtcNow().epoch; g = saves.Read(now); lastTime = now; lastSave = now;
-        form = Form.CreateDark("传奇放置 · Zan", 1248, 680); app = form.GetApp(); app.UseSkin("legend"); app.SetBackdropFx(false);
+        net = new GameNet(); dJob = 0; netJob = 0; netRealmPicked = 1;
+        form = Form.CreateDark("传奇放置 · 登录", 520, 470); app = form.GetApp(); net.Attach(app); app.UseSkin("legend"); app.SetBackdropFx(false);   // 启动只出登录小窗；进世界后 SetClientSize 长成主窗口。
         Panel root = Panel.Root("legend-root"); root.Pad(0); root.DockFill(); form.Add(root);
         Panel chat = Col("chat-panel"); chat.Pad(8); chat.Gap(8); chat.Prefer(252, 0); chat.DockRight(); root.Add(chat); BuildChat(chat);
         Panel main = Panel.Column(); main.Pad(0); main.Gap(4); main.DockFill(); root.Add(main);
+        // 启动只出登录联机窗口：主界面两块面板先隐藏（未登录时的本地数值
+        // 不作展示基准，主窗口区域也不许露出底色/框架）。弹窗宿主挂在
+        // root 上不受影响；进入世界时才显现。
+        shellChat = chat; shellMain = main;
+        chat.SetShown(false); main.SetShown(false);
         Grid navigation = Grid.Of(10); navigation.Class = "navigation-grid"; navigation.Pad(8); navigation.Gap(4); navigation.Prefer(0, 116); main.With(navigation);
         for (int n = 0; n < 20; n = n + 1) { navigation.With(Nav(n)); }
         Panel body = Panel.Row(); body.Gap(0); body.Grow(); main.With(body);
@@ -121,13 +148,55 @@ class LegendApp {
         Grid bottom = Grid.Of(10); bottom.Class = "bottom-nav navigation-grid"; bottom.Pad(8); bottom.Gap(4); bottom.Prefer(0, 64); bottom.DockBottom(); main.Add(bottom);
         for (int i = 20; i < 30; i = i + 1) { bottom.With(Nav(i)); }
         content = Panel.Column(); content.Class = "page-surface"; content.Pad(4); content.Gap(4); content.Grow(); center.With(content);
+        // 登录小窗即表单：主界面两块面板隐藏，netForm 排最后铺满全窗。
+        // 走完连接/登录/建角进入世界后表单隐藏、小窗长成主窗口；
+        // 未登录就关窗 = 不玩：整个程序直接退出。
+        netForm = Panel.Column(); netForm.Class = "page-surface"; netForm.Pad(24); netForm.Gap(10); netForm.DockFill(); root.Add(netForm);
         BuildPage(); DeclareUnits(root); Refresh();
+        LoadServers(); RebuildNetForm();
+        form.Every(120, () => { PumpNetStage(); });
         form.Every(1000, () => {
+          /* 心跳任务不许死：Every 里的动作一抛就永久停摆（探针/存档
+             全跟着停），所以整段兜底，异常记进探针便于定位。*/
+          try {
             long t = DateTime.UtcNow().epoch;
-            if (t > lastTime) { long elapsed = t - lastTime; g.Advance((int)(elapsed > 86400 ? 86400 : elapsed), t); lastTime = t; }
+            if (!net.InWorld()) {
+                // 联机挂机由服务端驱动（网络线程自行心跳/看门狗），本地只推进离线战斗。
+                long elapsed = t - lastTime; g.Advance((int)(elapsed > 86400 ? 86400 : elapsed), t);
+            }
+            lastTime = t;
+            if ((page == 6 || page == 20) && net.DataVersion() != lastNetKey) { lastNetKey = net.DataVersion(); BuildPage(); }
+            /* 掉线看门狗：进过世界后再断开，PumpNetStage 已随表单隐藏
+               停泵，由这里把窗口缩回登录小窗，引导重新连接。 */
+            bool inWorldNow = net.InWorld();
+            if (wasInWorld && !inWorldNow) { BackToLoginForm(); }
+            wasInWorld = inWorldNow;
+            if (UiDriver.Active()) {
+                // UI 自动化探针：让 ZAN_UI_SCRIPT 能断言联机状态，无需截屏比对。
+                // 必须在 Refresh() 之前——无角色时 Refresh 提前返回，探针会一直停在旧值。
+                // 探针异常不允许打死这个心跳任务（离线推进与存档都在后面）。
+                try {
+                    UiDriver.SetProbe("win", Rules.N(app.ClientWidth()) + "x" + Rules.N(app.ClientHeight()));
+                    UiDriver.SetProbe("net-stage", Rules.N(net.Stage()));
+                    UiDriver.SetProbe("net-status", net.StatusText());
+                    UiDriver.SetProbe("net-fight", net.FightLine());
+                    UiDriver.SetProbe("net-self", net.SelfLine());
+                    UiDriver.SetProbe("net-feed", net.FeedDump());
+                    UiDriver.SetProbe("net-chat", net.ChatDump());
+                    UiDriver.SetProbe("page", Rules.N(page));
+                    UiDriver.SetProbe("net-bag", Rules.N(net.BagCount()) + "件·武器:"
+                        + (net.Self() != null ? net.Self().Str("weaponName", "") : "-")
+                        + "·防具:" + (net.Self() != null ? net.Self().Str("armorName", "") : "-"));
+                    UiDriver.SetProbe("net-quest", net.Self() != null
+                        ? Rules.N(net.Self().Int("kills", 0)) : "-");
+                } catch (Exception e) { }
+            }
             if (t - lastSave >= 15) { Save(); } Refresh();
+          } catch (Exception e) {
+              if (UiDriver.Active()) { try { UiDriver.SetProbe("tick-err", e.ToString()); } catch (Exception e2) { } }
+          }
         });
-        form.OnExit(() => { Save(); }); form.Run();
+        form.OnExit(() => { if (net.Connected()) { net.Logout(); } Save(); }); form.Run();
     }
     void BuildProfile(Panel sidebar) {
         Panel profile = Col("profile"); profile.Pad(12); profile.Gap(4); profile.Prefer(0, 272); sidebar.With(profile);
@@ -150,8 +219,11 @@ class LegendApp {
         Label channels = Text("世界 · 行会 · 系统", "secondary small", 40); channels.Grow(); header.With(channels);
         Panel settings = Nav(30); settings.Prefer(84, 48); header.With(settings); settings.DockRight(); p.With(header);
         ScrollColumn chatScroll = new ScrollColumn(); chatScroll.Named("chat-scroll"); chatScroll.Grow(); p.With(chatScroll);
-        Label history = Text("[系统] 欢迎进入传奇放置。\n[连接] 当前未连接游戏服务器。\n本栏只显示真实消息，不播放伪造玩家聊天。", "secondary", 0); history.Named("chat-content"); chatScroll.With(history);
-        Panel send = Panel.Row(); send.Gap(4); send.Prefer(0, 28); send.DockBottom(); p.Add(send); Input input = new Input("连接服务器后发送"); input.Disabled = true; input.Grow(); send.With(input); Button button = Btn("发送", "chat-send", () => {}); button.Disabled = true; button.Prefer(40, 28); send.With(button); button.DockRight();
+        chatHistory = Text("[系统] 欢迎进入传奇放置。\n[连接] 当前未连接游戏服务器。\n本栏只显示真实消息，不播放伪造玩家聊天。", "secondary", 0); chatHistory.Named("chat-content"); chatScroll.With(chatHistory);
+        Panel send = Panel.Row(); send.Gap(4); send.Prefer(0, 28); send.DockBottom(); p.Add(send);
+        chatInput = new Input("连接服务器后发送"); chatInput.Disabled = true; chatInput.Grow(); send.With(chatInput);
+        chatSend = Btn("发送", "chat-send", () => { if (net.InWorld()) { string t = chatInput.GetText().Trim(); if (t.Length > 0) { net.Say(t); chatInput.Clear(); } } });
+        chatSend.Disabled = true; chatSend.Prefer(40, 28); send.With(chatSend); chatSend.DockRight();
     }
     void BuildPage() { BuildPageCore(); DeclareUnits(content); }
     void DeclareUnits(Control c) {
@@ -162,9 +234,17 @@ class LegendApp {
         foreach (Control child in c.children) { DeclareUnits(child); }
     }
     void BuildPageCore() {
-        renderedMode = g.mode; renderedChallenge = g.challenge; content.RemoveAll(); enemySprite = null; enemySpritePath = ""; detail = null; pageInfo = null; foeText = null; playerText = null; combatTitle = null; enemyName = null; battleStatus = null; foe = null; life = null; pause = null; push = null;
+        renderedMode = g.mode; renderedChallenge = g.challenge; content.RemoveAll(); enemySprite = null; enemySpritePath = ""; detail = null; pageInfo = null; foeText = null; playerText = null; combatTitle = null; enemyName = null; battleStatus = null; foe = null; life = null; pause = null; push = null; netQuest = null;
         for (int i = 0; i < 84; i = i + 1) { cells[i] = null; cellImages[i] = null; cellLabels[i] = null; }
         for (int i = 0; i < 12; i = i + 1) { gearLabels[i] = null; gearImages[i] = null; }
+        if (net.InWorld()) {
+            /* 联机时主窗口只出服务器驱动的页面：背包(20)穿装备、沙巴克(6)
+               是主线任务与战斗中枢；其余导航页联机玩法未开，给诚实占位。
+               角色在登录小窗就已创建，绝不回落离线建角/幻境界面。 */
+            if (page == 20) { BuildNetBag(); return; }
+            if (page == 6) { BuildNetPage(); return; }
+            BuildNetStub(); return;
+        }
         if (g.job < 0) { BuildWelcome(); return; }
         if (page == 0) { BuildMaps(); }
         else if (page == 2 || page == 3 || page == 12) { BuildCombat(); }
@@ -180,6 +260,7 @@ class LegendApp {
         else if (page == 1) { BuildArena(); }
         else if (page == 4) { BuildEscort(); }
         else if (page == 24 || page == 25) { BuildTitle(); }
+        else if (page == 6) { BuildNetPage(); }
         else { BuildOnlinePage(); }
     }
     void BuildWelcome() {
@@ -573,6 +654,402 @@ class LegendApp {
         }
         content.With(card); detail = Text("", "secondary", 0); detail.Named("title-notice"); content.With(detail);
     }
+    /* 联机页（沙巴克 · page 6）：进世界后的主线任务与战斗中枢。
+       首个任务“首次击杀”的进度来自服务端累计击杀（self.kills），
+       完成时奖励公告进右侧聊天栏；往下是战况、怪物与地图。
+       登录/建角都在登录小窗完成，这里不再有连接/断开表单。加密与
+       协议见 src/Net.zan。 */
+    void BuildNetPage() {
+        content.With(Text("沙巴克之路 · 主线任务", "yellow strong", 28));
+        netStatus = Text(net.StatusText(), "cyan", 28); netStatus.Named("net-status"); content.With(netStatus);
+        if (!net.InWorld()) {
+            Panel conn = Col("frame");
+            conn.With(Btn("重新连接服务器", "net-open", () => { BackToLoginForm(); BuildPage(); Refresh(); }));
+            conn.With(Text("与服务器的连接已断开。点击回到登录窗重新连接；离线玩法不受影响。", "secondary small", 0));
+            content.With(conn);
+            return;
+        }
+        DataRow quest = GameTables.current.quests.At(0);
+        int target = quest.Int("target");
+        netQuest = Text("", "strong", 24); netQuest.Named("net-quest"); content.With(netQuest);
+        content.With(Text("击杀任意怪物 " + Rules.N(target) + " 只，奖励金币 "
+            + Rules.N(quest.Int("gold")) + "。进度由服务端结算，完成时公告发奖。",
+            "secondary small", 24));
+        Panel world = Col("frame"); world.Grow();
+        netFight = Text(net.FightLine(), "green", 96); netFight.Named("net-fight"); world.With(netFight);
+        Panel actions = Panel.Row(); actions.Gap(4); actions.Prefer(0, 30);
+        actions.With(Btn("停止挂机", "net-auto-off", () => { net.AutoHunt(0, false); }));
+        actions.With(Btn("嗑药", "net-potion", () => { net.UsePotion(); }));
+        actions.With(Btn("去背包", "net-go-bag", () => { Navigate(20); }));
+        world.With(actions);
+        if (net.MobCount() > 0) {
+            world.With(Text("本图怪物（点击开始自动挂机；服务端每秒推送战况）", "yellow small", 24));
+            Grid mobRow = Grid.Of(3); mobRow.Gap(4);
+            for (int i = 0; i < net.MobCount() && i < 6; i = i + 1) {
+                JsonValue mob = net.MobAt(i);
+                int tpl = mob.Int("tpl", 0);
+                if (tpl <= 0 || mob.Int("alive", 0) != 1) { continue; }
+                string label = mob.Str("name", "怪物") + " · " + Rules.N(mob.Int("level", 1)) + "级 · 血" + Rules.N(mob.Int("hp", 0));
+                Panel card = Col("frame");
+                card.With(Text(label, "cyan small", 24));
+                Panel row2 = Panel.Row(); row2.Gap(4); row2.Prefer(0, 28);
+                Button autoBtn = Btn("挂机", "net-auto-" + Rules.N(tpl), () => { net.AutoHunt(tpl, true); }); autoBtn.Prefer(0, 26); row2.With(autoBtn);
+                Button hitBtn = Btn("打一只", "net-hunt-" + Rules.N(tpl), () => { net.Hunt(tpl); }); hitBtn.Prefer(0, 26); row2.With(hitBtn);
+                card.With(row2);
+                mobRow.With(card);
+            }
+            world.With(mobRow);
+        }
+        if (net.MapCount() > 0) {
+            world.With(Text("移动到其它地图（服务端结算等级门槛）", "yellow small", 24));
+            Grid mapRow = Grid.Of(4); mapRow.Gap(4);
+            for (int i = 0; i < net.MapCount() && i < 8; i = i + 1) {
+                JsonValue mp = net.MapAt(i);
+                int id = mp.Int("id", 0);
+                string name = mp.Str("name", "地图") + " · " + Rules.N(mp.Int("minLevel", 1)) + "级";
+                mapRow.With(Btn(name, "net-map-" + Rules.N(id), () => { net.MoveTo(id); }));
+            }
+            world.With(mapRow);
+        }
+        netWorld = Text("左侧为实时战况；顶部资料与右侧战报均来自服务器。世界聊天在右栏输入发送。", "secondary small", 20);
+        world.With(netWorld);
+        content.With(world);
+        Panel foot = Panel.Row(); foot.Gap(4); foot.Prefer(0, 30);
+        foot.With(Btn("退出登录", "net-logout", () => { net.Logout(); lastNetKey = -1; BackToLoginForm(); BuildPage(); Refresh(); }));
+        content.With(foot);
+        Note(content, "任务、击杀与掉落全部由服务端结算；本页不再推进离线幻境。断开后回登录窗可重连，离线进度原样保留。");
+    }
+
+    /* 联机背包页（page 20）：服务端权威背包。顶部当前穿装（可卸下），
+       下面逐行是背包物品：武器/防具可穿戴（等级门槛服务端把关），
+       消耗品可使用，任意物品可按商店半价卖出。进世界默认落在本页，
+       好让新角色第一时间穿上初始装备。 */
+    void BuildNetBag() {
+        JsonValue st = net.Self();
+        content.With(Text("背包 · 联机", "yellow strong", 28));
+        string weapon = st != null ? st.Str("weaponName", "") : "";
+        string armor = st != null ? st.Str("armorName", "") : "";
+        Panel worn = Col("frame");
+        worn.With(Text("已穿戴  武器：" + (weapon.Length > 0 ? weapon : "（空）")
+            + " · 防具：" + (armor.Length > 0 ? armor : "（空）")
+            + " · 攻击 " + Rules.N(st != null ? st.Int("atk", 0) : 0)
+            + " · 防御 " + Rules.N(st != null ? st.Int("def", 0) : 0), "cyan", 24));
+        Panel wornBtns = Panel.Row(); wornBtns.Gap(4); wornBtns.Prefer(0, 28);
+        Button offW = Btn("卸下武器", "net-takeoff-weapon", () => { net.TakeOff("weapon"); });
+        offW.Disabled = weapon.Length == 0; offW.Prefer(0, 28); wornBtns.With(offW);
+        Button offA = Btn("卸下防具", "net-takeoff-armor", () => { net.TakeOff("armor"); });
+        offA.Disabled = armor.Length == 0; offA.Prefer(0, 28); wornBtns.With(offA);
+        worn.With(wornBtns);
+        content.With(worn);
+        ScrollColumn list = new ScrollColumn(); list.Named("net-bag-scroll"); list.Grow(); content.With(list);
+        if (net.BagCount() == 0) { list.With(Text("背包空空如也。去“沙巴克”打怪可获得掉落。", "secondary", 48)); }
+        for (int i = 0; i < net.BagCount(); i = i + 1) {
+            JsonValue it = net.BagAt(i);
+            int id = it.Int("id", 0);
+            int kind = it.Int("kind", 3);
+            int minLv = it.Int("minLevel", 0);
+            string kindName = kind == 0 ? "消耗品" : kind == 1 ? "武器" : kind == 2 ? "防具" : "材料";
+            string desc = kindName;
+            if (it.Int("atk", 0) > 0) { desc = desc + " · 攻击+" + Rules.N(it.Int("atk", 0)); }
+            if (it.Int("def", 0) > 0) { desc = desc + " · 防御+" + Rules.N(it.Int("def", 0)); }
+            if (it.Int("heal", 0) > 0) { desc = desc + " · 回血" + Rules.N(it.Int("heal", 0)); }
+            if (minLv > 1) { desc = desc + " · 需" + Rules.N(minLv) + "级"; }
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 56);
+            Label name = Text(it.Str("name", "物品") + " ×" + Rules.N(it.Int("count", 1)) + "\n" + desc, "yellow", 44); name.Grow(); row.With(name);
+            if (kind == 1 || kind == 2) {
+                Button eq = Btn("穿戴", "net-equip-" + Rules.N(id), () => { net.EquipItem(id); });
+                eq.Disabled = st != null && st.Int("level", 1) < minLv;
+                eq.Prefer(64, 28); eq.DockRight(); row.Add(eq);
+            }
+            if (kind == 0) {
+                Button use = Btn("使用", "net-use-" + Rules.N(id), () => { net.UseItem(id); });
+                use.Prefer(64, 28); use.DockRight(); row.Add(use);
+            }
+            Button sell = Btn("卖出", "net-sell-" + Rules.N(id), () => { net.SellItem(id); });
+            sell.Prefer(64, 28); sell.DockRight(); row.Add(sell);
+            list.With(row);
+        }
+        Note(content, "背包与穿戴由服务端结算（服务器权威）；卖出价为商店半价。点击“沙巴克”查看主线任务与挂机。");
+    }
+
+    /* 联机时其余导航页的诚实占位：玩法未开就说明未开，并给出去任务
+       页/背包页的入口——不回落离线界面冒充联机内容。 */
+    void BuildNetStub() {
+        content.With(Text(pages[page] + " · 联机暂未开放", "yellow strong", 28));
+        Note(content, "联机期间此页玩法尚未开放；离线进度已保留，退出登录后可继续。");
+        Panel go = Panel.Row(); go.Gap(4); go.Prefer(0, 30);
+        go.With(Btn("去主线任务", "net-go-quest", () => { Navigate(6); }));
+        go.With(Btn("去背包", "net-go-bag2", () => { Navigate(20); }));
+        content.With(go);
+    }
+
+    /* ---- 登录小窗：窗口本身即表单，不套模态弹窗。阶段：
+       0 选/编辑服务器并连接 → 1 连接中 → 2 账号登录/注册 → 3 建角；
+       进入世界后表单隐藏、小窗长成主窗口。---- */
+
+    /* 断开/退出登录后回到登录小窗：主界面隐藏、窗口缩回小窗、
+       表单重建到“选择服务器”一步。*/
+    void BackToLoginForm() {
+        app.SetClientSize(520, 470);
+        app.SetWindowTitle("传奇放置 · 登录");
+        shellChat.SetShown(false); shellMain.SetShown(false);
+        netForm.SetShown(true);
+        netPhase = -1;
+        RebuildNetForm();
+    }
+
+    int NetPhase() {
+        if (!net.Connected() && !net.connecting) { return 0; }
+        if (!net.Ready() || net.Stage() < 2) { return 1; }
+        if (net.Stage() == 3 && net.self == null) { return 3; }
+        return 2;
+    }
+
+    /* 每 120ms 泵（form.Every）：阶段变了就重建表单；进入世界则收起
+       表单、小窗长成主窗口，主界面此刻才首次显现。*/
+    void PumpNetStage() {
+        if (netForm == null || !netForm.visible) { return; }
+        if (UiDriver.Active()) {
+            try {
+                UiDriver.SetProbe("win", Rules.N(app.ClientWidth()) + "x" + Rules.N(app.ClientHeight()));
+                UiDriver.SetProbe("net-raw", "connected=" + Rules.N(net.Connected() ? 1 : 0)
+                    + " connecting=" + Rules.N(net.connecting ? 1 : 0)
+                    + " stage=" + Rules.N(net.Stage())
+                    + " errLen=" + Rules.N(net.Error().Length)
+                    + " last=" + net.LastChat());
+            } catch (Exception e) { }
+        }
+        if (net.InWorld()) {
+            netForm.SetShown(false);
+            app.SetClientSize(1248, 680);
+            app.SetWindowTitle("传奇放置 · Zan");
+            shellChat.SetShown(true); shellMain.SetShown(true);
+            /* 进世界落点：直接到“背包”页——服务端建角已发初始装备
+               （木剑+布衣），进游戏第一件事就是穿上；主线任务进度在
+               “沙巴克”页常驻。角色在登录窗已创建，主窗口不再出现
+               建角表单或离线幻境界面。 */
+            page = 20; selected = -1; vault = false; inspectWorn = false;
+            lastNetKey = net.DataVersion();
+            BuildPage();
+            Refresh();
+            app.RequestRedraw(); return;
+        }
+        int ph = NetPhase();
+        if (ph != netPhase) { RebuildNetForm(); }
+        if (netHint != null) {
+            /* 状态行：断开原因优先（如“服务器密码不正确”），其次最新消息。*/
+            string s = net.Error().Length > 0 ? net.Error()
+                : (net.LastChat().Length > 0 ? net.LastChat() : net.StatusText());
+            if (netHint.Text != s) { netHint.Text = s; app.RequestRedraw(); }
+        }
+    }
+
+    /* 表单随阶段重建：RemoveAll 后按 NetPhase() 摆控件。阶段切换
+       本来就意味着换一批输入框，未保存的输入随重建丢弃。*/
+    void RebuildNetForm() {
+        int ph = NetPhase();
+        netPhase = ph;
+        netForm.RemoveAll();
+        netHint = null; dHost = null; dGatePass = null;
+        dUser = null; dPass = null; dRemember = null; dChar = null;
+        if (ph == 0) { BuildServerListForm(); }
+        else if (ph == 1) { BuildConnectingForm(); }
+        else if (ph == 2) { BuildLoginForm(); }
+        else { BuildCreateForm(); }
+        DeclareUnits(netForm);
+        app.RequestRedraw();
+    }
+
+    /* 第一步：已保存服务器列表 + 编辑器。点行即连接（用该条目保存的
+       地址与密码）；列表区撑满窗口中部，编辑器与按钮沉底，保存/
+       新增/删除三等分。*/
+    void BuildServerListForm() {
+        netForm.With(Text("选择服务器", "yellow strong", 22));
+        netHint = Text("点击服务器直接连接；下方可编辑、新增或删除。", "secondary small", 0);
+        netForm.With(netHint);
+        Panel list = Panel.Column(); list.Gap(4); list.Grow();
+        if (srvHosts.Count == 0) { list.With(Text("（还没有保存的服务器，在下方填写后点“新增”）", "secondary small", 0)); }
+        for (int i = 0; i < srvHosts.Count; i = i + 1) {
+            int n = i;
+            Button rb = Btn((n == srvSel ? "☑  " : "☐  ") + srvHosts[n], "srv-row-" + Rules.N(n),
+                () => { ConnectRow(n); });
+            rb.Prefer(0, 42); list.With(rb);
+        }
+        netForm.With(list);
+        /* 地址/密码/三等分按钮整块停靠底部，列表区吃掉中部剩余空间。*/
+        Panel bottomBlock = Panel.Column(); bottomBlock.Gap(10); bottomBlock.DockBottom();
+        dHost = new Input(srvSel >= 0 && srvSel < srvHosts.Count ? srvHosts[srvSel] : "");
+        dHost.Prefer(0, 30); bottomBlock.With(dHost);
+        dGatePass = new Input("服务器连接密码"); dGatePass.password = true; dGatePass.Prefer(0, 30);
+        if (srvSel >= 0 && srvSel < srvPasses.Count && srvPasses[srvSel].Length > 0) { dGatePass.SetText(srvPasses[srvSel]); }
+        bottomBlock.With(dGatePass);
+        Grid ops = Grid.Of(3); ops.Gap(4); ops.Prefer(0, 34);
+        ops.With(Btn("保存", "srv-save", () => { SaveSelectedFromEditor(); SaveServers(); RebuildNetForm(); }));
+        ops.With(Btn("新增", "srv-add", () => { AddServerFromEditor(); }));
+        ops.With(Btn("删除", "srv-del", () => { DeleteSelected(); }));
+        bottomBlock.With(ops);
+        /* Add 而非 With：With 会把非 Grow 子项改靠顶，沉底就失效了。*/
+        netForm.Add(bottomBlock);
+    }
+
+    /* 连接中：不放输入，只给状态。*/
+    void BuildConnectingForm() {
+        netForm.With(Text("连接中", "yellow strong", 22));
+        netHint = Text("正在连接服务器，进行加密握手…", "secondary small", 0);
+        netForm.With(netHint);
+    }
+
+    /* 第二步：加密会话已就绪，账号登录/注册。输入区在上，按钮沉底，
+       注册/登录对半分。*/
+    void BuildLoginForm() {
+        netForm.With(Text("账号登录", "yellow strong", 22));
+        netHint = Text("已连上服务器。登录或注册账号。", "yellow small", 0);
+        netForm.With(netHint);
+        dUser = new Input("账号（≥3字符）"); dUser.Prefer(0, 30);
+        if (LoadRememberedUser().Length > 0) { dUser.SetText(LoadRememberedUser()); }
+        netForm.With(dUser);
+        dPass = new Input("密码（≥6位）"); dPass.password = true; dPass.Prefer(0, 30); netForm.With(dPass);
+        dRemember = new Checkbox("记住我的账户");
+        if (LoadRememberedUser().Length > 0) { dRemember.SetChecked(true); }
+        netForm.With(dRemember);
+        /* 按钮块停靠底部：注册/登录对半，重选服务器整行。*/
+        Panel bottomBlock = Panel.Column(); bottomBlock.Gap(10); bottomBlock.DockBottom();
+        Grid auth = Grid.Of(2); auth.Gap(4); auth.Prefer(0, 34);
+        dRegister = Btn("注册", "net-d-register", () => { RegisterFromForm(); });
+        auth.With(dRegister);
+        dLogin = Btn("登录", "net-d-login", () => { LoginFromForm(); });
+        dLogin.Class = "primary"; auth.With(dLogin);
+        bottomBlock.With(auth);
+        Button back = Btn("重选服务器", "net-d-back", () => { net.BackToServerSelect(); });
+        back.Prefer(0, 34); bottomBlock.With(back);
+        netForm.Add(bottomBlock);
+    }
+
+    /* 第三步：账号已登录，本区没有角色。职业三等分，创建沉底。*/
+    void BuildCreateForm() {
+        netForm.With(Text("创建角色", "yellow strong", 22));
+        netHint = Text("本区还没有角色。起个名字，选个职业，即可进入世界。", "yellow small", 0);
+        netForm.With(netHint);
+        dChar = new Input("新角色名（≥2字符）"); dChar.Prefer(0, 30); netForm.With(dChar);
+        Grid jobs = Grid.Of(3); jobs.Gap(4); jobs.Prefer(0, 34);
+        string[] jobNames = new string[] { "战士", "法师", "道士" };
+        for (int j = 0; j < 3; j = j + 1) {
+            int n = j;
+            Button jb = Btn((dJob == n ? "☑ " : "☐ ") + jobNames[n], "net-d-job-" + Rules.N(n),
+                () => { dJob = n; RebuildNetForm(); });
+            jobs.With(jb); dJobs[n] = jb;
+        }
+        netForm.With(jobs);
+        netHint = Text("创建后直接进入世界。", "secondary small", 0);
+        netForm.With(netHint);
+        Panel bottomBlock = Panel.Column(); bottomBlock.Gap(10); bottomBlock.DockBottom();
+        dCreate = Btn("创建角色并进入", "net-d-create", () => { net.CreateCharFirst(dChar.GetText().Trim(), dJob); });
+        dCreate.Class = "primary"; dCreate.Prefer(0, 38); bottomBlock.With(dCreate);
+        netForm.Add(bottomBlock);
+    }
+
+    /* 点行即连：用该条目已保存的地址与密码直接拨号；握手就绪后
+       PumpNetStage 自动切到第二步账号登录。*/
+    void ConnectRow(int n) {
+        if (UiDriver.Active()) { try { UiDriver.SetProbe("row-click", Rules.N(n)); } catch (Exception e) { } }
+        if (n < 0 || n >= srvHosts.Count) { return; }
+        srvSel = n;
+        SaveLastHost(srvHosts[n]);
+        net.ConnectAddr(srvHosts[n], srvPasses[n]);
+    }
+    void AddServerFromEditor() {
+        if (dHost == null) { return; }
+        string h = dHost.GetText().Trim();
+        if (h.Length == 0) { if (netHint != null) { netHint.Text = "先填服务器地址，如 127.0.0.1:7100。"; } return; }
+        srvHosts.Add(h); srvPasses.Add(dGatePass != null ? dGatePass.GetText() : "");
+        srvSel = srvHosts.Count - 1;
+        SaveServers(); RebuildNetForm();
+    }
+    void DeleteSelected() {
+        if (srvSel >= 0 && srvSel < srvHosts.Count) { srvHosts.RemoveAt(srvSel); srvPasses.RemoveAt(srvSel); }
+        srvSel = 0;
+        SaveServers(); RebuildNetForm();
+    }
+    void SaveSelectedFromEditor() {
+        if (dHost == null) { return; }
+        string h = dHost.GetText().Trim();
+        if (h.Length == 0) { return; }
+        string p = dGatePass != null ? dGatePass.GetText() : "";
+        /* 地址命中的条目优先（改名编辑也安全），否则写回当前选中。*/
+        int at = -1;
+        for (int i = 0; i < srvHosts.Count; i = i + 1) { if (srvHosts[i] == h) { at = i; } }
+        if (at < 0) { at = srvSel; }
+        if (at < 0 || at >= srvHosts.Count) { srvHosts.Add(h); srvPasses.Add(p); srvSel = srvHosts.Count - 1; }
+        else { srvHosts[at] = h; srvPasses[at] = p; srvSel = at; }
+    }
+
+    /* 第二步的注册/登录：加密会话已就绪，直接发送。记住我的账户
+       只在登录时生效。*/
+    void RegisterFromForm() {
+        if (dUser == null || dPass == null) { return; }
+        net.Register(dUser.GetText().Trim(), dPass.GetText().Trim());
+    }
+    void LoginFromForm() {
+        if (dUser == null || dPass == null) { return; }
+        string u = dUser.GetText().Trim();
+        net.Login(u, dPass.GetText().Trim());
+        if (dRemember != null && dRemember.IsChecked()) { SaveRememberedUser(u); }
+        else { SaveRememberedUser(""); }
+    }
+
+    /* ---- 已保存服务器（servers.txt 每行 host|连接密码）与登录记忆
+       （login.txt 两行：上次账号、上次连接地址）。---- */
+    string RmLine(int idx) {
+        if (!File.Exists(rememberPath)) { return ""; }
+        try {
+            string rest = File.ReadAllText(rememberPath);
+            for (int i = 0; i < idx; i = i + 1) {
+                int nl = rest.IndexOf("\n");
+                if (nl < 0) { return ""; }
+                rest = rest.Substring(nl + 1);
+            }
+            int end = rest.IndexOf("\n");
+            string line = end >= 0 ? rest.Substring(0, end) : rest;
+            return line.Trim();
+        } catch (Exception e) { return ""; }
+    }
+    string LoadRememberedUser() { return RmLine(0); }
+    void SaveRememberedUser(string u) {
+        try { File.WriteAllText(rememberPath, u + "\n" + RmLine(1) + "\n"); } catch (Exception e) { }
+    }
+    void SaveLastHost(string h) {
+        try { File.WriteAllText(rememberPath, RmLine(0) + "\n" + h + "\n"); } catch (Exception e) { }
+    }
+    void LoadServers() {
+        srvHosts.Clear(); srvPasses.Clear(); srvSel = 0;
+        string txt = "";
+        if (File.Exists(serversPath)) {
+            try { txt = File.ReadAllText(serversPath); } catch (Exception e) { txt = ""; }
+        }
+        string rest = txt;
+        while (rest.Length > 0) {
+            int nl = rest.IndexOf("\n");
+            string line = (nl >= 0 ? rest.Substring(0, nl) : rest).Trim();
+            rest = nl >= 0 ? rest.Substring(nl + 1) : "";
+            if (line.Length == 0) { continue; }
+            int bar = line.IndexOf("|");
+            string h = (bar >= 0 ? line.Substring(0, bar) : line).Trim();
+            if (h.Length == 0) { continue; }
+            srvHosts.Add(h); srvPasses.Add(bar >= 0 ? line.Substring(bar + 1) : "");
+        }
+        string last = RmLine(1);
+        for (int i = 0; i < srvHosts.Count; i = i + 1) {
+            if (srvHosts[i] == last) { srvSel = i; }
+        }
+    }
+    void SaveServers() {
+        try {
+            string t = "";
+            for (int i = 0; i < srvHosts.Count; i = i + 1) { t = t + srvHosts[i] + "|" + srvPasses[i] + "\n"; }
+            File.WriteAllText(serversPath, t);
+        } catch (Exception e) { }
+    }
+
     void BuildOnlinePage() {
         content.With(Text(pages[page], "yellow strong", 28));
         string header = "角色                      等级                 状态                 操作";
@@ -581,7 +1058,7 @@ class LegendApp {
         if (page == 29) { header = "发件人                 主题                    附件             领取"; }
         content.With(Text(header, "cyan table-head", 32));
         for (int i = 0; i < 8; i = i + 1) { content.With(Text("", i % 2 == 0 ? "table-row" : "table-alt", 32)); }
-        Note(content, "此页目前只恢复入口与容器，玩法尚未完成。联机玩法需要真实服务端；不使用假玩家、假交易或本地 BOSS 冒充实现。");
+        Note(content, "此页玩法尚未完成。联机入口已在“沙巴克”页：连接真实服务端即可注册登录、挂机与聊天；不使用假玩家、假交易或本地 BOSS 冒充实现。");
     }
     void Refresh() {
         if ((page == 2 || page == 3 || page == 12) && (renderedMode != g.mode || renderedChallenge != g.challenge)) { BuildPage(); }
@@ -592,7 +1069,27 @@ class LegendApp {
         health.Text = "生命：" + Rules.N(g.hp); mana.Text = "法力：" + Rules.N(g.mp); level.Text = "等级：" + Rules.N(g.level) + "级"; coins.Text = "金币：" + Rules.N(g.gold); yuan.Text = "元宝：" + Rules.N(g.gems); fame.Text = "声望：" + Rules.N(g.reputation); merit.Text = "战功：" + Rules.N(g.merit); spirit.Text = "灵符：未接入";
         experience.percent = (int)((long)g.xp * 100 / g.NeedXp()); state.Text = g.active && g.job >= 0 ? "状态：挂机中" : "状态：空闲中";
         string log = ""; for (int i = g.logs.Count - 1; i >= 0; i = i - 1) { if (log.Length > 0) { log = log + "\n"; } log = log + g.logs[i]; } news.Text = log.Length == 0 ? "暂无收益记录。\n开始战斗后显示真实掉落与收益。" : log;
-        if (g.job < 0) { app.RequestRedraw(); return; }
+        if (net.InWorld()) {
+            // 联机时顶栏、战报与聊天全部来自服务器；离线数值原样保留在后台。
+            JsonValue st = net.Self();
+            hero.Text = st.Str("name", "旅人") + " · 联机";
+            int hp = st.Int("hp", 0); int maxhp = st.Int("maxhp", 1);
+            health.Text = "生命：" + Rules.N(hp) + "/" + Rules.N(maxhp);
+            mana.Text = "法力：服务端结算"; level.Text = "等级：" + Rules.N(st.Int("level", 1)) + "级";
+            coins.Text = "金币：" + Rules.N(st.Int("gold", 0)); yuan.Text = "元宝：" + Rules.N(st.Int("gems", 0));
+            fame.Text = "声望：—"; merit.Text = "战功：—"; spirit.Text = "灵符：—";
+            int exp = st.Int("exp", 0); int expnext = st.Int("expnext", 1);
+            experience.percent = expnext > 0 ? (int)((long)exp * 100 / expnext) : 0;
+            state.Text = "状态：联机 · " + (net.LastFight() != null ? "战斗中" : "待机");
+            news.Text = net.FeedDump();
+        }
+        if (chatHistory != null) {
+            string chatLog = net.ChatDump();
+            if (chatLog.Length > 0) { chatHistory.Text = chatLog; }
+            bool live = net.InWorld();
+            chatInput.Disabled = !live; chatSend.Disabled = !live;
+        }
+        if (g.job < 0 && !net.InWorld()) { app.RequestRedraw(); return; }
         if (enemySprite != null) {
             string path = EnemyArtPath();
             if (path != enemySpritePath) { enemySprite.Src = path; enemySpritePath = path; }
@@ -611,12 +1108,12 @@ class LegendApp {
         if (page == 14 && pageInfo != null) { pageInfo.Text = g.AltarSummary() + "\n累计捐献 " + Rules.N(g.altarDonations) + " 次"; detail.Text = g.notice; }
         if ((page == 24 || page == 25) && pageInfo != null) { pageInfo.Text = "当前称谓/爵位等级：" + Rules.N(g.title) + "\n战斗属性称谓加成：" + Rules.N(g.title) + " × 配置比例"; detail.Text = g.notice; }
         if (page == 0 && pageInfo != null) { pageInfo.Text = "当前地点：" + GameTables.current.Map(g.floor).Text("name") + " · " + (g.mode != 0 ? "正在挑战，暂不可传送" : (g.active ? "自动战斗中" : "战斗已暂停")); }
-        if (page == 20) {
+        if (page == 20 && !net.InWorld()) {
             pageInfo.Text = "攻击：" + g.StatPair("attack") + "\n魔法：" + g.StatPair("magic") + "\n道术：" + g.StatPair("tao") + "\n防御：" + g.StatPair("defense") + "\n魔防：" + g.StatPair("magic_defense") + "\n生命：" + Rules.N(g.MaxHp()) + "\n法力：" + Rules.N(g.MaxMp()) + "\n战力：" + Rules.N(g.Power());
             Equipment e = inspectWorn ? g.equipped[forgeSlot] : Selected();
             detail.Text = e == null ? "请选择背包或身上的装备查看完整属性。" : (inspectWorn ? "【已穿戴】" : "【背包/仓库】") + e.Name() + "\n" + e.Detail() + (e.CanWear(g.job, g.level, g.rebirth) ? "" : "\n当前不满足穿戴要求，属性不生效。") + CompareEquipment(e);
         }
-        if (page == 21) {
+        if (page == 21 && !net.InWorld()) {
             Equipment e = g.equipped[forgeSlot]; DataRow recipe = GameTables.current.forge.rows[forgeMode];
             detail.Text = "【" + recipe.Text("name") + "】 · " + Rules.Slots()[forgeSlot] + "\n" + (e == null ? "尚未穿戴装备" : e.Name() + "\n" + e.Detail())
                 + "\n" + g.ForgePreview(forgeSlot, recipe.Int("id"))
@@ -634,6 +1131,30 @@ class LegendApp {
                 elementLabels[i].Text = e.Text("name") + " · " + Rules.N(g.elementRanks[i]) + "级 · " + Rules.N(g.elementXp[i]) + "/" + Rules.N(g.ElementNeed(i)) + "\n" + GameTables.current.attributes.Get(e.Text("stat")).Text("name") + " +" + Rules.N(g.elementRanks[i] * e.Int("value_per_level")) + "\n突破：黑铁 " + Rules.N(g.ElementIronCost(i)) + " / 元宝 " + Rules.N(g.ElementYuanCost(i));
                 elementBars[i].percent = g.elementXp[i] * 100 / g.ElementNeed(i);
             }
+        }
+        if (page == 6 && netStatus != null) { netStatus.Text = net.StatusText(); if (netFight != null) { netFight.Text = net.FightLine(); } }
+        if (page == 6 && netQuest != null && net.InWorld()) {
+            /* 主线进度即走：kills 随每帧 fight 推送就地刷新，不必等重建。 */
+            JsonValue stq = net.Self();
+            DataRow quest = GameTables.current.quests.At(0);
+            int target = quest.Int("target");
+            int kills = stq != null ? stq.Int("kills", 0) : 0;
+            int shown = kills < target ? kills : target;
+            netQuest.Text = "主线 · " + quest.Text("name") + "　"
+                + Rules.N(shown) + " / " + Rules.N(target)
+                + (kills >= target ? " · 已完成，奖励已发放" : "");
+        }
+        if ((page == 2 || page == 3 || page == 12) && net.InWorld() && net.LastFight() != null && combatTitle != null) {
+            // 联机战斗覆盖：战斗页沿用同一组控件，数值取服务器最近一帧战况。
+            JsonValue f = net.LastFight();
+            combatTitle.Text = "联机 · " + f.Str("mob", "战斗");
+            enemyName.Text = f.Str("mob", "怪物");
+            foeText.Text = "余血 " + Rules.N(f.Int("mobhp", 0)) + " · 我方伤害 " + Rules.N(f.Int("dmg", 0));
+            JsonValue st = net.Self();
+            playerText.Text = Rules.N(st.Int("hp", 0)) + "/" + Rules.N(st.Int("maxhp", 1));
+            int maxhp = st.Int("maxhp", 1);
+            life.percent = maxhp > 0 ? (int)((long)st.Int("hp", 0) * 100 / maxhp) : 0;
+            battleStatus.Text = "服务端驱动挂机：每秒一帧战况推送\n本页不再推进离线幻境。";
         }
         if (page == 26 && pageInfo != null) { pageInfo.Text = g.QuestText() + "\n今日击杀 " + Rules.N(g.dailyKills) + "/30"; detail.Text = "累计击杀：" + Rules.N(g.kills) + "\n战败次数：" + Rules.N(g.deaths) + "\nBOSS胜利：" + Rules.N(g.bossWins) + "\n回收件数：" + Rules.N(g.recycled) + "\n离线结算：" + Rules.N(g.offlineSeconds) + "秒\n" + saveState; }
         app.RequestRedraw();

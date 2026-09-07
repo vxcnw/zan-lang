@@ -220,12 +220,25 @@ class Fight {
         return d;
     }
 
-    /* 击杀结算：经验（连升）、金币（区间随机）、掉落（万分比）。 */
+    /* 击杀结算：经验（连升）、金币（区间随机）、掉落（万分比）；
+       累计击杀进角色行（主线任务“首次击杀”进度，与客户端 quests.csv
+       首任务对齐），满 5 杀发一次性奖励公告。 */
     static void OnKill(Session s, ZanWeb.Model.Game.Mob t, JsonValue f) {
         s.row.exp = s.row.exp + t.exp;
+        s.row.kills = s.row.kills + 1;
+        f.Set("kills", JsonValue.NewNum(Convert.ToString(s.row.kills)));
         long gold = Fight.rng.Between((int)t.goldMin, (int)t.goldMax + 1);
         s.row.gold = s.row.gold + gold;
         f.Set("gold", JsonValue.NewNum(Convert.ToString(gold)));
+        if (s.row.kills == 5) {
+            s.row.gold = s.row.gold + 400;
+            /* 奖励并进这一击的 gold 增量：客户端 self 金币随 fight 推送
+               累加，奖励不改事件就会一直显示旧值。 */
+            f.Set("gold", JsonValue.NewNum(Convert.ToString(gold + 400)));
+            Gateway.PushAnnounce(s.conn, "任务完成：首次击杀",
+                "累计击杀达到 5，奖励 400 金币已发放。");
+            f.Set("quest", JsonValue.NewStr("首次击杀完成"));
+        }
         int ups = 0;
         while (s.row.exp >= Fight.ExpNext(s.row.level)) {
             s.row.exp = s.row.exp - Fight.ExpNext(s.row.level);
@@ -238,6 +251,9 @@ class Fight {
             JsonValue up = Gateway.Ev("levelup",
                 "升到 " + Convert.ToString(s.row.level) + " 级！");
             up.Set("level", JsonValue.NewNum(Convert.ToString(s.row.level)));
+            /* 升级同时改等级/血量上限/经验曲线：整份 self 随事件下发，
+               客户端整体替换，面板数字不再停在进场旧值。 */
+            up.Set("self", Gateway.SelfJson(s));
             Gateway.Send(s.conn, up);
         }
         if (t.dropItemId > 0 && Fight.rng.NextBelow(10000) < t.dropRate) {
