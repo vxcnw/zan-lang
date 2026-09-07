@@ -42,6 +42,7 @@ class SwitchComp : CellComp {
         }
         Switch sw = new Switch();
         sw.wiresOwnEvents = true;
+        if (this.poolKeys.Count >= CellComp.PoolCap) { this.Reset(); }
         this.poolKeys.Add(k);
         this.poolCtl.Add(sw);
         return sw;
@@ -100,6 +101,7 @@ class CheckboxComp : CellComp {
         Checkbox cb = new Checkbox();
         cb.wiresOwnEvents = true;
         cb.SetLabel("");
+        if (this.poolKeys.Count >= CellComp.PoolCap) { this.Reset(); }
         this.poolKeys.Add(k);
         this.poolCtl.Add(cb);
         return cb;
@@ -157,6 +159,7 @@ class RateComp : CellComp {
         // “一格一星”。显数由 FillStr 按列 shapeC 解析（见下）。
         Rate r = new Rate();
         r.wiresOwnEvents = true;
+        if (this.poolKeys.Count >= CellComp.PoolCap) { this.Reset(); }
         this.poolKeys.Add(k);
         this.poolCtl.Add(r);
         return r;
@@ -217,6 +220,7 @@ class SelectComp : CellComp {
         }
         SelectBox s = new SelectBox();
         s.wiresOwnEvents = true;
+        if (this.poolKeys.Count >= CellComp.PoolCap) { this.Reset(); }
         this.poolKeys.Add(k);
         this.poolCtl.Add(s);
         return s;
@@ -293,6 +297,7 @@ class ButtonsComp : CellComp {
         }
         ButtonGroup g = new ButtonGroup(0);
         g.SetSize(1);
+        if (this.poolKeys.Count >= CellComp.PoolCap) { this.Reset(); }
         this.poolKeys.Add(k);
         this.poolCtl.Add(g);
         return g;

@@ -1246,6 +1246,22 @@ class Gallery {
         return r;
     }
 
+    // 画廊懒构造常驻控件的专属 id 段（950000，与 Layer 930000、
+    // DataTable 池控件 940000 错开）。demo 块在帧循环里中途建控件，
+    // 而宿主每帧 WidgetId.ResetFrame 回卷重发主计数器：直接领号会
+    // 抢走后续某帧控件的本命 id（信号污染）——与 DataTable 池控件
+    // 同一机制，段内取号、宿主计数器原样恢复。
+    static int galBandSeq;
+    static int GalBandEnter() {
+        int outer = WidgetId.SeqValue();
+        WidgetId.SetSeq(950000 + Gallery.galBandSeq);
+        return outer;
+    }
+    static void GalBandExit(int outer) {
+        Gallery.galBandSeq = WidgetId.SeqValue() - 950000;
+        WidgetId.SetSeq(outer);
+    }
+
     /// DataTable 演示的 CellClick：Ops 按钮组列（Actions 动作列，
     /// "act"）的段点击落到这里——段号在 st.compC：0增 1删 2改 3查。
     /// 增/删走引擎行 API（Ctrl+Z 可撤销），改/查打开行表单窗口。
@@ -1306,6 +1322,7 @@ class Gallery {
         if (cols == null || row < 0 || row >= Gallery.demoRows.Count) { return; }
         App app = Gallery.app;
         if (Gallery.dtEditWin == null) {
+            int bandOuter = Gallery.GalBandEnter();
             Layer.BeginBody();
             Panel left = Panel.Column().Gap(app.Scale(6));
             Panel right = Panel.Column().Gap(app.Scale(6));
@@ -1341,6 +1358,7 @@ class Gallery {
             // 挂到全局 Layer 栈：demo 块内联渲染会在代码面板之前
             // 画窗，页面后画的内容盖掉半截（「弹窗被遮挡」）。
             Gallery.demoLayers.Add(Gallery.dtEditWin);
+            Gallery.GalBandExit(bandOuter);
         }
         Gallery.dtEditRow = row;
         Gallery.dtEditView = view;
@@ -12870,15 +12888,19 @@ class Gallery {
             // Export Excel: async streaming export of this small grid, with the
             // progress/result reported on the status line below the table.
             if (Gallery.dtExportBtn == null) {
+                int bandOuter = Gallery.GalBandEnter();
                 Gallery.dtExportBtn = new Button { Text = Gallery.T("Export Excel", "导出 Excel") };
                 Gallery.dtExportBtn.Click += Gallery.OnDtExportClick;
+                Gallery.GalBandExit(bandOuter);
             }
             Gallery.dtExportBtn.Text = Gallery.T("Export Excel", "导出 Excel");
             int dexY = py + app.Scale(266);
             Gallery.dtExportBtn.Render(app, px, dexY, app.Scale(130));
             if (Gallery.dtAddBtn == null) {
+                int bandOuter2 = Gallery.GalBandEnter();
                 Gallery.dtAddBtn = new Button { Text = Gallery.T("Add row", "添加行") };
                 Gallery.dtAddBtn.Click += Gallery.OnDtAddRowClick;
+                Gallery.GalBandExit(bandOuter2);
             }
             Gallery.dtAddBtn.Text = Gallery.T("Add row", "添加行");
             Gallery.dtAddBtn.Render(app, px + app.Scale(140), dexY, app.Scale(96));

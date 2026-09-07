@@ -60,6 +60,11 @@ abstract class CellComp {
     // ---- 注册表 ----
     static List<CellComp> registry;
 
+    /// 单个适配器池的深度上限。池键含业务键，键集无界的数据源
+    /// （时间戳主键、实时流逐行换键）会让池随历史行无限增长——
+    /// 超过上限整池重置：宁可损失复用，不失去内存上界。
+    static readonly int PoolCap = 2048;
+
     /// 按 id 注册适配器（重复注册覆盖，便于测试）。首次调用
     /// 装配内置适配器。
     static void Register(CellComp comp) {
@@ -117,6 +122,7 @@ class BandGridComp : CellComp {
         g.Bind(rows, cols);
         g.CellSize(16, 14);
         g.wiresOwnEvents = true;
+        if (this.poolKeys.Count >= CellComp.PoolCap) { this.Reset(); }
         this.poolKeys.Add(k);
         this.poolCtl.Add(g);
         this.poolShape.Add(shape);
@@ -163,6 +169,33 @@ class BandGridComp : CellComp {
 
 partial class DataTable {
     static bool compsInited;
+
+    /// 池控件专属保留 id 段（940000）的游标，seq 域——实际
+    /// id = 1000000 + 940000 + 游标。与 Designer(800000/840000/
+    /// 860000)、SceneDesigner(820000/880000)、FilePicker/ChildWindow
+    /// (900000)、Layer(930000)、IDE 助手(935000) 错开。
+    static int compBandSeq;
+
+    /// 进入池控件保留段（配对 CompBandExit，返回宿主计数器）。
+    /// 池控件在帧循环中迟到构造，而即时模式宿主（画廊等混合体）
+    /// 每帧 WidgetId.ResetFrame 会把主计数器回卷重发：从这里直接
+    /// 领号，领走的正是宿主后续某帧控件的本命 id——任何让当帧
+    /// 分配数变化的交互（插删行、toast、开窗）都会把分配前沿推过
+    /// 池控件的 id，点击按 id 归属时两个控件同时命中，事件落到
+    /// 错误的控件/行（「不同行组件事件乱飞」）。与 Layer 同一机制：
+    /// 段内取号，宿主计数器原样恢复、互不相扰。
+    static int CompBandEnter() {
+        int outer = WidgetId.SeqValue();
+        WidgetId.SetSeq(940000 + DataTable.compBandSeq);
+        return outer;
+    }
+
+    /// 离开池控件保留段：游标按实际消耗推进（各控件一次用量
+    /// 不一，按用量记账比定步长稳），宿主计数器恢复。
+    static void CompBandExit(int outer) {
+        DataTable.compBandSeq = WidgetId.SeqValue() - 940000;
+        WidgetId.SetSeq(outer);
+    }
 
     /// 内置组件适配器装配。幂等。
     static void EnsureCompRegistry() {
@@ -219,16 +252,23 @@ partial class DataTable {
         // 会让同屏两个网格（或一表一预览）声明同一 compId 时拿到
         // 同一个控件实例——同帧互灌值、互抢命中矩形、提交串台。
         key = DataTable.CompPoolKey(st, key);
+        // 池控件的构造（Acquire 未命中时 new）与值刷灌（FillStr 里
+        // 可能重灌选项/分段、Rate.Max 重排星号块）都会领新 id——
+        // 全部圈进保留段，见 CompBandEnter 的注释。
+        int outerSeq = DataTable.CompBandEnter();
         Control ctl = comp.Acquire(app, src, rowIdx, cc, key,
                                    cx, cy, cw, rowH, rows, cols);
-        if (ctl == null) { return; }
-        // 数值形态（cellType 9）走序列灌值；字符串形态
-        // （cellType 10 WidgetCol）直接把原始单元格文本给适配器。
-        if (col.cellType == 10) {
-            comp.FillStr(ctl, val, col, src, rowIdx);
-        } else {
-            comp.Fill(ctl, vals, rows, cols, col.heatBand);
+        if (ctl != null) {
+            // 数值形态（cellType 9）走序列灌值；字符串形态
+            // （cellType 10 WidgetCol）直接把原始单元格文本给适配器。
+            if (col.cellType == 10) {
+                comp.FillStr(ctl, val, col, src, rowIdx);
+            } else {
+                comp.Fill(ctl, vals, rows, cols, col.heatBand);
+            }
         }
+        DataTable.CompBandExit(outerSeq);
+        if (ctl == null) { return; }
         ctl.MeasureTree(app);
         // 组件默认在格内垂直居中（DataColumn.VTop() 可声明顶对齐）：
         // 叶子控件都在 Arrange 矩形的顶边作画，行高大于控件自然高度

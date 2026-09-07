@@ -2187,6 +2187,69 @@ class Program {
         Console.WriteLine(qst.colHidden[1] == false && qst.aggMode[1] == 0
             && qst.showSummary == false);
         Console.WriteLine(qst.menuCfMode[0] == 0 && qst.colWidths[0] == 80);
+        // Copy clamps the stored range to the live column set: callers
+        // may rebuild columns between selection and copy (the gallery
+        // rebuilds per frame). A stale range must not read past cols.
+        DataTableState cst = new DataTableState();
+        List<DataColumn> ccols = new List<DataColumn>();
+        ccols.Add(DataColumn.Text("A", 60));
+        ccols.Add(DataColumn.Text("B", 60));
+        ccols.Add(DataColumn.Text("C", 60));
+        List<DataRow> crows = new List<DataRow>();
+        crows.Add(Row("a", "b", "c"));
+        crows.Add(Row("1", "2", "3"));
+        DataSource csrc = new RowListSource(crows);
+        DataTable.EnsureInit(cst, ccols, csrc);
+        DataTable.Recompute(cst, ccols, csrc);
+        cst.rangeR0 = 0;
+        cst.rangeR1 = 1;
+        cst.rangeC0 = 0;
+        cst.rangeC1 = 2;
+        string clipFull = DataTable.CopyText(cst, ccols, csrc);
+        List<DataColumn> ccolsNarrow = new List<DataColumn>();
+        ccolsNarrow.Add(ccols[0]);
+        ccolsNarrow.Add(ccols[1]);
+        string clipNarrow = DataTable.CopyText(cst, ccolsNarrow, csrc);
+        Console.WriteLine(DataTable.SplitTabs(DataTable.SplitLines(clipFull)[0]).Count == 3);
+        Console.WriteLine(DataTable.SplitTabs(DataTable.SplitLines(clipNarrow)[0]).Count == 2);
+        // Comp pools are capped: a source with unbounded business keys
+        // must not grow its pool without bound — past the cap the pool
+        // resets, so an early key gets a fresh instance.
+        CellComp capComp = CellComp.Find("switch");
+        bool capOk = capComp != null;
+        Control capFirst = capOk
+            ? capComp.Acquire(null, null, 0, 0, RowKey.Legacy(0), 0, 0, 10, 10, 1, 1)
+            : null;
+        for (int i = 1; capOk && i < 2100; i = i + 1) {
+            capComp.Acquire(null, null, i, 0, RowKey.Legacy(i), 0, 0, 10, 10, 1, 1);
+        }
+        if (capOk) {
+            capOk = capComp.Acquire(null, null, 0, 0,
+                RowKey.Legacy(0), 0, 0, 10, 10, 1, 1) != capFirst;
+        }
+        Console.WriteLine(capOk);
+        // Pooled widgets draw ids from the DataTable reserved band
+        // (940000), never from the host counter: immediate-mode hosts
+        // (the gallery) call WidgetId.ResetFrame() every frame, which
+        // rewinds and reissues the main counter — a pooled widget id
+        // inside that window gets reissued to some other widget as the
+        // per-frame allocation count shifts (insert/delete rows, toasts,
+        // opening windows), and the click resolves to the wrong control
+        // / wrong row. Assert: constructing inside CompBandEnter/Exit
+        // leaves the host counter untouched and consumes band-domain
+        // sequence numbers only.
+        bool bandOk = CellComp.Find("switch") != null;
+        if (bandOk) {
+            int hostA = WidgetId.Next();
+            int bandOuter = DataTable.CompBandEnter();
+            Switch bandSw = new Switch();
+            int bandSeq = WidgetId.SeqValue();
+            DataTable.CompBandExit(bandOuter);
+            int hostB = WidgetId.Next();
+            bandOk = hostB == hostA + 1 && bandSeq >= 940000
+                && bandSeq < 941000 && bandSw != null;
+        }
+        Console.WriteLine(bandOk);
     }
 }
 

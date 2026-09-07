@@ -116,6 +116,11 @@ partial class DataTable {
         if (rangeMode) {
             c0 = DataTable.MinI(st.rangeC0, st.rangeC1);
             c1 = DataTable.MaxI(st.rangeC0, st.rangeC1);
+            // 与多区域路径同一口径：列集可能在选取后被重建
+            // （画廊每帧重建列），复制前夹到现存列，宁少不越界。
+            if (c0 < 0) { c0 = 0; }
+            if (c1 > cols.Count - 1) { c1 = cols.Count - 1; }
+            if (c0 > c1) { return ""; }
         }
 
         if (withHeader) {
