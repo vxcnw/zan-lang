@@ -2633,7 +2633,14 @@ class Chart {
         int plotX = x + pad + leftGut;
         if (o.gridLeft >= 0) { plotX = x + app.Scale(o.gridLeft); }
         int plotY = plotTop + topGut;
-        if (o.gridTop >= 0) { plotY = y + app.Scale(o.gridTop); }
+        if (o.gridTop >= 0) {
+            // grid.top 是 ECharts 绝对偏移，但不得小于面板头
+            //（标题/副标题/图例行）底边——头部内容永远优先显示，
+            // gridTop 只在头部之下继续往下推（bar12 的 70 压住
+            // 图例行的根因）。
+            int topAbs = y + app.Scale(o.gridTop);
+            if (topAbs > plotY) { plotY = topAbs; }
+        }
         int plotRight = x + w - rightGut;
         if (o.gridRight >= 0) { plotRight = x + w - app.Scale(o.gridRight); }
         int plotBot = y + h - pad - botGut;
