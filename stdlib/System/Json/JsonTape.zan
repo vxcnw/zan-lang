@@ -173,36 +173,38 @@ class JsonDoc {
         return escPool[s.strLen];
     }
 
-    /// `at` 槽位的整数值（非整数槽返回 `dflt`）。
+    /// `at` 槽位的整数值（非整数槽返回 `dflt`）。字段级直读：
+    /// `JsonSlot s = slots[at]` 是整 struct 拷贝，访问器只碰 kind
+    /// 和值两个字段，逐字段读免掉拷贝。
     int IntAt(int at, int dflt) {
         if (at < 0) { return dflt; }
-        JsonSlot s = slots[at];
-        if (s.kind == 2) { return (int)s.numI; }
-        if (s.kind == 7) { return (int)s.numD; }
-        if (s.kind == 1) { return 1; }
-        if (s.kind == 6) { return 0; }
+        int k = slots[at].kind;
+        if (k == 2) { return (int)slots[at].numI; }
+        if (k == 7) { return (int)slots[at].numD; }
+        if (k == 1) { return 1; }
+        if (k == 6) { return 0; }
         return dflt;
     }
 
     /// `at` 槽位的 64 位整数值。
     long LongAt(int at, long dflt) {
         if (at < 0) { return dflt; }
-        JsonSlot s = slots[at];
-        if (s.kind == 2) { return s.numI; }
-        if (s.kind == 7) { return (long)s.numD; }
-        if (s.kind == 1) { return 1L; }
-        if (s.kind == 6) { return 0L; }
+        int k = slots[at].kind;
+        if (k == 2) { return slots[at].numI; }
+        if (k == 7) { return (long)slots[at].numD; }
+        if (k == 1) { return 1L; }
+        if (k == 6) { return 0L; }
         return dflt;
     }
 
     /// `at` 槽位的浮点值。
     double DoubleAt(int at, double dflt) {
         if (at < 0) { return dflt; }
-        JsonSlot s = slots[at];
-        if (s.kind == 2) { return (double)s.numI; }
-        if (s.kind == 7) { return s.numD; }
-        if (s.kind == 1) { return 1.0; }
-        if (s.kind == 6) { return 0.0; }
+        int k = slots[at].kind;
+        if (k == 2) { return (double)slots[at].numI; }
+        if (k == 7) { return slots[at].numD; }
+        if (k == 1) { return 1.0; }
+        if (k == 6) { return 0.0; }
         return dflt;
     }
 
@@ -221,12 +223,12 @@ class JsonDoc {
     /// `at` 槽位的布尔值。
     bool BoolAt(int at, bool dflt) {
         if (at < 0) { return dflt; }
-        JsonSlot s = slots[at];
-        if (s.kind == 1) { return true; }
-        if (s.kind == 6) { return false; }
-        if (s.kind == 2) { return s.numI != 0; }
-        if (s.kind == 7) { return (long)s.numD != 0L; }
-        if (s.kind == 3) { return this.StrOf(s) == "true"; }
+        int k = slots[at].kind;
+        if (k == 1) { return true; }
+        if (k == 6) { return false; }
+        if (k == 2) { return slots[at].numI != 0; }
+        if (k == 7) { return (long)slots[at].numD != 0L; }
+        if (k == 3) { return this.StrOf(slots[at]) == "true"; }
         return dflt;
     }
 
