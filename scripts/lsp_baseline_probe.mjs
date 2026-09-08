@@ -116,9 +116,9 @@ for (const rel of DOC_FILES) {
 const QUERIES = {
   repo: [
     ['tests/gui/compref_designer_test.zan', /d\.SetUserComponents\(comps\);/, 2, 'SetUserComponents'],
-    ['tests/gui/compref_designer_test.zan', /string saved = d\.SaveJson\(\);/, 2, 'SaveJson'],
+    ['tests/gui/compref_designer_test.zan', /string saved = d\.SaveJson\(\);/, 17, 'SaveJson'],
     ['tests/gui/compref_designer_test.zan', /d\.LoadJson\(saved\);/, 2, 'LoadJson'],
-    ['tests/gui/compref_designer_test.zan', /comps\.Add\(new UserComponent\(/, 10, 'Add'],
+    ['tests/gui/compref_designer_test.zan', /comps\.Add\(new UserComponent\(/, 6, 'Add'],
     ['examples/gui_gallery/gui_gallery.zan', /app\.RequestRedraw\(\);/, 4, 'RequestRedraw'],
     ['examples/gui_gallery/gui_gallery.zan', /app\.Post\(/, 4, 'Post'],
     ['src/ide_zan/src/shell/ZanIDE.zan', /File\.WriteAllText\(/, 5, 'WriteAllText'],

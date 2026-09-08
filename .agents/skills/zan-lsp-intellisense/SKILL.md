@@ -5,7 +5,8 @@ description: Zan LSP（src/lsp/zan-lsp）与 intellisense 引擎的供数定式�
 
 # Zan LSP 供数与基线
 
-> 提炼自四期 LSP 改造第一批（基线 094d28f0 / 收敛+stdlib 1ecf29d8）。
+> 提炼自四期 LSP 改造（基线 094d28f0 / 收敛+stdlib 1ecf29d8 /
+> typed member completion 第二批）。
 > 每条都是实测踩坑后验证过的。
 
 ## 数据流（改供数前必读）
@@ -38,6 +39,17 @@ description: Zan LSP（src/lsp/zan-lsp）与 intellisense 引擎的供数定式�
   首次补全请求会接住同样的代价。
 - didChange 是全文同步重解析（736KB 文档每击键 ~46ms）——改这个
   就是"编译器前端增量入口"批次本身，别在 lsp_main.c 里绕。
+- **接收者解析必须文档优先**：把 `d.` 的接收者名直接喂项目索引
+  intel_resolve_type，反向扫描会被任何无关文件里的同名变量顶掉
+  （后者覆盖前者）→ 成员列表整批是陌生类型的。先对打开文档的
+  intellisense_t 解析，解析不出才回退项目索引；项目成员与文档局部
+  结果要**始终合并去重**，`count==0` 才回退会让项目成员在文档局部
+  有 1 条结果时整体缺席（四期2 第二批修的就是这两处）。
+- **探针 offset 是按"匹配起点"数的**：completion 查询的 offset =
+  正则匹配起点到光标的字符数，光标要落在 `.` 之后。正则一变
+  （比如前面多包了 `string saved = `）offset 全作废——光标落在
+  标识符中间发出去的是普通前缀补全（返回几百条），极易误诊成
+  "某成员未入索引"。改查询先重数 offset。
 
 ## 验证仪式
 

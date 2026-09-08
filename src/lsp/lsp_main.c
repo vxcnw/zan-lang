@@ -931,14 +931,36 @@ static void handle_completion(lsp_server_t *s, json_value *id, json_value *param
 
         if (resolve_type[0]) {
             count = intel_complete_members(is, resolve_type, effective);
-            /* Also check project-wide types for member completion */
-            if (count == 0 && g_project_intel) {
-                count = intel_complete_members(g_project_intel, resolve_type, effective);
-                if (count > 0) {
-                    memcpy(is->completions, g_project_intel->completions,
-                           sizeof(completion_t) * (size_t)count);
-                    is->completion_count = count;
+            /* Augment with project-wide members of the same type. The
+             * receiver name must be resolved against the OPEN DOCUMENT
+             * first — handing the raw name to the project index resolves
+             * it against identically-named variables from unrelated files
+             * and floods the list with a stranger type's members. */
+            if (g_project_intel) {
+                const char *local_t = intel_resolve_type(is, resolve_type);
+                const char *query_t = (local_t && local_t[0]) ? local_t
+                                                              : resolve_type;
+                int before = count;
+                intel_complete_members(g_project_intel, query_t, effective);
+                for (int pi = 0;
+                     pi < g_project_intel->completion_count &&
+                     count < INTEL_MAX_COMPLETIONS;
+                     pi++) {
+                    bool dup = false;
+                    for (int li = 0; li < before; li++) {
+                        if (strcmp(is->completions[li].label,
+                                  g_project_intel->completions[pi].label) == 0) {
+                            dup = true;
+                            break;
+                        }
+                    }
+                    if (!dup) {
+                        is->completions[count] =
+                            g_project_intel->completions[pi];
+                        count++;
+                    }
                 }
+                is->completion_count = count;
             }
         }
     } else if (effective[0]) {
