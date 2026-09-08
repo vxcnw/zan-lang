@@ -96,7 +96,6 @@ partial class ChartView {
         int mxB = app.mouseX;
         int myB = app.mouseY;
         ChartHit barHit = null;
-
         ChartView.PushPlotClip(app, f.plotX, f.plotY, f.plotW, f.plotH);
 
         // 可见柱状族序列数量（折线族与 pie/gauge/funnel 混搭覆盖
@@ -107,6 +106,27 @@ partial class ChartView {
             if (!sc.hidden && ChartView.IsBarFamily(sc.type)) { nsVis = nsVis + 1; }
         }
         if (nsVis < 1) { nsVis = 1; }
+
+        // markPoint 柱内锚点（ECharts2 bar.js xMarkMap 同源）：组
+        // 几何在堆叠/分组两支里更新，markPoint 循环按同式取本系列
+        // 柱中线；堆叠组名单物化到循环外共用。
+        int markGroupW = step * 7 / 10;
+        int markGap = app.Scale(2);
+        int markBarW = (markGroupW - markGap * (nsVis - 1)) / nsVis;
+        if (markBarW < app.Scale(2)) { markBarW = app.Scale(2); }
+        int markX0off = 0;
+        int markStackBarW = 0;
+        List<string> markGrp = new List<string>();
+        if (stacked) {
+            for (int gsi = 0; gsi < ns; gsi = gsi + 1) {
+                ChartSeries sc = series[gsi];
+                if (!sc.hidden && ChartView.IsBarFamily(sc.type)) {
+                    if (ChartView.GroupIndex(markGrp, sc.stackName) < 0) {
+                        markGrp.Add(sc.stackName);
+                    }
+                }
+            }
+        }
 
         if (stacked) {
             // 按 stackName 分组的堆叠柱（ECharts `stack` 分组）：
@@ -284,6 +304,8 @@ partial class ChartView {
                     }
                 }
             }
+            markStackBarW = step * 9 / 10 / ng;
+            if (markStackBarW < app.Scale(2)) { markStackBarW = app.Scale(2); }
         } else {
             // 分组柱 + 可选折线族覆盖层（混合图表）
             int groupW = step * 7 / 10;
@@ -323,6 +345,13 @@ partial class ChartView {
                 int totGw = nsVis * barW + (nsVis - 1) * gap;
                 if (totGw < groupW) { groupX0 = groupX0 + (groupW - totGw) / 2; }
             }
+            // markPoint 柱内锚点复用（xMarkMap 同源）：主循环的组
+            // 几何在此物化成标量，markPoint 循环按同一套式子取
+            // 本系列柱中线。
+            markGroupW = groupW;
+            markGap = gap;
+            markBarW = barW;
+            markX0off = groupX0 - (step - groupW) / 2;
             int mxB = app.mouseX;
             int myB = app.mouseY;
             // showBackground 底带缺省色 = 网格线色。
@@ -534,15 +563,39 @@ partial class ChartView {
         }
         c.PopClip();
         // markPoint：自动 max/min + 显式 marks（仅柱状族）。
+        // ECharts2 bar.js xMarkMap：自动与显式 markPoint 的 x 都取
+        // 本系列柱条中线（组内第 slot 根），不是类目带中线——
+        // bar1 的年最高徽标钉在降水量自己那根柱顶。
         for (int msi = 0; msi < ns; msi = msi + 1) {
             ChartSeries ms = series[msi];
             // 值对柱形（bar13）的 marks 走下方 points 路径：这里的
             // MarkAt 用 CatX 类目定位，数值 X 图上会画错列；两路
             // 同画还会出双标记。
             if (xValBars && ms.points.Count > 0) { continue; }
-            if (!ms.hidden && !ChartView.IsLineFamily(ms.type)) {
-                ChartView.DrawSeriesMarks(app, f, ms, i0, i1, step, step / 2, o);
+            if (ms.hidden || ChartView.IsLineFamily(ms.type)) { continue; }
+            int markX = 0;
+            if (stacked) {
+                // 堆叠：各 stack 组并排成一列（主循环 bx = cellL +
+                // g0 + gi*stkBarW 同式）。
+                int gi = ChartView.GroupIndex(markGrp, ms.stackName);
+                if (gi < 0) { gi = 0; }
+                markX = f.CatMid(0, n) - (step * 9 / 10) / 2
+                    + gi * markStackBarW + markStackBarW / 2;
+            } else {
+                int slotIdx = 0;
+                for (int psi = 0; psi < msi; psi = psi + 1) {
+                    ChartSeries pc = series[psi];
+                    if (!pc.hidden && !ChartView.IsLineFamily(pc.type)
+                        && pc.type != ChartType.Scatter) { slotIdx = slotIdx + 1; }
+                }
+                // 组内第 slot 根柱的中线：主循环 bx = cellL + g0 +
+                // slot*(barW+gap)，g0 = (cellW-groupW)/2 + markX0off
+                // （barWidth 覆盖致组不满宽时的居中修正）。
+                markX = f.CatMid(0, n) - markGroupW / 2
+                    + slotIdx * (markBarW + markGap) + markBarW / 2
+                    + markX0off;
             }
+            ChartView.DrawSeriesMarks(app, f, ms, i0, i1, step, markX, o);
         }
         // 值对系列（双数值轴）：横轴标注走 points 路径（bar13 的
         // 蓝色 x 轴 max/min 标注），悬停按最近点出 tooltip 卡。

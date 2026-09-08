@@ -1509,8 +1509,14 @@ partial class Charts {
         dir.itemStyle.normal.lineStyle.type = "dashed";
         // 搜索引擎：不堆叠 + emptyCircle + 横向渐变描边（红→黄），
         // 系列色走 ECharts 2 默认调色板（参考站未显式指定 color）。
+        // 数据级逐项覆盖：734 emptyHeart(10)（官方 line.opt.js）。
+        ChartData s734 = ChartData.Of(734);
+        s734.symbol = "emptyheart";
+        s734.size = 10;
+        s734.sizeSet = true;
         ChartSeries search = ChartSeries.Line(Charts.T("Search", "搜索引擎"),
             new List<int>{ 620, 732, 791, 734, 890, 930, 820 });
+        search.data[3] = s734;
         search.symbol = "emptyCircle";
         search.itemStyle.normal.lineStyle.width = 2;
         search.itemStyle.normal.lineStyle.gradStops = new List<int>{

@@ -355,7 +355,7 @@ partial class ChartView {
                 } else if (s.type == ChartType.Scatter) {
                     int rr = Chart.SymbolRadius(s.symbolSize, app.Scale(3));
                     if (oi < s.data.Count && s.data[oi].sizeSet && s.data[oi].size > 0) {
-                        rr = s.data[oi].size / 2;
+                        rr = s.data[oi].size;
                     }
                     rr = rr + app.Scale(2);
                     int dx = mx - px;
@@ -592,8 +592,10 @@ partial class ChartView {
                         ChartView.BuildPathFx(rxs, rys, smooth, fxX, fxY);
 
                         if (area && geoMode != 2) {
+                            // ECharts2 line.js 非堆积面积同样 = 系列色
+                            // alpha 0.5（无显式 areaStyle.color 时）。
                             ChartView.FillUnder(c, pathX, pathY, fillBase,
-                                drawColor, o.gradient, 150, 16);
+                                drawColor, o.gradient, 128, 128);
                         }
 
                         if (stepped) {
@@ -641,14 +643,19 @@ partial class ChartView {
                             if (oiN < s.data.Count) {
                                 if (s.data[oiN].color != 0) { ncol = s.data[oiN].color; }
                                 if (s.data[oiN].symbol.Length > 0) { sym2 = s.data[oiN].symbol; }
+                                // ECharts 数据级 symbolSize 覆盖（star 15、
+                                // emptypin 8、star6 20…）：值即半径。
                                 if (s.data[oiN].sizeSet && s.data[oiN].size > 0) {
-                                    pr = s.data[oiN].size / 2;
+                                    pr = s.data[oiN].size;
                                 }
                             }
                             bool showSym = sym2 != "none" && sym2 != "pass"
-                                && (s.symbol.Length > 0 || s.showSymbol != 0);
+                                && (s.symbol.Length > 0 || s.showSymbol != 0
+                                    || s.data[oiN].symbol.Length > 0);
                             if (showSym && symTicks != null
-                                && s.symbol.Length == 0 && s.showSymbol < 0) {
+                                && s.symbol.Length == 0 && s.showSymbol < 0
+                                && !(oiN < s.data.Count
+                                     && s.data[oiN].symbol.Length > 0)) {
                                 // auto（ECharts2 缺省）：符号只落在显示
                                 // 标签的主刻度上（升序游标对齐）。
                                 while (tickCur2 < symTicks.Count
@@ -686,11 +693,12 @@ partial class ChartView {
         c.PopClip();
 
         // markPoint：自动 max/min + 显式 marks（仅折线族；points
-        // 系列的标注走值对坐标，见下）。
+        // 系列的标注走值对坐标，见下）。折线没有组内柱偏，axOv 传
+        // 0 走 CatX 类目定位。
         for (int msi = 0; msi < series.Count; msi = msi + 1) {
             ChartSeries ms = series[msi];
             if (!ms.hidden && ms.points.Count < 1 && !ChartView.IsBarFamily(ms.type)) {
-                ChartView.DrawSeriesMarks(app, f, ms, i0, i1, step, half, o);
+                ChartView.DrawSeriesMarks(app, f, ms, i0, i1, step, 0, o);
             }
         }
         // 系列级 markLine（average/min/max/阈值），画在系列之上。
@@ -988,12 +996,14 @@ partial class ChartView {
                     ChartView.BuildPathFxEx(rxsFx, rtFx, smooth, true, topFx, topPath);
                     ChartView.BuildPathFxEx(rxsFx, rbFx, botSmooth, true, botFx, botPath);
                     if (s.areaStyle) {
-                        // ECharts 2 堆积面积 = 实色带（255）；o.gradient
-                        // （邮件营销式纵向渐变）保留半透明衰减。
-                        int fa = o.gradient ? 150 : 255;
-                        int fb = o.gradient ? 40 : 255;
+                        // ECharts2 line.js 堆积面积填充 = 系列色 alpha
+                        // 0.5（zrColor.alpha(defaultColor, 0.5)，约 128/
+                        // 256）；o.gradient（邮件营销式纵向渐变）保留
+                        // 半透明衰减。实色会互相遮盖成不透明的块。
+                        int fa = o.gradient ? 150 : 128;
+                        int fb = o.gradient ? 40 : 128;
                         ChartView.FillBandFx(c, topFx, topPath, botFx, botPath,
-                            s.color, o.gradient, fa, fb, o.gradient ? 90 : 255);
+                            s.color, o.gradient, fa, fb, o.gradient ? 90 : 128);
                     }
                     if (rt.Count > 1) {
                         List<int> grad = s.itemStyle.normal.lineStyle.gradStops;
@@ -1050,15 +1060,20 @@ partial class ChartView {
                             if (s.data[oi2].symbol.Length > 0) { sym2 = s.data[oi2].symbol; }
                             if (s.data[oi2].color != 0) { scol = s.data[oi2].color; }
                             // ECharts 数据级 symbolSize 覆盖（star 15、
-                            // emptypin 8、star6 20…）
+                            // emptypin 8、star6 20…）：值即半径。
                             if (s.data[oi2].sizeSet && s.data[oi2].size > 0) {
-                                pr = s.data[oi2].size / 2;
+                                pr = s.data[oi2].size;
                             }
                         }
                         if (sym2 == "none" || sym2 == "pass") { continue; }
-                        if (s.symbol.Length == 0 && s.showSymbol == 0) { continue; }
+                        // 数据级 symbol 覆盖（mail 的 droplet）不受系列
+                        // showSymbol=0 连坐——ECharts 逐项 symbol 只被
+                        // 数据级 'none' 压掉。
+                        bool ovSym3 = oi2 < s.data.Count
+                            && s.data[oi2].symbol.Length > 0;
+                        if (!ovSym3 && s.symbol.Length == 0 && s.showSymbol == 0) { continue; }
                         if (symTicks != null && s.symbol.Length == 0
-                            && s.showSymbol < 0) {
+                            && s.showSymbol < 0 && !ovSym3) {
                             // auto：符号只落在显示标签的主刻度上。
                             while (tickCur3 < symTicks.Count
                                 && symTicks[tickCur3] < u) {

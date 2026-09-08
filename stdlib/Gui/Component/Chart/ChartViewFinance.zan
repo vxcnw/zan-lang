@@ -414,7 +414,8 @@ partial class ChartView {
                     lbl = Chart.Commas(Chart.PointV(cd.high, ksrc.pointG));
                 }
                 int mrad = app.Scale(10);
-                if (m.sizeSet && m.size > 0) { mrad = m.size / 2; }
+                // ECharts symbolSize 语义 = 半径，不再折半。
+                if (m.sizeSet && m.size > 0) { mrad = m.size; }
                 ChartView.CandleMarkPin(app, c, lx, ly, mrad, col, lbl, mFs, f);
                 anyDrawn = true;
             }

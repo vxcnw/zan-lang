@@ -279,7 +279,7 @@ partial class ChartView {
                         }
                         int jr = sRad;
                         if (s.points[j].sizeSet && s.points[j].size > 0) {
-                            jr = s.points[j].size / 2;
+                            jr = s.points[j].size;
                         } else if (s.symbolSizeFn.Length > 0) {
                             // symbolSize 回调的公式化替代：半径随该点的
                             // 坐标值（真实值）变化（面积∝值用 Sqrt 形）。
@@ -328,7 +328,7 @@ partial class ChartView {
                     pb.points[pj].x, pb.pointG);
                 int pcy = Chart.ValueYF(plotY, plotH, yLo, maxYN,
                     pb.points[pj].y, pb.pointG);
-                int pr = pb.points[pj].sizeSet ? pb.points[pj].size / 2 : rad;
+                int pr = pb.points[pj].sizeSet ? pb.points[pj].size : rad;
                 if (pr < 1) { pr = 1; }
                 long pz = 0;
                 for (int pq = 0; pq < pps.Count; pq = pq + 1) {
@@ -499,7 +499,7 @@ partial class ChartView {
                 ChartSeries bs0 = o.series[bestS];
                 ChartPoint bp0 = bs0.points[bestJ];
                 hitR = Chart.SymbolRadius(bs0.symbolSize, app.Scale(4));
-                if (bp0.sizeSet && bp0.size > 0) { hitR = bp0.size / 2; }
+                if (bp0.sizeSet && bp0.size > 0) { hitR = bp0.size; }
                 if (bs0.symbolSizeFn.Length > 0) {
                     int sv = (bs0.symbolSizeFn == "y" || bs0.symbolSizeFn == "ySqrt")
                         ? Chart.PointV(bp0.y, bs0.pointG)

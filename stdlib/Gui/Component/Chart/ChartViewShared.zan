@@ -1029,8 +1029,18 @@ partial class ChartView {
     /// [i0,i1] 内的最大/最小值；series.marks 的显式项也绘制
     /// （dataIndex 定位；kind=max/min 回退到自动推导的极值）。
     /// 柱状图与折线图共用。f 提供 YOf 映射。
+    /// markPoint 的本系列柱内 x：barX 是类目 0 处本系列柱条中线，
+    /// 数据点挂在第 slot 类目 —— 按类目带宽平移（CatMid 差值含末格
+    /// 余数摊薄，与主循环 bx = CatLeft + g0 + slot*(barW+gap) 精确
+    /// 同式）。barX == 0 是折线模式的哨兵：走数据点 CatX。
+    static int BarMarkX(ChartFrame f, int barX, int slot, int nWin) {
+        if (barX == 0) { return 0; }
+        return barX + f.CatMid(slot, nWin) - f.CatMid(0, nWin);
+    }
+
     static void DrawSeriesMarks(App app, ChartFrame f, ChartSeries s,
-                                int i0, int i1, int step, int half, ChartOption o) {
+                                int i0, int i1, int step, int barX,
+                                ChartOption o) {
         if (!o.markPoint && s.marks.Count < 1) { return; }
         int maxI = ChartView.SeriesMaxIndex(s, i0, i1);
         int minI = ChartView.SeriesMinIndex(s, i0, i1);
@@ -1042,11 +1052,13 @@ partial class ChartView {
             // 不是 "max/min" 字样。
             if (maxI >= 0) {
                 ChartView.MarkAt(app, f, s, maxI, maxI - i0, nWin,
-                    Convert.ToString(s.Value(maxI)), below, 0, "", 0);
+                    Convert.ToString(s.Value(maxI)), below, 0, "", 0,
+                    ChartView.BarMarkX(f, barX, maxI - i0, nWin));
             }
             if (minI >= 0 && minI != maxI) {
                 ChartView.MarkAt(app, f, s, minI, minI - i0, nWin,
-                    Convert.ToString(s.Value(minI)), below, 0, "", 0);
+                    Convert.ToString(s.Value(minI)), below, 0, "", 0,
+                    ChartView.BarMarkX(f, barX, minI - i0, nWin));
             }
         }
         for (int mi = 0; mi < s.marks.Count; mi = mi + 1) {
@@ -1059,37 +1071,39 @@ partial class ChartView {
                 else { idx = 0 - 1; }
             }
             if (idx < i0 || idx > i1 || idx >= s.Count()) { continue; }
-            // 命名标记（ECharts data 项 name，如"最大值"）徽标里
-            // 组合 "name: value"（markPoint.label 默认 {c}），数值
-            // 不能被名字吞掉；{value} 占位仍原样替换。
+            // ECharts markPoint.label 缺省 {c}：徽标里只写数值——
+            // name（年最高/最大值）是 tooltip 元数据，不进徽标。
             string lbl = m.label;
-            if (lbl.Length == 0) {
-                lbl = Convert.ToString(s.Value(idx));
+            if (lbl.IndexOf("{value}") >= 0) {
+                lbl = lbl.Replace("{value}", Convert.ToString(s.Value(idx)));
             } else {
-                string vv = Convert.ToString(s.Value(idx));
-                if (lbl.IndexOf("{value}") >= 0) {
-                    lbl = lbl.Replace("{value}", vv);
-                } else {
-                    lbl = lbl + ": " + vv;
-                }
+                lbl = Convert.ToString(s.Value(idx));
             }
             ChartView.MarkAt(app, f, s, idx, idx - i0, nWin, lbl,
-                o.showValues || s.labelShow, m.color, m.symbol, m.sizeSet ? m.size : 0);
+                o.showValues || s.labelShow, m.color, m.symbol,
+                m.sizeSet ? m.size : 0,
+                ChartView.BarMarkX(f, barX, idx - i0, nWin));
         }
     }
 
     /// 在数据点（类别下标 idx，槽位 slot = idx - i0）上绘制单个
-    /// 标记。无显式 symbol 时画 ECharts 默认的气球徽标（pin）：
-    /// 系列色气球头 + 尾尖搭在符号外缘，**具体数值**白字写在头
-    /// 里——文字住在徽标中，与拐点零重叠。显式 symbol 的标记仍
-    /// 画符号 + 点旁小标签。below 为 true 时徽标翻到点下方——
-    /// 该系列同时显示数值标签时，点上方已被数值占据。
+    /// 标记。无显式 symbol 时画 ECharts 默认的气球徽标（pin，
+    /// _iconPin 几何：尾尖钉在数据点上、头在上方，头半径 =
+    /// symbolSize；label 缺省 {c} 只写数值白字居中）——**具体
+    /// 数值**写在头里，与拐点零重叠。axOv 传入本系列柱条中线在
+    /// 类目 0 处的像素（ECharts2 bar.js xMarkMap：显式/自动
+    /// markPoint 的 x 都是本系列柱内偏移，不是类目带中线；DrawSeriesMarks
+    /// 已按数据点类目平移，折线传 0 走 CatX）。
+    /// 显式 symbol 的标记仍画符号 + 点旁小标签。below 为 true 时
+    /// 徽标翻到点下方——该系列同时显示数值标签时，点上方已被
+    /// 数值占据。
     static void MarkAt(App app, ChartFrame f, ChartSeries s, int idx,
                        int slot, int nWin, string lbl, bool below,
-                       int colorOv, string symbolOv, int sizeOv) {
+                       int colorOv, string symbolOv, int sizeOv, int axOv) {
         Canvas c = app.canvas;
-        int rad = sizeOv > 0 ? sizeOv / 2 : app.Scale(4);
-        int lx = f.CatX(slot, nWin);
+        // ECharts2 symbolSize = 头半径（半宽参数），不折半；缺省 10。
+        int rad = sizeOv > 0 ? sizeOv : app.Scale(10);
+        int lx = axOv != 0 ? axOv : f.CatX(slot, nWin);
         int ly = f.YOf(s.Value(idx), s.axisIndex);
         int col = colorOv != 0 ? colorOv : s.color;
         if (symbolOv.Length > 0) {
@@ -1099,22 +1113,23 @@ partial class ChartView {
         }
         int mFs = Style.FontFallback(app, "small");
         int lw = Canvas.MeasureText(lbl, mFs);
-        // 气球头半径包住文字；尾尖只搭在符号外缘 1px，不盖住拐点。
-        int hr = lw / 2 + app.Scale(5);
+        // 显式 symbolSize 是几何半径（原版 pin 头 = symbolSize 圆、
+        // 尾长 1.5r）；数值挤不进头里才按文字宽度撑头（同原版 auto
+        // max/min 的 getTextWidth/2+5 文字适配送径）。
+        int hr = rad;
+        if (lw + app.Scale(2) > hr * 2) { hr = lw / 2 + app.Scale(5); }
         if (hr < app.Scale(8)) { hr = app.Scale(8); }
-        int tipY = below ? ly + rad + app.Scale(1)
-                         : ly - rad - app.Scale(1);
-        int th = app.Scale(5);
-        int cy = below ? tipY + th + hr : tipY - th - hr;
+        // _iconPin：尾尖在数据点 (ly)，头心在尾尖上方 1.5r。
+        int cy = below ? ly + hr + hr / 2 : ly - hr - hr / 2;
         // 尾巴小三角：apex 在尾尖，底边藏进气球头（头后画、盖住
-        // 底边接缝）。FillPoly1000 顶点千分比，r = th，apex 落在
-        // (0, ±1000)，中心取 tipY ∓ th。
+        // 底边接缝）。FillPoly1000 顶点千分比，r = hr，apex 落在
+        // (0, ±1000)，中心取 cy ∓ hr/2。
         List<int> vx = new List<int>();
         List<int> vy = new List<int>();
         vx.Add(0); vy.Add(below ? 0 - 1000 : 1000);
-        vx.Add(0 - 450); vy.Add(below ? 250 : 0 - 250);
-        vx.Add(450); vy.Add(below ? 250 : 0 - 250);
-        Chart.FillPoly1000(c, lx, below ? tipY + th : tipY - th, th,
+        vx.Add(0 - 300); vy.Add(below ? 250 : 0 - 250);
+        vx.Add(300); vy.Add(below ? 250 : 0 - 250);
+        Chart.FillPoly1000(c, lx, cy + (below ? 0 - hr / 2 : hr / 2), hr,
             vx, vy, col);
         c.FillCircle(lx, cy, hr, col);
         c.DrawText(lx - lw / 2, Canvas.CenterTextY(cy - hr, hr * 2, mFs),

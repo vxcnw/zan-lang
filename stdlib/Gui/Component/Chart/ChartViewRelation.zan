@@ -552,7 +552,9 @@ partial class ChartView {
             for (int i = 0; i < layout.nodes.Count; i = i + 1) {
                 if (layout.nodes[i].name != dd.name) { continue; }
                 if (dd.symbol.Length > 0) { layout.nodes[i].symbol = dd.symbol; }
-                if (dd.sizeSet && dd.size > 0) { layout.nodes[i].size = dd.size; }
+                // ECharts symbolSize 语义 = 半径；ForceNode.size 存直径，
+                // 绘制端取 /2，这里 ×2 回填。
+                if (dd.sizeSet && dd.size > 0) { layout.nodes[i].size = dd.size * 2; }
                 break;
             }
         }

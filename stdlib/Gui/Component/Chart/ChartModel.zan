@@ -71,16 +71,18 @@ class ChartKinds {
 
     /// ECharts series.symbol 形状族规范化：2.2.x 全部符号形状
     /// （circle/emptyCircle/rectangle/diamond/triangle/star/star5/
-    /// star6/arrow/droplet/pin/emptypin）+ "none"（该点不画符号，
-    /// 系列级与数据级都合法；渲染器入口统一跳过）。未知名返回 ""
-    /// （渲染器按族默认圆点）。star5 是 star 的 ECharts2 别名
-    ///（五角星），归一到 star。
+    /// star6/arrow/droplet/pin/emptypin/heart/emptyHeart）+ "none"
+    /// （该点不画符号，系列级与数据级都合法；渲染器入口统一跳过）。
+    /// 未知名返回 ""（渲染器按族默认圆点）。star5 是 star 的
+    /// ECharts2 别名（五角星），归一到 star。
     static string SymbolSanitize(string s) {
         if (s == "star5") { return "star"; }
         if (s == "emptyCircle" || s == "rectangle" || s == "diamond"
             || s == "triangle" || s == "circle" || s == "star"
             || s == "star6" || s == "arrow" || s == "droplet"
             || s == "pin" || s == "emptypin" || s == "none") { return s; }
+        if (s == "heart") { return "heart"; }
+        if (s == "emptyHeart") { return "emptyheart"; }
         return "";
     }
 

@@ -429,18 +429,32 @@ class Chart {
         } else if (shape == "star" || shape == "star5" || shape == "star6"
                    || shape == "arrow"
                    || shape == "droplet" || shape == "pin"
-                   || shape == "emptypin") {
+                   || shape == "emptypin"
+                   || shape == "heart" || shape == "emptyheart") {
             // ECharts 2.2.x 其余符号形状：顶点多边形扫描线填充
-            // （顶点表见 Chart.PolyVerts1000）。emptypin 原语义是
-            // 空心气球，引擎按实心 pin 近似——描边参数不丢。
+            // （顶点表见 Chart.PolyVerts1000）。empty* 变体按原语义
+            // 画白芯（getSymbolShape：empty 符号 color='#fff' 填充、
+            // 色环即本体，环宽缺省 2）。
             List<int> vx = new List<int>();
             List<int> vy = new List<int>();
             Chart.PolyVerts1000(shape, vx, vy);
             Chart.FillPoly1000(c, cx, cy, r, vx, vy, color);
+            if (shape == "emptypin" || shape == "emptyheart") {
+                int ew = borderWidth > 0 ? borderWidth : 2;
+                if (r > ew) {
+                    Chart.FillPoly1000(c, cx, cy, r - ew, vx, vy, 4294967295);
+                }
+            }
         } else if (shape == "emptyCircle") {
-            int th = r / 2;
-            if (th < 1) { th = 1; }
-            c.DrawCircle(cx, cy, r, color, th);
+            // ECharts emptyCircle：白芯 + 色环（折线 emptyColor '#fff'，
+            // 环宽 = borderWidth，缺省取 lineStyle.width，再缺省 2）。
+            // 填充圆在像素中心采样下 dx=r 的格点覆盖为 0（外缘半像素
+            // 落空），白芯抹掉内圈后色环缩进 1px——DrawCircle 在半径
+            // 处再描 1px 把外缘补齐，测试与视觉的环外径都回到 r。
+            int ew = borderWidth > 0 ? borderWidth : 2;
+            c.FillCircle(cx, cy, r, color);
+            if (r > ew) { c.FillCircle(cx, cy, r - ew, 4294967295); }
+            c.DrawCircle(cx, cy, r, color, 1);
         } else {
             c.FillCircle(cx, cy, r, color);
         }
@@ -474,16 +488,19 @@ class Chart {
         }
     }
 
-    /// symbolSize（像素直径，0 = 用 defaultR 族默认）-> 外接半径。
+    /// symbolSize -> 外接半径。ECharts2 语义 symbolSize 是「半宽
+    /// （半径）参数」（config.js markPoint 注释：总宽度为
+    /// symbolSize * 2），传入值本身就是半径，不再折半。
     static int SymbolRadius(int symbolSize, int defaultR) {
-        if (symbolSize > 0) { return symbolSize / 2; }
+        if (symbolSize > 0) { return symbolSize; }
         return defaultR;
     }
 
     /// 符号形状的顶点表（千分比相对坐标，y 向下为正），由
     /// FillPoly1000 缩放到像素。star = 五角星（内接比 382），
     /// star6 = 六角星（内接比 577 ≈ 1/√3），arrow = 上指箭镞，
-    /// droplet = 上尖水滴，pin/emptypin = 地图气球。
+    /// droplet = 上尖水滴，heart = 心形（zrender Heart 贝塞尔
+    /// 采样近似：底尖在下、双瓣在上），pin/emptypin = 地图气球。
     static void PolyVerts1000(string shape, List<int> vx, List<int> vy) {
         if (shape == "star" || shape == "star5") {
             int[] px = new int[] { 0, 225, 951, 363, 588, 0, -588, -363, -951, -225 };
@@ -501,6 +518,14 @@ class Chart {
         } else if (shape == "droplet") {
             int[] px = new int[] { 0, -400, -790, -1000, -790, -400, 0, 400, 790, 1000, 790, 400 };
             int[] py = new int[] { -1000, -500, -180, 150, 480, 730, 820, 730, 480, 150, -180, -500 };
+            for (int i = 0; i < px.Length; i = i + 1) { vx.Add(px[i]); vy.Add(py[i]); }
+        } else if (shape == "heart" || shape == "emptyheart") {
+            // 心形：zrender Heart（a=w/2、b=0.8h、内尖锚在 0.2h 高度）
+            // 两条贝塞尔的采样近似，底尖 (0,1000)、顶瓣 ±(1008,-331)。
+            int[] px = new int[] { 0, 500, 914, 1008, 872, 599, 277, 0,
+                -277, -599, -872, -1008, -914, -500 };
+            int[] py = new int[] { 1000, 667, 151, -331, -711, -927, -910,
+                -600, -910, -927, -711, -331, 151, 667 };
             for (int i = 0; i < px.Length; i = i + 1) { vx.Add(px[i]); vy.Add(py[i]); }
         } else {
             // pin / emptypin：气球头（全径圆） + 下尖尾
@@ -1730,7 +1755,8 @@ class Chart {
                 || cs.type == ChartType.Funnel) && cs.type != leadT;
             if (cs.type == ChartType.Pie && cs.piePerPoint) { ov = true; }
             if (lo != null && ov) { continue; }
-            if (lo != null && lo.legendData.Count > 0) {
+            if (lo != null && lo.legendData != null
+                && lo.legendData.Count > 0) {
                 bool white = false;
                 for (int wl = 0; wl < lo.legendData.Count; wl = wl + 1) {
                     if (lo.legendData[wl] == cs.name) { white = true; break; }
