@@ -1,0 +1,27 @@
+using System;
+namespace Conf;
+
+// 回归(D20):string 无 Equals 实例方法——C# 移植代码里
+// a.Equals(b) 编不过(== 有内容比较,实例方法形态缺失)。
+// 现在 Equals 走与 == 同一 strcmp 内容比较;null 接收者按空串比较
+// (与其他 string 方法的 null 收敛一致),不段退出。
+class Program {
+    static int B(bool b) {
+        return b ? 1 : 0;
+    }
+    static void Main() {
+        string a = "hello";
+        string b = "hell" + "o";
+        Console.WriteLine(B(a.Equals("hello")));
+        Console.WriteLine(B(a.Equals(b)));
+        Console.WriteLine(B(a.Equals("world")));
+        Console.WriteLine(B(a.Equals("")));
+        // null 接收者:按空串语义比较,软收敛
+        string n = null;
+        Console.WriteLine(B(n.Equals("x")));
+        Console.WriteLine(B(n.Equals("")));
+        // 与 == 一致
+        Console.WriteLine(B((a == b) == a.Equals(b)));
+        Console.WriteLine("end");
+    }
+}

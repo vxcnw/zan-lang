@@ -24,6 +24,7 @@ static const zan_builtin_member_t members_string[] = {
     { "ToUpper",     'M', "string ToUpper()" },
     { "ToLower",     'M', "string ToLower()" },
     { "Split",       'M', "List<string> Split(string separator)" },
+    { "Equals",      'M', "bool Equals(string other)" },
     { "ToString",    'M', "string ToString()" },
 };
 
