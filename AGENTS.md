@@ -147,6 +147,17 @@ ZanIDE禁止任何自绘必须全部用标准库组件来完成
     11. When in doubt: surface the problem, never roll back to finish cleanly.
     Full text: `docs/WORKSPACE_CONVENTIONS.md` §10.
 
+13. **经验沉淀纪律：验证过的教训必须进 skill，且持续增删迭代。** 项目级
+    skills 在 `.agents/skills/`（game-online=网游客户端+服务端定式，
+    game-dev=帧循环游戏，app-migration=复刻迁移，gui-design=界面排版，
+    testing-*=各实机验证仪式）。规则：
+    - 会话中**验证过**的新经验（踩坑后成立的解法）当天并入对应 skill，
+      与功能同一提交；跨项目可复用的写通用节，项目专属写项目节。
+    - 被**推翻**的旧经验在同一提交里删除——skill 里不留"可能也对"的
+      僵尸规则，宁缺毋滥。
+    - 每条规则带"为什么"（踩过的坑）；没有坑出处的新增不予合入。
+    - 动手前先查 skill：同类的坑别人踩过就不要再踩一遍。
+
 ## Build / dev quickstart
 
 **The toolchain of each platform is fixed — see [`docs/BUILD_TOOLCHAIN.md`](docs/BUILD_TOOLCHAIN.md).**
