@@ -18,6 +18,30 @@ class OverlayPopup {
     /// 富菜单上一帧悬停到的行（即时模式绘制，用它判断是否值得
     /// 为一次鼠标移动重绘）。
     static int lastRichHover;
+    // 面板层叠遮挡（RenderRich 专用）：后面板绘制前，把画在它之上
+    // 的面板矩形登记进来，行悬停判定跳过遮挡区内的落点。子/孙面板
+    // 左翻（贴右缘放不下时翻到父面板之上）或上钳后与后面板重叠，
+    // 鼠标落点同时落在两层行上；不遮挡的话被盖住的行照样点亮、
+    // 切换子菜单、响应点击——表观正是「指针在前面板上移动，后面
+    // 的菜单被激活」。宽 0 视为无遮挡；设值→绘制→清零成对出现，
+    // 不跨帧留存。两条矩形是因为主面板之上可能同时叠着子与孙两级。
+    static int occlAx;
+    static int occlAy;
+    static int occlAw;
+    static int occlAh;
+    static int occlBx;
+    static int occlBy;
+    static int occlBw;
+    static int occlBh;
+    /// 子菜单悬停宽限：指针从父行斜穿父面板其它行去子面板
+    /// （子面板贴边被上钳，必然要掠过别行）的途中，掠过的
+    /// 那几帧不该立刻关掉已开的子菜单——记下开始掠过的行与
+    /// 时刻，满宽限仍停在非子菜单行上才关/换。第二组同义，
+    /// 用于孙级面板。
+    static int subGraceRow;
+    static int subGraceMs;
+    static int subGraceRow2;
+    static int subGraceMs2;
     int x;
     int y;
     int w;
@@ -1164,15 +1188,19 @@ class OverlayPopup {
     /// 条目多，一行 26 逻辑像素才能一屏放下。
     static int MenuRowH(App app) { return app.Scale(26); }
 
-    /// 富项目列表的可视高度：条目总高被 maxRows 行的可点击
-    /// 高度钳制（maxRows <= 0 时整高）。定位与渲染共用同一
+    /// 富项目列表的可视高度：窗口装得下全部条目时整高显示
+    /// （行数上限只是小窗口的兜底，不该在满屏窗口里制造滚动条）；
+    /// 内容高过窗口时取行数上限与窗口可用高的较小者——两种
+    /// 情况都出滚动条而不是把面板截出屏。定位与渲染共用同一
     /// 口径，宿主传进来的 y 才不会按整高翻转到触发器上方。
     static int RichViewH(App app, List<MenuItem> items, int maxRows) {
         int fullH = OverlayPopup.RichHeight(app, items);
         if (maxRows <= 0) { return fullH; }
+        int avail = app.canvas.Height() - app.Scale(8);
+        if (fullH <= avail) { return fullH; }
         int cap = app.Scale(12) + maxRows * OverlayPopup.MenuRowH(app);
-        if (fullH > cap) { return cap; }
-        return fullH;
+        if (cap < avail) { return cap; }
+        return avail;
     }
 
     /// 富项目列表的面板高度（分隔线和标题比
@@ -1204,6 +1232,37 @@ class OverlayPopup {
             else { yy = yy + rowH; }
         }
         return yy;
+    }
+
+    /// 登记本帧绘制的遮挡矩形（宽 0 = 无）。每次 PaintRichPanel
+    /// 绘制前由 RenderRich 按面板 z 序设置，绘制后立即清零。
+    static void SetOccluders(int ax, int ay, int aw, int ah,
+                             int bx, int by, int bw, int bh) {
+        OverlayPopup.occlAx = ax;
+        OverlayPopup.occlAy = ay;
+        OverlayPopup.occlAw = aw;
+        OverlayPopup.occlAh = ah;
+        OverlayPopup.occlBx = bx;
+        OverlayPopup.occlBy = by;
+        OverlayPopup.occlBw = bw;
+        OverlayPopup.occlBh = bh;
+    }
+
+    /// 落点是否在本帧登记的遮挡矩形内——被画在更上层面板盖住的
+    /// 区域里，后面板的行不得再响应悬停（激活用的是同一批悬停
+    /// 结果，随之一起被挡住）。
+    static bool PointOccluded(int mx, int my) {
+        if (OverlayPopup.occlAw > 0
+            && mx >= OverlayPopup.occlAx
+            && mx < OverlayPopup.occlAx + OverlayPopup.occlAw
+            && my >= OverlayPopup.occlAy
+            && my < OverlayPopup.occlAy + OverlayPopup.occlAh) { return true; }
+        if (OverlayPopup.occlBw > 0
+            && mx >= OverlayPopup.occlBx
+            && mx < OverlayPopup.occlBx + OverlayPopup.occlBw
+            && my >= OverlayPopup.occlBy
+            && my < OverlayPopup.occlBy + OverlayPopup.occlBh) { return true; }
+        return false;
     }
 
     /// 在 (px,py) 处绘制一个富菜单面板（图标 / 分隔线 / 标题 / 子菜单
@@ -1294,7 +1353,8 @@ class OverlayPopup {
                 bool vis = rowY + rowH > py && rowY < py + ph;
                 bool hovered = vis
                     && app.mouseX >= px && app.mouseX < hoverMaxX
-                    && app.mouseY >= rowY && app.mouseY < rowY + rowH;
+                    && app.mouseY >= rowY && app.mouseY < rowY + rowH
+                    && !OverlayPopup.PointOccluded(app.mouseX, app.mouseY);
                 int fg = itemFg;
                 int hoverBg = itemHoverBg;
                 if (m.disabled) { fg = itemDisabledFg; }
@@ -1414,34 +1474,26 @@ class OverlayPopup {
         }
 
         app.BlockHitsBelow();
-        // 富菜单行由几何驱动：不注册命中 id，因此面板内移动指针
-        // 不会改变悬停 id，也就不会安排重绘。只在悬停行真的变了时
-        // 重绘，而不是菜单开着就每个鼠标移动事件重绘一整帧。
+        // 富菜单行由几何驱动：悬停/激活都按几何解析，只在悬停行
+        // 真的变了时重绘。几何解析不感知层叠，重叠面板（子/孙面板
+        // 左翻或上钳盖住后面板）里同一落点会同时命中两层行——
+        // 所以后面板绘制前，先把画在它之上的面板矩形登记为遮挡
+        // （SetOccluders），被盖住的行不再点亮/切换/激活。
         int barW = 0;
         if (maxScroll > 0) { barW = app.Scale(10); }
-        int overRow = OverlayPopup.PaintRichPanel(app, items, px, py, pw, viewH,
-            baseId, scrollY, barW);
-        if (overRow != OverlayPopup.lastRichHover) {
-            OverlayPopup.lastRichHover = overRow;
-            app.RequestRedraw();
-        }
-
-        // 跟踪当前打开的（若有）子菜单。悬停子菜单
-        // 父项时打开；光标位于父项或其子面板上时保持打开；
-        // 光标移到其它（非子菜单）行时关闭。
+        // 主面板最先绘制。子/孙面板矩形只依赖当前打开状态与面板
+        // 几何，这里按 curSub/curSub2 预先算出（稳态下与本帧实际
+        // 绘制位置一致），供遮挡与后面的悬停判定共用。
         int curSub = subOpen.Get();
-        bool overParentSub = overRow >= 0 && overRow < n && items[overRow].kind == 3;
-        bool overOtherRow = overRow >= 0 && !overParentSub;
-
         int childX = 0;
         int childY = 0;
         int childW = 0;
         int childH = 0;
         bool haveChild = false;
         if (curSub >= 0 && curSub < n && items[curSub].kind == 3) {
-            List<MenuItem> kids = items[curSub].children;
-            childW = OverlayPopup.RichWidth(app, kids);
-            childH = OverlayPopup.RichHeight(app, kids);
+            List<MenuItem> ckids = items[curSub].children;
+            childW = OverlayPopup.RichWidth(app, ckids);
+            childH = OverlayPopup.RichHeight(app, ckids);
             childX = px + pw - app.Scale(4);
             if (childX + childW > cw - margin) { childX = px - childW + app.Scale(4); }
             childY = OverlayPopup.RichRowTop(app, items, curSub, py + app.Scale(6))
@@ -1450,14 +1502,69 @@ class OverlayPopup {
             if (childY < margin) { childY = margin; }
             haveChild = true;
         }
+        int occGx = 0;
+        int occGy = 0;
+        int occGw = 0;
+        int occGh = 0;
+        if (richSub2 && haveChild) {
+            int occSub2 = subOpen2.Get();
+            List<MenuItem> ckids = items[curSub].children;
+            if (occSub2 >= 0 && occSub2 < ckids.Count
+                && ckids[occSub2].kind == 3) {
+                List<MenuItem> okids = ckids[occSub2].children;
+                occGw = OverlayPopup.RichWidth(app, okids);
+                occGh = OverlayPopup.RichHeight(app, okids);
+                occGx = childX + childW - app.Scale(4);
+                if (occGx + occGw > cw - margin) { occGx = childX - occGw + app.Scale(4); }
+                occGy = OverlayPopup.RichRowTop(app, ckids, occSub2,
+                    childY + app.Scale(6));
+                if (occGy + occGh > ch - margin) { occGy = ch - margin - occGh; }
+                if (occGy < margin) { occGy = margin; }
+            }
+        }
+        OverlayPopup.SetOccluders(childX, childY, childW, childH,
+            occGx, occGy, occGw, occGh);
+        int overRow = OverlayPopup.PaintRichPanel(app, items, px, py, pw, viewH,
+            baseId, scrollY, barW);
+        OverlayPopup.SetOccluders(0, 0, 0, 0, 0, 0, 0, 0);
+        if (overRow != OverlayPopup.lastRichHover) {
+            OverlayPopup.lastRichHover = overRow;
+            app.RequestRedraw();
+        }
+
+        // 跟踪当前打开的（若有）子菜单。悬停子菜单
+        // 父项时打开；光标位于父项或其子面板上时保持打开；
+        // 光标移到其它（非子菜单）行时关闭。
+        bool overParentSub = overRow >= 0 && overRow < n && items[overRow].kind == 3;
+        bool overOtherRow = overRow >= 0 && !overParentSub;
+
         bool overChild = haveChild
             && app.mouseX >= childX && app.mouseX < childX + childW
             && app.mouseY >= childY && app.mouseY < childY + childH;
 
         int newSub = curSub;
-        if (overParentSub) { newSub = overRow; }
-        else if (overChild) { newSub = curSub; }
-        else if (overOtherRow) { newSub = 0 - 1; }
+        if (overParentSub) {
+            newSub = overRow;
+            OverlayPopup.subGraceRow = 0 - 1;
+        } else if (overChild) {
+            newSub = curSub;
+            OverlayPopup.subGraceRow = 0 - 1;
+        } else if (overOtherRow) {
+            // 立即关会把「斜穿父面板去子面板」的路径打断：指针
+            // 掠过别的行只是路过，满宽限还停在这行上才是真要关。
+            if (curSub < 0) { newSub = 0 - 1; }
+            else if (OverlayPopup.subGraceRow == overRow
+                     && Window.GetTickMs() - OverlayPopup.subGraceMs >= 400) {
+                newSub = 0 - 1;
+            } else {
+                if (OverlayPopup.subGraceRow != overRow) {
+                    OverlayPopup.subGraceRow = overRow;
+                    OverlayPopup.subGraceMs = Window.GetTickMs();
+                }
+                newSub = curSub;
+            }
+        }
+        if (newSub == 0 - 1) { OverlayPopup.subGraceRow = 0 - 1; }
         if (newSub != curSub) {
             subOpen.Set(newSub);
             app.RequestRedraw();
@@ -1470,6 +1577,15 @@ class OverlayPopup {
         int chd = 0;
         bool childOpen = false;
         List<MenuItem> childKids = null;
+        // 已开孙面板的矩形（按 curSub2 的几何摆位）：既在子面板
+        // 绘制时作遮挡（孙面板盖住子面板时，被盖住的子面板行不得
+        // 再响应悬停/点击），也在下方 richSub2 段做「指针进面板
+        // 即保持」的判定。必须在子面板 PaintRichPanel 之前算好。
+        bool hadGrand = false;
+        int hx = 0;
+        int hy = 0;
+        int hw = 0;
+        int hh = 0;
         if (newSub >= 0 && newSub < n && items[newSub].kind == 3) {
             childKids = items[newSub].children;
             cwd = OverlayPopup.RichWidth(app, childKids);
@@ -1480,9 +1596,26 @@ class OverlayPopup {
                 - scrollY;
             if (cy + chd > ch - margin) { cy = ch - margin - chd; }
             if (cy < margin) { cy = margin; }
+            childOpen = true;
+            int occSub2 = subOpen2.Get();
+            hadGrand = richSub2 && occSub2 >= 0 && occSub2 < childKids.Count
+                && childKids[occSub2].kind == 3;
+            if (hadGrand) {
+                List<MenuItem> hk = childKids[occSub2].children;
+                hw = OverlayPopup.RichWidth(app, hk);
+                hh = OverlayPopup.RichHeight(app, hk);
+                hx = cx + cwd - app.Scale(4);
+                if (hx + hw > cw - margin) { hx = cx - hw + app.Scale(4); }
+                hy = OverlayPopup.RichRowTop(app, childKids, occSub2,
+                    cy + app.Scale(6));
+                if (hy + hh > ch - margin) { hy = ch - margin - hh; }
+                if (hy < margin) { hy = margin; }
+            }
+            // 无孙面板时 hw=0，PointOccluded 视为无遮挡。
+            OverlayPopup.SetOccluders(hx, hy, hw, hh, 0, 0, 0, 0);
             childOver = OverlayPopup.PaintRichPanel(app, childKids, cx, cy, cwd, chd,
                 baseId + 128, 0, 0);
-            childOpen = true;
+            OverlayPopup.SetOccluders(0, 0, 0, 0, 0, 0, 0, 0);
         } else {
             // 子面板没开也要占掉它的 barrier id：覆盖层 AllocId 按
             // 注册顺序发号，子面板开/关增减一个命中区会把其后注册
@@ -1506,35 +1639,38 @@ class OverlayPopup {
             int curSub2 = subOpen2.Get();
             bool overChildSub = childOpen && childOver >= 0
                 && childOver < childKids.Count && childKids[childOver].kind == 3;
-            // 当前已开的孙面板矩形（按 curSub2 的几何摆位），指针
-            // 进面板即保持——与子面板「悬停父项或其子面板都保持」
-            // 同一条规则。
-            bool hadGrand = childOpen && curSub2 >= 0
-                && curSub2 < childKids.Count && childKids[curSub2].kind == 3;
-            int hx = 0;
-            int hy = 0;
-            int hw = 0;
-            int hh = 0;
-            if (hadGrand) {
-                List<MenuItem> hk = childKids[curSub2].children;
-                hw = OverlayPopup.RichWidth(app, hk);
-                hh = OverlayPopup.RichHeight(app, hk);
-                hx = cx + cwd - app.Scale(4);
-                if (hx + hw > cw - margin) { hx = cx - hw + app.Scale(4); }
-                hy = OverlayPopup.RichRowTop(app, childKids, curSub2,
-                    cy + app.Scale(6));
-                if (hy + hh > ch - margin) { hy = ch - margin - hh; }
-                if (hy < margin) { hy = margin; }
-            }
+            // 当前已开的孙面板矩形（hadGrand + hx/hy/hw/hh）已在
+            // 子面板绘制前算好（兼作那次绘制的遮挡）；指针进面板
+            // 即保持——与子面板「悬停父项或其子面板都保持」同一条
+            // 规则。
             bool overGrand = hadGrand && app.mouseX >= hx
                 && app.mouseX < hx + hw && app.mouseY >= hy
                 && app.mouseY < hy + hh;
 
             int newSub2 = curSub2;
             if (!childOpen || newSub != curSub) { newSub2 = 0 - 1; }
-            else if (overChildSub) { newSub2 = childOver; }
-            else if (overGrand) { newSub2 = curSub2; }
-            else if (childOver >= 0) { newSub2 = 0 - 1; }
+            else if (overChildSub) {
+                newSub2 = childOver;
+                OverlayPopup.subGraceRow2 = 0 - 1;
+            } else if (overGrand) {
+                newSub2 = curSub2;
+                OverlayPopup.subGraceRow2 = 0 - 1;
+            } else if (childOver >= 0) {
+                // 与子面板同一条宽限规则：从孙父行斜穿子面板
+                // 其它行去孙面板的途中不立刻收起孙面板。
+                if (curSub2 < 0) { newSub2 = 0 - 1; }
+                else if (OverlayPopup.subGraceRow2 == childOver
+                         && Window.GetTickMs() - OverlayPopup.subGraceMs2 >= 400) {
+                    newSub2 = 0 - 1;
+                } else {
+                    if (OverlayPopup.subGraceRow2 != childOver) {
+                        OverlayPopup.subGraceRow2 = childOver;
+                        OverlayPopup.subGraceMs2 = Window.GetTickMs();
+                    }
+                    newSub2 = curSub2;
+                }
+            }
+            if (newSub2 == 0 - 1) { OverlayPopup.subGraceRow2 = 0 - 1; }
             if (newSub2 != curSub2) {
                 subOpen2.Set(newSub2);
                 app.RequestRedraw();
@@ -1642,9 +1778,13 @@ class OverlayPopup {
             subOpen2.Set(0 - 1);
             app.RequestRedraw();
         }
-        // 窗口失焦（事件 9，或本帧查询到焦点已不在本窗口）时
-        // 同样关闭：切到别的窗口后菜单不该悬在非活动窗口上。
-        if (kind == 9 || !app.window.IsFocused()) {
+        // 窗口失焦（事件 9）时关闭：切到别的窗口后菜单不该悬在
+        // 非活动窗口上。只认事件、不再逐帧轮询焦点：从未持有
+        // 焦点的窗口（后台启动、自动化注入驱动的会话）会被轮询
+        // 误判成「刚失焦」，菜单连同其子菜单链开一帧即关——
+        // 表观正是「悬停展开子菜单时整条菜单自动消失」。真实
+        // 失焦在 Windows 与 X11 都有失焦事件（kind 9）兜底。
+        if (kind == 9) {
             openFlag.Set(false);
             subOpen.Set(0 - 1);
             subOpen2.Set(0 - 1);
