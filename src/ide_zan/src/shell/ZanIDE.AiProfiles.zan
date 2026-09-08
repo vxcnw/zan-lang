@@ -1737,11 +1737,13 @@ partial class ZanIDE {
     /// .zan sources plus .zform and .zscene design documents (which zanc
     /// compiles directly; their Main is projected by formgen/scenegen, and
     /// only the first input's Main is emitted, so several designs can be
-    /// compiled together) - skipping IDE temp files (names starting with ".")
-    /// and build/publish output directories.
+    /// compiled together) plus saved user components (.zcomp, which the
+    /// generators expand into every design that references one) - skipping
+    /// IDE temp files (names starting with ".") and build/publish output
+    /// directories.
     static void GatherZanFiles(string dir, List<string> outp) {
         DirectoryTree.FilesInto(outp, dir,
-            PathFilter.Only(".zan .zform .zscene")
+            PathFilter.Only(".zan .zform .zscene .zcomp")
                 .Skip("publish build bin obj dist tools")
                 .Dots(true, true));
     }

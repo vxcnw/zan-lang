@@ -474,6 +474,14 @@ static bool zan_is_design_path(const char *p) {
            (n > 7 && strcmp(p + n - 7, ".zscene") == 0);
 }
 
+/* A saved user component (designer "save as component"): pure design data
+ * the generators expand into every referencing .zform. Not a translatable
+ * design document itself, and never parsed as Zan source. */
+bool zan_is_zcomp_path(const char *p) {
+    size_t n = strlen(p);
+    return n > 6 && strcmp(p + n - 6, ".zcomp") == 0;
+}
+
 static char *zan_read_file(const char *path, size_t *len_out) {
     FILE *f = fopen(path, "rb");
     if (!f) return NULL;
@@ -560,9 +568,34 @@ char **zan_gen_design(const char *stdlib_root, const char *const *paths,
         json_arr_add(files, f);
         free(text);
     }
+    /* Saved user components ride the same input list; the generator indexes
+     * them by file base name and expands every "ref" that points at one. */
+    json_value *comps = json_new_arr();
+    for (size_t i = 0; i < count; i++) {
+        if (!zan_is_zcomp_path(paths[i])) continue;
+        size_t clen = 0;
+        char *ctext = zan_read_file(paths[i], &clen);
+        if (!ctext) {
+            fprintf(stderr, "error: cannot read '%s'\n", paths[i]);
+            json_free(files);
+            json_free(comps);
+            free(outs);
+            return NULL;
+        }
+        const char *cbody = ctext;
+        if (clen >= 3 && (unsigned char)cbody[0] == 0xEF &&
+            (unsigned char)cbody[1] == 0xBB && (unsigned char)cbody[2] == 0xBF)
+            cbody += 3;
+        json_value *c = json_new_obj();
+        json_obj_set(c, "name", json_new_str(paths[i]));
+        json_obj_set(c, "text", json_new_str(cbody));
+        json_arr_add(comps, c);
+        free(ctext);
+    }
     json_value *req = json_new_obj();
     json_obj_set(req, "mode", json_new_str("design"));
     json_obj_set(req, "files", files);
+    json_obj_set(req, "components", comps);
     char *meta = json_serialize(req);
     json_free(req);
 

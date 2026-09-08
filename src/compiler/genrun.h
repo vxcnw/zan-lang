@@ -19,6 +19,7 @@
 #define ZAN_GENRUN_H
 
 #include <stddef.h>
+#include <stdbool.h>
 
 struct zan_ast_node;
 struct zan_arena;
@@ -48,6 +49,10 @@ int zan_gen_run(const char *exe, const char *meta_path, const char *out_path);
  * `stdlib_root` is needed only when a design file is present. */
 char **zan_gen_design(const char *stdlib_root, const char *const *paths,
                       size_t count);
+
+/* True when `p` is a saved user component (".zcomp"): design data consumed
+ * by the generators, never parsed as Zan source. */
+bool zan_is_zcomp_path(const char *p);
 
 /* Run the Zan-scripted code generators (the "codegen" mode: jsongen/dbgen/
  * routegen) over the compilation unit. Exports the metadata, spawns the

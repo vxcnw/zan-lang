@@ -1,0 +1,109 @@
+using System;
+using System.Json;
+using System.Collections.Generic;
+using Gui;
+using Gui.Widget;
+using Gui.Designer;
+
+/// Headless acceptance for saved user components as *references* in the
+/// form designer: dropping a component places one ref node (no inlined
+/// copy), the .zform round-trips {"kind":X,"ref":X}, the canvas preview
+/// builds the component's real widget tree via FormBuilder, and "unpack"
+/// splices an independent inline copy back in.
+class CompRefDesignerTest {
+    static int fails;
+
+    static void Ok(string what, bool cond) {
+        if (cond) { return; }
+        fails = fails + 1;
+        Console.WriteLine("FAIL " + what);
+    }
+
+    static void Eq(string what, string got, string want) {
+        if (got == want) { return; }
+        fails = fails + 1;
+        Console.WriteLine("FAIL " + what + ": got '" + got + "' want '" + want + "'");
+    }
+
+    static string CompDoc() {
+        return "{\"name\":\"BadgeCard\",\"role\":\"control\","
+            + "\"winW\":260,\"winH\":120,\"layoutMode\":0,"
+            + "\"fields\":["
+            + "{\"kind\":\"Label\",\"label\":\"inner title\",\"name\":\"InnerTitle\","
+            + "\"span\":24,\"fx\":16,\"fy\":12,\"fw\":200,\"fh\":24,\"options\":[]},"
+            + "{\"kind\":\"Button\",\"label\":\"Go\",\"name\":\"InnerBtn\","
+            + "\"span\":24,\"fx\":16,\"fy\":48,\"fw\":120,\"fh\":28,\"options\":[]}"
+            + "]}";
+    }
+
+    static void Main() {
+        fails = 0;
+
+        Designer d = new Designer();
+        List<UserComponent> comps = new List<UserComponent>();
+        comps.Add(new UserComponent("BadgeCard", CompDoc()));
+        d.SetUserComponents(comps);
+
+        // ---- drop = one reference node, sized from the component doc ----
+        d.AddUserComponent(0);
+        FormField f = d.sel;
+        Ok("ref node selected", f != null);
+        if (f == null) { Console.WriteLine("CD_FAIL"); return; }
+        Eq("ref kind", f.customKind, "BadgeCard");
+        Ok("ref flagged", f.compRef);
+        Eq("ref default w", Convert.ToString(f.fw), "260");
+        Eq("ref default h", Convert.ToString(f.fh), "120");
+        Eq("one top-level field", Convert.ToString(d.fields.Count), "1");
+
+        // The saved design carries the ref, not the inlined tree.
+        string saved = d.SaveJson();
+        JsonValue doc = JsonValue.ParseLenient(saved);
+        JsonValue fs = doc.Get("fields");
+        Ok("saved fields", fs != null && fs.Count() == 1);
+        JsonValue f0 = fs.At(0);
+        Eq("saved ref key", f0.Str("ref", ""), "BadgeCard");
+        Ok("saved ref has no inlined kids", !f0.Has("kids"));
+
+        // ---- the ref round-trips through Load/Save ----
+        d.LoadJson(saved);
+        Ok("reload clean", !d.loadError);
+        Ok("reloaded a ref", d.fields[0].compRef);
+        Eq("reloaded ref name", d.fields[0].customKind, "BadgeCard");
+        string again = d.SaveJson();
+        JsonValue doc2 = JsonValue.ParseLenient(again);
+        JsonValue fs2 = doc2.Get("fields");
+        Ok("round trip fields", fs2 != null && fs2.Count() == 1);
+        Eq("ref survives round trip",
+            fs2 == null ? "" : fs2.At(0).Str("ref", ""), "BadgeCard");
+
+        // ---- canvas preview builds the component's real widgets ----
+        Control pv = d.PvCompCtl(d.fields[0], 260, 120);
+        Ok("preview built", pv != null);
+        if (pv != null) {
+            // Flow docs build into a docked flow container; the component's
+            // widgets live inside. Label text syncs the node name, so the
+            // label is findable by caption, the button by design name.
+            Ok("preview label", pv.Find("inner title") != null);
+            Ok("preview button", pv.Find("InnerBtn") != null);
+        }
+        // Preview off -> the designer falls back to the placeholder chip.
+        d.fields[0].pvPreview = false;
+        // (placeholder path draws via canvas; nothing to assert headlessly
+        // beyond the flag round-tripping)
+        d.fields[0].pvPreview = true;
+
+        // ---- unpack splices an independent inline copy ----
+        d.UnpackUserComponent(d.fields[0]);
+        Ok("unpack replaced the ref", !d.fields[0].compRef);
+        Eq("unpack head label", d.fields[0].label, "BadgeCard");
+        Eq("unpack head kids", Convert.ToString(d.fields[0].kids.Count), "2");
+        Ok("unpack kept the name", d.fields[0].fname == d.fields[0].name
+            && d.fields[0].fname.Length > 0);
+        JsonValue doc3 = JsonValue.ParseLenient(d.SaveJson());
+        JsonValue fs3 = doc3.Get("fields");
+        Ok("unpacked design has no ref",
+            fs3 == null || fs3.At(0).Str("ref", "") == "");
+
+        if (fails == 0) { Console.WriteLine("COMPREF_DESIGNER_OK"); }
+    }
+}

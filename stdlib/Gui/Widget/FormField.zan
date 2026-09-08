@@ -42,6 +42,14 @@ class FormField : Control {
     /// Project component class name. A non-empty value marks a custom kind
     /// and is serialized directly so JSON round-trips preserve the class.
     string customKind;
+    /// 该字段是一个「已保存用户组件」的引用节点（而非项目源码
+    /// 类）：.zform 里写成 {"kind":名,"ref":名,...}，组件设计
+    /// 的每次进化自动跟随所有实例；GenForm 编译期按 ref 展开
+    /// 组件文档，画布上按组件文档做真控件预览。
+    bool compRef;
+    /// 引用节点的画布真控件预览开关（false = 显示占位块，
+    /// 序列化为 "pvOff": true）。
+    bool pvPreview;
     /// 是否必填（提交校验标记）。
     bool required;
     /// switch 字段的默认开启状态（ftype 7）。
@@ -124,6 +132,8 @@ class FormField : Control {
         locked = false;
         dockSide = 0;
         customKind = "";
+        compRef = false;
+        pvPreview = true;
         options = new List<string>();
         kids = new List<FormField>();
         childTab = 0;
@@ -306,6 +316,8 @@ class FormField : Control {
         f.name = fname;
         f.placeholder = placeholder;
         f.customKind = customKind;
+        f.compRef = compRef;
+        f.pvPreview = pvPreview;
         f.required = required;
         f.defOn = defOn;
         f.wrap = wrap;

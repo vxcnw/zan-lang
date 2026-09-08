@@ -1,0 +1,62 @@
+using System;
+using Gui;
+using Gui.Widget;
+
+/// End-to-end check for saved user components (.zcomp) referenced from a
+/// design: zanc's generator expands {"kind":"BadgeCard","ref":"BadgeCard"}
+/// into the component's field tree, so the compiled control owns the
+/// component's widgets plus the named Panel shell ("Card1"). Internals stay
+/// private: no typed field is projected for them (this file would not
+/// compile if `Card1_InnerTitle` were declared) — they stay reachable at
+/// runtime only, under their shell-prefixed names.
+partial class CompRefApp {
+    void OnInit() {
+    }
+}
+
+class CompRefTest {
+    static int fails;
+
+    static void Ok(string what, bool cond) {
+        if (cond) { return; }
+        fails = fails + 1;
+        Console.WriteLine("FAIL " + what);
+    }
+
+    static void Eq(string what, string got, string want) {
+        if (got == want) { return; }
+        fails = fails + 1;
+        Console.WriteLine("FAIL " + what + ": got '" + got + "' want '" + want + "'");
+    }
+
+    static void Main() {
+        fails = 0;
+
+        CompRefApp app = new CompRefApp();
+
+        // The ref node became a typed Panel shell named after it.
+        CompRefTest.Eq("shell kind", app.Card1.Kind(), "Panel");
+        CompRefTest.Eq("shell name", app.Card1.name, "Card1");
+
+        // The component's widgets landed inside the shell as real controls.
+        Ok("shell has children", app.Card1.ChildCount() == 2);
+
+        // The Label carries its designed caption; controls whose text prop
+        // syncs the node name (Label) are renamed to it, so it is found by
+        // caption rather than by prefixed design name.
+        Control title = app.Card1.Find("inner title");
+        Ok("inner label by caption", title != null);
+
+        // The Button keeps its shell-prefixed design name and its text.
+        Control btn = app.Card1.Find("Card1_InnerBtn");
+        Ok("inner button found", btn != null);
+        if (btn != null) {
+            CompRefTest.Eq("inner button text", btn.GetProp("text"), "Go");
+        }
+
+        // The window's own fields are untouched.
+        CompRefTest.Eq("outer text", app.Outer.GetProp("text"), "outer");
+
+        if (fails == 0) { Console.WriteLine("COMPREF_OK"); }
+    }
+}

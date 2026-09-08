@@ -143,6 +143,14 @@ partial class Designer {
             ck.str = f.customKind;
             ps.Add(ck);
         }
+        if (f.compRef) {
+            PropSpec pv = PropSpec.Bool("pvOff", Designer.T("Canvas preview", "画布预览"));
+            pv.flag = f.pvPreview;
+            pv.tip = Designer.T(
+                "Render the referenced component's real widgets on the canvas; turn off to show a placeholder chip.",
+                "在画布上按组件设计渲染真控件预览；关闭后显示占位块。");
+            ps.Add(pv);
+        }
         PropSpec req = PropSpec.Bool("required", Designer.T("Required", "必填"));
         req.flag = f.required;
         req.tip = Designer.T(
@@ -239,6 +247,18 @@ partial class Designer {
         f.name = f.fname;
         if (f.span < 1) { f.span = 1; }
         if (f.span > 24) { f.span = 24; }
+
+        // 引用节点的逃生门：解包成内联副本后即可就地改内部
+        // （代价是与组件脱钩，组件进化不再跟随）。
+        if (f.compRef) {
+            int ubId = SmallBtn(app, Designer.T("Unpack to inline copy", "解包为内联副本"),
+                0, ix, iy, iw);
+            if (Ui.Clicked(app, ubId)) {
+                this.UnpackUserComponent(f);
+                app.RequestRedraw();
+            }
+            iy = iy + app.Scale(34);
+        }
 
         // 双向绑定选择器：从配对的代码文件扫描出的变量。
         if (bindVars.Count > 0) {
@@ -910,6 +930,10 @@ partial class Designer {
     JsonValue FieldJson(FormField f) {
         JsonValue o = JsonValue.NewObject();
         o.Put("kind", JsonValue.NewStr(f.KindName()));
+        // 用户组件引用节点：显式携带 ref，GenForm 编译期据此
+        // 展开组件文档（ProjectComponents 源码类没有 ref，仍走
+        // new <Kind>()）。
+        if (f.compRef) { o.Put("ref", JsonValue.NewStr(f.customKind)); }
         o.Put("label", JsonValue.NewStr(f.label));
         o.Put("name", JsonValue.NewStr(f.fname));
         o.Put("placeholder", JsonValue.NewStr(f.placeholder));
@@ -928,6 +952,7 @@ partial class Designer {
             o.Put("alt", JsonValue.NewStr(f.altRects));
         }
         if (f.locked) { o.Put("locked", JsonValue.NewBool(true)); }
+        if (f.compRef && !f.pvPreview) { o.Put("pvOff", JsonValue.NewBool(true)); }
         o.Put("defOn", JsonValue.NewBool(f.defOn));
         // 外壳类总是写出停靠边：编译期对它们有默认边
         // （工具条贴顶、状态栏贴底、停靠面板填充），显式的
@@ -1221,6 +1246,18 @@ partial class Designer {
         } else if (f.ftype != 100) {
             f.kind = FormField.KindForType(f.ftype);
         }
+        // 用户组件引用：ref 键是权威标记（名字与 kind 相同）。
+        // 组件可以故意与内置控件同名，所以 ref 出现时强制回到
+        // 自定义组件形态。
+        if (o.Str("ref", "") != "") {
+            f.compRef = true;
+            f.customKind = o.Str("ref", "");
+            f.kind = f.customKind;
+            f.ftype = 100;
+        } else {
+            f.compRef = false;
+        }
+        f.pvPreview = !o.Bool("pvOff", false);
         // 类型是从 kind 反查出来的，构造时按输入框播下的默认标题 /
         // 占位得跟着换成真实类型的：否则一个没写 label 的 Panel 会
         // 被当成「Text field / Please enter」显示，写回时还会把这两个
@@ -1299,7 +1336,7 @@ partial class Designer {
             || k == "fw" || k == "fh" || k == "alt" || k == "locked"
             || k == "defOn" || k == "dock" || k == "childTab"
             || k == "activeTab" || k == "options" || k == "kids"
-            || k == "change";
+            || k == "change" || k == "ref" || k == "pvOff";
     }
 
     /// 字段总数（含嵌套容器子级）；加载后为唯一名计数器

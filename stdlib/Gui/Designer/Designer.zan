@@ -1,4 +1,5 @@
 using System;
+using System.Json;
 using Gui.Widget;
 using Gui;
 using Gui.Component;
@@ -296,6 +297,13 @@ partial class Designer {
     List<UserComponent> userComps;
     bool saveCompRequested;
 
+    // 引用节点画布预览的构建缓存：key = 代次|组件名|宽x高。
+    // 组件文档只在加载/保存时变（SetUserComponents 递增代次），
+    // 尺寸变化才重建 FormBuilder 树，其余帧只重渲染。
+    List<string> pvCompKeys;
+    List<Control> pvCompCtls;
+    int pvCompGen;
+
     /// 切换被设计窗口的布局模型。宿主在打开一份设计时
     /// 调用（.zform 里存了 layoutMode），设计器自己不提供
     /// 切换命令：两种布局不共享坐标，来回切会丢摆放。
@@ -446,6 +454,9 @@ partial class Designer {
         this.jsonOpen = false;
         this.userComps = new List<UserComponent>();
         this.saveCompRequested = false;
+        this.pvCompKeys = new List<string>();
+        this.pvCompCtls = new List<Control>();
+        this.pvCompGen = 0;
     }
 
     /// 把工具箱滚到末尾。
@@ -559,9 +570,19 @@ partial class Designer {
     }
 
     /// 宿主 IDE 提供项目保存的用户组件（每个组件一个实体，
-    /// 来自 components/*.zcomp）。
+    /// 来自 components/*.zcomp）。组件文档可能随时被重新加载
+    /// 或保存，引用节点据此作废预览缓存。
     void SetUserComponents(List<UserComponent> comps) {
         userComps = comps;
+        pvCompGen = pvCompGen + 1;
+    }
+
+    /// 组件名对应的 .zcomp 文档原文；不存在返回 ""。
+    string UserCompJson(string name) {
+        for (int i = 0; i < userComps.Count; i = i + 1) {
+            if (userComps[i].name == name) { return userComps[i].json; }
+        }
+        return "";
     }
 
     /// 用户请求把当前设计保存为可复用组件后，恰好返回一次 true；
@@ -576,26 +597,31 @@ partial class Designer {
         return formNameInput.GetText();
     }
 
-    /// 在表单上实例化一个已保存的用户组件：单容器
-    /// 设计直接原样插入，其余情况用名为组件名的
-    /// Card 包裹（WinForms UserControl 风格）。
+    /// 在表单上放置一个已保存用户组件的**引用**节点：.zform 里
+    /// 只写 {"kind":名,"ref":名,...}——组件设计的每次进化自动
+    /// 跟随所有实例（WinForms UserControl 语义），要改内部就打开
+    /// 组件本身，检查器提供「解包为内联副本」作逃生门。默认矩形
+    /// 取组件文档自己的画布尺寸（winW/winH），缺省 240x一行高。
+    /// 画布预览按组件文档用 FormBuilder 建真控件渲染。
     void AddUserComponent(int k) {
         if (k < 0 || k >= userComps.Count) { return; }
         this.DropDeadRefs();
-        List<FormField> parsed = ParseComponentFields(userComps[k].json);
-        FormField f;
-        if (parsed.Count == 1 && parsed[0].IsContainer()) {
-            f = parsed[0];
-        } else {
-            f = FormField.New(18, seq);
-            f.label = userComps[k].name;
-            f.kids = parsed;
-            for (int ci = 0; ci < parsed.Count; ci = ci + 1) { parsed[ci].childTab = 0; }
-        }
-        f.fname = userComps[k].name + Convert.ToString(seq);
-        f.name = f.fname;
+        FormField f = FormField.NewCustom(userComps[k].name, seq);
         seq = seq + 1;
-        if (activeContainer != null && activeContainer != f) {
+        f.compRef = true;
+        JsonValue doc = JsonValue.ParseLenient(userComps[k].json);
+        int dw = 240;
+        int dh = 0;
+        if (doc != null) {
+            dw = doc.Int("winW", 240);
+            dh = doc.Int("winH", 0);
+        }
+        if (dw < 60) { dw = 60; } else if (dw > 2000) { dw = 2000; }
+        if (dh <= 0) { dh = f.RowUnits(); }
+        if (dh < 28) { dh = 28; } else if (dh > 2000) { dh = 2000; }
+        f.fw = dw;
+        f.fh = dh;
+        if (activeContainer != null) {
             f.childTab = 0;
             if (activeContainer.kind == "Tabs") {
                 f.childTab = Designer.TabActivePage(activeContainer);
@@ -606,7 +632,80 @@ partial class Designer {
         }
         sel = f;
         inspTab = 0;
-        msg = Designer.T("added ", "已添加 ") + userComps[k].name;
+        msg = Designer.T("added ", "已添加 ") + userComps[k].name
+            + Designer.T(" (reference)", "（引用）");
+    }
+
+    /// 「解包为内联副本」：把引用节点换成组件文档的字段树
+    /// （单容器文档直接换成那个容器，多字段的包一层同名
+    /// Card），首节点继承引用的矩形/停靠/跨度。解包后的副本
+    /// 与组件脱钩，之后组件进化不再跟随。
+    void UnpackUserComponent(FormField f) {
+        string doc = this.UserCompJson(f.customKind);
+        if (doc == "") {
+            msg = Designer.T("component not found: ", "找不到组件：")
+                + f.customKind;
+            return;
+        }
+        List<FormField> parsed = this.ParseComponentFields(doc);
+        if (parsed.Count == 0) {
+            msg = Designer.T("component has no fields: ", "组件没有字段：")
+                + f.customKind;
+            return;
+        }
+        this.PushUndo();
+        List<FormField> host = fields;
+        FormField owner = this.ParentContainerOf(f);
+        if (owner != null) { host = owner.kids; }
+        int idx = IndexIn(host, f);
+        if (idx < 0) { return; }
+        FormField head = null;
+        if (parsed.Count == 1 && parsed[0].IsContainer()) {
+            head = parsed[0];
+        } else {
+            head = FormField.New(18, seq);
+            seq = seq + 1;
+            head.label = f.customKind;
+            head.kids = parsed;
+            for (int ci = 0; ci < parsed.Count; ci = ci + 1) { parsed[ci].childTab = 0; }
+        }
+        head.fname = f.fname;
+        head.name = f.name;
+        head.fx = f.fx;
+        head.fy = f.fy;
+        head.fw = f.fw;
+        head.fh = f.fh;
+        head.dockSide = f.dockSide;
+        head.span = f.span;
+        head.childTab = f.childTab;
+        host[idx] = head;
+        sel = head;
+        msg = Designer.T("unpacked ", "已解包 ") + f.customKind;
+    }
+
+    /// 引用节点画布预览的构建缓存：组件文档只在代次变化时
+    /// 重建（SetUserComponents / 尺寸变化），其余帧复用整棵
+    /// FormBuilder 树只重渲染。找不到组件或解析失败返回 null，
+    /// 调用方退回占位块。
+    Control PvCompCtl(FormField f, int w, int h) {
+        if (f.customKind == "") { return null; }
+        string doc = this.UserCompJson(f.customKind);
+        if (doc == "") { return null; }
+        string key = Convert.ToString(pvCompGen) + "|" + f.customKind
+            + "|" + Convert.ToString(w) + "x" + Convert.ToString(h);
+        for (int i = 0; i < pvCompKeys.Count; i = i + 1) {
+            if (pvCompKeys[i] == key) { return pvCompCtls[i]; }
+        }
+        JsonValue root = JsonValue.ParseLenient(doc);
+        if (root == null) { return null; }
+        Control ctl = FormBuilder.Build(root);
+        pvCompKeys.Add(key);
+        pvCompCtls.Add(ctl);
+        if (pvCompKeys.Count > 64) {
+            pvCompKeys.Clear();
+            pvCompCtls.Clear();
+        }
+        return ctl;
     }
 
     /// 按 ProjectComponents tag 添加发现的项目自定义组件

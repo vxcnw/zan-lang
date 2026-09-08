@@ -2440,6 +2440,33 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
       -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
   set_tests_properties(conformance_gui_httpsource PROPERTIES TIMEOUT 120)
 
+  # Saved user component referenced from a design: the generator expands
+  # {"kind":X,"ref":X} into components/X.zcomp's field tree (named Panel
+  # shell, anonymous prefixed internals, own fields untouched).
+  add_test(NAME conformance_gui_compref
+    COMMAND ${CMAKE_COMMAND}
+      -DZANC=$<TARGET_FILE:zanc>
+      -DSRC=${CMAKE_SOURCE_DIR}/tests/gui/compref_test.zan
+      "-DZANC_ARGS=${CMAKE_SOURCE_DIR}/tests/gui/compref_app.zform;${CMAKE_SOURCE_DIR}/tests/gui/components/BadgeCard.zcomp;--auto-stdlib${_gui_driver_tail}"
+      -DEXPECTED=${CMAKE_SOURCE_DIR}/tests/conformance/gui_compref.out
+      -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_compref${_exe_ext}
+      -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
+  set_tests_properties(conformance_gui_compref PROPERTIES TIMEOUT 120)
+
+  # Headless designer acceptance for user-component references: drop places
+  # one ref node sized from the component doc, Save/Load round-trips the
+  # {"kind":X,"ref":X} key, PvCompCtl builds the real widget tree, unpack
+  # splices an independent inline copy.
+  add_test(NAME conformance_gui_compref_designer
+    COMMAND ${CMAKE_COMMAND}
+      -DZANC=$<TARGET_FILE:zanc>
+      -DSRC=${CMAKE_SOURCE_DIR}/tests/gui/compref_designer_test.zan
+      "-DZANC_ARGS=--auto-stdlib${_gui_driver_tail}"
+      -DEXPECTED=${CMAKE_SOURCE_DIR}/tests/conformance/gui_compref_designer.out
+      -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_compref_designer${_exe_ext}
+      -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
+  set_tests_properties(conformance_gui_compref_designer PROPERTIES TIMEOUT 120)
+
 
   # The generated IGameScene adapter: a .zscene projects a nested
   # `partial class <Name>Scene : Game.Foundation.IGameScene` whose Enter/Exit

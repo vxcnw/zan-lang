@@ -1875,6 +1875,18 @@ partial class Designer {
         int ft = f.ftype;
 
         if (f.IsCustom()) {                   // 项目自定义组件
+            // 用户组件引用且开了预览：按组件文档用 FormBuilder
+            // 建出的真控件渲染（与运行时同一套，所见即所得）；
+            // 找不到组件 / 关了开关则退回占位块。
+            if (f.compRef && f.pvPreview) {
+                int ph2 = avail - PvS(app, 4);
+                if (ph2 < PvS(app, 28)) { ph2 = PvS(app, 28); }
+                Control pc = this.PvCompCtl(f, w, ph2);
+                if (pc != null) {
+                    PvCtrl(app, pc, x, y, w, ph2);
+                    return;
+                }
+            }
             int bh = line + PvS(app, 8);
             c.FillRoundRect(x, y, w, bh, t.borderRadiusMedium, Style.Part(app, "designer", "field", "", "", "", Style.SNormal()).BgOr(0));
             c.DrawRoundRect(x, y, w, bh, t.borderRadiusMedium, Style.Part(app, "designer", "accent", "", "", "", Style.SNormal()).BgOr(0), 1);

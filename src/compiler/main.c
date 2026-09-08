@@ -2206,6 +2206,9 @@ int main(int argc, char **argv) {
         while (scanned < input_count) {
             int round_end = input_count;
             for (int fi = scanned; fi < round_end; fi++) {
+                /* A saved user component is generator data (consumed inside
+                 * zan_gen_design); its JSON has no `using` directives. */
+                if (zan_is_zcomp_path(input_files[fi])) continue;
                 size_t slen3 = 0;
                 char *src3 = read_file(input_files[fi], &slen3);
                 if (!src3) continue;
@@ -2262,6 +2265,9 @@ int main(int argc, char **argv) {
      * Main -- which is then parsed and merged exactly like a source file. */
     zan_ast_node_t *ast = NULL;
     for (int fi = 0; fi < input_count; fi++) {
+        /* A saved user component (.zcomp) is generator data consumed inside
+         * zan_gen_design; it projects no Zan declarations of its own. */
+        if (fi > 0 && zan_is_zcomp_path(input_files[fi])) continue;
         size_t slen = 0;
         char *src = (fi == 0) ? source : read_file(input_files[fi], &slen);
         if (fi == 0) slen = source_len;
