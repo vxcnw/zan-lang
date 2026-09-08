@@ -205,7 +205,8 @@ class FormFill : AdminController {
     }
 
     /* 详情：schemaSnapshot 渲染（历史强一致，def 改版不影响）+ 附件区
-       （module="form" relatedId=行 id）+ 流程状态推导。 */
+       （module="form" relatedId=行 id）+ 流程状态推导。列表行内「查看」
+       以弹窗打开（&as=dialog），通知跳转等整屏入口保持整页。 */
     [HttpGet]
     [Custom(IsMenu = false, Perm = PermBit.View)]
     [Description("提交详情")]
@@ -220,14 +221,18 @@ class FormFill : AdminController {
         JsonValue schema = JsonValue.ParseLenient(r.schemaSnapshot);
         JsonValue data = JsonValue.ParseLenient(r.dataJson);
         List<DictItem> dicts = await FormSchema.DictsFor(this.Held(), schema);
-        ViewData d = await this.Layout("提交详情");
+        bool inDialog = this.In("as") == "dialog";
+        ViewData d = inDialog ? new ViewData() : await this.Layout("提交详情");
+        if (inDialog) { d.Set("dialogTitle", "提交详情"); }
         d.Set("id", Convert.ToString(r.id));
         d.Set("summary", r.summary);
         d.Set("createdAt", Fmt.Stamp(r.createdAt));
         d.Set("statusText", FormFill.BadgeText(r, inst));
         d.Set("statusKind", FormFill.BadgeKind(r, inst));
         d.Set("flowId", r.instId > 0 ? "1" : "");
+        d.Set("showBar", inDialog ? "" : "1");
         FormSchema.Render(d, schema, data, r.id, dicts);
+        if (inDialog) { this.Dialog(d); return; }
         this.Page(d);
     }
 

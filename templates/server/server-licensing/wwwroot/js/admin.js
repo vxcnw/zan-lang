@@ -228,7 +228,7 @@
 
   // ---- panel --------------------------------------------------------------
 
-  function load(path) {
+  function load(path, quiet) {
     path = normalize(path);
     var seq = ++loadSeq;
     if (loadController) { loadController.abort(); }
@@ -253,7 +253,9 @@
         if (html === '' || seq !== loadSeq) { return; }
         panel.innerHTML = html;
         panel.removeAttribute('aria-busy');
-        panel.scrollTop = 0;
+        // A quiet refresh (after a dialog write) is in place: the list the
+        // user is looking at updates where it stands -- no scroll jump.
+        if (!quiet) { panel.scrollTop = 0; }
         startStream();
         runScripts(panel);
         restorePane(path);
@@ -276,8 +278,8 @@
     });
   }
 
-  function reload() {
-    if (state.active) { load(state.active); }
+  function reload(quiet) {
+    if (state.active) { load(state.active, quiet); }
   }
 
   // Re-open the sub-pane this screen was on before its panel was rebuilt.
@@ -608,7 +610,9 @@
       if (j.code === '0000') {
         toast(j.msg || '已保存', 'ok');
         closeDialog();
-        reload();
+        // The dialog just closed over the list: refresh it quietly so the
+        // rows update in place instead of jumping back to the top.
+        reload(true);
         return;
       }
       toast(j.msg || '保存失败', 'bad');
@@ -1178,7 +1182,7 @@
           .then(function (j) {
             if (!j) { return; }
             toast(j.msg || '完成', j.code === '0000' ? 'ok' : 'bad');
-            if (j.code === '0000') { closeDialog(); reload(); }
+            if (j.code === '0000') { closeDialog(); reload(true); }
           })
           .catch(function () { toast('请求失败', 'bad'); });
       };
