@@ -1531,7 +1531,9 @@ static LLVMValueRef emit_binary_op_values(zan_irgen_t *g, zan_ast_node_t *expr,
             return is_float ? LLVMBuildFCmp(g->builder, LLVMRealOEQ, left, right, "eq")
                             : zan_icmp(g->builder, LLVMIntEQ, left, right, "eq");
         case TK_BANG_EQ:
-            return is_float ? LLVMBuildFCmp(g->builder, LLVMRealONE, left, right, "ne")
+            /* IEEE: x != y is !(x == y), so NaN != anything must hold --
+             * the ordered ONE predicate answers false there. */
+            return is_float ? LLVMBuildFCmp(g->builder, LLVMRealUNE, left, right, "ne")
                             : zan_icmp(g->builder, LLVMIntNE, left, right, "ne");
         case TK_LESS:
             return is_float ? LLVMBuildFCmp(g->builder, LLVMRealOLT, left, right, "lt")

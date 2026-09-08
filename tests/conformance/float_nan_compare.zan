@@ -1,0 +1,34 @@
+using System;
+namespace Conf;
+
+// 回归:浮点 != 曾用有序谓词(LLVM ONE),NaN 参与时恒为 false,
+// 违反 IEEE 754 的 x != y ≡ !(x == y)。改无序 UNE 后:
+// NaN 与任何值都不相等,故 NaN != NaN 必须成立;有序比较(< <= > >=)
+// 维持 C# 语义,NaN 参与一律 false。
+class Program {
+    static void Main() {
+        double z = 0.0;
+        double nan = z / z;      // 运行期产生 NaN,避免常量折叠差异
+        double inf = 1.0 / z;
+        Console.WriteLine(nan != nan ? 1 : 0);
+        Console.WriteLine(nan == nan ? 1 : 0);
+        Console.WriteLine(nan != 1.0 ? 1 : 0);
+        Console.WriteLine(nan == 1.0 ? 1 : 0);
+        Console.WriteLine(nan < 1.0 ? 1 : 0);
+        Console.WriteLine(nan > 1.0 ? 1 : 0);
+        Console.WriteLine(nan <= nan ? 1 : 0);
+        Console.WriteLine(nan >= nan ? 1 : 0);
+        Console.WriteLine(inf == inf ? 1 : 0);
+        Console.WriteLine(inf != inf ? 1 : 0);
+        Console.WriteLine(nan != inf ? 1 : 0);
+        // 结构体逐字段相等的 != 是对 == 取反,同样必须对 NaN 成立
+        var a = new P { X = z / z };
+        var b = new P { X = z / z };
+        Console.WriteLine(a != b ? 1 : 0);
+        Console.WriteLine(a == b ? 1 : 0);
+    }
+}
+
+struct P {
+    public double X;
+}
