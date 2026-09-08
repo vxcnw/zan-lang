@@ -177,6 +177,11 @@ class Switch : Control {
         on.Also("checked");
         on.Also("on");
         ps.Add(on);
+        PropSpec defOn = PropSpec.Bool("defOn", "Default on");
+        if (data != null) { defOn.flag = data; } else { defOn.sflag = onSig; }
+        defOn.WithTip("Design default-on: GenForm/FormBuilder project it as "
+                      + "a build-time SetProp, so the switch starts on.");
+        ps.Add(defOn);
         PropSpec sz = PropSpec.Enum("size", "Size",
             new List<string>{ "tiny", "small", "medium", "large" });
         sz.str = Size;

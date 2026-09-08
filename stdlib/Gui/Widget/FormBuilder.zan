@@ -273,6 +273,10 @@ class FormBuilder {
         if (ctl == null) { return null; }
         if (FormBuilder.IsContainer(o)) {
             ctl.logPad = 10;
+            // 容器的 kids 在流式路径同样要建（与 GenForm.EmitField 递归
+            // kids、BuildFree 的 FillKids 对齐）——此前漏调，流式容器
+            // 的子树在运行时/出口页里整棵丢失。
+            FormBuilder.FillKids(ctl, o, false);
             return ctl;
         }
         if (FormBuilder.NeedsCaption(o, ctl)) {
