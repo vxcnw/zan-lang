@@ -2,8 +2,9 @@ using System.Data.Orm;
 
 namespace ZanWeb.Model.Game;
 
-/* 地图表。种子写入五张初始地图；minLevel 是进入门槛，网关在 move 时
-   校验。status=1 开放。GM 可直接改库加图，客户端登录时拉取全表。 */
+/* 地图表。种子由 M2.DB 快照 gamemap 整表写入（迷你传奇原值 35 张）；
+   minLevel 是进入门槛，网关在 move 时校验。status=1 开放。
+   GM 可在后台加图，客户端登录时拉取全表。 */
 [Table(Name = "game_map")]
 class GameMap {
     [Column(IsIdentity = true)]

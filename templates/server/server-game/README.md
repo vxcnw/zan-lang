@@ -76,8 +76,11 @@ src/Model/Game/         [Table] 实体：game_account / game_realm / game_player
 src/Dao/Game/AccountDao.zan   账号读写唯一入口：注册/验密/密保散列/限频/封禁（网页与 TCP 共用）
 src/Controller/Account/     玩家网页：Register（注册）/ Forgot（找回密码三步）
 src/Controller/Index/       首页：区服列表（开放/维护、实时在线）+ 注册/找回入口
-src/Controller/Admin/Game/  GM 页：Realms（区服）/ Players（角色）/ Online（在线）/ Announces（公告）
-src/Framework/Schema.zan    建表 + 种子（3 区服、内置角色、5 图、13 种物品、6 个刷怪点、欢迎公告）
+src/Controller/Admin/Game/  GM 页：Realms（区服）/ Players（角色）/ Online（在线）/ Announces（公告）/
+                        Items（物品）/ Mobs（刷怪）/ Maps（地图）
+src/Framework/Schema.zan    建表 + 种子（3 区服、内置角色、欢迎公告；游戏目录——35 图/
+                        732 物品/232 刷怪点——由 data/M2.DB 快照整表种入，见
+                        src/Framework/GameSnapshot.zan 与 tools/sync_csv_to_db.py）
 views/                  视图（与控制器一一对应；Account/Index/Admin 三套布局）
 tools/e2e.py            端到端自检：注册/找回 + 完整协议 + GM + 战斗闭环（114 项断言）
 ```
@@ -229,9 +232,10 @@ $ nc 127.0.0.1 7100
 | 踢线/顶号/心跳超时 | `ev kick` 后立即 Leave：角色与背包当场落库、会话移出世界（连接本体由 worker 懒收口） |
 
 `game_account / game_realm / game_player / game_map / game_announce /
-game_mob / game_item / game_bag` 八张表由 `Schema.Ensure` 建表；种子三个
-区服（三区为维护态演示）、五张地图（新手村→赤月峡谷，`minLevel` 递增）、
-13 种物品与 6 个刷怪点（稻草人→赤月恶魔），改玩法先改这里。
+game_mob / game_item / game_bag` 八张表由 `Schema.Ensure` 建表。种子三个
+区服（三区为维护态演示）与欢迎公告写死在 `Schema.SeedGame`；游戏目录
+（35 张地图、732 种物品、232 个刷怪点）从 `data/M2.DB` 快照整表种入
+（缺快照则拒绝启动），数值与结构均可在 GM 后台逐条改。
 
 ## 配置 `[game]`
 
@@ -291,7 +295,7 @@ game_mob / game_item / game_bag` 八张表由 `Schema.Ensure` 建表；种子三
   全服广播用 `World.Broadcast`，**区服内**播报用 `World.DeliverRealm`，
   改值走 `World.Adjust`。
 - **加一个区服**：GM 页新增即可；种子区服在 `Schema.SeedGame`。
-- **加一张地图**：`Schema.SeedGame` 加一行（`minLevel` 控制进入门槛），
+- **加一张地图**：GM 后台「地图管理」新增即可（`minLevel` 控制进入门槛），
   客户端 `op:maps` 与 GM 页自动带出。
 - **加一个 GM 页**：拷 `Controller/Admin/Game/Announces.zan` 的骨架，
   `[Table]` 实体 + `Index/Form/Save` + 同名视图即可，权限与侧边栏自动。
