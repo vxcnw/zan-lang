@@ -1,0 +1,19 @@
+using System;
+namespace Conf;
+
+// 回归(D19):`Main(string[] args)` 的形参曾被完全忽略——args.Count 恒为 0,
+// 真实命令行只进 Environment.ArgCount()/ArgAt(i)。现在入口处从
+// __zan_argc/__zan_argv 构建 string[](元素为 owned 拷贝,argv[0]=程序名
+// 不进数组),与 Environment 计数一致。
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine(args.Count);
+        Console.WriteLine(Environment.ArgCount());
+        if (args.Count > 0) {
+            Console.WriteLine(args[0]);
+            Console.WriteLine(args[args.Count - 1]);
+            Console.WriteLine(Environment.ArgAt(0) == args[0] ? 1 : 0);
+        }
+        Console.WriteLine("end");
+    }
+}

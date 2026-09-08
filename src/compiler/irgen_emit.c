@@ -300,6 +300,104 @@ static void emit_main_method(zan_irgen_t *g, zan_ast_node_t *method, zan_symbol_
 
     local_scope_t *locals = local_scope_new(g->arena);
 
+    /* `static void Main(string[] args)`: the declared parameter used to be
+     * ignored (reads compiled against an unbound identifier or resolved to a
+     * field of the same name), so args.Count was always 0 while the real
+     * command line sat in __zan_argc/__zan_argv for the Environment builtins.
+     * Build the array here, at entry, from those same globals: element i is
+     * an owned copy of argv[i+1] (slot 0 is the program name, matching the
+     * 0-based user args Environment.ArgAt reports). */
+    if (method->method_decl.params.count == 1) {
+        zan_ast_node_t *param = method->method_decl.params.items[0];
+        zan_type_t *pt = zan_binder_resolve_type(g->binder, param->param.type);
+        if (pt && pt->kind == TYPE_ARRAY && pt->element_type &&
+            pt->element_type->kind == TYPE_STRING) {
+            LLVMTypeRef i8 = LLVMInt8TypeInContext(g->ctx);
+            LLVMTypeRef i8ptr = LLVMPointerType(i8, 0);
+            LLVMTypeRef i8ptrptr = LLVMPointerType(i8ptr, 0);
+            LLVMTypeRef i32 = LLVMInt32TypeInContext(g->ctx);
+            LLVMTypeRef i64t = LLVMInt64TypeInContext(g->ctx);
+            LLVMValueRef g_argc = LLVMGetNamedGlobal(g->mod, "__zan_argc");
+            if (!g_argc) {
+                g_argc = LLVMAddGlobal(g->mod, i32, "__zan_argc");
+                LLVMSetInitializer(g_argc, LLVMConstInt(i32, 0, 0));
+            }
+            LLVMValueRef g_argv = LLVMGetNamedGlobal(g->mod, "__zan_argv");
+            if (!g_argv) {
+                g_argv = LLVMAddGlobal(g->mod, i8ptrptr, "__zan_argv");
+                LLVMSetInitializer(g_argv, LLVMConstNull(i8ptrptr));
+            }
+            LLVMValueRef argc = LLVMBuildLoad2(g->builder, i32, g_argc, "ma.argc");
+            LLVMValueRef argc64 = LLVMBuildSExt(g->builder, argc, i64t, "ma.argc64");
+            /* n = argc-1 user args; a degenerate argc of 0 folds to 0 */
+            LLVMValueRef nneg = zan_icmp(g->builder, LLVMIntSGT, argc64,
+                LLVMConstInt(i64t, 0, 0), "ma.nneg");
+            LLVMValueRef n = LLVMBuildSelect(g->builder, nneg,
+                zan_sub(g->builder, argc64, LLVMConstInt(i64t, 1, 0), "ma.n"),
+                LLVMConstInt(i64t, 0, 0), "ma.count");
+            LLVMValueRef total = zan_mul(g->builder, n,
+                LLVMSizeOf(i8ptrptr), "ma.total");
+            LLVMValueRef arr = zan_array_alloc(g, total, n);
+            LLVMValueRef argv = LLVMBuildLoad2(g->builder, i8ptrptr, g_argv, "ma.argv");
+            /* fill loop: copy each C string into an owned rc string. Strided
+             * blocks share the alloc site; bounds are runtime values here, so
+             * the loop is emitted as a small count-guarded chain over a
+             * scratch-free pattern: fill[i] lives in its own block. */
+            LLVMValueRef lp = emit_entry_alloca(g, i64t, "ma.i");
+            zan_store_fit(g, LLVMConstInt(i64t, 0, 0), lp);
+            LLVMValueRef ffn = LLVMGetBasicBlockParent(LLVMGetInsertBlock(g->builder));
+            LLVMBasicBlockRef cond_bb = LLVMAppendBasicBlockInContext(g->ctx, ffn, "ma.cond");
+            LLVMBasicBlockRef body_bb = LLVMAppendBasicBlockInContext(g->ctx, ffn, "ma.fill");
+            LLVMBasicBlockRef done_bb = LLVMAppendBasicBlockInContext(g->ctx, ffn, "ma.filled");
+            LLVMBuildBr(g->builder, cond_bb);
+            LLVMPositionBuilderAtEnd(g->builder, cond_bb);
+            LLVMValueRef iv = LLVMBuildLoad2(g->builder, i64t, lp, "ma.iv");
+            LLVMBuildCondBr(g->builder, zan_icmp(g->builder, LLVMIntSLT, iv, n, "ma.more"),
+                body_bb, done_bb);
+            LLVMPositionBuilderAtEnd(g->builder, body_bb);
+            LLVMValueRef iv1 = zan_add(g->builder, iv, LLVMConstInt(i64t, 1, 0), "ma.i1");
+            LLVMValueRef slot = LLVMBuildGEP2(g->builder, i8ptr, argv, &iv1, 1, "ma.slot");
+            LLVMValueRef cstr = LLVMBuildLoad2(g->builder, i8ptr, slot, "ma.cstr");
+            LLVMValueRef len = zan_call2(g->builder,
+                LLVMFunctionType(i64t, (LLVMTypeRef[]){ i8ptr }, 1, 0),
+                g->fn_strlen, &cstr, 1, "ma.len");
+            LLVMValueRef cap = zan_add(g->builder, len, LLVMConstInt(i64t, 1, 0), "ma.cap");
+            LLVMValueRef buf = emit_string_alloc_rc(g, cap);
+            LLVMTypeRef memcpy_ty = LLVMFunctionType(i8ptr,
+                (LLVMTypeRef[]){ i8ptr, i8ptr, i64t }, 3, 0);
+            LLVMValueRef mc = get_libc_fn(g, "memcpy", memcpy_ty);
+            zan_call2(g->builder, memcpy_ty, mc,
+                (LLVMValueRef[]){ buf, cstr, len }, 3, "");
+            LLVMValueRef endp = LLVMBuildGEP2(g->builder, i8, buf, &len, 1, "ma.ep");
+            zan_store_fit(g, LLVMConstInt(i8, 0, 0), endp);
+            LLVMTypeRef i64p = LLVMPointerType(i64t, 0);
+            LLVMValueRef fits = zan_icmp(g->builder, LLVMIntULE, len,
+                LLVMConstInt(i64t, ZAN_STR_LEN_MASK, 0), "ma.fits");
+            LLVMValueRef half = LLVMBuildSelect(g->builder, fits, len,
+                LLVMConstInt(i64t, ZAN_STR_LEN_UNKNOWN, 0), "ma.half");
+            LLVMValueRef word = LLVMBuildOr(g->builder,
+                LLVMConstInt(i64t, ZAN_STRING_TAG << 32, 0), half, "ma.hdr");
+            LLVMValueRef hdr_ptr = LLVMBuildGEP2(g->builder, i8, buf,
+                &(LLVMValueRef){ LLVMConstInt(i64t, (uint64_t)ZAN_OBJ_SITE_OFF, 1) }, 1,
+                "ma.hdrp");
+            LLVMBuildStore(g->builder, word,
+                LLVMBuildBitCast(g->builder, hdr_ptr, i64p, "ma.hdrip"));
+            LLVMValueRef elem = LLVMBuildGEP2(g->builder, i8ptr, arr, &iv, 1, "ma.ep.slot");
+            zan_store_fit(g, buf, elem);
+            zan_store_fit(g, iv1, lp);
+            LLVMBuildBr(g->builder, cond_bb);
+            LLVMPositionBuilderAtEnd(g->builder, done_bb);
+            zan_type_t *args_type = zan_binder_make_array_type(g->binder,
+                g->binder->type_string);
+            /* the slot holds the array pointer; the local owns the array, so
+             * overwrite/scope-exit release it like any rc local */
+            LLVMValueRef slot_a = emit_entry_alloca(g, i8ptrptr, "ma.slot");
+            zan_store_fit(g, arr, slot_a);
+            local_add(locals, param->param.name, slot_a, args_type);
+            arc_own_local(g, locals);
+        }
+    }
+
     g->current_fn_is_main = true;
     if (method->method_decl.body) {
         emit_stmt(g, method->method_decl.body, locals);
