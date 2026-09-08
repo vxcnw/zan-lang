@@ -871,6 +871,10 @@ class BkLoop : IGuiHostLoop {
     }
     public void Update(GuiHost host, int dt) { }
     public void Render(GuiHost host, Canvas c, double alpha) {
+        // Android 上表面晚于 Start 到达(转向/后台往返亦然),App 会整体
+        // 换新画布对象(App.SwapCanvas);Start 时抓的引用画进已销毁的
+        // 旧表面,永不 present。每帧对齐到宿主传入的当前画布。
+        this.g.c = c;
         // 舞台 0 基绘制：原点落到标准标题栏之下，chrome 由宿主在
         // 内容之上叠画。
         CDraw.Origin(0, host.ContentTop());

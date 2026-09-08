@@ -142,9 +142,22 @@ Post 调用核对编码，别信二手注释。
 - 触屏：Gui 运行时把手指合成鼠标按下（GuiHost 循环里就是 kind 2
   code 0），SDL 版场景层另接 FingerDown/Up 直发的定式在 GuiHost 里
   不需要——接口根本没有 Finger 事件。手机点不动先查外壳的合成路径。
+  （模拟器实测：tap→放钩→抓取→计分→HUD 全链路同桌面。）
+- **画布对象会被整体换掉，Start 里抓引用必死**：Android 上表面晚于
+  Start 到达（转向、后台往返亦然），App.SwapCanvas 换新 Canvas 对象，
+  Start 时 `g.c = host.App().canvas` 抓的旧引用画进已销毁表面、永不
+  present——症状是壳 chrome/标题正常、游戏场景全黑只剩 Clear 色，
+  logcat 无任何错误、循环照跑。定式：Render 每帧把传入参数同步给
+  游戏对象（`this.g.c = c;`），别在 Start 抓。坑出处：goldminer
+  APK 黑屏，探针逐段排除（v1 参数画全亮 → v2 复刻 goldminer 原语
+  全亮）才定位到画布身份，不是图元/字体/资产问题。
 - 出包：`--publish --target android-arm64 --emit-apk` 一条命令；assets
   自动内嵌，加载路径保持"磁盘优先、内嵌兜底"。窗口要可自适应（横竖屏/
   任意尺寸），布局别写死像素。
+- **Android 上 Assets.Find 只回相对路径且 File.Exists=false**（实测
+  2026-09）——纹理资产解析不通，BlitImage 拿不到路径，模板的矢量
+  兜底就是真机上的实际画面；内嵌资产链路缺口已记 TASKS.md。验证
+  场景渲染时别被"贴图缺失"骗过去，矢量兜底亮了就算渲染链路通。
 
 ## 资源：内嵌内存加载
 
