@@ -1,0 +1,36 @@
+using System;
+using System.Json;
+namespace Conf;
+
+// 回归:未终止字符串尾部的孤反斜杠曾让 JsonValue.Parse 死循环
+// (escape 循环的 else 分支从反斜杠处起扫,FindNotAnyOf 立即
+// 返回 0,pos 原地不动)。两个解析器都必须干净拒绝,而不是挂死。
+// 注意:反斜杠/引号用 CharFromCode 拼接,避免源码转义歧义。
+class Program {
+    static int Rejects(string src) {
+        try {
+            JsonValue.Parse(src);
+        } catch (JsonException e) {
+            try {
+                JsonDoc.Parse(src);
+            } catch (JsonException e2) {
+                return 1;
+            }
+            return 2;
+        }
+        return 0;
+    }
+    static void Main() {
+        string bs = Encoding.CharFromCode(92);
+        string q = Encoding.CharFromCode(34);
+        Console.WriteLine(Convert.ToString(Rejects("[" + q + bs)));
+        Console.WriteLine(Convert.ToString(Rejects(q + bs)));
+        Console.WriteLine(Convert.ToString(Rejects("{"
+            + q + "a" + q + ":" + q + "x" + bs)));
+        Console.WriteLine(Convert.ToString(Rejects("[" + q + "a" + bs + q)));
+        // 正常转义不受影响:JSON 文本 {"s":"a\"b\\c"} → 值为 a"b\c
+        string src = "{\"s\":\"a" + bs + q + "b" + bs + bs + "c\"}";
+        JsonValue ok = JsonValue.Parse(src);
+        Console.WriteLine(ok.Str("s", ""));
+    }
+}

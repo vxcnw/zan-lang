@@ -871,6 +871,16 @@ class JsonReader {
                 }
                 pos = pos + 2;
             } else {
+                if ((s[pos] & 255) == 92) {
+                    // 尾部孤反斜杠(后面没有字节可构成转义):上面的
+                    // "c == 92 && pos + 1 < len" 不命中才会到这里。
+                    // 若直接走下面的 FindNotAnyOf,它从反斜杠处起扫
+                    // 立即返回 0,pos 原地不动 —— 解析器死循环。
+                    if (strict) { Fail(); return sb.ToString(); }
+                    sb.Append("\\");
+                    pos = pos + 1;
+                    continue;
+                }
                 int run2 = (int)NativeMemory.FindNotAnyOf(this.buf, pos, "\"\\",
                     len - pos);
                 int stop2 = run2 < 0 ? len : pos + run2;
