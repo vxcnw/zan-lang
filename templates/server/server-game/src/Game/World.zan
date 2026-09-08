@@ -63,6 +63,15 @@ class World {
         return null;
     }
 
+    /* 按推送连接找会话（Gateway 断开/顶号回调用）。在线量小，线性扫。 */
+    static Session ByPush(int pushCid) {
+        List<Session> rows = World.All();
+        for (int i = 0; i < rows.Count; i = i + 1) {
+            if (rows[i].pushCid == pushCid) { return rows[i]; }
+        }
+        return null;
+    }
+
     /* 在线角色快照：按角色 id 找仍在外面的会话（GM 页按角色行操作）。 */
     static Session ByChar(int playerId) {
         List<Session> rows = World.All();
@@ -91,13 +100,14 @@ class World {
     /* 登录成功登记会话；同账号旧连接被顶号：推送后立即 Leave 收敛
        （角色/背包当场落库，连接本体由 worker 懒收口）——半开连接不再
        挂着旧 row，避免 ByChar/Gift 误命中死会话。此时新会话 row 为空，
-       进区另有 EnterWorld。 */
+       进区另有 EnterWorld。旧会话可能还没有推送通道（HTTP 登录未
+       attach），Send/Close 都对 null 连接安全。 */
     static async void Enter(Session s, long now) {
         Session old = World.ByAccount(s.accountId);
         if (old != null && old.cid != s.cid) {
             old.kicked = true;
             Gateway.Send(old.conn, Gateway.Ev("kick", "该账号在别处登录"));
-            old.conn.Close();
+            if (old.conn != null) { old.conn.Close(); }
             await World.Leave(old.cid);
         }
         World.byCid.Add(s.cid, s);
@@ -152,6 +162,10 @@ class World {
         Session idx = World.ByAccount(s.accountId);
         if (idx != null && idx.cid == cid) { World.byAccount.Remove(s.accountId); }
         if (s.row != null) {
+            /* 挂机尾巴先结算再落库：不足一个批量周期的产出也入账
+               （连接已关，不推送）。 */
+            if (s.autoMobId > 0) { Fight.Settle(s, WebApp.NowSeconds(), false); }
+            s.autoMobId = 0;
             s.row.lastLogoutAt = WebApp.NowSeconds();
             Fight.PersistBagNow(s);
             await World.PersistRow(s.row, true);
@@ -201,7 +215,7 @@ class World {
         if (s == null) { return false; }
         s.kicked = true;
         Gateway.Send(s.conn, Gateway.Ev("kick", reason));
-        s.conn.Close();
+        if (s.conn != null) { s.conn.Close(); }
         await World.Leave(s.cid);
         return true;
     }
@@ -288,7 +302,7 @@ class World {
                     + Convert.ToString(now - s.lastSeen) + "s");
                 s.kicked = true;
                 Gateway.Send(s.conn, Gateway.Ev("kick", "心跳超时"));
-                s.conn.Close();
+                if (s.conn != null) { s.conn.Close(); }
                 await World.Leave(s.cid);
                 continue;
             }

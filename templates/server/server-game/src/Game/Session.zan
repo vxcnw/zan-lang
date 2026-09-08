@@ -13,11 +13,22 @@ namespace ZanWeb.Game;
    Zan 调度器是协作式单线程，会话表无需加锁，只要不跨 await 持有半更新
    的状态即可。 */
 class Session {
-    /* 网关连接 id（进程内自增，唯一）。 */
+    /* 会话 id（进程内唯一）。TCP 登录用连接 id；HTTP 登录用 10 亿段
+       自增号，与 TCP 连接 id 永不重叠。 */
     int cid;
 
-    /* 该玩家的 TCP 连接；Kick 走 conn.Close()，onClose 随后清理。 */
+    /* 推送通道的 TCP 连接；HTTP 登录的会话登录时为 null，客户端随后
+       用 attach op 把推送通道挂上来。所有游戏操作走 HTTP，这条连接
+       只收 ev（聊天/公告/战斗通知），Kick 走 conn.Close()。 */
     System.Net.Connection conn;
+
+    /* 会话由 HTTP 登录创建时为 true：推送连接断开只摘通道不登出
+       （会话由 HTTP 心跳/操作续命，超时由 World.Sweep 收口）；TCP
+       直连登录的旧式会话断开即落库登出。 */
+    bool httpOwned;
+
+    /* 当前推送连接的连接 id；0=未挂通道。断开与顶号按它对号。 */
+    int pushCid;
 
     /* 账号（登录后即有）。 */
     int accountId;
@@ -25,6 +36,12 @@ class Session {
 
     /* 已进入的区服（game_realm.id）；0=登录了但还没进区。 */
     int realmId;
+
+    /* 本区倍率（万分比，进区时从 game_realm 读出随会话缓存）：
+       经验/金币/爆率结算只看这三个值，换区即换套数值。 */
+    int expRate = 10000;
+    int goldRate = 10000;
+    int dropRate = 10000;
 
     /* 角色行的内存副本；未进区为 null。落库与读档都经它。 */
     ZanWeb.Model.Game.Player row;
@@ -36,8 +53,11 @@ class Session {
     bool bagDirty;
 
     /* 自动挂机：正在打击的怪物模板 id（game_mob.id），0=关闭。
-       每个 tick 由 Fight.AutoTick 打一轮并把结果 ev fight 推回。 */
+       照原版离线挂机：服务端不再逐秒推送战况，Fight 每 60 秒把
+       过去的战斗批量补跑结算成一条 ev idlesum；客户端的逐秒战况
+       是本地演示动画。autoSettledAt 是批量结算的时钟锚点。 */
     int autoMobId;
+    long autoSettledAt;
 
     /* 世界 BOSS 累计伤害（进程内战绩，公告表扬用）。 */
     long wbDmg;
