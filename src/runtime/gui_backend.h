@@ -66,8 +66,14 @@ typedef struct zan_glyph_tile_s {
     int left, top;
     int advance;        /* pen movement this tile consumes */
     int bpp;            /* 1 = coverage byte (R8), 4 = per-channel 0x00RRGGBB */
+    int flags;          /* ZAN_TILE_RGBA: cov holds w*h BGRA pixels with
+                         * straight alpha and own colors (CBDT emoji); the
+                         * run color is ignored and the composite is plain
+                         * source-over. 0 = coverage tile, tinted. */
     const void *cov;    /* w*h samples, rows tightly packed */
 } zan_glyph_tile;
+
+#define ZAN_TILE_RGBA 1
 
 /* Destination of one tile, in surface pixels (top-left, offsets applied). */
 typedef struct {

@@ -249,6 +249,7 @@ static const zan_glyph_tile *zan_atlas_store(
     victim->tile.top = top;
     victim->tile.advance = advance;
     victim->tile.bpp = bpp;
+    victim->tile.flags = 0;
     victim->tile.cov = cov_copy;
     g_atlas_bytes += bytes;
     g_atlas_stores++;

@@ -67,6 +67,7 @@ typedef enum {
 #define ZGL_K_TEXT1   5   /* single-channel coverage tile (FreeType glyph) */
 #define ZGL_K_TEXT4   6   /* per-channel coverage tile (GDI run) */
 #define ZGL_K_UNION   7   /* sample completed polyline coverage */
+#define ZGL_K_TEXTRGBA 9 /* color glyph tile: own BGRA + straight alpha */
 #define ZGL_K_SURFACE 8   /* combined rounded fill and border */
 
 /* Tile side for the upload comparison below: 64x64 is 16 KiB of pixels, small
@@ -311,6 +312,16 @@ ZGL_FS_COMMON
 "    vec2 p = zpix();\n"
 "    zclip(p);\n"
 "    int kind = int(v_kind.x + 0.5);\n"
+"    if (kind == 9) {\n"
+/* Color glyph tile (CBDT emoji): own straight-alpha BGRA pixels, blended
+ * source-over through the same dual-source equation -- out = t.rgb * t.a
+ * + dst * (1 - t.a); the run color does not participate. */
+"        vec4 t = texture(uAtlas4, v_uv);\n"
+"        if (t.a <= 0.0) discard;\n"
+"        o_color = vec4(t.rgb, 1.0);\n"
+"        o_cov = vec4(t.a);\n"
+"        return;\n"
+"    }\n"
 "    vec3 cov = (kind == 5) ? vec3(texture(uAtlas1, v_uv).r)\n"
 "                           : texture(uAtlas4, v_uv).rgb;\n"
 "    if (cov.r + cov.g + cov.b <= 0.0) discard;\n"
@@ -1203,7 +1214,8 @@ static void gl_glyph_run(zan_surface_t *s, const zan_glyph_run *run) {
         if (!zgl_begin(s, ZGL_MODE_TEXT)) return;
         zgl_quad q;
         memset(&q, 0, sizeof(q));
-        q.kind = (tile->bpp == 4) ? ZGL_K_TEXT4 : ZGL_K_TEXT1;
+        q.kind = (tile->flags & ZAN_TILE_RGBA) ? ZGL_K_TEXTRGBA
+               : (tile->bpp == 4) ? ZGL_K_TEXT4 : ZGL_K_TEXT1;
         float x0 = (float)run->items[i].x, y0 = (float)run->items[i].y;
         float x1 = x0 + (float)tile->w, y1 = y0 + (float)tile->h;
         q.cx = (x0 + x1) / 2.0f;

@@ -403,7 +403,14 @@ static int ft_prepare(int font_size) {
     return FT_Set_Pixel_Sizes(g_ft_face, 0, (FT_UInt)font_size) == 0;
 }
 
-#define ZAN_FT_FB_MAX 8
+#define ZAN_FT_FB_MAX 12
+
+#if defined(__ANDROID__)
+#include <android/log.h>
+#define FT_LOG(...) __android_log_print(ANDROID_LOG_INFO, "zan_font", __VA_ARGS__)
+#else
+#define FT_LOG(...) do {} while (0)
+#endif
 static FT_Face g_ft_fb[ZAN_FT_FB_MAX];
 static int g_ft_fb_count = 0;
 
@@ -424,9 +431,12 @@ static FT_Face ft_face_for_cp(u32 cp, int font_size) {
         /* The fallback chain mirrors fonts.xml: the zh family found at
          * init (Noto CJK ttc face 2 on AOSP, the ROM's CJK face on
          * vendor builds), then the serif ttc and DroidSansFallback for
-         * anything left. */
-        const char *fb_paths[3];
-        int fb_idx[3];
+         * anything left, then the color-emoji font -- and finally a sweep
+         * of the whole fonts directory, so every glyph the system ships
+         * anywhere is renderable (the keyboard can only offer characters
+         * some installed font carries). */
+        const char *fb_paths[4];
+        int fb_idx[4];
         int nfb = 0;
         if (g_android_cjk_ok) {
             fb_paths[nfb] = g_android_cjk_path;
@@ -439,17 +449,62 @@ static FT_Face ft_face_for_cp(u32 cp, int font_size) {
         fb_paths[nfb] = "/system/fonts/DroidSansFallback.ttf";
         fb_idx[nfb] = 0;
         nfb++;
+        fb_paths[nfb] = "/system/fonts/NotoColorEmoji.ttf";
+        fb_idx[nfb] = 0;
+        nfb++;
         for (int i = 0; i < nfb; i++) {
             FT_Face face = NULL;
-            if (access(fb_paths[i], R_OK) == 0 &&
-                FT_New_Face(g_ft_library, fb_paths[i], fb_idx[i],
-                            &face) == 0 &&
+            FT_Error ferr = access(fb_paths[i], R_OK) == 0
+                ? FT_New_Face(g_ft_library, fb_paths[i], fb_idx[i], &face)
+                : 0x9C;
+            FT_LOG("fb try %s: new=%d idx=%d hasCp=%u hasColor=%d",
+                   fb_paths[i], (int)ferr, fb_idx[i],
+                   face ? FT_Get_Char_Index(face, cp) : 0u,
+                   face ? (int)FT_HAS_COLOR(face) : -1);
+            if (ferr == 0 && face &&
                 FT_Get_Char_Index(face, cp)) {
                 g_ft_fb[g_ft_fb_count++] = face;
                 FT_Set_Pixel_Sizes(face, 0, (FT_UInt)font_size);
+                FT_LOG("fb adopt %s for cp %lx", fb_paths[i],
+                       (unsigned long)cp);
                 return face;
             }
             if (face) FT_Done_Face(face);
+        }
+        /* Thorough sweep of everything else /system/fonts ships: first
+         * face whose cmap covers `cp` is adopted. Scanned only while an
+         * uncovered code point keeps arriving, so the cost lands on the
+         * one glyph, not per frame. */
+        {
+            DIR *d = opendir("/system/fonts");
+            if (d) {
+                struct dirent *de;
+                int tried = 0;
+                while (g_ft_fb_count < ZAN_FT_FB_MAX && tried < 96 &&
+                       (de = readdir(d)) != NULL) {
+                    const char *nm = de->d_name;
+                    size_t l = strlen(nm);
+                    if (l < 5 || (strcasecmp(nm + l - 4, ".ttf") &&
+                                  strcasecmp(nm + l - 4, ".ttc") &&
+                                  strcasecmp(nm + l - 5, ".otf")))
+                        continue;
+                    tried++;
+                    char path[256];
+                    snprintf(path, sizeof(path), "/system/fonts/%s", nm);
+                    FT_Face face = NULL;
+                    if (access(path, R_OK) == 0 &&
+                        FT_New_Face(g_ft_library, path, 0, &face) == 0) {
+                        if (FT_Get_Char_Index(face, cp)) {
+                            g_ft_fb[g_ft_fb_count++] = face;
+                            FT_Set_Pixel_Sizes(face, 0, (FT_UInt)font_size);
+                            closedir(d);
+                            return face;
+                        }
+                        FT_Done_Face(face);
+                    }
+                }
+                closedir(d);
+            }
         }
 #else
         FcCharSet *charset = FcCharSetCreate();
@@ -486,6 +541,238 @@ static FT_Face ft_face_for_cp(u32 cp, int font_size) {
  * format FreeType produced is normalised to one coverage byte per pixel here,
  * so nothing downstream (nor a GPU backend's R8 atlas) has to know about
  * FT_PIXEL_MODE_*. */
+/* COLR(v0) color glyph (modern NotoColorEmoji): composite the palette
+ * layers ourselves into one premultiplied-BGRA bitmap via FT_Bitmap_Blend
+ * (y measured bottom-up, offsets in 26.6), then un-premultiply into the
+ * straight-alpha BGRA tile the composite path expects. Returns NULL when
+ * the face carries no layers for this glyph. */
+/* COLR v1 (the emoji font on modern Android): walk the paint graph with
+ * the FT API and rasterize every PaintGlyph leaf into the accumulating
+ * premultiplied-BGRA target. Subset renderer: solid fills exact,
+ * gradients flattened to their first stop, composite modes approximated
+ * with source-over ordering, and the transform paints recursed into
+ * without applying their matrices (positions of reused component shapes
+ * may be approximate). Returns NULL when the glyph has no v1 paint. */
+static void colr1_color(FT_Color *palette, const FT_ColorIndex *ci,
+                        FT_Color *out) {
+    if (ci->palette_index == 0xFFFF || !palette) {
+        out->blue = out->green = out->red = 0xFF;
+        out->alpha = 0xFF;
+    } else {
+        *out = palette[ci->palette_index];
+    }
+    out->alpha = (FT_Byte)((FT_UInt32)out->alpha *
+                           (FT_UInt32)(FT_UInt16)ci->alpha / 16384);
+}
+
+static void colr1_fill_color(FT_Face face, FT_Color *palette,
+                             FT_OpaquePaint op, FT_Color *out) {
+    FT_COLR_Paint p;
+    FT_ColorStop stop;
+    if (!FT_Get_Paint(face, op, &p)) goto white;
+    if (p.format == FT_COLR_PAINTFORMAT_SOLID) {
+        colr1_color(palette, &p.u.solid.color, out);
+        return;
+    }
+    if (p.format == FT_COLR_PAINTFORMAT_LINEAR_GRADIENT ||
+        p.format == FT_COLR_PAINTFORMAT_RADIAL_GRADIENT ||
+        p.format == FT_COLR_PAINTFORMAT_SWEEP_GRADIENT) {
+        FT_ColorStopIterator *it =
+            &p.u.linear_gradient.colorline.color_stop_iterator;
+        if (it->num_color_stops &&
+            FT_Get_Colorline_Stops(face, &stop, it)) {
+            colr1_color(palette, &stop.color, out);
+            return;
+        }
+    }
+white:
+    out->blue = out->green = out->red = 0xFF;
+    out->alpha = 0xFF;
+}
+
+static void colr1_paint(FT_Face face, FT_Color *palette, FT_OpaquePaint op,
+                        FT_Bitmap *target, FT_Vector *toff, int depth) {
+    FT_COLR_Paint p;
+    if (depth > 32 || !FT_Get_Paint(face, op, &p)) return;
+    switch (p.format) {
+    case FT_COLR_PAINTFORMAT_COLR_LAYERS: {
+        FT_LayerIterator it = p.u.colr_layers.layer_iterator;
+        FT_OpaquePaint child;
+        while (FT_Get_Paint_Layers(face, &it, &child))
+            colr1_paint(face, palette, child, target, toff, depth + 1);
+        break;
+    }
+    case FT_COLR_PAINTFORMAT_GLYPH: {
+        FT_Color c;
+        colr1_fill_color(face, palette, p.u.glyph.paint, &c);
+        if (FT_Load_Glyph(face, p.u.glyph.glyphID, FT_LOAD_RENDER) == 0) {
+            FT_Vector soff;
+            soff.x = face->glyph->bitmap_left << 6;
+            soff.y = face->glyph->bitmap_top << 6;
+            FT_Bitmap_Blend(g_ft_library, &face->glyph->bitmap, soff,
+                            target, toff, c);
+        }
+        break;
+    }
+    case FT_COLR_PAINTFORMAT_COLR_GLYPH: {
+        FT_OpaquePaint child;
+        memset(&child, 0, sizeof(child));
+        if (FT_Get_Color_Glyph_Paint(face, p.u.colr_glyph.glyphID,
+                                     FT_COLOR_NO_ROOT_TRANSFORM, &child))
+            colr1_paint(face, palette, child, target, toff, depth + 1);
+        break;
+    }
+    case FT_COLR_PAINTFORMAT_COMPOSITE: {
+        int mode = (int)p.u.composite.composite_mode;
+        if (mode == FT_COLR_COMPOSITE_SRC) {
+            colr1_paint(face, palette, p.u.composite.source_paint,
+                        target, toff, depth + 1);
+        } else if (mode == FT_COLR_COMPOSITE_DEST) {
+            colr1_paint(face, palette, p.u.composite.backdrop_paint,
+                        target, toff, depth + 1);
+        } else if (mode == FT_COLR_COMPOSITE_DEST_OVER) {
+            colr1_paint(face, palette, p.u.composite.source_paint,
+                        target, toff, depth + 1);
+            colr1_paint(face, palette, p.u.composite.backdrop_paint,
+                        target, toff, depth + 1);
+        } else {
+            /* SRC_OVER and every fancier mode: approximate source-over */
+            colr1_paint(face, palette, p.u.composite.backdrop_paint,
+                        target, toff, depth + 1);
+            colr1_paint(face, palette, p.u.composite.source_paint,
+                        target, toff, depth + 1);
+        }
+        break;
+    }
+    /* The transform family: recurse without applying the matrix. */
+    case FT_COLR_PAINTFORMAT_TRANSFORM:
+        colr1_paint(face, palette, p.u.transform.paint,
+                    target, toff, depth + 1);
+        break;
+    case FT_COLR_PAINTFORMAT_TRANSLATE:
+        colr1_paint(face, palette, p.u.translate.paint,
+                    target, toff, depth + 1);
+        break;
+    case FT_COLR_PAINTFORMAT_SCALE:
+        colr1_paint(face, palette, p.u.scale.paint,
+                    target, toff, depth + 1);
+        break;
+    case FT_COLR_PAINTFORMAT_ROTATE:
+        colr1_paint(face, palette, p.u.rotate.paint,
+                    target, toff, depth + 1);
+        break;
+    case FT_COLR_PAINTFORMAT_SKEW:
+        colr1_paint(face, palette, p.u.skew.paint,
+                    target, toff, depth + 1);
+        break;
+    default:
+        break;
+    }
+}
+
+static const zan_glyph_tile *ft_colr_tile(FT_Face face, FT_UInt glyph,
+                                          int font_size, const char *key) {
+    FT_Color *palette = NULL;
+    FT_LayerIterator it;
+    FT_UInt lg = glyph, lc = 0;
+    FT_Bitmap target;
+    FT_Vector toff, soff;
+    int layers = 0;
+    int advance = 0;
+    int w, h, pitch;
+    int nz = 0;
+    unsigned char *px;
+    const zan_glyph_tile *tile = NULL;
+    FT_OpaquePaint root;
+    int used_v1 = 0;
+
+    /* FT_Get_Color_Glyph_Paint reads op->p as an input guard: the struct
+     * must start zeroed or stack garbage makes every lookup miss. */
+    memset(&root, 0, sizeof(root));
+
+    if (FT_Palette_Select(face, 0, &palette) != 0) palette = NULL;
+    if (FT_Load_Glyph(face, glyph, FT_LOAD_DEFAULT) == 0)
+        advance = (int)(face->glyph->advance.x >> 6);
+
+    memset(&target, 0, sizeof(target));
+    FT_Bitmap_Init(&target);
+    toff.x = toff.y = 0;
+
+    /* COLR v1: walk the paint graph. */
+    if (FT_Get_Color_Glyph_Paint(face, glyph,
+                                 FT_COLOR_NO_ROOT_TRANSFORM, &root)) {
+        colr1_paint(face, palette, root, &target, &toff, 0);
+        used_v1 = 1;
+        layers = 1;   /* presence of a paint graph counts as content */
+    } else {
+        FT_LOG("colr v1 miss: glyph=%u pal=%d", glyph, palette ? 1 : 0);
+    }
+
+    /* COLR v0: iterate palette layers. */
+    if (!used_v1) {
+        it.p = NULL;
+        while (FT_Get_Color_Glyph_Layer(face, glyph, &lg, &lc, &it)) {
+            FT_Color c;
+            if (lc != 0xFFFF && palette) {
+                c = palette[lc];
+            } else {
+                /* 0xFFFF = text foreground; emoji art wants white */
+                c.blue = c.green = c.red = 0xFF; c.alpha = 0xFF;
+            }
+            if (FT_Load_Glyph(face, lg, FT_LOAD_RENDER) == 0) {
+                soff.x = face->glyph->bitmap_left << 6;
+                soff.y = face->glyph->bitmap_top << 6;
+                if (FT_Bitmap_Blend(g_ft_library, &face->glyph->bitmap, soff,
+                                    &target, &toff, c) == 0)
+                    layers++;
+            }
+            if (!lg) break;   /* base glyph marks the last layer */
+        }
+    }
+    if (!layers) { FT_Bitmap_Done(g_ft_library, &target); return NULL; }
+
+    w = (int)target.width;
+    h = (int)target.rows;
+    pitch = target.pitch;
+    FT_LOG("colr glyph=%u w=%d h=%d mode=%d",
+           glyph, w, h, (int)target.pixel_mode);
+    px = (unsigned char *)malloc((size_t)w * h * 4);
+    if (px) {
+        for (int py = 0; py < h; py++) {
+            const unsigned char *row =
+                pitch >= 0 ? target.buffer + (size_t)py * pitch
+                           : target.buffer + (size_t)(h - 1 - py) * (-pitch);
+            unsigned char *dst = px + (size_t)py * (size_t)w * 4;
+            for (int pxi = 0; pxi < w; pxi++) {
+                int b = row[pxi * 4], g = row[pxi * 4 + 1];
+                int r = row[pxi * 4 + 2], a = row[pxi * 4 + 3];
+                if (a) {
+                    /* pre-multiplied -> straight, clamped */
+                    b = b * 255 / a; g = g * 255 / a; r = r * 255 / a;
+                    if (b > 255) b = 255;
+                    if (g > 255) g = 255;
+                    if (r > 255) r = 255;
+                } else {
+                    b = g = r = 0;
+                }
+                dst[pxi * 4] = (unsigned char)b;
+                dst[pxi * 4 + 1] = (unsigned char)g;
+                dst[pxi * 4 + 2] = (unsigned char)r;
+                dst[pxi * 4 + 3] = (unsigned char)a;
+                nz += (a > 0);
+            }
+        }
+        FT_LOG("colr alpha-nonzero=%d", nz);
+        tile = zan_atlas_store(ZAN_TILE_GLYPH, font_size, key, 6,
+                               w, h, (int)(toff.x >> 6), (int)(toff.y >> 6),
+                               advance, px, 4);
+        if (tile) ((zan_glyph_tile *)tile)->flags = ZAN_TILE_RGBA;
+        free(px);
+    }
+    FT_Bitmap_Done(g_ft_library, &target);
+    return tile;
+}
+
 static const zan_glyph_tile *ft_glyph_tile(u32 cp, int font_size, int angle) {
     char key[8];
     key[0] = (char)(cp & 0xFF);
@@ -501,6 +788,13 @@ static const zan_glyph_tile *ft_glyph_tile(u32 cp, int font_size, int angle) {
     FT_Face face = ft_face_for_cp(cp, font_size);
     FT_UInt glyph = FT_Get_Char_Index(face, cp);
     if (!glyph) glyph = FT_Get_Char_Index(face, '?');
+    /* COLR layers carry the whole glyph: composite the color tile directly
+     * (unrotated only; a rotated color glyph degrades to its base outline
+     * through the coverage path below). */
+    if (FT_HAS_COLOR(face) && angle == 0) {
+        const zan_glyph_tile *ct = ft_colr_tile(face, glyph, font_size, key);
+        if (ct) return ct;
+    }
     /* Rotation is baked into the coverage tile via the face transform, so
      * nothing downstream knows tiles come in orientations: the atlas keeps
      * one tile per (glyph, angle) and the pen loop walks the rotated
@@ -518,7 +812,10 @@ static const zan_glyph_tile *ft_glyph_tile(u32 cp, int font_size, int angle) {
         mat.yy = (FT_Fixed)(cos(rad) * 65536.0);
         FT_Set_Transform(face, &mat, NULL);
     }
-    int loaded = glyph && FT_Load_Glyph(face, glyph, FT_LOAD_RENDER) == 0;
+    /* FT_LOAD_COLOR is a no-op on outline faces but hands CBDT/CBLC color
+     * emoji through as an FT_PIXEL_MODE_BGRA bitmap below. */
+    int loaded = glyph && FT_Load_Glyph(face, glyph,
+                                        FT_LOAD_RENDER | FT_LOAD_COLOR) == 0;
     int advance = 0;
     if (loaded) {
         advance = (int)((rotated ? face->glyph->metrics.horiAdvance
@@ -533,6 +830,28 @@ static const zan_glyph_tile *ft_glyph_tile(u32 cp, int font_size, int angle) {
     if (w <= 0 || h <= 0) {
         return zan_atlas_store(ZAN_TILE_GLYPH, font_size, key, 6,
                                0, 0, 0, 0, advance, NULL, 1);
+    }
+
+    /* Color glyph (embedded-PNG CBDT emoji): keep FT's BGRA byte order with
+     * straight alpha -- the CPU composite source-overs it and the GL shelf
+     * uploads it as BGRA. Row-copied because FT pitches may pad. */
+    if (bitmap->pixel_mode == FT_PIXEL_MODE_BGRA) {
+        int pitch = bitmap->pitch;
+        unsigned char *px = (unsigned char *)malloc((size_t)w * h * 4);
+        if (!px) return NULL;
+        for (int py = 0; py < h; py++) {
+            const unsigned char *row =
+                pitch >= 0 ? bitmap->buffer + py * pitch
+                           : bitmap->buffer + (h - 1 - py) * (-pitch);
+            memcpy(px + (size_t)py * (size_t)w * 4, row, (size_t)w * 4);
+        }
+        const zan_glyph_tile *tile =
+            zan_atlas_store(ZAN_TILE_GLYPH, font_size, key, 6,
+                            w, h, slot->bitmap_left, slot->bitmap_top,
+                            advance, px, 4);
+        free(px);
+        if (tile) ((zan_glyph_tile *)tile)->flags = ZAN_TILE_RGBA;
+        return tile;
     }
 
     unsigned char *cov = (unsigned char *)malloc((size_t)w * (size_t)h);

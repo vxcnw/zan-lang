@@ -53,9 +53,12 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <dirent.h>
 #ifdef ZAN_GUI_FREETYPE
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include <freetype/ftcolor.h>
+#include <freetype/ftbitmap.h>
 #if !defined(__ANDROID__) && !defined(ZAN_GUI_OHOS)
 #include <fontconfig/fontconfig.h>
 #endif
@@ -4024,6 +4027,35 @@ static void cpu_glyph_run(zan_surface_t *s, const zan_glyph_run *run) {
         int py1 = s->clip_y1 - oy; if (py1 > th) py1 = th;
         int px0 = s->clip_x0 - ox; if (px0 < 0) px0 = 0;
         int px1 = s->clip_x1 - ox; if (px1 > tw) px1 = tw;
+        if (tile->flags & ZAN_TILE_RGBA) {
+            /* Color glyph (emoji): plain straight-alpha source-over in the
+             * tile's own colors; the run color does not participate. Bytes
+             * are FT's BGRA order. */
+            const u32 *cov = (const u32 *)tile->cov;
+            for (int py = py0; py < py1; py++) {
+                const u32 *srow = cov + (size_t)py * (size_t)tw;
+                int dst_row = (oy + py) * s->stride + ox;
+                for (int px = px0; px < px1; px++) {
+                    u32 sp = srow[px];
+                    u32 a = (sp >> 24) & 0xFF;
+                    if (!a) continue;
+                    u32 sb = sp & 0xFF;
+                    u32 sg = (sp >> 8) & 0xFF;
+                    u32 sr = (sp >> 16) & 0xFF;
+                    int idx = dst_row + px;
+                    u32 dp = s->pixels[idx];
+                    u32 dr = (dp >> 16) & 0xFF;
+                    u32 dg = (dp >> 8) & 0xFF;
+                    u32 db = dp & 0xFF;
+                    u32 or_ = (sr * a + dr * (255 - a)) / 255;
+                    u32 og = (sg * a + dg * (255 - a)) / 255;
+                    u32 ob = (sb * a + db * (255 - a)) / 255;
+                    s->pixels[idx] = (255u << 24) | (or_ << 16)
+                                   | (og << 8) | ob;
+                }
+            }
+            continue;
+        }
         if (tile->bpp == 1) {
             const unsigned char *cov = (const unsigned char *)tile->cov;
             for (int py = py0; py < py1; py++) {
