@@ -1,0 +1,51 @@
+using System;
+namespace Conf;
+
+// 回归(D6/D25):浮点→字符串曾是 C 的 %g——6 位有效数字截断往返
+// (3.14159265358979 → "3.14159"),特殊值按 MSVC 旧式 "1.#INF"/"-1.#IND"
+// 拼写,没有任何解析器能读回。现在走 zan_rt_dbl_str:最短往返十进制 +
+// C# "G" 布局(一阶指数 -4..14 定点,之外 d.dddE±xx),NaN/Infinity 按
+// C# 拼写,且 zan_rt_dbl_parse(D23 的 Parse/TryParse/ToDouble 入口)
+// 能把它们读回——旧 msvcrt strtod 对这些拼写返回 0。
+class Program {
+    static void Main() {
+        double pi = 3.14159265358979;
+        Console.WriteLine(Convert.ToString(pi));
+        Console.WriteLine(Convert.ToString(0.1 + 0.2));
+        Console.WriteLine(Convert.ToString(1.0));
+        Console.WriteLine(Convert.ToString(100.0));
+        Console.WriteLine(Convert.ToString(0.5));
+        Console.WriteLine(Convert.ToString(0.0001));
+        Console.WriteLine(Convert.ToString(0.00001));
+        Console.WriteLine(Convert.ToString(1e21));
+        Console.WriteLine(Convert.ToString(1e14));
+        Console.WriteLine(Convert.ToString(1.7976931348623157e308));
+        double z = 0.0;
+        Console.WriteLine(Convert.ToString(z / z));
+        Console.WriteLine(Convert.ToString(1.0 / z));
+        Console.WriteLine(Convert.ToString(-1.0 / z));
+        // 拼接/插值/ToString()/StringBuilder 与 Convert.ToString 同一格式化
+        Console.WriteLine("v=" + (1.0 / 3.0));
+        Console.WriteLine(0.5.ToString());
+        var sb = new StringBuilder();
+        sb.Append(2.5);
+        Console.WriteLine(sb.ToString());
+        // 往返:Parse(ToString(x)) == x
+        double rt = double.Parse(Convert.ToString(pi));
+        Console.WriteLine(rt == pi ? 1 : 0);
+        // 特殊值回读
+        double nn = double.Parse("NaN");
+        Console.WriteLine(nn != nn ? 1 : 0);
+        double inf = double.Parse("Infinity");
+        Console.WriteLine(inf > 1e308 ? 1 : 0);
+        double ninf = double.Parse("-Infinity");
+        Console.WriteLine(ninf < -1e308 ? 1 : 0);
+        bool ok;
+        double v;
+        ok = double.TryParse("NaN", out v);
+        Console.WriteLine(ok && v != v ? 1 : 0);
+        // 精度对照:6 位截断曾把这些变假
+        Console.WriteLine(Convert.ToString(2.675));
+        Console.WriteLine(Convert.ToString(123.456));
+    }
+}

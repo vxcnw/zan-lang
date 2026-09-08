@@ -1393,9 +1393,26 @@ zan_status_t zan_irgen_init(zan_irgen_t *g, zan_arena_t *arena,
 
     LLVMBasicBlockRef pdbl_entry = LLVMAppendBasicBlockInContext(g->ctx, g->rt_print_double, "entry");
     LLVMPositionBuilderAtEnd(g->builder, pdbl_entry);
-    LLVMValueRef dbl_fmt = zan_irgen_intern_string(g, "%g\n");
-    LLVMValueRef dargs[] = { dbl_fmt, LLVMGetParam(g->rt_print_double, 0) };
-    zan_call2(g->builder, printf_type, printf_fn, dargs, 2, "");
+    /* shortest round-trip spelling, not %g (audit D6/D25): %g kept six
+     * significant digits and printed the specials as 1.#INF / 1.#QNAN */
+    {
+        LLVMTypeRef i8p_t = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
+        LLVMTypeRef i64_t = LLVMInt64TypeInContext(g->ctx);
+        LLVMTypeRef ds_fn_ty = LLVMFunctionType(LLVMVoidTypeInContext(g->ctx),
+            (LLVMTypeRef[]){ i8p_t, i64_t, LLVMDoubleTypeInContext(g->ctx) }, 3, 0);
+        LLVMValueRef ds_fn = LLVMGetNamedFunction(g->mod, "zan_rt_dbl_str");
+        if (!ds_fn) ds_fn = LLVMAddFunction(g->mod, "zan_rt_dbl_str", ds_fn_ty);
+        LLVMValueRef ds_buf = LLVMBuildAlloca(g->builder,
+            LLVMArrayType(LLVMInt8TypeInContext(g->ctx), 40), "pdbl.buf");
+        LLVMValueRef ds_bufp = LLVMBuildBitCast(g->builder, ds_buf, i8p_t,
+                                                "pdbl.bufp");
+        LLVMValueRef ds_args[] = { ds_bufp,
+            LLVMConstInt(i64_t, 40, 0), LLVMGetParam(g->rt_print_double, 0) };
+        zan_call2(g->builder, ds_fn_ty, ds_fn, ds_args, 3, "");
+        LLVMValueRef nl_fmt = zan_irgen_intern_string(g, "%s\n");
+        LLVMValueRef dargs[] = { nl_fmt, ds_bufp };
+        zan_call2(g->builder, printf_type, printf_fn, dargs, 2, "");
+    }
     LLVMBuildRetVoid(g->builder);
 
     /* declare C library functions for string interpolation */
@@ -3683,6 +3700,27 @@ static LLVMValueRef emit_itoa_into(zan_irgen_t *g, LLVMValueRef buf,
         (LLVMTypeRef[]){ i8ptr, i64, i32 }, 3, 0);
     LLVMValueRef args[] = { buf, v, LLVMConstInt(i32, is_unsigned ? 1 : 0, 0) };
     return zan_call2(g->builder, fn_ty, fn, args, 3, "itoa");
+}
+
+/* Write `v` as the shortest round-trip C#-style decimal string into `buf`
+ * (zan_rt_dbl_str, linked from the timer object every program carries).
+ * Replaces the %g snprintf emission at the double->string sites: %g kept
+ * six significant digits (round-trip broken) and rendered the specials in
+ * MSVC's legacy 1.#INF / 1.#QNAN spelling that no parser reads back. */
+static void emit_dbl_str(zan_irgen_t *g, LLVMValueRef buf, LLVMValueRef cap,
+                         LLVMValueRef v) {
+    LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
+    LLVMTypeRef i64t = LLVMInt64TypeInContext(g->ctx);
+    LLVMTypeRef dbl = LLVMDoubleTypeInContext(g->ctx);
+    LLVMTypeRef fn_ty = LLVMFunctionType(LLVMVoidTypeInContext(g->ctx),
+        (LLVMTypeRef[]){ i8ptr, i64t, dbl }, 3, 0);
+    LLVMValueRef fn = LLVMGetNamedFunction(g->mod, "zan_rt_dbl_str");
+    if (!fn) fn = LLVMAddFunction(g->mod, "zan_rt_dbl_str", fn_ty);
+    LLVMValueRef arg = v;
+    if (LLVMGetTypeKind(LLVMTypeOf(v)) == LLVMFloatTypeKind)
+        arg = LLVMBuildFPExt(g->builder, v, dbl, "dbl.ext");
+    LLVMValueRef args[] = { buf, cap, arg };
+    zan_call2(g->builder, fn_ty, fn, args, 3, "");
 }
 
 /* ---- irgen translation-unit parts (order matters) ---------------------

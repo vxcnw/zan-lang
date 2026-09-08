@@ -51,6 +51,15 @@ int zan_rt_soft_is_hard(void);
  * 0 and stores land in scratch memory instead of page 0. Only the soft path
  * ever selects it; hard mode exits inside the guard report. */
 unsigned char *zan_rt_soft_scratch(void);
+/* Shortest round-trip double -> C#-style "G" string (see rt_timer.c): the
+ * shortest digit string strtod reads back bit-identical, fixed-point for
+ * first-digit exponents -4..14, d.dddE+xx outside, NaN/Infinity spelled
+ * out. `buf` receives at most 40 bytes including the NUL. */
+void zan_rt_dbl_str(char *buf, unsigned long long cap, double v);
+/* double.Parse / double.TryParse backing: matches the NaN / +/-Infinity
+ * spellings zan_rt_dbl_str emits (legacy msvcrt strtod answers 0 for them),
+ * then falls through to strtod. endp follows strtod semantics. */
+double zan_rt_dbl_parse(const char *s, char **endp);
 /* Windows starts a console program through a narrow CRT argv whose encoding
  * follows the active ANSI code page. This helper rebuilds it from the Unicode
  * command line as UTF-8. It returns non-zero on success and otherwise leaves

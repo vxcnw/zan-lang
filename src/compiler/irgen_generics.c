@@ -2184,8 +2184,6 @@ static LLVMValueRef emit_entry_scratch(zan_irgen_t *g, unsigned size,
 static LLVMValueRef emit_value_as_cstr(zan_irgen_t *g, LLVMValueRef v) {
     LLVMTypeRef vt = LLVMTypeOf(v);
     if (LLVMGetTypeKind(vt) == LLVMPointerTypeKind) return v;
-    LLVMTypeRef i8 = LLVMInt8TypeInContext(g->ctx);
-    LLVMTypeRef i8ptr = LLVMPointerType(i8, 0);
     LLVMTypeRef i64 = LLVMInt64TypeInContext(g->ctx);
     if (LLVMGetTypeKind(vt) == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(vt) == 1) {
         zan_istr_t t = { "true", 4 }, f = { "false", 5 };
@@ -2193,22 +2191,12 @@ static LLVMValueRef emit_value_as_cstr(zan_irgen_t *g, LLVMValueRef v) {
             emit_string_literal_rc(g, t), emit_string_literal_rc(g, f), "b2s");
     }
     LLVMValueRef buf = emit_entry_scratch(g, 40, "v2s.buf");
-    const char *fmt;
-    LLVMValueRef arg;
     if (LLVMGetTypeKind(vt) == LLVMDoubleTypeKind || LLVMGetTypeKind(vt) == LLVMFloatTypeKind) {
-        fmt = "%g";
-        arg = (LLVMGetTypeKind(vt) == LLVMFloatTypeKind)
-            ? LLVMBuildFPExt(g->builder, v, LLVMDoubleTypeInContext(g->ctx), "f2d") : v;
-    } else {
-        emit_itoa_into(g, buf, emit_widen_i64_for_print(g, v), 0);
+        /* shortest round-trip spelling (audit D6/D25) */
+        emit_dbl_str(g, buf, LLVMConstInt(i64, 40, 0), v);
         return buf;
     }
-    zan_istr_t fs = { fmt, (int)strlen(fmt) };
-    LLVMValueRef fmt_ptr = emit_string_literal_rc(g, fs);
-    LLVMTypeRef snp_ty = LLVMFunctionType(LLVMInt32TypeInContext(g->ctx),
-        (LLVMTypeRef[]){ i8ptr, i64, i8ptr }, 3, 1);
-    zan_call2(g->builder, snp_ty, g->fn_snprintf,
-        (LLVMValueRef[]){ buf, LLVMConstInt(i64, 40, 0), fmt_ptr, arg }, 4, "");
+    emit_itoa_into(g, buf, emit_widen_i64_for_print(g, v), 0);
     return buf;
 }
 
@@ -2565,36 +2553,19 @@ static LLVMValueRef emit_to_cstr_u(zan_irgen_t *g, LLVMValueRef val,
 
     LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
     LLVMTypeRef i64 = LLVMInt64TypeInContext(g->ctx);
-    LLVMTypeRef snprintf_type = LLVMFunctionType(
-        LLVMInt32TypeInContext(g->ctx), (LLVMTypeRef[]){ i8ptr, i64, i8ptr }, 3, 1);
-    LLVMValueRef fmt;
-    LLVMValueRef arg;
     if (vtk == LLVMDoubleTypeKind || vtk == LLVMFloatTypeKind) {
-        fmt = zan_irgen_intern_string(g, "%g");
-        arg = val;
-    } else {
-        /* integers format straight into the result string: the digits are at
-         * most 20 plus a sign, so the length is known without a probe run */
-        LLVMValueRef ibuf = emit_string_alloc_rc(g, LLVMConstInt(i64, 24, 0));
-        emit_itoa_into(g, ibuf, emit_widen_i64_for_print(g, val),
-                       is_unsigned ? 1 : 0);
-        return ibuf;
+        /* shortest round-trip spelling (audit D6/D25); 40 bytes fits the
+         * longest form it can emit */
+        LLVMValueRef buf = emit_string_alloc_rc(g, LLVMConstInt(i64, 40, 0));
+        emit_dbl_str(g, buf, LLVMConstInt(i64, 40, 0), val);
+        return buf;
     }
-    LLVMValueRef tmp_sz = LLVMConstInt(i64, 1024, 0);
-    LLVMValueRef tmp = emit_entry_scratch(g, 1024, "fmt.tmp");
-    LLVMValueRef a1[] = { tmp, tmp_sz, fmt, arg };
-    zan_call2(g->builder, snprintf_type, g->fn_snprintf, a1, 4, "");
-    LLVMValueRef needed = zan_call2(g->builder,
-        LLVMFunctionType(i64, (LLVMTypeRef[]){ i8ptr }, 1, 0),
-        LLVMGetNamedFunction(g->mod, "strlen"), &tmp, 1, "needed");
-    LLVMValueRef bsz = zan_add(g->builder, needed, LLVMConstInt(i64, 1, 0), "bsz");
-    LLVMValueRef buf = emit_string_alloc_rc(g, bsz);
-    zan_call2(g->builder,
-        LLVMFunctionType(i8ptr, (LLVMTypeRef[]){ i8ptr, i8ptr }, 2, 0),
-        LLVMGetNamedFunction(g->mod, "strcpy"),
-        (LLVMValueRef[]){ buf, tmp }, 2, "");
-    emit_string_len_set(g, buf, needed);
-    return buf;
+    /* integers format straight into the result string: the digits are at
+     * most 20 plus a sign, so the length is known without a probe run */
+    LLVMValueRef ibuf = emit_string_alloc_rc(g, LLVMConstInt(i64, 24, 0));
+    emit_itoa_into(g, ibuf, emit_widen_i64_for_print(g, val),
+                   is_unsigned ? 1 : 0);
+    return ibuf;
 }
 
 /* Signed formatting: for callers that have no Zan type to consult. */

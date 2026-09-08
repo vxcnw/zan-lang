@@ -16,6 +16,8 @@
 
 #include "rt_timer.h"
 
+#include <stdio.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include "../common/host_oom.h"
@@ -1035,3 +1037,101 @@ void zan_async_set_sync_fast(int32_t on) { g_cfg_sync_fast = on ? 1 : 0; }
 int32_t zan_async_cfg_workers(void)   { return (int32_t)g_cfg_workers; }
 int32_t zan_async_cfg_io_shards(void) { return (int32_t)g_cfg_io_shards; }
 int32_t zan_async_cfg_sync_fast(void) { return (int32_t)g_cfg_sync_fast; }
+
+/* ---- shortest round-trip double formatting (audit D6/D25) --------------
+ * zan_rt_dbl_str writes `v` in the C# default ("G") layout: the shortest
+ * decimal digit string strtod reads back bit-identical, laid out
+ * fixed-point for first-digit exponents -4..14 and d.dddE+xx outside that
+ * window, with NaN / +/-Infinity spelled the way C# names them (strtod
+ * parses both back). The %g emission this replaces printed six significant
+ * digits (3.14159265358979 -> "3.14159", round-trip broken) and let MSVC
+ * render the specials as 1.#INF / 1.#QNAN / -1.#IND, which no parser reads.
+ * Lives in this object because it links into every program (see the
+ * crash-logger note at the top); `buf` receives at most 40 bytes incl. NUL. */
+void zan_rt_dbl_str(char *buf, unsigned long long cap, double v) {
+    if (v != v) { snprintf(buf, (size_t)cap, "NaN"); return; }
+    if (v == 0.0) { snprintf(buf, (size_t)cap, "0"); return; }
+    const char *sign = (v < 0.0) ? "-" : "";
+    double a = (v < 0.0) ? -v : v;
+    if (a > 1.7976931348623157e308) {
+        snprintf(buf, (size_t)cap, "%sInfinity", sign);
+        return;
+    }
+    /* shortest digit search: the smallest precision whose %.Pe text strtod
+     * reads back as the same double. 17 significant digits always suffice. */
+    char m[40];
+    int p;
+    for (p = 1; p < 17; p++) {
+        snprintf(m, sizeof m, "%.*e", p - 1, v);
+        if (strtod(m, NULL) == v) break;
+    }
+    if (p == 17) snprintf(m, sizeof m, "%.16e", v);
+
+    /* split "-d.dddde+XX" into the digit run and the first-digit exponent */
+    char *q = (*m == '-') ? m + 1 : m;
+    char *es = strchr(q, 'e');
+    int e10 = atoi(es + 1);
+    char sig[24];
+    int n = 0;
+    for (char *c = q; c < es; c++)
+        if (*c >= '0' && *c <= '9') sig[n++] = *c;
+    while (n > 1 && sig[n - 1] == '0') n--;
+    sig[n] = 0;
+
+    char out[48];
+    if (e10 >= -4 && e10 <= 14) {
+        if (e10 >= n) {
+            /* integral value: the digits plus e10-(n-1) trailing zeros */
+            char zeros[24];
+            int z = e10 - (n - 1);
+            memset(zeros, '0', (size_t)z);
+            zeros[z] = 0;
+            snprintf(out, sizeof out, "%s%s%s", sign, sig, zeros);
+    } else if (e10 >= 0) {
+        /* point inside the digit run: head.tail -- or integral when the
+         * point would trail the last digit (1.0 must read "1", not "1.") */
+        int h = e10 + 1;
+        if (sig[h])
+            snprintf(out, sizeof out, "%s%.*s.%s", sign, h, sig, sig + h);
+        else
+            snprintf(out, sizeof out, "%s%.*s", sign, h, sig);
+    } else {
+            /* |v| < 1: 0. + (-e10-1) zeros + digits */
+            char zeros[8];
+            int z = -e10 - 1;
+            memset(zeros, '0', (size_t)z);
+            zeros[z] = 0;
+            snprintf(out, sizeof out, "%s0.%s%s", sign, zeros, sig);
+        }
+    } else {
+        /* scientific: d[.rest]E+xx, exponent sign always shown, 2 digits min */
+        if (sig[1])
+            snprintf(out, sizeof out, "%s%c.%sE%+03d", sign, sig[0], sig + 1,
+                     e10);
+        else
+            snprintf(out, sizeof out, "%s%sE%+03d", sign, sig, e10);
+    }
+    snprintf(buf, (size_t)cap, "%s", out);
+}
+
+/* double.Parse / double.TryParse backing (audit D6/D25 read-back): the four
+ * special spellings zan_rt_dbl_str emits are matched here first, because the
+ * legacy msvcrt strtod a MinGW build links predates C99 and answers 0 for
+ * "NaN"/"Infinity" instead of parsing them. endp follows strtod semantics:
+ * left at `s` when nothing converted. */
+double zan_rt_dbl_parse(const char *s, char **endp) {
+    if (endp) *endp = (char *)s;
+    if (strcmp(s, "NaN") == 0) {
+        if (endp) *endp = (char *)s + 3;
+        return (double)NAN;
+    }
+    if (strcmp(s, "Infinity") == 0 || strcmp(s, "+Infinity") == 0) {
+        if (endp) *endp = (char *)s + (s[0] == '+' ? 9 : 8);
+        return (double)INFINITY;
+    }
+    if (strcmp(s, "-Infinity") == 0) {
+        if (endp) *endp = (char *)s + 9;
+        return -(double)INFINITY;
+    }
+    return strtod(s, endp);
+}

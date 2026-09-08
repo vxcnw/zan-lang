@@ -3851,9 +3851,17 @@ static LLVMValueRef emit_expr_string_interp(zan_irgen_t *g, zan_ast_node_t *expr
                         ? LLVMBuildFPExt(g->builder, val,
                             LLVMDoubleTypeInContext(g->ctx), "f2d")
                         : val;
-                    LLVMValueRef fmt = flen > 0
-                        ? zan_irgen_intern_string(g, fbuf)
-                        : zan_irgen_intern_string(g, "%g");
+                    if (flen <= 0) {
+                        /* no format spec: shortest round-trip spelling
+                         * (audit D6/D25), not %g */
+                        LLVMValueRef buf = emit_string_alloc_rc(g,
+                            LLVMConstInt(i64, 40, 0));
+                        emit_dbl_str(g, buf, LLVMConstInt(i64, 40, 0), val);
+                        strs[i] = buf;
+                        lens[i] = emit_string_length(g, buf, expr->loc);
+                        owns[i] = 1;
+                    } else {
+                    LLVMValueRef fmt = zan_irgen_intern_string(g, fbuf);
                     LLVMValueRef null_ptr = LLVMConstNull(i8ptr);
                     LLVMValueRef zero = LLVMConstInt(i64, 0, 0);
                     LLVMValueRef snp_args1[] = { null_ptr, zero, fmt, fval };
@@ -3866,6 +3874,7 @@ static LLVMValueRef emit_expr_string_interp(zan_irgen_t *g, zan_ast_node_t *expr
                     strs[i] = buf;
                     lens[i] = needed64;
                     owns[i] = 1;
+                    }
                 } else if (vtk == LLVMIntegerTypeKind &&
                            LLVMGetIntTypeWidth(vt) == 1) {
                     /* bool interpolates as true/false, like `b.ToString()`

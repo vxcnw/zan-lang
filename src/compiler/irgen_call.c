@@ -921,11 +921,13 @@ static LLVMValueRef emit_expr_call(zan_irgen_t *g, zan_ast_node_t *expr,
                     zan_call2(g->builder, printf_type, printf_fn, args, 2, "");
                 } else if (LLVMGetTypeKind(arg_type) == LLVMDoubleTypeKind ||
                            LLVMGetTypeKind(arg_type) == LLVMFloatTypeKind) {
-                    LLVMValueRef fmt = zan_irgen_intern_string(g, "%g");
-                    LLVMValueRef dbl_arg = arg;
-                    if (LLVMGetTypeKind(arg_type) == LLVMFloatTypeKind)
-                        dbl_arg = LLVMBuildFPExt(g->builder, arg, LLVMDoubleTypeInContext(g->ctx), "ext");
-                    LLVMValueRef args[] = { fmt, dbl_arg };
+                    /* shortest round-trip spelling, not %g (audit D6/D25) */
+                    LLVMValueRef sbuf = emit_entry_scratch(g, 40, "wl.dbl");
+                    emit_dbl_str(g, sbuf,
+                        LLVMConstInt(LLVMInt64TypeInContext(g->ctx), 40, 0),
+                        arg);
+                    LLVMValueRef fmt = zan_irgen_intern_string(g, "%s");
+                    LLVMValueRef args[] = { fmt, sbuf };
                     zan_call2(g->builder, printf_type, printf_fn, args, 2, "");
                 } else if (llvm_is_nullable(arg_type)) {
                     LLVMValueRef ns = emit_to_cstr(g, arg);
@@ -1338,10 +1340,13 @@ static LLVMValueRef emit_expr_call(zan_irgen_t *g, zan_ast_node_t *expr,
             LLVMValueRef arg = emit_expr(g, expr->call.args.items[0], locals);
             LLVMTypeKind ak = LLVMGetTypeKind(LLVMTypeOf(arg));
             if (ak == LLVMPointerTypeKind) {
+                /* zan_rt_dbl_parse fronts strtod with the NaN/Infinity
+                 * spellings the formatter emits (audit D6/D25) */
                 LLVMTypeRef strtod_ty = LLVMFunctionType(dbl,
                     (LLVMTypeRef[]){ i8ptr, LLVMPointerType(i8ptr, 0) }, 2, 0);
-                LLVMValueRef strtod_fn = get_libc_fn(g, "strtod", strtod_ty);
-                LLVMValueRef r = zan_call2(g->builder, strtod_ty, strtod_fn,
+                LLVMValueRef f = LLVMGetNamedFunction(g->mod, "zan_rt_dbl_parse");
+                if (!f) f = LLVMAddFunction(g->mod, "zan_rt_dbl_parse", strtod_ty);
+                LLVMValueRef r = zan_call2(g->builder, strtod_ty, f,
                     (LLVMValueRef[]){ arg, LLVMConstNull(LLVMPointerType(i8ptr, 0)) }, 2, "todbl");
                 emit_release_owned_call_temp(g, expr->call.args.items[0], arg, locals);
                 return r;
@@ -1386,9 +1391,13 @@ static LLVMValueRef emit_expr_call(zan_irgen_t *g, zan_ast_node_t *expr,
                         (LLVMValueRef[]){ s, LLVMConstNull(i8pp),
                                           LLVMConstInt(i32t, 10, 0) }, 3, "parse");
                 } else {
+                    /* zan_rt_dbl_parse fronts strtod with the NaN/Infinity
+                     * spellings zan_rt_dbl_str emits -- legacy msvcrt strtod
+                     * answers 0 for them (audit D6/D25 read-back) */
                     LLVMTypeRef strtod_ty = LLVMFunctionType(dbl,
                         (LLVMTypeRef[]){ i8ptr, i8pp }, 2, 0);
-                    LLVMValueRef f = get_libc_fn(g, "strtod", strtod_ty);
+                    LLVMValueRef f = LLVMGetNamedFunction(g->mod, "zan_rt_dbl_parse");
+                    if (!f) f = LLVMAddFunction(g->mod, "zan_rt_dbl_parse", strtod_ty);
                     r = zan_call2(g->builder, strtod_ty, f,
                         (LLVMValueRef[]){ s, LLVMConstNull(i8pp) }, 2, "parse");
                 }
@@ -1416,9 +1425,12 @@ static LLVMValueRef emit_expr_call(zan_irgen_t *g, zan_ast_node_t *expr,
                     v = zan_call2(g->builder, strtoll_ty, f,
                         (LLVMValueRef[]){ s, endp, LLVMConstInt(i32t, 10, 0) }, 3, "tp");
                 } else {
+                    /* zan_rt_dbl_parse: NaN/Infinity spellings parse and
+                     * advance endp exactly like a numeric token would */
                     LLVMTypeRef strtod_ty = LLVMFunctionType(dbl,
                         (LLVMTypeRef[]){ i8ptr, i8pp }, 2, 0);
-                    LLVMValueRef f = get_libc_fn(g, "strtod", strtod_ty);
+                    LLVMValueRef f = LLVMGetNamedFunction(g->mod, "zan_rt_dbl_parse");
+                    if (!f) f = LLVMAddFunction(g->mod, "zan_rt_dbl_parse", strtod_ty);
                     v = zan_call2(g->builder, strtod_ty, f,
                         (LLVMValueRef[]){ s, endp }, 2, "tp");
                 }
@@ -1655,34 +1667,25 @@ static LLVMValueRef emit_expr_call(zan_irgen_t *g, zan_ast_node_t *expr,
                          * decimal code the numeric branch would print. */
                         if (expr_is_char(g, expr->call.args.items[0], locals))
                             return emit_char_to_cstr(g, arg);
-                        /* allocate buffer and sprintf */
-                        LLVMValueRef buf_size = LLVMConstInt(i64, 32, 0);
+                        /* allocate buffer and sprintf; 40 bytes fits the
+                         * longest shortest-round-trip double (the -1.79689...
+                         * E+308 family and the 15-digit fixed forms) */
+                        LLVMValueRef buf_size = LLVMConstInt(i64, 40, 0);
                         LLVMValueRef buf = emit_string_alloc_rc(g, buf_size);
                         LLVMTypeKind atk = LLVMGetTypeKind(LLVMTypeOf(arg));
-                        LLVMValueRef fmt;
-                        LLVMValueRef num_arg = arg;
                         if (atk == LLVMDoubleTypeKind || atk == LLVMFloatTypeKind) {
-                            /* floating point: print with %g (varargs promote
-                             * float to double), matching Console.WriteLine. */
-                            fmt = zan_irgen_intern_string(g, "%g");
-                            if (atk == LLVMFloatTypeKind) {
-                                num_arg = LLVMBuildFPExt(g->builder, arg,
-                                    LLVMDoubleTypeInContext(g->ctx), "ext");
-                            }
-                        } else {
-                            /* signed by default; a ulong argument formats
-                             * unsigned or values >= 2^63 come out negative. */
-                            bool is_ul = expr_is_ulong(
-                                g, expr->call.args.items[0], locals);
-                            emit_itoa_into(g, buf,
-                                emit_widen_i64_for_print(g, arg), is_ul ? 1 : 0);
+                            /* shortest round-trip spelling (audit D6/D25):
+                             * %g kept six significant digits and printed the
+                             * specials as 1.#INF / 1.#QNAN */
+                            emit_dbl_str(g, buf, buf_size, arg);
                             return buf;
                         }
-                        LLVMValueRef sn_args[] = { buf, LLVMConstInt(i64, 32, 0), fmt, num_arg };
-                        zan_call2(g->builder,
-                            LLVMFunctionType(LLVMInt32TypeInContext(g->ctx),
-                                (LLVMTypeRef[]){ i8ptr, i64, i8ptr }, 3, 1),
-                            g->fn_snprintf, sn_args, 4, "");
+                        /* signed by default; a ulong argument formats
+                         * unsigned or values >= 2^63 come out negative. */
+                        bool is_ul = expr_is_ulong(
+                            g, expr->call.args.items[0], locals);
+                        emit_itoa_into(g, buf,
+                            emit_widen_i64_for_print(g, arg), is_ul ? 1 : 0);
                         return buf;
                     }
                 }
@@ -2210,25 +2213,14 @@ static LLVMValueRef emit_expr_call(zan_irgen_t *g, zan_ast_node_t *expr,
                     }
                     /* numeric: format like Convert.ToString */
                     LLVMValueRef buf = emit_string_alloc_rc(g,
-                        LLVMConstInt(i64, 32, 0));
-                    LLVMValueRef fmt;
-                    LLVMValueRef num_arg = v;
+                        LLVMConstInt(i64, 40, 0));
                     if (vk == LLVMDoubleTypeKind || vk == LLVMFloatTypeKind) {
-                        fmt = zan_irgen_intern_string(g, "%g");
-                        if (vk == LLVMFloatTypeKind) {
-                            num_arg = LLVMBuildFPExt(g->builder, v,
-                                LLVMDoubleTypeInContext(g->ctx), "ext");
-                        }
-                    } else {
-                        emit_itoa_into(g, buf, emit_widen_i64_for_print(g, v),
-                                       rt_ty->kind == TYPE_ULONG ? 1 : 0);
+                        /* shortest round-trip spelling (audit D6/D25) */
+                        emit_dbl_str(g, buf, LLVMConstInt(i64, 40, 0), v);
                         return buf;
                     }
-                    LLVMValueRef sn_args[] = { buf, LLVMConstInt(i64, 32, 0), fmt, num_arg };
-                    zan_call2(g->builder,
-                        LLVMFunctionType(LLVMInt32TypeInContext(g->ctx),
-                            (LLVMTypeRef[]){ i8ptr, i64, i8ptr }, 3, 1),
-                        g->fn_snprintf, sn_args, 4, "");
+                    emit_itoa_into(g, buf, emit_widen_i64_for_print(g, v),
+                                   rt_ty->kind == TYPE_ULONG ? 1 : 0);
                     return buf;
                 }
             }
