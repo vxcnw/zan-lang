@@ -3,12 +3,15 @@
 // score multiplier, bricks drop powerups (multiball, wide paddle, slow-mo,
 // score gems), and clearing a board advances to the next, faster level.
 // Floating score popups, particle bursts, screen shake and encouraging toasts
-// provide the juice; best score / highest level / max combo persist. All text
-// uses the smooth TTF atlases. F11 borderless fullscreen, Esc back/exit.
+// provide the juice; best score / highest level / max combo persist.
+// Esc back/exit.
+// GuiHost+Canvas 版：窗口/事件/呈现由 Gui 原生外壳承担（Game.Foundation.Gui），
+// 绘制走 Game.Kit.CanvasPrims 直绘，不依赖 SDL。
 using System;
 using System.IO;
-using SDL3;
+using Gui;
 using Game.Kit;
+using Game.Foundation.Gui;
 
 namespace Breakout;
 
@@ -27,7 +30,7 @@ class Profile {
     }
     static int ReadKey(List<string> lines, string key, int fb) {
         for (int i = 0; i < lines.Count; i = i + 1) {
-            string ln = lines[i]; int eq = -1; 
+            string ln = lines[i]; int eq = -1;
             for (int j = 0; j < ln.Length; j = j + 1) { if (ln[j] == 61) { eq = j; j = ln.Length; } }
             if (eq > 0) { if (ln.Substring(0, eq) == key) { return Profile.ParseInt(ln, eq + 1); } }
         }
@@ -101,8 +104,8 @@ class Popup {
 }
 
 class BkGame {
-    Host host;
-    SdlRenderer r;
+    GuiHost host;
+    Canvas c;
     Profile prof;
     Rng rng;
 
@@ -131,8 +134,8 @@ class BkGame {
     string toastText;
     int shakeUntil;
     bool wasRecord;
-    SdlTexture menuBg;
-    SdlTexture titleTex;
+    string menuBg;    // asset paths (null = 画布回退画法)
+    string titlePath;
     bool texTried;
     bool demo;
     int demoJitter;
@@ -145,34 +148,30 @@ class BkGame {
     static int PalG(int i) { int m = i % 6; if (m == 0) { return 110; } if (m == 1) { return 205; } if (m == 2) { return 235; } if (m == 3) { return 160; } if (m == 4) { return 120; } return 235; }
     static int PalB(int i) { int m = i % 6; if (m == 0) { return 140; } if (m == 1) { return 90; } if (m == 2) { return 140; } if (m == 3) { return 255; } if (m == 4) { return 255; } return 120; }
 
-    static BkGame Create(Host h) {
+    static BkGame Create(GuiHost h) {
         BkGame g = new BkGame();
         g.host = h;
-        g.r = h.Renderer();
+        g.c = h.App().canvas;
         g.prof = Profile.Load();
-        g.rng = Rng.Seed((long)Sdl.Ticks() + 24681357);
+        g.rng = Rng.Seed((long)Window.GetTickMs() + 24681357);
         g.scene = 0;
         g.mouseX = 640;
         g.mouseY = 360;
         g.demo = File.Exists("breakout_demo.txt");
-        if (g.demo) { g.StartGame(Sdl.Ticks()); }
+        if (g.demo) { g.StartGame(Window.GetTickMs()); }
         return g;
     }
 
     void EnsureTex() {
         if (this.texTried) { return; }
         this.texTried = true;
-        this.menuBg = BkGame.LoadTex(this.r, "assets/menu_bg.png");
-        this.titleTex = BkGame.LoadTex(this.r, "assets/title.png");
+        this.menuBg = BkGame.FindAsset("assets/menu_bg.png");
+        this.titlePath = BkGame.FindAsset("assets/title.png");
     }
-    static SdlTexture LoadTex(SdlRenderer r, string path) {
+    static string FindAsset(string path) {
         string p = Assets.Find(path);
         if (!File.Exists(p)) { return null; }
-        SdlTexture t = SdlTexture.LoadImage(r, p);
-        if (t == null || !t.IsValid()) { return null; }
-        t.SetNearest(false);
-        t.SetBlendMode(1);
-        return t;
+        return p;
     }
 
     // ----- level layouts ---------------------------------------------------
@@ -617,30 +616,29 @@ class BkGame {
             shX = (now * 7 % (amp * 2 + 1)) - amp;
             shY = (now * 13 % (amp * 2 + 1)) - amp;
         }
-        this.host.Begin(12, 10, 28);
+        CDraw.Clear(this.c, BkGame.W(), BkGame.H(), CDraw.Argb(255, 12, 10, 28));
         // dim nebula artwork + colored light pools for depth
         if (this.menuBg != null) {
-            KitUi.Backdrop(this.r, this.menuBg, 1280, 720);
-            this.r.SetColor(8, 7, 22, 216);
-            this.r.FillRect(0, 0, 1280, 720);
+            CKitUi.Backdrop(this.c, this.menuBg, BkGame.W(), BkGame.H());
+            CDraw.FillRect(this.c, 0, 0, BkGame.W(), BkGame.H(), CDraw.Argb(216, 8, 7, 22));
         }
-        Draw.FillCircle(this.r, 240, 620, 300, 120, 60, 220, 14);
-        Draw.FillCircle(this.r, 1050, 160, 280, 60, 160, 255, 12);
-        Draw.FillCircle(this.r, 660, 420, 360, 255, 90, 180, 8);
+        CDraw.FillCircle(this.c, 240, 620, 300, 120, 60, 220, 14);
+        CDraw.FillCircle(this.c, 1050, 160, 280, 60, 160, 255, 12);
+        CDraw.FillCircle(this.c, 660, 420, 360, 255, 90, 180, 8);
         // side + top glow rails
-        this.r.SetColor(120, 80, 220, 60);
-        this.r.FillRect(0 + shX, 0 + shY, 8, BkGame.H());
-        this.r.FillRect(BkGame.W() - 8 + shX, 0 + shY, 8, BkGame.H());
-        this.r.FillRect(0 + shX, 0 + shY, BkGame.W(), 8);
-        this.r.SetColor(190, 120, 255, 200);
-        this.r.FillRect(6 + shX, 0 + shY, 2, BkGame.H());
-        this.r.FillRect(BkGame.W() - 8 + shX, 0 + shY, 2, BkGame.H());
-        this.r.FillRect(0 + shX, 6 + shY, BkGame.W(), 2);
+        int rail = CDraw.Argb(60, 120, 80, 220);
+        int railHi = CDraw.Argb(200, 190, 120, 255);
+        CDraw.FillRect(this.c, 0 + shX, 0 + shY, 8, BkGame.H(), rail);
+        CDraw.FillRect(this.c, BkGame.W() - 8 + shX, 0 + shY, 8, BkGame.H(), rail);
+        CDraw.FillRect(this.c, 0 + shX, 0 + shY, BkGame.W(), 8, rail);
+        CDraw.FillRect(this.c, 6 + shX, 0 + shY, 2, BkGame.H(), railHi);
+        CDraw.FillRect(this.c, BkGame.W() - 8 + shX, 0 + shY, 2, BkGame.H(), railHi);
+        CDraw.FillRect(this.c, 0 + shX, 6 + shY, BkGame.W(), 2, railHi);
         // dashed danger line along the open bottom edge
-        this.r.SetColor(255, 90, 110, 130);
+        int danger = CDraw.Argb(130, 255, 90, 110);
         int dxp = 14;
         while (dxp < BkGame.W() - 14) {
-            this.r.FillRect(dxp + shX, BkGame.H() - 6 + shY, 22, 3);
+            CDraw.FillRect(this.c, dxp + shX, BkGame.H() - 6 + shY, 22, 3, danger);
             dxp = dxp + 44;
         }
 
@@ -651,11 +649,11 @@ class BkGame {
             int bx = b.x / 256;
             if (b.steel) {
                 // riveted steel obstacle
-                Draw.RoundRectFill(this.r, bx + shX, b.y + shY, b.w, b.h, 7, 96, 104, 128, 245);
-                Draw.RoundRectFill(this.r, bx + 4 + shX, b.y + 4 + shY, b.w - 8, b.h / 2 - 4, 5, 255, 255, 255, 26);
-                Draw.RingRect(this.r, bx + shX, b.y + shY, b.w, b.h, 2, 170, 180, 205, 160);
-                Draw.FillCircle(this.r, bx + 10 + shX, b.y + b.h / 2 + shY, 3, 190, 200, 220, 220);
-                Draw.FillCircle(this.r, bx + b.w - 10 + shX, b.y + b.h / 2 + shY, 3, 190, 200, 220, 220);
+                CDraw.RoundRectFill(this.c, bx + shX, b.y + shY, b.w, b.h, 7, 96, 104, 128, 245);
+                CDraw.RoundRectFill(this.c, bx + 4 + shX, b.y + 4 + shY, b.w - 8, b.h / 2 - 4, 5, 255, 255, 255, 26);
+                CDraw.RingRect(this.c, bx + shX, b.y + shY, b.w, b.h, 2, 170, 180, 205, 160);
+                CDraw.FillCircle(this.c, bx + 10 + shX, b.y + b.h / 2 + shY, 3, 190, 200, 220, 220);
+                CDraw.FillCircle(this.c, bx + b.w - 10 + shX, b.y + b.h / 2 + shY, 3, 190, 200, 220, 220);
                 i = i + 1;
                 continue;
             }
@@ -664,14 +662,14 @@ class BkGame {
             int br2 = cr - cr * dim / 100;
             int bg2 = cg - cg * dim / 100;
             int bb2 = cb - cb * dim / 100;
-            Draw.RoundRectFill(this.r, bx - 4 + shX, b.y - 4 + shY, b.w + 8, b.h + 8, 12, cr, cg, cb, 34);
-            Draw.RoundRectFill(this.r, bx + shX, b.y + shY, b.w, b.h, 9, br2, bg2, bb2, 235);
-            Draw.RoundRectFill(this.r, bx + 4 + shX, b.y + 4 + shY, b.w - 8, b.h / 2 - 4, 6, 255, 255, 255, 46);
+            CDraw.RoundRectFill(this.c, bx - 4 + shX, b.y - 4 + shY, b.w + 8, b.h + 8, 12, cr, cg, cb, 34);
+            CDraw.RoundRectFill(this.c, bx + shX, b.y + shY, b.w, b.h, 9, br2, bg2, bb2, 235);
+            CDraw.RoundRectFill(this.c, bx + 4 + shX, b.y + 4 + shY, b.w - 8, b.h / 2 - 4, 6, 255, 255, 255, 46);
             if (b.gem) {
-                Draw.FillCircle(this.r, bx + b.w / 2 + shX, b.y + b.h / 2 + shY, 5, 255, 255, 255, 200);
+                CDraw.FillCircle(this.c, bx + b.w / 2 + shX, b.y + b.h / 2 + shY, 5, 255, 255, 255, 200);
             }
             if (b.hp >= 3) {
-                Draw.RingRect(this.r, bx + shX, b.y + shY, b.w, b.h, 2, 255, 255, 255, 70);
+                CDraw.RingRect(this.c, bx + shX, b.y + shY, b.w, b.h, 2, 255, 255, 255, 70);
             }
             i = i + 1;
         }
@@ -686,18 +684,18 @@ class BkGame {
             if (d.kind == 1) { cr = 255; cg = 205; cb = 90; mark = "长"; }
             if (d.kind == 2) { cr = 120; cg = 200; cb = 255; mark = "慢"; }
             if (d.kind == 3) { cr = 255; cg = 220; cb = 110; mark = "宝"; }
-            Draw.FillCircle(this.r, d.x + shX, dy + shY, 18, cr, cg, cb, 50);
-            Draw.FillCircle(this.r, d.x + shX, dy + shY, 13, cr, cg, cb, 235);
-            Text.DrawCentered(this.r, mark, d.x + shX, dy - 11 + shY, 2, 20, 24, 44, 255);
+            CDraw.FillCircle(this.c, d.x + shX, dy + shY, 18, cr, cg, cb, 50);
+            CDraw.FillCircle(this.c, d.x + shX, dy + shY, 13, cr, cg, cb, 235);
+            CText.DrawCentered(this.c, mark, d.x + shX, dy - 11 + shY, 2, 20, 24, 44, 255);
             i = i + 1;
         }
 
         // paddle: glowing capsule
         int pw = this.padW;
         int py = BkGame.PadY();
-        Draw.RoundRectFill(this.r, this.padX - pw / 2 - 4 + shX, py - 4 + shY, pw + 8, 26, 13, 140, 255, 210, 40);
-        Draw.RoundRectFill(this.r, this.padX - pw / 2 + shX, py + shY, pw, 18, 9, 90, 235, 190, 255);
-        Draw.RoundRectFill(this.r, this.padX - pw / 2 + 8 + shX, py + 3 + shY, pw - 16, 6, 3, 255, 255, 255, 90);
+        CDraw.RoundRectFill(this.c, this.padX - pw / 2 - 4 + shX, py - 4 + shY, pw + 8, 26, 13, 140, 255, 210, 40);
+        CDraw.RoundRectFill(this.c, this.padX - pw / 2 + shX, py + shY, pw, 18, 9, 90, 235, 190, 255);
+        CDraw.RoundRectFill(this.c, this.padX - pw / 2 + 8 + shX, py + 3 + shY, pw - 16, 6, 3, 255, 255, 255, 90);
 
         // balls
         i = 0;
@@ -710,13 +708,13 @@ class BkGame {
                 while (t <= 3) {
                     int tx = bx - b.vx * t * 14 / 256000;
                     int ty = by - b.vy * t * 14 / 256000;
-                    Draw.FillCircle(this.r, tx + shX, ty + shY, 9 - t * 2, 255, 220, 120, 90 - t * 24);
+                    CDraw.FillCircle(this.c, tx + shX, ty + shY, 9 - t * 2, 255, 220, 120, 90 - t * 24);
                     t = t + 1;
                 }
-                Draw.FillCircle(this.r, bx + shX, by + shY, 16, 255, 240, 160, 40);
-                Draw.FillCircle(this.r, bx + shX, by + shY, 14, 255, 240, 160, 46);
-                Draw.FillCircle(this.r, bx + shX, by + shY, 9, 255, 235, 130, 255);
-                Draw.FillCircle(this.r, bx - 3 + shX, by - 3 + shY, 3, 255, 255, 255, 220);
+                CDraw.FillCircle(this.c, bx + shX, by + shY, 16, 255, 240, 160, 40);
+                CDraw.FillCircle(this.c, bx + shX, by + shY, 14, 255, 240, 160, 46);
+                CDraw.FillCircle(this.c, bx + shX, by + shY, 9, 255, 235, 130, 255);
+                CDraw.FillCircle(this.c, bx - 3 + shX, by - 3 + shY, 3, 255, 255, 255, 220);
             }
             i = i + 1;
         }
@@ -727,7 +725,7 @@ class BkGame {
             Particle p = this.parts[i];
             int age = now - p.bornAt;
             int alpha = 255 - age * 255 / 650;
-            Draw.FillCircle(this.r, p.x / 256 + shX, p.y / 256 + shY, 3, p.cr, p.cg, p.cb, alpha);
+            CDraw.FillCircle(this.c, p.x / 256 + shX, p.y / 256 + shY, 3, p.cr, p.cg, p.cb, alpha);
             i = i + 1;
         }
         // popups
@@ -738,22 +736,22 @@ class BkGame {
             if (age > 900) { this.pops.RemoveAt(i); }
             else {
                 int alpha = 255 - age * 255 / 900;
-                Text.DrawCentered(this.r, p.text, p.x, p.y - age / 9, 3, p.cr, p.cg, p.cb, alpha);
+                CText.DrawCentered(this.c, p.text, p.x, p.y - age / 9, 3, p.cr, p.cg, p.cb, alpha);
             }
             i = i - 1;
         }
 
         // HUD
-        Text.DrawShadow(this.r, "" + this.score, 28, 18, 7, 255, 230, 120, 3);
-        Text.DrawShadow(this.r, "第 " + this.level + " 关", 32, 84, 2, 170, 220, 255, 2);
+        CText.DrawShadow(this.c, "" + this.score, 28, 18, 7, 255, 230, 120, 255);
+        CText.DrawShadow(this.c, "第 " + this.level + " 关", 32, 84, 2, 170, 220, 255, 255);
         if (this.mult > 1) {
-            Text.DrawShadow(this.r, "连击 x" + this.mult, 32, 114, 3, 255, 170, 210, 2);
+            CText.DrawShadow(this.c, "连击 x" + this.mult, 32, 114, 3, 255, 170, 210, 255);
         }
         // lives (hearts as glowing dots)
         i = 0;
         while (i < this.lives) {
-            Draw.FillCircle(this.r, 1230 - i * 34, 36, 12, 255, 110, 140, 235);
-            Draw.FillCircle(this.r, 1233 - i * 34, 32, 4, 255, 255, 255, 140);
+            CDraw.FillCircle(this.c, 1230 - i * 34, 36, 12, 255, 110, 140, 235);
+            CDraw.FillCircle(this.c, 1233 - i * 34, 32, 4, 255, 255, 255, 140);
             i = i + 1;
         }
         // toast
@@ -761,78 +759,73 @@ class BkGame {
             int a = 255;
             int age = now - this.toastAt;
             if (age > 1100) { a = 255 - (age - 1100) * 255 / 400; }
-            Text.DrawCentered(this.r, this.toastText, 640, 150, 4, 255, 235, 140, a);
+            CText.DrawCentered(this.c, this.toastText, 640, 150, 4, 255, 235, 140, a);
         }
         if (this.stuck) {
-            Text.DrawCentered(this.r, "点击发射", 640, 560, 3, 190, 200, 230, 200);
+            CText.DrawCentered(this.c, "点击发射", 640, 560, 3, 190, 200, 230, 200);
         }
     }
 
     void DrawPlay(int now) {
         this.DrawScene(now);
-        this.host.End();
     }
 
     void DrawMenu(int now) {
         this.EnsureTex();
-        this.host.Begin(12, 10, 28);
-        KitUi.Backdrop(this.r, this.menuBg, 1280, 720);
-        this.r.SetColor(8, 8, 24, 130);
-        this.r.FillRect(0, 0, 1280, 720);
-        if (this.titleTex != null) {
-            this.r.DrawTexture(this.titleTex, 640 - 300, 40, 600, 200);
+        CDraw.Clear(this.c, BkGame.W(), BkGame.H(), CDraw.Argb(255, 12, 10, 28));
+        CKitUi.Backdrop(this.c, this.menuBg, BkGame.W(), BkGame.H());
+        CDraw.FillRect(this.c, 0, 0, BkGame.W(), BkGame.H(), CDraw.Argb(130, 8, 8, 24));
+        if (this.titlePath != null) {
+            CDraw.BlitImage(this.c, this.titlePath, 640 - 300, 40, 600, 200);
         } else {
-            Text.DrawCenteredShadow(this.r, "打砖块", 640, 80, 9, 245, 238, 220, 4);
+            CText.DrawCenteredShadow(this.c, "打砖块", 640, 80, 9, 245, 238, 220, 255);
         }
-        Text.DrawCenteredShadow(this.r, "霓虹碎砖 · 连击倍增 · 道具连锁", 640, 268, 3, 255, 214, 150, 3);
-        KitUi.Button(this.r, this.mouseX, this.mouseY, 460, 380, 360, 88, "开始弹射", 4, 1);
-        Text.DrawCenteredShadow(this.r, "最高分 " + this.prof.high + " · 最高 " + this.prof.bestLevel + " 关 · 最长连击 " + this.prof.bestCombo, 640, 520, 2, 255, 224, 130, 2);
-        Text.DrawCenteredShadow(this.r, "鼠标移动挡板 · 点击发射 · F11 全屏 · Esc 退出", 640, 600, 2, 185, 195, 220, 2);
-        this.host.End();
+        CText.DrawCenteredShadow(this.c, "霓虹碎砖 · 连击倍增 · 道具连锁", 640, 268, 3, 255, 214, 150, 255);
+        CKitUi.Button(this.c, this.mouseX, this.mouseY, 460, 380, 360, 88, "开始弹射", 4, 1);
+        CText.DrawCenteredShadow(this.c, "最高分 " + this.prof.high + " · 最高 " + this.prof.bestLevel + " 关 · 最长连击 " + this.prof.bestCombo, 640, 520, 2, 255, 224, 130, 255);
+        CText.DrawCenteredShadow(this.c, "鼠标移动挡板 · 点击发射 · Esc 退出", 640, 600, 2, 185, 195, 220, 255);
     }
 
     void DrawOver(int now) {
         this.DrawScene(now);
-        this.r.SetColor(6, 8, 18, 185);
-        this.r.FillRect(0, 0, 1280, 720);
+        CDraw.FillRect(this.c, 0, 0, BkGame.W(), BkGame.H(), CDraw.Argb(185, 6, 8, 18));
         int by = 190;
-        Draw.RoundRectFill(this.r, 390, by, 500, 320, 20, 16, 20, 40, 240);
-        Draw.RingRect(this.r, 390, by, 500, 320, 2, 190, 120, 255, 120);
+        CDraw.RoundRectFill(this.c, 390, by, 500, 320, 20, 16, 20, 40, 240);
+        CDraw.RingRect(this.c, 390, by, 500, 320, 2, 190, 120, 255, 120);
         bool record = this.score >= this.prof.high && this.score > 0;
         if (record) {
-            Text.DrawCenteredShadow(this.r, "新纪录！", 640, by + 30, 6, 255, 220, 100, 3);
+            CText.DrawCenteredShadow(this.c, "新纪录！", 640, by + 30, 6, 255, 220, 100, 255);
         } else {
-            Text.DrawCenteredShadow(this.r, "挡板失守", 640, by + 34, 4, 235, 140, 150, 3);
+            CText.DrawCenteredShadow(this.c, "挡板失守", 640, by + 34, 4, 235, 140, 150, 255);
         }
-        Text.DrawCentered(this.r, "得分 " + this.score, 640, by + 100, 5, 255, 225, 110, 255);
-        Text.DrawCentered(this.r, "第 " + this.level + " 关 · 最长连击 " + this.bestCombo, 640, by + 156, 2, 175, 200, 235, 255);
+        CText.DrawCentered(this.c, "得分 " + this.score, 640, by + 100, 5, 255, 225, 110, 255);
+        CText.DrawCentered(this.c, "第 " + this.level + " 关 · 最长连击 " + this.bestCombo, 640, by + 156, 2, 175, 200, 235, 255);
         string cheer = "再来一局，打出更高连击！";
         if (record) { cheer = "砖块粉碎机就是你！"; }
-        Text.DrawCentered(this.r, cheer, 640, by + 196, 2, 150, 230, 190, 255);
-        KitUi.Button(this.r, this.mouseX, this.mouseY, 420, by + 236, 210, 60, "再来一局", 3, 1);
-        KitUi.Button(this.r, this.mouseX, this.mouseY, 650, by + 236, 210, 60, "回到菜单", 3, 0);
-        this.host.End();
+        CText.DrawCentered(this.c, cheer, 640, by + 196, 2, 150, 230, 190, 255);
+        CKitUi.Button(this.c, this.mouseX, this.mouseY, 420, by + 236, 210, 60, "再来一局", 3, 1);
+        CKitUi.Button(this.c, this.mouseX, this.mouseY, 650, by + 236, 210, 60, "回到菜单", 3, 0);
     }
 
     // ----- input -----------------------------------------------------------
 
-    void OnKey(int sc, int now) {
-        if (sc == 41) { if (this.scene == 0) { this.host.Quit(); } else { this.scene = 0; } return; }
+    void OnKey(int key, int now) {
+        if (key == 27) { if (this.scene == 0) { this.host.RequestStop(); } else { this.scene = 0; } return; }
         if (this.scene == 0 || this.scene == 2) {
-            if (sc == 40 || sc == 44) { this.StartGame(now); }
+            if (key == 13 || key == 32) { this.StartGame(now); }
             return;
         }
-        if (sc == 44) { this.LaunchBall(now); }
+        if (key == 32) { this.LaunchBall(now); }
     }
     void OnDown(int cx, int cy, int now) {
         if (this.scene == 0) {
-            if (Draw.PointIn(cx, cy, 460, 380, 360, 88)) { this.StartGame(now); }
+            if (CDraw.PointIn(cx, cy, 460, 380, 360, 88)) { this.StartGame(now); }
             return;
         }
         if (this.scene == 1 || this.scene == 3) { this.LaunchBall(now); return; }
         if (this.scene == 2) {
-            if (Draw.PointIn(cx, cy, 420, 426, 210, 60)) { this.StartGame(now); return; }
-            if (Draw.PointIn(cx, cy, 650, 426, 210, 60)) { this.scene = 0; return; }
+            if (CDraw.PointIn(cx, cy, 420, 426, 210, 60)) { this.StartGame(now); return; }
+            if (CDraw.PointIn(cx, cy, 650, 426, 210, 60)) { this.scene = 0; return; }
         }
     }
 
@@ -846,36 +839,48 @@ class BkGame {
     }
 }
 
+// GuiHost 主循环回调：事件 → 固定步长模拟（16ms，追帧上限内多次）→
+// 渲染（BeginFrame/PresentFrame 由宿主包好；帧预算自限速约 60fps）。
+class BkLoop : IGuiHostLoop {
+    BkGame g;
+
+    public void Start(GuiHost host) {
+        this.g = BkGame.Create(host);
+    }
+    public void Event(GuiHost host, int kind, int code) {
+        int now = Window.GetTickMs();
+        App a = host.App();
+        // 鼠标是窗口客户区坐标，减 ContentTop 换回舞台坐标（标题栏
+        // 之上/之内的指针对游戏不可见）。
+        if (kind == 4) {
+            this.g.OnKey(code, now);
+        } else if (kind == 2) {
+            this.g.mouseX = a.mouseX;
+            this.g.mouseY = a.mouseY - host.ContentTop();
+        } else if (kind == 1) {
+            if (code == 0) {
+                this.g.mouseX = a.mouseX;
+                this.g.mouseY = a.mouseY - host.ContentTop();
+                this.g.OnDown(this.g.mouseX, this.g.mouseY, now);
+            }
+        }
+    }
+    public void FixedUpdate(GuiHost host, int dt) {
+        this.g.Tick(Window.GetTickMs());
+    }
+    public void Update(GuiHost host, int dt) { }
+    public void Render(GuiHost host, Canvas c, double alpha) {
+        // 舞台 0 基绘制：原点落到标准标题栏之下，chrome 由宿主在
+        // 内容之上叠画。
+        CDraw.Origin(0, host.ContentTop());
+        this.g.Render(Window.GetTickMs());
+    }
+    public void Stop(GuiHost host) { }
+}
+
 class BkApp {
     static void Main() {
-        Host h = Host.Create("打砖块", 1280, 720);
-        // 2D 场景 60fps 足够: 高刷屏 vsync-only 会翻倍烧帧; 失焦降到 2fps。
-        h.LimitFps(60);
-        h.SetIdleFps(2);
-
-        BkGame g = BkGame.Create(h);
-        while (h.Running()) {
-            int now = Sdl.Ticks();
-            while (SdlEvent.Poll()) {
-                int ty = SdlEvent.Type();
-                h.OnWindowEvent(ty);
-                if (SdlEvent.IsQuit()) { h.Quit(); }
-                if (ty == SdlEventType.KeyDown()) {
-                    int sc = SdlEvent.Scancode();
-                    if (sc == 68) { h.ToggleFullscreen(); }
-                    else if (!SdlEvent.IsRepeat()) { g.OnKey(sc, now); }
-                }
-                if (ty == SdlEventType.MouseMotion()) { g.mouseX = h.MouseX(); g.mouseY = h.MouseY(); }
-                if (ty == SdlEventType.MouseButtonDown()) {
-                    if (SdlEvent.MouseButton() == SdlMouseButton.Left()) {
-                        g.mouseX = h.MouseX(); g.mouseY = h.MouseY();
-                        g.OnDown(g.mouseX, g.mouseY, now);
-                    }
-                }
-            }
-            g.Tick(now);
-            g.Render(now);   // vsync-paced by the renderer
-        }
-        h.Close();
+        GuiHost host = new GuiHost("打砖块", 1280, 720, 16);
+        host.Run(new BkLoop());
     }
 }
