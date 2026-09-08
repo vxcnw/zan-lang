@@ -142,9 +142,12 @@ class Host {
         // 高 DPI 感知、固定大小（不可拖边改尺寸）：画布光栅在创建时按
         // 初始输出分辨率烘焙一次，不随窗口 resize 重建——放开 Resizable
         // 只会拖出一圈死边。F11 全屏仍可用；设计单位 + Letterbox 保持
-        // 玩法数学与分辨率无关。
+        // 玩法数学与分辨率无关。窗口按 1:1 设计尺寸创建——此前按 3/2
+        // 起步放大，小屏上窗口几乎占满整屏、画面被无谓放大(显示比例
+        // 明显偏大)；全屏/高 DPI 显示器仍走 OutputSize→SetUiScale 的
+        // 原生光栅路径，清晰度不受影响。
         int flags = SdlWindowFlags.HighPixelDensity();
-        h.window = SdlWindow.Create(title, logicalW * 3 / 2, logicalH * 3 / 2, flags);
+        h.window = SdlWindow.Create(title, logicalW, logicalH, flags);
         if (!h.window.IsValid()) { Sdl.Quit(); return h; }
         h.r = SdlRenderer.Create(h.window);
         if (!h.r.IsValid()) { h.window.Close(); Sdl.Quit(); return h; }
@@ -501,10 +504,11 @@ class Text {
     // 覆盖 HUD 全部字号。
     static int PxOf(int scale) { return scale * 14; }
 
-    // 字形烘焙像素:设计字号按渲染器 UI 缩放(逻辑 960 -> 光栅 1440,
-    // 即 3/2)放大到光栅空间再烘焙;绘制时 DrawTexture 内部把设计
+    // 字形烘焙像素:设计字号按渲染器 UI 缩放(窗口大过画布/全屏时
+    // >1)放大到光栅空间再烘焙;绘制时 DrawTexture 内部把设计
     // 坐标映射回光栅,纹素 1:1 落位——场景文字与美术同样原生清晰,
-    // 不再是"小字放大"的糊。缩放比 <1(画布被钳到逻辑尺寸)时按 1:1。
+    // 不再是"小字放大"的糊。缩放比 <=1(1:1 窗口、画布被钳到逻辑
+    // 尺寸)时按 1:1。
     static int GlyphPx(SdlRenderer r, int scale) {
         int design = PxOf(scale);
         int px = design * r.ScaleNum() / r.ScaleDen();

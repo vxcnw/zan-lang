@@ -655,18 +655,44 @@ class MinerApp {
         int ex = cx - (int)(Math.Cos(rad) * h2);
         int ey = cy - (int)(Math.Sin(rad) * h2);
         // 绳:绞车卷筒(即摆动圆心 HOOK_X,HOOK_Y)→ 爪铰点,一条绷直
-        // 的 2px 线。绳在 DrawAll 里先于矿工绘制,上半段藏在机身后,
-        // 静止垂落时视觉上从绞车底下钻出。摆动的爪绕圆心走圆弧,绳
-        // 只有与爪同圆心才始终对准铰点——此前锚在绞车底(SKY_H+6)
-        // 且分 8 段加下垂偏移,摆动时绳身打弯、与爪的轨迹脱节。
+        // 的 2px 线。绳在 DrawAll 里先于矿工绘制。摆动的爪绕圆心走
+        // 圆弧,绳只有与爪同圆心才始终对准铰点——分段加下垂偏移会让
+        // 绳身打弯、与爪的轨迹脱节。但线头不能从圆心(机身内部)画起:
+        // 起点裁剪到机身包围盒的出射点,视觉上从抓钩机底部钻出。
         int sx0 = ox + Data.HOOK_X;
         int sy0 = oy + Data.HOOK_Y;
+        // 机身包围盒:矿工贴图立在 SKY_H 草地线上,机顶压在 Gui 顶栏
+        // 下缘(HudTop Dock.Top Prefer 44 + 1px 分隔线 = 45)。
+        int bodyTop = oy + 45;
+        int bodyBottom = oy + Data.SKY_H + 6;
+        int bodyHalf = (this.minerW + 1) / 2;
+        int bodyLeft = ox + Data.HOOK_X - bodyHalf;
+        int bodyRight = ox + Data.HOOK_X + bodyHalf;
+        // 沿 (dx,dy)=圆心→铰点方向从圆心走参数 t∈[0,1],取与包围盒
+        // 的最后一个交点(最大 t)为线头;圆心在盒内,必有交点。
+        int dx = ex - sx0;
+        int dy = ey - sy0;
+        double tBest = 0.0;
+        if (dx != 0) {
+            double tx = dx > 0 ? (double)(bodyRight - sx0) / dx
+                               : (double)(bodyLeft - sx0) / dx;
+            if (tx > tBest) { tBest = tx; }
+        }
+        if (dy != 0) {
+            double ty = dy > 0 ? (double)(bodyBottom - sy0) / dy
+                               : (double)(bodyTop - sy0) / dy;
+            if (ty > tBest) { tBest = ty; }
+        }
+        if (tBest < 0.0) { tBest = 0.0; }
+        if (tBest > 1.0) { tBest = 1.0; }
+        int sx = sx0 + (int)(dx * tBest);
+        int sy = sy0 + (int)(dy * tBest);
         // 两遍 1px 并排成 2px 绳身,深棕+浅棕在土色背景上可读
         rd.SetColor(74, 56, 38, 255);
-        rd.DrawLine(sx0, sy0, ex, ey);
-        rd.DrawLine(sx0, sy0 + 1, ex, ey + 1);
+        rd.DrawLine(sx, sy, ex, ey);
+        rd.DrawLine(sx, sy + 1, ex, ey + 1);
         rd.SetColor(128, 100, 66, 255);
-        rd.DrawLine(sx0, sy0, ex, ey);
+        rd.DrawLine(sx, sy, ex, ey);
         rd.SetColor(0, 0, 0, 255);
         // 爪纹理(旋转对齐摆角:0 度 = 纹理朝下)
         if (this.texClaw != null && this.texClaw.IsValid()) {
@@ -918,13 +944,15 @@ class MinerApp {
             // 门控渲染:游戏世界每帧都在动(摆钩/倒计时),到点即画;
             // 纯空转的帧只推进世界步进,省掉整段重绘+回读+合成。
             if (!h.ShouldRender()) { h.Pace(); if (app.prof) { app.ppCountSleep(); } continue; }
-            // 场景重绘与合成解耦:合成贵(13-15ms/次),空闲摆钩帧场景
-            // 也没必要 30fps 全画——6 帧一拍让重绘+合成同步降到 10Hz。
+            // 场景重绘与合成解耦:合成贵(13-15ms/次)。摆钩是持续动画
+            // (最长 122°/s),10Hz 会看得见的跳——给 30fps 档;结算/暂停
+            // 等真正静止的画面才 6 帧一拍降到 10Hz。
             if (!app.pauseOverlay) {
                 int st2 = app.w.state;
-                bool fast2 = st2 == World.ST_EXTEND || st2 == World.ST_RETRACT
-                             || st2 == World.ST_QTE || st2 == World.ST_BOMB;
-                if (!fast2) {
+                bool anim2 = st2 == World.ST_SWING || st2 == World.ST_EXTEND
+                             || st2 == World.ST_RETRACT || st2 == World.ST_QTE
+                             || st2 == World.ST_BOMB;
+                if (!anim2) {
                     hudSceneFrame = hudSceneFrame + 1;
                     if (hudSceneFrame < 6) {
                         h.Pace();
@@ -948,8 +976,9 @@ class MinerApp {
             // HUD 层:场景帧作底,Gui 控件树画在上面并合成呈现。
             // 合成=GPU 回读整帧+上传+整树重排+绘制,一次 13-15ms,是
             // 全部 CPU 的 95%(实测:read 4ms+tree 8ms/帧)。分档门控:
-            // 伸钩/收钩/QTE/拆弹逐帧合成(60fps,爪与物品快速移动);
-            // 空闲摆钩/结算 6 帧一拍(10fps 合成,顶栏数字变化 10Hz 可读);
+            // 伸钩/收钩/QTE/拆弹与摆钩 2 帧一拍(30fps 合成——逐帧合成
+            // 占满一核,而 30fps 已是连续动画的流畅下限);
+            // 结算等静止画面 6 帧一拍(10fps 合成,顶栏数字变化 10Hz 可读);
             // 暂停期每次重绘必合成(重绘门已放宽到 2fps)。状态切换与
             // 点击按键的帧立即合成。廉价帧不呈现:Gui 的合成契约是
             // "重绘后才能 present"——画布内容在 present 后不保留,拿
@@ -961,10 +990,14 @@ class MinerApp {
                 bool fast = !app.pauseOverlay
                             && (st == World.ST_EXTEND || st == World.ST_RETRACT
                             || st == World.ST_QTE || st == World.ST_BOMB);
+                bool swing = !app.pauseOverlay && st == World.ST_SWING;
+                // 快态 30fps(60fps 合成占满一核,30fps 已是物品移动的
+                // 流畅观感下限);摆钩 30fps(连续摆动,10Hz 会跳);
+                // 真正静止的画面 10Hz;暂停/状态切换/输入帧立即合成。
                 int interval = app.pauseOverlay ? 1
-                               : (fast ? 1 : 6);
+                               : (fast ? 2 : (swing ? 2 : 6));
                 bool composite = stateChanged || action || dyn || inputEvent
-                                 || fast || ++hudFrame >= interval;
+                                 || fast || swing || ++hudFrame >= interval;
                 if (composite) { hudFrame = 0; }
                 if (composite && app.prof) {
                     app.ppComposites = app.ppComposites + 1;
