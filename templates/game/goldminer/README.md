@@ -16,38 +16,36 @@ zan Gold Miner — 黄金矿工（模板版）
 
 操作
 ----
-- 鼠标点击 / 空格 / ↓ / 触屏点按   放钩、QTE 节拍点
+- 鼠标点击 / 空格 / ↓ / 回车 / 触屏点按   放钩、QTE 节拍点
 - Q / E                 使用（消耗）炸药：钩住重物拉不动时直接炸掉
-- F11                   全屏；关窗即存档退出
+- Esc                   结算画面退出（存档）；关窗即存档退出
 
 手机上玩
 --------
 ```bash
 build/zanc templates/game/goldminer/src/main.zan templates/game/goldminer/src/Game.zan \
-  templates/game/goldminer/src/Kit.zan --auto-stdlib \
+  --auto-stdlib \
   --publish --target android-arm64 --emit-apk goldminer.apk \
   --apk-package com.example.goldminer --apk-label 黄金矿工
 ```
 `--publish` 会把 assets/ 内嵌进 libmain.so（磁盘优先、内嵌兜底的加载
 逻辑不变），APK 直装手机即可；横竖屏都能玩——设计分辨率 960×720 经
-Letterbox 等比铺满，竖屏上下留黑边，点按屏幕任意位置即放钩。
+等比铺满，竖屏上下留黑边，点按屏幕任意位置即放钩。
 
 界面架构
 --------
-两层 UI，模板示范了 Zan 游戏的推荐分层方式：
+GuiHost 版（Game.Foundation.Gui）：窗口/事件/呈现由 stdlib/Gui 原生
+外壳承担，不依赖 SDL。全部画面走 Canvas 直绘：
 
-- 场景层（src/main.zan 的 DrawAll）：矿工、抓钩、物品、粒子、
-  飘字、QTE 圈等"长在游戏世界里"的演出，自绘进 SDL 画布；
-- HUD 层（HudTop / HudOverlay + GameHud）：窗口顶栏（关卡、
-  金币进度、倒计时、连击、炸药）与结算/拆弹面板用 stdlib Gui
-  控件树搭建，由 GameHud 接管宿主窗口，把场景帧作底、Gui 树
-  合成在上（stdlib/Game/Ui/Hud.zan）。配色/圆角/描边全部落在
-  skins/gamehud/skin.css 皮肤里，改风格不改代码。
-- MINER_NOHUD=1 启动可退回纯自绘 HUD 路径（对照/兜底）。
-
-src/Kit.zan 是模板自带的 SDL 游戏小工具箱（宿主窗口、资源
-定位、Rng、整数绘图、系统字体文本），自包含、不依赖任何
-examples/ 下的共享模块，可随项目自由修改。
+- 场景层（src/main.zan 的 DrawAll）：背景、矿工、抓钩（矢量三爪钩，
+  随摆角旋转——画布暂无旋转贴图）、物品、粒子、飘字、QTE 圈，
+  经 Game.Kit 的 CDraw/CText 绘制；
+- HUD 层（DrawFallbackHud）：半透明顶栏（关卡、金币进度、厘秒
+  倒计时、连击、炸药）与结算/拆弹面板，同一套 CText 场景层自绘，
+  信息始终可读。
+- 音频：SDL3 驱动（SdlAudio/SdlAudioClip）暂留，待原生音频落地后
+  切换（与 wuwei AudioService 同一先例）；SdlAudio.Open 失败自动
+  哑火，不影响运行。
 
 构建
 ----
@@ -59,20 +57,17 @@ API（File.EmbedExists 等），zanc 检测到源文件旁的 assets/ 目录
 
     build\zanc.exe templates\game\goldminer\src\main.zan ^
                    templates\game\goldminer\src\Game.zan ^
-                   templates\game\goldminer\src\Kit.zan ^
                    --auto-stdlib ^
                    -o build\goldminer.exe
 
-独立 exe 发布（单文件、免 DLL、双击无控制台窗口）
+独立 exe 发布（单文件、免第三方 DLL、双击无控制台窗口）
 ------------------------------------------------
-加 `--publish --link-mode static --subsystem windows` 即把 SDL 等
-全部静态链进 exe（零第三方 DLL），并设为 GUI 子系统（不弹控制台）；
-`--subsystem windows` 必须显式给，zanc 命令行默认 console 子系统
-（IDE 会对 GUI 项目自动加，CLI 不探测）：
+加 `--publish --link-mode static --subsystem windows`，并设为 GUI
+子系统（不弹控制台）；`--subsystem windows` 必须显式给，zanc 命令行
+默认 console 子系统（IDE 会对 GUI 项目自动加，CLI 不探测）：
 
     build\zanc.exe templates\game\goldminer\src\main.zan ^
                    templates\game\goldminer\src\Game.zan ^
-                   templates\game\goldminer\src\Kit.zan ^
                    --auto-stdlib ^
                    --publish --link-mode static --subsystem windows ^
                    -o dist\goldminer\goldminer.exe
@@ -93,9 +88,8 @@ IDE「新建项目」复制本模板后 assets/ 与 src/ 同级，同样自动�
 
 文件
 ----
-- src/Kit.zan     模板自带工具箱：Host 窗口/Assets/Rng/Draw/Text（无外部依赖）
-- src/main.zan    入口 + 场景渲染/输入/GameHud 控件树 HUD/无头自测
-                  （MINER_SIM=1 平衡仿真、MINER_SHOT=1 截图、MINER_NOHUD=1 关 HUD）
+- src/main.zan    入口 + 场景渲染/输入/兜底 HUD/无头自测
+                  （MINER_SIM=1 平衡仿真，不建窗口）
 - src/Game.zan    核心玩法：摆钩、抓取、物品表、连击/QTE/炸弹、关卡与存档
 - zan.proj        IDE 项目文件（IDE「新建项目 → 游戏」可直接套用）
 - template.manifest 模板清单（IDE 新建项目对话框展示）

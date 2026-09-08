@@ -90,6 +90,21 @@ class CDraw {
         c.FillCircle(cx + originX, cy + originY, rad, Argb(ca, cr, cg, cb));
     }
 
+    // 直线段（抗锯齿、厚度 t，圆头）：绳线/描迹用。
+    static void Line(Canvas c, int x0, int y0, int x1, int y1, int t,
+                     int cr, int cg, int cb, int ca) {
+        if (t <= 0) { return; }
+        c.DrawLine(x0 + originX, y0 + originY, x1 + originX, y1 + originY,
+                   Argb(ca, cr, cg, cb), t);
+    }
+
+    // 圆环描边（厚度 t 画在半径上）：QTE 圈/瞄准环用。
+    static void CircleStroke(Canvas c, int cx, int cy, int rad, int t,
+                             int cr, int cg, int cb, int ca) {
+        if (rad <= 0 || t <= 0) { return; }
+        c.DrawCircle(cx + originX, cy + originY, rad, Argb(ca, cr, cg, cb), t);
+    }
+
     static bool PointIn(int px, int py, int x, int y, int w, int h) {
         return px >= x && px < x + w && py >= y && py < y + h;
     }
@@ -104,6 +119,12 @@ class CText {
         return scale * 9;
     }
     static int LineHeight(int scale) { return CText.FontPx(scale); }
+
+    // 量宽（右对齐/居中排版用；与 Draw 同一字号档）。
+    static int Width(string text, int scale) {
+        if (text == null || text.Length == 0) { return 0; }
+        return Canvas.MeasureText(text, CText.FontPx(scale));
+    }
 
     // 左上角锚定（y 是行盒顶，不是基线）——与 Text.Draw 契约一致。
     // 其余 CText 入口（居中/阴影）全部经此落笔，原点只加这一处。

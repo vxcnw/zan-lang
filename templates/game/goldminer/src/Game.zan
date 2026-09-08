@@ -3,7 +3,7 @@
 // 刺激机制:连击 FEVER / 收线 QTE / 拆弹 QTE / TNT 连锁 / 最后 10 秒警报。
 using System;
 using System.IO;
-using SDL3;
+using Gui;
 
 namespace GoldMiner;
 
@@ -156,7 +156,7 @@ class World {
     public int bestGold = 0;
 
     public static long NowMs() {
-        return Sdl.Ticks();
+        return Window.GetTickMs();
     }
 
     public void NewRun(Rng rng) {

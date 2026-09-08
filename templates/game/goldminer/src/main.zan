@@ -1,12 +1,17 @@
-// Gold Miner — 黄金矿工:数据/渲染/输入/HUD 与无头自测。
-// 界面分两层:游戏场景(抓钩/物品/粒子)自绘进 SDL 画布;窗口
-// 顶栏、结算、拆弹面板走 stdlib Gui 控件树(GameHud 合成 +
-// gamehud 皮肤),不再散落颜色/坐标魔法数字。
+// Gold Miner — 黄金矿工:数据/渲染/输入与无头自测。
+// GuiHost 版:窗口/事件/呈现走 Game.Foundation.Gui,场景与兜底 HUD
+// 全部经 Canvas 直绘(Game.Kit CDraw/CText,自带 SDL 版曾用的
+// 超采样离屏一概不需要);顶栏/结算/拆弹走场景层自绘(原 Gui 控件
+// 树 HUD 依赖 GameHud 的 SDL 合成链路,画布版统一收敛到兜底 HUD,
+// 信息两档:厘秒倒计时 + 结算后续提示)。SDL3 仅剩音频
+// (SdlAudio/SdlAudioClip;待 P2 原生音频落地后切换,与 wuwei
+// AudioService 同一先例),Snd.Open 失败自动哑火不碍运行。
 using System;
 using System.IO;
 using SDL3;
 using Gui;
-using Game.Ui;
+using Game.Kit;
+using Game.Foundation.Gui;
 
 namespace GoldMiner;
 
@@ -70,6 +75,24 @@ class Data {
     }
 }
 
+// 进程环境变量(UTF-16)。gui 运行时的外观开关按约定走环境变量:
+// 如文字脸 ZAN_GUI_FONT_FACE,运行库首次建字体时读取。
+// 非 Windows 上 kernel32 解析不到,静默空操作。
+delegate int SetEnvWFn(nint name, nint value);
+
+class Env {
+    public static void Set(string name, string value) {
+        nint fn = Interop.Entry("kernel32.dll", "SetEnvironmentVariableW");
+        if (fn == 0) { return; }
+        SetEnvWFn call = (SetEnvWFn)fn;
+        nint wn = Wide.Of(name);
+        nint wv = Wide.Of(value);
+        call(wn, wv);
+        Wide.Free(wn);
+        Wide.Free(wv);
+    }
+}
+
 // 音效包
 class Snd {
     public SdlAudioClip swing;
@@ -118,64 +141,39 @@ class Snd {
 }
 
 class MinerApp {
-    public Host host;
-    public SdlRenderer r;
+    public GuiHost host;
+    public Canvas c;
     public World w;
     public Snd snd;
     public Rng uiRng;
 
-    // Gui 控件树 HUD 层(null = 未启用/接管失败,退回场景自绘)
-    public GameHud hud;
-    // HUD 画布光栅宽(= 窗口输出分辨率):Gui 控件树的坐标/尺寸字面量
-    // 按光栅生效,设计数字统一过 Ux() 换算,和场景美术同一比例。
-    int uiCanvasW;
-
-    // 设计单位 -> HUD 光栅像素。
-    public int Ux(int v) {
-        if (this.uiCanvasW <= 0) { return v; }
-        return v * this.uiCanvasW / Data.W;
-    }
-    public bool guiReady;               // gui 运行时已初始化(兜底 HUD 前提)
-    public HudTop topHud;           // 顶栏面板
-    public HudOverlay ovHud;        // 结算/拆弹覆盖层
-
-    public int mouseX;
-    public int mouseY;
-    public bool mouseJustDown;
     public long now;
 
-    // 纹理
-    public SdlTexture texBg;
-    public SdlTexture texMiner;
-    public SdlTexture texClaw;
-    public SdlTexture[] texKind;        // 11 物品
-    public SdlTexture texDynamite;
+    // 纹理路径(assets 定位;null = 缺失,画矢量兜底)
+    public string bgPath;
+    public string minerPath;
+    public string[] kindPath;           // 11 物品
 
     // 计时
     public long lastFrameAt;
     public int lastBombTickSec = -1;
     public int lastTenSecTick = -1;
     public int lastBoomSeq = 0;         // 已播声的爆炸事件序号
-    // 素材实比(加载期从 PNG/JPG 头读出)
-    public int bgW = 960;
-    public int bgH = 720;
+    // 素材实比(加载期从 PNG 头读出)
     public int minerW = 120;
     public int minerH = 200;
-    public int clawW = 56;
     public int clawH = 66;
 
-    public static MinerApp Create(Host h) {
+    public static MinerApp Create(GuiHost h) {
         MinerApp a = new MinerApp();
         a.host = h;
-        a.r = h.Renderer();
+        a.c = h.App().canvas;
         a.uiRng = Rng.Seed(20260904L);
-        a.texBg = MinerApp.LoadTex(a.r, "assets/bg.jpg");
-        a.texMiner = MinerApp.LoadTex(a.r, "assets/miner.png");
-        a.texClaw = MinerApp.LoadTex(a.r, "assets/claw.png");
-        a.texDynamite = MinerApp.LoadTex(a.r, "assets/dynamite.png");
-        a.texKind = new SdlTexture[ItemDef.KIND_COUNT];
+        a.bgPath = MinerApp.FindAsset("assets/bg.jpg");
+        a.minerPath = MinerApp.FindAsset("assets/miner.png");
+        a.kindPath = new string[ItemDef.KIND_COUNT];
         for (int i = 0; i < ItemDef.KIND_COUNT; i = i + 1) {
-            a.texKind[i] = MinerApp.LoadTex(a.r, "assets/" + Data.KIND_TEX[i] + ".png");
+            a.kindPath[i] = MinerApp.FindAsset("assets/" + Data.KIND_TEX[i] + ".png");
         }
         a.w = new World();
         a.w.rng = Rng.Seed((int)(DateTime.UtcNow().ToUnixSeconds() & 2147483647));
@@ -186,8 +184,8 @@ class MinerApp {
         // 按 PNG 头实比覆盖每个物品的绘制尺寸(保宽比,长边 = rad*2)
         int[] wh = new int[2];
         for (int i = 0; i < ItemDef.KIND_COUNT; i = i + 1) {
-            string p = Assets.Find("assets/" + Data.KIND_TEX[i] + ".png");
-            if (MinerApp.PngSize(p, wh)) {
+            if (a.kindPath[i] == null) { continue; }
+            if (MinerApp.PngSize(a.kindPath[i], wh)) {
                 ItemDef d = Data.DEFS[i];
                 int longEdge = d.rad * 2;
                 if (wh[0] >= wh[1]) {
@@ -199,49 +197,29 @@ class MinerApp {
                 }
             }
         }
-        // 背景/矿工/爪子同法取实比
-        string bp = Assets.Find("assets/bg.jpg");
-        if (File.Exists(bp)) {
-            byte[] bb = File.ReadAllBytes(bp);
-            int[] pos = new int[2];
-            if (MinerApp.JpgW(bb, pos) == 1) {
-                a.bgW = pos[1];
-                a.bgH = pos[0];
+        // 矿工贴地站立:脚踩草地线,头顶让出兜底 HUD 顶栏带(此前
+        // 头盔被顶栏罩住)。
+        if (a.minerPath != null) {
+            int[] mw = new int[2];
+            if (MinerApp.PngSize(a.minerPath, mw)) {
+                a.minerH = Data.SKY_H - 54;
+                a.minerW = a.minerH * mw[0] / mw[1];
             }
-        }
-        int[] mw = new int[2];
-        string mp = Assets.Find("assets/miner.png");
-        if (MinerApp.PngSize(mp, mw)) {
-            // 矿工贴地站立:脚踩草地线,头顶让出 Gui 顶栏带(半透明
-            // 顶栏 Dock.Top 约 46 设计像素,此前头盔被顶栏罩住)。
-            a.minerH = Data.SKY_H - 54;
-            a.minerW = a.minerH * mw[0] / mw[1];
-        }
-        int[] cw = new int[2];
-        string cp = Assets.Find("assets/claw.png");
-        if (MinerApp.PngSize(cp, cw)) {
-            a.clawW = 56;
-            a.clawH = 56 * cw[1] / cw[0];
         }
         return a;
     }
 
-    static SdlTexture LoadTex(SdlRenderer r, string rel) {
+    static string FindAsset(string rel) {
         string p = Assets.Find(rel);
-        SdlTexture t = SdlTexture.LoadImage(r, p);
-        if ((t == null || !t.IsValid()) && File.EmbedExists(rel)) {
-            byte[] b = File.ReadAllBytes(rel);
-            t = SdlTexture.LoadImageFromMem(r, b.ToStr(0, b.Length), b.Length);
-        }
-        if (t != null && t.IsValid()) { t.SetBlendMode(1); }
-        return t;
+        if (!File.Exists(p)) { return null; }
+        return p;
     }
 
     // 读 PNG 头 IHDR 取尺寸(大端)。素材由构建管线统一生成,尺寸可靠;
     // 解析失败返回 false,调用方退回正方形假设。
     static bool PngSize(string path, int[] outWH) {
         outWH[0] = 0; outWH[1] = 0;
-        if (!File.Exists(path)) { return false; }
+        if (path == null || !File.Exists(path)) { return false; }
         byte[] b = File.ReadAllBytes(path);
         if (b.Length < 24) { return false; }
         if (b[0] != 137 || b[1] != 80 || b[2] != 78 || b[3] != 71) { return false; }
@@ -252,169 +230,9 @@ class MinerApp {
         return outWH[0] > 0 && outWH[1] > 0;
     }
 
-    static int JpgW(byte[] b, int[] pos) {
-        // JPEG 尺寸解析:扫 SOF0/SOF2 段取高度宽度(小工具,够用即可)
-        int i = 2;
-        while (i + 9 < b.Length) {
-            if (b[i] != 255) { i = i + 1; continue; }
-            int marker = b[i + 1] & 255;
-            if (marker == 216 || marker == 1 || (marker >= 208 && marker <= 215)) {
-                i = i + 2; continue;
-            }
-            int segLen = (b[i + 2] & 255) << 8 | (b[i + 3] & 255);
-            if ((marker >= 192 && marker <= 195) || (marker >= 201 && marker <= 203)) {
-                pos[0] = (b[i + 7] & 255) << 8 | (b[i + 8] & 255);      // 高
-                pos[1] = (b[i + 9] & 255) << 8 | (b[i + 10] & 255);     // 宽
-                return 1;
-            }
-            i = i + 2 + segLen;
-        }
-        return 0;
-    }
-
     // ---------------------------------------------------------------
     // 逻辑推进
     // ---------------------------------------------------------------
-    // 失焦暂停:World.Step 不推进(倒计时/摆钩/收线全停),画面保持
-    // 最后一帧 + 暂停幕;点击或任意按键立即恢复。MINER_SIM/HUDSHOT
-    // 等无头通道不建窗口,不受影响。
-    public bool pauseOverlay;
-
-    // MINER_PROF=1: 逐段计时走廊。启动后约 1.2s 自动发射一次(触发
-    // "首次发射"的完整路径:swing 声、首个逐帧合成、首个声卡流),
-    // 环绕窗口打印各段耗时。发射本身立即返回,真实开销落在后面
-    // 第一条 fast 帧——所以从发射帧起连续打印 8 帧完整帧账单。
-    bool prof;
-    long profT0;
-    long profActionAt;
-    int profLogCnt;
-    int profAutoFired;
-
-    // 逐帧账单:event/step/scene/hud 各段耗时(ms,含帧尾 pacing)。
-    // MINER_PROF_CONT=1: 持续输出(1 秒汇总一行),否则只打印发射后 8 帧。
-    void ProfFrame(int evMs, int stepMs, int sceneMs, int hudMs, int totalMs) {
-        if (!this.prof || this.profActionAt == 0) { return; }
-        if (this.profCont) {
-            Canvas.TextStatEnable(true);   // 每秒读数会清零,开关常开
-            this.pfN = this.pfN + 1;
-            this.pfScene = this.pfScene + sceneMs;
-            this.pfHud = this.pfHud + hudMs;
-            this.pfTotal = this.pfTotal + totalMs;
-            long now = World.NowMs();
-            if (this.pfMark == 0) { this.pfMark = now; }
-            long span = now - this.pfMark;
-            if (span >= 1000) {
-                // 文本/光栅统计:9=文字光栅 us,5/6=字形图集命中/未中,
-                // 0/1=文字/测量调用次数,RasterStat(0)=最大混合图层。
-                long textUs = Canvas.TextStat(9);
-                long atlasH = Canvas.TextStat(5);
-                long atlasM = Canvas.TextStat(6);
-                int textCalls = Canvas.TextStat(0);
-                int measureCalls = Canvas.TextStat(1);
-                long measureUs = Canvas.TextStat(10);
-                int blendTopW = Canvas.RasterStat(0, 2);
-                int blendTopH = Canvas.RasterStat(0, 3);
-                Console.WriteLine("[prof1s] frames=" + Convert.ToString(this.pfN)
-                                  + " sceneMs=" + Convert.ToString(this.pfScene)
-                                  + " hudMs=" + Convert.ToString(this.pfHud)
-                                  + "  [read=" + Convert.ToString(this.pfRead)
-                                  + " upload=" + Convert.ToString(this.pfUpload)
-                                  + " tree=" + Convert.ToString(this.pfTree)
-                                  + " present=" + Convert.ToString(this.pfPresent) + "]"
-                                  + " txtUs=" + Convert.ToString(textUs)
-                                  + " txtCalls=" + Convert.ToString(textCalls)
-                                  + " mUs=" + Convert.ToString(measureUs)
-                                  + " mCalls=" + Convert.ToString(measureCalls)
-                                  + " atlasHit=" + Convert.ToString(atlasH)
-                                  + " miss=" + Convert.ToString(atlasM)
-                                  + " blendTop=" + Convert.ToString(blendTopW)
-                                  + "x" + Convert.ToString(blendTopH)
-                                  + " totalMs=" + Convert.ToString(this.pfTotal)
-                                  + " paused=" + (this.pauseOverlay ? "1" : "0"));
-                this.pfN = 0; this.pfScene = 0; this.pfHud = 0; this.pfTotal = 0;
-                this.pfRead = 0; this.pfUpload = 0; this.pfTree = 0; this.pfPresent = 0;
-                this.pfMark = now;
-            }
-            return;
-        }
-        if (this.profLogCnt >= 8) { return; }
-        this.profLogCnt = this.profLogCnt + 1;
-        Console.WriteLine("[prof] frame f" + Convert.ToString(this.profLogCnt)
-                          + " ev=" + Convert.ToString(evMs)
-                          + " step=" + Convert.ToString(stepMs)
-                          + " scene=" + Convert.ToString(sceneMs)
-                          + " hud=" + Convert.ToString(hudMs)
-                          + " total=" + Convert.ToString(totalMs));
-    }
-
-    bool profCont;
-    int pfN;
-    int pfScene;
-    int pfHud;
-    int pfTotal;
-    int pfRead;
-    int pfUpload;
-    int pfTree;
-    int pfPresent;
-    long pfMark;
-
-    // 暂停期心跳账单:每满 1 秒打一行 loops/renders/composites/sleepMs。
-    int ppLoops;
-    int ppRenders;
-    int ppComposites;
-    long ppSleepMs;
-    long ppSecMark;
-
-    void ProfPauseTick(bool paused) {
-        if (!this.prof || !paused) { return; }
-        Canvas.TextStatEnable(true);
-        this.ppLoops = this.ppLoops + 1;
-        long now = World.NowMs();
-        if (this.ppSecMark == 0) { this.ppSecMark = now; }
-        long span = now - this.ppSecMark;
-        if (span >= 1000) {
-            Console.WriteLine("[pp] loops/s=" + Convert.ToString(this.ppLoops)
-                              + " renders=" + Convert.ToString(this.ppRenders)
-                              + " composites=" + Convert.ToString(this.ppComposites)
-                              + " sleepMs=" + Convert.ToString(this.ppSleepMs));
-            this.ppLoops = 0;
-            this.ppRenders = 0;
-            this.ppComposites = 0;
-            this.ppSleepMs = 0;
-            this.ppSecMark = now;
-        }
-    }
-
-    // ShouldRender 拒绝的帧计一次(睡眠时长近似=帧预算-2ms)。
-    void ppCountSleep() {
-        if (this.ppSleepMs == -1) { return; }
-        this.ppSleepMs = this.ppSleepMs + 14;
-        if (this.ppSleepMs > 100000) { this.ppSleepMs = -1; }
-    }
-
-    // 事件类型直方图(诊断:谁在击穿重绘门/触发空转)。
-    int ppEv0;
-    int ppEv0Ty;
-
-    void ppEvent(int ty) {
-        if (this.ppEvN == 0) { this.ppEv0Ty = ty; }
-        if (ty == this.ppEv0Ty) { this.ppEv0 = this.ppEv0 + 1; }
-        else { this.ppEvOther = this.ppEvOther + 1; }
-        this.ppEvN = this.ppEvN + 1;
-        long now = World.NowMs();
-        if (this.ppEvMark == 0) { this.ppEvMark = now; }
-        if (now - this.ppEvMark >= 1000) {
-            Console.WriteLine("[ppev] inputEvent/s=" + Convert.ToString(this.ppEvN)
-                              + " ty=" + Convert.ToString(this.ppEv0Ty)
-                              + " x" + Convert.ToString(this.ppEv0)
-                              + " other=" + Convert.ToString(this.ppEvOther));
-            this.ppEvN = 0; this.ppEv0 = 0; this.ppEvOther = 0; this.ppEvMark = now;
-        }
-    }
-    int ppEvN;
-    int ppEvOther;
-    long ppEvMark;
-
     public void StepFrame(int dtMs) {
         this.w.Step(dtMs);
         World w = this.w;
@@ -441,7 +259,7 @@ class MinerApp {
         }
     }
 
-    // 输入触发(点击/空格/下)
+    // 输入触发(点击/空格/下/回车)
     public void OnActionKey() {
         World w = this.w;
         if (w.state == World.ST_RESULT) {
@@ -458,10 +276,6 @@ class MinerApp {
             this.snd.Play(this.snd.grab, 0.35);
         }
         w.Action();
-        if (this.prof && this.profActionAt == 0) {
-            this.profActionAt = 1;
-            Console.WriteLine("[prof] === first-fire OnActionKey done (play+Action) ===");
-        }
     }
 
     public void OnDynamiteKey() {
@@ -472,12 +286,12 @@ class MinerApp {
     }
 
     // ---------------------------------------------------------------
-    // 场景渲染(游戏世界;HUD 交给 Gui 控件树)
+    // 场景渲染(游戏世界 + 兜底 HUD,全部 Canvas 直绘)
     // ---------------------------------------------------------------
     public void DrawAll() {
         int w = Data.W;
         int h = Data.H;
-        SdlRenderer rd = this.r;
+        Canvas rd = this.c;
         World wo = this.w;
         // 震屏偏移
         int ox = 0;
@@ -487,182 +301,182 @@ class MinerApp {
             oy = this.uiRng.Range(-wo.shakeMag, wo.shakeMag + 1) / 8;
         }
         // 背景
-        if (this.texBg != null && this.texBg.IsValid()) {
-            rd.DrawTexture(this.texBg, ox, oy, w, h);
+        if (this.bgPath != null) {
+            CDraw.BlitImage(rd, this.bgPath, ox, oy, w, h);
         } else {
-            Draw.VGradient(rd, 0, 0, w, h, 96, 140, 200, 60, 40, 28, 255);
+            CDraw.FillVGrad(rd, 0, 0, w, h, CDraw.Argb(255, 96, 140, 200),
+                            CDraw.Argb(255, 60, 40, 28));
         }
         // FEVER 热浪(>=3 连击:边缘暖光)
         if (wo.feverGlow > 0) {
             int ga = wo.feverGlow * 55 / 100;
-            Draw.RingRect(rd, ox + 2, oy + 2, w - 4, h - 4, 8, 255,
-                          170 - ga / 3, 60, ga);
+            CDraw.RingRect(rd, ox + 2, oy + 2, w - 4, h - 4, 8, 255,
+                           170 - ga / 3, 60, ga);
         }
         // 物品
         for (int i = 0; i < wo.items.Count; i = i + 1) {
             Item it = wo.items[i];
             if (!it.alive) { continue; }
             ItemDef d = Data.DEFS[it.kind];
-            SdlTexture t = this.texKind[it.kind];
+            string tp = this.kindPath[it.kind];
             double fy = Math.Sin(it.wob + this.now / 480.0) * 2.0;
-            if (t != null && t.IsValid()) {
+            if (tp != null) {
                 int dw = d.texW;
                 int dh = d.texH;
-                rd.DrawTexture(t, ox + it.x - dw / 2, oy + it.y - dh / 2 + (int)fy, dw, dh);
+                CDraw.BlitImage(rd, tp, ox + it.x - dw / 2,
+                                oy + it.y - dh / 2 + (int)fy, dw, dh);
             } else {
-                Draw.FillCircle(rd, ox + it.x, oy + it.y + (int)fy, d.rad, 200, 170, 60, 255);
+                CDraw.FillCircle(rd, ox + it.x, oy + it.y + (int)fy, d.rad,
+                                 200, 170, 60, 255);
             }
         }
         // 绳 + 爪 + 钩上物
         this.DrawClaw(ox, oy);
         // 矿工(双脚踩草地线 SKY_H,头部完整在画内)
-        if (this.texMiner != null && this.texMiner.IsValid()) {
+        if (this.minerPath != null) {
             int mw = this.minerW;
             int mh = this.minerH;
-            rd.DrawTexture(this.texMiner, ox + Data.HOOK_X - mw / 2,
-                           oy + Data.SKY_H + 6 - mh, mw, mh);
+            CDraw.BlitImage(rd, this.minerPath, ox + Data.HOOK_X - mw / 2,
+                            oy + Data.SKY_H + 6 - mh, mw, mh);
         } else {
-            Draw.FillCircle(rd, ox + Data.HOOK_X, oy + Data.HOOK_Y - 40, 34, 220, 160, 60, 255);
+            CDraw.FillCircle(rd, ox + Data.HOOK_X, oy + Data.HOOK_Y - 40, 34,
+                             220, 160, 60, 255);
         }
         // 粒子
         for (int i = 0; i < wo.parts.Count; i = i + 1) {
             Particle p = wo.parts[i];
             int a = p.life * 255 / p.maxLife;
-            rd.SetColor(p.r, p.g, p.b, a);
-            rd.FillRect(ox + (int)p.x - p.size / 2, oy + (int)p.y - p.size / 2,
-                        p.size, p.size);
+            CDraw.FillRect(rd, ox + (int)p.x - p.size / 2,
+                           oy + (int)p.y - p.size / 2, p.size, p.size,
+                           CDraw.Argb(a, p.r, p.g, p.b));
         }
-        rd.SetColor(0, 0, 0, 255);
         // 飘字(得分/提示,属于游戏世界的演出)
         for (int i = 0; i < wo.texts.Count; i = i + 1) {
             FloatText ft = wo.texts[i];
             int a = ft.life * 255 / 70;
-            Text.DrawCenteredShadow(rd, ft.text, ox + ft.x, oy + ft.y - 20, 3,
-                                    ft.r, ft.g, ft.b, a > 255 ? 255 : a);
+            CText.DrawCenteredShadow(rd, ft.text, ox + ft.x, oy + ft.y - 20, 3,
+                                     ft.r, ft.g, ft.b, a > 255 ? 255 : a);
         }
         // 场景内 QTE 圈(圈心跟着爪走,必须画在场景层)
-        if (wo.state == World.ST_QTE) { this.DrawQte(ox, oy); }        // 爆炸白闪
-        // 失焦暂停幕:世界已停步,盖一层半透明 + 提示,点击/按键恢复
-        if (this.pauseOverlay) {
-            rd.SetColor(8, 10, 16, 170);
-            rd.FillRect(0, 0, w, h);
-            Text.DrawCenteredShadow(rd, "已暂停", w / 2, h / 2 - 30, 5,
-                                    240, 226, 190, 255);
-            Text.DrawCenteredShadow(rd, "点击窗口继续", w / 2, h / 2 + 30, 3,
-                                    200, 194, 178, 220);
-        }
-        // Gui HUD 降级时的场景层兜底信息(顶栏/结算/拆弹)
-        if (this.hud == null && this.guiReady) { this.DrawFallbackHud(ox, oy); }
+        if (wo.state == World.ST_QTE) { this.DrawQte(ox, oy); }
+        // 兜底 HUD:半透明顶栏(关卡/金币/进度/倒计时/炸药) + 结算与
+        // 拆弹信息,保证游戏数据始终可读。
+        this.DrawFallbackHud(ox, oy);
+        // 爆炸白闪
         if (wo.flashFrames > 0) {
             int fa = wo.flashFrames * 38;
             if (fa > 255) { fa = 255; }
-            rd.SetColor(255, 245, 220, fa);
-            rd.FillRect(0, 0, w, h);
-            rd.SetColor(0, 0, 0, 255);
+            CDraw.FillRect(rd, 0, 0, w, h, CDraw.Argb(fa, 255, 245, 220));
         }
     }
 
-    // Gui HUD 不可用(合成失败降级 / MINER_NOHUD)时的场景层兜底:
-    // 半透明顶栏(关卡/金币/进度/倒计时/炸药) + 结算与拆弹信息,
-    // 保证游戏数据始终可读。文本与场景飘字同一套系统字体文本
-    // (Kit.Text,全 CJK 带投影),不再用单独的像素字模。
+    // 场景层兜底 HUD:半透明顶栏(关卡/金币/进度/倒计时/炸药) +
+    // 结算与拆弹覆盖。文本与场景飘字同一套 CText(系统字体,全 CJK
+    // 带投影)。倒计时给到厘秒(原 Gui 控件树 HUD 同档,时间感知更紧)。
     void DrawFallbackHud(int ox, int oy) {
-        SdlRenderer rd = this.r;
+        Canvas rd = this.c;
         World wo = this.w;
         int pct = wo.Target() > 0 ? wo.gold * 100 / wo.Target() : 0;
         if (pct > 100) { pct = 100; }
         // 顶栏
-        rd.SetColor(12, 14, 20, 215);
-        rd.FillRect(ox, oy, Data.W, 46);
-        rd.SetColor(138, 111, 51, 255);
-        rd.FillRect(ox, oy + 46, Data.W, 2);
-        Text.DrawShadow(rd, "第 " + Convert.ToString(wo.level) + " 关",
-                        ox + 16, oy + 10, 2, 232, 226, 212, 255);
-        Text.DrawShadow(rd, "$" + Convert.ToString(wo.gold) + "/"
-                        + Convert.ToString(wo.Target()),
-                        ox + 140, oy + 10, 2, 244, 208, 120, 255);
-        rd.SetColor(40, 44, 56, 255);
-        rd.FillRect(ox + 360, oy + 17, 200, 12);
-        rd.SetColor(111, 170, 94, 255);
-        rd.FillRect(ox + 360, oy + 19, 196 * pct / 100, 8);
+        CDraw.FillRect(rd, ox, oy, Data.W, 46, CDraw.Argb(215, 12, 14, 20));
+        CDraw.FillRect(rd, ox, oy + 46, Data.W, 2, CDraw.Argb(255, 138, 111, 51));
+        CText.DrawShadow(rd, "第 " + Convert.ToString(wo.level) + " 关",
+                         ox + 16, oy + 10, 2, 232, 226, 212, 255);
+        CText.DrawShadow(rd, "$" + Convert.ToString(wo.gold) + "/"
+                         + Convert.ToString(wo.Target()),
+                         ox + 140, oy + 10, 2, 244, 208, 120, 255);
+        CDraw.FillRect(rd, ox + 360, oy + 17, 200, 12, CDraw.Argb(255, 40, 44, 56));
+        CDraw.FillRect(rd, ox + 360, oy + 19, 196 * pct / 100, 8,
+                       CDraw.Argb(255, 111, 170, 94));
         // 右侧从右往左排(倒计时/连击/炸药),量宽定位互不重叠
-        int secLeft = (wo.timeLeftMs + 999) / 1000;
+        int totalCs = (wo.timeLeftMs + 5) / 10;
+        int cs = totalCs % 100;
+        bool urgent = totalCs <= 1000;
         int xr = ox + Data.W - 16;
         string dtxt = "Q 炸药 x" + Convert.ToString(wo.dynamites);
-        int dw = Text.Width(rd, dtxt, 2);
-        Text.DrawShadow(rd, dtxt, xr - dw, oy + 10, 2, 200, 194, 174, 255);
+        int dw = CText.Width(dtxt, 2);
+        CText.DrawShadow(rd, dtxt, xr - dw, oy + 10, 2, 200, 194, 174, 255);
         xr = xr - dw - 28;
-        string ttxt = "剩余 " + Convert.ToString(secLeft) + " 秒";
-        int tw = Text.Width(rd, ttxt, 2);
-        Text.DrawShadow(rd, ttxt, xr - tw, oy + 10, 2,
-                        secLeft <= 10 ? 250 : 232,
-                        secLeft <= 10 ? 120 : 226,
-                        secLeft <= 10 ? 96 : 212, 255);
+        string ttxt = "剩余 " + Convert.ToString(totalCs / 100) + "." +
+                      (cs < 10 ? "0" : "") + Convert.ToString(cs) + " 秒";
+        int tw = CText.Width(ttxt, 2);
+        CText.DrawShadow(rd, ttxt, xr - tw, oy + 10, 2,
+                         urgent ? 250 : 232,
+                         urgent ? 120 : 226,
+                         urgent ? 96 : 212, 255);
         xr = xr - tw - 28;
         if (wo.combo >= 2) {
             string ctxt = "连击 x" + Convert.ToString(wo.combo);
-            int cw = Text.Width(rd, ctxt, 2);
-            Text.DrawShadow(rd, ctxt, xr - cw, oy + 10, 2, 240, 176, 80, 255);
+            int cw = CText.Width(ctxt, 2);
+            CText.DrawShadow(rd, ctxt, xr - cw, oy + 10, 2, 240, 176, 80, 255);
         }
         // 拆弹覆盖
         if (wo.state == World.ST_BOMB) {
-            rd.SetColor(10, 12, 17, 205);
-            rd.FillRect(ox + Data.W / 2 - 170, oy + 230, 340, 150);
-            rd.SetColor(192, 85, 63, 255);
-            rd.FillRect(ox + Data.W / 2 - 170, oy + 230, 340, 3);
-            Text.DrawCenteredShadow(rd, "疯狂点击! 拆除炸弹!",
-                                    ox + Data.W / 2, oy + 252, 3,
-                                    240, 176, 80, 255);
-            Text.DrawCenteredShadow(rd, Convert.ToString(wo.bombClicks) + "/"
-                                    + Convert.ToString(wo.bombNeed) + "    "
-                                    + Convert.ToString(wo.bombTimeLeft / 1000 + 1)
-                                    + " 秒",
-                                    ox + Data.W / 2, oy + 312, 2,
-                                    232, 226, 212, 255);
+            CDraw.FillRect(rd, ox + Data.W / 2 - 170, oy + 230, 340, 150,
+                           CDraw.Argb(205, 10, 12, 17));
+            CDraw.FillRect(rd, ox + Data.W / 2 - 170, oy + 230, 340, 3,
+                           CDraw.Argb(255, 192, 85, 63));
+            CText.DrawCenteredShadow(rd, "疯狂点击! 拆除炸弹!",
+                                     ox + Data.W / 2, oy + 252, 3,
+                                     240, 176, 80, 255);
+            CText.DrawCenteredShadow(rd, Convert.ToString(wo.bombClicks) + "/"
+                                     + Convert.ToString(wo.bombNeed) + "    "
+                                     + Convert.ToString(wo.bombTimeLeft / 1000 + 1)
+                                     + " 秒",
+                                     ox + Data.W / 2, oy + 312, 2,
+                                     232, 226, 212, 255);
         }
         // 结算覆盖
         if (wo.state == World.ST_RESULT) {
             bool win = wo.levelResult > 0;
-            rd.SetColor(10, 12, 17, 205);
-            rd.FillRect(ox + Data.W / 2 - 230, oy + 200, 460, 210);
-            rd.SetColor(win ? 111 : 192, win ? 170 : 85, win ? 94 : 63, 255);
-            rd.FillRect(ox + Data.W / 2 - 230, oy + 200, 460, 3);
-            Text.DrawCenteredShadow(rd, win ? "过关!" : "时间到!",
-                                    ox + Data.W / 2, oy + 224, 4,
-                                    232, 226, 212, 255);
-            Text.DrawCenteredShadow(rd, "本关 $" + Convert.ToString(wo.gold)
-                                    + " / 目标 $" + Convert.ToString(wo.Target()),
-                                    ox + Data.W / 2, oy + 306, 2,
-                                    244, 208, 120, 255);
-            Text.DrawCenteredShadow(rd, "累计 $" + Convert.ToString(wo.totalGold),
-                                    ox + Data.W / 2, oy + 350, 2,
-                                    232, 226, 212, 255);
+            CDraw.FillRect(rd, ox + Data.W / 2 - 230, oy + 200, 460, 210,
+                           CDraw.Argb(205, 10, 12, 17));
+            CDraw.FillRect(rd, ox + Data.W / 2 - 230, oy + 200, 460, 3,
+                           CDraw.Argb(255, win ? 111 : 192,
+                                      win ? 170 : 85, win ? 94 : 63));
+            CText.DrawCenteredShadow(rd, win ? "过关!" : "时间到!",
+                                     ox + Data.W / 2, oy + 224, 4,
+                                     232, 226, 212, 255);
+            CText.DrawCenteredShadow(rd, "本关 $" + Convert.ToString(wo.gold)
+                                     + " / 目标 $" + Convert.ToString(wo.Target()),
+                                     ox + Data.W / 2, oy + 296, 2,
+                                     244, 208, 120, 255);
+            CText.DrawCenteredShadow(rd, "累计 $" + Convert.ToString(wo.totalGold),
+                                     ox + Data.W / 2, oy + 334, 2,
+                                     232, 226, 212, 255);
+            CText.DrawCenteredShadow(rd, win
+                                     ? "点击继续 → 第 " + Convert.ToString(wo.level + 1) + " 关"
+                                     : "点击重新开始",
+                                     ox + Data.W / 2, oy + 372, 2,
+                                     200, 194, 178, 255);
         }
-        rd.SetColor(0, 0, 0, 255);
     }
 
-    void DrawClaw(int ox, int oy) {        SdlRenderer rd = this.r;
+    // 爪与绳。画布没有旋转贴图,爪改为随摆角旋转的矢量三爪钩
+    // (钢毂 + 绿灯 + 三枚弯钳),铰点/绳头几何与纹理版同一约定。
+    void DrawClaw(int ox, int oy) {
+        Canvas rd = this.c;
         World wo = this.w;
         double rad = wo.angle * Math.PI / 180.0;
-        int cx = ox + Data.HOOK_X + (int)(Math.Cos(rad) * wo.clawLen);
-        int cy = oy + Data.HOOK_Y + (int)(Math.Sin(rad) * wo.clawLen);
-        // 爪顶铰点(绿点)= 爪心 - 指向方向·ch/2。未旋转时铰点在纹理
-        // 顶缘中点(爪心上方 ch/2),爪绕中心旋转后铰点始终在指向方向
-        // (cosA,sinA,与伸出判定同一约定)的反方向 ch/2 处。上一版把
-        // sin/cos 写反:垂直时接到左缘中点,135 度时接到反侧。
+        double ca = Math.Cos(rad);
+        double sa = Math.Sin(rad);
+        int cx = ox + Data.HOOK_X + (int)(ca * wo.clawLen);
+        int cy = oy + Data.HOOK_Y + (int)(sa * wo.clawLen);
+        // 爪顶铰点(绿点)= 爪心 - 指向方向·ch/2。与伸出判定同一约定:
+        // 指向方向 (cosA,sinA),铰点始终在其反方向 ch/2 处。
         int ch = this.clawH;
         int h2 = ch / 2;
-        int ex = cx - (int)(Math.Cos(rad) * h2);
-        int ey = cy - (int)(Math.Sin(rad) * h2);
+        int ex = cx - (int)(ca * h2);
+        int ey = cy - (int)(sa * h2);
         // 绳:绞车卷筒(即摆动圆心 HOOK_X,HOOK_Y)→ 爪铰点,一条绷直
-        // 的 2px 线。绳在 DrawAll 里先于矿工绘制。摆动的爪绕圆心走
-        // 圆弧,绳只有与爪同圆心才始终对准铰点——分段加下垂偏移会让
-        // 绳身打弯、与爪的轨迹脱节。但线头不能从圆心(机身内部)画起:
-        // 起点裁剪到机身包围盒的出射点,视觉上从抓钩机底部钻出。
+        // 的绳。摆动的爪绕圆心走圆弧,绳只有与爪同圆心才始终对准铰
+        // 点。但线头不能从圆心(机身内部)画起:起点裁剪到机身包围盒
+        // 的出射点,视觉上从抓钩机底部钻出。
         int sx0 = ox + Data.HOOK_X;
         int sy0 = oy + Data.HOOK_Y;
-        // 机身包围盒:矿工贴图立在 SKY_H 草地线上,机顶压在 Gui 顶栏
-        // 下缘(HudTop Dock.Top Prefer 44 + 1px 分隔线 = 45)。
+        // 机身包围盒:矿工贴图立在 SKY_H 草地线上,机顶压在顶栏下缘
+        // (兜底 HUD 顶栏 46px)。
         int bodyTop = oy + 45;
         int bodyBottom = oy + Data.SKY_H + 6;
         int bodyHalf = (this.minerW + 1) / 2;
@@ -687,358 +501,101 @@ class MinerApp {
         if (tBest > 1.0) { tBest = 1.0; }
         int sx = sx0 + (int)(dx * tBest);
         int sy = sy0 + (int)(dy * tBest);
-        // 两遍 1px 并排成 2px 绳身,深棕+浅棕在土色背景上可读
-        rd.SetColor(74, 56, 38, 255);
-        rd.DrawLine(sx, sy, ex, ey);
-        rd.DrawLine(sx, sy + 1, ex, ey + 1);
-        rd.SetColor(128, 100, 66, 255);
-        rd.DrawLine(sx, sy, ex, ey);
-        rd.SetColor(0, 0, 0, 255);
-        // 爪纹理(旋转对齐摆角:0 度 = 纹理朝下)
-        if (this.texClaw != null && this.texClaw.IsValid()) {
-            int cw = this.clawW;
-            int ang = (int)(wo.angle) - 90;
-            if (ang < 0) { ang = ang + 360; }
-            rd.DrawTextureRotated(this.texClaw, cx - cw / 2, cy - ch / 2, cw, ch, ang);
-        } else {
-            Draw.FillCircle(rd, cx, cy, 14, 160, 160, 170, 255);
-        }
+        // 两遍绳身:深棕粗底 + 浅棕细面,土色背景上可读
+        CDraw.Line(rd, sx, sy, ex, ey, 4, 74, 56, 38, 255);
+        CDraw.Line(rd, sx, sy, ex, ey, 2, 128, 100, 66, 255);
+        // 矢量爪:局部 (u,v) 坐标,v+ = 指向方向(90° 时向下),
+        // 世界 = 爪心 + u·(-sinA,cosA) + v·(cosA,sinA)。
+        // 三枚弯钳(左右对称 + 中央爪尖),再盖钢毂与绿灯。
+        int p1x = cx + (int)(-6 * -sa + -2 * ca);
+        int p1y = cy + (int)(-6 * ca + -2 * sa);
+        int p2x = cx + (int)(-17 * -sa + 8 * ca);
+        int p2y = cy + (int)(-17 * ca + 8 * sa);
+        int p3x = cx + (int)(-10 * -sa + 22 * ca);
+        int p3y = cy + (int)(-10 * ca + 22 * sa);
+        // 左钳两段
+        CDraw.Line(rd, p1x, p1y, p2x, p2y, 3, 156, 162, 176, 255);
+        CDraw.Line(rd, p2x, p2y, p3x, p3y, 3, 156, 162, 176, 255);
+        // 右钳(镜像 u)
+        int q1x = cx + (int)(6 * -sa + -2 * ca);
+        int q1y = cy + (int)(6 * ca + -2 * sa);
+        int q2x = cx + (int)(17 * -sa + 8 * ca);
+        int q2y = cy + (int)(17 * ca + 8 * sa);
+        int q3x = cx + (int)(10 * -sa + 22 * ca);
+        int q3y = cy + (int)(10 * ca + 22 * sa);
+        CDraw.Line(rd, q1x, q1y, q2x, q2y, 3, 156, 162, 176, 255);
+        CDraw.Line(rd, q2x, q2y, q3x, q3y, 3, 156, 162, 176, 255);
+        // 中央爪尖
+        int m1x = cx + (int)(0 * -sa + 2 * ca);
+        int m1y = cy + (int)(0 * ca + 2 * sa);
+        int m2x = cx + (int)(0 * -sa + 24 * ca);
+        int m2y = cy + (int)(0 * ca + 24 * sa);
+        CDraw.Line(rd, m1x, m1y, m2x, m2y, 5, 120, 126, 140, 255);
+        // 钢毂 + 亮边 + 绿灯(灯在铰点侧,即指向反方向)
+        CDraw.FillCircle(rd, cx, cy, 9, 70, 74, 86, 255);
+        CDraw.CircleStroke(rd, cx, cy, 9, 2, 150, 156, 170, 255);
+        int lx = cx - (int)(11 * ca);
+        int ly = cy - (int)(11 * sa);
+        CDraw.FillCircle(rd, lx, ly, 3, 110, 235, 120, 255);
         // 钩上物挂在爪钳里:中心在爪心指向方向 0.58 爪高处,随摆角
-        // 转动(贴图保持直立)。此前固定画在爪心正下方,斜角时物品
-        // 悬在钳外与爪错位。
+        // 转动(贴图保持直立)。
         if (wo.hookedKind >= 0) {
             ItemDef d = Data.DEFS[wo.hookedKind];
-            SdlTexture t = this.texKind[wo.hookedKind];
-            if (t != null && t.IsValid()) {
-                int dw = d.texW;
-                int dh = d.texH;
-                int jr = ch * 58 / 100;
-                int ix = cx + (int)(Math.Cos(rad) * jr) - dw / 2;
-                int iy = cy + (int)(Math.Sin(rad) * jr) - dh / 2;
-                rd.DrawTexture(t, ix, iy, dw, dh);
+            string tp = this.kindPath[wo.hookedKind];
+            int jr = ch * 58 / 100;
+            int jx = cx + (int)(ca * jr);
+            int jy = cy + (int)(sa * jr);
+            if (tp != null) {
+                CDraw.BlitImage(rd, tp, jx - d.texW / 2, jy - d.texH / 2,
+                                d.texW, d.texH);
+            } else {
+                CDraw.FillCircle(rd, jx, jy, d.rad, 200, 170, 60, 255);
             }
         }
     }
 
     void DrawQte(int ox, int oy) {
-        SdlRenderer rd = this.r;
+        Canvas rd = this.c;
         World wo = this.w;
         double rad = wo.angle * Math.PI / 180.0;
         int cx = ox + Data.HOOK_X + (int)(Math.Cos(rad) * wo.clawLen);
         int cy = oy + Data.HOOK_Y + (int)(Math.Sin(rad) * wo.clawLen);
         // 金圈(命中区)
-        Draw.CircleStroke(rd, cx, cy, 44, 255, 210, 80, 255);
-        Draw.CircleStroke(rd, cx, cy, 45, 255, 210, 80, 200);
+        CDraw.CircleStroke(rd, cx, cy, 44, 2, 255, 210, 80, 255);
         // 白圈(收缩)
         int wr = (int)wo.qteRing;
         if (wr < 8) { wr = 8; }
-        Draw.CircleStroke(rd, cx, cy, wr, 255, 255, 255, 235);
-        Draw.CircleStroke(rd, cx, cy, wr + 1, 255, 255, 255, 160);
+        CDraw.CircleStroke(rd, cx, cy, wr, 2, 255, 255, 255, 235);
         // 进度点
         for (int i = 0; i < wo.qteNeed; i = i + 1) {
             int dx = cx - wo.qteNeed * 10 + i * 20 + 5;
             if (i < wo.qteDone) {
-                Draw.FillCircle(rd, dx, cy + 74, 6, 130, 240, 120, 255);
+                CDraw.FillCircle(rd, dx, cy + 74, 6, 130, 240, 120, 255);
             } else {
-                Draw.FillCircle(rd, dx, cy + 74, 6, 70, 70, 80, 255);
+                CDraw.FillCircle(rd, dx, cy + 74, 6, 70, 70, 80, 255);
             }
         }
-        // 操作提示(顶栏不再放常驻提示行;圈心过深时画到圈上方)
+        // 操作提示(圈心过深时画到圈上方)
         int hy = cy + 96;
         if (hy > Data.H - 20) { hy = cy - 74; }
-        Text.DrawCenteredShadow(rd, "白圈缩进金圈时点击!", cx, hy, 2,
-                                232, 226, 212, 255);
-    }
-
-    // ---------------------------------------------------------------
-    // GameHud(Gui 控件树)
-    // ---------------------------------------------------------------
-    // 顶栏(关卡/金币/进度/倒计时/连击/炸药)与覆盖层(结算/拆弹)
-    // 全部是 stdlib Gui 控件,配色/圆角/描边落在 skins/gamehud/
-    // skin.css;保留模式:树只建一次,内容经 FrameHook 每帧同步。
-    // MINER_NOHUD=1 退回纯自绘路径(对照/兜底)。
-
-    public void BuildHud() {
-        // HUD 画布跟随渲染后备缓冲实际像素(GameHud.Frame 以 OutputSize
-        // 为准并自动追平),不能按 host.CanvasW() 取——那个值被超采样
-        // 上限钳制过,输出分辨率超过 logicalW*ss 时(如 4K 全屏)两者差
-        // 一截,Ux 按钳制值换算会把整套面板缩小错位。
-        int packed = this.r.OutputSize();
-        int outW = packed & 0xFFFF;
-        if (outW <= 0) { outW = this.host.CanvasW(); }
-        this.uiCanvasW = outW;
-        this.topHud = new HudTop(this);
-        this.ovHud = new HudOverlay(this);
-        Form form = Form.Create("hud", Data.W, Data.H);
-        form.FrameHook(() => { this.SyncHud(); });
-        form.With(this.topHud.Build());
-        form.With(this.ovHud.BuildResult());
-        form.With(this.ovHud.BuildBomb());
-        this.hud = GameHud.CreateFor(this.host.WindowHandle(),
-                                     this.r.Handle());
-        if (!this.hud.Ready()) {
-            Console.WriteLine("[hud] takeover failed: " + this.hud.LastError());
-            this.hud = null;
-            return;
-        }
-        this.hud.Root(form);
-        // GameHud 的 app 从不 Show():titlebarH 停在构造默认 32 且
-        // showChrome 默认开,Form.RenderFrame 按 ContentTop() 把整棵
-        // HUD 树压到 y=32 起——顶栏悬在窗口顶下一条、底部空 32px。
-        // HUD 是全屏合成层没有标题栏,关掉 chrome 让树从 y=0 铺满。
-        this.hud.GetApp().SetChromeVisible(false);
-        this.guiReady = true;
-        this.host.hudMode = true;   // 宿主 End() 不再自己 Present
-    }
-
-    // 每帧把 World 状态同步进控件(绑定/直设文本)。
-    void SyncHud() {
-        if (this.topHud != null) { this.topHud.Sync(); }
-        if (this.ovHud != null) { this.ovHud.Sync(); }
+        CText.DrawCenteredShadow(rd, "白圈缩进金圈时点击!", cx, hy, 2,
+                                 232, 226, 212, 255);
     }
 
     // ---------------------------------------------------------------
     // 入口与无头自测
     // ---------------------------------------------------------------
     static int Main(string[] args) {
-        // HUD 文字脸:圆体(幼圆)比系统 UI 字体(写死的 Segoe UI 经字体
-        // 链接兜到雅黑)更配游戏画风;机器上没有幼圆时 GDI 字体链接
-        // 自动回退系统默认。运行库首次建字体时读一次该变量。
+        // 文字脸:圆体(幼圆)比系统 UI 字体更配游戏画风;机器上没有
+        // 幼圆时 GDI 字体链接自动回退系统默认。运行库首次建字体时
+        // 读一次该变量。
         Env.Set("ZAN_GUI_FONT_FACE", "幼圆");
-        // 无头平衡仿真:自动打 6 关,校验经济曲线与状态机
+        // 无头平衡仿真:自动打 8 关,校验经济曲线与状态机(不建窗口)
         if (ProcessHost.Env("MINER_SIM") == "1") {
             return MinerApp.SimRun();
         }
-        // 无头截图
-        bool shot = ProcessHost.Env("MINER_SHOT") == "1";
-        Host h = Host.CreateFull("黄金矿工", Data.W, Data.H, 1, false);
-        if (!h.Running()) {
-            Console.WriteLine("host init failed");
-            return 1;
-        }
-        h.LimitFps(60);
-        h.SetIdleFps(2);
-        h.PauseOnUnfocus();       // 失焦暂停:倒计时/收线不偷跑,点击恢复
-        h.SetPauseRedrawInterval(500); // 暂停期画面静止,2fps 重绘暂停幕足够
-        // 事件驱动重绘:无变化帧不渲染(HUDSHOT/SIM 无头路径不受影响,
-        // 它们不走主循环)。
-        h.SetRedrawInterval(30);
-        MinerApp app = MinerApp.Create(h);
-        if (shot) {
-            return MinerApp.ShotRun(app);
-        }
-        if (ProcessHost.Env("MINER_HUDSHOT") == "1") {
-            if (ProcessHost.Env("MINER_NOHUD") != "1") { app.BuildHud(); }
-            return MinerApp.HudShotRun(app, h);
-        }
-        // Gui 控件树 HUD:接管宿主窗口,场景在下、Gui 在上。
-        bool hudFailLogged = false;
-        if (ProcessHost.Env("MINER_NOHUD") != "1") {
-            app.BuildHud();
-        }
-        // HUD 合成节拍:GameHud.Frame 是"GPU 回读整帧 + Gui 全画布软件
-        // 栅格 + 双全帧纹理上传 + 合成 Present",一次约 6-10ms,跟随游戏
-        // 60fps 常态跑会把一个核吃满。合成与游戏帧解耦:快速阶段
-        // (伸钩/收钩/QTE/拆弹)逐帧合成保手感,其余两帧一拍;状态
-        // 切换/点击按键立即合成。合成节拍即场景呈现节拍——不存在
-        // "只呈现场景不重绘 GUI"的廉价帧(Gui 合成契约:画布 present
-        // 后不保留,凑帧呈现会把空 HUD 贴上屏)。
-        int hudFrame = 0;
-        int hudSceneFrame = 0;
-        int lastState = -99;
-        // MINER_LIVESHOT=1: 实机合成路径自摄——第 120/600 帧各 DumpBmp
-        // 一张合成结果(含 FrameScene 廉价帧),离屏验证 live 合成内容,
-        // 不依赖窗口在前台。
-        bool liveShot = ProcessHost.Env("MINER_LIVESHOT") == "1";
-        int liveFrame = 0;
-        bool prof = app.prof = ProcessHost.Env("MINER_PROF") == "1";
-        app.profCont = ProcessHost.Env("MINER_PROF_CONT") == "1";
-        long f0 = 0;
-        long t1 = 0;
-        long t2 = 0;
-        long t3 = 0;
-        long t4 = 0;
-        if (prof) {
-            app.profT0 = World.NowMs();
-            Console.WriteLine("[prof] MINER_PROF on, auto-fire at ~1200ms");
-        }
-        while (h.Running()) {
-            f0 = World.NowMs();
-            app.now = World.NowMs();
-            int dt = (int)(app.now - app.lastFrameAt);
-            if (dt < 0) { dt = 0; }
-            if (dt > 100) { dt = 100; }
-            app.lastFrameAt = app.now;
-            if (h.ShouldPause()) {
-                // 暂停期 dt 计时照常推进,但世界不消费——恢复瞬间不会
-                // 跳一大步(dt 钳 100ms 也兜底)。不 MarkEvent:重绘门
-                // 由 pauseRedrawMs 放宽,暂停幕低频刷新,CPU 让给前台。
-            } else if (prof && app.profAutoFired == 0
-                    && Sdl.Ticks() - app.profT0 >= 1200) {
-                app.profAutoFired = 1;
-                Console.WriteLine("[prof] === auto-fire ===");
-                app.OnActionKey();
-            }
-            bool action = false;
-            bool dyn = false;
-            bool inputEvent = false;
-            while (SdlEvent.Poll()) {
-                int ty = SdlEvent.Type();
-                h.OnWindowEvent(ty);
-                if (SdlEvent.IsQuit()) {
-                    app.w.Save();
-                    h.Quit();
-                    break;
-                }
-                if (ty == SdlEventType.MouseMotion()) {
-                    app.mouseX = h.MouseX();
-                    app.mouseY = h.MouseY();
-                } else if (ty != SdlEventType.MouseButtonUp()
-                           && ty != SdlEventType.FingerMotion()) {
-                    // 键盘/滚轮/手柄等真实输入要求下一帧立即渲染;
-                    // MouseMotion 每秒上百条,放进门控会把空闲重绘
-                    // 门彻底击穿(鼠标轻晃=恒 60fps),只记坐标。
-                    inputEvent = true;
-                    h.MarkEvent();
-                    if (app.prof) { app.ppEvent(ty); }
-                }
-                if (ty == SdlEventType.MouseButtonDown()
-                    && SdlEvent.MouseButton() == SdlMouseButton.Left()) {
-                    action = true;
-                }
-                // 触屏(安卓/iOS):手指按下/抬起都当一次发射。Gui 运行时
-                // 已把手指合成鼠标点击供控件层用;这里再直发一拍,保证
-                // 场景层的放钩/QTE/拆弹点击在手机上与桌面同手感。
-                if (ty == SdlEventType.FingerDown()
-                    || ty == SdlEventType.FingerUp()) {
-                    action = true;
-                }
-                if (ty == SdlEventType.KeyDown() && !SdlEvent.IsRepeat()) {
-                    int sc = SdlEvent.Scancode();
-                    if (sc == SdlScancode.Space() || sc == SdlScancode.Down()
-                        || sc == SdlScancode.Enter()) { action = true; }
-                    if (sc == SdlScancode.Q() || sc == SdlScancode.E()) { dyn = true; }
-                    if (sc == SdlScancode.F11()) { h.ToggleFullscreen(); }
-                    if (sc == SdlScancode.Escape() && app.w.state == World.ST_RESULT) {
-                        app.w.Save();
-                        h.Quit();
-                    }
-                }
-            }
-            // 失焦暂停:世界停步(倒计时/摆钩/收线全冻结),暂停幕由
-            // DrawAll 画;重新聚焦自动恢复,点击/按键帧立即呈现新状态。
-            // 暂停中吞掉 action/dyn:焦点刚回来那一下的点击不应算放钩。
-            app.pauseOverlay = h.ShouldPause();
-            if (!app.pauseOverlay) {
-                if (action) { app.OnActionKey(); }
-                if (dyn) { app.OnDynamiteKey(); }
-                t1 = World.NowMs();
-                app.StepFrame(dt);
-                t2 = World.NowMs();
-            }
-            // GameHud.Frame 不走 Form.Run 的 frameHook,顶栏标签须每帧直同步,
-            // 否则倒计时/金币/combo 保持初始空串(截图路径 HudShotRun 已直调故正常)。
-            // 暂停期世界冻结、HUD 内容不变,同步也没意义——只在将要
-            // 渲染的帧做(心跳计数除外)。
-            if (!app.pauseOverlay || h.ShouldRender()) { app.SyncHud(); }
-            // 门控渲染:游戏世界每帧都在动(摆钩/倒计时),到点即画;
-            // 纯空转的帧只推进世界步进,省掉整段重绘+回读+合成。
-            if (!h.ShouldRender()) { h.Pace(); if (app.prof) { app.ppCountSleep(); } continue; }
-            // 场景重绘与合成解耦:合成贵(13-15ms/次)。摆钩是持续动画
-            // (最长 122°/s),10Hz 会看得见的跳——给 30fps 档;结算/暂停
-            // 等真正静止的画面才 6 帧一拍降到 10Hz。
-            if (!app.pauseOverlay) {
-                int st2 = app.w.state;
-                bool anim2 = st2 == World.ST_SWING || st2 == World.ST_EXTEND
-                             || st2 == World.ST_RETRACT || st2 == World.ST_QTE
-                             || st2 == World.ST_BOMB;
-                if (!anim2) {
-                    hudSceneFrame = hudSceneFrame + 1;
-                    if (hudSceneFrame < 6) {
-                        h.Pace();
-                        if (app.prof) { app.ppCountSleep(); }
-                        continue;
-                    }
-                    hudSceneFrame = 0;
-                } else {
-                    hudSceneFrame = 0;
-                }
-            } else {
-                hudSceneFrame = 0;
-            }
-            if (app.prof) { app.ppRenders = app.ppRenders + 1; }
-            // 与其他示例游戏一致:Begin 选中离屏画布并清屏,
-            // End 合成回贴( hudMode 下不再 Present)。
-            h.Begin(12, 10, 8);
-            app.DrawAll();
-            h.End();
-            t3 = World.NowMs();
-            // HUD 层:场景帧作底,Gui 控件树画在上面并合成呈现。
-            // 合成=GPU 回读整帧+上传+整树重排+绘制,一次 13-15ms,是
-            // 全部 CPU 的 95%(实测:read 4ms+tree 8ms/帧)。分档门控:
-            // 伸钩/收钩/QTE/拆弹与摆钩 2 帧一拍(30fps 合成——逐帧合成
-            // 占满一核,而 30fps 已是连续动画的流畅下限);
-            // 结算等静止画面 6 帧一拍(10fps 合成,顶栏数字变化 10Hz 可读);
-            // 暂停期每次重绘必合成(重绘门已放宽到 2fps)。状态切换与
-            // 点击按键的帧立即合成。廉价帧不呈现:Gui 的合成契约是
-            // "重绘后才能 present"——画布内容在 present 后不保留,拿
-            // 旧画布凑帧会把空 HUD 贴上屏(整条顶栏闪烁)。
-            if (app.hud != null) {
-                int st = app.w.state;
-                bool stateChanged = st != lastState;
-                lastState = st;
-                bool fast = !app.pauseOverlay
-                            && (st == World.ST_EXTEND || st == World.ST_RETRACT
-                            || st == World.ST_QTE || st == World.ST_BOMB);
-                bool swing = !app.pauseOverlay && st == World.ST_SWING;
-                // 快态 30fps(60fps 合成占满一核,30fps 已是物品移动的
-                // 流畅观感下限);摆钩 30fps(连续摆动,10Hz 会跳);
-                // 真正静止的画面 10Hz;暂停/状态切换/输入帧立即合成。
-                int interval = app.pauseOverlay ? 1
-                               : (fast ? 2 : (swing ? 2 : 6));
-                bool composite = stateChanged || action || dyn || inputEvent
-                                 || fast || swing || ++hudFrame >= interval;
-                if (composite) { hudFrame = 0; }
-                if (composite && app.prof) {
-                    app.ppComposites = app.ppComposites + 1;
-                    if (app.profCont) {
-                        app.pfRead = app.pfRead + app.hud.lastReadMs;
-                        app.pfUpload = app.pfUpload + app.hud.lastUploadMs;
-                        app.pfTree = app.pfTree + app.hud.lastTreeMs;
-                        app.pfPresent = app.pfPresent + app.hud.lastPresentMs;
-                    }
-                }
-                if (composite
-                    && !app.hud.Frame(app.r, h.WindowHandle())) {
-                    if (!hudFailLogged) {
-                        hudFailLogged = true;
-                        Console.WriteLine("[hud] frame failed: " + app.hud.LastError());
-                    }
-                    app.hud = null;
-                    app.host.hudMode = false;
-                }
-            }
-            liveFrame = liveFrame + 1;
-            if (liveShot && (liveFrame == 120 || liveFrame == 600)) {
-                MinerApp.DumpBmp(app.r, "miner_live_" + Convert.ToString(liveFrame)
-                                 + ".bmp");
-                Console.WriteLine("=== LIVE SHOT " + Convert.ToString(liveFrame)
-                                  + " ===");
-            }
-            t4 = World.NowMs();
-            // 帧尾统一按 LimitFps 预算补睡:hudMode 下 End() 不再 pacing
-            // (那时合成还没发生),睡在这可以把 HUD 读回+合成+呈现也算进
-            // 帧预算,60fps 不再被 HUD 段额外拖慢。
-            h.Pace();
-            if (prof) {
-                app.ProfFrame((int)(t1 - f0), (int)(t2 - t1), (int)(t3 - t2),
-                              (int)(t4 - t3), (int)(World.NowMs() - f0));
-                // 暂停期心跳账单:统计每秒循环圈数/真实渲染次数/合成
-                // 次数/纯空转睡眠耗时,定位暂停态残余 CPU 的来源。
-                app.ProfPauseTick(h.Paused());
-            }
-        }
-        app.w.Save();
+        GuiHost host = new GuiHost("黄金矿工", Data.W, Data.H, 16);
+        host.Run(new MnLoop());
         return 0;
     }
 
@@ -1186,390 +743,51 @@ class MinerApp {
         Console.WriteLine(allOk ? "SIM PASS" : "SIM FAIL");
         return allOk ? 0 : 1;
     }
-
-    // 无头截图:摆钩/伸出/收线/炸弹/结算 各抓一张
-    static int ShotRun(MinerApp app) {
-        StreamWriter log = new StreamWriter("miner_shot.log");
-        log.WriteLine("=== MINER_SHOT ===");
-        string[] names = new string[9];
-        names[0] = "swing"; names[1] = "extend"; names[2] = "qte";
-        names[3] = "bomb"; names[4] = "boom"; names[5] = "result";
-        names[6] = "ang45"; names[7] = "ang135"; names[8] = "tntgrab";
-        for (int s = 0; s < 9; s = s + 1) {
-            World w = app.w;
-            if (s == 0) { w.StartLevel(); }
-            if (s == 6) { w.StartLevel(); w.angle = 45.0; w.clawLen = 260.0; }
-            if (s == 7) { w.StartLevel(); w.angle = 135.0; w.clawLen = 260.0; }
-            if (s == 8) {
-                // TNT 抓取即炸:垂直下方 300 处摆一颗 TNT,周围两件
-                // 陪葬品,真实伸钩推进到命中(爆炸在物品原位发生),
-                // 再走 6 帧让白闪衰减、粒子展开。
-                w.StartLevel();
-                int tyy = Data.HOOK_Y + 300;
-                w.items.Add(Item.Make(8, Data.HOOK_X, tyy));
-                w.items.Add(Item.Make(0, Data.HOOK_X + 60, tyy + 24));
-                w.items.Add(Item.Make(1, Data.HOOK_X - 92, tyy - 30));
-                w.state = World.ST_EXTEND;
-                w.clawV = 900.0;
-                for (int k = 0; k < 40 && w.state == World.ST_EXTEND; k = k + 1) {
-                    w.Step(16);
-                }
-                for (int k = 0; k < 6; k = k + 1) { w.Step(16); }
-            }
-            if (s == 1) { w.state = World.ST_EXTEND; w.clawLen = 260.0; }
-            if (s == 2) {
-                w.StartLevel();
-                w.hookedKind = 2;
-                w.items.Add(Item.Make(2, Data.HOOK_X + 200, Data.HOOK_Y + 240));
-                w.items[w.items.Count - 1].alive = false;
-                w.state = World.ST_QTE;
-                w.qteRing = 60.0;
-                w.qteDone = 0;
-                w.qteNeed = 3;
-                w.clawLen = 300.0;
-                w.angle = 75.0;
-            }
-            if (s == 3) {
-                w.StartLevel();
-                w.hookedKind = 9;
-                w.state = World.ST_BOMB;
-                w.bombTimeLeft = 1800;
-                w.bombClicks = 4;
-                w.bombNeed = 12;
-                w.bombPulse = 1.2;
-            }
-            if (s == 4) {
-                w.StartLevel();
-                w.BoomFx(Data.W / 2, 480, 160);
-                w.Shake(10, 260);
-                w.flashFrames = 5;
-            }
-            if (s == 5) {
-                w.StartLevel();
-                w.gold = w.Target();
-                w.EndLevel(true);
-            }
-            app.now = World.NowMs();
-            app.StepFrame(16);
-            app.SyncHud();
-            // 画两帧:Present 后备缓冲滞后一帧,首帧回读只能拿到清屏色
-            for (int rep = 0; rep < 2; rep = rep + 1) {
-                app.host.Begin(12, 10, 8);
-                app.DrawAll();
-                app.host.End();
-            }
-            MinerApp.DumpBmp(app.r, "miner_shot_" + names[s] + ".bmp");
-            log.WriteLine("SHOT " + names[s]);
-        }
-        log.WriteLine("=== SHOT OK ===");
-        log.Close();
-        Console.WriteLine("=== SHOT OK ===");
-        return 0;
-    }
-
-    // MINER_HUDSHOT=1:带 HUD 合成跑 24 帧后导出第 20 帧合成结果
-    // (场景在下、Gui 控件树在上),验证 GameHud 接管链路。
-    static int HudShotRun(MinerApp app, Host h) {
-        for (int f = 1; f <= 24; f = f + 1) {
-            app.now = World.NowMs();
-            app.lastFrameAt = app.now;
-            app.StepFrame(16);
-            app.SyncHud();
-            app.host.Begin(12, 10, 8);
-            app.DrawAll();
-            app.host.End();
-            if (app.hud != null) {
-                if (!app.hud.Frame(app.r, h.WindowHandle())) {
-                    // 与主循环一致的降级:合成失败退回宿主直呈 + 场景层兜底
-                    Console.WriteLine("[hudshot] frame failed f=" + f +
-                                      " err=" + app.hud.LastError());
-                    app.hud = null;
-                    app.host.hudMode = false;
-                }
-            }
-            h.Pace();
-            if (f == 20) {
-                app.r.Present();
-                MinerApp.DumpBmp(app.r, "miner_hud_composite.bmp");
-                Console.WriteLine("=== HUD SHOT OK ===");
-            }
-        }
-        // 过关态:驱动到 ST_RESULT 再合成数帧,验证重排后的结算面板
-        // (Flex.Column 居中排版,hud-title/subtitle/small 三档层级)。
-        app.w.gold = app.w.Target();
-        app.w.EndLevel(true);
-        for (int f = 25; f <= 31; f = f + 1) {
-            app.now = World.NowMs();
-            app.lastFrameAt = app.now;
-            app.StepFrame(16);
-            app.SyncHud();
-            app.host.Begin(12, 10, 8);
-            app.DrawAll();
-            app.host.End();
-            if (app.hud != null
-                && !app.hud.Frame(app.r, h.WindowHandle())) {
-                Console.WriteLine("[hudshot] result frame failed f=" + f +
-                                  " err=" + app.hud.LastError());
-                break;
-            }
-            h.Pace();
-        }
-        app.r.Present();
-        MinerApp.DumpBmp(app.r, "miner_hud_result.bmp");
-        Console.WriteLine("=== HUD RESULT OK ===");
-        return 0;
-    }
-
-    static void DumpBmp(SdlRenderer r, string path) {
-        r.Present();
-        int packed = r.OutputSize();
-        int w = packed & 0xFFFF;
-        int h = (packed >> 16) & 0xFFFF;
-        if (w <= 0 || h <= 0) { return; }
-        byte[] rgba = new byte[w * h * 4];
-        if (!r.ReadPixels(rgba, w, h)) { return; }
-        int rowBytes = w * 3;
-        int pad = (4 - (rowBytes % 4)) % 4;
-        int imageBytes = (rowBytes + pad) * h;
-        byte[] bmp = new byte[54 + imageBytes];
-        bmp[0] = (byte)0x42; bmp[1] = (byte)0x4D;
-        MinerApp.PutU32(bmp, 2, 54 + imageBytes);
-        MinerApp.PutU32(bmp, 10, 54);
-        MinerApp.PutU32(bmp, 14, 40);
-        MinerApp.PutI32(bmp, 18, w);
-        MinerApp.PutI32(bmp, 22, h);
-        bmp[26] = (byte)1; bmp[28] = (byte)24;
-        for (int y = 0; y < h; y = y + 1) {
-            int dstRow = 54 + y * (rowBytes + pad);
-            int srcRow = (h - 1 - y) * w * 4;
-            for (int x = 0; x < w; x = x + 1) {
-                int o = srcRow + x * 4;
-                // ReadPixels 回读为 BGRA 字节序(D3D 后备缓冲),BMP 24 位
-                // 行序恰为 BGR,按原序直拷;此前按 RGBA 假设交叉写,整帧
-                // R/B 互换。
-                bmp[dstRow + x * 3] = rgba[o];
-                bmp[dstRow + x * 3 + 1] = rgba[o + 1];
-                bmp[dstRow + x * 3 + 2] = rgba[o + 2];
-            }
-        }
-        File.WriteAllBytes(path, bmp);
-    }
-
-    static void PutU32(byte[] b, int at, int v) {
-        b[at] = (byte)(v & 0xFF);
-        b[at + 1] = (byte)((v >> 8) & 0xFF);
-        b[at + 2] = (byte)((v >> 16) & 0xFF);
-        b[at + 3] = (byte)((v >> 24) & 0xFF);
-    }
-    static void PutI32(byte[] b, int at, int v) {
-        b[at] = (byte)(v & 0xFF);
-        b[at + 1] = (byte)((v >> 8) & 0xFF);
-        b[at + 2] = (byte)((v >> 16) & 0xFF);
-        b[at + 3] = (byte)((v >> 24) & 0xFF);
-    }
 }
 
-// 3x5 像素字模已退役:兜底 HUD 与场景飘字统一走 Kit.Text(系统
-// 字体,全 CJK 带投影)——像素风数字与游戏画风不搭,且两套字模
-// 维护两份。
+// GuiHost 主循环回调：事件 → 固定步长模拟（16ms，追帧上限内多次）→
+// 渲染（BeginFrame/PresentFrame 由宿主包好；帧预算自限速约 60fps）。
+class MnLoop : IGuiHostLoop {
+    MinerApp a;
 
-// 顶栏 HUD(Gui 控件树):关卡、金币/目标、进度条、倒计时、连击、
-// 炸药持有与提示行。配色全部来自 gamehud 皮肤(hud-* class)。
-class HudTop {
-    MinerApp app;
-    Panel bar;
-    Label level;
-    Label gold;
-    Progress bar_;
-    Label time;
-    Label combo;
-    Label dynamite;
-
-    HudTop(MinerApp a) { this.app = a; }
-
-    Panel Build() {
-        // 卡片构造(style 0):面板表面按 CSS 画半透明底,无名构造
-        // (style 3)只布局不画表面,顶栏会整个透底。顶栏用 hud-bar
-        // (通栏方角贴边),不用 hud-panel 的圆角卡片样式——通栏条
-        // 右缘贴窗口边,圆角看起来只有左侧有、右侧像被啃掉。
-        // 卡片不从子控件推首选尺寸(那是 style 3 的 OnMeasure),
-        // Dock.Top 的高度必须显式 Prefer,否则量出 0、顶栏连同
-        // 文字整个消失。
-        Panel p = new Panel("hudTop");
-        p.Class = "hud-bar";
-        p.Prefer(this.app.Ux(Data.W), this.app.Ux(44));
-        p.Dock(Dock.Top());
-        this.bar = p;
-
-        Flex row = Flex.Row().AlignCenter().Gap(this.app.Ux(14));
-        p.Pad(this.app.Ux(10));
-        p.With(row);
-
-        // 顶栏整行统一 hud-subtitle(14px)——此前 title/subtitle/small
-        // 三种字号混排一行,视觉杂乱。
-        this.level = new Label("");
-        this.level.Class = "hud-subtitle";
-        row.With(this.level);
-
-        this.gold = new Label("");
-        this.gold.Class = "hud-subtitle";
-        row.With(this.gold);
-
-        this.bar_ = new Progress(0, 0);
-        this.bar_.Class = "hud";
-        this.bar_.Prefer(this.app.Ux(300), this.app.Ux(18));
-        this.bar_.ShowText(false);
-        row.With(this.bar_);
-
-        this.time = new Label("");
-        this.time.Class = "hud-subtitle";
-        row.With(this.time);
-
-        this.combo = new Label("");
-        this.combo.Class = "hud-subtitle";
-        row.With(this.combo);
-
-        this.dynamite = new Label("");
-        this.dynamite.Class = "hud-subtitle";
-        row.With(this.dynamite);
-        return p;
+    public void Start(GuiHost host) {
+        this.a = MinerApp.Create(host);
     }
-
-    void Sync() {
-        World w = this.app.w;
-        this.level.Text = "第 " + w.level + " 关";
-        this.gold.Text = "$" + w.gold + " / " + w.Target();
-        int pct = w.gold * 100 / w.Target();
-        if (pct > 100) { pct = 100; }
-        this.bar_.SetPercent(pct);
-        // 两位小数倒计时:厘秒连续跳动,时间感知更紧(最后 10 秒尤其)。
-        int totalCs = (w.timeLeftMs + 5) / 10;
-        int cs = totalCs % 100;
-        this.time.Text = "剩余 " + totalCs / 100 + "." +
-                         (cs < 10 ? "0" : "") + cs + " 秒";
-        if (w.combo >= 2) {
-            this.combo.Text = "连击 x" + w.combo;
-        } else {
-            this.combo.Text = "";
-        }
-        this.dynamite.Text = "Q 炸药 x" + w.dynamites;
-    }
-}
-
-// 覆盖层 HUD:拆弹倒计时面板与过关/失败结算。只有对应状态可见。
-class HudOverlay {
-    MinerApp app;
-    Panel bomb;
-    Label bombSec;
-    Label bombCnt;
-    Progress bombBar;
-    Panel result;
-    Label resTitle;
-    Label resGold;
-    Label resTotal;
-    Label resNext;
-
-    HudOverlay(MinerApp a) { this.app = a; }
-
-    Panel BuildResult() {
-        // ---- 结算面板(居中) ----
-        // 卡片构造(style 0)画 CSS 半透明底;无名构造(style 3)只布局
-        // 不画表面,结算面板此前一直透底。卡片定尺寸,内部 Flex.Column
-        // 三段式:标题/两行数据/提示行,间距全部走 Ux(4 的倍数)档位,
-        // 居中对齐,不再裸排 Label。
-        Panel rp = new Panel("hudResult");
-        rp.Class = "hud-panel";
-        // Panel 默认 dock=5(fill)，Place() 只在 manual 停靠下生效，
-        // 不切回 manual 会被 fill 分支撑满整个 HUD 画布。
-        rp.DockManual();
-        rp.Prefer(this.app.Ux(440), this.app.Ux(280));
-        rp.Place(this.app.Ux(Data.W / 2 - 220), this.app.Ux(190));
-        this.result = rp;
-
-        Flex col = Flex.Column().Justify("center").Align("center")
-                    .Gap(this.app.Ux(16));
-        rp.Pad(this.app.Ux(28));
-        rp.With(col);
-
-        this.resTitle = new Label("");
-        this.resTitle.Class = "hud-title";
-        col.With(this.resTitle);
-
-        this.resGold = new Label("");
-        this.resGold.Class = "hud-subtitle";
-        col.With(this.resGold);
-
-        this.resTotal = new Label("");
-        this.resTotal.Class = "hud-subtitle";
-        col.With(this.resTotal);
-
-        this.resNext = new Label("");
-        this.resNext.Class = "hud-small";
-        col.With(this.resNext);
-
-        rp.SetShown(false);
-        return rp;
-    }
-
-    Panel BuildBomb() {
-        // ---- 拆弹面板(居中) ----
-        // 标题/秒数大字/点击计数/进度条四段,同结算面板一套节奏。
-        // 卡片构造(style 0)画 CSS 半透明底,同结算面板。
-        Panel bp = new Panel("hudBomb");
-        bp.Class = "hud-panel";
-        bp.DockManual();
-        bp.Prefer(this.app.Ux(360), this.app.Ux(180));
-        bp.Place(this.app.Ux(Data.W / 2 - 180), this.app.Ux(230));
-        this.bomb = bp;
-
-        Flex col = Flex.Column().Justify("center").Align("center")
-                    .Gap(this.app.Ux(12));
-        bp.Pad(this.app.Ux(24));
-        bp.With(col);
-
-        Label title = new Label("疯狂点击! 拆除炸弹!");
-        title.Class = "hud-title";
-        col.With(title);
-
-        this.bombSec = new Label("");
-        this.bombSec.Class = "hud-title";
-        col.With(this.bombSec);
-
-        this.bombCnt = new Label("");
-        this.bombCnt.Class = "hud-subtitle";
-        col.With(this.bombCnt);
-
-        this.bombBar = new Progress(0, 0);
-        this.bombBar.Class = "hud";
-        this.bombBar.Prefer(this.app.Ux(280), this.app.Ux(14));
-        this.bombBar.ShowText(false);
-        col.With(this.bombBar);
-
-        bp.SetShown(false);
-        return bp;
-    }
-
-    void Sync() {
-        World w = this.app.w;
-        bool showBomb = w.state == World.ST_BOMB;
-        bool showResult = w.state == World.ST_RESULT;
-        this.bomb.SetShown(showBomb);
-        this.result.SetShown(showResult);
-        if (showBomb) {
-            this.bombSec.Text = Convert.ToString(w.bombTimeLeft / 1000 + 1);
-            this.bombCnt.Text = w.bombClicks + " / " + w.bombNeed;
-            this.bombBar.SetPercent(w.bombClicks * 100 / w.bombNeed);
-        }
-        if (showResult) {
-            bool win = w.levelResult > 0;
-            this.resTitle.Text = win ? "过关!" : "时间到!";
-            this.resGold.Text = "本关 $" + w.gold + "   目标 $" + w.Target();
-            this.resTotal.Text = "累计 $" + w.totalGold;
-            if (win) {
-                this.resNext.Text = "点击继续 → 第 " + (w.level + 1) + " 关";
-            } else {
-                this.resNext.Text = "点击重新开始";
+    public void Event(GuiHost host, int kind, int code) {
+        // Gui 键码 = WM_KEYDOWN wParam(Windows VK)。放钩/节拍:空格 32、
+        // 下 40、回车 13、鼠标左键;炸药:Q 81 / E 69;Esc 27 只在结算
+        // 画面退出并存档(Stop 里落盘)。鼠标 kind:1=移动 2=按下 3=释放
+        // (Win32Shell 契约,与 App 控件分发同一套)。
+        if (kind == 4) {
+            if (code == 27) {
+                if (this.a.w.state == World.ST_RESULT) { host.RequestStop(); }
+                return;
             }
+            if (code == 32 || code == 40 || code == 13) {
+                this.a.OnActionKey();
+            } else if (code == 81 || code == 69) {
+                this.a.OnDynamiteKey();
+            }
+        } else if (kind == 2 && code == 0) {
+            // 左键按下:放钩 / QTE 节拍 / 拆弹连点 / 结算确认(触屏由
+            // Gui 运行时合成鼠标点击,同一路径)。
+            this.a.OnActionKey();
         }
+    }
+    public void FixedUpdate(GuiHost host, int dt) {
+        this.a.now = Window.GetTickMs();
+        this.a.StepFrame(dt);
+    }
+    public void Update(GuiHost host, int dt) { }
+    public void Render(GuiHost host, Canvas c, double alpha) {
+        this.a.now = Window.GetTickMs();
+        // 舞台 0 基绘制：原点落到标准标题栏之下，chrome 由宿主在
+        // 内容之上叠画。
+        CDraw.Origin(0, host.ContentTop());
+        CDraw.Clear(c, Data.W, Data.H, CDraw.Argb(255, 12, 10, 8));
+        this.a.DrawAll();
+    }
+    public void Stop(GuiHost host) {
+        this.a.w.Save();
     }
 }
