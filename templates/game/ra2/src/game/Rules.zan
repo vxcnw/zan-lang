@@ -325,6 +325,10 @@ class Rules {
     int bombDelay;        // ticks before Ivan's bomb goes off
     int blackoutTicks;    // spy-infiltrated power plant downtime
     int freezeTicks;      // chrono-beam freeze duration
+    int refundPercent;    // sell refund, percent of the building's cost
+    int repairPercent;    // full repair cost, percent of the full price
+    int repairStep;       // hit points one repair step heals
+    int repairRateTicks;  // ticks between repair steps
 
     // The [OverlayTypes] list, in rules order: the names the map overlay
     // plane's byte values index into. The GEM* entries are RA2's ore fields.
@@ -379,6 +383,10 @@ class Rules {
     int BombDelay() { return this.bombDelay; }
     int BlackoutTicks() { return this.blackoutTicks; }
     int FreezeTicks() { return this.freezeTicks; }
+    int RefundPercent() { return this.refundPercent; }
+    int RepairPercent() { return this.repairPercent; }
+    int RepairStep() { return this.repairStep; }
+    int RepairRateTicks() { return this.repairRateTicks; }
 
     /// <summary>Whether a map overlay index carries ore: its [OverlayTypes]
     /// name begins with GEM (RA2 has no separate ORE_* types). Unknown
@@ -1208,6 +1216,14 @@ class Rules {
         r.bombDelay = 300;
         r.blackoutTicks = 300;
         r.freezeTicks = 90;
+        // The shipped [General] sell/repair block: half the price back for a
+        // sold building, a full repair costing 15% of it, 8 hp per repair
+        // step. RepairRate=.016 minutes is one step a second at the 1:1
+        // tick pacing the rest of the economy already runs on.
+        r.refundPercent = 50;
+        r.repairPercent = 15;
+        r.repairStep = 8;
+        r.repairRateTicks = 60;
         return r;
     }
 
@@ -1331,6 +1347,12 @@ class Rules {
                                         this.preqTech);
             this.preqProc = Rules.CsvOr(general, "PrerequisiteProc",
                                         this.preqProc);
+            this.refundPercent = Rules.LeadingInt(general.GetOr(
+                "RefundPercent", Convert.ToString(this.refundPercent)));
+            this.repairPercent = Rules.LeadingInt(general.GetOr(
+                "RepairPercent", Convert.ToString(this.repairPercent)));
+            this.repairStep = Rules.LeadingInt(general.GetOr(
+                "RepairStep", Convert.ToString(this.repairStep)));
         }
         IniSection ai = ini.Section("AI");
         if (ai != null) {

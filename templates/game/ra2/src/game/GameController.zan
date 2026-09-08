@@ -12,6 +12,8 @@ class GameController {
     int money;
     int building;        // buildId armed for placement, or -1
     bool moveAttack;     // A key armed: next map click is a move-attack order
+    bool sellMode;       // sidebar 卖 armed: next own-structure click sells it
+    bool repairMode;     // sidebar 修 armed: next own-structure click repairs
     int aiMoney;         // the opponent's credits
     int tick;            // ticks since the game started
     int result;          // 0 playing, 1 player won, 2 player lost
@@ -38,6 +40,8 @@ class GameController {
         g.paused = false;
         g.building = -1;
         g.moveAttack = false;
+        g.sellMode = false;
+        g.repairMode = false;
         g.squads = new List<List<WorldObject>>();
         int sq = 0;
         while (sq < 10) { g.squads.Add(new List<WorldObject>()); sq = sq + 1; }
@@ -56,6 +60,8 @@ class GameController {
     bool NeedsRedraw() { return this.dirty; }
     void ClearRedraw() { this.dirty = false; }
     int BuildingId() { return this.building; }
+    bool SellModeArmed() { return this.sellMode; }
+    bool RepairModeArmed() { return this.repairMode; }
     int Power() { return this.world.PowerBalance(this.side); }
     bool LowPower() { return this.Power() < 0; }
     string SelectedInfo() { return this.world.SelectedInfo(); }
@@ -123,8 +129,9 @@ class GameController {
     // ---- economy -----------------------------------------------------------
 
     /// <summary>Applies the world's money events to the wallets: kind 1 is a
-    /// grant (an engineer's oil-derrick capture bonus), kind 2 a spy theft
-    /// where the victim's side is carried in the amount slot.</summary>
+    /// grant or, with a negative amount, a debit (the repair wrench's per-
+    /// step bill and the sell refund both ride this path); kind 2 is a spy
+    /// theft where the victim's side is carried in the amount slot.</summary>
     void DrainEvents() {
         int n = this.world.EventCount();
         for (int i = 0; i < n; i = i + 1) {
@@ -134,6 +141,9 @@ class GameController {
             if (kind == 1) {
                 if (side == this.side) { this.money = this.money + amount; }
                 else { this.aiMoney = this.aiMoney + amount; }
+                if (amount < 0 && side == this.side && this.money < 0) {
+                    this.money = 0;   // a bill cannot drive the wallet under
+                }
             } else if (kind == 2) {
                 int victim = amount;
                 int victimMoney = victim == this.side ? this.money : this.aiMoney;
@@ -179,11 +189,22 @@ class GameController {
     // ---- player commands ---------------------------------------------------
 
     /// <summary>Left click on the map: place the armed build if there is one,
-    /// issue a move-attack order if A is armed, otherwise select whatever
-    /// occupies the cell.</summary>
+    /// sell or repair an own structure when that mode is armed, issue a
+    /// move-attack order if A is armed, otherwise select whatever occupies
+    /// the cell.</summary>
     void OnClickCell(int x, int y) {
         if (this.building >= 0) {
             this.Place(x, y);
+            return;
+        }
+        if (this.sellMode) {
+            this.sellMode = false;
+            this.SellAt(x, y);
+            return;
+        }
+        if (this.repairMode) {
+            this.repairMode = false;
+            this.RepairAt(x, y);
             return;
         }
         if (this.moveAttack) {
@@ -200,10 +221,72 @@ class GameController {
     void ToggleMoveAttack() {
         this.moveAttack = !this.moveAttack;
         this.building = -1;   // mutually exclusive with build placement
+        this.ClearSellRepair();
         this.dirty = true;
     }
 
     bool MoveAttackArmed() { return this.moveAttack; }
+
+    /// <summary>The sidebar's 卖 button: the next click on an own finished
+    /// structure sells it for half its price. Armed one click at a time,
+    /// and mutually exclusive with the other armed modes.</summary>
+    void ToggleSell() {
+        this.sellMode = !this.sellMode;
+        if (this.sellMode) {
+            this.repairMode = false;
+            this.building = -1;
+            this.moveAttack = false;
+        }
+        this.dirty = true;
+    }
+
+    /// <summary>The sidebar's 修 button: the next click on an own damaged
+    /// structure starts the wrench -- RepairStep hit points every
+    /// RepairRateTicks, paid per step, until full health or bankruptcy.</summary>
+    void ToggleRepair() {
+        this.repairMode = !this.repairMode;
+        if (this.repairMode) {
+            this.sellMode = false;
+            this.building = -1;
+            this.moveAttack = false;
+        }
+        this.dirty = true;
+    }
+
+    void ClearSellRepair() {
+        this.sellMode = false;
+        this.repairMode = false;
+    }
+
+    /// <summary>Sells the structure under the cell. The refund lands
+    /// immediately; a sell also cancels the building's repair and any queue
+    /// it was running -- the money already spent on both is gone, as in the
+    /// original.</summary>
+    bool SellAt(int x, int y) {
+        int refund = this.world.SellStructureAt(this.side, x, y);
+        this.dirty = true;
+        return refund >= 0;
+    }
+
+    /// <summary>Starts (or, on an already-repairing building, stops) the
+    /// wrench on the structure under the cell. Only own, damaged, finished
+    /// buildings take the order -- a click elsewhere just drops the mode.</summary>
+    bool RepairAt(int x, int y) {
+        List<int> hit = new List<int>();
+        this.world.ObjectsAt(x, y, hit);
+        for (int i = 0; i < hit.Count; i = i + 1) {
+            WorldObject o = this.world.ObjectAt(hit[i]);
+            if (o.Side() != this.side || o.Kind() != ObjKind.Structure()
+             || o.IsDead() || o.IsCiv()) { continue; }
+            StructureType t = this.world.TypeOf(o);
+            if (t == null || o.UnderConstruction(t.BuildTime())) { continue; }
+            if (o.Hp() >= o.MaxHp()) { continue; }   // nothing to patch
+            o.SetRepairing(!o.Repairing());
+            this.dirty = true;
+            return true;
+        }
+        return false;
+    }
 
     /// <summary>Left click on a build-menu entry: arm it for placement. A
     /// click on a different entry while one is armed swaps it. Entries whose
@@ -216,6 +299,7 @@ class GameController {
         if (this.building == buildId) { this.building = -1; }   // toggle off
         else { this.building = buildId; }
         this.moveAttack = false;
+        this.ClearSellRepair();
         this.dirty = true;
     }
 
@@ -242,6 +326,7 @@ class GameController {
     /// Units whose prereqs do not stand cannot be queued.</summary>
     void OnClickUnit(int unitId) {
         this.building = -1;
+        this.ClearSellRepair();
         WorldObject sel = this.world.Selected();
         if (sel == null || sel.Kind() != ObjKind.Structure()) { return; }
         if (sel.Side() != this.side) { return; }   // cannot train from enemy
@@ -269,6 +354,7 @@ class GameController {
     /// informational and cannot be moved or fired.</summary>
     void OnRightClick(int x, int y) {
         if (this.building >= 0) { this.building = -1; }
+        else if (this.sellMode || this.repairMode) { this.ClearSellRepair(); }
         else if (this.world.SelectedSide() == this.side) {
             if (!this.world.OrderAttack(x, y)) { this.world.OrderMove(x, y); }
         }

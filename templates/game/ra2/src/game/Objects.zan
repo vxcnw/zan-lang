@@ -68,6 +68,12 @@ class WorldObject {
     int cargo;
     int dockTimer;
 
+    // Structures under the wrench: true while the owner pays to patch the
+    // building up. Cleared automatically at full health.
+    bool repairing;
+    int repairAt;      // world tick of the next repair step
+    int repairCarry;   // unbilled fraction of a credit from the last step
+
     static WorldObject CreateStructure(int side, int buildId, int x, int y,
                                        int hp) {
         WorldObject o = new WorldObject();
@@ -92,6 +98,9 @@ class WorldObject {
         o.civ = false;
         o.cargo = 0;
         o.dockTimer = 0;
+        o.repairing = false;
+        o.repairAt = 0;
+        o.repairCarry = 0;
         return o;
     }
 
@@ -125,6 +134,9 @@ class WorldObject {
         o.civ = false;
         o.cargo = 0;
         o.dockTimer = 0;
+        o.repairing = false;
+        o.repairAt = 0;
+        o.repairCarry = 0;
         return o;
     }
 
@@ -147,6 +159,7 @@ class WorldObject {
     int Reload() { return this.reload; }
     void SetReload(int ticks) { this.reload = ticks; }
     void TakeDamage(int dmg) { this.hp = this.hp - dmg; if (this.hp < 0) { this.hp = 0; } }
+    void SetHp(int hp) { this.hp = hp; if (this.hp > this.maxHp) { this.hp = this.maxHp; } }
     bool IsDead() { return this.hp <= 0; }
     /// <summary>Drops the attack order. The route dies with it: a soldier
     /// whose target just fell keeps walking to the death cell otherwise --
@@ -173,6 +186,14 @@ class WorldObject {
     void SetCiv(bool on) { this.civ = on; }
     int Cargo() { return this.cargo; }
     void SetCargo(int credits) { this.cargo = credits; }
+    bool Repairing() { return this.repairing; }
+    void SetRepairing(bool on) {
+        this.repairing = on;
+        this.repairAt = 0;
+        this.repairCarry = 0;
+    }
+    int RepairAtTick() { return this.repairAt; }
+    void SetRepairAtTick(int t) { this.repairAt = t; }
     int DockTimer() { return this.dockTimer; }
     void SetDockTimer(int ticks) { this.dockTimer = ticks; }
 
@@ -1150,6 +1171,73 @@ class World {
         return this.AddObject(o);
     }
 
+    /// <summary>Sells the structure at a cell: frees its footprint and every
+    /// index bookkeeping RemoveDead does (selection, attackers, the grid),
+    /// then queues the owner half the price back through the money events.
+    /// Returns the refund, or -1 when the cell holds nothing sellable -- no
+    /// structure, someone else's, still under construction, or a map
+    /// civilian (the original will not buy those back either).</summary>
+    int SellStructureAt(int side, int x, int y) {
+        List<int> hit = new List<int>();
+        this.ObjectsAt(x, y, hit);
+        if (hit.Count == 0) { return -1; }
+        WorldObject o = this.objects[hit[0]];
+        if (o.Side() != side || o.Kind() != ObjKind.Structure()
+         || o.IsDead() || o.IsCiv()) { return -1; }
+        StructureType t = this.TypeOf(o);
+        if (t == null) { return -1; }
+        if (o.UnderConstruction(t.BuildTime())) { return -1; }
+        int refund = t.Cost() * this.Rules().RefundPercent() / 100;
+        this.AddMoneyEvent(side, refund);
+        this.Demolish(o);
+        return refund;
+    }
+
+    /// <summary>Removes one structure from the field without a death
+    /// explosion -- the sell path. The same bookkeeping RemoveDead does for
+    /// a corpse: footprint freed, selection and attackers re-pointed, the
+    /// grid's index+1 entries rewritten for the shrink.</summary>
+    void Demolish(WorldObject o) {
+        int i = this.IndexOfObject(o);
+        if (i < 0) { return; }
+        StructureType t = this.TypeOf(o);
+        for (int dy = 0; dy < t.FootprintH(); dy = dy + 1) {
+            for (int dx = 0; dx < t.FootprintW(); dx = dx + 1) {
+                this.occupancy[this.CellSlot(o.X() + dx, o.Y() + dy)] = 0;
+            }
+        }
+        if (this.selectedIndex == i) {
+            this.selectedIndex = -1;
+        } else if (this.selectedIndex > i) {
+            this.selectedIndex = this.selectedIndex - 1;
+        }
+        int si = 0;
+        while (si < this.selection.Count) {
+            int sel = this.selection[si];
+            if (sel == i) {
+                this.selection.RemoveAt(si);
+                continue;
+            }
+            if (sel > i) { this.selection[si] = sel - 1; }
+            si = si + 1;
+        }
+        if (this.selectedIndex < 0 && this.selection.Count > 0) {
+            this.selectedIndex = this.selection[0];
+        }
+        for (int j = 0; j < this.objects.Count; j = j + 1) {
+            WorldObject other = this.objects[j];
+            int tj = other.TargetIndex();
+            if (tj == i) { other.StopAttack(); }
+            else if (tj > i) { other.SetTarget(tj - 1); }
+        }
+        this.objects.RemoveAt(i);
+        for (int c = 0; c < this.occupancy.Length; c = c + 1) {
+            if (this.occupancy[c] > i + 1) {
+                this.occupancy[c] = this.occupancy[c] - 1;
+            }
+        }
+    }
+
     /// <summary>Places a neutral civilian structure (from the map's
     /// [Structures] section) at full or partial health. Returns the new
     /// object's index, or -1 when the id is unknown or the footprint does
@@ -1921,6 +2009,9 @@ class World {
             if (o.UnderConstruction(t.BuildTime())) {
                 sb.Append("  (建造中)");
             }
+            if (o.Repairing()) {
+                sb.Append("  (修理中)");
+            }
         } else {
             UnitType u = o.UnitType();
             if (u == null) { return ""; }
@@ -2294,6 +2385,33 @@ class World {
             WorldObject o = this.objects[i];
             if (o.Kind() != ObjKind.Structure()) { continue; }
             o.AdvanceBuilt();
+            // The wrench: a repairing structure heals one RepairStep every
+            // RepairRateTicks. The cost rides the same schedule: a full
+            // patch is RepairPercent of the building's price, so every hp
+            // healed bills that share of the price (a fractional credit
+            // carries to the next step, rounding out exactly at full
+            // health). The controller settles the money events, so the
+            // world stays wallet-free; when the owner cannot pay, the
+            // repair stalls -- Repairing() stays on, no progress -- like
+            // being broke mid-repair in the original.
+            if (o.Repairing() && o.Hp() < o.MaxHp()
+             && this.worldTick >= o.repairAt) {
+                StructureType rt = this.TypeOf(o);
+                if (rt != null) {
+                    int heal = this.Rules().RepairStep();
+                    if (o.Hp() + heal > o.MaxHp()) { heal = o.MaxHp() - o.Hp(); }
+                    // fullPrice * healedHp / maxHp, keeping the fraction:
+                    // numerators accumulate in repairAt's sibling, carry.
+                    int numer = rt.Cost() * this.Rules().RepairPercent() * heal;
+                    int billNumer = numer + o.repairCarry;
+                    int stepCost = billNumer / (o.MaxHp() * 100);
+                    o.repairCarry = billNumer % (o.MaxHp() * 100);
+                    if (stepCost > 0) { this.AddMoneyEvent(o.Side(), 0 - stepCost); }
+                    o.SetHp(o.Hp() + heal);
+                    o.SetRepairAtTick(this.worldTick + this.Rules().RepairRateTicks());
+                }
+            }
+            if (o.Repairing() && o.Hp() >= o.MaxHp()) { o.SetRepairing(false); }
             // A finished refinery delivers one free harvester, as the
             // shipped buildings always have -- the ore loop starts the
             // moment the refinery opens, without a manual click.

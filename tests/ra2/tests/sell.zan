@@ -1,0 +1,194 @@
+// Selling and repairing structures: the shipped [General] values
+// (RefundPercent=50, RepairPercent=15, RepairStep=8, RepairRate=.016 min)
+// through the controller's 卖/修 modes. Headless, synthetic map -- same
+// contract as objects.zan.
+using System;
+using System.Collections.Generic;
+using Ra2.Formats;
+using Ra2.Game;
+
+class SellTest {
+
+    // An 11-byte IsoMapPack5 record for a cell (clear ground).
+    static void PutCell(byte[] buf, int at, int x, int y) {
+        buf[at] = (byte)(x & 0xFF);
+        buf[at + 1] = (byte)((x >> 8) & 0xFF);
+        buf[at + 2] = (byte)(y & 0xFF);
+        buf[at + 3] = (byte)((y >> 8) & 0xFF);
+        buf[at + 4] = (byte)1;
+        buf[at + 5] = (byte)0;
+        buf[at + 6] = (byte)0;
+        buf[at + 7] = (byte)0;
+        buf[at + 8] = (byte)0;          // subTile
+        buf[at + 9] = (byte)0;          // level
+        buf[at + 10] = (byte)0;         // iceGrowth
+    }
+
+    static IsoMap BuildMap() {
+        int n = 24 * 24;
+        byte[] buf = new byte[n * 11 + 1];
+        int i = 0;
+        for (int y = 0; y < 24; y = y + 1) {
+            for (int x = 0; x < 24; x = x + 1) {
+                SellTest.PutCell(buf, i * 11, x, y);
+                i = i + 1;
+            }
+        }
+        return IsoMap.Parse(buf, n * 11, 24, 24);
+    }
+
+    static void Main() {
+        Rules r = Rules.Default();
+
+        // ---- the shipped [General] sell/repair block ------------------------
+        Console.WriteLine("s_refund=" + Convert.ToString(r.RefundPercent()));
+        Console.WriteLine("s_rep_pct=" + Convert.ToString(r.RepairPercent()));
+        Console.WriteLine("s_rep_step=" + Convert.ToString(r.RepairStep()));
+        Console.WriteLine("s_rep_rate=" + Convert.ToString(r.RepairRateTicks()));
+        // A rules override keeps its shipped meaning: percent stays percent.
+        string ini = "[General]\nRefundPercent=60%\nRepairPercent=20%\nRepairStep=10\n";
+        Rules r2 = Rules.Load(IniParser.Parse(ini));
+        Console.WriteLine("s_ini_refund=" + Convert.ToString(r2.RefundPercent()));
+        Console.WriteLine("s_ini_pct=" + Convert.ToString(r2.RepairPercent()));
+        Console.WriteLine("s_ini_step=" + Convert.ToString(r2.RepairStep()));
+
+        // ---- selling: half the cost back, footprint freed -------------------
+        {
+            World w = World.Create(BuildMap(), StructureCatalog.CreateWith(r),
+                                   UnitCatalog.CreateWith(r));
+            w.PlaceStructure(Side2.Allied(), 0, 4, 4);   // GACNST 3000
+            int barracks = w.PlaceStructure(Side2.Allied(), 3, 9, 4); // 500
+            GameController gc = GameController.Create(w, Side2.Allied());
+            Console.WriteLine("s_place_ok=" + Convert.ToString(barracks >= 0));
+            // A click with the mode unarmed selects, not sells.
+            gc.OnClickCell(9, 4);
+            Console.WriteLine("s_select=" + Convert.ToString(w.SelectedIndex() >= 0));
+            gc.ToggleSell();
+            Console.WriteLine("s_armed=" + Convert.ToString(gc.SellModeArmed()));
+            // Armed click on an empty map cell: nothing happens, mode is
+            // spent either way.
+            gc.OnClickCell(20, 20);
+            Console.WriteLine("s_armed_spent=" + Convert.ToString(!gc.SellModeArmed()));
+            Console.WriteLine("s_count1=" + Convert.ToString(w.ObjectCount()));
+            // A building under construction cannot be sold -- only a
+            // finished structure takes the dollar cursor.
+            gc.ToggleSell();
+            gc.OnClickCell(9, 4);
+            Console.WriteLine("s_wet_cement=" + Convert.ToString(w.ObjectCount() == 2));
+            // Finish construction, then sell the barracks: 500/2 = 250 land.
+            WorldObject bw = w.ObjectAt(1);
+            StructureType btp = w.Catalog().TypeFor(Side2.Allied(), 3);
+            if (btp == null) { return; }
+            while (bw.BuiltTicks() < btp.BuildTime() && gc.TickCount() < 400) {
+                gc.Tick();
+            }
+            int money0 = gc.Money();
+            gc.ToggleSell();
+            gc.OnClickCell(9, 4);
+            gc.Tick();   // the refund event settles on the controller's tick
+            Console.WriteLine("s_refund_ok=" + Convert.ToString(gc.Money() == money0 + 250));
+            Console.WriteLine("s_count2=" + Convert.ToString(w.ObjectCount()));
+            // The freed footprint takes a new building again.
+            Console.WriteLine("s_rebuild=" + Convert.ToString(
+                w.PlaceStructure(Side2.Allied(), 3, 9, 4) >= 0));
+            // Sell the new barracks, then the yard: the last structure coming
+            // down loses the war for the seller (result 2, no own base).
+            while (w.ObjectAt(0).BuiltTicks() < 300 && gc.TickCount() < 400) {
+                gc.Tick();
+            }
+            gc.ToggleSell();
+            gc.OnClickCell(9, 4);
+            gc.Tick();
+            gc.ToggleSell();
+            gc.OnClickCell(4, 4);
+            gc.Tick();
+            Console.WriteLine("s_yard_gone=" + Convert.ToString(
+                gc.World().SideEliminated(Side2.Allied())));
+            Console.WriteLine("s_result=" + Convert.ToString(gc.Result() != 0));
+        }
+
+        // ---- selling guards: construction site and civilians ----------------
+        {
+            World w = World.Create(BuildMap(), StructureCatalog.CreateWith(r),
+                                   UnitCatalog.CreateWith(r));
+            int civ = w.PlaceCivStructure(0, 3, 3, 400);   // neutral oil derrick
+            GameController gc = GameController.Create(w, Side2.Allied());
+            Console.WriteLine("s_civ=" + Convert.ToString(civ >= 0));
+            gc.ToggleSell();
+            gc.OnClickCell(3, 3);
+            Console.WriteLine("s_civ_kept=" + Convert.ToString(w.ObjectCount() == 1));
+        }
+
+        // ---- repairing: 8 hp a second, 15% of the price for a full patch ----
+        {
+            World w = World.Create(BuildMap(), StructureCatalog.CreateWith(r),
+                                   UnitCatalog.CreateWith(r));
+            int barracks = w.PlaceStructure(Side2.Allied(), 3, 5, 5);
+            WorldObject b = w.ObjectAt(barracks);   // GAPILE 500 hp, cost 500
+            StructureType bt = w.Catalog().TypeFor(Side2.Allied(), 3);
+            if (bt == null) { return; }
+            while (b.BuiltTicks() < bt.BuildTime()) { w.Tick(); }
+            b.TakeDamage(200);                      // 300/500 left
+            GameController gc = GameController.Create(w, Side2.Allied());
+            int money0 = gc.Money();
+            gc.ToggleRepair();
+            Console.WriteLine("s_rep_armed=" + Convert.ToString(gc.RepairModeArmed()));
+            gc.OnClickCell(6, 5);                   // inside the 2x2 footprint
+            // A finished, damaged building takes the wrench.
+            Console.WriteLine("s_rep_started=" + Convert.ToString(b.Repairing()));
+            gc.Tick();                              // world tick 1: heal fires,
+            gc.Tick();                              // the next drain pays for it
+            int hp1 = b.Hp();
+            int money1 = gc.Money();
+            Console.WriteLine("s_rep_heal=" + Convert.ToString(hp1 - 300));
+            // A full patch is 15% of 500 = 75 credits over the whole health
+            // pool; the first 8-hp step bills 75*8/500 = 1.2, rounded to 1
+            // with the fraction carried (the whole repair bills out to
+            // exactly 15%).
+            int expect = 1;
+            Console.WriteLine("s_rep_cost=" + Convert.ToString(money0 - money1));
+            Console.WriteLine("s_rep_cost_ok=" + Convert.ToString(
+                money0 - money1 == expect));
+            // Repair paces itself: a tick inside the window heals nothing.
+            int hpNow = b.Hp();
+            gc.Tick();
+            Console.WriteLine("s_rep_paced=" + Convert.ToString(b.Hp() == hpNow));
+            // ... and stops by itself at full health, billing out exactly
+            // the shipped 15% -- 75 credits for this building. The final
+            // heal's bill may still be queued when Repairing() drops, so
+            // two settling ticks ride along before the books are read.
+            while (b.Repairing() && b.Hp() < b.MaxHp()) { gc.Tick(); }
+            gc.Tick();
+            gc.Tick();
+            Console.WriteLine("s_rep_full=" + Convert.ToString(
+                b.Hp() == b.MaxHp() && !b.Repairing()));
+            Console.WriteLine("s_rep_total=" + Convert.ToString(money0 - gc.Money()));
+            Console.WriteLine("s_rep_total_ok=" + Convert.ToString(
+                money0 - gc.Money() == 30));
+            // A second click on a whole building is refused -- no money moved.
+            money0 = gc.Money();
+            gc.ToggleRepair();
+            gc.OnClickCell(6, 5);
+            Console.WriteLine("s_rep_whole=" + Convert.ToString(
+                !b.Repairing() && gc.Money() == money0));
+        }
+
+        // ---- the armed modes are mutually exclusive -------------------------
+        {
+            World w = World.Create(BuildMap(), StructureCatalog.CreateWith(r),
+                                   UnitCatalog.CreateWith(r));
+            GameController gc = GameController.Create(w, Side2.Allied());
+            gc.ToggleSell();
+            gc.ToggleRepair();
+            Console.WriteLine("s_excl=" + Convert.ToString(
+                gc.RepairModeArmed() && !gc.SellModeArmed()));
+            gc.ToggleMoveAttack();
+            Console.WriteLine("s_ma_clears=" + Convert.ToString(
+                !gc.RepairModeArmed() && !gc.SellModeArmed()));
+            // Right click cancels a leftover armed mode.
+            gc.ToggleSell();
+            gc.OnRightClick(8, 8);
+            Console.WriteLine("s_rc_clears=" + Convert.ToString(!gc.SellModeArmed()));
+        }
+    }
+}

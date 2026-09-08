@@ -202,7 +202,42 @@ class Ra2App {
                   game.LowPower() ? 232 : 170,
                   game.LowPower() ? 92 : 178,
                   game.LowPower() ? 92 : 192, 255);
+        // The 卖/修 pair -- the original's dollar-sign cursor and wrench as
+        // two sidebar toggles. The armed one lights up (kind 2) until the
+        // next map click spends it or a right click cancels it.
+        int srY = infoY + 50;
+        int sellKind = game.SellModeArmed() ? 2 : 0;
+        int repairKind = game.RepairModeArmed() ? 2 : 0;
+        Ra2App.ButtonFrame(r, mouseX, mouseY, Ra2App.SellBtnX(), srY, 62, 30,
+                           sellKind);
+        Text.DrawCentered(r, "卖", Ra2App.SellBtnX() + 31, srY + 8, 2,
+                          236, 236, 236, 255);
+        Ra2App.ButtonFrame(r, mouseX, mouseY, Ra2App.RepairBtnX(), srY, 62, 30,
+                           repairKind);
+        Text.DrawCentered(r, "修", Ra2App.RepairBtnX() + 31, srY + 8, 2,
+                          236, 236, 236, 255);
         Ra2App.DrawProduction(r, game, art, mouseX, mouseY);
+    }
+
+    static int SellBtnX() { return Ra2App.ViewW() - 296 + 22; }
+    static int RepairBtnX() { return Ra2App.ViewW() - 296 + 92; }
+
+    /// <summary>The 卖/修 row's y, riding the build menu's row count the way
+    /// ProdPanelY does, so the hit test matches what was drawn.</summary>
+    static int SellRepairY(GameController game) {
+        int rows = (game.World().Catalog().CountFor(game.Side()) + 2) / 3;
+        return 16 + 30 + rows * (54 + 5) + 6 + 50;
+    }
+
+    /// <summary>-1 none, 0 sell, 1 repair: which sidebar toggle sits under
+    /// the cursor.</summary>
+    static int HitSellRepair(GameController game, int mx, int my) {
+        int sy = Ra2App.SellRepairY(game);
+        if (my >= sy && my < sy + 30) {
+            if (mx >= Ra2App.SellBtnX() && mx < Ra2App.SellBtnX() + 62) { return 0; }
+            if (mx >= Ra2App.RepairBtnX() && mx < Ra2App.RepairBtnX() + 62) { return 1; }
+        }
+        return -1;
     }
 
     /// <summary>The button's chrome without its label, so a caller can put an
@@ -443,6 +478,13 @@ class Ra2App {
     static void DrawMoveAttackHint(SdlRenderer r, GameController game, int mx,
                                    int my) {
         if (!game.MoveAttackArmed()) { return; }
+        Ra2App.ModeHint(r, "移动攻击", mx, my);
+    }
+
+    /// <summary>The armed-mode cursor tag: a small coloured chip beside the
+    /// pointer naming what the next click will do (move-attack, sell,
+    /// repair).</summary>
+    static void ModeHint(SdlRenderer r, string label, int mx, int my) {
         int w = 120;
         int h = 24;
         int x = mx + 16;
@@ -450,8 +492,16 @@ class Ra2App {
         if (x + w > Ra2App.ViewW()) { x = mx - w - 16; }
         if (y + h > Ra2App.ViewH()) { y = my - h - 16; }
         Draw.RoundRectFill(r, x, y, w, h, 6, 200, 60, 60, 220);
-        Text.DrawCentered(r, "移动攻击", x + w / 2, y + 5, 2,
+        Text.DrawCentered(r, label, x + w / 2, y + 5, 2,
                           255, 255, 255, 255);
+    }
+
+    /// <summary>Sell/repair cursor chips, mirroring the move-attack one:
+    /// the dollar tag when 卖 is armed, the wrench tag when 修 is.</summary>
+    static void DrawSellRepairHint(SdlRenderer r, GameController game, int mx,
+                                   int my) {
+        if (game.SellModeArmed()) { Ra2App.ModeHint(r, "变卖", mx, my); }
+        else if (game.RepairModeArmed()) { Ra2App.ModeHint(r, "修理", mx, my); }
     }
 
     /// <summary>The in-game minimap: terrain backdrop, a frame showing the
@@ -989,6 +1039,10 @@ class Ra2App {
                     // arm a build (or, on the production panel, queue a unit).
                     // Everything else maps to a cell.
                     if (Ra2App.InSidebar(mouseX)) {
+                        int sr = Ra2App.HitSellRepair(game, mouseX, mouseY);
+                        if (sr == 0) { game.ToggleSell(); }
+                        else if (sr == 1) { game.ToggleRepair(); }
+                        else {
                         int pid = Ra2App.HitProduction(game, mouseX, mouseY);
                         if (pid >= 0) {
                             game.OnClickUnit(pid);
@@ -1000,6 +1054,7 @@ class Ra2App {
                         if (by >= 0 && by < rows && bx >= 0 && bx < 3
                          && bid < game.World().Catalog().CountFor(game.Side())) {
                             game.OnClickBuild(bid);
+                        }
                         }
                         }
                     } else if (cam != null) {
@@ -1062,6 +1117,8 @@ class Ra2App {
                     Ra2App.DrawPaused(host.Renderer(), game,
                         Ra2App.ViewW(), Ra2App.ViewH());
                     Ra2App.DrawMoveAttackHint(host.Renderer(), game, mouseX,
+                                              mouseY);
+                    Ra2App.DrawSellRepairHint(host.Renderer(), game, mouseX,
                                               mouseY);
                 }
             }
