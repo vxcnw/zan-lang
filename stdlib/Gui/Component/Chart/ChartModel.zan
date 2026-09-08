@@ -147,6 +147,10 @@ class ChartData {
                       //   列之和，模板无法表达）
     int labelSide;    // ECharts label.position 逐项覆盖：0 = 继承系列，
                       //   1 = 左、2 = 右（bar8 正负交错标签）
+    ChartItemStyle itemStyle; // ECharts data 项逐根 itemStyle（bar-data-color
+                              //   的逐柱颜色、bar-stack-borderRadius 的逐柱
+                              //   圆角）；null = 跟随系列 itemStyle。渲染器
+                              //   只读 normal 态，读前须判空。
 
     /// 以整数值构造数据点（名称空、继承系列色、不隐藏、无逐项尺寸）。
     static ChartData Of(int v) {
@@ -219,6 +223,7 @@ class ChartData {
         d.selected = src.selected; d.size = src.size; d.sizeSet = src.sizeSet;
         d.gap = src.gap; d.symbol = src.symbol;
         d.labelText = src.labelText; d.labelSide = src.labelSide;
+        d.itemStyle = ChartItemStyle.Clone(src.itemStyle);
         return d;
     }
 }
@@ -1170,10 +1175,14 @@ class ChartSeries {
                      //   的第几个坐标系（默认 0；单 polar 时忽略）
     int selectedOffset; // ECharts pie.selectedOffset：选中扇区外偏像素（默认 10）
     int barWidth;    // ECharts bar.barWidth：柱宽像素；0 = 自动
+    int barWidthPct; // ECharts bar.barWidth 的百分比形式（"60%"）：类目
+                     //   带宽的百分比；0 = 未设（跟随 barWidth/自动）
     int barHeight;   // ECharts bar.barHeight：>0 时双数值轴值对柱画横条
                      //   （厚度 px、垂直中心在 y 值、从 x=0 基线长到 x 值，
                      //   官方 _buildOther 横向分支）；0 = 竖柱
     int barGapPct;   // ECharts bar.barGap：同系列柱间距百分比；-1 = 旧固定缝
+    bool silent;     // ECharts series.silent：true = 不响应鼠标命中（不出
+                     //     tooltip），图形照画（waterfall2 占位柱）
     string symbol;   // ECharts series.symbol 形状族（Sanitized：circle/emptyCircle/
                      //   rectangle/diamond/triangle；"" = 按族默认）
     int symbolSize;  // ECharts series.symbolSize 像素；0 = 自动（族默认）
@@ -1277,8 +1286,10 @@ class ChartSeries {
         s.polarIndex = 0;
         s.selectedOffset = 10;
         s.barWidth = 0;
+        s.barWidthPct = 0;
         s.barHeight = 0;
         s.barGapPct = 0 - 1;
+        s.silent = false;
         s.symbol = "";
         s.symbolSize = 0;
         s.pointG = 1;
@@ -1709,6 +1720,8 @@ class ChartSeries {
         s.radius = ChartScalar.Clone(src.radius);
         s.radiusInner = ChartScalar.Clone(src.radiusInner);
         s.selectedOffset = src.selectedOffset; s.barWidth = src.barWidth;
+        s.barWidthPct = src.barWidthPct;
+        s.silent = src.silent;
         s.barHeight = src.barHeight;
         s.barGapPct = src.barGapPct; s.symbol = src.symbol;
         s.symbolSize = src.symbolSize; s.symbolSizeFn = src.symbolSizeFn;
@@ -2331,11 +2344,14 @@ class ChartOption {
 
     /// 解析颜色：数字直接用；"auto" 归 0（继承）；字符串经
     /// StyleSheet.ParseColor，无法解析且非空时返回 dflt。
+    /// "transparent" 返回 alpha≈0 的哨兵色（非 0，不与"继承系列色"
+    /// 的 0 值语义冲突；视觉上不可见——瀑布图占位柱依赖它）。
     static int ParseColor(JsonValue v, int dflt) {
         if (v == null) { return dflt; }
         if (v.IsNumber()) { return v.AsInt(dflt); }
         string s = v.AsString("");
         if (s == "auto") { return 0; }
+        if (s == "transparent") { return Chart.Transparent(); }
         int color = StyleSheet.ParseColor(s);
         if (color == 0 && s.Length > 0) { return dflt; }
         return color;
@@ -3058,8 +3074,17 @@ class ChartOption {
                 }
                 cs.startAngle = s.Int("startAngle", cs.startAngle);
                 cs.selectedOffset = s.Int("selectedOffset", cs.selectedOffset);
-                cs.barWidth = s.Int("barWidth", cs.barWidth);
+                // barWidth 百分比形式（"60%"）单独入 barWidthPct，
+                // 像素形式照旧；渲染按带宽百分比定柱宽。
+                JsonValue bwp = s.Get("barWidth");
+                if (bwp != null && bwp.IsString() && bwp.AsString("").EndsWith("%")) {
+                    string wpct = bwp.AsString("");
+                    cs.barWidthPct = Convert.ToInt(wpct.Substring(0, wpct.Length - 1));
+                } else {
+                    cs.barWidth = s.Int("barWidth", cs.barWidth);
+                }
                 cs.barHeight = s.Int("barHeight", cs.barHeight);
+                cs.silent = s.Bool("silent", cs.silent);
                 JsonValue bgp = s.Get("barGap");
                 if (bgp != null && bgp.IsString() && bgp.AsString("").EndsWith("%")) {
                     string pct = bgp.AsString("");
@@ -3213,6 +3238,27 @@ class ChartOption {
                                 item.sizeSet = true;
                             }
                             item.symbol = ChartKinds.SymbolSanitize(it.Str("symbol", ""));
+                            // 逐根 itemStyle：逐柱颜色/圆角/透明
+                            //（bar-data-color、bar-stack-borderRadius、瀑布图
+                            // 透明占位）。color 未显式声明时镜像入 item.color
+                            // （渲染器读 item.color 优先，与系列级同约定）。
+                            if (it.Has("itemStyle")) {
+                                item.itemStyle = ChartItemStyle.Create();
+                                ChartOption.ParseItemStyle(it.Get("itemStyle"), item.itemStyle);
+                                if (item.color == 0 && item.itemStyle.normal.color != 0) {
+                                    item.color = item.itemStyle.normal.color;
+                                }
+                            }
+                            // 逐项 label：position 覆盖（左/右记 labelSide，
+                            // 与 bar8 同一承载），字符串 formatter 进 labelText。
+                            JsonValue lbl = it.Get("label");
+                            if (lbl != null && lbl.IsObject()) {
+                                string pos = lbl.Str("position", "");
+                                if (pos == "left" || pos == "insideLeft") { item.labelSide = 1; }
+                                else if (pos == "right" || pos == "insideRight") { item.labelSide = 2; }
+                                JsonValue lf = lbl.Get("formatter");
+                                if (lf != null && lf.IsString()) { item.labelText = lf.AsString(""); }
+                            }
                             cs.data.Add(item);
                         } else if (it.IsNumber()) {
                             cs.data.Add(ChartData.Numeric(it.AsDouble(0.0)));

@@ -158,18 +158,30 @@ class ChartFrame {
     /// 小数轴的 Y 映射：v 为 值×1000 定点，leftMinF/leftMaxF（或右轴
     /// rightMinF/rightMaxF）是 ×1000 的轴界（line6 流量 0.86..1.5、
     /// 降雨量 -0.005..-0.955 这类数据在 int Value() 四舍五入后全折成
-    /// 1..2 / 0..-1，画成平线）。轴不是小数轴时回落整数映射。
+    /// 1..2 / 0..-1，画成平线）。轴不是小数轴时按整数轴界做定点
+    /// 映射：vF=值×1000 对 [lo×1000, hi×1000] 比例映射，整数数据
+    /// （vF 恰为 1000 的倍数）与 YOf 逐像素一致，小数数据不再被
+    /// vF/1000 截断丢掉小数位。
     int YOfF(int vF, int axisIndex) {
         int loF = this.leftMinF;
         int hiF = this.leftMaxF;
         bool rev = this.reversed;
         if (axisIndex == 1) { loF = this.rightMinF; hiF = this.rightMaxF; rev = this.rightReversed; }
-        if (loF == 0 && hiF == 0) { return this.YOf(vF / 1000, axisIndex); }
-        long span = (long)hiF - (long)loF;
-        if (span == 0) { span = 1; }
-        int d = (int)(((long)vF - (long)loF) * (long)this.plotH / span);
-        if (rev) { return this.plotY + d; }
-        return this.plotY + this.plotH - d;
+        if (loF == 0 && hiF == 0) {
+            int lo = this.leftMin;
+            int hi = this.leftMax;
+            if (axisIndex == 1) { lo = this.rightMin; hi = this.rightMax; }
+            long span = (long)hi - (long)lo;
+            if (span == 0) { span = 1; }
+            long d = ((long)vF - (long)lo * 1000L) * (long)this.plotH / (span * 1000L);
+            if (rev) { return this.plotY + (int)d; }
+            return this.plotY + this.plotH - (int)d;
+        }
+        long spanF = (long)hiF - (long)loF;
+        if (spanF == 0) { spanF = 1; }
+        int dF = (int)(((long)vF - (long)loF) * (long)this.plotH / spanF);
+        if (rev) { return this.plotY + dF; }
+        return this.plotY + this.plotH - dF;
     }
 
     /// 系列所在轴的零线像素（ECharts 面积/柱的填充基线）：
@@ -364,6 +376,13 @@ class Chart {
     /// 用于面积/扇区填充）。
     static int WithAlpha(int packed, int a) {
         return (packed - (int)4278190080) + a * 16777216;
+    }
+
+    /// ECharts 'transparent'：alpha 1/255 的白色——合成后每通道
+    /// 偏移 ≤1，视觉不可见；取非 0 值是为了不与"0 = 继承系列色"
+    /// 的图表着色语义冲突（瀑布图透明占位柱）。
+    static int Transparent() {
+        return Chart.WithAlpha(Chart.Rgb(255, 255, 255), 1);
     }
 
     /// 在 `bg` 上对比足够的前景：浅底深字、深底白字。
@@ -712,19 +731,96 @@ class Chart {
         return mn;
     }
 
+    /// 轴上是否存在共享 stackName 的柱族系列（堆叠柱）。小数堆叠柱
+    /// 的量程须按类目堆叠和推导，逐项极值会低估堆叠顶
+    /// （normalization 各项 ≤0.57、堆叠顶达 1.0）。
+    static bool HasStackedBarsF(List<ChartSeries> series, int axisIndex) {
+        List<string> grp = new List<string>();
+        for (int i = 0; i < series.Count; i = i + 1) {
+            ChartSeries s = series[i];
+            if (s.hidden || s.axisIndex != axisIndex) { continue; }
+            if (!ChartView.IsBarFamily(s.type)) { continue; }
+            if (ChartView.GroupIndex(grp, s.stackName) >= 0) { return true; }
+            grp.Add(s.stackName);
+        }
+        return false;
+    }
+
+    /// 堆叠柱（共享 stackName 的柱族）逐类目正/负堆叠和（×1000
+    /// 定点）：hi = 正累加器最大值，lo = 负累加器最小值。正负独立
+    /// 累计与渲染路径同一语义（负段不与正段相加）。
+    static ChartSpan StackExtentF(List<ChartSeries> series, int axisIndex) {
+        List<string> grp = new List<string>();
+        for (int g = 0; g < series.Count; g = g + 1) {
+            ChartSeries cs = series[g];
+            if (cs.hidden || cs.axisIndex != axisIndex) { continue; }
+            if (!ChartView.IsBarFamily(cs.type)) { continue; }
+            if (ChartView.GroupIndex(grp, cs.stackName) < 0) { grp.Add(cs.stackName); }
+        }
+        int ng = grp.Count;
+        if (ng < 1) { ng = 1; }
+        int n = 0;
+        for (int c = 0; c < series.Count; c = c + 1) {
+            ChartSeries cs2 = series[c];
+            if (!cs2.hidden && cs2.axisIndex == axisIndex
+                && ChartView.IsBarFamily(cs2.type)) {
+                if (cs2.Count() > n) { n = cs2.Count(); }
+            }
+        }
+        int hi = 0;
+        int lo = 0;
+        for (int i = 0; i < n; i = i + 1) {
+            List<int> accs = new List<int>();
+            List<int> negAccs = new List<int>();
+            for (int a = 0; a < ng; a = a + 1) { accs.Add(0); negAccs.Add(0); }
+            for (int s2 = 0; s2 < series.Count; s2 = s2 + 1) {
+                ChartSeries cs3 = series[s2];
+                if (cs3.hidden || cs3.axisIndex != axisIndex
+                    || !ChartView.IsBarFamily(cs3.type)) { continue; }
+                int gi = ChartView.GroupIndex(grp, cs3.stackName);
+                if (gi < 0) { gi = 0; }
+                if (i >= cs3.Count()) { continue; }
+                double dv = cs3.Number(i);
+                int vF = (int)(dv * 1000.0 + (dv >= 0 ? 0.5 : 0 - 0.5));
+                if (vF < 0) { negAccs[gi] = negAccs[gi] + vF; }
+                else { accs[gi] = accs[gi] + vF; }
+            }
+            for (int a2 = 0; a2 < ng; a2 = a2 + 1) {
+                if (accs[a2] > hi) { hi = accs[a2]; }
+                if (negAccs[a2] < lo) { lo = negAccs[a2]; }
+            }
+        }
+        ChartSpan sp = new ChartSpan();
+        sp.lo = lo;
+        sp.hi = hi;
+        sp.ticks = 5;
+        return sp;
+    }
+
     /// 小数轴 extent 下界（×1000 定点）：固定 min 直接生效，否则
     /// 原始数据下界直传（不预设 nice——向下取整是 smartSteps 的
-    /// 职责，valueAxis._calculateValue 语义）。
+    /// 职责，valueAxis._calculateValue 语义）。堆叠柱并入类目堆叠
+    /// 和的负向极值。
     static int FracAxisLoF(int fixedLo, List<ChartSeries> series, int axisIndex) {
         if (fixedLo != ChartOption.Auto()) { return fixedLo * 1000; }
-        return Chart.AxisMinForF(series, axisIndex);
+        int lo = Chart.AxisMinForF(series, axisIndex);
+        if (Chart.HasStackedBarsF(series, axisIndex)) {
+            ChartSpan se = Chart.StackExtentF(series, axisIndex);
+            if (se.lo < lo) { lo = se.lo; }
+        }
+        return lo;
     }
 
     /// 小数轴 extent 上界（×1000 定点）：固定 max 直接生效，否则
-    /// 原始数据上界直传。
+    /// 原始数据上界直传。堆叠柱并入类目堆叠和的正向极值。
     static int FracAxisHiF(int fixedHi, List<ChartSeries> series, int axisIndex) {
         if (fixedHi != ChartOption.Auto()) { return fixedHi * 1000; }
-        return Chart.AxisMaxForF(series, axisIndex);
+        int hi = Chart.AxisMaxForF(series, axisIndex);
+        if (Chart.HasStackedBarsF(series, axisIndex)) {
+            ChartSpan se = Chart.StackExtentF(series, axisIndex);
+            if (se.hi > hi) { hi = se.hi; }
+        }
+        return hi;
     }
 
     /// ECharts 2 数值轴 nice 量程结果（lo/hi 取整到步长倍数）。

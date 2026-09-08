@@ -141,7 +141,18 @@ partial class ChartView {
             }
             int ng = grp.Count;
             if (ng < 1) { ng = 1; }
+            // barWidth 百分比（"60%"）取首条可见柱系列声明：堆叠组
+            // 带宽直接按类目带百分比（normalization 单组 60%）。
+            int bwPctSt = 0;
+            for (int pw = 0; pw < ns; pw = pw + 1) {
+                ChartSeries pws = series[pw];
+                if (!pws.hidden && ChartView.IsBarFamily(pws.type)) {
+                    bwPctSt = pws.barWidthPct;
+                    break;
+                }
+            }
             int groupW = step * 9 / 10;
+            if (bwPctSt > 0) { groupW = step * bwPctSt / 100; }
             int barW = groupW / ng;
             if (barW < app.Scale(2)) { barW = app.Scale(2); }
             int groupX0 = (step - groupW) / 2;
@@ -172,24 +183,30 @@ partial class ChartView {
                     if (!sc.hidden && ChartView.IsBarFamily(sc.type)) {
                         int gi = ChartView.GroupIndex(grp, sc.stackName);
                         if (gi < 0) { gi = 0; }
-                        int v = 0;
-                        if (oi < sc.Count()) { v = sc.Value(oi); }
+                        // 值取 ×1000 定点：堆叠累计/映射全程定点，整数
+                        // 数据映射结果与旧 int 路径逐像素一致，小数数据
+                        //（normalization 0.06..0.57）不再被取整归零。
+                        int vF = 0;
+                        if (oi < sc.Count()) {
+                            double dvK = sc.Number(oi);
+                            vF = (int)(dvK * 1000.0 + (dvK >= 0 ? 0.5 : 0 - 0.5));
+                        }
                         int cellL = f.CatLeft(i, n);
                         int cellW = f.CatWidth(i, n);
                         int g0 = (cellW - groupW) / 2;
                         int bx = cellL + g0 + gi * barW;
                         // 负向堆积：负值段挂在本组负累加器上，从零轴向
                         // 下方生长；正值段照旧从正累加器顶向上。
-                        bool segNeg = v < 0;
+                        bool segNeg = vF < 0;
                         int segBase = segNeg ? negAccs[gi] : accs[gi];
-                        int yTop = f.YOf((segBase + v) * g / 1000, 0);
-                        int yBot = f.YOf(segBase * g / 1000, 0);
+                        int yTop = f.YOfF((segBase + vF) * g / 1000, 0);
+                        int yBot = f.YOfF(segBase * g / 1000, 0);
                         int segH = yBot - yTop;
                         int segY0 = yTop < yBot ? yTop : yBot;
                         int segY1 = yTop < yBot ? yBot : yTop;
                         bool overSeg = mxB >= bx && mxB < bx + barW
                             && myB >= segY0 && myB < segY1;
-                        if (overSeg && segH != 0) {
+                        if (overSeg && segH != 0 && !sc.silent) {
                             barHit = ChartView.MakeDataHit(sc, si, oi,
                                 winLabels[i], ChartElementType.Bar, mxB, myB,
                                 oi < sc.Count() ? sc.Value(oi) : 0);
@@ -205,7 +222,15 @@ partial class ChartView {
                         int segRad = rad;
                         bool segGrad = o.gradient && si == topSi[gi];
                         if (si != topSi[gi]) { segRad = 0; }
-                        ChartView.BarCell(c, bx, drawTop, barW, segH, segRad, sc.color, segGrad);
+                        // 逐段 itemStyle.borderRadius（bar-stack-borderRadius
+                        // 每段自带四角圆角声明，平角段显式 [0,0,0,0]）。
+                        List<int> segR4 = null;
+                        if (oi < sc.data.Count && sc.data[oi].itemStyle != null
+                            && sc.data[oi].itemStyle.normal.borderRadius.Count > 0) {
+                            segR4 = sc.data[oi].itemStyle.normal.borderRadius;
+                        }
+                        ChartView.BarCellR4(c, bx, drawTop, barW, segH, segR4,
+                            segRad, sc.color, segGrad);
                         // barBorderColor/barBorderWidth（ECharts 2.2.x）：
                         // 描边贴着段外框；悬停时被 emphasis 覆盖
                         // （bar10 白色 Forecast 段靠 tomato 描边成形）。
@@ -219,8 +244,8 @@ partial class ChartView {
                             ChartView.StrokeRect(c, bx, segY0, barW,
                                 segY1 - segY0, sBcol, app.Scale(sBwid));
                         }
-                        if (segNeg) { negAccs[gi] = negAccs[gi] + v; }
-                        else { accs[gi] = accs[gi] + v; }
+                        if (segNeg) { negAccs[gi] = negAccs[gi] + vF; }
+                        else { accs[gi] = accs[gi] + vF; }
                         // 数值标签（ECharts 堆叠 label position）：
                         // "top" 在段上方、"bottom" 在段下方、
                         // "insideTop" 段内顶部，缺省段内垂直居中；
@@ -232,7 +257,7 @@ partial class ChartView {
                             int sgH = segY1 - segY0;
                             if (sgH >= sgFh + app.Scale(4)) {
                                 string lbl = ChartView.LabelText(sc, oi,
-                                    winLabels[i], v);
+                                    winLabels[i], sc.Value(oi));
                                 int lw = Canvas.MeasureText(lbl, sgFs);
                                 int lx = bx + (barW - lw) / 2;
                                 if (lx < bx) { lx = bx; }
@@ -289,7 +314,9 @@ partial class ChartView {
                         int oi3 = i0 + oi2;
                         if (oi3 >= s.Count()) { continue; }
                         lpx.Add(f.CatMid(oi2, n));
-                        lpy.Add(f.YOf(s.Value(oi3) * g / 1000, s.axisIndex));
+                        double dvO = s.Number(oi3);
+                        int vFo = (int)(dvO * 1000.0 + (dvO >= 0 ? 0.5 : 0 - 0.5));
+                        lpy.Add(f.YOfF(vFo * g / 1000, s.axisIndex));
                     }
                     bool smooth = o.smooth;
                     if (s.smooth == 1) { smooth = true; } else if (s.smooth == 0) { smooth = false; }
@@ -316,6 +343,7 @@ partial class ChartView {
             // barWidth/barGap/showBackground 取首条可见柱系列
             // 的声明（ECharts 允许逐系列，这里取主导系列统一）。
             int bwOverride = 0;
+            int bwPct = 0;
             int bgPct = 0 - 1;
             bool showBg = false;
             int bgCol = 0;
@@ -325,6 +353,7 @@ partial class ChartView {
                 if (!pc.hidden && !ChartView.IsLineFamily(pc.type)
                     && pc.type != ChartType.Scatter) {
                     bwOverride = pc.barWidth;
+                    bwPct = pc.barWidthPct;
                     bgPct = pc.barGapPct;
                     showBg = pc.showBackground;
                     bgCol = pc.backgroundColor;
@@ -334,14 +363,20 @@ partial class ChartView {
                     break;
                 }
             }
-            if (bwOverride > 0) {
+            if (bwPct > 0) {
+                // barWidth "60%"：类目带宽的百分比（tick-align 语义），
+                // 相对类目带宽、与组内序列数无关。
+                barW = step * bwPct / 100;
+                if (barW < app.Scale(2)) { barW = app.Scale(2); }
+                if (barW > groupW) { barW = groupW; }
+            } else if (bwOverride > 0) {
                 barW = app.Scale(bwOverride);
                 if (barW > groupW / nsVis) { barW = groupW / nsVis; }
                 if (bgPct >= 0) { gap = barW * bgPct / 100; }
             } else if (bgPct >= 0 && barW > 0 && nsVis > 1) {
                 gap = barW * bgPct / 100;
             }
-            if (bwOverride > 0 || bgPct >= 0) {
+            if (bwOverride > 0 || bwPct > 0 || bgPct >= 0) {
                 int totGw = nsVis * barW + (nsVis - 1) * gap;
                 if (totGw < groupW) { groupX0 = groupX0 + (groupW - totGw) / 2; }
             }
@@ -383,7 +418,9 @@ partial class ChartView {
                             int oiL = i0 + li;
                             if (oiL >= s.Count()) { continue; }
                             lpx.Add(f.CatMid(li, n));
-                            lpy.Add(f.YOf(s.Value(oiL) * g / 1000, ax));
+                            double dvL = s.Number(oiL);
+                            int vFL = (int)(dvL * 1000.0 + (dvL >= 0 ? 0.5 : 0 - 0.5));
+                            lpy.Add(f.YOfF(vFL * g / 1000, ax));
                         }
                         bool smooth = o.smooth;
                         if (s.smooth == 1) { smooth = true; } else if (s.smooth == 0) { smooth = false; }
@@ -400,9 +437,10 @@ partial class ChartView {
                         for (int sp = 0; sp < n; sp = sp + 1) {
                             int oiS = i0 + sp;
                             if (oiS >= s.Count()) { continue; }
-                            int v = s.Value(oiS) * g / 1000;
+                            double dvS2 = s.Number(oiS);
+                            int vFS = (int)(dvS2 * 1000.0 + (dvS2 >= 0 ? 0.5 : 0 - 0.5));
                             int px2 = f.CatMid(sp, n);
-                            int py2 = f.YOf(v, ax);
+                            int py2 = f.YOfF(vFS * g / 1000, ax);
                             int scol = s.color;
                             if (oiS < s.data.Count && s.data[oiS].color != 0) { scol = s.data[oiS].color; }
                             Chart.DrawSymbol(c, px2, py2,
@@ -414,17 +452,23 @@ partial class ChartView {
                         // ECharts 双数值轴柱形（bar13）：值对系列，
                         // 柱画在 x 值处、从零线长到 y。
                         ChartView.DrawValueXBars(app, f, s, si, i0, i1, g, o);
-                    } else if (ChartView.IsBarFamily(s.type)) {
-                        int zeroY = f.YOf(0, ax);
-                        for (int i = 0; i < n; i = i + 1) {
-                            int oi = i0 + i;
-                            int v = 0;
-                            if (oi < s.Count()) { v = s.Value(oi); }
-                            // 逐项颜色（ChartData.Colored）优先于
-                            // 序列颜色 —— ECharts 的三级颜色控制。
-                            int col = s.color;
-                            if (oi < s.data.Count && s.data[oi].color != 0) { col = s.data[oi].color; }
-                            int by = f.YOf(v * g / 1000, ax);
+                } else if (ChartView.IsBarFamily(s.type)) {
+                    int zeroY = f.YOfF(0, ax);
+                    for (int i = 0; i < n; i = i + 1) {
+                        int oi = i0 + i;
+                        // 值取 ×1000 定点（bar1 的 4.9、mix-line-bar 的
+                        // 2.6 这类小数柱值不再被 Value() 取整）；整数数据
+                        // 映射结果与旧 int 路径逐像素一致。
+                        int vF = 0;
+                        if (oi < s.Count()) {
+                            double dvB = s.Number(oi);
+                            vF = (int)(dvB * 1000.0 + (dvB >= 0 ? 0.5 : 0 - 0.5));
+                        }
+                        // 逐项颜色（ChartData.Colored）优先于
+                        // 序列颜色 —— ECharts 的三级颜色控制。
+                        int col = s.color;
+                        if (oi < s.data.Count && s.data[oi].color != 0) { col = s.data[oi].color; }
+                        int by = f.YOfF(vF * g / 1000, ax);
                             int cellL = f.CatLeft(i, n);
                             int cellW = f.CatWidth(i, n);
                             int g0 = (cellW - groupW) / 2;
@@ -434,7 +478,7 @@ partial class ChartView {
                                 // showBackground），随柱条正负取方向。
                                 int bgY2;
                                 int bgH2;
-                                if (v < 0) {
+                                if (vF < 0) {
                                     bgY2 = zeroY;
                                     bgH2 = f.plotY + f.plotH - zeroY;
                                 } else {
@@ -447,14 +491,14 @@ partial class ChartView {
                                         bgCol != 0 ? bgCol : bgInk);
                                 }
                             }
-                            if (v < 0) {
+                            if (vF < 0) {
                                 // 负值柱条垂挂在零基线下方
                                 int bh = zeroY - by;
                                 if (bh < 0) { bh = 0 - bh; }
-                                if (mxB >= bx && mxB < bx + barW
+                                if (!s.silent && mxB >= bx && mxB < bx + barW
                                     && myB >= zeroY && myB < zeroY + bh && bh > 0) {
                                     barHit = ChartView.MakeDataHit(s, si, oi,
-                                        winLabels[i], ChartElementType.Bar, mxB, myB, v);
+                                        winLabels[i], ChartElementType.Bar, mxB, myB, s.Value(oi));
                                 }
                                 bool hovB = mxB >= bx
                                     && mxB < bx + barW && myB >= zeroY
@@ -463,8 +507,15 @@ partial class ChartView {
                                 if (hovB && s.itemStyle.emphasis.color != 0) {
                                     fillC = s.itemStyle.emphasis.color;
                                 }
+                                // 逐根 itemStyle.borderRadius 优先于系列
+                                // 声明（bar-stack-borderRadius 语义）。
+                                List<int> cellR4 = barRad;
+                                if (oi < s.data.Count && s.data[oi].itemStyle != null
+                                    && s.data[oi].itemStyle.normal.borderRadius.Count > 0) {
+                                    cellR4 = s.data[oi].itemStyle.normal.borderRadius;
+                                }
                                 ChartView.BarCellR4(c, bx, zeroY, barW, bh,
-                                    barRad, rad, fillC, o.gradient);
+                                    cellR4, rad, fillC, o.gradient);
                                 int bcol = hovB && s.itemStyle.emphasis.borderColor != 0
                                     ? s.itemStyle.emphasis.borderColor
                                     : s.itemStyle.normal.borderColor;
@@ -477,7 +528,7 @@ partial class ChartView {
                                 }
                                 if (o.showValues || s.labelShow) {
                                     string lbl = ChartView.LabelText(s, oi,
-                                        winLabels[i], v);
+                                        winLabels[i], s.Value(oi));
                                     int lw = Canvas.MeasureText(lbl, valFs);
                                     int lx = bx + (barW - lw) / 2;
                                     if (lx < f.plotX) { lx = f.plotX; }
@@ -495,10 +546,10 @@ partial class ChartView {
                             } else {
                                 int bh = zeroY - by;
                                 if (bh < 0) { bh = 0; }
-                                if (mxB >= bx && mxB < bx + barW
+                                if (!s.silent && mxB >= bx && mxB < bx + barW
                                     && myB >= by && myB < zeroY && bh > 0) {
                                     barHit = ChartView.MakeDataHit(s, si, oi,
-                                        winLabels[i], ChartElementType.Bar, mxB, myB, v);
+                                        winLabels[i], ChartElementType.Bar, mxB, myB, s.Value(oi));
                                 }
                                 bool hovB = mxB >= bx
                                     && mxB < bx + barW && myB >= by
@@ -507,8 +558,13 @@ partial class ChartView {
                                 if (hovB && s.itemStyle.emphasis.color != 0) {
                                     fillC = s.itemStyle.emphasis.color;
                                 }
+                                List<int> cellR4P = barRad;
+                                if (oi < s.data.Count && s.data[oi].itemStyle != null
+                                    && s.data[oi].itemStyle.normal.borderRadius.Count > 0) {
+                                    cellR4P = s.data[oi].itemStyle.normal.borderRadius;
+                                }
                                 ChartView.BarCellR4(c, bx, by, barW, bh,
-                                    barRad, rad, fillC, o.gradient);
+                                    cellR4P, rad, fillC, o.gradient);
                                 int bcol = hovB && s.itemStyle.emphasis.borderColor != 0
                                     ? s.itemStyle.emphasis.borderColor
                                     : s.itemStyle.normal.borderColor;
@@ -519,9 +575,9 @@ partial class ChartView {
                                     ChartView.StrokeRect(c, bx, by, barW, bh,
                                         bcol, app.Scale(bwid));
                                 }
-                                if ((o.showValues || s.labelShow) && v > 0) {
+                                if ((o.showValues || s.labelShow) && vF > 0) {
                                     string lbl = ChartView.LabelText(s, oi,
-                                        winLabels[i], v);
+                                        winLabels[i], s.Value(oi));
                                     int lw = Canvas.MeasureText(lbl, valFs);
                                     int lx = bx + (barW - lw) / 2;
                                     if (lx < f.plotX) { lx = f.plotX; }
@@ -818,19 +874,46 @@ partial class ChartView {
 
         if (n < 1 || ns < 1) { c.PopClip(); return null; }
 
-        int dataMin = 0;
-        int dataMax = 0;
-        for (int fi = 0; fi < series.Count; fi = fi + 1) {
-            if (!series[fi].hidden) {
-                for (int fj = 0; fj < series[fi].Count(); fj = fj + 1) {
-                    int fv = series[fi].Value(fj);
-                    if (fv > dataMax) { dataMax = fv; }
-                    if (fv < dataMin) { dataMin = fv; }
+        // 值域分两套模式：小数系列（bar-negative2 的 -0.07..0.47）走
+        // ×1000 定点域（NiceRange 取 nice 界），整数系列保持原 int
+        // 域（NiceMin/NiceMax）——两套的映射/累计都是模式自洽的，
+        // 整数路径逐像素不变。
+        bool vFrac = Chart.SeriesFracAny(series, 0);
+        int ticksH = 5;
+        int lo;
+        int hi;
+        if (vFrac) {
+            int dataMinF = 0;
+            int dataMaxF = 0;
+            for (int fi = 0; fi < series.Count; fi = fi + 1) {
+                if (!series[fi].hidden) {
+                    for (int fj = 0; fj < series[fi].Count(); fj = fj + 1) {
+                        double dfv = series[fi].Number(fj);
+                        int fvF = (int)(dfv * 1000.0 + (dfv >= 0 ? 0.5 : 0 - 0.5));
+                        if (fvF > dataMaxF) { dataMaxF = fvF; }
+                        if (fvF < dataMinF) { dataMinF = fvF; }
+                    }
                 }
             }
+            ChartSpan spH = Chart.NiceRange(dataMinF, dataMaxF);
+            lo = spH.lo;
+            hi = spH.hi;
+            ticksH = spH.ticks;
+        } else {
+            int dataMin = 0;
+            int dataMax = 0;
+            for (int fi = 0; fi < series.Count; fi = fi + 1) {
+                if (!series[fi].hidden) {
+                    for (int fj = 0; fj < series[fi].Count(); fj = fj + 1) {
+                        int fv = series[fi].Value(fj);
+                        if (fv > dataMax) { dataMax = fv; }
+                        if (fv < dataMin) { dataMin = fv; }
+                    }
+                }
+            }
+            lo = Chart.NiceMin(dataMin);
+            hi = Chart.NiceMax(dataMax);
         }
-        int lo = Chart.NiceMin(dataMin);
-        int hi = Chart.NiceMax(dataMax);
         if (stacked) {
             int stMax = 0;
             for (int qi = 0; qi < series.Count; qi = qi + 1) {
@@ -838,8 +921,16 @@ partial class ChartView {
             }
             // 正负独立累加器下的组顶/组底定标（MaxStackAll 会把
             // 正负相加，量程缩水）。
-            hi = Chart.NiceMax(Chart.MaxBarStackGroupsW(series, stMax, baseIdx));
-            lo = Chart.NiceMin(Chart.MinBarStackGroupsW(series, stMax, baseIdx));
+            if (vFrac) {
+                ChartSpan seH = Chart.StackExtentF(series, 0);
+                ChartSpan spN = Chart.NiceRange(seH.lo, seH.hi);
+                lo = spN.lo;
+                hi = spN.hi;
+                ticksH = spN.ticks;
+            } else {
+                hi = Chart.NiceMax(Chart.MaxBarStackGroupsW(series, stMax, baseIdx));
+                lo = Chart.NiceMin(Chart.MinBarStackGroupsW(series, stMax, baseIdx));
+            }
         }
         if (hi <= lo) { hi = lo + 1; }
         int span = hi - lo;
@@ -865,7 +956,7 @@ partial class ChartView {
                                     Style.SNormal());
         StyleBox sLabel = Style.Part(app, "chart", "label", "", "", "",
                                      Style.SNormal());
-        int ticks = 5;
+        int ticks = ticksH;
         bool grid = o.showGrid;
         // ECharts axis.show：数值轴（x）/类目轴（y）整条显隐。
         bool xShow = o.xAxes.Count < 1 || o.xAxes[0].show;
@@ -875,7 +966,7 @@ partial class ChartView {
             int gx = Chart.ValueX(plotX, plotW, lo, hi, tv);
             if (grid) { c.FillRect(gx, plotY, 1, plotH, sGrid.BgOr(0)); }
             if (!xShow) { continue; }
-            string vs = Convert.ToString(tv);
+            string vs = vFrac ? Chart.FracText(tv) : Convert.ToString(tv);
             int tw = Canvas.MeasureText(vs, axisFs);
             int lxT = gx - tw / 2;
             if (lxT < x + pad) { lxT = x + pad; }
@@ -951,7 +1042,14 @@ partial class ChartView {
                         if (gi < 0) { gi = 0; }
                         int v = 0;
                         int sdi = baseIdx + i;
-                        if (sdi < sc.Count()) { v = sc.Value(sdi) * g / 1000; }
+                        if (sdi < sc.Count()) {
+                            if (vFrac) {
+                                double dvH = sc.Number(sdi);
+                                v = (int)(dvH * 1000.0 + (dvH >= 0 ? 0.5 : 0 - 0.5)) * g / 1000;
+                            } else {
+                                v = sc.Value(sdi) * g / 1000;
+                            }
+                        }
                         bool segNeg = v < 0;
                         int segBase = segNeg ? negAccs[gi] : accs[gi];
                         int x0 = Chart.ValueX(plotX, plotW, lo, hi, segBase);
@@ -964,7 +1062,7 @@ partial class ChartView {
                         if (si != topSi[gi]) { segRad = 0; }
                         bool hov = mx >= drawX && mx < drawX + segW
                             && my >= by && my < by + barH;
-                        if (mx >= drawX && mx < drawX + segW
+                        if (!sc.silent && mx >= drawX && mx < drawX + segW
                             && my >= by && my < by + barH && segW > 0) {
                             hbarHit = ChartView.MakeDataHit(sc,
                                 ChartView.SeriesIndexOf(o, sc), baseIdx + i,
@@ -1076,7 +1174,14 @@ partial class ChartView {
                 for (int si = 0; si < ns; si = si + 1) {
                     int v = 0;
                     int ndi = baseIdx + i;
-                    if (ndi < series[si].Count()) { v = series[si].Value(ndi) * g / 1000; }
+                    if (ndi < series[si].Count()) {
+                        if (vFrac) {
+                            double dvHG = series[si].Number(ndi);
+                            v = (int)(dvHG * 1000.0 + (dvHG >= 0 ? 0.5 : 0 - 0.5)) * g / 1000;
+                        } else {
+                            v = series[si].Value(ndi) * g / 1000;
+                        }
+                    }
                     int x1 = Chart.ValueX(plotX, plotW, lo, hi, v);
                     int bx = x0;
                     int bw = x1 - x0;
@@ -1091,7 +1196,7 @@ partial class ChartView {
                     }
                     bool hov = mx >= bx && mx < bx + bw
                         && my >= by && my < by + barH;
-                    if (mx >= bx && mx < bx + bw
+                    if (!series[si].silent && mx >= bx && mx < bx + bw
                         && my >= by && my < by + barH && bw > 0) {
                                     hbarHit = ChartView.MakeDataHit(series[si],
                             ChartView.SeriesIndexOf(o, series[si]), ndi,

@@ -204,9 +204,12 @@ partial class Charts {
         Charts.Add("line", "line-stack", "Stacked Line Chart", "堆叠折线图", "", "");
         Charts.Add("line", "area-stack", "Stacked Area Chart", "堆叠面积图", "", "");
         Charts.Add("line", "line-marker", "Temperature Change in the Coming Week", "未来一周气温变化", "", "");
-        Charts.Add("line", "area-simple", "Large Area Chart", "大数据量面积图", "", "");
-        Charts.Add("line", "area-rainfall", "Rainfall and Flow Relationship", "雨量流量关系图", "", "");
-        Charts.Add("line", "area-time-axis", "Large Ara Chart", "时间轴折线图", "", "");
+        // 标题 = 官方注册表 title/titleCN 原文（chart-list-data.js），
+        // 不是示例 option 内部的 title.text（如 area-time-axis 图题
+        // 'Large Ara Chart' 是官网源码原文，列表名以注册表为准）。
+        Charts.Add("line", "area-simple", "Large scale area chart", "大数据量面积图", "", "");
+        Charts.Add("line", "area-rainfall", "Rainfall", "雨量流量关系图", "", "");
+        Charts.Add("line", "area-time-axis", "Area Chart with Time Axis", "时间轴折线图", "", "");
         Charts.Add("line", "line-style", "Line Style and Item Style", "自定义折线图样式", "", "");
         Charts.Add("line", "line-in-cartesian-coordinate-system",
             "Line Chart in Cartesian Coordinate System", "双数值轴折线图", "", "");
