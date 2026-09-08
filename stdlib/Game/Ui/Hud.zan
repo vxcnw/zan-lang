@@ -104,6 +104,10 @@ class GameHud {
         hud.app.SetDark(true);
         hud.app.EnableSkins(0);
         hud.app.ApplySkinName("gamehud");
+        // 游戏 HUD 是整屏合成层,背后是游戏场景,没有"桌面背景"可演:
+        // 暗色主题自带的 Stars 环境特效在这里纯属纯开销——每次合成
+        // 都做整窗快照+恢复+星粒光栅+特效提交,还往画面里撒游离星点。
+        hud.app.SetBackdropFx(false);
         return hud;
     }
 
