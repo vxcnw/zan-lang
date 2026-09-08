@@ -100,6 +100,13 @@ class ListView<T> : Control {
     int builtFor;
     /// 模板行独占的 WidgetId 段起点（-1 = 还没建过行）。
     int rowSeqBase;
+    /// 行命中区的稳定 id 块起点与块长（-1/0 = 未预留）：行 i 的命中
+    /// id = rowHitBase + i。必须整块预留而不能逐帧 AllocId——每帧只有
+    /// 可见行占号，拖动滚动条时可见行数在 n/n+1 间来回变，其后注册
+    /// 的滚动条 id 跟着漂移，pressedId 失配后拖动两三像素就停摆
+    /// （offset 不动 → 可见行数也不翻回 → 直到松手）。
+    int rowHitBase;
+    int rowHitCount;
 
     /// 模板行独占的 id 段长度：够放几百行、每行十来个控件。
     static int RowIdReserve() { return 4096; }
@@ -126,6 +133,8 @@ class ListView<T> : Control {
         rowsStale = true;
         builtFor = -1;
         rowSeqBase = -1;
+        rowHitBase = -1;
+        rowHitCount = 0;
         wiresOwnEvents = true;
         Select = new UiEvent();
         Activate = new UiEvent();
@@ -348,10 +357,23 @@ class ListView<T> : Control {
         return h;
     }
 
+    /// 行命中 id 块：每行一个，作为连续块预留（同 Carousel/Collapse
+    /// 的 EnsureIds），数据超出块长时整块换新——按倍数增长，持续追加
+    /// 的信息流不至于每来一条就换一遍所有行的 id。
+    void EnsureRowIds() {
+        int need = this.Count();
+        if (rowHitBase >= 0 && need <= rowHitCount) { return; }
+        if (need < 64) { need = 64; }
+        if (need < rowHitCount * 2) { need = rowHitCount * 2; }
+        rowHitBase = WidgetId.Block(need);
+        rowHitCount = need;
+    }
+
     /// 处理某行矩形的选择 / 激活 / 右键菜单。返回其注册的 id，
     /// 调用方可据此绘制 hover 状态。
     int RowInteract(App app, int index, int x, int y, int w, int h) {
-        int id = app.focus.AllocId();
+        this.EnsureRowIds();
+        int id = rowHitBase + index;
         app.hitTester.RegisterRect(id, x, y, w, h, 0);
         if (app.focus.IsHovered(id)) { hover = index; }
         // 触摸长按等价右键：按住行上不动打开上下文菜单。行是

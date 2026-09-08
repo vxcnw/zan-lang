@@ -674,6 +674,7 @@ class App {
         this.theme = Theme.Light();
         this.focus = new FocusManager();
         this.hitTester = new HitTester();
+        this.hitTester.BindFocus(this.focus);
         this.isRunning = true;
         this.needsRedraw = true;
         this.pollPending = false;
@@ -3892,7 +3893,9 @@ class App {
     int AnimIntroIn(int key, int durMs, int x, int y, int w, int h) {
         int value = this.AnimIntroValue(key, durMs);
         if (this.AnimActive(key)) {
-            this.RequestAnimationFrameIn(0, x, y, w, h);
+            // 30ms 步进：入场动画不需要 60fps（大图表整窗软渲染
+            // 跟不满会掉帧发卡）；输入事件照常即时唤醒整帧。
+            this.RequestAnimationFrameIn(30, x, y, w, h);
         }
         return value;
     }

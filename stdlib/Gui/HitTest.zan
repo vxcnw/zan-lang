@@ -102,8 +102,18 @@ class HitTester {
     List<int> snapType;
     int snapUsed;
 
+    // 按压状态的持有者（App 构造后 BindFocus）：按下锚点按矩形重绑
+    // 到新 id 时，FocusManager.pressedId 若还指着旧 id 就一并改写。
+    // pressedId 在按下时写入、释放才清，中间若本帧前面的控件增减把
+    // 序号顶漂（列表滚动时可见行数变化、弹层开合、前方控件多画少
+    // 画一个），持按压的控件拿新 id 查 IsPressed 会失配——滚动条/
+    // 滑块拖到一半突然停摆，id 漂回来又瞬移到指针处。锚点记的是
+    // 矩形，跟着矩形走的才是同一个控件，pressedId 也该跟着它走。
+    FocusManager focus;
+
     /// 构造：初始化双复用池、阻挡区表、锚点表与快照表。
     HitTester() {
+        focus = null;
         poolA = new List<HitRegion>();
         poolB = new List<HitRegion>();
         useA = true;
@@ -126,6 +136,10 @@ class HitTester {
         snapType = new List<int>();
         snapUsed = 0;
     }
+
+    /// 绑定焦点状态机，使按下锚点的矩形重绑同步到 pressedId
+    /// （App 构造时调用一次；未绑定则只重绑锚点）。
+    void BindFocus(FocusManager f) { focus = f; }
 
     /// 整帧（非条带帧）渲染结束时调用：把当前命中区拷贝为事件
     /// 解析的基准。regions 是复用池，对象会被下一帧就地改写，因此
@@ -235,6 +249,13 @@ class HitTester {
                 && anchorType[k] == wtype
                 && anchorX[k] == x && anchorY[k] == y
                 && anchorW[k] == w && anchorH[k] == h) {
+                // 按下锚点（k==0）换了 id 且按压还握在旧 id 上：把
+                // 按压一并带到新 id（见 focus 字段的注释）。释放后
+                // pressedId 为 -1，不会被锚点的滞留值重新点亮。
+                if (k == 0 && focus != null && anchorId[k] >= 0
+                    && anchorId[k] != id && focus.pressedId == anchorId[k]) {
+                    focus.SetPressed(id);
+                }
                 anchorId[k] = id;
             }
         }
