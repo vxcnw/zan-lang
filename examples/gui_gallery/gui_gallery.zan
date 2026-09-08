@@ -8399,6 +8399,9 @@ class Gallery {
                 Gallery.demoItemList = new ListView<GalleryItemRow>(
                     r => GalleryItemRow.View(r));
                 Gallery.demoItemList.Class = "flat";
+                // 分组标题档不是选项：WithSelectable 后点击/悬停/
+                // 右键都不落在标题行上（文本按 disabled 状态弱色）。
+                Gallery.demoItemList.WithSelectable(r => !r.header);
                 Gallery.demoItemList.Bind(Gallery.demoItemRows);
             }
             Gallery.demoItemList.RenderInside(app, new Rect(

@@ -12,6 +12,11 @@ delegate string CellOf<T>(T item);
 /// 行是自定义组件而非文本列的列表。
 delegate Control RowOf<T>(T item);
 
+/// 回答某个实体所在的行是否可选（可用）。返回 false 的行
+/// 视为禁用项：点击、Ctrl+点击、Shift+范围、右键、长按
+/// 全部无反应，悬停/选中带不出现，SelectedIndex 不落在其上。
+delegate bool RowGate<T>(T item);
+
 /// ListView 的一列：表头显示什么、宽度相对其他列
 /// 如何（0 = 均分），以及如何从实体读取其文本。
 class ListColumn<T> {
@@ -91,6 +96,8 @@ class ListView<T> : Control {
     bool multi;
     /// 多选命中的行号集合（Ctrl+点击维护，不含聚焦行）。
     List<int> marks;
+    /// 可选行门（WithSelectable）：null = 全部可选。
+    RowGate<T> onlySelectable;
     /// 垂直滚动偏移（宿主可读写以驱动/响应滚动）。
     SignalInt scroll;
     /// 模板模式：每个构建的子控件分配一个行 id，因此
@@ -129,6 +136,7 @@ class ListView<T> : Control {
         hover = -1;
         multi = false;
         marks = new List<int>();
+        onlySelectable = null;
         scroll = new SignalInt(0);
         rowsStale = true;
         builtFor = -1;
@@ -233,8 +241,10 @@ class ListView<T> : Control {
     T ItemAt(int row) { return data[row]; }
 
     /// 像点击那样移动选中项，发生变化时触发 Select。
+    /// 禁用行不接收：与鼠标路径同一道门。
     void SelectIndex(int row) {
         if (row < -1 || row >= this.Count()) { return; }
+        if (row >= 0 && !this.Selectable(row)) { return; }
         if (sel == row) { return; }
         sel = row;
         Select.Post();
@@ -245,6 +255,15 @@ class ListView<T> : Control {
 
     /// 启用多选（Ctrl+点击切换、Shift+点击范围选择）。
     ListView<T> WithMultiSelect() { multi = true; return this; }
+
+    /// 声明哪些行可选（分组标题档、条件未满足的禁用项等非选项）。
+    /// 不可选行对点击/Ctrl+点击/Shift+范围/右键/长按全部无反应，
+    /// 悬停与选中带不出现，文本以 `disabled` 状态弱色呈现；
+    /// 模板模式下行控件自带的 `Disabled` 同样生效。
+    ListView<T> WithSelectable(RowGate<T> gate) {
+        onlySelectable = gate;
+        return this;
+    }
 
     /// `row` 属于多选集合（或为聚焦行）时为 true。
     bool IsMarked(int row) {
@@ -332,6 +351,17 @@ class ListView<T> : Control {
         int used = WidgetId.SeqValue();
         if (used < resume) { WidgetId.SetSeq(resume); }
         else { rowSeqBase = used; }
+        // 门判定的禁用行传播到行控件：模板行自己画文本，不传播的
+        // 话禁用行行为上点不动、外观上却和可选项一模一样（列模式
+        // 有 ::cell:disabled 弱色，模板模式靠行控件自己的 disabled
+        // 状态；只置真不复位——控件自身的 Disabled 是模板的语义）。
+        if (onlySelectable != null) {
+            for (int i = 0; i < children.Count; i = i + 1) {
+                if (children[i] != null && !onlySelectable(data[i])) {
+                    children[i].Disabled.Set(true);
+                }
+            }
+        }
         for (int k = 0; k < children.Count; k = k + 1) {
             children[k].MeasureTree(app);
         }
@@ -375,12 +405,15 @@ class ListView<T> : Control {
         this.EnsureRowIds();
         int id = rowHitBase + index;
         app.hitTester.RegisterRect(id, x, y, w, h, 0);
-        if (app.focus.IsHovered(id)) { hover = index; }
+        // 禁用行：命中区照常注册（id 块稳定依赖每行都占号），
+        // 但五种选择手势全部不认，悬停高亮也不出现。
+        bool live = this.Selectable(index);
+        if (live && app.focus.IsHovered(id)) { hover = index; }
         // 触摸长按等价右键：按住行上不动打开上下文菜单。行是
         // 真实注册 id，无需哨兵；轮询必须赶在下方 ClickTarget
         // 早退之前——那个目标在按住期间是上一帧的滞留值，会
         // 把还没成为点击目标的行挡在长按之外。
-        if (app.TouchDevice() && app.PollLongPress(id)) {
+        if (live && app.TouchDevice() && app.PollLongPress(id)) {
             sel = index;
             Context.Post();
             this.NoteSelfDamage(app);
@@ -394,14 +427,14 @@ class ListView<T> : Control {
         if (app.ClickTarget() != id && app.RightPressTarget() != id) {
             return id;
         }
-        if (app.RightPressTarget() == id && app.EventKind() == 2
+        if (live && app.RightPressTarget() == id && app.EventKind() == 2
             && app.window.EventButton() == 1) {
             sel = index;
             Context.Post();
             this.NoteSelfDamage(app);
             return id;
         }
-        if (app.ClickTarget() == id && app.ClickAvailable()) {
+        if (live && app.ClickTarget() == id && app.ClickAvailable()) {
             int mods = app.window.EventMods();
             if (multi && Modifiers.HasCtrl(mods)) {
                 // 把该行加入/移出多选集合。
@@ -413,13 +446,13 @@ class ListView<T> : Control {
                 if (!was) { marks.Add(index); if (sel < 0) { sel = index; } }
                 Select.Post();
             } else if (multi && Modifiers.HasShift(mods) && sel >= 0) {
-                // 把选中项从聚焦行扩展到本行。
+                // 把选中项从聚焦行扩展到本行；范围内的禁用行跳过。
                 int a = sel;
                 int b = index;
                 if (b < a) { int tmp = a; a = b; b = tmp; }
                 int r = a;
                 while (r <= b) {
-                    if (!this.IsMarked(r)) { marks.Add(r); }
+                    if (this.Selectable(r) && !this.IsMarked(r)) { marks.Add(r); }
                     r = r + 1;
                 }
                 Select.Post();
@@ -446,6 +479,18 @@ class ListView<T> : Control {
     void NoteSelfDamage(App app) {
         app.NoteDamage(bx, by, bw, bh);
         app.window.Wake();
+    }
+
+    /// `row` 是否可选（可用）：在数据范围内、未被 WithSelectable
+    /// 的门挡下，且（模板模式）行控件自身没有 Disabled。禁用项
+    /// 对一切选择途径关闭——鼠标的五种手势、程序化 SelectIndex、
+    /// 悬停高亮，视觉上以 `disabled` 状态呈现弱色。
+    bool Selectable(int row) {
+        if (!this.Has(row)) { return false; }
+        if (onlySelectable != null && !onlySelectable(data[row])) { return false; }
+        if (this.Templated() && row < children.Count && children[row] != null
+            && children[row].IsDisabled()) { return false; }
+        return true;
     }
 
     /// 空列表时居中绘制 Empty 提示文本。
@@ -532,8 +577,11 @@ class ListView<T> : Control {
                                    Style.SNormal());
         StyleBox secondary = Style.Part(app, "listview", "cell", "", Class + " secondary",
                                         "", Style.SNormal());
+        StyleBox cellOff = Style.Part(app, "listview", "cell", "", Class, "",
+                                      Style.SDisabled());
         int cellFont = cell.FontOr(Style.FontFallback(app, "small"));
         int secondaryFont = secondary.FontOr(cellFont);
+        int cellOffFont = cellOff.FontOr(cellFont);
         int rowH = this.RowHeight(app);
         int viewY = by + headH;
         int viewH = bh - headH;
@@ -572,7 +620,7 @@ class ListView<T> : Control {
             if (i == sel || (multi && this.IsMarked(i))) {
                 c.FillRect(bx, ry, hotW, rowH, rowSelected.BgOr(rowNormal.BgOr(0)));
             }
-            else if (app.focus.IsHovered(id)) {
+            else if (this.Selectable(i) && app.focus.IsHovered(id)) {
                 c.FillRect(bx, ry, hotW, rowH, rowHover.BgOr(0));
             }
             if (i > first || off > 0) { c.FillRect(bx, ry, rowW, 1, divider.BgOr(0)); }
@@ -583,6 +631,7 @@ class ListView<T> : Control {
                 int cw = ws[k];
                 StyleBox cs = k > 0 ? secondary : cell;
                 int csFont = k > 0 ? secondaryFont : cellFont;
+                if (!this.Selectable(i)) { cs = cellOff; csFont = cellOffFont; }
                 string s = Ellipsis.Fit(cols[k].TextOf(data[i]), cw - pad,
                                         csFont);
                 int color = cs.FgOr(0);
@@ -646,7 +695,7 @@ class ListView<T> : Control {
                     app.canvas.FillRect(bx, y, hotW, rh,
                         rowSelected.BgOr(rowNormal.BgOr(0)));
                 }
-                else if (app.focus.IsHovered(id)) {
+                else if (this.Selectable(i) && app.focus.IsHovered(id)) {
                     app.canvas.FillRect(bx, y, hotW, rh, rowHover.BgOr(0));
                 }
             }

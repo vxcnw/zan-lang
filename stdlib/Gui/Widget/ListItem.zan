@@ -66,8 +66,10 @@ class ListItem : Control {
     /// 覆写：CSS 类型选择器名（"listitem"）。
     override string StyleType() { return "listitem"; }
 
-    /// 当前状态档：选中行按 `selected` 状态解析。
+    /// 当前状态档：禁用行按 `disabled` 状态解析（弱色），
+    /// 其次选中行按 `selected` 状态解析。
     int StateNow() {
+        if (this.IsDisabled()) { return Style.SDisabled(); }
         if (Selected) { return Style.SSelected(); }
         return Style.SNormal();
     }
@@ -144,6 +146,9 @@ class ListItem : Control {
         PropSpec sel = PropSpec.Bool("selected", "Selected");
         sel.flag = Selected;
         ps.Add(sel);
+        PropSpec off = PropSpec.Bool("disabled", "Disabled");
+        off.flag = this.IsDisabled();
+        ps.Add(off);
         ps.Add(PropSpec.Text("class", "Classes"));
         return ps;
     }

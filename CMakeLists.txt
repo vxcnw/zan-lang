@@ -1891,6 +1891,18 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
       -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_listview_scrollbar_drag${_exe_ext}
       -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
 
+  # ListView 禁用行（不可选选项）回归：WithSelectable 的门与模板行
+  # 控件自带 Disabled 都必须关死行的全部选择途径——点选、Ctrl+点选、
+  # Shift+范围（内部禁用行跳过）、右键、程序化 SelectIndex、悬停。
+  add_test(NAME conformance_gui_listview_disabled
+    COMMAND ${CMAKE_COMMAND}
+      -DZANC=$<TARGET_FILE:zanc>
+      -DSRC=${CMAKE_SOURCE_DIR}/tests/gui/listview_disabled_test.zan
+      "-DZANC_ARGS=--auto-stdlib${_gui_driver_tail}"
+      -DEXPECTED=${CMAKE_SOURCE_DIR}/tests/conformance/gui_listview_disabled.out
+      -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_listview_disabled${_exe_ext}
+      -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
+
   # VirtualList template rows: rows are built lazily (never at SetRows, only
   # when a frame needs them in the viewport) and the string-mode bookkeeping
   # stays intact across the mode switch.
