@@ -2161,20 +2161,17 @@ partial class DataTable {
                             }
                         }
                         if (mu + md > 0) {
-                            // 块的每一行都整块重绘：后续行的行底色与
-                            // 分隔线会盖掉先前绘制，末行重绘后收敛
-                            // 正确。裁剪从单行 band 条带换成块矩形——
-                            // 列本身不跨 band，水平方向安全。
-                            // 底色/字色都必须经主题兜底：合并块填充
-                            // 直接拿 rowBg（当前行刚算好的斑马底），
-                            // 字色 CellForeground 无 styler 时回 0，
-                            // 直传 DrawText 是全透明——正常格路径
-                            // 靠 sCell.FgOr 兜底，这里同款。
-                            int mTop = ry - mu * rowH;
-                            int mH = (mu + md + 1) * rowH;
-                            c.PopClip();
-                            c.PushClip(ccl, mTop, cw, mH);
-                            c.FillRect(ccl, mTop, cw, mH, rowBg);
+                            // 块底色只画本行段：行状态（斑马/悬停/选中/
+                            // styler 行底）属于行自身。若整块重绘，块的
+                            // 可见底色会收敛到「最后绘制行」的状态——
+                            // 悬停块内一行、整块跟着变色；块尾越出视口
+                            // 时填充更会盖过主体底缘，在汇总条上方留下
+                            // 残块。逐行画段后，块内行线被下一段的填充
+                            // 自然盖掉，合并外观不变。
+                            // 字色必须经主题兜底：CellForeground 无
+                            // styler 时回 0，直传 DrawText 是全透明——
+                            // 正常格路径靠 sCellBox.FgOr 兜底，这里同款。
+                            c.FillRect(ccl, ry, cw, rowH, rowBg);
                             string mShown = DataTable.Truncate(
                                 DataTable.FormatCell(cols[cc], cellText), fs,
                                 cw - t.paddingSmall * 2);
@@ -2184,6 +2181,18 @@ partial class DataTable {
                             else if (cols[cc].align == 2) { mTx = ccl + cw - t.paddingSmall - mTw; }
                             int mFg = DataTable.CellForeground(st, src, rowIdx, cc);
                             if (mFg == 0) { mFg = sCellBox.FgOr(0); }
+                            // 值文本锚在整块垂直中央（块被视口截断时
+                            // 随块滚动、居中于完整块），裁剪收敛到块与
+                            // 主体的交集——文本与填充都不再越出主体。
+                            // 当前行必在块内且在主体内，交集非空。
+                            int mTop = ry - mu * rowH;
+                            int mH = (mu + md + 1) * rowH;
+                            int cTop = mTop;
+                            if (cTop < bodyTop) { cTop = bodyTop; }
+                            int cBot = mTop + mH;
+                            if (cBot > bodyTop + bodyH) { cBot = bodyTop + bodyH; }
+                            c.PopClip();
+                            c.PushClip(ccl, cTop, cw, cBot - cTop);
                             c.DrawText(mTx, mTop + (mH - fs) / 2, mShown,
                                        mFg, fs);
                             c.PopClip();
