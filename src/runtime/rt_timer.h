@@ -43,9 +43,15 @@ void zan_rt_soft_note3(const char *file, unsigned line, unsigned col,
  * mode composes, prints, raises the fault record, and exits(70). */
 void zan_rt_guard_fail3(const char *file, unsigned line, unsigned col,
                         const char *msg);
-/* Non-zero when ZAN_RT_HARD=1 was set at startup: guards must exit(70)
- * instead of reporting and continuing. */
+/* Non-zero when ZAN_RT_HARD=1 was set at startup (or the program was built
+ * with --strict-runtime): guards must exit(70) instead of reporting and
+ * continuing. */
 int zan_rt_soft_is_hard(void);
+/* Program-baked fail-fast: --strict-runtime compiles a main() prologue that
+ * calls this before any user code, so a strict binary exits(70) on a guard
+ * failure even where the operator never set ZAN_RT_HARD=1. The env var still
+ * wins when explicitly set to 0 (escape hatch without a rebuild). */
+void zan_rt_set_strict(void);
 /* A small zeroed, readable/writable page the soft guards substitute for a
  * null base before the lowered GEP+load runs: the fault-free load then reads
  * 0 and stores land in scratch memory instead of page 0. Only the soft path

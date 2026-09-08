@@ -161,17 +161,30 @@ int zan_utf8_argv(int *argc, char ***argv) {
 
 static char *g_soft_seen[ZAN_SOFT_MAX_SITES];
 static int g_soft_seen_count;
+/* set once by a --strict-runtime program's main() prologue (see
+ * zan_rt_set_strict); forces the hard path of every guard regardless of
+ * ZAN_RT_HARD (which still overrides to 0 for an explicit opt-out) */
+static int g_soft_strict;
 
 static int zan_soft_is_hard(void) {
     static int hard = -1;
     if (hard < 0) {
         const char *env = getenv("ZAN_RT_HARD");
         hard = (env && *env && *env != '0') ? 1 : 0;
+        if (!hard && !env) hard = g_soft_strict;
     }
     return hard;
 }
 
 int zan_rt_soft_is_hard(void) { return zan_soft_is_hard(); }
+
+/* Program-baked fail-fast: --strict-runtime compiles a main() prologue that
+ * calls this before any user code, so a binary built strict exits(70) on a
+ * guard failure even where the operator never set ZAN_RT_HARD=1 (audit D7:
+ * soft mode's "log + continue with a default value" is a deployment choice,
+ * not a property of every binary). The env var still wins when the operator
+ * explicitly sets it to 0, keeping an escape hatch without a rebuild. */
+void zan_rt_set_strict(void) { g_soft_strict = 1; }
 
 /* Scratch substitute for a null base on the soft path (see rt_timer.h). */
 static unsigned char g_soft_scratch[256];

@@ -440,6 +440,11 @@ struct zan_irgen {
     LLVMValueRef fn_report_leaks; /* void __zan_report_leaks(void) */
     const char  *src_file;        /* source path, for runtime diagnostics */
     bool         runtime_checks;  /* insert div-by-zero (etc.) guards; default true */
+    bool         strict_runtime;  /* --strict-runtime: main() marks the program
+                                   * fail-fast at startup (equivalent to the
+                                   * operator setting ZAN_RT_HARD=1), so soft
+                                   * guards exit(70) instead of logging and
+                                   * continuing with a default value */
     bool         check_leaks;     /* emit a leak report at program exit */
     bool         arc_guard;       /* quarantine freed objects/strings and trap
                                    * any later retain/release of them

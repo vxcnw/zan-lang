@@ -1638,6 +1638,7 @@ static void print_usage(void) {
     fprintf(stderr, "  --arc-guard     Quarantine freed objects and trap stale retain/release (default with -g)\n");
     fprintf(stderr, "  --no-check-leaks, --no-arc-guard  Turn those off in a debug build\n");
     fprintf(stderr, "  --no-runtime-checks  Disable runtime guards (e.g. division by zero)\n");
+    fprintf(stderr, "  --strict-runtime  Guard failures exit(70) without ZAN_RT_HARD=1\n");
     fprintf(stderr, "  --publish        Build optimized release binary (strip debug, optimize)\n");
     fprintf(stderr, "  --async-workers, --mt  Run async programs on the multi-worker coroutine\n");
     fprintf(stderr, "                   scheduler (worker count from ZAN_CO_WORKERS)\n");
@@ -1831,6 +1832,12 @@ int main(int argc, char **argv) {
     int check_leaks_opt = -1;
     int arc_guard_opt = -1;
     bool runtime_checks = true;
+    /* --strict-runtime: bake guard hard mode into the emitted program, so a
+     * guard failure exits(70) at runtime regardless of the ZAN_RT_HARD env
+     * var (audit D7-family: the soft default "log and continue with a
+     * default value" keeps services alive but feeds production data through
+     * a corrupted value; a binary that prefers fail-fast opts in here). */
+    bool strict_runtime = false;
     bool publish_mode = false;
     bool debug_info = false; /* -g / --debug: emit DWARF for source debugging */
     bool mt_scheduler = false;
@@ -1895,6 +1902,8 @@ int main(int argc, char **argv) {
             arc_guard_opt = 0;
         } else if (strcmp(argv[i], "--no-runtime-checks") == 0) {
             runtime_checks = false;
+        } else if (strcmp(argv[i], "--strict-runtime") == 0) {
+            strict_runtime = true;
         } else if (strcmp(argv[i], "--publish") == 0) {
             publish_mode = true;
         } else if (strcmp(argv[i], "-g") == 0 || strcmp(argv[i], "--debug") == 0) {
@@ -2615,6 +2624,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     irgen.emit_debug = debug_info;
+    irgen.strict_runtime = strict_runtime;
     /* Split guard reports (shared message globals + zan_rt_soft_note2) need
      * the runtime to actually export zan_rt_soft_note2. Host builds link the
      * runtime object built from source alongside zanc, so they always have

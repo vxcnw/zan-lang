@@ -132,6 +132,17 @@ static void emit_main_method(zan_irgen_t *g, zan_ast_node_t *method, zan_symbol_
 
     g->current_fn = main_fn;
     g->current_fn_ret_type = LLVMInt32TypeInContext(g->ctx);
+    /* --strict-runtime: mark this binary fail-fast before any user code runs,
+     * so a guard failure exits(70) even without ZAN_RT_HARD=1 in the
+     * environment (the env var still overrides when explicitly set to 0) */
+    if (g->strict_runtime) {
+        LLVMTypeRef strict_ty = LLVMFunctionType(LLVMVoidTypeInContext(g->ctx),
+                                                 NULL, 0, 0);
+        LLVMValueRef strict_fn = LLVMGetNamedFunction(g->mod, "zan_rt_set_strict");
+        if (!strict_fn)
+            strict_fn = LLVMAddFunction(g->mod, "zan_rt_set_strict", strict_ty);
+        zan_call2(g->builder, strict_ty, strict_fn, NULL, 0, "");
+    }
     g->throw_locals_base = 0;
     g->catch_cleanup_count = 0;
     g->throw_catch_base = 0;

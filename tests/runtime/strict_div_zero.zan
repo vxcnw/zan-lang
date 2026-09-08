@@ -1,0 +1,13 @@
+// 回归(D7 族):--strict-runtime 编译旗标把守卫失败从软失败(打日志+
+// 带默认值继续)升级为 exit(70)。run_runtime_error.cmake 编译时附加
+// --strict-runtime(ZANC_ARGS),程序运行即 fail-fast,无需环境变量。
+using System;
+namespace Conf;
+
+class Program {
+    static void Main() {
+        Console.WriteLine("before");
+        int y = 10 / 0;
+        Console.WriteLine("after " + y);
+    }
+}

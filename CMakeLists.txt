@@ -3147,6 +3147,23 @@ foreach(_runtime_case IN ITEMS
   set_tests_properties(runtime_${_runtime_case} PROPERTIES TIMEOUT 60)
 endforeach()
 
+# --strict-runtime (audit D7-family): the flag must bake fail-fast into the
+# binary itself — the same div-zero program exits 70 with NO ZAN_RT_HARD env
+# var when compiled with the flag (STRICT=1 runs the harness without setting
+# it), while the plain runtime_div_zero case above keeps pinning the env-var
+# contract on the default (soft) build.
+if(EXISTS "${CMAKE_SOURCE_DIR}/tests/runtime/strict_div_zero.zan")
+  add_test(NAME runtime_strict_div_zero
+    COMMAND ${CMAKE_COMMAND}
+      -DZANC=$<TARGET_FILE:zanc>
+      -DSRC=${CMAKE_SOURCE_DIR}/tests/runtime/strict_div_zero.zan
+      -DOUT_EXE=${CMAKE_BINARY_DIR}/runtime_strict_div_zero${_exe_ext}
+      "-DEXPECT_REGEX=division by zero"
+      -DSTRICT=1
+      -P ${CMAKE_SOURCE_DIR}/tests/run_runtime_error.cmake)
+  set_tests_properties(runtime_strict_div_zero PROPERTIES TIMEOUT 60)
+endif()
+
 # ---- Golden compiler regression tests ----
 # Freeze the lexer token stream and parse tree for a set of hermetic (stdlib-free)
 # .zan inputs so any lexer/parser/AST regression is caught in CI on every
