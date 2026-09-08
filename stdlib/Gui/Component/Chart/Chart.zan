@@ -3031,11 +3031,12 @@ class Chart {
         // 网格线仍随 splitLine 语义保留。
         bool y0Show = y0.show;
         bool x0Show = x0.show;
-        // ECharts 2 数值轴默认 splitArea.show=true：相邻刻度之间
-        // 交替底纹（color[0] 轻、color[1] 重）。对白底取 3%/5.5%
-        // 黑的 alpha 叠加，视觉即参照站的 #F7F7F7/#F2F2F2。
-        // 类目 Y（轴互换）与对数轴不画。
-        if (grid && !catY && !leftLog && y0.type == ChartAxisType.Value
+        // ECharts splitArea.show：相邻刻度交替底纹。2.2 数值轴默
+        // 认开、5.x 默认关——引擎字段随 5.x 默认 false，按轴打开。
+        // 对白底取 3%/5.5% 黑的 alpha 叠加，视觉即参照站的
+        // #F7F7F7/#F2F2F2。类目 Y（轴互换）与对数轴不画。
+        if (grid && y0.splitArea && !catY && !leftLog
+            && y0.type == ChartAxisType.Value
             && plotW > 0 && plotH > 0) {
             int sSpan = leftTickHi - leftTickLo;
             for (int sk = 0; sk < ticks; sk = sk + 1) {
