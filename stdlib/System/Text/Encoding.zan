@@ -123,6 +123,89 @@ class Encoding {
         return (int)strlen(text);
     }
 
+    /// <summary>UTF-8 编码入口（C# Encoding.UTF8 的对应形态）。
+    /// Zan 字符串本身就是 UTF-8 字节串，因此编码即原样拷贝，
+    /// 解码即校验/清洗后原样还原。</summary>
+    static Encoding UTF8 {
+        get {
+            Encoding e = new Encoding();
+            return e;
+        }
+    }
+
+    /// <summary>把字符串编码为 UTF-8 字节（等价 s.ToBytes()，null 收敛为
+    /// 空串）。返回的 byte[] 长度即字节数。</summary>
+    static byte[] GetBytes(string text) {
+        if (text == null) { text = ""; }
+        return text.ToBytes();
+    }
+
+    /// <summary>把 UTF-8 字节解码为字符串：从 <paramref name="offset"/>
+    /// 起取 <paramref name="count"/> 个字节。非法字节序列（截断的多字节
+    /// 头、10xxxxxx 续字节落单）逐个替换为 U+FFFD，与 C#
+    /// Encoding.UTF8.GetString 的宽松替换行为一致，绝不产生越界读取。
+    /// count 会被夹进 [0, 剩余字节]，负 offset 收敛为 0。</summary>
+    static string GetString(byte[] bytes, int offset, int count) {
+        if (bytes == null) { return ""; }
+        int alen = bytes.Length;
+        if (offset < 0) { offset = 0; }
+        if (offset > alen) { offset = alen; }
+        int avail = alen - offset;
+        if (count < 0) { count = 0; }
+        if (count > avail) { count = avail; }
+        StringBuilder sb = new StringBuilder();
+        int i = offset;
+        int end = offset + count;
+        while (i < end) {
+            int b0 = bytes[i] & 255;
+            if (b0 < 128) {                       // 0xxxxxxx：单字节
+                sb.Append(bytes.ToStr(i, 1));
+                i = i + 1;
+                continue;
+            }
+            int need = 0;                          // 首字节后还需要的续字节数
+            int cp = 0;
+            if (b0 >= 194 && b0 <= 223) { need = 1; cp = b0 & 31; }
+            else if (b0 >= 224 && b0 <= 239) { need = 2; cp = b0 & 15; }
+            else if (b0 >= 240 && b0 <= 244) { need = 3; cp = b0 & 7; }
+            if (need == 0 || i + need > end - 1) {
+                // 非法首字节，或序列尾部越出窗口（end 是开区间）：替换字符
+                sb.Append(Utf8FromCodePoint(65533));
+                i = i + 1;
+                continue;
+            }
+            int k = 1;
+            bool bad = false;
+            while (k <= need) {
+                int bx = bytes[i + k] & 255;
+                if ((bx & 192) != 128) { bad = true; break; }
+                cp = (cp << 6) | (bx & 63);
+                k = k + 1;
+            }
+            if (bad) {
+                sb.Append(Utf8FromCodePoint(65533));
+                i = i + 1;
+                continue;
+            }
+            // 过短编码（如 2 字节编码 < 128）按 C# 语义仍替换
+            int min = need == 1 ? 128 : (need == 2 ? 2048 : 65536);
+            if (cp < min) {
+                sb.Append(Utf8FromCodePoint(65533));
+                i = i + 1;
+                continue;
+            }
+            sb.Append(bytes.ToStr(i, need + 1));
+            i = i + need + 1;
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>GetString(bytes, 0, bytes.Length) 的便捷形态。</summary>
+    static string GetString(byte[] bytes) {
+        if (bytes == null) { return ""; }
+        return GetString(bytes, 0, bytes.Length);
+    }
+
     /// <summary>将字节值转换为十六进制字符串（两个字符）。</summary>
     static string ByteToHex(int b) {
         string hex = "0123456789abcdef";
