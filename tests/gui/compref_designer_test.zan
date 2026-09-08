@@ -142,6 +142,13 @@ class CompRefDesignerTest {
         Ok("unpacked design has no ref",
             fs3 == null || fs3.At(0).Str("ref", "") == "");
 
+        // ---- double-click open request: one-shot, names the component ----
+        Ok("no open request initially", d.ConsumeOpenComponent() == "");
+        d.openCompRequested = true;
+        d.openCompName = "BadgeCard";
+        Eq("consume open component", d.ConsumeOpenComponent(), "BadgeCard");
+        Ok("consume is one-shot", d.ConsumeOpenComponent() == "");
+
         if (fails == 0) { Console.WriteLine("COMPREF_DESIGNER_OK"); }
     }
 }

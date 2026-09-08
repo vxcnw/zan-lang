@@ -320,6 +320,12 @@ partial class Designer {
     List<Input> compPropInputs;
     List<string> compPropShadow;
 
+    // 画布双击引用节点的开门请求：宿主轮询 ConsumeOpenComponent，
+    // 打开 components/<名>.zcomp 文档本身供编辑（组件的一等
+    // 编辑入口，与「保存为组件」对称）。
+    bool openCompRequested;
+    string openCompName;
+
     /// 切换被设计窗口的布局模型。宿主在打开一份设计时
     /// 调用（.zform 里存了 layoutMode），设计器自己不提供
     /// 切换命令：两种布局不共享坐标，来回切会丢摆放。
@@ -480,6 +486,8 @@ partial class Designer {
         this.compPropEditFor = "";
         this.compPropInputs = new List<Input>();
         this.compPropShadow = new List<string>();
+        this.openCompRequested = false;
+        this.openCompName = "";
     }
 
     /// 把工具箱滚到末尾。
@@ -618,6 +626,16 @@ partial class Designer {
     /// 表单名称输入框的当前文本（宿主保存组件时用作文件名）。
     string FormNameText() {
         return formNameInput.GetText();
+    }
+
+    /// 双击引用节点后恰好返回一次组件名（"" 表示无请求）；宿主
+    /// 打开 components/<名>.zcomp 文档本身供编辑。
+    string ConsumeOpenComponent() {
+        if (openCompRequested) {
+            openCompRequested = false;
+            return openCompName;
+        }
+        return "";
     }
 
     /// 在表单上放置一个已保存用户组件的**引用**节点：.zform 里

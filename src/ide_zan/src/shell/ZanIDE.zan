@@ -892,6 +892,20 @@ partial class ZanIDE {
                     log.Add("> Saved component -> " + compPath + ".");
                     app.RequestRedraw();
                 }
+                // Double-clicking a reference node in the canvas asks the
+                // host to open the component document itself: one .zcomp tab
+                // (designer-hosted, same as the save path above) is the
+                // component's first-class editing surface.
+                string openComp = formDesigner.ConsumeOpenComponent();
+                if (openComp != "") {
+                    string compPath = root + "/components/" + openComp + ".zcomp";
+                    if (File.Exists(compPath)) {
+                        ZanIDE.OpenPath(tabs, activeTab, compPath, openComp);
+                    } else {
+                        log.Add("> Component file missing: " + compPath + ".");
+                        app.RequestRedraw();
+                    }
+                }
             } else if (sceneMode) {
                 // The .zscene tab hosts the free-canvas game scene designer
                 // (stdlib Game.Scene.SceneDesigner). The .zscene file stores
