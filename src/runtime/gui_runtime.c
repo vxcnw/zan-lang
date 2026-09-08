@@ -40,7 +40,7 @@
 /* X11 headers back the native Linux window shell; the unified SDL backend
  * (ZAN_GUI_SDL) owns windowing instead, so they are not needed (and the build
  * need not depend on libX11-dev) in that configuration. */
-#if !defined(ZAN_GUI_SDL) && !defined(ZAN_GUI_OHOS)
+#if !defined(ZAN_GUI_SDL) && !defined(ZAN_GUI_OHOS) && !defined(__ANDROID__)
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
@@ -3978,6 +3978,8 @@ static inline int zan_gui_in_hit_guard(iptr hwnd, int x, int y) {
 #include "gui_runtime_sdl.c"
 #elif defined(ZAN_GUI_OHOS)
 #include "gui_runtime_ohos.c"
+#elif defined(ZAN_GUI_ANDROID_NATIVE)
+#include "gui_runtime_android_native.c"
 #else
 #include "gui_runtime_x11.c"
 #endif

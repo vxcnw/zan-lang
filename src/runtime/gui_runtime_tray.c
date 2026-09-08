@@ -23,7 +23,7 @@
  *                -1           the tray was stopped / the manager vanished
  */
 
-#if defined(__linux__) && !defined(ZAN_GUI_SDL)
+#if defined(__linux__) && !defined(ZAN_GUI_SDL) && !defined(__ANDROID__)
 
 #include <pthread.h>
 

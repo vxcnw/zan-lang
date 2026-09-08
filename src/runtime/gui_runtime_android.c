@@ -20,6 +20,14 @@
 
 #include <errno.h>
 #include <jni.h>
+#if !defined(ZAN_GUI_SDL)
+/* NativeActivity shell: the bridge reaches the JVM through the activity the
+ * glue recorded instead of SDL's helpers (which don't exist in this build). */
+static JNIEnv *zan_anw_bridge_env(void);
+static jobject  zan_anw_bridge_activity(void);
+#define SDL_GetAndroidJNIEnv()  ((JNIEnv *)zan_anw_bridge_env())
+#define SDL_GetAndroidActivity() (zan_anw_bridge_activity())
+#endif
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>

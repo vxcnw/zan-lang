@@ -4369,9 +4369,37 @@ int main(int argc, char **argv) {
                     { size_t cur = strlen(cmd);
                       snprintf(cmd + cur, sizeof(cmd) - cur,
                                " \"%s/libc.so\" \"%s/libm.so\""
-                               " \"%s/liblog.so\" \"%s/libdl.so\""
+                               " \"%s/liblog.so\" \"%s/libdl.so\"",
+                               sys3, sys3, sys3, sys3); }
+                    /* NativeActivity shell support: the glue object
+                     * (NDK's android_native_app_glue, providing
+                     * ANativeActivity_onCreate and the android_main
+                     * that calls the module's main) links whenever the
+                     * staged shell exists, in both link flavors -- SDL
+                     * builds simply never call it, and the module
+                     * carries both entries. libandroid
+                     * (ANativeWindow/ANativeActivity/ALooper/
+                     * AInputQueue), libEGL and libGLESv2 (the EGL
+                     * present path) go on as sysroot stubs so the
+                     * dlopened library records its full dependency
+                     * group, the same policy as the OHOS branch below
+                     * (libc etc. stay explicit above). */
+                    {
+                        char glue[1400];
+                        snprintf(glue, sizeof(glue),
+                                 "%s/android_native_app_glue.o", sys3);
+                        if (zan_file_exists(glue)) {
+                            size_t cur = strlen(cmd);
+                            snprintf(cmd + cur, sizeof(cmd) - cur,
+                                     " \"%s/libandroid.so\" \"%s/libEGL.so\""
+                                     " \"%s/libGLESv2.so\" \"%s\"",
+                                     sys3, sys3, sys3, glue);
+                        }
+                    }
+                    { size_t cur = strlen(cmd);
+                      snprintf(cmd + cur, sizeof(cmd) - cur,
                                " \"%s/libclang_rt.builtins.a\"",
-                               sys3, sys3, sys3, sys3, sys3); }
+                               sys3); }
                     if (getenv("ZAN_VERBOSE_LINK"))
                         fprintf(stderr, "[link] %s\n", cmd);
                     link_ret = system(cmd);
@@ -4828,9 +4856,11 @@ int main(int argc, char **argv) {
                   snprintf(cmd + cur, sizeof(cmd) - cur,
                            " --end-group \"%s/libc.so\" \"%s/libm.so\""
                            " \"%s/liblog.so\" \"%s/libdl.so\""
+                           " \"%s/libandroid.so\" \"%s/libEGL.so\""
+                           " \"%s/libGLESv2.so\""
                            " \"%s/crtend_android.o\""
                            " \"%s/libclang_rt.builtins.a\"",
-                           sys, sys, sys, sys, sys, sys);
+                           sys, sys, sys, sys, sys, sys, sys, sys, sys);
               } else {
                   snprintf(cmd + cur, sizeof(cmd) - cur,
                            " --end-group \"%s/libdl.a\" \"%s/crtend_android.o\""
