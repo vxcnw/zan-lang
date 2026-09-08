@@ -336,7 +336,7 @@ partial class ChartView {
                 int val = s.Value(oi);
                 int px = s.type == ChartType.Bar ? f.CatMid(vi, n)
                     : f.CatX(vi, n);
-                int py = f.YOf(val * g / 1000, ax);
+                int py = f.YOf((int)((long)val * g / 1000L), ax);
                 bool inside = false;
                 int d2 = 0;
                 ChartElementType et = ChartElementType.ScatterPoint;
@@ -487,7 +487,7 @@ partial class ChartView {
                         int bx0 = (cellW - bw) / 2;
                         int oi = i0 + bi;
                         if (oi >= s.Count()) { continue; }
-                        int v = s.Value(oi) * g / 1000;
+                        int v = (int)((long)s.Value(oi) * g / 1000L);
                         int col = s.color;
                         if (oi < s.data.Count && s.data[oi].color != 0) { col = s.data[oi].color; }
                         if (gi < 0) {
@@ -510,7 +510,7 @@ partial class ChartView {
                     for (int sp = 0; sp < n; sp = sp + 1) {
                         int oi = i0 + sp;
                         if (oi >= s.Count()) { continue; }
-                        int v = s.Value(oi) * g / 1000;
+                        int v = (int)((long)s.Value(oi) * g / 1000L);
                         int px2 = f.CatX(sp, n);
                         int py2 = f.YOf(v, ax);
                         int scol = drawColor;
@@ -542,7 +542,7 @@ partial class ChartView {
                         }
                         if (oi >= s.Count()) { continue; }
                         if (geoMode == 2) {
-                            pxs.Add(f.XOfValue(s.Value(oi) * g / 1000));
+                            pxs.Add(f.XOfValue((int)((long)s.Value(oi) * g / 1000L)));
                             pys.Add(f.CatMidY(j, n));
                         } else {
                             pxs.Add(f.CatX(j, n));
@@ -551,7 +551,7 @@ partial class ChartView {
                             // YOfF 回落原 int 映射。
                             double dv = s.Number(oi);
                             int vF = (int)(dv * 1000 + (dv >= 0 ? 0.5 : 0 - 0.5));
-                            pys.Add(f.YOfF(vF * g / 1000, ax));
+                            pys.Add(f.YOfF((int)((long)vF * g / 1000L), ax));
                         }
                         gaps.Add(oi < s.data.Count && s.data[oi].gap);
                     }
@@ -931,15 +931,18 @@ partial class ChartView {
                     int val = 0;
                     if (oi < s.Count()) { val = s.Value(oi); }
                     if (stacked) {
-                        int cumG = (prev + val) * g / 1000;
-                        int prevG = prev * g / 1000;
-                        topY.Add(f.plotY + f.plotH - (cumG * f.plotH / maxV));
-                        botY.Add(f.plotY + f.plotH - (prevG * f.plotH / maxV));
+                        int cumG = (int)((long)(prev + val) * g / 1000L);
+                        int prevG = (int)((long)prev * g / 1000L);
+                        topY.Add(f.plotY + f.plotH
+                            - (int)((long)cumG * f.plotH / maxV));
+                        botY.Add(f.plotY + f.plotH
+                            - (int)((long)prevG * f.plotH / maxV));
                         topYFx.Add(f.YOfFx(cumG, 0));
                         botYFx.Add(f.YOfFx(prevG, 0));
                     } else {
-                        int absG = val * g / 1000;
-                        topY.Add(f.plotY + f.plotH - (absG * f.plotH / maxV));
+                        int absG = (int)((long)val * g / 1000L);
+                        topY.Add(f.plotY + f.plotH
+                            - (int)((long)absG * f.plotH / maxV));
                         botY.Add(f.plotY + f.plotH);
                         topYFx.Add(f.YOfFx(absG, 0));
                         botYFx.Add((f.plotY + f.plotH) * 256);

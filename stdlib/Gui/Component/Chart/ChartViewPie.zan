@@ -1489,8 +1489,8 @@ partial class ChartView {
             int nextIdx = idx + 1;
             if (pyramid) { nextIdx = idx - 1; }
             if (nextIdx >= 0 && nextIdx < n) { vBot = stages[nextIdx].val; }
-            int wTop = vTop * maxW / maxV * g / 1000;
-            int wBot = vBot * maxW / maxV * g / 1000;
+            int wTop = (int)((long)vTop * maxW * g / ((long)maxV * 1000L));
+            int wBot = (int)((long)vBot * maxW * g / ((long)maxV * 1000L));
             int ry = top + i2 * rowH;
             int col = stages[idx].color;
             int strip = rowH - gapPx;

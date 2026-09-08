@@ -844,11 +844,12 @@ partial class ChartView {
         List<int> ly = new List<int>();
         for (int k = 0; k < n; k = k + 1) {
             int cx = f.CatMid(k, n);
-            int vy = f.plotY + f.plotH - (es[k].y * g / 1000 * f.plotH / nice);
+            int vy = f.plotY + f.plotH
+                - (int)((long)es[k].y * g * f.plotH / (1000L * nice));
             int eTop = f.plotY + f.plotH
-                - ((es[k].y + es[k].err) * g / 1000 * f.plotH / nice);
+                - (int)((long)(es[k].y + es[k].err) * g * f.plotH / (1000L * nice));
             int eBot = f.plotY + f.plotH
-                - ((es[k].y - es[k].err) * g / 1000 * f.plotH / nice);
+                - (int)((long)(es[k].y - es[k].err) * g * f.plotH / (1000L * nice));
             c.DrawLine(cx, eTop, cx, eBot,
                 Chart.WithAlpha(color, 160 * revealAlpha / 255), app.Scale(1));
             c.DrawLine(cx - app.Scale(4), eTop, cx + app.Scale(4), eTop,

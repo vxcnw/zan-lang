@@ -245,8 +245,8 @@ class ChartBig {
             List<int> ly = new List<int>();
             for (int cc = 0; cc < cn; cc = cc + 1) {
                 int px = plotX + cc * plotW / cn;
-                int vTop = mx[cc] * g / 1000;
-                int vBot = mn[cc] * g / 1000;
+                int vTop = (int)((long)mx[cc] * g / 1000L);
+                int vBot = (int)((long)mn[cc] * g / 1000L);
                 // 大数据量程大，(v - lo) × plotH 会超 int32，乘法走 long。
                 int yTop = plotY + plotH - (int)(((long)vTop - (long)st.axisLo) * (long)plotH / (long)span);
                 int yBot = plotY + plotH - (int)(((long)vBot - (long)st.axisLo) * (long)plotH / (long)span);

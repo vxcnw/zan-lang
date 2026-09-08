@@ -199,8 +199,10 @@ partial class ChartView {
                         // 下方生长；正值段照旧从正累加器顶向上。
                         bool segNeg = vF < 0;
                         int segBase = segNeg ? negAccs[gi] : accs[gi];
-                        int yTop = f.YOfF((segBase + vF) * g / 1000, 0);
-                        int yBot = f.YOfF(segBase * g / 1000, 0);
+                        // vF 是 ×1000 定点，堆叠和可达 2.9e6 量级，
+                        // ×g(0..1000) 必超 int32——乘法全程 long。
+                        int yTop = f.YOfF((int)((long)(segBase + vF) * (long)g / 1000L), 0);
+                        int yBot = f.YOfF((int)((long)segBase * (long)g / 1000L), 0);
                         int segH = yBot - yTop;
                         int segY0 = yTop < yBot ? yTop : yBot;
                         int segY1 = yTop < yBot ? yBot : yTop;
@@ -316,7 +318,7 @@ partial class ChartView {
                         lpx.Add(f.CatMid(oi2, n));
                         double dvO = s.Number(oi3);
                         int vFo = (int)(dvO * 1000.0 + (dvO >= 0 ? 0.5 : 0 - 0.5));
-                        lpy.Add(f.YOfF(vFo * g / 1000, s.axisIndex));
+                        lpy.Add(f.YOfF((int)((long)vFo * g / 1000L), s.axisIndex));
                     }
                     bool smooth = o.smooth;
                     if (s.smooth == 1) { smooth = true; } else if (s.smooth == 0) { smooth = false; }
@@ -420,7 +422,7 @@ partial class ChartView {
                             lpx.Add(f.CatMid(li, n));
                             double dvL = s.Number(oiL);
                             int vFL = (int)(dvL * 1000.0 + (dvL >= 0 ? 0.5 : 0 - 0.5));
-                            lpy.Add(f.YOfF(vFL * g / 1000, ax));
+                            lpy.Add(f.YOfF((int)((long)vFL * g / 1000L), ax));
                         }
                         bool smooth = o.smooth;
                         if (s.smooth == 1) { smooth = true; } else if (s.smooth == 0) { smooth = false; }
@@ -440,7 +442,7 @@ partial class ChartView {
                             double dvS2 = s.Number(oiS);
                             int vFS = (int)(dvS2 * 1000.0 + (dvS2 >= 0 ? 0.5 : 0 - 0.5));
                             int px2 = f.CatMid(sp, n);
-                            int py2 = f.YOfF(vFS * g / 1000, ax);
+                            int py2 = f.YOfF((int)((long)vFS * g / 1000L), ax);
                             int scol = s.color;
                             if (oiS < s.data.Count && s.data[oiS].color != 0) { scol = s.data[oiS].color; }
                             Chart.DrawSymbol(c, px2, py2,
@@ -468,7 +470,7 @@ partial class ChartView {
                         // 序列颜色 —— ECharts 的三级颜色控制。
                         int col = s.color;
                         if (oi < s.data.Count && s.data[oi].color != 0) { col = s.data[oi].color; }
-                        int by = f.YOfF(vF * g / 1000, ax);
+                        int by = f.YOfF((int)((long)vF * g / 1000L), ax);
                             int cellL = f.CatLeft(i, n);
                             int cellW = f.CatWidth(i, n);
                             int g0 = (cellW - groupW) / 2;
@@ -578,6 +580,21 @@ partial class ChartView {
                                 if ((o.showValues || s.labelShow) && vF > 0) {
                                     string lbl = ChartView.LabelText(s, oi,
                                         winLabels[i], s.Value(oi));
+                                    // ECharts label.rotate（bar-label-rotation
+                                    // insideBottom + rotate 90）：标签整体旋转、
+                                    // 锚在柱内底缘水平居中。DrawTextRot 顺时针
+                                    // 为正、ECharts 正值逆时针 → 取反传入；柱内
+                                    // 高度放不下整条标签时跳过（防挤压）。
+                                    if (s.labelRotate != 0) {
+                                        int rlw = Canvas.MeasureText(lbl, valFs);
+                                        int rfh = Canvas.FontHeight(valFs);
+                                        if (rlw + app.Scale(6) <= bh && rfh <= barW) {
+                                            int rx = bx + (barW - rfh) / 2;
+                                            int ry = by + bh - app.Scale(4);
+                                            c.DrawTextRot(rx, ry, lbl, valCol,
+                                                valFs, 0 - s.labelRotate);
+                                        }
+                                    } else {
                                     int lw = Canvas.MeasureText(lbl, valFs);
                                     int lx = bx + (barW - lw) / 2;
                                     if (lx < f.plotX) { lx = f.plotX; }
@@ -592,6 +609,7 @@ partial class ChartView {
                                         pInk = Chart.ContrastFg(fillC);
                                     }
                                     c.DrawText(lx, ly, lbl, pInk, valFs);
+                                    }
                                 }
                             }
                         }
@@ -721,7 +739,7 @@ partial class ChartView {
         if (s.label.color != 0) { valCol = s.label.color; }
         for (int j = i0; j <= i1 && j < s.points.Count; j = j + 1) {
             int xv = s.points[j].x;
-            int yv = s.points[j].y * g / 1000;
+            int yv = (int)((long)s.points[j].y * g / 1000L);
             int col = s.color;
             if (s.points[j].color != 0) { col = s.points[j].color; }
             int px = f.XOfValue(xv);
@@ -1045,9 +1063,10 @@ partial class ChartView {
                         if (sdi < sc.Count()) {
                             if (vFrac) {
                                 double dvH = sc.Number(sdi);
-                                v = (int)(dvH * 1000.0 + (dvH >= 0 ? 0.5 : 0 - 0.5)) * g / 1000;
+                                v = (int)((long)(int)(dvH * 1000.0
+                                    + (dvH >= 0 ? 0.5 : 0 - 0.5)) * g / 1000L);
                             } else {
-                                v = sc.Value(sdi) * g / 1000;
+                                v = (int)((long)sc.Value(sdi) * g / 1000L);
                             }
                         }
                         bool segNeg = v < 0;
@@ -1177,9 +1196,10 @@ partial class ChartView {
                     if (ndi < series[si].Count()) {
                         if (vFrac) {
                             double dvHG = series[si].Number(ndi);
-                            v = (int)(dvHG * 1000.0 + (dvHG >= 0 ? 0.5 : 0 - 0.5)) * g / 1000;
+                            v = (int)((long)(int)(dvHG * 1000.0
+                                + (dvHG >= 0 ? 0.5 : 0 - 0.5)) * g / 1000L);
                         } else {
-                            v = series[si].Value(ndi) * g / 1000;
+                            v = (int)((long)series[si].Value(ndi) * g / 1000L);
                         }
                     }
                     int x1 = Chart.ValueX(plotX, plotW, lo, hi, v);
