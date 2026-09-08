@@ -319,14 +319,36 @@ static void emit_eh_propagate_tail(zan_irgen_t *g) {
             zan_call2(g->builder, printf_ty, printf_fn, sargs, 2, "");
         }
         LLVMBuildBr(g->builder, reh_cont_bb);
-        /* class throw: name the category, the object is opaque here */
+        /* class throw: resolve the class name through the tid-name registry
+         * (walks the thrown descriptor's base chain) and print it; fall back
+         * to the old "(class object)" note when the class is not registered */
         LLVMPositionBuilderAtEnd(g->builder, reh_cls_bb);
         {
+            LLVMValueRef name_fn = get_eh_tid_name_fn(g);
+            LLVMValueRef cname = zan_call2(g->builder,
+                LLVMFunctionType(i8ptr, (LLVMTypeRef[]){ i8ptr }, 1, 0),
+                name_fn, (LLVMValueRef[]){ tid }, 1, "reh.cname");
+            LLVMValueRef found = zan_icmp(g->builder, LLVMIntNE, cname,
+                LLVMConstNull(i8ptr), "reh.cfound");
+            LLVMBasicBlockRef named_bb =
+                LLVMAppendBasicBlockInContext(g->ctx, fn, "reh.named");
+            LLVMBasicBlockRef anon_bb =
+                LLVMAppendBasicBlockInContext(g->ctx, fn, "reh.anon");
+            LLVMBuildCondBr(g->builder, found, named_bb, anon_bb);
+            LLVMPositionBuilderAtEnd(g->builder, named_bb);
+            {
+                LLVMValueRef cfmt2 = zan_irgen_intern_string(g,
+                    "Unhandled exception: %s\n");
+                LLVMValueRef cargs[2] = { cfmt2, cname };
+                zan_call2(g->builder, printf_ty, printf_fn, cargs, 2, "");
+            }
+            LLVMBuildBr(g->builder, reh_cont_bb);
+            LLVMPositionBuilderAtEnd(g->builder, anon_bb);
             LLVMValueRef cfmt = zan_irgen_intern_string(g,
                 "Unhandled exception (class object)\n");
             zan_call2(g->builder, printf_ty, printf_fn, &cfmt, 1, "");
+            LLVMBuildBr(g->builder, reh_cont_bb);
         }
-        LLVMBuildBr(g->builder, reh_cont_bb);
         /* no exception object in flight (internal rethrow miss) */
         LLVMPositionBuilderAtEnd(g->builder, reh_none_bb);
         {
@@ -3041,14 +3063,37 @@ throw_unwind:
                     zan_call2(g->builder, printf_ty, printf_fn, args, 2, "");
                 }
                 LLVMBuildBr(g->builder, die_cont_bb);
+                /* class throw: resolve the class name through the tid-name
+                 * registry and print it; fall back to "(class object)" when
+                 * the class is not registered (same as the propagate tail) */
                 LLVMPositionBuilderAtEnd(g->builder, die_cls_bb);
                 {
+                    LLVMValueRef name_fn = get_eh_tid_name_fn(g);
+                    LLVMValueRef cname = zan_call2(g->builder,
+                        LLVMFunctionType(i8ptr, (LLVMTypeRef[]){ i8ptr }, 1, 0),
+                        name_fn, (LLVMValueRef[]){ dtid }, 1, "die.cname");
+                    LLVMValueRef found = zan_icmp(g->builder, LLVMIntNE, cname,
+                        LLVMConstNull(i8ptr), "die.cfound");
+                    LLVMBasicBlockRef named_bb =
+                        LLVMAppendBasicBlockInContext(g->ctx, fn2, "die.named");
+                    LLVMBasicBlockRef anon_bb =
+                        LLVMAppendBasicBlockInContext(g->ctx, fn2, "die.anon");
+                    LLVMBuildCondBr(g->builder, found, named_bb, anon_bb);
+                    LLVMPositionBuilderAtEnd(g->builder, named_bb);
+                    {
+                        LLVMValueRef fmt2 = zan_irgen_intern_string(g,
+                            "Unhandled exception: %s\n");
+                        LLVMValueRef args2[] = { fmt2, cname };
+                        zan_call2(g->builder, printf_ty, printf_fn, args2, 2, "");
+                    }
+                    LLVMBuildBr(g->builder, die_cont_bb);
+                    LLVMPositionBuilderAtEnd(g->builder, anon_bb);
                     LLVMValueRef fmt = zan_irgen_intern_string(g,
                         "Unhandled exception (class object)\n");
                     LLVMValueRef args[] = { fmt };
                     zan_call2(g->builder, printf_ty, printf_fn, args, 1, "");
+                    LLVMBuildBr(g->builder, die_cont_bb);
                 }
-                LLVMBuildBr(g->builder, die_cont_bb);
                 LLVMPositionBuilderAtEnd(g->builder, die_none_bb);
                 {
                     LLVMValueRef fmt = zan_irgen_intern_string(g,

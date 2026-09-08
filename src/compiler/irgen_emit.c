@@ -2374,6 +2374,41 @@ done:
     /* --publish: emit the .ctors constructor that un-scrambles string literals
      * (no-op unless obfuscation is on and literals were recorded). */
     zan_irgen_emit_string_deobf(g);
+    /* Fill the exception class-name registry: pairs recorded while emitting
+     * throw sites / catch dispatch become a static {tid, name} array the
+     * unhandled-exception reporter matches against, so an uncaught class
+     * throw prints its class name. The registry global is only referenced
+     * when a class throw can reach the reporter, so a program that never
+     * threw a class leaves it unreferenced (and dead) -- the fill below runs
+     * whenever the registry exists, giving it a real (possibly empty,
+     * terminator-only) body; an external global without an initializer would
+     * fail module verification. */
+    if (g->tid_name_reg_global) {
+        LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
+        unsigned n = (unsigned)g->tid_name_count;
+        LLVMTypeRef reg_ty = LLVMArrayType(g->tid_name_reg_ent_ty, n + 1);
+        LLVMValueRef newg = LLVMAddGlobal(g->mod, reg_ty,
+                                          LLVMGetValueName(g->tid_name_reg_global));
+        LLVMSetLinkage(newg, LLVMInternalLinkage);
+        /* swap: the function body indexes through a pointer-typed GEP, so the
+         * array length behind the name doesn't matter to the emitted code */
+        LLVMReplaceAllUsesWith(g->tid_name_reg_global, newg);
+        LLVMDeleteGlobal(g->tid_name_reg_global);
+        g->tid_name_reg_global = newg;
+        LLVMValueRef *elems = zan_arena_alloc(g->arena,
+            (int)(n + 1) * sizeof(LLVMValueRef));
+        LLVMValueRef *fields = zan_arena_alloc(g->arena, 2 * sizeof(LLVMValueRef));
+        for (unsigned i = 0; i < n; i++) {
+            fields[0] = LLVMConstBitCast(g->tid_names[i].tid, i8ptr);
+            fields[1] = zan_irgen_intern_string(g, g->tid_names[i].name);
+            elems[i] = LLVMConstStruct(fields, 2, 0);
+        }
+        fields[0] = LLVMConstNull(i8ptr);
+        fields[1] = LLVMConstNull(i8ptr);
+        elems[n] = LLVMConstStruct(fields, 2, 0); /* terminator */
+        LLVMSetInitializer(newg, LLVMConstArray(g->tid_name_reg_ent_ty,
+                                                elems, (unsigned)(n + 1)));
+    }
     /* An error diagnostic emitted during codegen (e.g. an unsupported await
      * form flagged by the ANF pass) must fail the build — the driver only
      * checks diagnostics before codegen, so surface it here. */

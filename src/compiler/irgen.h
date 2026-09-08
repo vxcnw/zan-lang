@@ -604,6 +604,23 @@ struct zan_irgen {
     } *goto_labels;
     int goto_label_count;
     int goto_label_cap;
+    /* exception class-name registry: one {descriptor address, name} pair per
+     * class that got a __zan_tid_<Class> descriptor. The unhandled-exception
+     * reporter walks the thrown object's descriptor chain and matches
+     * addresses against this table to print the real class name
+     * ("Unhandled exception: FileNotFoundException: msg") instead of an
+     * opaque "(class object)". */
+    struct {
+        LLVMValueRef tid;   /* address of the __zan_tid_<Class> global */
+        const char     *name;
+    } *tid_names;
+    int tid_name_count;
+    int tid_name_cap;
+    /* the registry global + its element struct type, created on first use of
+     * the runtime name lookup; filled from tid_names right before the module
+     * is emitted */
+    LLVMValueRef tid_name_reg_global;
+    LLVMTypeRef  tid_name_reg_ent_ty;
     /* set while emitting an async function's $resume body: the current heap
      * frame pointer and its struct type, so `return` stores into the frame's
      * result slot + notifies the awaiter instead of a plain ret. NULL when not

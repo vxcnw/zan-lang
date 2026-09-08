@@ -2319,7 +2319,11 @@ static LLVMValueRef get_eh_exc_tid_global(zan_irgen_t *g) {
 /* Per-class type descriptor for exception dispatch: an i8* global named
  * __zan_tid_<Class> whose value is the base class's descriptor (or null for
  * a root class). Identity is the descriptor's ADDRESS; the stored pointer
- * links the inheritance chain so `catch (Base b)` matches derived throws. */
+ * links the inheritance chain so `catch (Base b)` matches derived throws.
+ * Every descriptor created here also registers its {address, class name}
+ * pair in g->tid_names: the unhandled-exception reporter matches the thrown
+ * object's descriptor chain against these addresses at RUNTIME (addresses,
+ * not names, survive into the binary) to print the real class name. */
 static LLVMValueRef get_class_tid_global(zan_irgen_t *g, zan_symbol_t *sym) {
     LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
     char name[512];
@@ -2332,6 +2336,17 @@ static LLVMValueRef get_class_tid_global(zan_irgen_t *g, zan_symbol_t *sym) {
     if (sym->type && sym->type->base_type && sym->type->base_type->sym) {
         LLVMValueRef base_tid = get_class_tid_global(g, sym->type->base_type->sym);
         LLVMSetInitializer(v, LLVMConstBitCast(base_tid, i8ptr));
+    }
+    {
+        char *cls = zan_arena_alloc(g->arena, (int)sym->name.len + 1);
+        memcpy(cls, sym->name.str, sym->name.len);
+        cls[sym->name.len] = '\0';
+        if (ZAN_TAB_ENSURE(g->tid_names, g->tid_name_count,
+                           g->tid_name_cap, 16)) {
+            g->tid_names[g->tid_name_count].tid = v;
+            g->tid_names[g->tid_name_count].name = cls;
+            g->tid_name_count++;
+        }
     }
     return v;
 }
@@ -2386,6 +2401,108 @@ static LLVMValueRef get_eh_tid_match_fn(zan_irgen_t *g) {
     LLVMPositionBuilderAtEnd(g->builder, no);
     LLVMBuildRet(g->builder, LLVMConstInt(i1t, 0, 0));
     if (saved) LLVMPositionBuilderAtEnd(g->builder, saved);
+    return fn;
+}
+
+/* i8* __zan_eh_tid_name(i8* thrown): walks the thrown descriptor's base chain
+ * and returns the registered class-name string of the FIRST entry whose
+ * registered descriptor address appears in that chain, or null. The registry
+ * is a static array of {i8* tid, i8* name} pairs grown lazily as classes get
+ * descriptors, terminated by a null tid. This is what makes an uncaught
+ * `throw new FileNotFoundException("x")` print the class name instead of
+ * "(class object)": descriptors are addresses, so the reporter can only
+ * identify a class by matching the thrown chain against the registry. */
+static LLVMValueRef get_eh_tid_name_fn(zan_irgen_t *g) {
+    LLVMValueRef fn = LLVMGetNamedFunction(g->mod, "__zan_eh_tid_name");
+    if (fn) return fn;
+    LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
+    LLVMTypeRef fnty = LLVMFunctionType(i8ptr, (LLVMTypeRef[]){ i8ptr }, 1, 0);
+    fn = LLVMAddFunction(g->mod, "__zan_eh_tid_name", fnty);
+    LLVMSetLinkage(fn, LLVMInternalLinkage);
+    LLVMBasicBlockRef saved = LLVMGetInsertBlock(g->builder);
+    LLVMBasicBlockRef entry = LLVMAppendBasicBlockInContext(g->ctx, fn, "entry");
+    LLVMBasicBlockRef chain = LLVMAppendBasicBlockInContext(g->ctx, fn, "chain");
+    LLVMBasicBlockRef scan = LLVMAppendBasicBlockInContext(g->ctx, fn, "scan");
+    LLVMBasicBlockRef ent = LLVMAppendBasicBlockInContext(g->ctx, fn, "ent");
+    LLVMBasicBlockRef nextc = LLVMAppendBasicBlockInContext(g->ctx, fn, "nextc");
+    LLVMBasicBlockRef yes = LLVMAppendBasicBlockInContext(g->ctx, fn, "yes");
+    LLVMBasicBlockRef no = LLVMAppendBasicBlockInContext(g->ctx, fn, "no");
+    LLVMPositionBuilderAtEnd(g->builder, entry);
+    LLVMValueRef thrown = LLVMGetParam(fn, 0);
+    LLVMValueRef tn = zan_icmp(g->builder, LLVMIntEQ, thrown,
+        LLVMConstNull(i8ptr), "tnull");
+    LLVMBuildCondBr(g->builder, tn, no, chain);
+    /* walk the thrown descriptor's base chain (the descriptor slot itself
+     * holds the base descriptor's address; a root class holds null) */
+    LLVMPositionBuilderAtEnd(g->builder, chain);
+    LLVMValueRef cur = LLVMBuildAlloca(g->builder, i8ptr, "cur");
+    LLVMBuildStore(g->builder, thrown, cur);
+    LLVMBuildBr(g->builder, scan);
+    LLVMPositionBuilderAtEnd(g->builder, scan);
+    LLVMValueRef c = LLVMBuildLoad2(g->builder, i8ptr, cur, "c");
+    LLVMBuildCondBr(g->builder,
+        zan_icmp(g->builder, LLVMIntEQ, c, LLVMConstNull(i8ptr), "cnull"),
+        no, ent);
+    LLVMPositionBuilderAtEnd(g->builder, ent);
+    /* for each registry entry, compare its tid against the current chain
+     * link; entry.tid == NULL terminates the registry */
+    LLVMTypeRef ent_ty = LLVMStructTypeInContext(g->ctx,
+        (LLVMTypeRef[]){ i8ptr, i8ptr }, 2, 0);
+    LLVMTypeRef reg_ty = LLVMArrayType(ent_ty, 0);
+    LLVMValueRef reg = LLVMAddGlobal(g->mod, reg_ty, "__zan_tid_name_reg");
+    LLVMSetLinkage(reg, LLVMInternalLinkage);
+    /* zero-initialized: entry.tid of every pair is null, i.e. a terminated
+     * empty registry -- the fill pass writes real pairs into it */
+    LLVMValueRef idx[2] = { LLVMConstInt(LLVMInt32TypeInContext(g->ctx), 0, 0),
+                            LLVMConstInt(LLVMInt32TypeInContext(g->ctx), 0, 0) };
+    LLVMValueRef reg0 = LLVMBuildInBoundsGEP2(g->builder, reg_ty, reg, idx, 2,
+                                              "reg0");
+    LLVMValueRef slot = LLVMBuildAlloca(g->builder, i8ptr, "slot");
+    LLVMBuildStore(g->builder, LLVMBuildBitCast(g->builder, reg0, i8ptr, "r0"),
+                   slot);
+    LLVMBasicBlockRef tryent = LLVMAppendBasicBlockInContext(g->ctx, fn, "tryent");
+    LLVMBasicBlockRef regnext = LLVMAppendBasicBlockInContext(g->ctx, fn, "regnext");
+    LLVMBasicBlockRef regcheck = LLVMAppendBasicBlockInContext(g->ctx, fn, "regcheck");
+    LLVMBuildBr(g->builder, tryent);
+    LLVMPositionBuilderAtEnd(g->builder, tryent);
+    LLVMValueRef sp = LLVMBuildLoad2(g->builder, i8ptr, slot, "sp");
+    LLVMValueRef entp = LLVMBuildBitCast(g->builder, sp,
+        LLVMPointerType(ent_ty, 0), "entp");
+    LLVMValueRef etidp = LLVMBuildStructGEP2(g->builder, ent_ty, entp, 0, "etidp");
+    LLVMValueRef etid = LLVMBuildLoad2(g->builder, i8ptr, etidp, "etid");
+    LLVMBuildCondBr(g->builder,
+        zan_icmp(g->builder, LLVMIntEQ, etid, LLVMConstNull(i8ptr), "erend"),
+        no, regcheck);
+    LLVMPositionBuilderAtEnd(g->builder, regcheck);
+    LLVMValueRef hit = zan_icmp(g->builder, LLVMIntEQ, c, etid, "hit");
+    LLVMBuildCondBr(g->builder, hit, yes, regnext);
+    LLVMPositionBuilderAtEnd(g->builder, regnext);
+    LLVMValueRef nslot = LLVMBuildGEP2(g->builder, i8ptr, sp,
+        (LLVMValueRef[]){ LLVMConstInt(LLVMInt32TypeInContext(g->ctx), 2, 0) }, 1,
+        "nslot");
+    LLVMBuildStore(g->builder, nslot, slot);
+    LLVMBuildBr(g->builder, tryent);
+    LLVMPositionBuilderAtEnd(g->builder, yes);
+    /* hit: return the pair's name */
+    LLVMValueRef nmp = LLVMBuildStructGEP2(g->builder, ent_ty, entp, 1, "nmp");
+    LLVMValueRef nm = LLVMBuildLoad2(g->builder, i8ptr, nmp, "nm");
+    LLVMBuildRet(g->builder, nm);
+    LLVMPositionBuilderAtEnd(g->builder, nextc);
+    /* step the descriptor chain: load the next link from *cur */
+    {
+        LLVMValueRef cp = LLVMBuildBitCast(g->builder, c,
+            LLVMPointerType(i8ptr, 0), "cp");
+        LLVMValueRef next = LLVMBuildLoad2(g->builder, i8ptr, cp, "next");
+        LLVMBuildStore(g->builder, next, cur);
+        LLVMBuildBr(g->builder, scan);
+    }
+    LLVMPositionBuilderAtEnd(g->builder, no);
+    LLVMBuildRet(g->builder, LLVMConstNull(i8ptr));
+    if (saved) LLVMPositionBuilderAtEnd(g->builder, saved);
+    /* the registry is filled after emission; remember the global and its
+     * element type for the fill pass on the irgen struct */
+    g->tid_name_reg_global = reg;
+    g->tid_name_reg_ent_ty = ent_ty;
     return fn;
 }
 
