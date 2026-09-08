@@ -4,14 +4,16 @@ using Ra2.Formats;
 
 namespace Ra2.Game;
 
-/// <summary>The sides, mirroring the shell's selection. Neutral (2) owns the
-/// map's civilian structures: they can be captured by engineers but never act,
-/// and nobody needs them destroyed to win.</summary>
+/// <summary>The sides, mirroring the shell's selection. Yuri (2) is the
+/// third skirmish side; Neutral (3) owns the map's civilian structures: they
+/// can be captured by engineers but never act, and nobody needs them
+/// destroyed to win.</summary>
 class Side2 {
     static int Allied() { return 0; }
     static int Soviet() { return 1; }
-    static int Neutral() { return 2; }
-    static int Count() { return 2; }
+    static int Yuri() { return 2; }
+    static int Neutral() { return 3; }
+    static int Count() { return 3; }
 }
 
 /// <summary>A built thing in the world: a structure or a movable unit.
@@ -456,6 +458,7 @@ class UnitType {
 class UnitCatalog {
     List<UnitType> allied;
     List<UnitType> soviet;
+    List<UnitType> yuri;
     Rules rules;
 
     /// <summary>The catalog from the transcribed RA2 defaults -- what the
@@ -469,6 +472,7 @@ class UnitCatalog {
         c.rules = rules;
         c.allied = UnitCatalog.BuildSide(rules, Side2.Allied());
         c.soviet = UnitCatalog.BuildSide(rules, Side2.Soviet());
+        c.yuri = UnitCatalog.BuildSide(rules, Side2.Yuri());
         return c;
     }
 
@@ -494,6 +498,7 @@ class UnitCatalog {
     /// <summary>A side's units, in build order.</summary>
     List<UnitType> ListFor(int side) {
         if (side == Side2.Soviet()) { return this.soviet; }
+        if (side == Side2.Yuri()) { return this.yuri; }
         return this.allied;
     }
 
@@ -607,6 +612,7 @@ class StructureType {
 class StructureCatalog {
     List<StructureType> allied;
     List<StructureType> soviet;
+    List<StructureType> yuri;
     List<StructureType> civ;
     Rules rules;
 
@@ -621,6 +627,7 @@ class StructureCatalog {
         c.rules = rules;
         c.allied = StructureCatalog.BuildSide(rules, Side2.Allied());
         c.soviet = StructureCatalog.BuildSide(rules, Side2.Soviet());
+        c.yuri = StructureCatalog.BuildSide(rules, Side2.Yuri());
         c.civ = StructureCatalog.BuildCiv(rules);
         return c;
     }
@@ -661,6 +668,7 @@ class StructureCatalog {
     /// <summary>A side's structures, in build order.</summary>
     List<StructureType> ListFor(int side) {
         if (side == Side2.Soviet()) { return this.soviet; }
+        if (side == Side2.Yuri()) { return this.yuri; }
         return this.allied;
     }
 
@@ -748,6 +756,7 @@ class World {
         w.effects = new List<int>();
         w.events = new List<int>();
         w.blackout = new List<int>();
+        w.blackout.Add(0);
         w.blackout.Add(0);
         w.blackout.Add(0);
         w.occupancy = new int[w.width * w.height];
@@ -1928,6 +1937,7 @@ class World {
         }
         if (o.Side() == Side2.Neutral()) { sb.Append("  [中立]"); }
         else if (o.Side() == Side2.Soviet()) { sb.Append("  [苏联]"); }
+        else if (o.Side() == Side2.Yuri()) { sb.Append("  [尤里]"); }
         else { sb.Append("  [盟军]"); }
         return sb.ToString();
     }
@@ -2279,6 +2289,7 @@ class World {
         // A side short of power (or blacked out) produces at half speed.
         bool playerLow = this.SideLowPower(Side2.Allied());
         bool sovietLow = this.SideLowPower(Side2.Soviet());
+        bool yuriLow = this.SideLowPower(Side2.Yuri());
         for (int i = 0; i < this.objects.Count; i = i + 1) {
             WorldObject o = this.objects[i];
             if (o.Kind() != ObjKind.Structure()) { continue; }
@@ -2301,7 +2312,8 @@ class World {
                 }
             }
             if (!o.HasProduction()) { continue; }
-            bool low = o.Side() == Side2.Soviet() ? sovietLow : playerLow;
+            bool low = o.Side() == Side2.Soviet() ? sovietLow
+                     : o.Side() == Side2.Yuri() ? yuriLow : playerLow;
             if (low && this.worldTick % 2 == 0) { continue; }   // every other tick
             int left = o.ProdLeftAt(0);
             if (left > 0) { o.SetProdLeftAt(0, left - 1); continue; }

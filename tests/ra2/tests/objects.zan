@@ -344,18 +344,20 @@ class ObjTest {
             IsoMap iso3 = ObjTest.BuildMap();
             World w3 = World.Create(iso3, StructureCatalog.Create(),
                                     UnitCatalog.Create());
+            // The controller first: the AI side it plays is the next side
+            // after the player's, and the enemy base must land there.
+            GameController gc = GameController.Create(w3, Side2.Allied());
             w3.PlaceStructure(Side2.Allied(), 0, 1, 2);          // player yard
             int pBar = w3.PlaceStructure(Side2.Allied(), 3, 6, 2); // player barracks
-            int enemyPlaced = w3.PlaceEnemyBase(Side2.Soviet());
+            int enemyPlaced = w3.PlaceEnemyBase(gc.EnemySide());
             Console.WriteLine("ai_enemy_base=" + Convert.ToString(enemyPlaced));
             Console.WriteLine("ai_enemy_alive=" + Convert.ToString(
-                w3.SideEliminated(Side2.Soviet()) == false));
+                w3.SideEliminated(gc.EnemySide()) == false));
             Console.WriteLine("ai_yard_queue=" + Convert.ToString(w3.QueueUnit(0, 0)));
 
             // The player queues a unit through the game controller, exactly as
             // a click on the production panel would: select the barracks, then
             // order a GI. The cost comes off the player's credits.
-            GameController gc = GameController.Create(w3, Side2.Allied());
             gc.OnClickCell(6, 2);
             Console.WriteLine("ui_sel=" + Convert.ToString(gc.World().SelectedIndex()));
             int moneyBefore = gc.Money();

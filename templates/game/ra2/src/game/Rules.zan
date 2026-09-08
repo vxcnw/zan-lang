@@ -475,9 +475,12 @@ class Rules {
         return null;
     }
 
-    /// <summary>The units a side fields, in sidebar order.</summary>
+    /// <summary>The units a side fields, in sidebar order. Bit weights are
+    /// 1 allied, 2 soviet, 4 yuri -- Yuri mirrors the shipped rules where
+    /// every Yuri unit names exactly one Owner house.</summary>
     List<UnitDef> UnitsForSide(int side) {
-        int bit = side == 0 ? 1 : 2;
+        int bit = side == Side2.Allied() ? 1
+                : side == Side2.Soviet() ? 2 : 4;
         List<UnitDef> outList = new List<UnitDef>();
         for (int i = 0; i < this.units.Count; i = i + 1) {
             UnitDef d = this.units[i];
@@ -488,7 +491,8 @@ class Rules {
 
     /// <summary>The buildable structures a side has, in sidebar order.</summary>
     List<BuildingDef> BuildingsForSide(int side) {
-        int bit = side == 0 ? 1 : 2;
+        int bit = side == Side2.Allied() ? 1
+                : side == Side2.Soviet() ? 2 : 4;
         List<BuildingDef> outList = new List<BuildingDef>();
         for (int i = 0; i < this.buildings.Count; i = i + 1) {
             BuildingDef d = this.buildings[i];
@@ -626,6 +630,30 @@ class Rules {
             "100,100,100,75,50,50,200,200,200,100,100"));
         r.warheads.Add(Warhead.Create("FlakTWH",
             "150,125,100,60,10,10,30,20,10,100,100"));
+        // Yuri's Revenge warheads, the shipped [Verses] tables. GattWH is
+        // the gattling family's anti-armour-weak rounds; Virus nearly
+        // ignores everything but infantry; LocomotorBeam is the
+        // Magnetron's hull-lifting beam (a slow heavy hit here); AntiB
+        // only bites structures, the Floating Disk's drain.
+        r.warheads.Add(Warhead.Create("GattWH",
+            "100,80,70,50,30,10,10,5,3,200,50"));
+        r.warheads.Add(Warhead.Create("DiskWH",
+            "100,100,100,50,50,50,100,100,100,100,100"));
+        Warhead loco = Warhead.Create("LocomotorBeam",
+            "0,0,0,100,100,100,0,0,0,100,0");
+        r.warheads.Add(loco);
+        r.warheads.Add(Warhead.Create("MagneShakeWH",
+            "0,0,0,0,100,0,100,100,100,0,0"));
+        r.warheads.Add(Warhead.Create("VirusWH",
+            "100,100,100,1,1,1,1,1,1,1,100"));
+        r.warheads.Add(Warhead.Create("Battering",
+            "100,100,100,0,0,0,20,20,20,200,100"));
+        r.warheads.Add(Warhead.Create("Smashing",
+            "0,0,0,100,20,100,0,0,0,0,0"));
+        r.warheads.Add(Warhead.Create("AntiB",
+            "0,0,0,0,0,0,100,100,100,0,0"));
+        r.warheads.Add(Warhead.Create("HARVWH",
+            "100,80,70,50,20,20,20,15,10,400,100"));
 
         // -- weapons: damage, ROF ticks, range cells, warhead ----------------
         r.weapons.Add(Weapon.Create("M60", 15, 20, 4, r.WarheadNamed("SA")));
@@ -672,8 +700,6 @@ class Rules {
             r.WarheadNamed("BORISWH")));
         r.weapons.Add(Weapon.Create("MP5", 30, 20, 6,
             r.WarheadNamed("SA")));
-        r.weapons.Add(Weapon.Create("PsychicJab", 25, 15, 5,
-            r.WarheadNamed("PJABWH")));
         // Tank guns, the shipped [105mm] / [120mm] damage, ROF and range.
         r.weapons.Add(Weapon.Create("105mm", 75, 30, 6,
             r.WarheadNamed("AP")));
@@ -701,7 +727,39 @@ class Rules {
         // The War Miner's nose gun, the shipped [20mmRapid]: an
         // anti-infantry deterrent, so mining under fire is not free.
         r.weapons.Add(Weapon.Create("20mmRapid", 30, 20, 5,
-            r.WarheadNamed("SA")));
+            r.WarheadNamed("HARVWH")));
+        // The Yuri arsenal, the shipped YR [Weapon] values. Ranges are the
+        // fractional cell values rounded up. The gattling tank's flak-mode
+        // AAGattling rides as its secondary; the Magnetron's shake is the
+        // anti-structure complement to its beam; the Master Mind and the
+        // Psychic Tower reuse the Controller warhead, so their shots
+        // convert rather than kill.
+        r.weapons.Add(Weapon.Create("PsychicJab", 25, 15, 5,
+            r.WarheadNamed("PJABWH")));
+        r.weapons.Add(Weapon.Create("Punch", 100, 60, 2,
+            r.WarheadNamed("Battering")));
+        r.weapons.Add(Weapon.Create("Smash", 100, 60, 2,
+            r.WarheadNamed("Smashing")));
+        r.weapons.Add(Weapon.Create("Virusgun", 125, 100, 10,
+            r.WarheadNamed("VirusWH")));
+        r.weapons.Add(Weapon.Create("AGGattling", 25, 16, 6,
+            r.WarheadNamed("GattWH")));
+        r.weapons.Add(Weapon.Create("AAGattling", 25, 16, 8,
+            r.WarheadNamed("GattWH")));
+        r.weapons.Add(Weapon.Create("ATGun", 65, 60, 5,
+            r.WarheadNamed("AP")));
+        r.weapons.Add(Weapon.Create("DiskLaser", 90, 80, 7,
+            r.WarheadNamed("DiskWH")));
+        r.weapons.Add(Weapon.Create("DiskDrain", 1, 50, 2,
+            r.WarheadNamed("AntiB")));
+        r.weapons.Add(Weapon.Create("MagneticBeam", 200, 20, 12,
+            r.WarheadNamed("LocomotorBeam")));
+        r.weapons.Add(Weapon.Create("MagneShake", 80, 110, 10,
+            r.WarheadNamed("MagneShakeWH")));
+        r.weapons.Add(Weapon.Create("MindControlTank", 3, 10, 6,
+            r.WarheadNamed("Controller")));
+        r.weapons.Add(Weapon.Create("MindControlTower", 3, 100, 7,
+            r.WarheadNamed("Controller")));
 
         // -- the roster -------------------------------------------------------
         // Order matters: each side's menu ids come from filtering this list,
@@ -875,6 +933,88 @@ class Rules {
             ArmorClass.Special1(), r.WeaponNamed("DroneJump"), "NAWEAP", 2,
             "DRON.SHP"));
 
+        // -- the Yuri roster, the shipped YR [YuriCountry] entries. Side 4
+        // in the mask: every Yuri unit names exactly one Owner house. The
+        // install carries every unit's art (infantry SHP in CONQMD, vehicle
+        // VXL in LOCALMD, the gattling/lasher/disc turrets alongside), so
+        // the Image= chain resolves directly; the Slave Miner (mines, no
+        // refinery dock in this engine) is the Yuri harvester and PCV the
+        // deployable MCV.
+        UnitDef init = UnitDef.Create("INIT", "尤里新兵", 200, 100, 4,
+            ArmorClass.None(), r.WeaponNamed("PsychicJab"), "YABRCK", 4,
+            "INIT.SHP");
+        r.units.Add(init);
+        UnitDef brute = UnitDef.Create("BRUTE", "狂獸人", 500, 200, 6,
+            ArmorClass.Plate(), r.WeaponNamed("Punch"), "YABRCK", 4,
+            "BRUTE.SHP");
+        brute.SetSecondary(r.WeaponNamed("Smash"));
+        r.units.Add(brute);
+        UnitDef virus = UnitDef.Create("VIRUS", "病毒狙擊手", 700, 100, 4,
+            ArmorClass.None(), r.WeaponNamed("Virusgun"), "YABRCK", 4,
+            "VIRUS.SHP");
+        virus.AddPrereq("RADAR");
+        r.units.Add(virus);
+        UnitDef yuriPrime = UnitDef.Create("YURIPR", "尤里X", 1500, 150, 6,
+            ArmorClass.Flak(), r.WeaponNamed("MindControl"), "YABRCK", 4,
+            "YURI.SHP");
+        yuriPrime.SetSecondary(r.WeaponNamed("PsiWave"));
+        yuriPrime.SetMindImmune(true);
+        yuriPrime.AddPrereq("TECH");
+        r.units.Add(yuriPrime);
+        // The Lasher, the Yuri light tank: Image=LTNK with the LTNKTUR
+        // turret, both present in the install's LOCALMD.
+        UnitDef ltnk = UnitDef.Create("LTNK", "狂風坦克", 700, 300, 7,
+            ArmorClass.Heavy(), r.WeaponNamed("ATGun"), "YAWEAP", 4,
+            "LTNK.VXL");
+        ltnk.SetTurretVxl("LTNKTUR.VXL");
+        r.units.Add(ltnk);
+        // The Gattling tank, Image=TTNK art via the install's YTNK model.
+        UnitDef ytnk = UnitDef.Create("YTNK", "蓋特機砲坦克", 600, 210, 6,
+            ArmorClass.Light(), r.WeaponNamed("AGGattling"), "YAWEAP", 4,
+            "YTNK.VXL");
+        ytnk.SetTurretVxl("YTNKTUR.VXL");
+        ytnk.SetSecondary(r.WeaponNamed("AAGattling"));
+        r.units.Add(ytnk);
+        // The Magnetron: shipped section is [TELE]; its beam wrenches
+        // vehicles (rendered here as a slow heavy zap) and the shake
+        // secondary chews structures.
+        UnitDef tele = UnitDef.Create("MAGNT", "磁電坦克", 1000, 150, 5,
+            ArmorClass.Light(), r.WeaponNamed("MagneticBeam"), "YAWEAP", 4,
+            "V3.VXL");
+        tele.SetTurretVxl("GTNKTUR.VXL");
+        tele.SetSecondary(r.WeaponNamed("MagneShake"));
+        tele.AddPrereq("RADAR");
+        r.units.Add(tele);
+        // The Floating Disk: a hovering saucer, its drain secondary strips
+        // structures. Turret=yes in the rules, DISKTUR.VXL in the install.
+        UnitDef disk = UnitDef.Create("DISK", "雷射幽浮", 1750, 600, 15,
+            ArmorClass.Light(), r.WeaponNamed("DiskLaser"), "YAWEAP", 4,
+            "DISK.VXL");
+        disk.SetTurretVxl("DISKTUR.VXL");
+        disk.SetSecondary(r.WeaponNamed("DiskDrain"));
+        disk.AddPrereq("TECH");
+        r.units.Add(disk);
+        // The Master Mind, three simultaneous mind-control links shipped as
+        // one converting shot here.
+        UnitDef mind = UnitDef.Create("MIND", "精神控制車", 1750, 500, 4,
+            ArmorClass.Heavy(), r.WeaponNamed("MindControlTank"), "YAWEAP",
+            4, "MIND.VXL");
+        mind.AddPrereq("TECH");
+        r.units.Add(mind);
+        // The Slave Miner, the Yuri harvester: it mines with its gun mounted
+        // (SMINTUR turret) and delivers like the other sides' miners.
+        UnitDef smin = UnitDef.Create("SMIN", "奴隸礦場", 1750, 2000, 3,
+            ArmorClass.Medium(), r.WeaponNamed("20mmRapid"), "YAWEAP", 4,
+            "SMIN.VXL");
+        smin.SetTurretVxl("SMINTUR.VXL");
+        smin.SetRole(UnitRole.Harvester());
+        r.units.Add(smin);
+        // The Yuri MCV, for parity with the other sides' buildable MCVs.
+        UnitDef pcv = UnitDef.Create("PCV", "尤里機動基地車", 3000, 1000, 4,
+            ArmorClass.Heavy(), null, "YAWEAP", 4, "PCV.VXL");
+        pcv.AddPrereq("PROC");
+        r.units.Add(pcv);
+
         // -- the structures, interleaved so each side filters to menu order ---
         BuildingDef gacnst = BuildingDef.Create("GACNST", "建造厂",
             "GACNST.SHP", 4, 3, 1000, 3000, 0, 50,
@@ -966,6 +1106,64 @@ class Rules {
         r.buildings.Add(BuildingDef.Create("NAWALL", "围墙",
             "NAWALL.SHP", 1, 1, 300, 100, 0, 0, ArmorClass.Concrete(), 2));
 
+        // -- the Yuri base, the shipped YR buildings. The install carries no
+        // Yuri building SHP (checked every mount), so each takes the ally/
+        // soviet counterpart art its [rules] Image= comment names; the
+        // player-colour remap and the purple placeholder still read Yuri.
+        r.buildings.Add(BuildingDef.Create("YACNST", "尤里建造厂",
+            "NACNST.SHP", 4, 3, 1000, 3000, 0, 50,
+            ArmorClass.Concrete(), 4));
+        BuildingDef yapowr = BuildingDef.Create("YAPOWR", "生化反应堆",
+            "NAPOWR.SHP", 2, 2, 700, 600, 150, 0, ArmorClass.Wood(), 4);
+        r.buildings.Add(yapowr);
+        BuildingDef yabrk = BuildingDef.Create("YABRCK", "尤里兵营",
+            "NAHAND.SHP", 2, 2, 500, 500, 0, 10, ArmorClass.Wood(), 4);
+        yabrk.AddPrereq("POWER");
+        r.buildings.Add(yabrk);
+        BuildingDef yarefn = BuildingDef.Create("YAREFN", "矿石精炼厂",
+            "NAREFN.SHP", 4, 3, 2000, 1750, 0, 50, ArmorClass.Medium(), 4);
+        yarefn.SetRefinery(true);
+        yarefn.AddPrereq("POWER");
+        r.buildings.Add(yarefn);
+        BuildingDef yaweap = BuildingDef.Create("YAWEAP", "战车工厂",
+            "NAWEAP.SHP", 3, 2, 1000, 2000, 0, 25, ArmorClass.Wood(), 4);
+        yaweap.AddPrereq("PROC");
+        yaweap.AddPrereq("BARRACKS");
+        r.buildings.Add(yaweap);
+        BuildingDef yaradr = BuildingDef.Create("NAPSIS", "心灵感应器",
+            "NARADR.SHP", 2, 2, 750, 1000, 0, 50, ArmorClass.Wood(), 4);
+        yaradr.AddPrereq("PROC");
+        r.buildings.Add(yaradr);
+        BuildingDef yapsyt = BuildingDef.Create("YAPSYT", "心灵控制塔",
+            "NALASR.SHP", 1, 1, 455, 1500, 0, 100, ArmorClass.Steel(), 4);
+        yapsyt.SetWeapon(r.WeaponNamed("MindControlTower"));
+        yapsyt.SetPowered(true);
+        yapsyt.AddPrereq("RADAR");
+        r.buildings.Add(yapsyt);
+        BuildingDef yaggun = BuildingDef.Create("YAGGUN", "盖特机炮",
+            "NAFLAK.SHP", 1, 1, 810, 1000, 0, 50, ArmorClass.Steel(), 4);
+        yaggun.SetWeapon(r.WeaponNamed("AGGattling"));
+        yaggun.SetPowered(true);
+        yaggun.AddPrereq("BARRACKS");
+        r.buildings.Add(yaggun);
+        BuildingDef yatech = BuildingDef.Create("YATECH", "尤里作战实验室",
+            "NATECH.SHP", 3, 2, 500, 2000, 0, 100, ArmorClass.Wood(), 4);
+        yatech.AddPrereq("BARRACKS");
+        yatech.AddPrereq("RADAR");
+        r.buildings.Add(yatech);
+        BuildingDef yagrnd = BuildingDef.Create("YAGRND", "部队回收厂",
+            "GADEPT.SHP", 3, 3, 900, 600, 0, 50, ArmorClass.Wood(), 4);
+        yagrnd.AddPrereq("FACTORY");
+        r.buildings.Add(yagrnd);
+        BuildingDef naclon = BuildingDef.Create("NACLON", "复制中心",
+            "GAPILE.SHP", 2, 2, 1000, 2500, 0, 200, ArmorClass.Wood(), 4);
+        naclon.AddPrereq("TECH");
+        r.buildings.Add(naclon);
+        BuildingDef yacmd = BuildingDef.Create("YACOMD", "尤里指挥中心",
+            "NATECH.SHP", 4, 3, 1000, 3000, 0, 50,
+            ArmorClass.Concrete(), 4);
+        r.buildings.Add(yacmd);
+
         // -- neutral civilian structures the maps carry -----------------------
         BuildingDef oil = BuildingDef.Create("CAOILD", "油井",
             "CAOILD.SHP", 2, 2, 1000, 0, 0, 0, ArmorClass.Steel(), 4);
@@ -985,22 +1183,22 @@ class Rules {
             "GASPOT.SHP", 1, 1, 400, 0, 0, 0, ArmorClass.Wood(), 4));
 
         // -- tech-tree aliases, the shipped [General] values ------------------
-        r.preqPower = Rules.Csv("GAPOWR,NAPOWR");
-        r.preqFactory = Rules.Csv("GAWEAP,NAWEAP");
-        r.preqBarracks = Rules.Csv("NAHAND,GAPILE");
-        r.preqRadar = Rules.Csv("GAAIRC,NARADR");
-        r.preqTech = Rules.Csv("GATECH,NATECH");
-        r.preqProc = Rules.Csv("GAREFN,NAREFN");
+        r.preqPower = Rules.Csv("GAPOWR,NAPOWR,YAPOWR");
+        r.preqFactory = Rules.Csv("GAWEAP,NAWEAP,YAWEAP");
+        r.preqBarracks = Rules.Csv("NAHAND,GAPILE,YABRCK");
+        r.preqRadar = Rules.Csv("GAAIRC,NARADR,NAPSIS");
+        r.preqTech = Rules.Csv("GATECH,NATECH,YATECH");
+        r.preqProc = Rules.Csv("GAREFN,NAREFN,YAREFN");
 
         // -- the AI's build lists, the shipped [AI] values --------------------
-        r.aiConst = Rules.Csv("GACNST,NACNST");
-        r.aiPower = Rules.Csv("NAPOWR,GAPOWR");
-        r.aiRefinery = Rules.Csv("NAREFN,GAREFN");
-        r.aiBarracks = Rules.Csv("NAHAND,GAPILE");
-        r.aiWeapons = Rules.Csv("GAWEAP,NAWEAP");
-        r.aiTech = Rules.Csv("NATECH,GATECH");
-        r.aiRadar = Rules.Csv("GAAIRC,NARADR");
-        r.aiDefense = Rules.Csv("TESLA,NALASR,NAFLAK,GAPILL");
+        r.aiConst = Rules.Csv("GACNST,NACNST,YACNST");
+        r.aiPower = Rules.Csv("NAPOWR,GAPOWR,YAPOWR");
+        r.aiRefinery = Rules.Csv("NAREFN,GAREFN,YAREFN");
+        r.aiBarracks = Rules.Csv("NAHAND,GAPILE,YABRCK");
+        r.aiWeapons = Rules.Csv("GAWEAP,NAWEAP,YAWEAP");
+        r.aiTech = Rules.Csv("NATECH,GATECH,YATECH");
+        r.aiRadar = Rules.Csv("GAAIRC,NARADR,NAPSIS");
+        r.aiDefense = Rules.Csv("TESLA,NALASR,NAFLAK,GAPILL,YAGGUN");
 
         // -- economy -----------------------------------------------------------
         r.startMoney = 10000;

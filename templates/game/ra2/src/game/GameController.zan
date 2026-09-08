@@ -157,7 +157,7 @@ class GameController {
     /// exactly like the real game.</summary>
     void Economy() {
         Rules rules = this.world.Rules();
-        for (int s = 0; s < 2; s = s + 1) {
+        for (int s = 0; s < Side2.Count(); s = s + 1) {
             int income = 0;
             for (int i = 0; i < this.world.ObjectCount(); i = i + 1) {
                 WorldObject o = this.world.ObjectAt(i);
@@ -304,6 +304,12 @@ class GameController {
 
     // ---- opponent AI -------------------------------------------------------
 
+    /// <summary>The side the skirmish AI plays: the next side round-robin
+    /// after the player's, so each choice meets a different opponent.</summary>
+    int EnemySide() {
+        return (this.side + 1) % Side2.Count();
+    }
+
     /// <summary>Runs the enemy's turn: the AI follows the [AI] section's
     /// build order from the Rules (power, refinery, barracks, more power,
     /// war factory, radar, tech, defences), trains the armed regulars its
@@ -311,7 +317,7 @@ class GameController {
     /// player object. The AI is honest -- it follows the same placement,
     /// production, prereq and combat rules as the player.</summary>
     void UpdateAi() {
-        int aiSide = 1 - this.side;
+        int aiSide = this.EnemySide();
         if (this.result != 0) { return; }
         Rules rules = this.world.Rules();
         // One construction decision per second of game time.
@@ -596,7 +602,10 @@ class GameController {
     /// through, or lose its base first.</summary>
     void CheckResult() {
         if (this.result != 0) { return; }
-        if (this.world.SideEliminated(1 - this.side)) { this.result = 1; return; }
+        if (this.world.SideEliminated(this.EnemySide())) {
+            this.result = 1;
+            return;
+        }
         if (this.world.SideEliminated(this.side)) { this.result = 2; return; }
     }
 }

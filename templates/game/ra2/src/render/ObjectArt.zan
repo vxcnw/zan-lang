@@ -17,6 +17,9 @@ class ObjectArt {
     // The allied unit palette: unitPal with the remap slots recoloured from
     // soviet red to the allied player colour. Built on first use.
     Palette alliedPal;
+    // The Yuri unit palette: remap slots recoloured to the third side's
+    // shipped DarkRed house colour. Built on first use.
+    Palette yuriPal;
     Palette theaterPal;
 
     // SHP name + frame + palette -> decoded texture. The palette is part of
@@ -68,6 +71,7 @@ class ObjectArt {
         if (a.unitPal == null) { a.unitPal = db.PaletteNamed("unit.pal"); }
         if (a.unitPal == null) { a.unitPal = db.PaletteNamed("unitsno.pal"); }
         a.alliedPal = null;
+        a.yuriPal = null;
         // Buildings use the temperate theater palette. Using the unit palette
         // made every structure render with wrong colours -- the yard's olive
         // green came out as bright white.
@@ -177,25 +181,41 @@ class ObjectArt {
     /// carries the soviet red ramp there; the allied side gets those slots
     /// recoloured to its player colour (the rules [Colors] Gold entry, the
     /// first skirmish slot's default) so friend and foe read apart on the
-    /// field. The soviet palette is the file as shipped.</summary>
+    /// field. Yuri's slots recolour to its shipped DarkRed house colour --
+    /// the purple the third side wears. The soviet palette is the file as
+    /// shipped.</summary>
     Palette UnitPalFor(int side) {
-        if (side != Side2.Allied() || this.unitPal == null) {
-            return this.unitPal;
-        }
-        if (this.alliedPal == null) {
-            int hue = 30;
-            int sat = 100;
-            IniSection colors = this.db.Rules().Section("Colors");
-            if (colors != null) {
-                List<int> hsv = ObjectArt.ParseHsvTriple(colors.Get("Gold"));
-                if (hsv.Count == 3) {
-                    hue = hsv[0];
-                    sat = hsv[1];
-                }
+        if (side == Side2.Allied()) {
+            if (this.unitPal == null) { return null; }
+            if (this.alliedPal == null) {
+                this.alliedPal = this.RemappedFromColors("Gold");
             }
-            this.alliedPal = this.unitPal.Remapped(hue, sat);
+            return this.alliedPal;
         }
-        return this.alliedPal;
+        if (side == Side2.Yuri()) {
+            if (this.unitPal == null) { return null; }
+            if (this.yuriPal == null) {
+                this.yuriPal = this.RemappedFromColors("DarkRed");
+            }
+            return this.yuriPal;
+        }
+        return this.unitPal;
+    }
+
+    /// <summary>The unit palette with its remap slots recoloured to the
+    /// named [Colors] entry, built once.</summary>
+    Palette RemappedFromColors(string colorName) {
+        int hue = 30;
+        int sat = 100;
+        IniSection colors = this.db.Rules().Section("Colors");
+        if (colors != null) {
+            List<int> hsv = ObjectArt.ParseHsvTriple(colors.Get(colorName));
+            if (hsv.Count == 3) {
+                hue = hsv[0];
+                sat = hsv[1];
+            }
+        }
+        return this.unitPal.Remapped(hue, sat);
     }
 
     /// <summary>"32,100,255" -> 32,100,255. Stops at an inline ';' comment;
@@ -516,6 +536,7 @@ class ObjectRenderer {
         int g = 128;
         int b = 214;
         if (side == Side2.Soviet()) { r = 224; g = 52; b = 48; }
+        else if (side == Side2.Yuri()) { r = 154; g = 60; b = 200; }
         else if (side == Side2.Neutral()) { r = 128; g = 128; b = 136; }
         for (int y = 0; y < h; y = y + 1) {
             for (int x = 0; x < w; x = x + 1) {

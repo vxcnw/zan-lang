@@ -10,13 +10,15 @@ class Scene {
     static int Playing() { return 2; }
 }
 
-/// <summary>The two RA2 sides a player can pick.</summary>
+/// <summary>The three RA2 sides a player can pick.</summary>
 class Side {
     static int Allied() { return 0; }
     static int Soviet() { return 1; }
+    static int Yuri() { return 2; }
 
     static string NameOf(int side) {
         if (side == Side.Soviet()) { return "苏联"; }
+        if (side == Side.Yuri()) { return "尤里"; }
         return "盟军";
     }
 }
@@ -92,11 +94,11 @@ class Shell {
     }
 
     void SetSide(int side) {
-        if (side == Side.Allied() || side == Side.Soviet()) { this.side = side; }
+        if (side == Side.Allied() || side == Side.Soviet()
+         || side == Side.Yuri()) { this.side = side; }
     }
 
     void ToggleSide() {
-        if (this.side == Side.Allied()) { this.side = Side.Soviet(); }
-        else { this.side = Side.Allied(); }
+        this.side = (this.side + 1) % 3;
     }
 }

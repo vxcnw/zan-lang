@@ -899,12 +899,15 @@ class Ra2App {
                     }
                     // The opponent opens on the map's second start, so the two
                     // bases face each other across the terrain; maps without a
-                    // second waypoint fall back to the far corner.
+                    // second waypoint fall back to the far corner. The AI
+                    // plays the next side after the player's, matching the
+                    // controller's round-robin.
+                    int aiSide = (side + 1) % Side2.Count();
                     List<int> eStart = new List<int>();
                     if (map.StartCell(1, eStart) && eStart.Count >= 2) {
-                        world.PlaceBase(1 - side, eStart[0], eStart[1]);
+                        world.PlaceBase(aiSide, eStart[0], eStart[1]);
                     } else {
-                        world.PlaceEnemyBase(1 - side);
+                        world.PlaceEnemyBase(aiSide);
                     }
                     // Neutral civilian structures from the map's [Structures]:
                     // oil derricks, hospitals and city props an engineer can
@@ -1157,7 +1160,8 @@ class Ra2App {
                         oreX = oreAt[0];
                         oreY = oreAt[1];
                         int pside = shell.SideIndex();
-                        string mreg = pside == 0 ? "CMIN" : "HARV";
+                        string mreg = pside == 0 ? "CMIN"
+                                    : pside == 2 ? "SMIN" : "HARV";
                         int mid = Ra2App.UnitIdOfReg(world, pside, mreg);
                         for (int r2 = 0; r2 < 6 && minerObj == null; r2 = r2 + 1) {
                             int minerId = world.SpawnUnit(pside, mid,

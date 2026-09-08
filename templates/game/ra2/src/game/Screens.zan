@@ -233,26 +233,34 @@ class Screens {
             if (hov && clicked) { shell.SelectMapAt(idx); }
         }
 
-        // Side picker. The side names come from the CSF's Name:Allies /
-        // Name:Soviets -- the exact words the original skirmish screen used.
+        // Side picker: Allies, Soviets, Yuri. The first two names come from
+        // the CSF's Name:Allies / Name:Soviets -- the exact words the
+        // original skirmish screen used; Name:YuriCountry covers Yuri.
         int sideX = viewW - 460;
         KitUi.Panel(r, sideX - 12, listY - 14, 420, 200, 22, 26, 36, 210);
         Text.Draw(r, ui.Or("GUI:Side", "阵营"), sideX + 8, listY, 3,
                   236, 208, 120, 255);
-        int sw = 180;
+        int sw = 120;
         int sh = 62;
         int sy = listY + 60;
         int alliedKind = 0;
         int sovietKind = 0;
+        int yuriKind = 0;
         if (shell.SideIndex() == Side.Allied()) { alliedKind = 2; }
-        else { sovietKind = 2; }
+        else if (shell.SideIndex() == Side.Soviet()) { sovietKind = 2; }
+        else { yuriKind = 2; }
         bool hovA = KitUi.Button(r, mouseX, mouseY, sideX + 8, sy, sw, sh,
                               ui.Or("Name:Allies", "盟军"), 3, alliedKind);
-        bool hovS = KitUi.Button(r, mouseX, mouseY, sideX + 8 + sw + 20, sy, sw, sh,
-                              ui.Or("Name:Soviets", "苏联"), 3, sovietKind);
+        bool hovS = KitUi.Button(r, mouseX, mouseY, sideX + 8 + sw + 10, sy,
+                              sw, sh, ui.Or("Name:Soviets", "苏联"), 3,
+                              sovietKind);
+        bool hovY = KitUi.Button(r, mouseX, mouseY, sideX + 8 + (sw + 10) * 2,
+                              sy, sw, sh, ui.Or("Name:YuriCountry", "尤里"),
+                              3, yuriKind);
         if (clicked) {
             if (hovA) { shell.SetSide(Side.Allied()); }
             if (hovS) { shell.SetSide(Side.Soviet()); }
+            if (hovY) { shell.SetSide(Side.Yuri()); }
         }
 
         // Map preview, rendered from the selected map's own terrain by the
