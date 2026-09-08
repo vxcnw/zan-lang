@@ -960,7 +960,7 @@ class SceneDesigner {
     }
 
     /// 功能区高度（像素），画布工具栏与层菜单定位使用。
-    int BarH(App app) { return Ribbon.HeightGroups(app); }
+    int BarH(App app) { return Gui.Widget.Ribbon.HeightGroups(app); }
 
     /// 渲染画布上方的快速布局功能区（排版/编辑/网格/缩放/层五组）并分派点击：右侧同时显示只读的缩放与多选状态。
     void RenderLayoutBar(App app, Canvas c, Theme t, int x, int y, int w, int h) {
@@ -1060,7 +1060,7 @@ class SceneDesigner {
                 this.showGhost), 6, 1);
         groups.Add(gl);
 
-        int hit = Ribbon.RenderGroups(app, x, y, w, groups);
+        int hit = Gui.Widget.Ribbon.RenderGroups(app, x, y, w, groups);
         if (hit >= 0 && hit < grp.Count) {
             this.barClickGroup = grp[hit];
             this.barClickIndex = idx[hit];

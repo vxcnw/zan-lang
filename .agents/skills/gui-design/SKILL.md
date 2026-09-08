@@ -104,6 +104,11 @@ token 定义在 `stdlib/Gui/Theme.zan`,由 `Style.zan` 导出为 `:root` 变量,
   就会"组件是对的,demo 是错的"。
 - 觉得某控件"不精美"→ 修 `stdlib/Gui/Widget/` 或 `skins/base.css` 里的规则,
   让所有使用处一起变好;新皮肤值写进皮肤包的 `:root`,不散落。
+- **新增 Gui 类先查重名**(2026-09-08 踩坑):c977c311 在 `Gui.Component` 下新增
+  彩带动画组件 `Ribbon`,把 SceneDesigner 等只 `using Gui.Component` 的文件里
+  裸写的 `Gui.Widget.Ribbon`(功能区控件)整体劫持到新类上,调用点报
+  "no member",离肇因提交很远——Zan 的名字解析按 using 就近绑定,同名类不警告。
+  新增类落名前 `grep -rn "class <Name>" stdlib/Gui/`;撞名要么改名、要么调用点限定名。
 
 ## 毛刺防治(斜线/曲线/圆角的抗锯齿)
 
