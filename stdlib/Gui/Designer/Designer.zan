@@ -772,23 +772,13 @@ partial class Designer {
         props.Set(key, JsonValue.NewStr(val));
     }
 
-    /// 预览树上应用组件属性：目标控件按组件文档里的原始名找
-    /// （FormBuilder 直接用文档建树，无 shell 前缀）；实例值
-    /// 优先，缺省取声明里的 def。与 GenForm 展开语义一致
-    /// （那里落到目标 kid 的 props 直通，最终同为 SetProp）。
+    /// 预览树上应用组件属性：与运行期注册表（UserComponentRegistry.
+    /// ApplyProps）共用同一语义——实例值优先，缺省取声明里的 def，
+    /// 落到目标控件（预览树按组件文档原名查找）。实例值存
+    /// f.extra 的 "props" 直通对象。
     void ApplyCompProps(Control root, JsonValue compRoot, FormField f) {
-        JsonValue decls = compRoot.Get("props");
-        if (decls == null || !decls.IsArray()) { return; }
-        for (int i = 0; i < decls.Count(); i = i + 1) {
-            JsonValue dd = decls.At(i);
-            if (dd == null || !dd.IsObject()) { continue; }
-            string target = dd.Str("target", "");
-            if (target == "") { continue; }
-            string val = this.CompPropValue(f, dd.Str("key", ""), dd.Str("def", ""));
-            if (val == "") { continue; }
-            Control t = root.Find(target);
-            if (t != null) { t.SetProp(dd.Str("prop", "text"), val); }
-        }
+        JsonValue inst = f.extra == null ? null : f.extra.Get("props");
+        UserComponentRegistry.ApplyProps(root, compRoot, inst);
     }
 
     /// 引用节点画布预览的构建缓存：组件文档只在代次变化时

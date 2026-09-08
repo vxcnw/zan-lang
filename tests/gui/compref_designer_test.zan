@@ -149,6 +149,27 @@ class CompRefDesignerTest {
         Eq("consume open component", d.ConsumeOpenComponent(), "BadgeCard");
         Ok("consume is one-shot", d.ConsumeOpenComponent() == "");
 
+        // ---- runtime registry: instantiate without compile-time refs ----
+        UserComponentRegistry.SetAll(comps);
+        Control rt = UserComponentRegistry.Build("BadgeCard");
+        Ok("registry built", rt != null);
+        if (rt != null) {
+            Control rb = rt.Find("InnerBtn");
+            Eq("registry default prop", rb == null ? "" : rb.GetProp("text"), "Go");
+        }
+        JsonValue inst = JsonValue.ParseLenient("{\"btnText\":\"DYN!\"}");
+        Control rt2 = UserComponentRegistry.Build("BadgeCard", inst);
+        Ok("registry built with instance", rt2 != null);
+        if (rt2 != null) {
+            Control rb2 = rt2.Find("InnerBtn");
+            Eq("registry instance prop",
+                rb2 == null ? "" : rb2.GetProp("text"), "DYN!");
+        }
+        Ok("unknown component is null",
+            UserComponentRegistry.Build("Nope") == null);
+        Ok("preview and registry agree",
+            UserComponentRegistry.JsonOf("BadgeCard") == CompDoc());
+
         if (fails == 0) { Console.WriteLine("COMPREF_DESIGNER_OK"); }
     }
 }
