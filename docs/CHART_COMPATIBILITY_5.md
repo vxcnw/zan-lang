@@ -30,6 +30,7 @@ echarts.apache.org/examples）。画廊 `examples/gui_charts` 按**官方示例�
 
 | 缺口 | 受影响官方示例 | 备注 |
 |------|----------------|------|
+| 值对坐标定点管线（ChartPoint 小数 x/y + X 定点域 + YOfF 整域定点） | line-function、scatter 回归类 | 引擎 ChartPoint 目前仅 int 坐标 |
 | dataZoom 滑杆拖拽 + inside 滚轮缩放 | 全部 [dataZoom] 例 | 当前只渲染初始窗口 |
 | 5.x 默认配色主题（palette） | 全部 | 引擎仍是 2.2 色板 |
 | smooth 默认值应为 false | 全部 line | 现由每例显式设置兜底 |
@@ -60,7 +61,9 @@ echarts.apache.org/examples）。画廊 `examples/gui_charts` 按**官方示例�
 
 ## 待办
 
-- `Math` 内置补 `Sin/Cos/Tan`（builtin_api.c）：line-function 及后续 custom
-  段大量依赖；补齐后 line-function 按官方位置回补目录。
+- 值对坐标定点管线（见缺口表首行）：补齐后 line-function 按官方位置回补
+  目录（func(x)=sin(x/10)·cos(2x/10+1)·sin(3x/10+2)·50，x∈[-200,200]
+  步长 0.1，y 固定 ±100，x 向 inside 缩放初始 [-20,20]；Math.Sin/Cos
+  内置已就绪，conformance `builtin_math_trig` 覆盖）。
 - line-markline 标签位、confidence-band 置信带、bump-chart endLabel、
   line-log 对数轴小数：随引擎能力补齐逐例回补。

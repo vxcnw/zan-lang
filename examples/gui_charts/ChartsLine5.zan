@@ -178,8 +178,9 @@ partial class Charts {
     }
 
     // ===== 批次 2（官方顺序：line-marker / area-simple /
-    // area-rainfall / area-time-axis；line-function 待 Math 内置
-    // 补 Sin/Cos 后回归本段官方位置）=====
+    // area-rainfall / area-time-axis）。line-function 待引擎补值对
+    // 坐标定点管线（ChartPoint 小数 x/y + X 定点域）后按官方位置
+    // 回补，Math.Sin/Cos 内置已先行补齐。=====
 
     /// line-marker 未来一周气温变化：Highest/Lowest 双系列 +
     /// markPoint Max('Max')/Min('Min') + markLine average('Avg')，
@@ -349,7 +350,6 @@ partial class Charts {
         o.zoomEnd = 20;
         Charts.Show(app, o, x, y, w, h);
     }
-
 
     // ===== area-rainfall 逐字数据（ref5/area-rainfall.js，3079 个小时点）=====
     static List<string> E5RainCats() {
