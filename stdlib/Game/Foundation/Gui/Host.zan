@@ -7,10 +7,10 @@ namespace Game.Foundation.Gui;
 /// <summary>
 /// GUI 运行时应用主循环回调。宿主在 Run() 里按固定顺序回调：
 /// Start → 每帧 { Event* → FixedUpdate×N → Update → Render } → Stop。
-/// * Event 对每个键盘事件各调一次（kind 4=按下 / 5=抬起）；
-///   FixedUpdate 一帧内可能触发多次（追帧）也可能零次；
-///   Render 的 alpha 是 0..1 的帧间插值系数。
-/// 与 SDL 版 Game.Foundation.Sdl.IGameHostLoop 语义一致，
+/// * Event 对每个输入事件各调一次（kind 1=鼠标移动 2=鼠标按下
+///   3=鼠标释放 4=键按下 5=键抬起——Win32Shell/App 控件分发同一
+///   编码，keycode/按钮见 Event 参数）；FixedUpdate 一帧内可能触发
+///   多次（追帧）也可能零次；Render 的 alpha 是 0..1 的帧间插值系数。
 /// 渲染回调给 Gui.Canvas（软件光栅 + 各平台原生 present）而非
 /// SdlRenderer——窗口、事件泵与呈现全部由 stdlib/Gui 的原生
 /// 外壳承担（Windows GDI / Linux X11 / macOS / OHOS / Android
@@ -19,10 +19,11 @@ namespace Game.Foundation.Gui;
 interface IGuiHostLoop {
     /// 主循环开始前调用一次（窗口已就绪）。
     void Start(GuiHost host);
-    /// 每个输入事件回调一次：kind 4=按下，5=抬起，keycode 是
-    /// Gui 的键码空间（8=退格、13=回车、方向键 37..40 等）；
-    /// kind 1=鼠标按下，2=移动，3=释放，keycode 传按钮索引
-    /// （0=左键）。鼠标坐标直接读 host.App().mouseX/mouseY。
+    /// 每个输入事件回调一次：kind 1=鼠标移动，2=鼠标按下，3=鼠标
+    /// 释放，keycode 传按钮索引（0=左键、1=右键）；kind 4=键按下，
+    /// 5=键抬起，keycode 是 Gui 的键码空间（Windows VK：8=退格、
+    /// 13=回车、32=空格、方向键 37..40 等）。鼠标坐标直接读
+    /// host.App().mouseX/mouseY。
     void Event(GuiHost host, int kind, int keycode);
     /// 固定步长模拟回调（步长毫秒数由构造参数决定）。
     void FixedUpdate(GuiHost host, int deltaMilliseconds);

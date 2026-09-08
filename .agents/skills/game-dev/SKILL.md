@@ -109,6 +109,18 @@ description: Zan 上做 2D 游戏(templates/game/* 与 stdlib/Game)的帧循环�
 同理，ctest 冒烟在并行会话构建时会假失败（共享 build\zanc.exe），单独
 重跑一次再定论。
 
+## GuiHost 输入事件契约：kind 1=移动 2=按下（文档曾写反）
+
+IGuiHostLoop.Event 的 kind 编码与 Win32Shell/App 控件分发是同一套：
+**1=鼠标移动、2=鼠标按下、3=鼠标释放、4=键按下、5=键抬起**。GuiHost
+接口注释曾把 1/2 写反，六个游戏模板照错文档编码——鼠标移动被当点击、
+真实点击被忽略：goldminer 移植实测"无输入自动放钩"暴露（一次游离
+WM_MOUSEMOVE 就放一钩），gomoku/ddz 真机鼠标操作等于乱落子/乱选牌。
+修的是文档 + 同批修模板（2026-09）。键盘 keycode = Windows VK
+（WM_KEYDOWN wParam）：空格 32、回车 13、Esc 27、方向键 37..40、
+字母=大写 ASCII（P=80、Q=81、C=67）。接输入前先对 Win32Shell 的
+Post 调用核对编码，别信二手注释。
+
 ## 追逐平衡：吸力/拉力必须压过目标速度
 
 "每帧向移动目标收拢"的磁吸（糖果吸向蛇头、相机跟角色、吸附对齐），
@@ -127,9 +139,9 @@ description: Zan 上做 2D 游戏(templates/game/* 与 stdlib/Game)的帧循环�
 
 ## 移动端与触屏
 
-- 触屏：Gui 运行时把手指合成鼠标点击供**控件层**用；**场景层**要自己再
-  接 FingerDown/FingerUp 直发动作，否则 SDL 的触摸鼠标镜像关闭时手机上
-  根本没法玩。两层都接，手感与桌面一致。
+- 触屏：Gui 运行时把手指合成鼠标按下（GuiHost 循环里就是 kind 2
+  code 0），SDL 版场景层另接 FingerDown/Up 直发的定式在 GuiHost 里
+  不需要——接口根本没有 Finger 事件。手机点不动先查外壳的合成路径。
 - 出包：`--publish --target android-arm64 --emit-apk` 一条命令；assets
   自动内嵌，加载路径保持"磁盘优先、内嵌兜底"。窗口要可自适应（横竖屏/
   任意尺寸），布局别写死像素。
@@ -147,3 +159,7 @@ description: Zan 上做 2D 游戏(templates/game/* 与 stdlib/Game)的帧循环�
 - 真机跑一遍真实交互。三个通道（仿真/截图/真机）**必须是同一条代码
   路径**——截图路径单独直调而主循环漏调，就会出"截图里有、游玩看不到"
   的分叉，且被兜底渲染长期掩盖。每加一个功能，先问：三条通道都走到它吗？
+- 资产定位是相对 exe 目录/工作目录向上 4 级（Assets.Find）：从
+  _scratch 深目录直接跑模板 exe 时 assets 全找不到、看到的"贴图"
+  其实是矢量兜底——**验证贴图要 cd 到模板目录再启动**（ddz 酒馆
+  贴图整场没加载才发现，此前五个模板的"贴图正常"都是兜底画）。
