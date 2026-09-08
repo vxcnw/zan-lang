@@ -2269,8 +2269,28 @@ static bool looks_like_var_decl(zan_parser_t *p) {
     case TK_INT: case TK_LONG: case TK_SHORT: case TK_BYTE:
     case TK_UINT: case TK_ULONG: case TK_USHORT: case TK_SBYTE:
     case TK_FLOAT: case TK_DOUBLE: case TK_DECIMAL: case TK_BOOL: case TK_CHAR:
-    case TK_STRING: case TK_VOID: case TK_OBJECT: case TK_NINT:
+    case TK_STRING: case TK_VOID: case TK_OBJECT: case TK_NINT: {
+        /* `int x = 3` declares a variable, but `int.Parse("abc");` is an
+         * expression statement on a builtin type's static member. A dot
+         * after the type keyword (past any array rank) means the statement
+         * is an expression, not a declaration. `void` never starts an
+         * expression, so it stays an unconditional declaration. */
+        if (p->current.kind == TK_VOID) return true;
+        const char *s = p->lex->source;
+        size_t q = p->lex->pos, n = p->lex->source_len;
+        #define ZAN_TKW_WS(ch) ((ch)==' '||(ch)=='\t'||(ch)=='\r'||(ch)=='\n')
+        while (q < n && ZAN_TKW_WS(s[q])) q++;
+        while (q < n && s[q] == '[') {
+            size_t r = q + 1;
+            while (r < n && ZAN_TKW_WS(s[r])) r++;
+            if (r >= n || s[r] != ']') return false;
+            q = r + 1;
+            while (q < n && ZAN_TKW_WS(s[q])) q++;
+        }
+        if (q < n && s[q] == '.') return false;
+        #undef ZAN_TKW_WS
         return true;
+    }
     case TK_IDENT: {
         /* could be type or expression; peek for identifier after */
         zan_token_t peek = zan_lexer_peek(p->lex);
