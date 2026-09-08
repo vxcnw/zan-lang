@@ -1,0 +1,17 @@
+using System;
+namespace Conf;
+
+// 回归:null 字符串的下标读曾直达 GEP+load 段退出——"可靠边界"
+// 路径只做长度探针与下标清洗,从不清洗 null 基址。修复后 null 基址
+// 在下标访问处带源位置软报告(element access),并换入 scratch 页
+// 继续执行。软失败契约与 Length 的 length probe 行为一致。
+class Program {
+    static void Main() {
+        string s = "abc";
+        Console.WriteLine(s[1]);
+        string n = null;
+        Console.WriteLine(n.Length);
+        Console.WriteLine(n[0]);
+        Console.WriteLine("end");
+    }
+}

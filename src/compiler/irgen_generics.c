@@ -1444,6 +1444,49 @@ static LLVMValueRef emit_index_safe_bounds(zan_irgen_t *g, LLVMValueRef index,
     return emit_index_safe_check(g, index, length, false, loc, kind);
 }
 
+/* A "reliable" string bound (literal/local receiver) says nothing about the
+ * base being non-null: `string s = null; s[0]` reached the reliable path's
+ * GEP with a null payload -- the length probe reported, but soft mode kept
+ * running and the load faulted at (null + i) with no source location. Run
+ * this BEFORE the length probe on reliable paths: it reports the null and,
+ * on soft mode, swaps in the runtime's scratch page so the following GEP
+ * stays readable (and the probe's own null report never double-fires, the
+ * page being non-null). The swap sits on the null edge only, so the hot
+ * path stays a compare-and-branch; hard mode exits inside the report and
+ * never reaches it. */
+static LLVMValueRef emit_string_base_guard(zan_irgen_t *g, LLVMValueRef payload,
+                                           zan_loc_t loc) {
+    if (!g->runtime_checks || !g->current_fn) return payload;
+    if (LLVMGetTypeKind(LLVMTypeOf(payload)) != LLVMPointerTypeKind) return payload;
+    LLVMValueRef fn = LLVMGetBasicBlockParent(LLVMGetInsertBlock(g->builder));
+    if (!fn) return payload;
+    LLVMValueRef isnull = zan_icmp(g->builder, LLVMIntEQ, payload,
+        LLVMConstNull(LLVMTypeOf(payload)), "strbase.null");
+    LLVMBasicBlockRef fast_bb = LLVMGetInsertBlock(g->builder);
+    LLVMBasicBlockRef slow_bb = LLVMAppendBasicBlockInContext(g->ctx, fn, "strbase.null");
+    LLVMBasicBlockRef done_bb = LLVMAppendBasicBlockInContext(g->ctx, fn, "strbase.done");
+    LLVMBuildCondBr(g->builder, isnull, slow_bb, done_bb);
+    LLVMPositionBuilderAtEnd(g->builder, slow_bb);
+    emit_runtime_check(g, isnull, loc,
+        "null reference where a string/byte buffer is required (element access)");
+    LLVMTypeRef i8p = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
+    LLVMTypeRef fn_ty = LLVMFunctionType(i8p, NULL, 0, 0);
+    LLVMValueRef sfn = LLVMGetNamedFunction(g->mod, "zan_rt_soft_scratch");
+    if (!sfn) sfn = LLVMAddFunction(g->mod, "zan_rt_soft_scratch", fn_ty);
+    LLVMValueRef scratch = zan_call2(g->builder, fn_ty, sfn, NULL, 0,
+                                     "soft.scratch");
+    scratch = LLVMBuildBitCast(g->builder, scratch, LLVMTypeOf(payload),
+                               "soft.scratch.bc");
+    LLVMBasicBlockRef slow_end = LLVMGetInsertBlock(g->builder);
+    LLVMBuildBr(g->builder, done_bb);
+    LLVMPositionBuilderAtEnd(g->builder, done_bb);
+    LLVMValueRef phi = LLVMBuildPhi(g->builder, LLVMTypeOf(payload), "strbase.phi");
+    LLVMValueRef vals[2] = { payload, scratch };
+    LLVMBasicBlockRef bbs[2] = { fast_bb, slow_end };
+    LLVMAddIncoming(phi, vals, bbs, 2);
+    return phi;
+}
+
 /* Guard a string element access (`s[i]` read/write) whose receiver carries no
  * reliable NUL bound -- a field, a parameter or an extern result that may be
  * a raw FFI buffer. Those skip the bounds check by design (an explicit

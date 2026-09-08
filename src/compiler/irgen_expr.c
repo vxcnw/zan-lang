@@ -2872,6 +2872,7 @@ binding_lowered:
                     if (local->type && local->type->kind == TYPE_STRING) {
                         LLVMValueRef idx = emit_expr(g, expr->binary.left->index.index, locals);
                         if (!local->opaque_string) {
+                            arr_ptr = emit_string_base_guard(g, arr_ptr, expr->loc);
                             LLVMValueRef len = emit_string_buffer_len(g, arr_ptr, expr->loc);
                             emit_index_bounds_check(g, idx, len, expr->loc, "string");
                             idx = emit_index_safe_bounds(g, idx, len, expr->loc, "string");
@@ -2959,6 +2960,7 @@ binding_lowered:
                          * receivers carry a reliable NUL bound. */
                         if (fsym->type && fsym->type->kind == TYPE_STRING &&
                             expr_has_reliable_string_bounds(arr_expr, locals)) {
+                            arr_ptr = emit_string_base_guard(g, arr_ptr, expr->loc);
                             LLVMValueRef len = emit_string_buffer_len(g, arr_ptr, expr->loc);
                             emit_index_bounds_check(g, idx, len, expr->loc, "string");
                             idx = emit_index_safe_bounds(g, idx, len, expr->loc, "string");
@@ -3136,10 +3138,12 @@ binding_lowered:
                         /* A string field may hold a raw FFI buffer, whose
                          * first NUL says nothing about its capacity; only a
                          * literal/local receiver carries a reliable bound. */
-                        if (expr_has_reliable_string_bounds(arr_expr, locals))
+                        if (expr_has_reliable_string_bounds(arr_expr, locals)) {
+                            arr_ptr = emit_string_base_guard(g, arr_ptr, expr->loc);
                             idx = emit_index_safe_bounds(g, idx,
                                 emit_string_buffer_len(g, arr_ptr, expr->loc), expr->loc,
                                 "string");
+                        }
                         else
                             idx = emit_string_elem_guard(g, arr_ptr, idx, expr->loc, &arr_ptr);
                         LLVMValueRef elem_ptr = LLVMBuildGEP2(g->builder, i8, arr_ptr, &idx, 1, "eidx");
@@ -3635,6 +3639,7 @@ static LLVMValueRef emit_incdec_expr(zan_irgen_t *g, zan_ast_node_t *expr,
             LLVMValueRef arr_ptr = emit_expr(g, arr_expr, locals);
             LLVMValueRef idx = emit_expr(g, operand->index.index, locals);
             if (expr_has_reliable_string_bounds(arr_expr, locals)) {
+                arr_ptr = emit_string_base_guard(g, arr_ptr, operand->loc);
                 LLVMValueRef str_len = emit_string_buffer_len(g, arr_ptr, operand->loc);
                 emit_index_bounds_check(g, idx, str_len, operand->loc, "string");
                 idx = emit_index_safe_bounds(g, idx, str_len, operand->loc, "string");
@@ -4953,6 +4958,7 @@ static LLVMValueRef emit_expr_index(zan_irgen_t *g, zan_ast_node_t *expr,
         if (arr_ptr && arr_type && arr_type->kind == TYPE_STRING) {
             LLVMValueRef idx = emit_expr(g, expr->index.index, locals);
             if (expr_has_reliable_string_bounds(expr->index.object, locals)) {
+                arr_ptr = emit_string_base_guard(g, arr_ptr, expr->loc);
                 LLVMValueRef str_len = emit_string_buffer_len(g, arr_ptr, expr->loc);
                 emit_index_bounds_check(g, idx, str_len, expr->loc, "string");
                 idx = emit_index_safe_bounds(g, idx, str_len, expr->loc, "string");
