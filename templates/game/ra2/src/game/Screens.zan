@@ -16,13 +16,19 @@ namespace Ra2.Ui;
 /// panel instead of failing to open.
 class ShellArt {
     SdlTexture title;
+    SdlTexture logo;
+    SdlTexture load;
     bool loaded;
 
     static ShellArt Load(SdlRenderer r, Vfs vfs) {
         ShellArt a = new ShellArt();
         a.loaded = false;
         a.title = ShellArt.LoadPcx(r, vfs, "TITLE.PCX");
-        if (a.title != null) { a.loaded = true; }
+        a.logo = ShellArt.LoadPcx(r, vfs, "LOGO.PCX");
+        a.load = ShellArt.LoadPcx(r, vfs, "LOAD.PCX");
+        if (a.title != null || a.logo != null || a.load != null) {
+            a.loaded = true;
+        }
         return a;
     }
 
@@ -46,11 +52,19 @@ class ShellArt {
     }
 
     SdlTexture Title() { return this.title; }
+    SdlTexture Logo() { return this.logo; }
+    SdlTexture Load() { return this.load; }
     bool HasTitle() { return this.title != null; }
+    bool HasLogo() { return this.logo != null; }
+    bool HasLoad() { return this.load != null; }
 
     void Close() {
         if (this.title != null) { this.title.Close(); }
+        if (this.logo != null) { this.logo.Close(); }
+        if (this.load != null) { this.load.Close(); }
         this.title = null;
+        this.logo = null;
+        this.load = null;
     }
 }
 
@@ -96,61 +110,81 @@ class Screens {
 
     /// <summary>Main menu over the game's own title art. Returns the action
     /// the click landed on: 0 none, 1 skirmish, 2 quit.</summary>
+    ///
+    /// The original menu runs its intro video behind a left-anchored seven
+    /// button strip (遭遇戰/單人遊戲/網際網路/網路/選項/社群/退出遊戲,
+    /// read from the install's CSF). The install carries no VQP decoder, so
+    /// the backdrop is the shipped LOGO.PCX -- the box-art war scene the
+    /// shell also used for static moments -- letterboxed 640x480 just as the
+    /// game drew it, button strip down the left like the real one.
     static int DrawMainMenu(SdlRenderer r, ShellArt art, Strings ui,
                             int viewW, int viewH,
                             int mouseX, int mouseY, bool clicked) {
-        // The stock TITLE.PCX is very dark; lift it a touch so the menu reads
-        // as a scene rather than a black screen.
-        if (art != null && art.HasTitle()) {
-            r.DrawTexture(art.Title(), 0, 0, viewW, viewH);
-            Draw.RoundRectFill(r, 0, 0, viewW, viewH, 0, 36, 38, 42, 55);
-            // A red alert banner down the left edge, like the game's warning
-            // stripes.
-            r.SetColor(178, 24, 24, 255);
-            r.FillRect(0, 0, 8, viewH);
-            r.FillRect(viewW - 8, 0, 8, viewH);
+        SdlTexture backdrop = art != null && art.HasLogo() ? art.Logo()
+                            : art != null && art.HasTitle() ? art.Title() : null;
+        if (backdrop != null) {
+            // 4:3 centred, the aspect the original art was drawn for; the
+            // bars either side take the widescreen slack.
+            int bh = viewH;
+            int bw = bh * 4 / 3;
+            if (bw > viewW) { bw = viewW; bh = bw * 3 / 4; }
+            r.DrawTexture(backdrop, (viewW - bw) / 2, 0, bw, bh);
+            // A vertical darkening behind the buttons so the gold text
+            // keeps its contrast over the bright sky part of the scene,
+            // the way the video's left side fell dark behind them.
+            int stripX = (viewW - bw) / 2;
+            Draw.RoundRectFill(r, stripX, 0, bw / 2 + 40, viewH, 0,
+                               12, 12, 14, 110);
         } else {
             KitUi.Backdrop(r, null, viewW, viewH);
         }
 
-        // The big red title, read as the game's own logo.
-        Text.DrawCenteredShadow(r, "红色警戒 2", viewW / 2, 70, 9,
-                                226, 40, 32, 4);
-        Text.DrawCentered(r, "R E D   A L E R T   2", viewW / 2, 220, 4,
-                          200, 150, 90, 255);
-        r.SetColor(178, 24, 24, 255);
-        r.DrawLine(viewW / 2 - 240, 270, viewW / 2 + 240, 270);
-
-        int bw = Screens.PanelW();
-        int bh = 62;
-        int bx = viewW / 2 - bw / 2;
-        int by = 310;
-        int gap = 22;
-
-        // The original menu's button labels, from the CSF table the install
-        // ships: GUI:Skirmish 遭遇戰, GUI:SinglePlayerMenu 單人遊戲,
-        // GUI:SelectMultiplayerGame, GUI:ExitGame 退出遊戲.
+        // The original menu's seven buttons, top to bottom, with the CSF
+        // labels the install ships: 遭遇戰, 單人遊戲, 網際網路, 網路,
+        // 選項, 社群, 退出遊戲.
         string skirmishLabel = ui.Or("GUI:Skirmish", "遭遇战");
         string singleLabel = ui.Or("GUI:SinglePlayerMenu", "单人游戏");
-        string multiLabel = ui.Or("GUI:SelectMultiplayerGame", "多人游戏");
-        string exitLabel = ui.Or("GUI:ExitGame", "退出");
+        string internetLabel = ui.Or("GUI:Internet", "网际网络");
+        string networkLabel = ui.Or("GUI:Network", "网络游戏");
+        string optionsLabel = ui.Or("GUI:Options", "选项");
+        string communityLabel = ui.Or("GUI:YuriWebsite", "社群");
+        string exitLabel = ui.Or("GUI:ExitGame", "退出游戏");
 
+        // The strip hugs the left edge of the 4:3 frame, buttons stacked
+        // tight like the shipped menu's -- narrower and shorter than the
+        // old slab buttons, all seven rows of them.
+        int bw = 250;
+        int bh = 52;
+        int gap = 14;
+        int totalH = 7 * bh + 6 * gap;
+        int bx = 36;
+        int by = (viewH - totalH) / 2;
+
+        // Skirmish is the one implemented mode. The rest are drawn disabled
+        // rather than hidden so the menu reads like the real one and the gap
+        // is honest.
         int action = 0;
         bool hovSkirmish = Ra2UiButton(r, mouseX, mouseY, bx, by, bw, bh,
                                        skirmishLabel, true);
         if (hovSkirmish && clicked) { action = 1; }
 
-        // Campaign and multiplayer are not implemented; they are drawn
-        // disabled rather than hidden so the menu reads like the real one and
-        // the gap is honest.
-        Screens.DisabledButton(r, bx, by + bh + gap, bw, bh, singleLabel);
-        Screens.DisabledButton(r, bx, by + (bh + gap) * 2, bw, bh, multiLabel);
+        Screens.DisabledButton(r, bx, by + (bh + gap), bw, bh, singleLabel);
+        Screens.DisabledButton(r, bx, by + (bh + gap) * 2, bw, bh,
+                               internetLabel);
+        Screens.DisabledButton(r, bx, by + (bh + gap) * 3, bw, bh,
+                               networkLabel);
+        Screens.DisabledButton(r, bx, by + (bh + gap) * 4, bw, bh,
+                               optionsLabel);
+        Screens.DisabledButton(r, bx, by + (bh + gap) * 5, bw, bh,
+                               communityLabel);
 
-        bool hovQuit = Ra2UiButton(r, mouseX, mouseY, bx, by + (bh + gap) * 3,
-                                   bw, bh, exitLabel, false);
+        bool hovQuit = Ra2UiButton(r, mouseX, mouseY, bx,
+                                   by + (bh + gap) * 6, bw, bh,
+                                   exitLabel, false);
         if (hovQuit && clicked) { action = 2; }
 
-        Text.Draw(r, "Esc 退出  F11 全屏", 20, viewH - 34, 2, 150, 158, 172, 255);
+        Text.Draw(r, "Esc 退出  F11 全屏", 20, viewH - 34, 2, 150, 158, 172,
+                  255);
         return action;
     }
 
