@@ -32,12 +32,13 @@ class AccountDao {
 
     /* 注册新账号：校验与散列都在这里，调用方只递原始输入。
        返回新 id；0=账号已存在；-1=写入失败。 */
-    async int Register(string username, string password,
+    async int Register(string username, string password, string email,
                        string question, string answer) {
         Account have = await this.ByUsername(username);
         if (have != null) { return 0; }
         Account row = new Account();
         row.username = username;
+        row.email = email;
         row.passwordSalt = Hex.Encode(RandomNumberGenerator.GetBytes(16), 16);
         row.passwordHash = AuthUser.PasswordHash(password, row.passwordSalt);
         row.question = question;

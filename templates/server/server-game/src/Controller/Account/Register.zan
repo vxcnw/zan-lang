@@ -45,7 +45,7 @@ class Register : AppController {
             return;
         }
         AccountDao dao = new AccountDao(this.Held());
-        int id = await dao.Register(user, pass, question, answer);
+        int id = await dao.Register(user, pass, "", question, answer);
         if (id == 0) {
             this.ViewOf(Register.Tpl, await Register.Form("", "", "", "",
                 "账号已存在，请换一个或直接登录", false));
@@ -60,14 +60,17 @@ class Register : AppController {
             true));
     }
 
-    /* 与 TCP register 协议同一套约束；文案两处一致。 */
+    /* 与 TCP register 协议同一套约束；文案两处一致。密保与客户端
+       一致可选：都空=不设置，只填一半要求补全。 */
     static string Validate(string user, string pass, string pass2,
                            string question, string answer) {
         if (Fmt.CharCount(user) < 3 || Fmt.CharCount(user) > 32) { return "账号需 3-32 字"; }
         if (Fmt.CharCount(pass) < 6 || Fmt.CharCount(pass) > 64) { return "密码需 6-64 字"; }
         if (pass != pass2) { return "两次输入的密码不一致"; }
-        if (Fmt.CharCount(question) < 2 || Fmt.CharCount(question) > 50) { return "密保问题需 2-50 字"; }
-        if (Fmt.CharCount(answer) < 2 || Fmt.CharCount(answer) > 50) { return "密保答案需 2-50 字"; }
+        if (question.Length > 0 || answer.Length > 0) {
+            if (Fmt.CharCount(question) < 2 || Fmt.CharCount(question) > 50) { return "密保问题需 2-50 字"; }
+            if (Fmt.CharCount(answer) < 2 || Fmt.CharCount(answer) > 50) { return "密保答案需 2-50 字"; }
+        }
         return "";
     }
 

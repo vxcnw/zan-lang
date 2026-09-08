@@ -217,6 +217,15 @@ class Schema {
             if (!await Schema.AddRealm(db, "一区·雷霆之怒", 0, 1)) { return false; }
             if (!await Schema.AddRealm(db, "二区·烈焰天下", 0, 2)) { return false; }
             if (!await Schema.AddRealm(db, "三区·战神殿", 1, 3)) { return false; }
+        } else {
+            /* 旧库补倍率列：ALTER TABLE 加列后旧行是 NULL，归一到 1.0 倍
+               （用 is null 判空，=0 匹配不到 NULL）。 */
+            await db.ExecuteAsync("update game_realm set expRate=10000"
+                + " where expRate is null or expRate=0");
+            await db.ExecuteAsync("update game_realm set goldRate=10000"
+                + " where goldRate is null or goldRate=0");
+            await db.ExecuteAsync("update game_realm set dropRate=10000"
+                + " where dropRate is null or dropRate=0");
         }
         int maps = await db.Select<GameMap>().CountAsync();
         int itemsN = await db.Select<Item>().CountAsync();
@@ -238,6 +247,23 @@ class Schema {
             if (!await Schema.SeedSkillsFromSnap(db)) { GameSnapshot.Close(); return false; }
             GameSnapshot.Close();
         } else {
+            /* 旧库补 slot 列：种子期未写 slot 的库按快照 bclass 原表推导
+               回填。ALTER 加列后旧行 slot 是 NULL（=0 匹配不到），逐条
+               update 不带 slot 条件、只按名称命中，空值与非空都写一遍。 */
+            if (itemsN > 0) {
+                await GameSnapshot.Open("data/M2.DB");
+                DbResult snap = await GameSnapshot.Table("gameitem");
+                for (int i = 0; i < snap.RowCount(); i = i + 1) {
+                    string nm = GameSnapshot.Str(snap, i, "name");
+                    if (nm.Length == 0) { continue; }
+                    await db.Update<Item>()
+                        .Set(a => a.slot, Schema.SlotOfBclass(
+                            GameSnapshot.Str(snap, i, "bclass")))
+                        .Where(a => a.name == nm)
+                        .ExecuteAffrowsAsync();
+                }
+                GameSnapshot.Close();
+            }
             if (!await Schema.SeedSkills(db)) { return false; }
         }
         int ann = await db.Select<Announce>().CountAsync();
@@ -326,6 +352,21 @@ class Schema {
        （def=d2）、道具/虚拟→3。价格 pirce、门槛 lvl、美术键 picture
        原样带入。data.dll 里没有药水（回复是挂机内置行为），目录即
        原版原味。 */
+    /* bclass（原版二级分类）→ 穿戴槽位。非穿戴类回 -1。 */
+    static int SlotOfBclass(string bclass) {
+        if (bclass == "武器") { return 0; }
+        if (bclass == "衣服") { return 1; }
+        if (bclass == "头盔") { return 2; }
+        if (bclass == "项链") { return 3; }
+        if (bclass == "手镯") { return 4; }
+        if (bclass == "戒指") { return 6; }
+        if (bclass == "腰带") { return 8; }
+        if (bclass == "靴子") { return 9; }
+        if (bclass == "勋章") { return 10; }
+        if (bclass == "宝石") { return 11; }
+        return -1;
+    }
+
     static async bool SeedItems(IDbConnection db) {
         int n = await db.Select<Item>().CountAsync();
         if (n > 0) { return true; }
@@ -337,6 +378,7 @@ class Schema {
             string bclass = GameSnapshot.Str(snap, i, "bclass");
             Item row = new Item();
             row.name = name;
+            row.slot = Schema.SlotOfBclass(bclass);
             if (aclass == "消耗") {
                 row.kind = 0;
                 row.hp = GameSnapshot.Int(snap, i, "hp");
@@ -560,10 +602,24 @@ class Schema {
 
     static async bool AddRealm(IDbConnection db, string name, int state,
                             int sort) {
+        return await Schema.AddRealm(db, name, state, sort, 10000, 10000,
+            10000);
+    }
+
+    /* 倍率走万分比整型（10000=1.0 倍），种子默认全 1.0 倍。
+       分区组：种子全归“永久区”；GM 开新区时在后台改 grp 即分出
+       “公测1-10区”这类组（客户端分区窗按组两层展示）。 */
+    static async bool AddRealm(IDbConnection db, string name, int state,
+                            int sort, int expRate, int goldRate,
+                            int dropRate) {
         Realm r = new Realm();
         r.name = name;
+        r.grp = "永久区";
         r.state = state;
         r.sort = sort;
+        r.expRate = expRate;
+        r.goldRate = goldRate;
+        r.dropRate = dropRate;
         r.createdAt = WebApp.NowSeconds();
         int _id = await db.Insert<Realm>(r).ExecuteIdentityAsync();
         return _id > 0;

@@ -149,6 +149,9 @@ class GameNet {
     string user = "";
     int realmId = 1;
     string realmName = "";
+    /* 分区窗选中的区没有角色（enter 被拒）：登录窗据此切到建角页。 */
+    bool needCreate;
+    bool NeedCreate() { return this.needCreate; }
     JsonValue self;
     JsonValue realms;
     JsonValue mobs;
@@ -193,6 +196,12 @@ class GameNet {
     int BagCount() { return this.bag != null && this.bag.IsArray() ? this.bag.Count() : 0; }
     JsonValue BagAt(int i) { return this.bag.At(i); }
     string RealmName() { return this.realmName; }
+    /* 当前/想要进入的区服 id（登录窗建角步用它记玩家的选择）。 */
+    int RealmId() { return this.realmId; }
+    /* 当前区服倍率（万分比，进区后随 self 下发）；未进区回 0。 */
+    int ExpRate() { return this.self != null ? this.self.Int("expRate", 0) : 0; }
+    int GoldRate() { return this.self != null ? this.self.Int("goldRate", 0) : 0; }
+    int DropRate() { return this.self != null ? this.self.Int("dropRate", 0) : 0; }
     /* 阶段或世界数据变化时递增，LegendApp 借此重建联机页。*/
     int dataVersion;
     int DataVersion() { return this.stage * 1000 + this.dataVersion; }
@@ -511,8 +520,9 @@ class GameNet {
         this.announces = null;
         this.lastFight = null;
         this.uid = 0;
-        this.realmId = 0;
+        /* realmId 不清零：断线重连分区窗仍默认选中上次玩过的区。 */
         this.realmName = "";
+        this.needCreate = false;
         /* 保留本次连接里更早的错误（如服务器密码不正确）：它才是
            用户要看的断开原因；reason 只在没有更早错误时兜底。*/
         if (this.error.Length == 0) { this.error = reason; }
@@ -640,53 +650,110 @@ class GameNet {
 
     /* ---- UI 动作 ---- */
 
-    void Register(string user, string pass) {
+    /* 注册：照原版「创建新账号」只收 账号/密码/邮箱（密保可空，服务端
+       两者都空=不设置）。结果存 formMsg 给登录窗建号页提示行（聊天流
+       同步留一份）。 */
+    string formMsg = "";
+    string FormMsg() { return this.formMsg; }
+    void SetFormMsg(string s) { this.formMsg = s; }
+    void Register(string user, string pass, string email) {
         if (user.Length < 3 || pass.Length < 6) { this.AddChat("[系统]", "账号需 ≥3 字符，密码需 ≥6 位。"); return; }
         this.Op("{\"op\":\"register\",\"user\":\"" + user + "\",\"pass\":\"" + pass
-            + "\",\"question\":\"" + SecretQuestion() + "\",\"answer\":\"" + SecretAnswer() + "\"}", (JsonValue r) => {
-            if (r.Int("ok", 0) == 1) { this.AddChat("[系统]", "注册成功，请登录。"); }
-            else { this.AddChat("[系统]", "注册失败：" + r.Str("err", "未知错误")); }
+            + "\",\"email\":\"" + email + "\"}", (JsonValue r) => {
+            if (r.Int("ok", 0) == 1) {
+                this.formMsg = "注册成功，请登录。";
+                this.AddChat("[系统]", this.formMsg);
+            } else {
+                this.formMsg = "注册失败：" + r.Str("err", "未知错误");
+                this.AddChat("[系统]", this.formMsg);
+            }
+            this.Bump();
         });
     }
 
+    /* 登录成功：拿区服列表（应答自带）后停在「分区」选择页——照原版
+       不自动进区，玩家选分区→区服才进；一个账号所有区通用。 */
     void Login(string user, string pass) {
         this.Op("{\"op\":\"login\",\"user\":\"" + user + "\",\"pass\":\"" + pass + "\"}", (JsonValue r) => {
             if (r.Int("ok", 0) != 1) { this.AddChat("[系统]", "登录失败：" + r.Str("err", "未知错误")); return; }
             this.uid = r.Int("uid", 0);
             this.user = user;
             this.stage = 3;
-            this.AddChat("[系统]", "登录成功，正在获取区服列表…");
-            this.Op("{\"op\":\"realms\"}", (JsonValue rr) => {
-                JsonValue rows = rr.Get("realms");
-                if (rr.Int("ok", 0) == 1 && rows != null && rows.IsArray() && rows.Count() > 0) { this.realms = rows; }
-                /* 登录后自动进默认区：有角色直接进世界，没角色回复
-                   needCreate，联机弹窗据此切到建角步骤。*/
-                this.EnterRealm(this.realmId, this.RealmNameOf(this.realmId));
-            });
+            this.needCreate = false;
+            JsonValue rows = r.Get("realms");
+            if (rows != null && rows.IsArray() && rows.Count() > 0) { this.realms = rows; }
+            this.AddChat("[系统]", "登录成功，请选择分区进入。");
+            this.Bump();
         });
     }
 
-    string RealmNameOf(int id) {
-        if (this.realms != null && this.realms.IsArray()) {
-            for (int i = 0; i < this.realms.Count(); i = i + 1) {
-                JsonValue rl = this.realms.At(i);
-                if (rl.Int("id", 0) == id) { return rl.Str("name", "区服 " + Rules.N(id)); }
-            }
-        }
-        return "区服 " + Rules.N(id);
+    /* 修改密码（密保找回）：forgot 拿问题，reset 校验答案并改密。
+       结果存字段，登录窗「修改密码」页直接读。 */
+    string forgotQuestion = "";
+    string forgotMsg = "";
+    bool resetOk; string resetMsg = "";
+    string ForgotQuestion() { return this.forgotQuestion; }
+    string ForgotMsg() { return this.forgotMsg; }
+    bool ResetOk() { return this.resetOk; }
+    string ResetMsg() { return this.resetMsg; }
+    void Forgot(string user) {
+        this.forgotQuestion = ""; this.forgotMsg = "";
+        this.Op("{\"op\":\"forgot\",\"user\":\"" + user + "\"}", (JsonValue r) => {
+            if (r.Int("ok", 0) == 1) { this.forgotQuestion = r.Str("question", ""); }
+            else { this.forgotMsg = r.Str("err", "未知错误"); }
+            this.Bump();
+        });
+    }
+    void Reset(string user, string answer, string newpass) {
+        this.resetMsg = "";
+        this.Op("{\"op\":\"reset\",\"user\":\"" + user + "\",\"answer\":\"" + answer
+            + "\",\"newpass\":\"" + newpass + "\"}", (JsonValue r) => {
+            this.resetOk = r.Int("ok", 0) == 1;
+            this.resetMsg = this.resetOk ? r.Str("msg", "密码已重置，请用新密码登录")
+                : r.Str("err", "未知错误");
+            this.Bump();
+        });
     }
 
+    /* 选择角色页：characters 列表缓存（进页拉一次，删除后重拉）+
+       删除角色。 */
+    JsonValue chars; bool charsReady;
+    int CharCount() { return this.chars != null && this.chars.IsArray() ? this.chars.Count() : 0; }
+    JsonValue CharAt(int i) { return this.chars.At(i); }
+    bool CharsReady() { return this.charsReady; }
+    void RefreshChars(int realmId) {
+        this.chars = null; this.charsReady = false;
+        this.Op("{\"op\":\"characters\",\"realm\":" + Convert.ToString(realmId) + "}", (JsonValue r) => {
+            JsonValue rows = r.Get("rows");
+            if (rows != null && rows.IsArray()) { this.chars = rows; }
+            this.charsReady = true;
+            this.Bump();
+        });
+    }
+    void DelChar(int realmId) {
+        this.Op("{\"op\":\"delchar\",\"realm\":" + Convert.ToString(realmId) + "}", (JsonValue r) => {
+            this.AddChat("[系统]", r.Int("ok", 0) == 1 ? "角色已删除。"
+                : "删除失败：" + r.Str("err", "未知错误"));
+            this.RefreshChars(realmId);
+        });
+    }
+
+    /* 进区：分区窗点区服调用。有角色直接进世界（self 带回）；没角色
+       服务端拒绝，needCreate 置位，登录窗切到建角页。 */
     void EnterRealm(int id, string name) {
         this.realmId = id;
         this.realmName = name;
         this.Op("{\"op\":\"enter\",\"realm\":" + Convert.ToString(id) + "}", (JsonValue r) => {
             if (r.Int("ok", 0) != 1) {
-                /* 还没有角色：留在建角流程，弹窗据此切到建角步骤。*/
-                this.AddChat("[系统]", "进入区服：" + r.Str("err", "请先创建角色"));
+                /* 该区还没有角色：置标记，登录窗切到建角页（照原版选区
+                   后没角色就先建角）。*/
+                this.needCreate = true;
+                this.AddChat("[系统]", r.Str("err", "请先创建角色"));
                 this.self = null;
                 this.Bump();
                 return;
             }
+            this.needCreate = false;
             JsonValue st = r.Get("self");
             if (st != null && st.IsObject()) { this.self = st; }
             this.stage = 4;
@@ -694,25 +761,16 @@ class GameNet {
         });
     }
 
-    /* 建角走固定一区：新号没有可选区，realmId 默认 1，先拉一次区服列表
-       把区名写对，再 create；服务端建角即进入世界（self 直接带回来）。*/
-    void CreateCharFirst(string name, int job) {
-        this.realmId = 1;
-        this.Op("{\"op\":\"realms\"}", (JsonValue rr) => {
-            JsonValue rows = rr.Get("realms");
-            if (rr.Int("ok", 0) == 1 && rows != null && rows.IsArray() && rows.Count() > 0) {
-                this.realms = rows;
-                this.realmName = rows.At(0).Str("name", "区服 1");
-            }
-            this.CreateChar(name, job);
-        });
-    }
-
-    void CreateChar(string name, int job) {
+    /* 建角入口：先拉一次区服列表把区名/倍率备好，再 create 到当前
+       选中区（realmId 可被建角窗的区服列表改过）；服务端建角即进入
+       世界（self 直接带回来）。 */
+    void CreateChar(string name, int job, int gender) {
         if (name.Length < 2) { this.AddChat("[系统]", "角色名需 2 个字符以上。"); return; }
         this.Op("{\"op\":\"create\",\"realm\":" + Convert.ToString(this.realmId)
-            + ",\"name\":\"" + name + "\",\"job\":" + Convert.ToString(job) + "}", (JsonValue r) => {
+            + ",\"name\":\"" + name + "\",\"job\":" + Convert.ToString(job)
+            + ",\"gender\":" + Convert.ToString(gender) + "}", (JsonValue r) => {
             if (r.Int("ok", 0) != 1) { this.AddChat("[系统]", "创建角色失败：" + r.Str("err", "未知错误")); return; }
+            this.needCreate = false;
             JsonValue st = r.Get("self");
             if (st != null && st.IsObject()) { this.self = st; }
             this.stage = 4;
@@ -720,10 +778,6 @@ class GameNet {
             this.AfterEnter();
         });
     }
-
-    /* 服务器要求的密保问题/答案固定为一组（服务端校验 2-50 字）。*/
-    static string SecretQuestion() { return "出生之城"; }
-    static string SecretAnswer() { return "比奇"; }
 
     void AfterEnter() {
         this.lastFight = null;
@@ -966,12 +1020,5 @@ class GameNet {
         if (this.stage >= 2) { this.Enqueue("{\"op\":\"logout\"}"); }
         this.Enqueue("!close");
         this.Drop("主动断开");
-    }
-
-    /* 登录窗第二步的“重选服务器”：挂断当前会话，回到连接一步。
-       与 Logout 不同：不发送 logout（可能还没登录账号）。*/
-    void BackToServerSelect() {
-        if (this.connected || this.connecting) { this.Enqueue("!close"); }
-        this.Drop("重新选择服务器");
     }
 }

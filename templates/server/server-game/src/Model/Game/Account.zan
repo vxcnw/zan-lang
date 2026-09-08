@@ -41,6 +41,10 @@ class Account {
     [Column(StringLength = 128, IsNullable = false)]
     string banReason;
 
+    /* 邮箱（创建账号时备档，可空串；找回密码走密保，不依赖邮箱）。 */
+    [Column(StringLength = 128, IsNullable = false)]
+    string email;
+
     long lastLoginAt;
     long createdAt;
 }

@@ -16,13 +16,18 @@ namespace ZanWeb.Game;
 
      客户端 → 服务端                          服务端 → 客户端
      {"op":"register","user","pass",
-      "question","answer"}                   {"ok":1,"msg"} / {"ok":0,"err"}
+      "email","question","answer"}           {"ok":1,"msg"} / {"ok":0,"err"}
+                                            （email/密保可空；密保只填
+                                             一半会要求补全）
      {"op":"login","user","pass"}            {"ok":1,"uid","realms"}
      {"op":"forgot","user"}                  {"ok":1,"question"}
      {"op":"reset","user","answer","newpass"} {"ok":1,"msg"}
-     {"op":"realms"}                         {"ok":1,"realms":[{id,name,state,online}]}
+     {"op":"realms"}                         {"ok":1,"realms":[{id,name,grp,state,online}]}
      {"op":"characters","realm":1}           {"ok":1,"rows":[{id,name,level,job}]}
-     {"op":"create","realm":1,"name","job"}  {"ok":1,"self","maps","announce"}
+     {"op":"delchar","realm":1}              {"ok":1,"msg"}（删该区角色+背包，
+                                              在线角色拒绝）
+     {"op":"create","realm":1,"name","job",
+      "gender"}                              {"ok":1,"self","maps","announce"}
                                              （建角自带木剑+布衣入背包，
                                              self 含 kills/weaponName/armorName）
      {"op":"enter","realm":1}                {"ok":1,"self","maps","announce"}
@@ -268,6 +273,7 @@ class Gateway {
 
         /* 已登录、未进区：选角相关。 */
         if (op == "characters") { await Gateway.Characters(conn, s, m); return; }
+        if (op == "delchar") { await Gateway.DelChar(conn, s, m); return; }
         if (op == "create") { await Gateway.Create(conn, s, m, now); return; }
         if (op == "enter") { await Gateway.Enter(conn, s, m, now); return; }
 
@@ -412,6 +418,7 @@ class Gateway {
     static async void Register(Connection conn, JsonValue m) {
         string user = m.Str("user", "").Trim();
         string pass = m.Str("pass", "");
+        string email = m.Str("email", "").Trim();
         string question = m.Str("question", "").Trim();
         string answer = m.Str("answer", "");
         if (Fmt.CharCount(user) < 3 || Fmt.CharCount(user) > 32) {
@@ -422,19 +429,28 @@ class Gateway {
             Gateway.Send(conn, Gateway.Err("密码需 6-64 字"));
             return;
         }
-        if (Fmt.CharCount(question) < 2 || Fmt.CharCount(question) > 50) {
-            Gateway.Send(conn, Gateway.Err("密保问题需 2-50 字"));
+        if (Fmt.CharCount(email) > 128) {
+            Gateway.Send(conn, Gateway.Err("邮箱过长"));
             return;
         }
-        if (Fmt.CharCount(answer.Trim()) < 2 || Fmt.CharCount(answer.Trim()) > 50) {
-            Gateway.Send(conn, Gateway.Err("密保答案需 2-50 字"));
-            return;
+        /* 密保照原版创建账号窗为可选项：两者都空=不设置（找回密码
+           不可用，forgot/reset 对 question 空的账号本就拒绝）；只填
+           一半视为没填完，要求补全。 */
+        if (question.Length > 0 || answer.Trim().Length > 0) {
+            if (Fmt.CharCount(question) < 2 || Fmt.CharCount(question) > 50) {
+                Gateway.Send(conn, Gateway.Err("密保问题需 2-50 字"));
+                return;
+            }
+            if (Fmt.CharCount(answer.Trim()) < 2 || Fmt.CharCount(answer.Trim()) > 50) {
+                Gateway.Send(conn, Gateway.Err("密保答案需 2-50 字"));
+                return;
+            }
         }
         IDbConnection db = await Gateway.Db(conn);
         if (db == null) { return; }
         try {
             AccountDao dao = new AccountDao(db);
-            int id = await dao.Register(user, pass, question, answer);
+            int id = await dao.Register(user, pass, email, question, answer);
             if (id == 0) {
                 Gateway.Send(conn, Gateway.Err("账号已存在"));
                 return;
@@ -586,8 +602,15 @@ class Gateway {
             JsonValue o = JsonValue.NewObject();
             o.Set("id", JsonValue.NewNum(Convert.ToString(realm.id)));
             o.Set("name", JsonValue.NewStr(realm.name));
+            /* 分区组（客户端「分区」窗分组展示），空列按永久区。 */
+            o.Set("grp", JsonValue.NewStr(realm.grp.Length > 0 ? realm.grp : "永久区"));
             o.Set("state", JsonValue.NewNum(Convert.ToString(realm.state)));
             o.Set("online", JsonValue.NewNum(Convert.ToString(World.RealmOnline(realm.id))));
+            /* 倍率（万分比）随列表下发：客户端选区页直接展示“经验/金币/
+               爆率 2.0 倍”之类的标签。 */
+            o.Set("expRate", JsonValue.NewNum(Convert.ToString(realm.expRate)));
+            o.Set("goldRate", JsonValue.NewNum(Convert.ToString(realm.goldRate)));
+            o.Set("dropRate", JsonValue.NewNum(Convert.ToString(realm.dropRate)));
             arr.Append(o);
         }
         r.Set("realms", arr);
@@ -622,11 +645,51 @@ class Gateway {
         }
     }
 
+    /* 删除角色（选角页）：删该区本账号角色 + 其背包行。角色被任一
+       在线会话持有时拒绝（防 flush 回写复活行）；一区一角色，删完
+       可重建。 */
+    static async void DelChar(Connection conn, Session s, JsonValue m) {
+        int realmId = m.Int("realm", 0);
+        IDbConnection db = await Gateway.Db(conn);
+        if (db == null) { return; }
+        try {
+            List<ZanWeb.Model.Game.Player> rows = await db
+                .Select<ZanWeb.Model.Game.Player>()
+                .Where(a => a.accountId == s.accountId && a.realmId == realmId)
+                .ToListAsync();
+            if (rows.Count == 0) {
+                Gateway.Send(conn, Gateway.Err("该区没有角色"));
+                return;
+            }
+            for (int i = 0; i < rows.Count; i = i + 1) {
+                if (World.HoldsPlayer(rows[i].id)) {
+                    Gateway.Send(conn, Gateway.Err("角色在线，请先退出再删除"));
+                    return;
+                }
+            }
+            for (int i = 0; i < rows.Count; i = i + 1) {
+                int pid = rows[i].id;
+                await db.Delete<ZanWeb.Model.Game.Bag>()
+                    .Where(a => a.playerId == pid).ExecuteAffrowsAsync();
+                await db.Delete<ZanWeb.Model.Game.Player>()
+                    .Where(a => a.id == pid).ExecuteAffrowsAsync();
+            }
+            JsonValue r = Gateway.Ok();
+            r.Set("msg", JsonValue.NewStr("角色已删除"));
+            Gateway.Send(conn, r);
+        } finally {
+            Gateway.Give(conn, db);
+        }
+    }
+
     /* 创建角色并直接进区：校验区服开放、角色名区内唯一、职业合法。 */
     static async void Create(Connection conn, Session s, JsonValue m, long now) {
         int realmId = m.Int("realm", 0);
         string name = m.Str("name", "").Trim();
         int job = m.Int("job", 0);
+        /* 性别照原版创建角色窗：男/女两块，缺省男。 */
+        int gender = m.Int("gender", 0);
+        if (gender < 0 || gender > 1) { gender = 0; }
         if (Fmt.CharCount(name) < 2 || Fmt.CharCount(name) > 16) {
             Gateway.Send(conn, Gateway.Err("角色名需 2-16 字"));
             return;
@@ -663,6 +726,7 @@ class Gateway {
             row.realmId = realmId;
             row.nickname = name;
             row.job = job;
+            row.gender = gender;
             row.level = 1;
             row.gold = 0;
             row.gems = 0;
@@ -689,9 +753,10 @@ class Gateway {
             /* 自增主键不自动回填内存行，会话与 GM 页都按 row.id 定位角色。 */
             row.id = id;
             /* 开局装备：木剑+布衣直接入背包（精确名取模板——快照目录
-               全名是"布衣(男)"，先男后女兜底），进区 LoadBag 即载入——
-               新角色进世界就能穿上，不必先去商店。表达式里不写变量：
-               字面量查询最稳（表达式树对局部串变量的求值不稳）。 */
+               全名是"布衣(男/女)"，按角色性别发放，缺码回退另一性别），
+               进区 LoadBag 即载入——新角色进世界就能穿上，不必先去商店。
+               表达式里不写变量：字面量查询最稳（表达式树对局部串变量
+               的求值不稳），性别分支各写字面量。 */
             ZanWeb.Model.Game.Item starter = await db
                 .Select<ZanWeb.Model.Game.Item>()
                 .Where(a => a.name == "木剑").FirstAsync();
@@ -702,11 +767,13 @@ class Gateway {
                 b.count = 1;
                 await db.Insert<ZanWeb.Model.Game.Bag>(b).ExecuteAffrowsAsync();
             }
-            starter = await db.Select<ZanWeb.Model.Game.Item>()
-                .Where(a => a.name == "布衣(男)").FirstAsync();
-            if (starter == null) {
+            if (gender == 1) {
                 starter = await db.Select<ZanWeb.Model.Game.Item>()
                     .Where(a => a.name == "布衣(女)").FirstAsync();
+            }
+            if (starter == null) {
+                starter = await db.Select<ZanWeb.Model.Game.Item>()
+                    .Where(a => a.name == "布衣(男)").FirstAsync();
             }
             if (starter != null) {
                 ZanWeb.Model.Game.Bag b = new ZanWeb.Model.Game.Bag();
@@ -791,7 +858,7 @@ class Gateway {
                                 ZanWeb.Model.Game.Realm realm,
                                 ZanWeb.Model.Game.Player row, long now,
                                 JsonValue offline) {
-        World.EnterWorld(s, realm.id, row, now);
+        World.EnterWorld(s, realm.id, realm, row, now);
         await Fight.LoadBag(db, s);
         JsonValue r = Gateway.Ok();
         r.Set("self", Gateway.SelfJson(s));
@@ -1038,6 +1105,10 @@ class Gateway {
         o.Set("uid", JsonValue.NewNum(Convert.ToString(s.row.id)));
         o.Set("name", JsonValue.NewStr(s.row.nickname));
         o.Set("realm", JsonValue.NewNum(Convert.ToString(s.realmId)));
+        /* 本区倍率随 self 下发，设置页可展示当前区的产出倍率。 */
+        o.Set("expRate", JsonValue.NewNum(Convert.ToString(s.expRate)));
+        o.Set("goldRate", JsonValue.NewNum(Convert.ToString(s.goldRate)));
+        o.Set("dropRate", JsonValue.NewNum(Convert.ToString(s.dropRate)));
         o.Set("job", JsonValue.NewNum(Convert.ToString(s.row.job)));
         o.Set("level", JsonValue.NewNum(Convert.ToString(s.row.level)));
         o.Set("gold", JsonValue.NewNum(Convert.ToString(s.row.gold)));
@@ -1098,9 +1169,10 @@ class Gateway {
     }
 
     static async bool MapsInto(JsonValue r, IDbConnection db) {
+        /* 全量下发（开放+未开放），open 标记 status==1；客户端按
+           未开放置灰，与原版地图列表一致。 */
         List<ZanWeb.Model.Game.GameMap> maps = await db
             .Select<ZanWeb.Model.Game.GameMap>()
-            .Where(a => a.status == 1)
             .OrderBy(a => a.sortOrder).ToListAsync();
         JsonValue arr = JsonValue.NewArray();
         for (int i = 0; i < maps.Count; i = i + 1) {
@@ -1109,6 +1181,7 @@ class Gateway {
             o.Set("name", JsonValue.NewStr(maps[i].name));
             o.Set("minLevel", JsonValue.NewNum(Convert.ToString(maps[i].minLevel)));
             o.Set("picture", JsonValue.NewNum(Convert.ToString(maps[i].picture)));
+            o.Set("open", JsonValue.NewNum(Convert.ToString(maps[i].status == 1 ? 1 : 0)));
             arr.Append(o);
         }
         r.Set("maps", arr);

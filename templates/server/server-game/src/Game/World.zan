@@ -76,6 +76,18 @@ class World {
     /* 在线会话快照：GM 页与广播使用（Values 返回当前集合的快照列表）。 */
     static List<Session> All() { return World.byCid.Values; }
 
+    /* 某角色当前是否被在线会话持有（删除角色前拦截，防 flush 回写
+       复活已删行）。 */
+    static bool HoldsPlayer(int playerId) {
+        List<Session> rows = World.All();
+        for (int i = 0; i < rows.Count; i = i + 1) {
+            Session s = rows[i];
+            if (s == null || s.row == null || s.kicked) { continue; }
+            if (s.row.id == playerId) { return true; }
+        }
+        return false;
+    }
+
     /* 登录成功登记会话；同账号旧连接被顶号：推送后立即 Leave 收敛
        （角色/背包当场落库，连接本体由 worker 懒收口）——半开连接不再
        挂着旧 row，避免 ByChar/Gift 误命中死会话。此时新会话 row 为空，
@@ -95,15 +107,25 @@ class World {
             + Convert.ToString(World.byCid.Count));
     }
 
-    /* 进入区服：会话挂上角色，开始参与世界（广播/落库/踢线都看 row）。 */
+    /* 进入区服：会话挂上角色与该区倍率，开始参与世界（广播/落库/踢线
+       都看 row）。realm 传 null 时保留会话现有倍率（不会发生，防御）。 */
     static void EnterWorld(Session s, int realmId,
+                           ZanWeb.Model.Game.Realm realm,
                            ZanWeb.Model.Game.Player row, long now) {
         s.realmId = realmId;
+        if (realm != null) {
+            s.expRate = realm.expRate > 0 ? realm.expRate : 10000;
+            s.goldRate = realm.goldRate > 0 ? realm.goldRate : 10000;
+            s.dropRate = realm.dropRate > 0 ? realm.dropRate : 10000;
+        }
         s.row = row;
         s.dirty = false;
         s.lastSeen = now;
         Console.WriteLine("[world] enter #" + Convert.ToString(s.cid)
             + " " + s.username + " realm=" + Convert.ToString(realmId)
+            + " rate=" + Convert.ToString(s.expRate) + "/"
+            + Convert.ToString(s.goldRate) + "/"
+            + Convert.ToString(s.dropRate)
             + " online=" + Convert.ToString(World.OnlineCount()));
     }
 
