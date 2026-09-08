@@ -1785,6 +1785,22 @@ const char *intel_resolve_chain(intellisense_t *is, const char *chain,
 
 /* --- Project-wide indexing --- */
 
+/* Directories that never carry indexable sources of the project at hand:
+ * VCS metadata, build/package output and throwaway scratch. Scanning them
+ * is pure waste (build/dist) or actively divergent (a _scratch with
+ * thousands of probe files), and monorepo-scale roots used to take minutes
+ * and gigabytes because of them. */
+static bool index_skip_dir(const char *name) {
+    return strcmp(name, "bin") == 0 ||
+           strcmp(name, "obj") == 0 ||
+           strcmp(name, "build") == 0 ||
+           strcmp(name, "dist") == 0 ||
+           strcmp(name, "node_modules") == 0 ||
+           strcmp(name, "target") == 0 ||
+           strcmp(name, "_scratch") == 0 ||
+           strcmp(name, ".git") == 0;
+}
+
 #ifdef _WIN32
 
 static void index_directory_recursive(intellisense_t *is, const char *dir_path) {
@@ -1802,11 +1818,8 @@ static void index_directory_recursive(intellisense_t *is, const char *dir_path) 
         snprintf(full_path, sizeof(full_path), "%s\\%s", dir_path, fd.cFileName);
 
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            /* recurse into subdirectories (skip bin/obj/build/.git) */
-            if (strcmp(fd.cFileName, "bin") != 0 &&
-                strcmp(fd.cFileName, "obj") != 0 &&
-                strcmp(fd.cFileName, "build") != 0 &&
-                strcmp(fd.cFileName, ".git") != 0) {
+            /* recurse into subdirectories (skip VCS/build/scratch dirs) */
+            if (!index_skip_dir(fd.cFileName)) {
                 index_directory_recursive(is, full_path);
             }
         } else {
@@ -1863,10 +1876,7 @@ static void index_directory_recursive(intellisense_t *is, const char *dir_path) 
         if (stat(full_path, &st) != 0) continue;
 
         if (S_ISDIR(st.st_mode)) {
-            if (strcmp(entry->d_name, "bin") != 0 &&
-                strcmp(entry->d_name, "obj") != 0 &&
-                strcmp(entry->d_name, "build") != 0 &&
-                strcmp(entry->d_name, ".git") != 0) {
+            if (!index_skip_dir(entry->d_name)) {
                 index_directory_recursive(is, full_path);
             }
         } else if (S_ISREG(st.st_mode)) {

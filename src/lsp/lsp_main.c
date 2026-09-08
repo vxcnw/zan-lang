@@ -42,11 +42,13 @@
 #include <io.h>
 #include <fcntl.h>
 #include <winsock2.h>
+#include <windows.h>
 typedef SOCKET lsp_sock_t;
 #define LSP_INVALID_SOCK INVALID_SOCKET
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <sys/stat.h>
 #include <unistd.h>
 typedef int lsp_sock_t;
 #define LSP_INVALID_SOCK (-1)
@@ -724,6 +726,62 @@ static void handle_initialize(lsp_server_t *s, json_value *id, json_value *param
 /* Project-wide intellisense instance for cross-file completion */
 static intellisense_t *g_project_intel = NULL;
 
+/* Toolchain stdlib root: user project roots rarely contain the stdlib, so
+ * goto-definition and member completion on stdlib members (List.Add,
+ * app.RequestRedraw, File.WriteAllText, ...) used to miss entirely. Locate
+ * it the same exe-relative way zanc's --auto-stdlib does; ZAN_STDLIB
+ * overrides for non-standard layouts. */
+static bool lsp_stdlib_root(char *out, size_t cap) {
+    const char *env = getenv("ZAN_STDLIB");
+    if (env && env[0]) {
+        snprintf(out, cap, "%s", env);
+        return true;
+    }
+#ifdef _WIN32
+    char exe_path[1024];
+    if (GetModuleFileNameA(NULL, exe_path, (DWORD)sizeof(exe_path)) == 0) {
+        return false;
+    }
+    char *last_sep = strrchr(exe_path, '\\');
+    if (!last_sep) { return false; }
+    *last_sep = '\0';
+    snprintf(out, cap, "%s\\..\\stdlib", exe_path);
+    DWORD attr = GetFileAttributesA(out);
+    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+        snprintf(out, cap, "%s\\stdlib", exe_path);
+        attr = GetFileAttributesA(out);
+        if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+            return false;
+        }
+    }
+    return true;
+#else
+    char exe_path[1024];
+    ssize_t elen = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (elen <= 0) { return false; }
+    exe_path[elen] = '\0';
+    char *last_sep = strrchr(exe_path, '/');
+    if (!last_sep) { return false; }
+    *last_sep = '\0';
+    snprintf(out, cap, "%s/../stdlib", exe_path);
+    struct stat st;
+    return stat(out, &st) == 0 && S_ISDIR(st.st_mode);
+#endif
+}
+
+/* Parse the toolchain stdlib into the shared project index, once per
+ * session, right after the workspace scan. Reuses the same recursive
+ * walker, so skip-lists and file-size caps apply unchanged. */
+static void ensure_stdlib_indexed(void) {
+    static bool stdlib_indexed = false;
+    if (stdlib_indexed) { return; }
+    stdlib_indexed = true;
+    if (!g_project_intel) { return; }
+    char root[1024];
+    if (!lsp_stdlib_root(root, sizeof(root))) { return; }
+    intel_index_project(g_project_intel, root);
+}
+
 static void ensure_project_indexed(lsp_server_t *s) {
     if (s->project_indexed) return;
     s->project_indexed = true;
@@ -735,6 +793,7 @@ static void ensure_project_indexed(lsp_server_t *s) {
         intel_init(g_project_intel);
     }
     intel_index_project(g_project_intel, s->workspace_root);
+    ensure_stdlib_indexed();
 }
 
 /* Native filesystem path for a file:// URI (mirrors handle_initialize's
