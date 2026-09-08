@@ -21,14 +21,22 @@ class Data : AdminController {
         string table = this.In("t");
         GenTable t = await this.Design(table);
         if (t == null) { return; }
-        ViewData d = await this.Layout(t.title);
+        bool inDialog = this.In("as") == "dialog";
+        ViewData d = inDialog ? new ViewData() : await this.Layout(t.title);
+        if (inDialog) { d.Set("dialogTitle", t.title); await this.Buttons(d); }
         List<GenColumn> cols = await this.Columns(t.id);
         IDbConnection db = await this.Conn();
         if (db == null) { d.Set("dbDown", "1"); this.Page(d); return; }
 
         d.Set("t", t.tableName);
         d.Set("tableTitle", t.title);
-        if (t.migrated != 1) { d.Set("notMigrated", "1"); this.Page(d); return; }
+        /* 弹窗模式（?as=dialog）由「表设计与生成 · 管理数据」打开；视图分
+           showDialogBody/normalBody 两支，pager 链接带 as=dialog 保持翻页在弹窗内。 */
+        if (inDialog) { d.Set("showDialogBody", "1"); } else { d.Set("normalBody", "1"); }
+        if (t.migrated != 1) {
+            if (inDialog) { d.Set("dialogMsg", "这张表还没有同步到数据库，先在「表设计与生成」里点同步。"); this.Dialog(d); return; }
+            d.Set("notMigrated", "1"); this.Page(d); return;
+        }
 
         ListQuery q = this.Paged("id", 20);
         string kw = q.Kw();
@@ -114,6 +122,7 @@ class Data : AdminController {
         if (filters.Count > 0) { d.Set("filterHtml", fb.ToString()); }
 
         this.Pager(d, q, total);
+        if (inDialog) { this.Dialog(d); return; }
         this.Page(d);
     }
 

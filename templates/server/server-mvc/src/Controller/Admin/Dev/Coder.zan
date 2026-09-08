@@ -140,7 +140,9 @@ class Coder : AdminController {
     [Custom(Perm = PermBit.View)]
     [Description("字段设计")]
     async void Design() {
-        ViewData d = await this.Layout("字段设计");
+        bool inDialog = this.In("as") == "dialog";
+        ViewData d = inDialog ? new ViewData() : await this.Layout("字段设计");
+        if (inDialog) { d.Set("dialogTitle", "字段设计"); await this.Buttons(d); }
         int id = this.InInt("id", 0);
         GenTable t = await this.GenTable.Read(id);
         if (t == null) { this.Fail(404, "0404", "设计不存在"); }
@@ -171,6 +173,8 @@ class Coder : AdminController {
             list.Add(row);
         }
         if (cols.Count == 0) { d.Set("empty", "1"); }
+        d.Set("showBar", inDialog ? "" : "1");
+        if (inDialog) { this.Dialog(d); return; }
         this.Page(d);
     }
 
