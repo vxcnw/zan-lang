@@ -2197,7 +2197,8 @@ static zan_type_t *infer_expr_type_raw(zan_irgen_t *g, zan_ast_node_t *e,
         switch (e->binary.op) {
         case TK_PLUS: case TK_MINUS: case TK_STAR: case TK_SLASH:
         case TK_PERCENT: case TK_AMP: case TK_PIPE: case TK_CARET:
-        case TK_LESS_LESS: case TK_GREATER_GREATER: {
+        case TK_LESS_LESS: case TK_GREATER_GREATER:
+        case TK_GREATER_GREATER_GREATER: {
             zan_type_t *lt = infer_expr_type(g, e->binary.left, locals);
             zan_type_t *rt = infer_expr_type(g, e->binary.right, locals);
             /* An operand's nullability carries into the result: `a + 1` on an

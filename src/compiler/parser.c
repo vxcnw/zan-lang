@@ -1818,7 +1818,7 @@ static int get_precedence(zan_token_kind_t kind) {
     switch (kind) {
     case TK_STAR: case TK_SLASH: case TK_PERCENT: return 12;
     case TK_PLUS: case TK_MINUS: return 11;
-    case TK_LESS_LESS: case TK_GREATER_GREATER: return 10;
+    case TK_LESS_LESS: case TK_GREATER_GREATER: case TK_GREATER_GREATER_GREATER: return 10;
     case TK_LESS: case TK_GREATER: case TK_LESS_EQ: case TK_GREATER_EQ:
     case TK_IS: case TK_AS: return 9;
     case TK_EQ_EQ: case TK_BANG_EQ: return 8;
@@ -1947,6 +1947,7 @@ static bool is_assign_op(zan_token_kind_t kind) {
     case TK_EQ: case TK_PLUS_EQ: case TK_MINUS_EQ: case TK_STAR_EQ:
     case TK_SLASH_EQ: case TK_PERCENT_EQ: case TK_AMP_EQ: case TK_PIPE_EQ:
     case TK_CARET_EQ: case TK_LESS_LESS_EQ: case TK_GREATER_GREATER_EQ:
+    case TK_GREATER_GREATER_GREATER_EQ:
         return true;
     default:
         return false;
@@ -2006,6 +2007,7 @@ static zan_ast_node_t *parse_expression(zan_parser_t *p) {
         case TK_CARET_EQ:           base = TK_CARET; break;
         case TK_LESS_LESS_EQ:       base = TK_LESS_LESS; break;
         case TK_GREATER_GREATER_EQ: base = TK_GREATER_GREATER; break;
+        case TK_GREATER_GREATER_GREATER_EQ: base = TK_GREATER_GREATER_GREATER; break;
         default: break;
         }
         if (base != TK_EOF) {

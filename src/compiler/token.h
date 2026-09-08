@@ -155,6 +155,7 @@ typedef enum {
     TK_CARET,           /* ^ */
     TK_LESS_LESS,       /* << */
     TK_GREATER_GREATER, /* >> */
+    TK_GREATER_GREATER_GREATER, /* >>> unsigned right shift (audit D16) */
 
     /* assignment */
     TK_EQ,              /* = */
@@ -168,6 +169,7 @@ typedef enum {
     TK_CARET_EQ,        /* ^= */
     TK_LESS_LESS_EQ,    /* <<= */
     TK_GREATER_GREATER_EQ, /* >>= */
+    TK_GREATER_GREATER_GREATER_EQ, /* >>>= */
 
     TK__COUNT
 } zan_token_kind_t;

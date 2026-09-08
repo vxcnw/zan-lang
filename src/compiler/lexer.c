@@ -156,6 +156,7 @@ static const char *s_token_names[TK__COUNT] = {
     [TK_CARET]       = "^",
     [TK_LESS_LESS]   = "<<",
     [TK_GREATER_GREATER] = ">>",
+    [TK_GREATER_GREATER_GREATER] = ">>>",
     [TK_EQ]          = "=",
     [TK_PLUS_EQ]     = "+=",
     [TK_MINUS_EQ]    = "-=",
@@ -167,6 +168,7 @@ static const char *s_token_names[TK__COUNT] = {
     [TK_CARET_EQ]    = "^=",
     [TK_LESS_LESS_EQ]= "<<=",
     [TK_GREATER_GREATER_EQ] = ">>=",
+    [TK_GREATER_GREATER_GREATER_EQ] = ">>>=",
 };
 
 const char *zan_token_kind_name(zan_token_kind_t kind) {
@@ -1312,6 +1314,10 @@ pp_retry:
 
     case '>':
         if (lexer_match(lex, '>')) {
+            if (lexer_match(lex, '>')) {
+                if (lexer_match(lex, '=')) return lexer_make(lex, TK_GREATER_GREATER_GREATER_EQ, loc);
+                return lexer_make(lex, TK_GREATER_GREATER_GREATER, loc);
+            }
             if (lexer_match(lex, '=')) return lexer_make(lex, TK_GREATER_GREATER_EQ, loc);
             return lexer_make(lex, TK_GREATER_GREATER, loc);
         }

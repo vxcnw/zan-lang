@@ -1815,6 +1815,7 @@ zan_type_t *zan_checker_check_expr(zan_checker_t *c, zan_ast_node_t *expr) {
 
         case TK_AMP: case TK_PIPE: case TK_CARET:
         case TK_LESS_LESS: case TK_GREATER_GREATER:
+        case TK_GREATER_GREATER_GREATER:
             if ((type_is_integral(left) || left->kind == TYPE_CHAR ||
                  left->kind == TYPE_ENUM) &&
                 (type_is_integral(right) || right->kind == TYPE_CHAR ||

@@ -1527,6 +1527,10 @@ static LLVMValueRef emit_binary_op_values(zan_irgen_t *g, zan_ast_node_t *expr,
             right = mask_shift_count(g, expr->binary.left, right, locals);
             return is_unsigned ? zan_lshr(g->builder, left, right, "shr")
                                : zan_ashr(g->builder, left, right, "shr");
+        case TK_GREATER_GREATER_GREATER:
+            /* C# >>>: always logical, whatever the operand's signedness */
+            right = mask_shift_count(g, expr->binary.left, right, locals);
+            return zan_lshr(g->builder, left, right, "ushr");
         case TK_EQ_EQ:
             return is_float ? LLVMBuildFCmp(g->builder, LLVMRealOEQ, left, right, "eq")
                             : zan_icmp(g->builder, LLVMIntEQ, left, right, "eq");
