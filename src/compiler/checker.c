@@ -717,10 +717,23 @@ static bool initializer_covers_all_members(zan_ast_node_t *expr,
     return members > 0 && covered == members;
 }
 
+static bool type_is_scalar_primitive(zan_type_t *t);
+
 static void check_ctor_available(zan_checker_t *c, zan_type_t *type,
                                  zan_ast_node_t *expr) {
-    if (!type || type->kind != TYPE_CLASS || !type->sym) return;
-    if (expr->new_expr.is_array) return;
+    if (!type || expr->new_expr.is_array) return;
+    /* The builtin scalar primitives (string, numerics, bool, char) declare no
+     * constructors. irgen's new lowering has no case for them either: the
+     * fall-through returned literal 0, so `new string(bytes)` compiled clean,
+     * produced null, and the failure surfaced far from the cause as an
+     * unrelated fault. Reject here and point at what does build values. */
+    if (type_is_scalar_primitive(type)) {
+        zan_diag_emit(c->diag, DIAG_ERROR, expr->loc,
+            "the builtin type '%s' has no constructor -- use literals, casts or the conversion functions",
+            type_name(type));
+        return;
+    }
+    if (type->kind != TYPE_CLASS || !type->sym) return;
     zan_symbol_t *sym = type->sym;
     int declared = 0;
     int argc = ctor_arg_count(c, expr, sym);
@@ -1741,6 +1754,27 @@ zan_type_t *zan_checker_check_expr(zan_checker_t *c, zan_ast_node_t *expr) {
             }
             /* fall through */
         case TK_MINUS: case TK_STAR: case TK_SLASH: case TK_PERCENT:
+            /* A delegate operand reached the arithmetic path. The generic
+             * rejection at the bottom is suppressed when the other side is an
+             * untyped lambda (types as error), which is exactly how
+             * `d += (…) => {…}` slipped past checking and died at codegen as
+             * `add ptr, @lambda` -- an internal LLVM verification failure
+             * instead of a diagnostic. Delegates are single-cast (no runtime
+             * combine representation), so combination is a hard error with
+             * the language's multicast answer spelled out. */
+            if (left->kind == TYPE_DELEGATE || right->kind == TYPE_DELEGATE) {
+                if (expr->binary.op == TK_PLUS || expr->binary.op == TK_MINUS)
+                    zan_diag_emit(c->diag, DIAG_ERROR, expr->loc,
+                                  "delegates are single-cast: '+='/'-=' combination is not supported -- assign directly (`d = h`) or subscribe on a multicast event type (`UiEvent`, `e += h`)");
+                else
+                    zan_diag_emit(c->diag, DIAG_ERROR, expr->loc,
+                                  "cannot apply operator to '%s' and '%s'",
+                                  left->kind == TYPE_ERROR ? "lambda"
+                                                           : type_name(left),
+                                  right->kind == TYPE_ERROR ? "lambda"
+                                                            : type_name(right));
+                return c->binder->type_error;
+            }
             if (type_is_numeric(left) && type_is_numeric(right)) {
                 return promote_numeric(c->binder, left, right);
             }

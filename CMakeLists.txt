@@ -833,6 +833,32 @@ add_test(NAME diag_concat_reference
     -P ${CMAKE_SOURCE_DIR}/tests/run_compile_error.cmake)
 set_tests_properties(diag_concat_reference PROPERTIES TIMEOUT 60)
 
+# `delegate += lambda` slipped past the checker (an untyped lambda types as
+# error, suppressing the operator rejection) and died at codegen as
+# `add ptr, @lambda` -- an internal LLVM verification failure instead of a
+# diagnostic. Delegates are single-cast; multicast lives on UiEvent.op_add.
+add_test(NAME diag_delegate_combine
+  COMMAND ${CMAKE_COMMAND}
+    -DZANC=$<TARGET_FILE:zanc>
+    -DSRC=${CMAKE_SOURCE_DIR}/tests/diag/delegate_combine.zan
+    -DOUT_EXE=${CMAKE_BINARY_DIR}/diag_delegate_combine${_exe_ext}
+    "-DEXPECT_REGEX=delegates are single-cast"
+    -P ${CMAKE_SOURCE_DIR}/tests/run_compile_error.cmake)
+set_tests_properties(diag_delegate_combine PROPERTIES TIMEOUT 60)
+
+# `new string(bytes)` used to pass the checker (the ctor availability check
+# only looked at classes) and irgen's fall-through returned literal 0 -- the
+# variable silently became null and failed far from the cause. Scalar
+# primitives have no constructors; reject at the source.
+add_test(NAME diag_ctor_builtin_scalar
+  COMMAND ${CMAKE_COMMAND}
+    -DZANC=$<TARGET_FILE:zanc>
+    -DSRC=${CMAKE_SOURCE_DIR}/tests/diag/ctor_builtin_scalar.zan
+    -DOUT_EXE=${CMAKE_BINARY_DIR}/diag_ctor_builtin_scalar${_exe_ext}
+    "-DEXPECT_REGEX=the builtin type 'string' has no constructor"
+    -P ${CMAKE_SOURCE_DIR}/tests/run_compile_error.cmake)
+set_tests_properties(diag_ctor_builtin_scalar PROPERTIES TIMEOUT 60)
+
 # A43-A16: a duplicate method (same name, same parameter types) used to
 # compile with first-wins semantics -- zero diagnostics for a silent
 # semantics swap. Same-signature duplicates must be a hard error while
