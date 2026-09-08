@@ -215,6 +215,23 @@ partial class Charts {
             "Line Chart in Cartesian Coordinate System", "双数值轴折线图", "", "");
         Charts.Add("line", "line-step", "Step Line", "阶梯折线图", "", "");
         Charts.Add("line", "line-y-category", "Line Y Category", "垂直折线图（Y轴为类目轴）", "", "");
+        // ===== bar 段（官方注册表顺序，实现见 ChartsBar5.zan）=====
+        Charts.Add("bar", "bar-simple", "Basic Bar", "基础柱状图", "", "");
+        Charts.Add("bar", "bar-tick-align", "Axis Align with Tick", "坐标轴刻度与标签对齐", "", "");
+        Charts.Add("bar", "bar-background", "Bar with Background", "带背景色的柱状图", "", "");
+        Charts.Add("bar", "bar-data-color", "Set Style of Single Bar.", "自定义单个柱子颜色", "", "");
+        Charts.Add("bar", "bar-waterfall", "Waterfall Chart", "瀑布图（柱状图模拟）", "", "");
+        Charts.Add("bar", "bar-negative2", "Bar Chart with Negative Value", "交错正负轴标签", "", "");
+        Charts.Add("bar", "bar-y-category", "World Population", "世界人口总量 - 条形图", "", "");
+        Charts.Add("bar", "bar-label-rotation", "Bar Label Rotation", "柱状图标签旋转", "", "");
+        Charts.Add("bar", "bar-stack", "Stacked Column Chart", "堆叠柱状图", "", "");
+        Charts.Add("bar", "bar-stack-borderRadius", "Stacked Bar with borderRadius", "带圆角的堆积柱状图", "", "");
+        Charts.Add("bar", "bar-stack-normalization", "Stacked Bar Normalization", "堆叠柱状图的归一化", "", "");
+        Charts.Add("bar", "bar-waterfall2", "Waterfall Chart", "阶梯瀑布图（柱状图模拟）", "", "");
+        Charts.Add("bar", "bar-y-category-stack", "Stacked Horizontal Bar", "堆叠条形图", "", "");
+        Charts.Add("bar", "bar-negative", "Bar Chart with Negative Value", "正负条形图", "", "");
+        Charts.Add("bar", "bar1", "Rainfall and Evaporation", "某地区蒸发量和降水量", "", "");
+        Charts.Add("bar", "mix-line-bar", "Mixed Line and Bar", "折柱混合", "", "");
     }
 
     static string T(string en, string zh) {
@@ -262,45 +279,6 @@ partial class Charts {
         o.toolboxShow = true;
         if (Charts.nomouse) { o.showTooltip = false; }
         ChartView.Keyed(o, Charts.KeyOf(Charts.selected.Get(), 0)).Render(app, x, y, w, h);
-    }
-
-    static void ShowN(App app, ChartOption o, int sub, int x, int y, int w, int h) {
-        o.toolboxShow = true;
-        if (Charts.nomouse) { o.showTooltip = false; }
-        ChartView.Keyed(o, Charts.KeyOf(Charts.selected.Get(), sub)).Render(app, x, y, w, h);
-    }
-
-    static void ShowQuiet(App app, ChartOption o, int sub, int x, int y, int w, int h) {
-        o.toolboxShow = false;
-        ChartView.Keyed(o, Charts.KeyOf(Charts.selected.Get(), sub)).Render(app, x, y, w, h);
-    }
-
-    static void Split2(App app, ChartOption a, ChartOption b, int x, int y, int w, int h) {
-        int gap = app.Scale(12);
-        int hw = (w - gap) / 2;
-        Charts.ShowN(app, a, 0, x, y, hw, h);
-        Charts.ShowN(app, b, 1, x + hw + gap, y, hw, h);
-    }
-
-    static void SplitV(App app, ChartOption a, ChartOption b, int x, int y, int w, int h) {
-        int gap = app.Scale(12);
-        int hh = (h - gap) / 2;
-        Charts.ShowN(app, a, 0, x, y, w, hh);
-        Charts.ShowN(app, b, 1, x, y + hh + gap, w, hh);
-    }
-
-    /// 2×2 四联（ECharts funnel3.html 四系列象限布局的近似：
-    /// 官方在单面板内以系列 x/y/width/height 定位，此处以四子图
-    /// 分栏还原——同数据、降序/升序交替）。
-    static void Split4(App app, ChartOption a, ChartOption b,
-                       ChartOption cc, ChartOption d, int x, int y, int w, int h) {
-        int gap = app.Scale(12);
-        int hw = (w - gap) / 2;
-        int hh = (h - gap) / 2;
-        Charts.ShowN(app, a, 0, x, y, hw, hh);
-        Charts.ShowN(app, b, 1, x + hw + gap, y, hw, hh);
-        Charts.ShowN(app, cc, 2, x, y + hh + gap, hw, hh);
-        Charts.ShowN(app, d, 3, x + hw + gap, y + hh + gap, hw, hh);
     }
 
     static List<string> Week() {
@@ -499,5 +477,22 @@ partial class Charts {
         else if (id == "line-in-cartesian-coordinate-system") { Charts.E5LineInCartesian(app, x, y, w, h); }
         else if (id == "line-step") { Charts.E5LineStep(app, x, y, w, h); }
         else if (id == "line-y-category") { Charts.E5LineYCategory(app, x, y, w, h); }
+        // ECharts 5 官方示例 bar 段（ChartsBar5.zan）。
+        else if (id == "bar-simple") { Charts.E5BarSimple(app, x, y, w, h); }
+        else if (id == "bar-tick-align") { Charts.E5BarTickAlign(app, x, y, w, h); }
+        else if (id == "bar-background") { Charts.E5BarBackground(app, x, y, w, h); }
+        else if (id == "bar-data-color") { Charts.E5BarDataColor(app, x, y, w, h); }
+        else if (id == "bar-waterfall") { Charts.E5BarWaterfall(app, x, y, w, h); }
+        else if (id == "bar-negative2") { Charts.E5BarNegative2(app, x, y, w, h); }
+        else if (id == "bar-y-category") { Charts.E5BarYCategory(app, x, y, w, h); }
+        else if (id == "bar-label-rotation") { Charts.E5BarLabelRotation(app, x, y, w, h); }
+        else if (id == "bar-stack") { Charts.E5BarStack(app, x, y, w, h); }
+        else if (id == "bar-stack-borderRadius") { Charts.E5BarStackBorderRadius(app, x, y, w, h); }
+        else if (id == "bar-stack-normalization") { Charts.E5BarStackNormalization(app, x, y, w, h); }
+        else if (id == "bar-waterfall2") { Charts.E5BarWaterfall2(app, x, y, w, h); }
+        else if (id == "bar-y-category-stack") { Charts.E5BarYCategoryStack(app, x, y, w, h); }
+        else if (id == "bar-negative") { Charts.E5BarNegative(app, x, y, w, h); }
+        else if (id == "bar1") { Charts.E5Bar1(app, x, y, w, h); }
+        else if (id == "mix-line-bar") { Charts.E5MixLineBar(app, x, y, w, h); }
     }
 }

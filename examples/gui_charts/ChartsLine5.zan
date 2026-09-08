@@ -202,6 +202,9 @@ partial class Charts {
             Charts.Week(), new List<ChartSeries>{ hi, lo });
         o.smooth = false;
         o.xAxes[0].boundaryGap = false;
+        // yAxes 缺省为空表，先显式建数值轴再设 formatter
+        //（空表索引是 null，赋值会成为静默无操作）。
+        o.Y(ChartAxis.Value());
         o.yAxes[0].labelFormatter = "{value} °C";
         Charts.Show(app, o, x, y, w, h);
     }

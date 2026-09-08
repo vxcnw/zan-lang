@@ -1,0 +1,501 @@
+using System;
+using Gui;
+using Gui.Component.Chart;
+
+partial class Charts {
+    // ===== ECharts 5 官方示例库柱状段 1:1 重建 =====。数据逐项取自
+    // ref5 对应 option 源码（_scratch/ref5/<id>.js），标题取注册表
+    // 官方中英文。引擎本批新增：柱值 ×1000 定点（小数柱值）、
+    // 'transparent' 哨兵色、barWidth 百分比、逐根 itemStyle、
+    // series.silent、label.rotate。暂缺进账本（不假装对齐）：
+    // bar-stack 的 markLine 两点式 [[min],[max]] 段、堆叠组内逐系列
+    // barWidth 像素（Baidu barWidth:5）、legend.data 子集/排序、
+    // bar-negative2 数值轴 position:'top'、value 轴 boundaryGap
+    // [0,0.01]、label 富文本 rich、legend.selectedMode。
+
+    /// 小数柱值：ChartData.Numeric 的 ×1000 定点承载（bar1 的 4.9、
+    /// mix-line-bar 的 2.6、normalization 的 0.062…）。
+    static ChartData E5D(double v) {
+        return ChartData.Numeric(v);
+    }
+
+    /// 逐根柱圆角（bar-stack-borderRadius 的 data[i].itemStyle
+    /// .borderRadius，四角 [tl,tr,br,bl]，平角段显式全 0）。
+    static ChartData E5Rad(int v, int tl, int tr, int br, int bl) {
+        ChartData d = ChartData.Of(v);
+        d.itemStyle = ChartItemStyle.Create();
+        d.itemStyle.normal.borderRadius.Add(tl);
+        d.itemStyle.normal.borderRadius.Add(tr);
+        d.itemStyle.normal.borderRadius.Add(br);
+        d.itemStyle.normal.borderRadius.Add(bl);
+        return d;
+    }
+
+    /// normalization 官方 label formatter 的编译期等价：
+    /// Math.round(v*1000)/10 + '%'（逐字节同输出）。
+    static string E5Pct(double v) {
+        int t = (int)Math.Round(v * 1000.0);
+        return Convert.ToString(t / 10) + "." + Convert.ToString(t % 10) + "%";
+    }
+
+    /// 类目名双语化（bar-y-category 的国家名等）。
+    static List<string> TList(List<string> en, List<string> zh) {
+        List<string> r = new List<string>();
+        for (int i = 0; i < en.Count; i = i + 1) { r.Add(Charts.T(en[i], zh[i])); }
+        return r;
+    }
+
+    /// bar-simple 基础柱状图：一周单系列。
+    static void E5BarSimple(App app, int x, int y, int w, int h) {
+        ChartOption o = ChartOption.Of(
+            Charts.T("Basic Bar", "基础柱状图"), Charts.Week(),
+            new List<ChartSeries>{
+                ChartSeries.Bar("", new List<int>{
+                    120, 200, 150, 80, 70, 110, 130 }) });
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar-tick-align 坐标轴刻度与标签对齐：barWidth '60%'。
+    static void E5BarTickAlign(App app, int x, int y, int w, int h) {
+        ChartSeries s = ChartSeries.Bar(Charts.T("Direct", "直接访问"),
+            new List<int>{ 10, 52, 200, 334, 390, 330, 220 });
+        s.barWidthPct = 60;
+        ChartOption o = ChartOption.Of(
+            Charts.T("Axis Align with Tick", "坐标轴刻度与标签对齐"),
+            Charts.Week(), new List<ChartSeries>{ s });
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar-background 带背景色的柱状图：showBackground +
+    /// backgroundStyle rgba(180,180,180,0.2)（alpha 51/255）。
+    static void E5BarBackground(App app, int x, int y, int w, int h) {
+        ChartSeries s = ChartSeries.Bar("",
+            new List<int>{ 120, 200, 150, 80, 70, 110, 130 });
+        s.showBackground = true;
+        s.backgroundColor = Chart.WithAlpha(Chart.Rgb(180, 180, 180), 51);
+        ChartOption o = ChartOption.Of(
+            Charts.T("Bar with Background", "带背景色的柱状图"),
+            Charts.Week(), new List<ChartSeries>{ s });
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar-data-color 自定义单个柱子颜色：第 2 根 #505372。
+    static void E5BarDataColor(App app, int x, int y, int w, int h) {
+        ChartSeries s = ChartSeries.Named("", ChartType.Bar,
+            new List<ChartData>{
+                ChartData.Of(120),
+                ChartData.Colored(200, Chart.Rgb(80, 83, 114)),
+                ChartData.Of(150), ChartData.Of(80), ChartData.Of(70),
+                ChartData.Of(110), ChartData.Of(130) });
+        ChartOption o = ChartOption.Of(
+            Charts.T("Set Style of Single Bar.", "自定义单个柱子颜色"),
+            Charts.Week(), new List<ChartSeries>{ s });
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar-waterfall 瀑布图（柱状图模拟）：透明占位系列（stack Total）
+    /// + Life Cost 段内标签。占位色 = ECharts 'transparent'（引擎
+    /// alpha≈0 哨兵色，非 0 不落入"继承系列色"语义）。
+    static void E5BarWaterfall(App app, int x, int y, int w, int h) {
+        ChartSeries ph = ChartSeries.StackedBar(Charts.T("Placeholder", "占位"),
+            new List<int>{ 0, 1700, 1400, 1200, 300, 0 });
+        ph.stackName = "Total";
+        ph.color = Chart.Transparent();
+        ph.itemStyle.normal.color = Chart.Transparent();
+        ph.itemStyle.normal.borderColor = Chart.Transparent();
+        ChartSeries lc = ChartSeries.StackedBar(
+            Charts.T("Life Cost", "生活开支"),
+            new List<int>{ 2900, 1200, 300, 200, 900, 300 });
+        lc.stackName = "Total";
+        lc.labelShow = true;
+        lc.labelPos = "inside";
+        ChartOption o = ChartOption.Of(
+            Charts.T("Waterfall Chart", "瀑布图（柱状图模拟）"),
+            new List<string>{ "Total", "Rent", "Utilities", "Transportation",
+                "Meals", "Other" },
+            new List<ChartSeries>{ ph, lc });
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar-negative2 交错正负轴标签：水平单系列小数数据
+    ///（-0.07..0.47，定点管线），负值根 label.position right，
+    /// 类目轴整条隐藏（axisLine/axisLabel/axisTick/splitLine 全关）。
+    /// 数值轴 position:'top' 进账本（引擎水平柱刻度画在下缘）。
+    static void E5BarNegative2(App app, int x, int y, int w, int h) {
+        List<double> vs = new List<double>{ 0 - 0.07, 0 - 0.09, 0.2, 0.44,
+            0 - 0.23, 0.08, 0 - 0.17, 0.47, 0 - 0.36, 0.18 };
+        List<ChartData> ds = new List<ChartData>();
+        for (int i = 0; i < vs.Count; i = i + 1) {
+            ChartData d = ChartData.Numeric(vs[i]);
+            if (vs[i] < 0) { d.labelSide = 2; }
+            ds.Add(d);
+        }
+        ChartSeries s = ChartSeries.Named(Charts.T("Cost", "开销"),
+            ChartType.Bar, ds);
+        s.hbar = true;
+        s.labelShow = true;
+        s.labelFmt = "{b}";
+        List<string> cats = new List<string>{ "ten", "nine", "eight",
+            "seven", "six", "five", "four", "three", "two", "one" };
+        ChartOption o = ChartOption.Of(
+            Charts.T("Bar Chart with Negative Value", "交错正负轴标签"),
+            cats, new List<ChartSeries>{ s });
+        // 官方 yAxis axisLine/axisLabel/axisTick/splitLine 全关：
+        // 显式建一条同类目的 y 轴并整条隐藏（yAxes 缺省为空表，
+        // 直接索引是 null 无操作）。
+        ChartAxis catY = ChartAxis.Category(cats);
+        catY.show = false;
+        o.Y(catY);
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar-y-category 世界人口总量 - 条形图：水平双系列。
+    /// value 轴 boundaryGap [0,0.01] 进账本（2% 留白）。
+    static void E5BarYCategory(App app, int x, int y, int w, int h) {
+        ChartOption o = ChartOption.Of(
+            Charts.T("World Population", "世界人口总量 - 条形图"),
+            Charts.TList(
+                new List<string>{ "Brazil", "Indonesia", "USA", "India",
+                    "China", "World" },
+                new List<string>{ "巴西", "印度尼西亚", "美国", "印度",
+                    "中国", "世界" }),
+            new List<ChartSeries>{
+                ChartSeries.HBar("2011", new List<int>{
+                    18203, 23489, 29034, 104970, 131744, 630230 }),
+                ChartSeries.HBar("2012", new List<int>{
+                    19325, 23438, 31000, 121594, 134141, 681807 }) });
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar-label-rotation 柱状图标签旋转：四系列 barGap 0，标签
+    /// '{c}  {a}' 富文本 rich 进账本（引擎输出 '{c}  {a}' 同文）、
+    /// insideBottom + rotate 90（引擎 labelRotate）。emphasis.focus
+    /// 与 toolbox 进账本。
+    static void E5BarLabelRotation(App app, int x, int y, int w, int h) {
+        ChartSeries fo = ChartSeries.Bar(Charts.T("Forest", "森林"),
+            new List<int>{ 320, 332, 301, 334, 390 });
+        ChartSeries st = ChartSeries.Bar(Charts.T("Steppe", "草原"),
+            new List<int>{ 220, 182, 191, 234, 290 });
+        ChartSeries de = ChartSeries.Bar(Charts.T("Desert", "沙漠"),
+            new List<int>{ 150, 232, 201, 154, 190 });
+        ChartSeries we = ChartSeries.Bar(Charts.T("Wetland", "湿地"),
+            new List<int>{ 98, 77, 101, 99, 40 });
+        List<ChartSeries> ss = new List<ChartSeries>{ fo, st, de, we };
+        for (int i = 0; i < ss.Count; i = i + 1) {
+            ss[i].barGapPct = 0;
+            ss[i].labelShow = true;
+            ss[i].labelFmt = "{c}  {a}";
+            ss[i].labelPos = "insideBottom";
+            ss[i].labelRotate = 90;
+        }
+        ChartOption o = ChartOption.Of(
+            Charts.T("Bar Label Rotation", "柱状图标签旋转"),
+            new List<string>{ "2012", "2013", "2014", "2015", "2016" }, ss);
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar-stack 堆叠柱状图：Direct/Search Engine 独立列，
+    /// Email/Union Ads/Video Ads 堆 'Ad'，Baidu/Google/Bing/Others
+    /// 堆 'Search Engine'。Search Engine 的 markLine 两点式
+    /// [[{type:min},{type:max}]] 段与 Baidu barWidth:5（堆叠组内
+    /// 逐系列柱宽）进账本。
+    static void E5BarStack(App app, int x, int y, int w, int h) {
+        ChartSeries se = ChartSeries.Bar(
+            Charts.T("Search Engine", "搜索引擎"),
+            new List<int>{ 862, 1018, 964, 1026, 1679, 1600, 1570 });
+        ChartSeries bd = ChartSeries.StackedBar(Charts.T("Baidu", "百度"),
+            new List<int>{ 620, 732, 701, 734, 1090, 1130, 1120 });
+        bd.stackName = "Search Engine";
+        ChartOption o = ChartOption.Of(
+            Charts.T("Stacked Column Chart", "堆叠柱状图"), Charts.Week(),
+            new List<ChartSeries>{
+                ChartSeries.Bar(Charts.T("Direct", "直接访问"),
+                    new List<int>{ 320, 332, 301, 334, 390, 330, 320 }),
+                Charts.E5StackNamed(Charts.T("Email", "邮件营销"), "Ad",
+                    new List<int>{ 120, 132, 101, 134, 90, 230, 210 }),
+                Charts.E5StackNamed(Charts.T("Union Ads", "联盟广告"), "Ad",
+                    new List<int>{ 220, 182, 191, 234, 290, 330, 310 }),
+                Charts.E5StackNamed(Charts.T("Video Ads", "视频广告"), "Ad",
+                    new List<int>{ 150, 232, 201, 154, 190, 330, 410 }),
+                se, bd,
+                Charts.E5StackNamed(Charts.T("Google", "谷歌"),
+                    "Search Engine",
+                    new List<int>{ 120, 132, 101, 134, 290, 230, 220 }),
+                Charts.E5StackNamed(Charts.T("Bing", "必应"),
+                    "Search Engine",
+                    new List<int>{ 60, 72, 71, 74, 190, 130, 110 }),
+                Charts.E5StackNamed(Charts.T("Others", "其他"),
+                    "Search Engine",
+                    new List<int>{ 62, 82, 91, 84, 109, 110, 120 }) });
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// 堆叠组名承载：ECharts stack:'Ad' → stackName（组名即分组键）。
+    static ChartSeries E5StackNamed(string name, string stack, List<int> vs) {
+        ChartSeries s = ChartSeries.StackedBar(name, vs);
+        s.stackName = stack;
+        return s;
+    }
+
+    /// bar-stack-borderRadius 带圆角的堆积柱状图：两堆叠组 a/b，
+    /// 逐根 itemStyle.borderRadius（圆角顶 [20,20,0,0]、平角
+    /// [0,0,0,0]），缺值 '-'（Gap）。
+    static void E5BarStackBorderRadius(App app, int x, int y, int w, int h) {
+        ChartOption o = ChartOption.Of(
+            Charts.T("Stacked Bar with borderRadius", "带圆角的堆积柱状图"),
+            Charts.Week(),
+            new List<ChartSeries>{
+                Charts.E5RadSeries("a", "a", new List<int>{ 120, 200, 150,
+                    80, 70, 110, 130 },
+                    new List<int>{ 0, 0, 0, 0, 0, 1, 1 }),
+                Charts.E5RadSeries("b", "a", new List<int>{ 10, 46, 64, 0,
+                    0, 0, 0 },
+                    new List<int>{ 0, 1, 1, 0, 0, 0, 0 }),
+                Charts.E5RadSeries("c", "a", new List<int>{ 30, 0, 0, 20,
+                    10, 0, 0 },
+                    new List<int>{ 1, 0, 0, 1, 1, 0, 0 }),
+                Charts.E5RadSeries("d", "b", new List<int>{ 30, 0, 0, 20,
+                    10, 0, 0 },
+                    new List<int>{ 0, 0, 0, 1, 1, 0, 0 }),
+                Charts.E5RadSeries("e", "b", new List<int>{ 10, 20, 150, 0,
+                    0, 50, 10 },
+                    new List<int>{ 1, 1, 1, 0, 0, 1, 1 }) });
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// E5RadSeries 辅助：values[i] 的 0 表示 '-' 缺值（Gap 项），
+    /// rads[i] 非 0 表示该根带 [20,20,0,0] 圆角顶，否则平角
+    /// [0,0,0,0]——与官方逐根声明一一对应。
+    static ChartSeries E5RadSeries(string name, string stack,
+        List<int> vs, List<int> rads) {
+        List<ChartData> ds = new List<ChartData>();
+        for (int i = 0; i < vs.Count; i = i + 1) {
+            if (vs[i] == 0) {
+                ds.Add(ChartData.Gap());
+            } else if (rads[i] != 0) {
+                ds.Add(Charts.E5Rad(vs[i], 20, 20, 0, 0));
+            } else {
+                ds.Add(Charts.E5Rad(vs[i], 0, 0, 0, 0));
+            }
+        }
+        ChartSeries s = ChartSeries.Named(name, ChartType.Bar, ds);
+        s.stackName = stack;
+        return s;
+    }
+
+    /// bar-stack-normalization 堆叠柱状图的归一化：五系列堆 'total'，
+    /// 小数数据（各类目和≈1），label 为官方 formatter 的预计算文本
+    /// Math.round(v*1000)/10 + '%'（逐字节同输出）。legend
+    /// selectedMode:false 进账本。
+    static void E5BarStackNormalization(App app, int x, int y, int w, int h) {
+        ChartOption o = ChartOption.Of(
+            Charts.T("Stacked Bar Normalization", "堆叠柱状图的归一化"),
+            Charts.Week(),
+            new List<ChartSeries>{
+                Charts.E5Norm(Charts.T("Direct", "直接访问"),
+                    new List<double>{ 0.062111801242236024,
+                        0.1819277108433735, 0.1775811209439528,
+                        0.18659217877094972, 0.17333333333333334,
+                        0.12941176470588237, 0.1245136186770428 }),
+                Charts.E5Norm(Charts.T("Mail Ad", "邮件广告"),
+                    new List<double>{ 0.19875776397515527,
+                        0.07951807228915662, 0.05958702064896755,
+                        0.07486033519553073, 0.04,
+                        0.09019607843137255, 0.08171206225680934 }),
+                Charts.E5Norm(Charts.T("Affiliate Ad", "联盟广告"),
+                    new List<double>{ 0.13664596273291926,
+                        0.10963855421686747, 0.11268436578171091,
+                        0.13072625698324022, 0.1288888888888889,
+                        0.12941176470588237, 0.12062256809338522 }),
+                Charts.E5Norm(Charts.T("Video Ad", "视频广告"),
+                    new List<double>{ 0.09316770186335403,
+                        0.12771084337349398, 0.11858407079646018,
+                        0.08603351955307263, 0.08444444444444445,
+                        0.12941176470588237, 0.15953307392996108 }),
+                Charts.E5Norm(Charts.T("Search Engine", "搜索引擎"),
+                    new List<double>{ 0.5093167701863354,
+                        0.5012048192771085, 0.5315634218289086,
+                        0.5217877094972067, 0.5733333333333334,
+                        0.5215686274509804, 0.5136186770428015 }) });
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// E5Norm 辅助：归一化堆叠系列（定点小数 + 百分比标签）。
+    static ChartSeries E5Norm(string name, List<double> vs) {
+        List<ChartData> ds = new List<ChartData>();
+        for (int i = 0; i < vs.Count; i = i + 1) {
+            ChartData d = ChartData.Numeric(vs[i]);
+            d.labelText = Charts.E5Pct(vs[i]);
+            ds.Add(d);
+        }
+        ChartSeries s = ChartSeries.Named(name, ChartType.Bar, ds);
+        s.stackName = "total";
+        s.barWidthPct = 60;
+        s.labelShow = true;
+        return s;
+    }
+
+    /// bar-waterfall2 阶梯瀑布图（柱状图模拟）：透明占位（silent）
+    /// + Income（label top）/ Expenses（label bottom），缺值 '-'。
+    /// legend.data 子集（不显示 Placeholder）进账本——引擎图例按
+    /// 系列全集渲染，占位项以透明色出现在图例里。
+    static void E5BarWaterfall2(App app, int x, int y, int w, int h) {
+        ChartSeries ph = ChartSeries.StackedBar(
+            Charts.T("Placeholder", "占位"),
+            new List<int>{ 0, 900, 1245, 1530, 1376, 1376, 1511, 1689,
+                1856, 1495, 1292 });
+        ph.stackName = "Total";
+        ph.color = Chart.Transparent();
+        ph.itemStyle.normal.color = Chart.Transparent();
+        ph.itemStyle.normal.borderColor = Chart.Transparent();
+        ph.silent = true;
+        ChartSeries inc = ChartSeries.StackedBar(
+            Charts.T("Income", "收入"),
+            new List<int>{ 900, 345, 393, 0, 0, 135, 178, 286, 0, 0, 0 });
+        // 官方 '-' 缺值项：Income 第 4/5/9/10/11 根、Expenses
+        // 第 1/2/3/6/7/10/11 根（Gap 不画、不进堆叠）。
+        Charts.E5SetGaps(inc, new List<int>{ 3, 4, 8, 9, 10 });
+        inc.stackName = "Total";
+        inc.labelShow = true;
+        inc.labelPos = "top";
+        ChartSeries exp = ChartSeries.StackedBar(
+            Charts.T("Expenses", "支出"),
+            new List<int>{ 0, 0, 0, 108, 154, 0, 0, 0, 119, 361, 203 });
+        Charts.E5SetGaps(exp, new List<int>{ 0, 1, 2, 5, 6, 7 });
+        exp.stackName = "Total";
+        exp.labelShow = true;
+        exp.labelPos = "bottom";
+        ChartOption o = ChartOption.Of(
+            Charts.T("Accumulated Waterfall Chart", "阶梯瀑布图（柱状图模拟）"),
+            new List<string>{ "Nov 1", "Nov 2", "Nov 3", "Nov 4", "Nov 5",
+                "Nov 6", "Nov 7", "Nov 8", "Nov 9", "Nov 10", "Nov 11" },
+            new List<ChartSeries>{ ph, inc, exp });
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// 指定下标改写为 '-' 缺值项（ECharts data[i]:'-' 的 Gap 语义：
+    /// 不画、不进堆叠/极值；零高段自然不显示、不参与标签与命中）。
+    static void E5SetGaps(ChartSeries s, List<int> idxs) {
+        for (int k = 0; k < idxs.Count; k = k + 1) {
+            int i2 = idxs[k];
+            if (i2 >= 0 && i2 < s.data.Count) {
+                s.data[i2] = ChartData.Gap();
+            }
+        }
+    }
+
+    /// bar-y-category-stack 堆叠条形图：五系列水平堆 'total'，
+    /// 段内数值标签。
+    static void E5BarYCategoryStack(App app, int x, int y, int w, int h) {
+        ChartOption o = ChartOption.Of(
+            Charts.T("Stacked Horizontal Bar", "堆叠条形图"), Charts.Week(),
+            new List<ChartSeries>{
+                Charts.E5HStack(Charts.T("Direct", "直接访问"),
+                    new List<int>{ 320, 302, 301, 334, 390, 330, 320 }),
+                Charts.E5HStack(Charts.T("Mail Ad", "邮件广告"),
+                    new List<int>{ 120, 132, 101, 134, 90, 230, 210 }),
+                Charts.E5HStack(Charts.T("Affiliate Ad", "联盟广告"),
+                    new List<int>{ 220, 182, 191, 234, 290, 330, 310 }),
+                Charts.E5HStack(Charts.T("Video Ad", "视频广告"),
+                    new List<int>{ 150, 212, 201, 154, 190, 330, 410 }),
+                Charts.E5HStack(Charts.T("Search Engine", "搜索引擎"),
+                    new List<int>{ 820, 832, 901, 934, 1290, 1330, 1320 }) });
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// E5HStack 辅助：水平堆叠系列 + 段内标签。
+    static ChartSeries E5HStack(string name, List<int> vs) {
+        ChartSeries s = ChartSeries.HStacked(name, vs);
+        s.stackName = "total";
+        s.labelShow = true;
+        return s;
+    }
+
+    /// bar-negative 正负条形图：Profit 独立列 + Income/Expenses 堆
+    /// 'Total'（支出负向左伸展）。legend.data 排序
+    /// [Profit, Expenses, Income] 进账本（引擎按系列顺序渲染）。
+    static void E5BarNegative(App app, int x, int y, int w, int h) {
+        ChartSeries pf = ChartSeries.HBar(Charts.T("Profit", "利润"),
+            new List<int>{ 200, 170, 240, 244, 200, 220, 210 });
+        pf.labelShow = true;
+        pf.labelPos = "inside";
+        ChartSeries inc = ChartSeries.HStacked(Charts.T("Income", "收入"),
+            new List<int>{ 320, 302, 341, 374, 390, 450, 420 });
+        inc.stackName = "Total";
+        inc.labelShow = true;
+        ChartSeries exp = ChartSeries.HStacked(Charts.T("Expenses", "支出"),
+            new List<int>{ 0 - 120, 0 - 132, 0 - 101, 0 - 134, 0 - 190,
+                0 - 230, 0 - 210 });
+        exp.stackName = "Total";
+        exp.labelShow = true;
+        exp.labelPos = "left";
+        ChartOption o = ChartOption.Of(
+            Charts.T("Bar Chart with Negative Value", "正负条形图"),
+            Charts.Week(), new List<ChartSeries>{ pf, inc, exp });
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// bar1 某地区蒸发量和降水量：小数柱值 + Rainfall 的
+    /// Max/Min 标注点与 Avg 标线 + Evaporation 的坐标标注点
+    ///（{xAxis:7,yAxis:183} → ChartMarkPoint.Point）。
+    static void E5Bar1(App app, int x, int y, int w, int h) {
+        ChartSeries rf = Charts.E5BarNamed(Charts.T("Rainfall", "降水量"),
+            new List<double>{ 2.0, 4.9, 7.0, 23.2, 25.6, 76.7, 135.6,
+                162.2, 32.6, 20.0, 6.4, 3.3 });
+        rf.MarkPoint(ChartMarkPoint.Max(Charts.T("Max", "最大值")));
+        rf.MarkPoint(ChartMarkPoint.Min(Charts.T("Min", "最小值")));
+        rf.MarkLine(ChartMarkLine.Average(Charts.T("Avg", "平均值")));
+        ChartSeries ev = Charts.E5BarNamed(
+            Charts.T("Evaporation", "蒸发量"),
+            new List<double>{ 2.6, 5.9, 9.0, 26.4, 28.7, 70.7, 175.6,
+                182.2, 48.7, 18.8, 6.0, 2.3 });
+        ev.MarkPoint(ChartMarkPoint.Point(7, 183, Charts.T("Max", "最大值")));
+        ev.MarkPoint(ChartMarkPoint.Point(11, 3, Charts.T("Min", "最小值")));
+        ev.MarkLine(ChartMarkLine.Average(Charts.T("Avg", "平均值")));
+        ChartOption o = ChartOption.Of(
+            Charts.T("Rainfall and Evaporation", "某地区蒸发量和降水量"),
+            new List<string>{ "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" },
+            new List<ChartSeries>{ rf, ev });
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// E5BarNamed 辅助：小数柱值系列（ChartData.Numeric 定点）。
+    static ChartSeries E5BarNamed(string name, List<double> vs) {
+        List<ChartData> ds = new List<ChartData>();
+        for (int i = 0; i < vs.Count; i = i + 1) { ds.Add(Charts.E5D(vs[i])); }
+        return ChartSeries.Named(name, ChartType.Bar, ds);
+    }
+
+    /// mix-line-bar 折柱混合：双数值轴（Precipitation 0..250 ml /
+    /// Temperature 0..25 °C），两柱一线（线绑 axisIndex 1）。官方
+    /// 源码即 7 类目 × 12 项数据（1:1 保留，渲染取前 7 项）。
+    static void E5MixLineBar(App app, int x, int y, int w, int h) {
+        ChartSeries ev = Charts.E5BarNamed(
+            Charts.T("Evaporation", "蒸发量"),
+            new List<double>{ 2.0, 4.9, 7.0, 23.2, 25.6, 76.7, 135.6,
+                162.2, 32.6, 20.0, 6.4, 3.3 });
+        ChartSeries pr = Charts.E5BarNamed(
+            Charts.T("Precipitation", "降水量"),
+            new List<double>{ 2.6, 5.9, 9.0, 26.4, 28.7, 70.7, 175.6,
+                182.2, 48.7, 18.8, 6.0, 2.3 });
+        ChartSeries tp = Charts.E5BarNamed(
+            Charts.T("Temperature", "温度"),
+            new List<double>{ 2.0, 2.2, 3.3, 4.5, 6.3, 10.2, 20.3, 23.4,
+                23.0, 16.5, 12.0, 6.2 });
+        tp.type = ChartType.Line;
+        tp.axisIndex = 1;
+        ChartOption o = ChartOption.Of(
+            Charts.T("Mixed Line and Bar", "折柱混合"), Charts.Week(),
+            new List<ChartSeries>{ ev, pr, tp });
+        ChartAxis y0 = ChartAxis.ValueRange(0, 250);
+        y0.title = Charts.T("Precipitation", "降水量");
+        y0.labelFormatter = "{value} ml";
+        o.Y(y0);
+        ChartAxis y1 = ChartAxis.ValueRange(0, 25);
+        y1.title = Charts.T("Temperature", "温度");
+        y1.labelFormatter = "{value} °C";
+        o.Y(y1);
+        Charts.Show(app, o, x, y, w, h);
+    }
+}

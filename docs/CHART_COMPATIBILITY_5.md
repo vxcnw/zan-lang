@@ -20,7 +20,7 @@ echarts.apache.org/examples）。画廊 `examples/gui_charts` 按**官方示例�
 | 段 | 已移植 | 说明 |
 |----|--------|------|
 | line (40) | 13 | line-simple / line-smooth / area-basic / line-stack / area-stack / line-marker / area-simple / area-rainfall / area-time-axis / line-style / line-in-cartesian-coordinate-system / line-step / line-y-category |
-| bar (46) | 0 | 下一批 |
+| bar (46) | 16 | bar-simple / bar-tick-align / bar-background / bar-data-color / bar-waterfall / bar-negative2 / bar-y-category / bar-label-rotation / bar-stack / bar-stack-borderRadius / bar-stack-normalization / bar-waterfall2 / bar-y-category-stack / bar-negative / bar1 / mix-line-bar（bar-markline 两点式、堆叠组内逐系列 barWidth 像素、legend.data 子集/排序仍在缺口账本） |
 | 其余段 | 0 | pie → scatter → candlestick → gauge → funnel → radar → … 按注册表顺序 |
 
 每批闭环：移植 → 构建 → 截图对照官方 → 提交。目录里只放已移植条目，
@@ -58,6 +58,19 @@ echarts.apache.org/examples）。画廊 `examples/gui_charts` 按**官方示例�
 - `yAxis.splitArea`：2.2 数值轴默认开、5.x 默认关。已加 `ChartAxis.splitArea`
   字段（默认 false，工厂/clone/JSON parse 三处一致），Chart.zan 底纹绘制按
   字段开关（2026-09-09）。
+
+### 已修的引擎缺陷（来自官方示例移植）
+
+- 数据值 × 动画因子 g 的 int32 溢出（2026-09-09）。bar-waterfall 堆叠和
+  2900（×1000 定点 = 2.9e6）乘 g(0..1000) 超 2^31，终帧 yTop 算到零线下方
+  → 整段柱"消失"。修复：全部数据值 × g 位点（柱/线/散点/极径/误差棒/
+  漏斗宽/大图）改 long 乘法；像素/扫描角/透明度等有界位点不动。教训：
+  小数值验证不出的时变缺陷先怀疑溢出类，用终态帧（g=1000）定点追踪。
+- `transparent` 哨兵色 `Chart.Transparent()`（alpha≈1 非零，避免与
+  0=继承系列色冲突），瀑布图占位系列用。
+- `YOfF` 整数轴回落路径定点化：vF(×1000) 对 [lo×1000, hi×1000] 比例映射，
+  整数数据与旧 int 路径逐像素一致；堆叠感知的 frac 轴界
+  （HasStackedBarsF/StackExtentF 折入 FracAxisLo/Hi）。
 
 ## 待办
 
