@@ -83,6 +83,9 @@ static const zan_builtin_member_t members_math[] = {
     { "Round",   'M', "double Round(double value)" },
     { "Floor",   'M', "double Floor(double value)" },
     { "Ceiling", 'M', "double Ceiling(double value)" },
+    { "Sin",     'M', "double Sin(double value)" },
+    { "Cos",     'M', "double Cos(double value)" },
+    { "Tan",     'M', "double Tan(double value)" },
 };
 
 static const zan_builtin_member_t members_convert[] = {

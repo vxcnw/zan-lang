@@ -1,0 +1,16 @@
+// Conformance: Math trig builtins (Sin/Cos/Tan) reach irgen's libm
+// lowering now that the binder's builtin table lists them. Integer args
+// promote via SIToFP; the user-Math shadow case is covered separately by
+// builtin_shadowing.zan.
+using System;
+
+class BuiltinMathTrig {
+    static void Main() {
+        Console.WriteLine("sin1 " + (long)(Math.Sin(1.0) * 10000.0));
+        Console.WriteLine("cos1 " + (long)(Math.Cos(1.0) * 10000.0));
+        Console.WriteLine("tan05 " + (long)(Math.Tan(0.5) * 10000.0));
+        Console.WriteLine("sin0 " + (long)Math.Sin(0.0));
+        Console.WriteLine("cos0int " + (long)Math.Cos(0));
+        Console.WriteLine("tan1 " + (long)(Math.Tan(1.0) * 10000.0));
+    }
+}
