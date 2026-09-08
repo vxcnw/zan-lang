@@ -2467,6 +2467,21 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
       -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
   set_tests_properties(conformance_gui_compref_designer PROPERTIES TIMEOUT 120)
 
+  # Designer-component dogfood, composed like the "批量任务进度窗" ask: a
+  # saved component (BatchJobProgress.zcomp) declares title/percent/status
+  # props mapped to inner controls; the host form drops two references
+  # (instance values vs declared defaults) and drives progress at runtime
+  # through Find + SetProp.
+  add_test(NAME conformance_gui_batchjob
+    COMMAND ${CMAKE_COMMAND}
+      -DZANC=$<TARGET_FILE:zanc>
+      -DSRC=${CMAKE_SOURCE_DIR}/tests/gui/batchjob_test.zan
+      "-DZANC_ARGS=${CMAKE_SOURCE_DIR}/tests/gui/batchjob_app.zform;${CMAKE_SOURCE_DIR}/tests/gui/components/BatchJobProgress.zcomp;--auto-stdlib${_gui_driver_tail}"
+      -DEXPECTED=${CMAKE_SOURCE_DIR}/tests/conformance/gui_batchjob.out
+      -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_batchjob${_exe_ext}
+      -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
+  set_tests_properties(conformance_gui_batchjob PROPERTIES TIMEOUT 120)
+
 
   # The generated IGameScene adapter: a .zscene projects a nested
   # `partial class <Name>Scene : Game.Foundation.IGameScene` whose Enter/Exit

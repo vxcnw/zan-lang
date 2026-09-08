@@ -1,0 +1,38 @@
+{
+  "name": "BatchJobProgress",
+  "role": "control",
+  "winW": 320,
+  "winH": 112,
+  "layoutMode": 0,
+  "props": [
+    {
+      "key": "titleText", "label": "任务名", "kind": "text",
+      "target": "JobTitle", "prop": "text", "def": "Batch Job"
+    },
+    {
+      "key": "percent", "label": "进度%", "kind": "text",
+      "target": "Bar", "prop": "percent", "def": "0"
+    },
+    {
+      "key": "statusText", "label": "状态文字", "kind": "text",
+      "target": "StatusLine", "prop": "text", "def": "waiting…"
+    }
+  ],
+  "fields": [
+    {
+      "kind": "Label", "label": "Batch Job", "name": "JobTitle",
+      "span": 24, "fx": 16, "fy": 12, "fw": 240, "fh": 22, "childTab": 0,
+      "options": []
+    },
+    {
+      "kind": "Progress", "label": "", "name": "Bar",
+      "span": 24, "fx": 16, "fy": 44, "fw": 288, "fh": 14, "childTab": 0,
+      "options": []
+    },
+    {
+      "kind": "Label", "label": "waiting…", "name": "StatusLine",
+      "span": 24, "fx": 16, "fy": 70, "fw": 288, "fh": 20, "childTab": 0,
+      "options": []
+    }
+  ]
+}
