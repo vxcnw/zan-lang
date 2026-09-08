@@ -3,11 +3,14 @@
 // straights, pair-straights, bombs and rockets, bomb multipliers, bean bank
 // with win-streak fire, and a landlord crown. Cards are drawn as crisp vector
 // cards with smooth TTF ranks (no pixel text); the table is a gpt-image-2
-// generated tavern scene. F11 borderless fullscreen, Esc back/exit.
+// generated tavern scene. Esc back/exit.
+// GuiHost+Canvas 版：窗口/事件/呈现由 Gui 原生外壳承担（Game.Foundation.Gui），
+// 绘制走 Game.Kit.CanvasPrims 直绘，不依赖 SDL。
 using System;
 using System.IO;
-using SDL3;
+using Gui;
 using Game.Kit;
+using Game.Foundation.Gui;
 
 namespace Ddz;
 
@@ -28,7 +31,7 @@ class DdzProfile {
     }
     static int ReadKey(List<string> lines, string key, int fb) {
         for (int i = 0; i < lines.Count; i = i + 1) {
-            string ln = lines[i]; int eq = -1; 
+            string ln = lines[i]; int eq = -1;
             for (int j = 0; j < ln.Length; j = j + 1) { if (ln[j] == 61) { eq = j; j = ln.Length; } }
             if (eq > 0) { if (ln.Substring(0, eq) == key) { return DdzProfile.ParseInt(ln, eq + 1); } }
         }
@@ -83,8 +86,8 @@ class Combo {
 }
 
 class DdzGame {
-    Host host;
-    SdlRenderer r;
+    GuiHost host;
+    Canvas c;
     DdzProfile prof;
     Rng rng;
 
@@ -115,32 +118,35 @@ class DdzGame {
     string toastText;
     List<DdzPopup> pops;
     List<DdzParticle> parts;
-    SdlTexture menuBg;
-    SdlTexture titleTex;
-    SdlTexture tableBg;
-    SdlTexture cardBack;
-    SdlTexture avatarL;
-    SdlTexture avatarR;
-    SdlTexture avatarMe;
-    SdlTexture cardFace;
-    SdlTexture pipSpade;
-    SdlTexture pipHeart;
-    SdlTexture pipDiamond;
-    SdlTexture pipClub;
-    SdlTexture jokerSmall;
-    SdlTexture jokerBig;
+    string menuBg;        // asset paths (null = 画布回退画法)
+    string titlePath;
+    string tablePath;
+    string cardBackPath;
+    string avatarLPath;
+    string avatarRPath;
+    string avatarMePath;
+    string cardFacePath;
+    string pipSpade;
+    string pipHeart;
+    string pipDiamond;
+    string pipClub;
+    string jokerSmall;
+    string jokerBig;
     bool texTried;
     bool demo;
     int demoAt;
     int diff;             // 0 easy, 1 normal, 2 hard
     int deadline;         // player turn countdown (ms timestamp)
 
-    static DdzGame Create(Host h) {
+    static int VW() { return 1280; }
+    static int VH() { return 720; }
+
+    static DdzGame Create(GuiHost h) {
         DdzGame g = new DdzGame();
         g.host = h;
-        g.r = h.Renderer();
+        g.c = h.App().canvas;
         g.prof = DdzProfile.Load();
-        g.rng = Rng.Seed((long)Sdl.Ticks() + 97531246);
+        g.rng = Rng.Seed((long)Window.GetTickMs() + 97531246);
         g.scene = 0;
         g.mouseX = 640;
         g.mouseY = 360;
@@ -150,36 +156,32 @@ class DdzGame {
         g.table = Combo.None();
         g.diff = 1;
         g.demo = File.Exists("ddz_demo.txt");
-        if (g.demo) { g.StartRound(Sdl.Ticks()); }
+        if (g.demo) { g.StartRound(Window.GetTickMs()); }
         return g;
     }
 
     void EnsureTex() {
         if (this.texTried) { return; }
         this.texTried = true;
-        this.menuBg = DdzGame.LoadTex(this.r, "assets/menu_bg.png");
-        this.titleTex = DdzGame.LoadTex(this.r, "assets/title.png");
-        this.tableBg = DdzGame.LoadTex(this.r, "assets/table_bg.png");
-        this.cardBack = DdzGame.LoadTex(this.r, "assets/card_back.png");
-        this.avatarL = DdzGame.LoadTex(this.r, "assets/avatar_left.png");
-        this.avatarR = DdzGame.LoadTex(this.r, "assets/avatar_right.png");
-        this.avatarMe = DdzGame.LoadTex(this.r, "assets/avatar_me.png");
-        this.cardFace = DdzGame.LoadTex(this.r, "assets/card_face.png");
-        this.pipSpade = DdzGame.LoadTex(this.r, "assets/pip_spade.png");
-        this.pipHeart = DdzGame.LoadTex(this.r, "assets/pip_heart.png");
-        this.pipDiamond = DdzGame.LoadTex(this.r, "assets/pip_diamond.png");
-        this.pipClub = DdzGame.LoadTex(this.r, "assets/pip_club.png");
-        this.jokerSmall = DdzGame.LoadTex(this.r, "assets/joker_small.png");
-        this.jokerBig = DdzGame.LoadTex(this.r, "assets/joker_big.png");
+        this.menuBg = DdzGame.FindAsset("assets/menu_bg.png");
+        this.titlePath = DdzGame.FindAsset("assets/title.png");
+        this.tablePath = DdzGame.FindAsset("assets/table_bg.png");
+        this.cardBackPath = DdzGame.FindAsset("assets/card_back.png");
+        this.avatarLPath = DdzGame.FindAsset("assets/avatar_left.png");
+        this.avatarRPath = DdzGame.FindAsset("assets/avatar_right.png");
+        this.avatarMePath = DdzGame.FindAsset("assets/avatar_me.png");
+        this.cardFacePath = DdzGame.FindAsset("assets/card_face.png");
+        this.pipSpade = DdzGame.FindAsset("assets/pip_spade.png");
+        this.pipHeart = DdzGame.FindAsset("assets/pip_heart.png");
+        this.pipDiamond = DdzGame.FindAsset("assets/pip_diamond.png");
+        this.pipClub = DdzGame.FindAsset("assets/pip_club.png");
+        this.jokerSmall = DdzGame.FindAsset("assets/joker_small.png");
+        this.jokerBig = DdzGame.FindAsset("assets/joker_big.png");
     }
-    static SdlTexture LoadTex(SdlRenderer r, string path) {
+    static string FindAsset(string path) {
         string p = Assets.Find(path);
         if (!File.Exists(p)) { return null; }
-        SdlTexture t = SdlTexture.LoadImage(r, p);
-        if (t == null || !t.IsValid()) { return null; }
-        t.SetNearest(false);
-        t.SetBlendMode(1);
-        return t;
+        return p;
     }
 
     void Toast(string t, int now) { this.toastText = t; this.toastAt = now; }
@@ -794,31 +796,31 @@ class DdzGame {
 
     void OnDown(int cx, int cy, int now) {
         if (this.scene == 0) {
-            if (Draw.PointIn(cx, cy, 430, 330, 420, 84)) { this.StartRound(now); }
-            if (Draw.PointIn(cx, cy, 430, 452, 130, 54)) { this.diff = 0; }
-            if (Draw.PointIn(cx, cy, 575, 452, 130, 54)) { this.diff = 1; }
-            if (Draw.PointIn(cx, cy, 720, 452, 130, 54)) { this.diff = 2; }
+            if (CDraw.PointIn(cx, cy, 430, 330, 420, 84)) { this.StartRound(now); }
+            if (CDraw.PointIn(cx, cy, 430, 452, 130, 54)) { this.diff = 0; }
+            if (CDraw.PointIn(cx, cy, 575, 452, 130, 54)) { this.diff = 1; }
+            if (CDraw.PointIn(cx, cy, 720, 452, 130, 54)) { this.diff = 2; }
             return;
         }
         if (this.scene == 3) {
-            if (Draw.PointIn(cx, cy, 420, 430, 210, 60)) { this.StartRound(now); return; }
-            if (Draw.PointIn(cx, cy, 650, 430, 210, 60)) { this.scene = 0; return; }
+            if (CDraw.PointIn(cx, cy, 420, 430, 210, 60)) { this.StartRound(now); return; }
+            if (CDraw.PointIn(cx, cy, 650, 430, 210, 60)) { this.scene = 0; return; }
             return;
         }
         if (this.scene == 1) {
             if (this.bidTurn == 0) {
-                if (Draw.PointIn(cx, cy, 380, 600, 116, 56)) { this.ApplyBid(0, 0, now); return; }
-                if (Draw.PointIn(cx, cy, 512, 600, 116, 56) && this.bidBest < 1) { this.ApplyBid(0, 1, now); return; }
-                if (Draw.PointIn(cx, cy, 644, 600, 116, 56) && this.bidBest < 2) { this.ApplyBid(0, 2, now); return; }
-                if (Draw.PointIn(cx, cy, 776, 600, 116, 56)) { this.ApplyBid(0, 3, now); return; }
+                if (CDraw.PointIn(cx, cy, 380, 600, 116, 56)) { this.ApplyBid(0, 0, now); return; }
+                if (CDraw.PointIn(cx, cy, 512, 600, 116, 56) && this.bidBest < 1) { this.ApplyBid(0, 1, now); return; }
+                if (CDraw.PointIn(cx, cy, 644, 600, 116, 56) && this.bidBest < 2) { this.ApplyBid(0, 2, now); return; }
+                if (CDraw.PointIn(cx, cy, 776, 600, 116, 56)) { this.ApplyBid(0, 3, now); return; }
             }
             return;
         }
         // scene 2
         if (this.turn == 0) {
-            if (Draw.PointIn(cx, cy, 425, 508, 130, 54)) { this.TryPlaySelected(now); return; }
-            if (Draw.PointIn(cx, cy, 575, 508, 130, 54)) { this.TryPass(now); return; }
-            if (Draw.PointIn(cx, cy, 725, 508, 130, 54)) { this.ClearSelection(now); return; }
+            if (CDraw.PointIn(cx, cy, 425, 508, 130, 54)) { this.TryPlaySelected(now); return; }
+            if (CDraw.PointIn(cx, cy, 575, 508, 130, 54)) { this.TryPass(now); return; }
+            if (CDraw.PointIn(cx, cy, 725, 508, 130, 54)) { this.ClearSelection(now); return; }
         }
         // card picking (topmost card wins: scan from right)
         int n = this.hand0.Count;
@@ -829,7 +831,7 @@ class DdzGame {
             if (this.hand0[i].selected) { y = y - 36; }
             int w = 96;
             if (i < n - 1) { w = this.HandX(i + 1, n) - x; }
-            if (Draw.PointIn(cx, cy, x, y, w, 130)) {
+            if (CDraw.PointIn(cx, cy, x, y, w, 130)) {
                 this.hand0[i].selected = !this.hand0[i].selected;
                 return;
             }
@@ -837,12 +839,12 @@ class DdzGame {
         }
     }
 
-    void OnKey(int sc, int now) {
-        if (sc == 41) { if (this.scene == 0) { this.host.Quit(); } else { this.scene = 0; } return; }
-        if (sc == 40 && this.scene == 2) { this.TryPlaySelected(now); }
-        if (sc == 44 && this.scene == 2) { this.TryPass(now); }
-        if (sc == 6 && this.scene == 2) { this.ClearSelection(now); }
-        if (this.scene == 3 && sc == 40) { this.StartRound(now); }
+    void OnKey(int key, int now) {
+        if (key == 27) { if (this.scene == 0) { this.host.RequestStop(); } else { this.scene = 0; } return; }
+        if (key == 13 && this.scene == 2) { this.TryPlaySelected(now); }
+        if (key == 32 && this.scene == 2) { this.TryPass(now); }
+        if (key == 67 && this.scene == 2) { this.ClearSelection(now); }
+        if (this.scene == 3 && key == 13) { this.StartRound(now); }
     }
 
     void Tick(int now) {
@@ -929,7 +931,7 @@ class DdzGame {
         return "" + v;
     }
 
-    SdlTexture PipTex(int suit) {
+    string PipTex(int suit) {
         if (suit == 0) { return this.pipSpade; }
         if (suit == 1) { return this.pipHeart; }
         if (suit == 2) { return this.pipDiamond; }
@@ -939,70 +941,68 @@ class DdzGame {
     void DrawCard(int x, int y, int card, bool raised) {
         int v = DdzGame.Val(card);
         int suit = card % 4;
-        Draw.RoundRectFill(this.r, x + 3, y + 5, 96, 130, 10, 20, 12, 8, 110);
-        if (this.cardFace != null) {
-            this.r.DrawTexture(this.cardFace, x, y, 96, 130);
+        CDraw.RoundRectFill(this.c, x + 3, y + 5, 96, 130, 10, 20, 12, 8, 110);
+        if (this.cardFacePath != null) {
+            CDraw.BlitImage(this.c, this.cardFacePath, x, y, 96, 130);
         } else {
-            Draw.RoundRectFill(this.r, x, y, 96, 130, 10, 250, 246, 238, 255);
-            Draw.RingRect(this.r, x, y, 96, 130, 2, 205, 194, 176, 255);
+            CDraw.RoundRectFill(this.c, x, y, 96, 130, 10, 250, 246, 238, 255);
+            CDraw.RingRect(this.c, x, y, 96, 130, 2, 205, 194, 176, 255);
         }
-        if (raised) { Draw.RingRect(this.r, x, y, 96, 130, 2, 255, 190, 80, 255); }
+        if (raised) { CDraw.RingRect(this.c, x, y, 96, 130, 2, 255, 190, 80, 255); }
         int cr = 40; int cg = 40; int cb = 48;
         if (v == 16) { cr = 90; cg = 90; cb = 110; }
         else if (v == 17) { cr = 200; cg = 60; cb = 44; }
         else if (suit == 1 || suit == 2) { cr = 200; cg = 60; cb = 44; }
         if (v >= 16) {
-            SdlTexture jk = this.jokerSmall;
+            string jk = this.jokerSmall;
             if (v == 17) { jk = this.jokerBig; }
-            Text.Draw(this.r, "王", x + 10, y + 8, 3, cr, cg, cb, 255);
-            if (v == 16) { Text.Draw(this.r, "小", x + 12, y + 52, 2, 90, 90, 110, 255); }
-            if (v == 17) { Text.Draw(this.r, "大", x + 12, y + 52, 2, 200, 60, 44, 255); }
-            if (jk != null) { this.r.DrawTexture(jk, x + 36, y + 32, 54, 86); }
+            CText.Draw(this.c, "王", x + 10, y + 8, 3, cr, cg, cb, 255);
+            if (v == 16) { CText.Draw(this.c, "小", x + 12, y + 52, 2, 90, 90, 110, 255); }
+            if (v == 17) { CText.Draw(this.c, "大", x + 12, y + 52, 2, 200, 60, 44, 255); }
+            if (jk != null) { CDraw.BlitImage(this.c, jk, x + 36, y + 32, 54, 86); }
             return;
         }
-        Text.Draw(this.r, DdzGame.RankName(v), x + 10, y + 8, 3, cr, cg, cb, 255);
-        SdlTexture pip = this.PipTex(suit);
+        CText.Draw(this.c, DdzGame.RankName(v), x + 10, y + 8, 3, cr, cg, cb, 255);
+        string pip = this.PipTex(suit);
         if (pip != null) {
-            this.r.DrawTexture(pip, x + 12, y + 46, 22, 22);
-            this.r.DrawTexture(pip, x + 40, y + 70, 46, 46);
+            CDraw.BlitImage(this.c, pip, x + 12, y + 46, 22, 22);
+            CDraw.BlitImage(this.c, pip, x + 40, y + 70, 46, 46);
             return;
         }
         // vector fallback pip
         int px = x + 22; int py = y + 66;
         if (suit == 0) {
-            Draw.FillCircle(this.r, px - 5, py, 6, cr, cg, cb, 255);
-            Draw.FillCircle(this.r, px + 5, py, 6, cr, cg, cb, 255);
-            Draw.FillCircle(this.r, px, py - 7, 7, cr, cg, cb, 255);
-            this.r.SetColor(cr, cg, cb, 255);
-            this.r.FillRect(px - 2, py, 4, 12);
+            CDraw.FillCircle(this.c, px - 5, py, 6, cr, cg, cb, 255);
+            CDraw.FillCircle(this.c, px + 5, py, 6, cr, cg, cb, 255);
+            CDraw.FillCircle(this.c, px, py - 7, 7, cr, cg, cb, 255);
+            CDraw.FillRect(this.c, px - 2, py, 4, 12, CDraw.Argb(255, cr, cg, cb));
         } else if (suit == 1) {
-            Draw.FillCircle(this.r, px - 5, py - 3, 6, cr, cg, cb, 255);
-            Draw.FillCircle(this.r, px + 5, py - 3, 6, cr, cg, cb, 255);
-            Draw.FillCircle(this.r, px, py + 6, 7, cr, cg, cb, 255);
+            CDraw.FillCircle(this.c, px - 5, py - 3, 6, cr, cg, cb, 255);
+            CDraw.FillCircle(this.c, px + 5, py - 3, 6, cr, cg, cb, 255);
+            CDraw.FillCircle(this.c, px, py + 6, 7, cr, cg, cb, 255);
         } else if (suit == 2) {
-            Draw.FillCircle(this.r, px, py - 7, 6, cr, cg, cb, 255);
-            Draw.FillCircle(this.r, px - 6, py + 2, 6, cr, cg, cb, 255);
-            Draw.FillCircle(this.r, px + 6, py + 2, 6, cr, cg, cb, 255);
-            this.r.SetColor(cr, cg, cb, 255);
-            this.r.FillRect(px - 2, py + 2, 4, 10);
+            CDraw.FillCircle(this.c, px, py - 7, 6, cr, cg, cb, 255);
+            CDraw.FillCircle(this.c, px - 6, py + 2, 6, cr, cg, cb, 255);
+            CDraw.FillCircle(this.c, px + 6, py + 2, 6, cr, cg, cb, 255);
+            CDraw.FillRect(this.c, px - 2, py + 2, 4, 10, CDraw.Argb(255, cr, cg, cb));
         } else {
-            Draw.FillCircle(this.r, px, py - 5, 6, cr, cg, cb, 255);
-            Draw.FillCircle(this.r, px, py + 5, 6, cr, cg, cb, 255);
-            Draw.FillCircle(this.r, px - 5, py, 6, cr, cg, cb, 255);
-            Draw.FillCircle(this.r, px + 5, py, 6, cr, cg, cb, 255);
+            CDraw.FillCircle(this.c, px, py - 5, 6, cr, cg, cb, 255);
+            CDraw.FillCircle(this.c, px, py + 5, 6, cr, cg, cb, 255);
+            CDraw.FillCircle(this.c, px - 5, py, 6, cr, cg, cb, 255);
+            CDraw.FillCircle(this.c, px + 5, py, 6, cr, cg, cb, 255);
         }
     }
 
     void DrawCardBack(int x, int y) {
-        Draw.RoundRectFill(this.r, x + 2, y + 4, 76, 104, 9, 20, 12, 8, 110);
-        if (this.cardBack != null) {
-            this.r.DrawTexture(this.cardBack, x, y, 76, 104);
+        CDraw.RoundRectFill(this.c, x + 2, y + 4, 76, 104, 9, 20, 12, 8, 110);
+        if (this.cardBackPath != null) {
+            CDraw.BlitImage(this.c, this.cardBackPath, x, y, 76, 104);
             return;
         }
-        Draw.RoundRectFill(this.r, x, y, 76, 104, 9, 70, 40, 100, 255);
-        Draw.RingRect(this.r, x, y, 76, 104, 2, 140, 100, 190, 255);
-        Draw.FillCircle(this.r, x + 38, y + 52, 22, 110, 70, 160, 255);
-        Draw.FillCircle(this.r, x + 38, y + 52, 12, 160, 110, 220, 255);
+        CDraw.RoundRectFill(this.c, x, y, 76, 104, 9, 70, 40, 100, 255);
+        CDraw.RingRect(this.c, x, y, 76, 104, 2, 140, 100, 190, 255);
+        CDraw.FillCircle(this.c, x + 38, y + 52, 22, 110, 70, 160, 255);
+        CDraw.FillCircle(this.c, x + 38, y + 52, 12, 160, 110, 220, 255);
     }
 
     void DrawShown(Combo c, int cx, int cy) {
@@ -1018,37 +1018,35 @@ class DdzGame {
 
     void DrawSeat(int who, int x, int y, int count) {
         string name = "右家";
-        SdlTexture face = this.avatarR;
-        if (who == 2) { name = "左家"; face = this.avatarL; }
-        Draw.RoundRectFill(this.r, x, y, 190, 96, 12, 40, 28, 16, 210);
-        Draw.RingRect(this.r, x, y, 190, 96, 2, 214, 178, 120, 90);
+        string face = this.avatarRPath;
+        if (who == 2) { name = "左家"; face = this.avatarLPath; }
+        CDraw.RoundRectFill(this.c, x, y, 190, 96, 12, 40, 28, 16, 210);
+        CDraw.RingRect(this.c, x, y, 190, 96, 2, 214, 178, 120, 90);
         int tx = x + 18;
         if (face != null) {
-            Draw.RoundRectFill(this.r, x + 10, y + 12, 72, 72, 10, 26, 18, 10, 255);
-            this.r.DrawTexture(face, x + 12, y + 14, 68, 68);
-            Draw.RingRect(this.r, x + 10, y + 12, 72, 72, 2, 214, 178, 120, 150);
+            CDraw.RoundRectFill(this.c, x + 10, y + 12, 72, 72, 10, 26, 18, 10, 255);
+            CDraw.BlitImage(this.c, face, x + 12, y + 14, 68, 68);
+            CDraw.RingRect(this.c, x + 10, y + 12, 72, 72, 2, 214, 178, 120, 150);
             tx = x + 94;
         }
-        Text.Draw(this.r, name, tx, y + 14, 2, 240, 224, 195, 255);
+        CText.Draw(this.c, name, tx, y + 14, 2, 240, 224, 195, 255);
         if (this.scene >= 2 && this.landlord == who) {
-            Text.Draw(this.r, "地主", tx, y + 40, 2, 255, 200, 90, 255);
+            CText.Draw(this.c, "地主", tx, y + 40, 2, 255, 200, 90, 255);
         }
-        Text.Draw(this.r, "余 " + count + " 张", tx, y + 64, 2, 200, 190, 170, 255);
+        CText.Draw(this.c, "余 " + count + " 张", tx, y + 64, 2, 200, 190, 170, 255);
     }
 
     void DrawTable(int now) {
         this.EnsureTex();
-        this.host.Begin(26, 18, 12);
-        if (this.tableBg != null) {
-            this.r.DrawTexture(this.tableBg, 0, 0, 1280, 720);
-            this.r.SetColor(14, 10, 6, 60);
-            this.r.FillRect(0, 0, 1280, 720);
+        CDraw.Clear(this.c, DdzGame.VW(), DdzGame.VH(), CDraw.Argb(255, 26, 18, 12));
+        if (this.tablePath != null) {
+            CDraw.BlitImage(this.c, this.tablePath, 0, 0, DdzGame.VW(), DdzGame.VH());
+            CDraw.FillRect(this.c, 0, 0, DdzGame.VW(), DdzGame.VH(), CDraw.Argb(60, 14, 10, 6));
         } else if (this.menuBg != null) {
-            KitUi.Backdrop(this.r, this.menuBg, 1280, 720);
-            this.r.SetColor(18, 12, 8, 170);
-            this.r.FillRect(0, 0, 1280, 720);
+            CKitUi.Backdrop(this.c, this.menuBg, DdzGame.VW(), DdzGame.VH());
+            CDraw.FillRect(this.c, 0, 0, DdzGame.VW(), DdzGame.VH(), CDraw.Argb(170, 18, 12, 8));
         }
-        Draw.FillCircle(this.r, 640, 340, 460, 255, 190, 110, 12);
+        CDraw.FillCircle(this.c, 640, 340, 460, 255, 190, 110, 12);
         // seats
         this.DrawSeat(2, 30, 60, this.hand2.Count);
         this.DrawSeat(1, 1060, 60, this.hand1.Count);
@@ -1084,55 +1082,54 @@ class DdzGame {
                 this.DrawCard(x, y, this.hand0[i].card, this.scene == 2 && this.hand0[i].selected);
                 i = i + 1;
             }
-            if (this.avatarMe != null) {
-                Draw.RoundRectFill(this.r, 30, 520, 72, 72, 10, 26, 18, 10, 255);
-                this.r.DrawTexture(this.avatarMe, 32, 522, 68, 68);
-                Draw.RingRect(this.r, 30, 520, 72, 72, 2, 214, 178, 120, 150);
+            if (this.avatarMePath != null) {
+                CDraw.RoundRectFill(this.c, 30, 520, 72, 72, 10, 26, 18, 10, 255);
+                CDraw.BlitImage(this.c, this.avatarMePath, 32, 522, 68, 68);
+                CDraw.RingRect(this.c, 30, 520, 72, 72, 2, 214, 178, 120, 150);
             }
             if (this.scene >= 2 && this.landlord == 0) {
-                Text.Draw(this.r, "地主 · 你", 110, 546, 2, 255, 200, 90, 255);
+                CText.Draw(this.c, "地主 · 你", 110, 546, 2, 255, 200, 90, 255);
             }
         }
         // status strip
-        Draw.RoundRectFill(this.r, 20, 662, 560, 46, 10, 30, 22, 14, 190);
-        Text.Draw(this.r, this.prof.Title() + " · 豆 " + this.prof.beans
+        CDraw.RoundRectFill(this.c, 20, 662, 560, 46, 10, 30, 22, 14, 190);
+        CText.Draw(this.c, this.prof.Title() + " · 豆 " + this.prof.beans
             + " · 连胜 " + this.prof.streak
             + " · 倍数 x" + this.mult + " · 底分 " + this.bid, 40, 672, 2, 230, 214, 185, 255);
         // action buttons
         if (this.scene == 2 && this.turn == 0) {
-            KitUi.Button(this.r, this.mouseX, this.mouseY, 425, 508, 130, 54, "出牌", 2, 1);
-            KitUi.Button(this.r, this.mouseX, this.mouseY, 575, 508, 130, 54, "不出", 2, 0);
-            KitUi.Button(this.r, this.mouseX, this.mouseY, 725, 508, 130, 54, "取消", 2, 0);
+            CKitUi.Button(this.c, this.mouseX, this.mouseY, 425, 508, 130, 54, "出牌", 2, 1);
+            CKitUi.Button(this.c, this.mouseX, this.mouseY, 575, 508, 130, 54, "不出", 2, 0);
+            CKitUi.Button(this.c, this.mouseX, this.mouseY, 725, 508, 130, 54, "取消", 2, 0);
             if (!this.demo) {
                 int left = (this.deadline - now + 999) / 1000;
                 if (left < 0) { left = 0; }
                 int tr = 255; int tg = 214; int tb = 150;
                 if (left <= 5) { tg = 110; tb = 90; }
-                Text.DrawCenteredShadow(this.r, "倒计时 " + left + " 秒", 640, 478, 2, tr, tg, tb, 2);
+                CText.DrawCenteredShadow(this.c, "倒计时 " + left + " 秒", 640, 478, 2, tr, tg, tb, 255);
             }
         }
         if (this.scene == 2 && this.turn != 0) {
             string nm = "右家思考中…";
             if (this.turn == 2) { nm = "左家思考中…"; }
-            Text.DrawCenteredShadow(this.r, nm, 640, 522, 2, 255, 214, 150, 2);
+            CText.DrawCenteredShadow(this.c, nm, 640, 522, 2, 255, 214, 150, 255);
         }
         if (this.scene == 1) {
-            Text.DrawCenteredShadow(this.r, "叫分：谁当地主？", 640, 470, 3, 255, 218, 160, 2);
+            CText.DrawCenteredShadow(this.c, "叫分：谁当地主？", 640, 470, 3, 255, 218, 160, 255);
             if (this.bidTurn == 0) {
-                KitUi.Button(this.r, this.mouseX, this.mouseY, 380, 600, 116, 56, "不叫", 2, 0);
+                CKitUi.Button(this.c, this.mouseX, this.mouseY, 380, 600, 116, 56, "不叫", 2, 0);
                 int k1 = 1; if (this.bidBest >= 1) { k1 = 0; }
                 int k2 = 1; if (this.bidBest >= 2) { k2 = 0; }
-                KitUi.Button(this.r, this.mouseX, this.mouseY, 512, 600, 116, 56, "1 分", 2, k1);
-                KitUi.Button(this.r, this.mouseX, this.mouseY, 644, 600, 116, 56, "2 分", 2, k2);
-                KitUi.Button(this.r, this.mouseX, this.mouseY, 776, 600, 116, 56, "3 分", 2, 1);
+                CKitUi.Button(this.c, this.mouseX, this.mouseY, 512, 600, 116, 56, "1 分", 2, k1);
+                CKitUi.Button(this.c, this.mouseX, this.mouseY, 644, 600, 116, 56, "2 分", 2, k2);
+                CKitUi.Button(this.c, this.mouseX, this.mouseY, 776, 600, 116, 56, "3 分", 2, 1);
             } else {
                 string nm = "右家考虑中…";
                 if (this.bidTurn == 2) { nm = "左家考虑中…"; }
-                Text.DrawCenteredShadow(this.r, nm, 640, 620, 2, 230, 214, 185, 2);
+                CText.DrawCenteredShadow(this.c, nm, 640, 620, 2, 230, 214, 185, 255);
             }
         }
         this.DrawFx(now);
-        this.host.End();
     }
 
     void DrawFx(int now) {
@@ -1144,7 +1141,7 @@ class DdzGame {
             int px = (p.x + p.vx * age / 4) / 256;
             int py = (p.y + p.vy * age / 4) / 256 + age * age / 26000;
             int alpha = 235 - age * 235 / 900;
-            Draw.FillCircle(this.r, px, py, 3, p.cr, p.cg, p.cb, alpha);
+            CDraw.FillCircle(this.c, px, py, 3, p.cr, p.cg, p.cb, alpha);
             i = i + 1;
         }
         i = 0;
@@ -1153,76 +1150,70 @@ class DdzGame {
             int age = now - p.bornAt;
             if (age > 1400) { this.pops.RemoveAt(i); continue; }
             int alpha = 255 - age * 255 / 1400;
-            Text.DrawCentered(this.r, p.text, p.x, p.y - age / 14, 2, p.cr, p.cg, p.cb, alpha);
+            CText.DrawCentered(this.c, p.text, p.x, p.y - age / 14, 2, p.cr, p.cg, p.cb, alpha);
             i = i + 1;
         }
         if (now - this.toastAt < 2200) {
-            Text.DrawCenteredShadow(this.r, this.toastText, 640, 452, 2, 255, 224, 150, 2);
+            CText.DrawCenteredShadow(this.c, this.toastText, 640, 452, 2, 255, 224, 150, 255);
         }
     }
 
     void DrawMenu(int now) {
         this.EnsureTex();
-        this.host.Begin(24, 16, 10);
-        KitUi.Backdrop(this.r, this.menuBg, 1280, 720);
-        this.r.SetColor(14, 10, 6, 120);
-        this.r.FillRect(0, 0, 1280, 720);
-        if (this.titleTex != null) {
-            this.r.DrawTexture(this.titleTex, 640 - 300, 30, 600, 200);
+        CDraw.Clear(this.c, DdzGame.VW(), DdzGame.VH(), CDraw.Argb(255, 24, 16, 10));
+        CKitUi.Backdrop(this.c, this.menuBg, DdzGame.VW(), DdzGame.VH());
+        CDraw.FillRect(this.c, 0, 0, DdzGame.VW(), DdzGame.VH(), CDraw.Argb(120, 14, 10, 6));
+        if (this.titlePath != null) {
+            CDraw.BlitImage(this.c, this.titlePath, 640 - 300, 30, 600, 200);
         } else {
-            Text.DrawCenteredShadow(this.r, "斗地主", 640, 70, 9, 245, 232, 205, 4);
+            CText.DrawCenteredShadow(this.c, "斗地主", 640, 70, 9, 245, 232, 205, 255);
         }
-        Text.DrawCenteredShadow(this.r, "叫分抢庄 · 炸弹翻倍 · 连胜赢豆", 640, 244, 3, 255, 218, 160, 3);
-        KitUi.Button(this.r, this.mouseX, this.mouseY, 430, 330, 420, 84, "开始斗地主", 3, 1);
-        Text.DrawCenteredShadow(this.r, "难度", 640, 430, 2, 230, 212, 182, 2);
+        CText.DrawCenteredShadow(this.c, "叫分抢庄 · 炸弹翻倍 · 连胜赢豆", 640, 244, 3, 255, 218, 160, 255);
+        CKitUi.Button(this.c, this.mouseX, this.mouseY, 430, 330, 420, 84, "开始斗地主", 3, 1);
+        CText.DrawCenteredShadow(this.c, "难度", 640, 430, 2, 230, 212, 182, 255);
         int kE = 0; int kN = 0; int kH = 0;
         if (this.diff == 0) { kE = 1; }
         if (this.diff == 1) { kN = 1; }
         if (this.diff == 2) { kH = 1; }
-        KitUi.Button(this.r, this.mouseX, this.mouseY, 430, 452, 130, 54, "简单", 2, kE);
-        KitUi.Button(this.r, this.mouseX, this.mouseY, 575, 452, 130, 54, "普通", 2, kN);
-        KitUi.Button(this.r, this.mouseX, this.mouseY, 720, 452, 130, 54, "困难", 2, kH);
-        Text.DrawCenteredShadow(this.r, this.prof.Title() + " · 豆 " + this.prof.beans
+        CKitUi.Button(this.c, this.mouseX, this.mouseY, 430, 452, 130, 54, "简单", 2, kE);
+        CKitUi.Button(this.c, this.mouseX, this.mouseY, 575, 452, 130, 54, "普通", 2, kN);
+        CKitUi.Button(this.c, this.mouseX, this.mouseY, 720, 452, 130, 54, "困难", 2, kH);
+        CText.DrawCenteredShadow(this.c, this.prof.Title() + " · 豆 " + this.prof.beans
             + " · 胜 " + this.prof.wins + " 负 " + this.prof.losses
-            + " · 最长连胜 " + this.prof.bestStreak, 640, 668, 2, 230, 212, 182, 2);
-        this.host.End();
+            + " · 最长连胜 " + this.prof.bestStreak, 640, 668, 2, 230, 212, 182, 255);
     }
 
     void DrawOver(int now) {
         this.DrawTableBase(now);
-        this.r.SetColor(12, 10, 6, 165);
-        this.r.FillRect(0, 0, 1280, 720);
+        CDraw.FillRect(this.c, 0, 0, DdzGame.VW(), DdzGame.VH(), CDraw.Argb(165, 12, 10, 6));
         int by = 190;
-        Draw.RoundRectFill(this.r, 390, by, 500, 320, 20, 36, 26, 14, 245);
-        Draw.RingRect(this.r, 390, by, 500, 320, 2, 214, 178, 120, 140);
+        CDraw.RoundRectFill(this.c, 390, by, 500, 320, 20, 36, 26, 14, 245);
+        CDraw.RingRect(this.c, 390, by, 500, 320, 2, 214, 178, 120, 140);
         if (this.winner == 1) {
-            Text.DrawCenteredShadow(this.r, "胜利！赢 " + this.deltaBeans + " 豆", 640, by + 34, 5, 255, 218, 110, 3);
+            CText.DrawCenteredShadow(this.c, "胜利！赢 " + this.deltaBeans + " 豆", 640, by + 34, 5, 255, 218, 110, 255);
             string cheer = "手气正旺，再来一局！";
             if (this.prof.streak >= 3) { cheer = this.prof.streak + " 连胜！豆子滚滚来"; }
-            Text.DrawCentered(this.r, cheer, 640, by + 120, 3, 150, 230, 190, 255);
+            CText.DrawCentered(this.c, cheer, 640, by + 120, 3, 150, 230, 190, 255);
         } else {
-            Text.DrawCenteredShadow(this.r, "惜败，输 " + this.deltaBeans + " 豆", 640, by + 34, 5, 235, 165, 150, 3);
-            Text.DrawCentered(this.r, "记牌回想一下，翻盘就在下局", 640, by + 120, 3, 225, 210, 190, 255);
+            CText.DrawCenteredShadow(this.c, "惜败，输 " + this.deltaBeans + " 豆", 640, by + 34, 5, 235, 165, 150, 255);
+            CText.DrawCentered(this.c, "记牌回想一下，翻盘就在下局", 640, by + 120, 3, 225, 210, 190, 255);
         }
-        Text.DrawCentered(this.r, "豆 " + this.prof.beans + " · 倍数 x" + this.mult, 640, by + 170, 2, 230, 214, 185, 255);
-        KitUi.Button(this.r, this.mouseX, this.mouseY, 420, by + 240, 210, 60, "再来一局", 3, 1);
-        KitUi.Button(this.r, this.mouseX, this.mouseY, 650, by + 240, 210, 60, "回到菜单", 3, 0);
+        CText.DrawCentered(this.c, "豆 " + this.prof.beans + " · 倍数 x" + this.mult, 640, by + 170, 2, 230, 214, 185, 255);
+        CKitUi.Button(this.c, this.mouseX, this.mouseY, 420, by + 240, 210, 60, "再来一局", 3, 1);
+        CKitUi.Button(this.c, this.mouseX, this.mouseY, 650, by + 240, 210, 60, "回到菜单", 3, 0);
         this.DrawFx(now);
-        this.host.End();
     }
 
-    // table without Begin/End so the over screen can overlay it
+    // table base so the over screen can overlay it
     void DrawTableBase(int now) {
         this.EnsureTex();
-        this.host.Begin(26, 18, 12);
-        if (this.tableBg != null) {
-            this.r.DrawTexture(this.tableBg, 0, 0, 1280, 720);
-            this.r.SetColor(14, 10, 6, 60);
-            this.r.FillRect(0, 0, 1280, 720);
+        CDraw.Clear(this.c, DdzGame.VW(), DdzGame.VH(), CDraw.Argb(255, 26, 18, 12));
+        if (this.tablePath != null) {
+            CDraw.BlitImage(this.c, this.tablePath, 0, 0, DdzGame.VW(), DdzGame.VH());
+            CDraw.FillRect(this.c, 0, 0, DdzGame.VW(), DdzGame.VH(), CDraw.Argb(60, 14, 10, 6));
         } else if (this.menuBg != null) {
-            KitUi.Backdrop(this.r, this.menuBg, 1280, 720);
-            this.r.SetColor(18, 12, 8, 170);
-            this.r.FillRect(0, 0, 1280, 720);
+            CKitUi.Backdrop(this.c, this.menuBg, DdzGame.VW(), DdzGame.VH());
+            CDraw.FillRect(this.c, 0, 0, DdzGame.VW(), DdzGame.VH(), CDraw.Argb(170, 18, 12, 8));
         }
         this.DrawSeat(2, 30, 60, this.hand2.Count);
         this.DrawSeat(1, 1060, 60, this.hand1.Count);
@@ -1236,37 +1227,48 @@ class DdzGame {
     }
 }
 
-class DdzApp {
-    static void Main() {
-        Host h = Host.Create("斗地主", 1280, 720);
-        // 2D 场景 60fps 足够: 高刷屏 vsync-only 会翻倍烧帧; 失焦降到 2fps。
-        h.LimitFps(60);
-        h.SetIdleFps(2);
+// GuiHost 主循环回调：事件 → 固定步长模拟（16ms，追帧上限内多次）→
+// 渲染（BeginFrame/PresentFrame 由宿主包好；帧预算自限速约 60fps）。
+class DzLoop : IGuiHostLoop {
+    DdzGame g;
 
-        DdzGame g = DdzGame.Create(h);
-        while (h.Running()) {
-            int now = Sdl.Ticks();
-            while (SdlEvent.Poll()) {
-                int ty = SdlEvent.Type();
-                h.OnWindowEvent(ty);
-                if (SdlEvent.IsQuit()) { h.Quit(); }
-                if (ty == SdlEventType.KeyDown()) {
-                    int sc = SdlEvent.Scancode();
-                    if (sc == 68) { h.ToggleFullscreen(); }
-                    else if (!SdlEvent.IsRepeat()) { g.OnKey(sc, now); }
-                }
-                if (ty == SdlEventType.MouseMotion()) { g.mouseX = h.MouseX(); g.mouseY = h.MouseY(); }
-                if (ty == SdlEventType.MouseButtonDown()) {
-                    if (SdlEvent.MouseButton() == SdlMouseButton.Left()) {
-                        g.mouseX = h.MouseX();
-                        g.mouseY = h.MouseY();
-                        g.OnDown(g.mouseX, g.mouseY, now);
-                    }
-                }
+    public void Start(GuiHost host) {
+        this.g = DdzGame.Create(host);
+    }
+    public void Event(GuiHost host, int kind, int code) {
+        int now = Window.GetTickMs();
+        App a = host.App();
+        // 鼠标是窗口客户区坐标，减 ContentTop 换回舞台坐标（标题栏
+        // 之上/之内的指针对游戏不可见）。
+        if (kind == 4) {
+            this.g.OnKey(code, now);
+        } else if (kind == 2) {
+            this.g.mouseX = a.mouseX;
+            this.g.mouseY = a.mouseY - host.ContentTop();
+        } else if (kind == 1) {
+            if (code == 0) {
+                this.g.mouseX = a.mouseX;
+                this.g.mouseY = a.mouseY - host.ContentTop();
+                this.g.OnDown(this.g.mouseX, this.g.mouseY, now);
             }
-            g.Tick(now);
-            g.Render(now);   // vsync-paced by the renderer
         }
-        h.Close();
+    }
+    public void FixedUpdate(GuiHost host, int dt) {
+        this.g.Tick(Window.GetTickMs());
+    }
+    public void Update(GuiHost host, int dt) { }
+    public void Render(GuiHost host, Canvas c, double alpha) {
+        // 舞台 0 基绘制：原点落到标准标题栏之下，chrome 由宿主在
+        // 内容之上叠画。
+        CDraw.Origin(0, host.ContentTop());
+        this.g.Render(Window.GetTickMs());
+    }
+    public void Stop(GuiHost host) { }
+}
+
+class DzApp {
+    static void Main() {
+        GuiHost host = new GuiHost("斗地主", 1280, 720, 16);
+        host.Run(new DzLoop());
     }
 }
