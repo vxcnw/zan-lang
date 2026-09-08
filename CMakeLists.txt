@@ -2427,6 +2427,20 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
       -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_formbuild${_exe_ext}
       -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
 
+  # HttpTableSource: loopback HTTP server with a hit counter against the
+  # cache-first block source. Pins the wire protocol, disk-cache serving
+  # (second instance = zero extra hits) and the offline failure path.
+  add_test(NAME conformance_gui_httpsource
+    COMMAND ${CMAKE_COMMAND}
+      -DZANC=$<TARGET_FILE:zanc>
+      -DSRC=${CMAKE_SOURCE_DIR}/tests/gui/httpsource_test.zan
+      "-DZANC_ARGS=--auto-stdlib${_gui_driver_tail}"
+      -DEXPECTED=${CMAKE_SOURCE_DIR}/tests/conformance/gui_httpsource.out
+      -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_httpsource${_exe_ext}
+      -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
+  set_tests_properties(conformance_gui_httpsource PROPERTIES TIMEOUT 120)
+
+
   # The generated IGameScene adapter: a .zscene projects a nested
   # `partial class <Name>Scene : Game.Foundation.IGameScene` whose Enter/Exit
   # route through the code-behind's OnScene* hooks, Doc() exposes the live

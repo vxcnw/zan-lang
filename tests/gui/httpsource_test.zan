@@ -1,0 +1,136 @@
+using System;
+using System.Json;
+using System.Net.Sockets;
+using System.Net.Http;
+using System.Threading;
+using Gui;
+using Gui.Component.DataTable;
+
+/// Loopback conformance for HttpTableSource: a real in-process HTTP server
+/// (with a hit counter) against the cache-first block source. Pins the wire
+/// protocol parse, cache-first serving (second instance with the same cache
+/// dir produces zero extra HTTP hits), and the offline failure path.
+class HttpTestSrv {
+    static HttpServer srv;
+    static int hits;
+
+    static int hitCount() { return hits; }
+
+    static int SafeInt(string s) {
+        if (s == "" || s == null) { return 0; }
+        return Convert.ToInt32(s);
+    }
+
+    static async HttpResponse Handle(HttpRequest req) {
+        hits = hits + 1;
+        int start = SafeInt(req.GetQueryParam("start"));
+        int count = SafeInt(req.GetQueryParam("count"));
+        string rows = "";
+        int made = 0;
+        for (int i = 0; i < count; i = i + 1) {
+            int idx = start + i;
+            if (idx >= 10) { break; }
+            if (made > 0) { rows = rows + ","; }
+            rows = rows + "[\"r" + Convert.ToString(idx) + "c0\","
+                + "\"r" + Convert.ToString(idx) + "c1\"]";
+            made = made + 1;
+        }
+        return HttpResponse.Json("{\"total\":10,\"rows\":[" + rows + "]}");
+    }
+
+    static void Entry() {
+        Socket.Initialize();
+        srv = new HttpServer("127.0.0.1", 18365);
+        srv.OnRequest(HttpTestSrv.Handle);
+        srv.Start();
+    }
+}
+
+class HttpSourceTest {
+    static int fails;
+
+    static void Ok(string what, bool cond) {
+        if (cond) { return; }
+        fails = fails + 1;
+        Console.WriteLine("FAIL " + what);
+    }
+
+    static void Eq(string what, string got, string want) {
+        if (got == want) { return; }
+        fails = fails + 1;
+        Console.WriteLine("FAIL " + what + ": got '" + got + "' want '" + want + "'");
+    }
+
+    static void Purge(string dir, HttpTableSource src) {
+        string p = src.CachePath(0, 100);
+        if (File.Exists(p)) { File.Delete(p); }
+    }
+
+    static bool PollUntil(HttpTableSource src, int wantRows, int tries) {
+        for (int i = 0; i < tries; i = i + 1) {
+            src.Poll();
+            if (src.RowCount() >= wantRows) { return true; }
+            Thread.Sleep(20);
+        }
+        return false;
+    }
+
+    static void Main() {
+        fails = 0;
+        Directory.CreateDirectory("hts_cache");
+        Directory.CreateDirectory("hts_cache2");
+        Thread.Start(HttpTestSrv.Entry);
+        Thread.Sleep(300);
+
+        try {
+            // ---- network fetch: one block, one HTTP hit, cells + total ----
+            HttpTableSource a = HttpTableSource.Create("127.0.0.1", 18365,
+                                                       "/data", "hts_cache");
+            Purge("hts_cache", a);
+            a.RequestBlock(0);
+            Ok("network block arrived", PollUntil(a, 10, 300));
+            Eq("row count from total", Convert.ToString(a.RowCount()), "10");
+            Eq("cell 0,0", a.CellText(0, 0), "r0c0");
+            Eq("cell 9,1", a.CellText(9, 1), "r9c1");
+            Eq("no error", a.LastError(), "");
+            Eq("one http hit", Convert.ToString(HttpTestSrv.hitCount()), "1");
+        } catch (Exception ex) {
+            Console.WriteLine("EXC network: " + ex.Message);
+            fails = fails + 1;
+        }
+
+        try {
+            // ---- disk cache: a fresh instance with the same cache dir serves
+            //      the same block without touching the network again ----
+            HttpTableSource b = HttpTableSource.Create("127.0.0.1", 18365,
+                                                       "/data", "hts_cache");
+            b.RequestBlock(0);
+            Ok("cache block arrived", PollUntil(b, 10, 100));
+            Eq("cell from cache", b.CellText(3, 0), "r3c0");
+            Eq("cache avoided the network",
+               Convert.ToString(HttpTestSrv.hitCount()), "1");
+        } catch (Exception ex) {
+            Console.WriteLine("EXC cache: " + ex.Message);
+            fails = fails + 1;
+        }
+
+        try {
+            // ---- offline: nothing listens on 18366, failure surfaces ----
+            HttpTableSource c = HttpTableSource.Create("127.0.0.1", 18366,
+                                                       "/data", "hts_cache2");
+            c.RequestBlock(0);
+            for (int i = 0; i < 200; i = i + 1) {
+                c.Poll();
+                if (c.LastError() != "") { break; }
+                Thread.Sleep(20);
+            }
+            Ok("offline error surfaced", c.LastError() != "");
+            Eq("offline has no rows", Convert.ToString(c.RowCount()), "0");
+        } catch (Exception ex) {
+            Console.WriteLine("EXC offline: " + ex.Message);
+            fails = fails + 1;
+        }
+
+        if (fails == 0) { Console.WriteLine("HTTSOURCE_OK"); }
+    }
+}
