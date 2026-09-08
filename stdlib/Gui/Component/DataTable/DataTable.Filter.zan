@@ -42,6 +42,19 @@ partial class DataTable {
         return false;
     }
 
+    /// needle 在 hay 中首次出现（不区分 ASCII 大小写）的字节
+    /// 下标；无命中返回 -1。与 ContainsCI 同一匹配语义，供
+    /// 查找高亮定位匹配段。
+    static int IndexOfCI(string hay, string needle) {
+        int nl = needle.Length;
+        int hl = hay.Length;
+        if (nl == 0 || nl > hl) { return 0 - 1; }
+        for (int i = 0; i <= hl - nl; i = i + 1) {
+            if (DataTable.MatchAt(hay, needle, i)) { return i; }
+        }
+        return 0 - 1;
+    }
+
     /// hay 是否以 needle 开头（不区分 ASCII 大小写）。
     static bool StartsCI(string hay, string needle) {
         if (needle.Length > hay.Length) { return false; }

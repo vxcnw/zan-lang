@@ -2694,14 +2694,14 @@ class Gallery {
         Gallery.demoTableState.CellClick.Add(Gallery.OnDemoCellClick);
         Gallery.demoTableState.CellEdit.Add(Gallery.OnDemoCellEdit);
         Gallery.demoRows = new List<DataRow>();
-        Gallery.demoRows.Add(Gallery.DtRow11("Alpha", "Zan", "98", "128000", "Engineering", "San Francisco", "143400", "pencil", "Edit", "12,18,9,24,30,22", "3,1,0,4,2,5,1"));
+        Gallery.demoRows.Add(Gallery.DtRow11("Alpha", "Zan", "98", "128000", "Engineering", "San Francisco Bay Area", "143400", "pencil", "Edit", "12,18,9,24,30,22", "3,1,0,4,2,5,1"));
         Gallery.demoRows.Add(Gallery.DtRow11("Beta", "Lang", "87", "94500", "Sales", "New York", "105800", "trash", "Edit", "20,-8,26,16,-4,24", "0,2,4,1,3,2,0"));
         Gallery.demoRows.Add(Gallery.DtRow11("Alpha", "Kite", "91", "112300", "Engineering", "Los Angeles", "125800", "download", "Edit", "8,15,12,20,17,26", "5,0,3,2,1,4,2"));
         Gallery.demoRows.Add(Gallery.DtRow11("Beta", "Vale", "82", "88000", "Operations", "New York", "98600", "pencil", "Edit", "30,22,28,18,24,20", "1,4,2,0,5,3,1"));
         Gallery.demoRows.Add(Gallery.DtRow11("Alpha", "Orin", "76", "76400", "Engineering", "Seattle", "85600", "star", "Edit", "10,12,18,15,22,28", "2,3,1,5,0,2,4"));
         Gallery.demoRows.Add(Gallery.DtRow11("Beta", "Nyx", "95", "141200", "Sales", "San Francisco", "158100", "trash", "Edit", "24,30,18,26,20,32", "4,2,5,3,1,0,3"));
         Gallery.demoRows.Add(Gallery.DtRow11("Gamma", "Rune", "88", "99900", "Operations", "Los Angeles", "111900", "pencil", "Edit", "14,10,16,22,18,26", "0,5,2,1,4,3,2"));
-        Gallery.demoRows.Add(Gallery.DtRow11("Alpha", "Sol", "69", "65000", "Engineering", "Seattle", "72800", "star", "Edit", "22,26,20,14,18,24", "3,0,4,2,5,1,0"));
+        Gallery.demoRows.Add(Gallery.DtRow11("Alpha", "Sol", "69", "65000", "Engineering", "Seattle Greater Area", "72800", "star", "Edit", "22,26,20,14,18,24", "3,0,4,2,5,1,0"));
         Gallery.demoRows.Add(Gallery.DtRow11("Gamma", "Wren", "93", "133750", "Sales", "San Francisco", "149800", "download", "Edit", "16,20,-12,24,30,26", "1,3,0,4,2,5,4"));
         Gallery.demoRows.Add(Gallery.DtRow11("Beta", "Iris", "74", "81200", "Operations", "New York", "90900", "pencil", "Edit", "18,14,-6,16,26,-10", "5,1,3,0,2,4,1"));
         Gallery.demoRows.Add(Gallery.DtRow11("Gamma", "Fox", "81", "90500", "Engineering", "Los Angeles", "101400", "star", "Edit", "26,18,24,30,22,28", "2,4,1,3,0,5,3"));
@@ -12901,7 +12901,8 @@ class Gallery {
             List<DataColumn> cols = new List<DataColumn>();
             // Every column is named, so the styler below and any handler can
             // say "score" instead of 2 — and keep working if a column moves.
-            cols.Add(DataColumn.Field(DataColumn.Pin(DataColumn.Text("Team", app.Scale(110))), "team"));
+            cols.Add(DataColumn.Field(DataColumn.Pin(DataColumn.Merge(
+                DataColumn.Text("Team", app.Scale(110)))), "team"));
             // Name must be filled in and fits a short label; Score is a spinner
             // bounded to a percentage; Dept picks from a fixed list.
             cols.Add(DataColumn.Field(DataColumn.Pin(DataColumn.MaxLength(
@@ -12917,7 +12918,10 @@ class Gallery {
                                    0xFF2E6ADB))), "salary"));
             cols.Add(DataColumn.Field(DataColumn.Dropdown(DataColumn.Text("Dept", app.Scale(120)),
                                          Gallery.DeptChoices(), true), "dept"));
-            cols.Add(DataColumn.Field(DataColumn.Text("City", app.Scale(110)), "city"));
+            // Wrap 开自动换行 + 均匀自动行高： City 列文本超宽时
+            // 折行（至多 3 行），整表行高按抽样估计抬升。
+            cols.Add(DataColumn.Field(DataColumn.Wrap(
+                DataColumn.Text("City", app.Scale(110)), 3), "city"));
             // Frozen to the right: a running total belongs where it stays
             // readable no matter how far the middle columns are scrolled.
             cols.Add(DataColumn.Field(DataColumn.PinRight(
@@ -12948,8 +12952,8 @@ class Gallery {
             // so the tint follows the active theme).
             Gallery.demoStyler.Bind(app, cols);
             Gallery.BoxCaption(app, px, py - app.Scale(20), w - app.Scale(36),
-                Gallery.T("Team/Name frozen left, Total frozen right · Icon/Trend-chart inline columns (line + baseline fill, negatives below the zero line) · Plan shows a live BandGrid per cell (declarative CompCol) · Ops column: Add/Del/Edit/View — Edit/View open a row form window over every editable column · Add row appends one · right-click a header for freeze/group/aggregate · F2 edits · Ctrl+Z undoes",
-                          "Team/Name 冻结在左、Total 冻结在右 · 图标/趋势图内嵌列（折线 + 基线填充，负值悬于零基线下方）· Plan 列每格内嵌一个真实 BandGrid（声明式 CompCol）· Ops 按钮组列：增/删/改/查——改、查打开行表单窗口（覆盖所有可编辑列）· 添加行按钮追加一行 · 右键表头可冻结/分组/汇总 · F2 编辑 · Ctrl+Z 撤销"),
+                Gallery.T("Team/Name frozen left, Total frozen right · Team merges equal neighbours (sort by Team to see it), City wraps with uniform auto row height · Ctrl+F find bar, F3 next hit · right-click a row: transpose view, pivot drill · Plan shows a live BandGrid per cell (declarative CompCol) · Ops column: Add/Del/Edit/View · right-click a header for freeze/group/aggregate · F2 edits · Ctrl+Z undoes",
+                          "Team/Name 冻结在左、Total 冻结在右 · Team 列同值相邻合并（按 Team 排序可见），City 列自动换行 + 均匀自动行高 · Ctrl+F 查找条、F3 下一处 · 右键行：转置视图、透视下钻 · Plan 列每格内嵌一个真实 BandGrid（声明式 CompCol）· Ops 按钮组列：增/删/改/查 · 右键表头可冻结/分组/汇总 · F2 编辑 · Ctrl+Z 撤销"),
                 app.theme.fontSizeMedium);
             Gallery.dtDemoCols = cols;
             DataTable.Render(app, px, py, w - app.Scale(36),

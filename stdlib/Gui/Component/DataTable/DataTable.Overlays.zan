@@ -16,7 +16,8 @@ partial class DataTable {
     // 0 复制，1 带表头复制，2 粘贴，3 清空单元格，5 选区生成图表，
     // 6/7 透视（退出/生成），8 插入行，9 删除行，
     // 10 撤销，11 全选，12 清除选择，
-    // 13 剪切，14/15 分组展开/折叠全部，16/17 异步导出 CSV/Excel
+    // 13 剪切，14/15 分组展开/折叠全部，16/17 异步导出 CSV/Excel，
+    // 18 转置视图开关，19 透视单元格下钻，20 查找（Ctrl+F）
     // （对照 AG Grid getContextMenuItems 的默认项集）
     static readonly int RowActCopy = 0;
     static readonly int RowActCopyHdr = 1;
@@ -35,6 +36,9 @@ partial class DataTable {
     static readonly int RowActContractGroups = 15;
     static readonly int RowActExportCsv = 16;
     static readonly int RowActExportXlsx = 17;
+    static readonly int RowActTranspose = 18;
+    static readonly int RowActPivotDrill = 19;
+    static readonly int RowActFind = 20;
 
     // ---------- 表头菜单 action 码 ----------
     // 0 升序，1 降序，2 清除排序，3 自动列宽，4 自动全部列宽，
@@ -143,10 +147,21 @@ partial class DataTable {
         if (st.pivotView) {
             items.Add(MenuItem.Item(DataTable.T("Exit pivot view", "退出透视视图"),
                                     "table", DataTable.RowActPivotExit));
+            items.Add(MenuItem.Item(DataTable.T("Drill into this cell", "下钻此单元格"),
+                                    "zoom-in", DataTable.RowActPivotDrill));
         } else {
             items.Add(MenuItem.Item(DataTable.T("Pivot from selection", "从选区生成透视表"),
                                     "table", DataTable.RowActPivot));
         }
+        if (st.transposeView) {
+            items.Add(MenuItem.Item(DataTable.T("Exit transpose view", "退出转置视图"),
+                                    "arrows-exchange", DataTable.RowActTranspose));
+        } else {
+            items.Add(MenuItem.Item(DataTable.T("Transpose view", "转置视图"),
+                                    "arrows-exchange", DataTable.RowActTranspose));
+        }
+        items.Add(MenuItem.Shortcut(DataTable.T("Find", "查找"), "search", "Ctrl+F",
+                                    DataTable.RowActFind));
         if (DataTable.IsGrouped(st)) {
             items.Add(MenuItem.Item(DataTable.T("Expand All Groups", "展开全部分组"),
                                     "", DataTable.RowActExpandGroups));
@@ -223,6 +238,22 @@ partial class DataTable {
             } else {
                 DataTable.Flash(st, DataTable.T("Select a range with a value column and two category columns", "请先框选含数值列与两个维度列的区域"));
             }
+        } else if (act == DataTable.RowActFind) {
+            DataTable.OpenFind(st);
+        } else if (act == DataTable.RowActTranspose) {
+            if (DataTable.IsTransposeView(st)) {
+                DataTable.ExitTranspose(st);
+                DataTable.Flash(st, DataTable.T("Exited transpose view", "已退出转置视图"));
+            } else if (DataTable.SetTranspose(st, cols, src)) {
+                DataTable.Flash(st, DataTable.T("Switched to transpose view", "已切换为转置视图"));
+            } else {
+                DataTable.Flash(st, DataTable.T("Nothing to transpose", "没有可转置的内容"));
+            }
+        } else if (act == DataTable.RowActPivotDrill) {
+            // 右键命中格（hitRow/hitCol 是透视源空间的行列索引）
+            // 背后的底层行：退出视图并把维度值钉成精确筛选。
+            DataTable.PivotDrill(st, st.hitRow, st.hitCol);
+            DataTable.Flash(st, DataTable.T("Drilled into underlying rows", "已下钻到原始行"));
         } else if (act == DataTable.RowActInsert) {
             // 在被点击行的*下方*插入，这是读者
             // 期望新条目出现的位置；锚点行保持原位。
@@ -717,15 +748,24 @@ partial class DataTable {
                                   "color", scales));
 
         kids.Add(MenuItem.Separator());
-        string clearLbl = DataTable.T("Clear Rules", "清除规则");
-        if (cfMode != 0) { clearLbl = clearLbl + "  ✓"; }
-        kids.Add(MenuItem.Item(clearLbl, "close", DataTable.HdrActCfClear));
+        // 打开"清除规则"弹窗：全表规则逐条列出，勾选单删/多删。
+        // 直项不带勾选态——它不是开关，是弹窗入口（同筛选…/列选择器…）。
+        kids.Add(MenuItem.Item(DataTable.T("Clear Rules…", "清除规则…"), "close",
+                               DataTable.HdrActCfClear));
         return kids;
     }
 
     /// 表头菜单 action 执行（RenderHeaderMenu 下一帧统一调用）。
     static void DispatchHeaderAction(App app, DataTableState st, List<DataColumn> cols,
                                      DataSource src, int col, int act) {
+        // 通过菜单设置新规则 = 撤销显式清除（menuCfOff 让位）。
+        bool cfSet = (act >= DataTable.HdrActCfBar0 && act < DataTable.HdrActCfBar0 + 8)
+            || (act >= DataTable.HdrActCfScale0 && act < DataTable.HdrActCfScale0 + 8)
+            || act == DataTable.HdrActCfGreater || act == DataTable.HdrActCfLess
+            || (act >= DataTable.HdrActCfTopN && act <= DataTable.HdrActCfBottomPct);
+        if (cfSet && col >= 0 && col < st.menuCfOff.Count) {
+            st.menuCfOff[col] = false;
+        }
         if (act == DataTable.HdrActSortAsc) {
             DataTable.SortBy(st, col, 1);
             st.hitCol = col; st.Sort.Raise();
@@ -815,11 +855,10 @@ partial class DataTable {
             // 名次缓存随下一次 Recompute 重建。
             st.dirty = true;
         } else if (act == DataTable.HdrActCfClear) {
-            // 只清菜单槽：mode 0 时 EnsureColumnSlots 不回写，
-            // 列上工厂预设的规则自然恢复生效。
-            st.menuCfMode[col] = 0;
-            st.menuCfRankPct[col] = false;
-            st.dirty = true;
+            // 清除规则弹窗：全表规则逐条勾选删除（单删/多删）。
+            // 被清列写入 menuCfOff 压制工厂预设——只清菜单槽的话，
+            // 每帧重建的列会把工厂预设带回来。
+            DataTable.OpenCfClear(st, cols);
         }
     }
 

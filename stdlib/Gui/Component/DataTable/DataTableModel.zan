@@ -165,6 +165,22 @@ class DataColumn {
     // 不弹提示。
     string description;
 
+    // ---- 合并单元格 ----
+    // mergeSame 为 true 时，同一列里文本相同且相邻的数据行
+    // （中间不隔组表头/详情带）渲染为一个纵向合并格——VTable
+    // "同值相邻合并"的同类项。仅影响渲染：排序/筛选/导出
+    // 仍逐行看到各自的值，编辑也仍写回所在行的底层单元格。
+    bool mergeSame;
+
+    // ---- 文本换行（自动行高） ----
+    // wrapText 为 true 时（cellType 0）单元格文本按列宽折行
+    // 最多 wrapLines 行，行高相应增大——整个网格统一行高的
+    // 约定保持不变（虚拟化的 slot*rowH 寻址依赖它），需要的
+    // 行数按过滤集合的抽样统计（见 ComputeFrame 的
+    // WrapRowHeight），因此是"网格长高"而非逐行变高。
+    bool wrapText;
+    int wrapLines;
+
     DataColumn(string title, int width) {
         this.title = title;
         this.field = "";
@@ -224,6 +240,9 @@ class DataColumn {
         this.freeze = 0;
         this.band = "";
         this.description = "";
+        this.mergeSame = false;
+        this.wrapText = false;
+        this.wrapLines = 2;
     }
 
     /// 为列命名，使其可通过 `DataTable.Col(cols, name)` 访问
@@ -498,6 +517,30 @@ class DataColumn {
     /// 指针在（本应出现的）调整大小手柄上显示禁止光标。
     static DataColumn NotResizable(DataColumn c) {
         c.resizable = false; return c;
+    }
+
+    /// 同值相邻纵向合并（VTable data merge 的同类项）：该列
+    /// 文本相同且相邻的数据行（中间不隔组表头/详情带）画成
+    /// 一个跨行合并格。仅是渲染效果——排序/筛选/导出仍逐行
+    /// 看到各自的值；编辑仍写回所在行的底层单元格，改值后
+    /// 合并随之下一次重绘自然拆开。
+    ///
+    /// ```zan
+    /// cols.Add(DataColumn.Merge(DataColumn.Text("Region", 100)));
+    /// ```
+    static DataColumn Merge(DataColumn c) {
+        c.mergeSame = true; return c;
+    }
+
+    /// 文本换行：该列（cellType 0）的单元格文本按列宽折行，
+    /// 最多 `maxLines` 行；行高按全部换行列的最大需要行数
+    /// 统一增大（网格仍是统一行高，虚拟化寻址不变）。
+    /// `maxLines <= 0` 取 2。长文本超出部分仍按截断加省略号。
+    static DataColumn Wrap(DataColumn c, int maxLines) {
+        if (maxLines < 1) { maxLines = 2; }
+        c.wrapText = true;
+        c.wrapLines = maxLines;
+        return c;
     }
 
     static DataColumn Text(string title, int width) {
@@ -1011,6 +1054,27 @@ class TreeAdapter {
     /// `row` 的父行源索引；顶层行返回 -1。仅默认
     /// RootCount/RootAt 的"无父即根"判定使用它。
     virtual int ParentOf(DataSource src, int row) { return -1; }
+
+    // ---- 懒加载（VTable 树形懒加载的同类项） ----
+    // 三个虚方法构成异步展开契约：IsLazy 声明该行的子行
+    // 需要按需取回；ChildrenLoaded 回答是否已取回；网格在
+    // 用户展开未取回的行时置 loading 标记并调用 LoadChildren，
+    // 应用取回子行（把行插入数据源）后调用
+    // DataTable.TreeLoaded(st, src, row) 收尾——加载中的行
+    // 在树列上显示 spinner 占位，子行到位后下一帧自然长出。
+    //
+    /// `row` 的子行是否需要按需（异步）取回。默认 false =
+    /// 子行已在数据源里，展开即得。
+    virtual bool IsLazy(DataSource src, int row) { return false; }
+
+    /// 懒加载行的子行是否已取回。仅 IsLazy 行会被询问；
+    /// 未取回的行展开时触发 LoadChildren。
+    virtual bool ChildrenLoaded(DataSource src, int row) { return true; }
+
+    /// 开始异步取回 `row` 的子行。实现应尽快把取到的子行
+    /// 插入数据源，然后调用 DataTable.TreeLoaded(st, src, row)。
+    /// 网格不等待：加载期间该行显示 spinner。
+    virtual void LoadChildren(DataSource src, int row) { }
 }
 
 /// 分组表格中的一行分组标题：标题文本、嵌套层级、所含
@@ -1031,6 +1095,11 @@ class GroupRow {
     bool collapsed;
     List<int> aggValues;
     List<string> aggTexts;
+    /// 最内层（叶子）分组的成员源行（st.order 的连续片段），
+    /// BuildDisplay 关组时填充。最外层组不物化成员（每行
+    /// 只会记一次，嵌套层级不重复占内存）；组表头三态
+    /// 复选框对父组按 key 前缀收集后代叶子组的成员。
+    List<int> members;
 
     GroupRow(string lb, int lv, int cnt, string k, bool coll) {
         label = lb;
@@ -1040,6 +1109,7 @@ class GroupRow {
         collapsed = coll;
         aggValues = new List<int>();
         aggTexts = new List<string>();
+        members = new List<int>();
     }
 }
 
@@ -1213,6 +1283,16 @@ class DataTableState {
     List<int> menuCfColor2;
     List<int> menuCfThreshold;
     List<bool> menuCfRankPct;
+    // 每列：用户显式清除过规则（清除弹窗）。置位后压制列上
+    // 工厂预设——否则每帧重建的列会把预设带回来。菜单重新
+    // 设置规则时自动复位。
+    List<bool> menuCfOff;
+
+    // ---- 清除条件格式规则弹窗 ----
+    bool cfClearOpen;           // 弹窗打开中
+    List<int> cfClearCols;      // 打开时枚举的带规则列
+    List<bool> cfClearSel;      // 与 cfClearCols 对齐的勾选
+    int cfClearScroll;          // 规则多到超出弹窗高度时的滚动
 
     // ---- 分页 ----
     bool paged;
@@ -1335,6 +1415,33 @@ class DataTableState {
     string colChooserSearch;   // 选择器搜索框文本
     int colChooserScroll;      // 勾选列表的滚动起始索引
 
+    // ---- 查找条（Ctrl+F，VTable/浏览器式网格内查找） ----
+    // 与筛选互补：筛选丢弃不匹配的行，查找定位并高亮全部
+    // 命中格。findHits 不物化——命中随视图（排序/筛选）即时
+    // 变化，导航沿当前显示顺序现场扫描（键位触发，非每帧）；
+    // 高亮则每帧只扫可见窗口，百万行也不加重渲染。
+    bool findOpen;             // 查找条可见
+    bool findFocused;          // 查找输入框持有键盘
+    string findQuery;          // 生效的查找文本（Enter 提交）
+    string findBuf;            // 输入缓冲
+    int findCur;               // 光标（字节偏移）
+    int findIndex;             // 当前命中序号（0 基；-1 无）
+    int findCount;             // 命中总数（查询提交时统计，抽样上限见 Search.zan）
+
+    // ---- 转置视图（VTable Transpose 的同类项） ----
+    // 整表行列互换：显示行 = 原列（首列为列标题），显示列 =
+    // 原（过滤后）行。与透视同一实现套路——渲染管线看到的是
+    // 生成列 + 包装源，排序/选区/剪贴板照常；生成列只读。
+    // 透视与转置互斥：进入其一先退出另一个。
+    bool transposeView;        // 表格当前显示转置投影
+    List<DataColumn> trViewCols; // 生成列（0 号 = 列标题列）
+    TransposeDataSource trSource; // 包装源（行列互换的 CellText）
+    DataSource trInner;        // 进入视图时的源引用
+    List<DataColumn> trOrigColsList; // 进入视图时的原始列引用
+    int trOrigCols;            // 进入视图时的列数（退出时裁掉生成槽位）
+    int trRows;                // 已转置的行数（列数随之确定）
+    bool trDirty;              // 需要重新物化（行数变化等）
+
     // ---- 选区生成图表浮层 ----
     bool chartOpen;            // 绘制在网格上方的条形图浮层
     string chartTitle;         // 图表标题（值列名称）
@@ -1377,7 +1484,7 @@ class DataTableState {
     string pvRowTitle;         // 行维度列标题（筛选面板芯片显示用）
     string pvColTitle;         // 列维度列标题
     string pvValTitle;         // 值列标题
-    int pivotAgg;              // 0 Sum，1 Average，2 Count
+    int pivotAgg;              // 0 Sum，1 Average，2 Count，3 Max，4 Min
 
     // ---- 行分组（ag-Grid / DevExpress 风格） ----
     List<int> groupCols;       // 分组列，外→内（空 = 扁平表格）
@@ -1392,6 +1499,8 @@ class DataTableState {
     TreeAdapter treeAdapter;
     List<bool> expandedTree;   // 按源行索引对齐的展开标志
     int treeCol;               // 渲染缩进/箭头的列（-1 = 无，首列前不显示）
+    List<bool> treeLoading;    // 懒加载进行中的行（按源行索引对齐；
+                               // LoadChildren 已发出、TreeLoaded 未到）
 
     // ---- 组合筛选树（Filter Builder） ----
     // 程序化构建的 AND/OR 嵌套树，与逐列 ColFilter 正交：
@@ -1600,6 +1709,11 @@ class DataTableState {
         this.menuCfColor2 = new List<int>();
         this.menuCfThreshold = new List<int>();
         this.menuCfRankPct = new List<bool>();
+        this.menuCfOff = new List<bool>();
+        this.cfClearOpen = false;
+        this.cfClearCols = new List<int>();
+        this.cfClearSel = new List<bool>();
+        this.cfClearScroll = 0;
         this.paged = false;
         this.pageModel = new SignalInt(1);
         this.pageRows = 0;
@@ -1665,6 +1779,13 @@ class DataTableState {
         this.colChooserOpen = false;
         this.colChooserSearch = "";
         this.colChooserScroll = 0;
+        this.findOpen = false;
+        this.findFocused = false;
+        this.findQuery = "";
+        this.findBuf = "";
+        this.findCur = 0;
+        this.findIndex = -1;
+        this.findCount = 0;
         this.chartOpen = false;
         this.chartTitle = "";
         this.chartBars = new List<ChartBar>();
@@ -1697,6 +1818,14 @@ class DataTableState {
         this.pvColTitle = "";
         this.pvValTitle = "";
         this.pivotAgg = 0;
+        this.transposeView = false;
+        this.trViewCols = new List<DataColumn>();
+        this.trSource = null;
+        this.trInner = null;
+        this.trOrigColsList = null;
+        this.trOrigCols = 0;
+        this.trRows = 0;
+        this.trDirty = false;
         this.FilterChanged = new UiEvent();
         this.HeaderClick = new UiEvent();
         this.Sort = new UiEvent();
@@ -1720,6 +1849,7 @@ class DataTableState {
         this.treeAdapter = null;
         this.expandedTree = new List<bool>();
         this.treeCol = -1;
+        this.treeLoading = new List<bool>();
         this.filterTree = null;
         this.showGroupPanel = false;
         this.dragChip = -1;

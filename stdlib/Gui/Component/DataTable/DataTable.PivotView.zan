@@ -128,6 +128,7 @@ partial class DataTable {
         if (valueCol < 0 || valueCol >= cols.Count || valueCol == rowCol) { return false; }
         if (colDim == rowCol || colDim == valueCol || colDim >= cols.Count) { colDim = -1; }
         if (agg < 0 || agg > 4) { agg = 0; }
+        if (st.transposeView) { DataTable.ExitTranspose(st); }
         if (!st.pivotView) {
             // 快照原视图的查询状态，退出时原样恢复。逐列
             // 筛选/筛选行在视图期间换成全新列表：视图层的
@@ -221,6 +222,37 @@ partial class DataTable {
         DataTable.ClearRange(st);
         st.scrollRow = 0;
         st.scrollX = 0;
+    }
+
+    /// 下钻钉选：把 `value` 作为批量精确匹配钉到列 `col` 的
+    /// 筛选上（清掉该列其它阶段，保证结果就这批行）。
+    static void DrillPin(DataTableState st, int col, string value) {
+        if (col < 0 || value.Length == 0) { return; }
+        while (st.filters.Count <= col) { st.filters.Add(new ColFilter()); }
+        ColFilter f = st.filters[col];
+        f.Reset();
+        f.batchTerms.Add(value);
+        f.batchExact = true;
+        f.batchKeep = true;
+    }
+
+    /// 透视单元格下钻：回到未聚合的底层行集——退出视图，
+    /// 把当前格的行维度/列维度值钉成精确筛选，让恢复的
+    /// 平面视图只显示交叉格背后的原始行。`r`/`c` 是透视源
+    /// 行列索引（c = 0 是行标签列；无第二维度时只钉行维度）。
+    /// 行索引越界（总计行/空白处）时不动作。
+    static void PivotDrill(DataTableState st, int r, int c) {
+        if (!st.pivotView) { return; }
+        string rk = "";
+        if (r >= 0 && r < st.pvRowKeys.Count) { rk = st.pvRowKeys[r]; }
+        string ck = "";
+        if (st.pvColDim >= 0 && c >= 1 && c - 1 < st.pvColKeys.Count) {
+            ck = st.pvColKeys[c - 1];
+        }
+        if (rk.Length == 0) { return; }
+        DataTable.ExitPivot(st);
+        DataTable.DrillPin(st, st.pvRowCol, rk);
+        DataTable.DrillPin(st, st.pvColDim, ck);
     }
 
     /// 从当前单元格范围推导透视配置并切换视图（右键菜单
@@ -649,6 +681,10 @@ partial class DataTable {
         r.editMax = c.editMax;
         r.freeze = c.freeze;
         r.band = c.band;
+        r.description = c.description;
+        r.mergeSame = c.mergeSame;
+        r.wrapText = c.wrapText;
+        r.wrapLines = c.wrapLines;
         return r;
     }
 

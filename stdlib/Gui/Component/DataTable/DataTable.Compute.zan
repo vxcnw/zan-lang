@@ -370,6 +370,69 @@ partial class DataTable {
         DataTable.InvalidateView(st);
     }
 
+    /// BuildDisplay 关组时物化叶子组的成员源行（st.order 的
+    /// 连续片段）。只对最内层组调用；外层组按需经
+    /// GroupMemberRows 从后代叶子组收集。
+    static void FillGroupMembers(DataTableState st, GroupRow grp, int lo, int hi) {
+        grp.members.Clear();
+        int k = lo;
+        while (k < hi && k < st.order.Count) {
+            grp.members.Add(st.order[k]);
+            k = k + 1;
+        }
+    }
+
+    /// 组表头三态复选框的选中状态：0 = 全未选（含空组），
+    /// 1 = 全选，2 = 部分选中。叶子组直接读物化成员；父组
+    /// 沿 key 前缀汇总可见后代叶子组的成员——PathKey 每层
+    /// 以分隔符结尾，子组键必以父组键开头。折叠的父组没有
+    /// 已构建的后代，按未选处理（重新展开后状态即恢复，
+    /// 选择本身存在 st.selected / selectionModel 里）。
+    static int GroupCheckState(DataTableState st, GroupRow grp, DataSource src) {
+        int n = 0;
+        int sel = 0;
+        if (grp.members.Count > 0) {
+            for (int i = 0; i < grp.members.Count; i = i + 1) {
+                n = n + 1;
+                if (DataTable.IsSelected(st, src, grp.members[i])) { sel = sel + 1; }
+            }
+        } else {
+            for (int g = 0; g < st.groups.Count; g = g + 1) {
+                GroupRow leaf = st.groups[g];
+                if (leaf.members.Count == 0 || !leaf.key.StartsWith(grp.key)) {
+                    continue;
+                }
+                for (int i = 0; i < leaf.members.Count; i = i + 1) {
+                    n = n + 1;
+                    if (DataTable.IsSelected(st, src, leaf.members[i])) { sel = sel + 1; }
+                }
+            }
+        }
+        if (n == 0 || sel == 0) { return 0; }
+        if (sel == n) { return 1; }
+        return 2;
+    }
+
+    /// 组表头复选框点击：把组成员整组置为 `val`。成员收集
+    /// 规则与 GroupCheckState 相同。
+    static void SelectGroupRows(DataTableState st, GroupRow grp, DataSource src, bool val) {
+        if (grp.members.Count > 0) {
+            for (int i = 0; i < grp.members.Count; i = i + 1) {
+                DataTable.SetSelected(st, src, grp.members[i], val);
+            }
+            return;
+        }
+        for (int g = 0; g < st.groups.Count; g = g + 1) {
+            GroupRow leaf = st.groups[g];
+            if (leaf.members.Count == 0 || !leaf.key.StartsWith(grp.key)) {
+                continue;
+            }
+            for (int i = 0; i < leaf.members.Count; i = i + 1) {
+                DataTable.SetSelected(st, src, leaf.members[i], val);
+            }
+        }
+    }
+
     // ---------- 树模式（TreeGrid） ----------
     // 适配器描述层级，网格把源行交错成"父行后跟可见后代"。
     // 展开状态按源行索引存放；排序/筛选改变顺序时身份跟随
@@ -405,11 +468,14 @@ partial class DataTable {
     }
 
     /// `row` 是否有子行（可展开）。适配器为 null 或行越界
-    /// 时为 false。
+    /// 时为 false。懒加载行在子行尚未取回时同样可展开——
+    /// 展开本身就是取回的触发器。
     static bool CanTreeExpand(DataTableState st, DataSource src, int row) {
         if (st.treeAdapter == null || src == null) { return false; }
         if (row < 0 || row >= src.RowCount()) { return false; }
-        return st.treeAdapter.ChildCount(src, row) > 0;
+        if (st.treeAdapter.ChildCount(src, row) > 0) { return true; }
+        return st.treeAdapter.IsLazy(src, row)
+            && !st.treeAdapter.ChildrenLoaded(src, row);
     }
 
     /// 展开 `row`。叶子或已展开的行保持不变。
@@ -417,7 +483,36 @@ partial class DataTable {
         if (!DataTable.CanTreeExpand(st, src, row)) { return; }
         DataTable.TreeReserve(st, src);
         if (st.expandedTree[row]) { return; }
+        // 懒加载行首次展开：置 loading（树列显示 spinner 占位）
+        // 并调用适配器开始取回。展开标志同样置位——子行插入
+        // 数据源后 BuildTreeDisplay 下一帧自然长出，应用无需
+        // 再补一次展开状态。
+        if (st.treeAdapter.ChildCount(src, row) == 0
+            && st.treeAdapter.IsLazy(src, row)
+            && !st.treeAdapter.ChildrenLoaded(src, row)) {
+            while (st.treeLoading.Count <= row) { st.treeLoading.Add(false); }
+            st.treeLoading[row] = true;
+            st.treeAdapter.LoadChildren(src, row);
+            // 同步完成的适配器（LoadChildren 返回即已就绪）就地
+            // 清标志；异步适配器取回后调用 TreeLoaded 清。
+            if (st.treeAdapter.ChildrenLoaded(src, row)) {
+                st.treeLoading[row] = false;
+            }
+        }
         st.expandedTree[row] = true;
+        DataTable.InvalidateView(st);
+    }
+
+    /// 懒加载进行中的行（树列绘制占位指示）。
+    static bool TreeIsLoading(DataTableState st, int row) {
+        return row >= 0 && row < st.treeLoading.Count && st.treeLoading[row];
+    }
+
+    /// 应用取回懒加载子行后调用：解除 loading 标记并触发
+    /// 重算，已插入数据源的子行在下一帧出现。
+    static void TreeLoaded(DataTableState st, DataSource src, int row) {
+        if (row >= 0 && row < st.treeLoading.Count) { st.treeLoading[row] = false; }
+        st.dirty = true;
         DataTable.InvalidateView(st);
     }
 
@@ -1081,6 +1176,9 @@ partial class DataTable {
                     if (curGrp[fe] != null) {
                         curGrp[fe].count = p - grpStart[fe];
                         DataTable.FillGroupAgg(st, cols, src, curGrp[fe], grpStart[fe], p, fe == 0);
+                        if (fe == G - 1) {
+                            DataTable.FillGroupMembers(st, curGrp[fe], grpStart[fe], p);
+                        }
                     }
                     fe = fe - 1;
                 }
@@ -1122,6 +1220,9 @@ partial class DataTable {
             if (curGrp[fz] != null) {
                 curGrp[fz].count = N - grpStart[fz];
                 DataTable.FillGroupAgg(st, cols, src, curGrp[fz], grpStart[fz], N, fz == 0);
+                if (fz == G - 1) {
+                    DataTable.FillGroupMembers(st, curGrp[fz], grpStart[fz], N);
+                }
             }
             fz = fz - 1;
         }

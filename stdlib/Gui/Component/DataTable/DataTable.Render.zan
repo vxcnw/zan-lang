@@ -165,6 +165,11 @@ partial class DataTable {
 
     // ---------- 单元格渲染 ----------
 
+    /// 合并单元格邻行文本比对的走查上限：防止整列同值的
+    /// 大表每帧 O(n) 回溯。超出封顶的运行按截断处理（罕见：
+    /// mergeSame 面向品类列，运行通常短）。
+    static readonly int MergeWalkCap = 1000;
+
     /// `fgOverride` 是 state 的 CellStyler 给出的打包颜色，0 表示
     /// 无。它替换普通和链接单元格的主题文本色，但
     /// 条件格式颜色仍然优先——在那里，颜色*就是*
@@ -622,13 +627,113 @@ partial class DataTable {
             color = Style.Part(app, "datatable", "cell", "", "link", "",
                                Style.SNormal()).FgOr(0);
         }
-        string shown = DataTable.Truncate(DataTable.FormatCell(col, val), fs, innerW);
+        string full = DataTable.FormatCell(col, val);
+        // ---- 自动换行（wrapText 列且行高容得下两行以上）：
+        // 按像素宽度断行、块内垂直居中；省略号由 WrapTextLines
+        // 收尾。查找高亮不进多行路径。
+        if (col.wrapText && innerW > app.Scale(8) && full.Length > 0) {
+            int wrapLineH = fs + app.Scale(4);
+            int maxLines = rowH / wrapLineH;
+            if (maxLines > col.wrapLines) { maxLines = col.wrapLines; }
+            if (maxLines >= 2) {
+                DataTable.DrawWrappedLines(app, full, cx + pad, cy, innerW, rowH,
+                                           maxLines, wrapLineH, color, fs);
+                return;
+            }
+        }
+        string shown = DataTable.Truncate(full, fs, innerW);
         int tw = Canvas.MeasureText(shown, fs);
         int tx = cx + pad;
         if (col.align == 1) { tx = cx + (cw - tw) / 2; }
         if (col.align == 2) { tx = cx + cw - pad - tw; }
         int ty = Canvas.CenterTextY(cy, rowH, fs);
+        // ---- 查找命中高亮：查询串在已显示文本中的首个出现垫
+        // 一块强调色底（VTable 搜索插件的视觉）。高亮随截断与
+        // 对齐走，只标可见部分。
+        if (st != null && st.findOpen && st.findQuery.Length > 0
+            && rowIdx >= 0 && cc >= 0 && col.cellType < 6 && !col.isBool) {
+            int mi = DataTable.IndexOfCI(shown, st.findQuery);
+            if (mi >= 0) {
+                int qw = Canvas.MeasureText(
+                    shown.Substring(mi, st.findQuery.Length), fs);
+                int pw = 0;
+                if (mi > 0) { pw = Canvas.MeasureText(shown.Substring(0, mi), fs); }
+                int acc = Style.Part(app, "datatable", "accent", "", "", "",
+                                     Style.SNormal()).BgOr(0);
+                c.FillRoundRect(tx + pw - 1, ty - 1, qw + 2, fs + 2, app.Scale(2),
+                                DataTable.ColorAlpha(acc, 70));
+            }
+        }
         c.DrawText(tx, ty, shown, color, fs);
+    }
+
+    /// wrapText 的多行绘制：WrapTextLines 断行后自上而下排布，
+    /// 整块在行矩形内垂直居中。
+    static void DrawWrappedLines(App app, string text, int tx, int cy, int innerW,
+                                 int rowH, int maxLines, int lineH, int color, int fs) {
+        Canvas c = app.canvas;
+        List<string> lines = DataTable.WrapTextLines(text, innerW, fs, maxLines);
+        int blockH = lines.Count * lineH;
+        int y0 = cy + (rowH - blockH) / 2;
+        for (int i = 0; i < lines.Count; i = i + 1) {
+            c.DrawText(tx, y0 + i * lineH + (lineH - fs) / 2, lines[i], color, fs);
+        }
+    }
+
+    /// 按像素宽度把 `text` 断成至多 `maxLines` 行：逐行探测
+    /// 最长可容纳前缀（指数步长 + 回退，Text.ClampCharStart
+    /// 保证字符边界，多字节字符不切半）；行内有空格时回退到
+    /// 最后一个空格断词；仍有剩余时尾行以省略号收尾。
+    static List<string> WrapTextLines(string text, int maxW, int fs, int maxLines) {
+        List<string> outp = new List<string>();
+        if (maxW < 4) { maxW = 4; }
+        if (text.Length == 0) { outp.Add(""); return outp; }
+        int start = 0;
+        int n = text.Length;
+        while (start < n && outp.Count < maxLines) {
+            int maxLen = n - start;
+            if (Canvas.MeasureText(text.Substring(start, maxLen), fs) <= maxW) {
+                outp.Add(text.Substring(start, maxLen));
+                return outp;
+            }
+            int fit = 0;
+            int step = maxLen;
+            while (step > 0) {
+                int tryLen = fit + step;
+                if (tryLen > maxLen) { tryLen = maxLen; }
+                int ce = Text.ClampCharStart(text, start + tryLen) - start;
+                if (ce > fit && Canvas.MeasureText(text.Substring(start, ce), fs) <= maxW) {
+                    fit = ce;
+                } else {
+                    step = step / 2;
+                }
+            }
+            if (fit <= 0) {
+                // 单字符都放不下：硬进一个字符，保证每轮前进。
+                fit = Text.ClampCharStart(text, start + 1) - start;
+                if (fit <= 0) { fit = 1; }
+            }
+            int brk = fit;
+            if (start + fit < n) {
+                // 空格是单字节 ASCII，逐字节回扫安全；
+                // 至多回退四分之一行长，避免极窄列不前进。
+                int sp = start + fit - 1;
+                int floor = start + fit - fit / 4;
+                while (sp > floor) {
+                    if (text.Substring(sp, 1) == " ") { brk = sp - start; break; }
+                    sp = sp - 1;
+                }
+            }
+            if (brk <= 0) { brk = fit; }
+            outp.Add(text.Substring(start, brk));
+            start = start + brk;
+            while (start < n && text.Substring(start, 1) == " ") { start = start + 1; }
+        }
+        if (start < n && outp.Count > 0) {
+            int last = outp.Count - 1;
+            outp[last] = DataTable.Truncate(outp[last] + "…", fs, maxW);
+        }
+        return outp;
     }
 
     // ---------- 冻结 band 几何 ----------
@@ -858,6 +963,39 @@ partial class DataTable {
         if (st.rowH > 0) {
             rowH = app.Scale(st.rowH);
         }
+        // 自动行高（wrapText 列）：均匀网格的行高抬升——抽样
+        // 估计换行行数（至多 64 行、跨全数据集均匀取样），行高
+        // 抬到容纳样本中最多的行数（不超过各列 wrapLines 上限）。
+        // 虚拟化按 slot*rowH 寻址，逐行异高不在架构内（DispRow
+        // 契约），均匀抬升是与性能模型一致的折中。
+        bool hasWrap = false;
+        for (int wc = 0; wc < cols.Count; wc = wc + 1) {
+            if (cols[wc].wrapText) { hasWrap = true; wc = cols.Count; }
+        }
+        if (hasWrap && src.RowCount() > 0 && st.colWidths.Count >= cols.Count) {
+            int lineH2 = fs + app.Scale(4);
+            int maxLines = 1;
+            int totalRows = src.RowCount();
+            int stride = (totalRows + 63) / 64;
+            for (int srow = 0; srow < totalRows; srow = srow + stride) {
+                for (int wcol = 0; wcol < cols.Count; wcol = wcol + 1) {
+                    DataColumn wcol2 = cols[wcol];
+                    if (!wcol2.wrapText || wcol >= st.colHidden.Count
+                        || st.colHidden[wcol]) { continue; }
+                    int innerW2 = app.Scale(st.colWidths[wcol]) - app.Scale(12);
+                    if (innerW2 < app.Scale(16)) { continue; }
+                    string txt = DataTable.CellTextRouted(cols, src, srow, wcol);
+                    if (txt.Length == 0) { continue; }
+                    int wlines = (Canvas.MeasureText(txt, fs) + innerW2 - 1) / innerW2;
+                    if (wlines > wcol2.wrapLines) { wlines = wcol2.wrapLines; }
+                    if (wlines > maxLines) { maxLines = wlines; }
+                }
+            }
+            if (maxLines > 1) {
+                int needH = maxLines * lineH2 + app.Scale(8);
+                if (needH > rowH) { rowH = needH; }
+            }
+        }
         // band 行位于列标题上方且略矮——
         // 只带组名，没有排序箭头或筛选图标。`headerH` 保持
         // 完整表头高度，后续所有测量（主体顶部、菜单
@@ -1031,11 +1169,16 @@ partial class DataTable {
         // （EnsureInit/Recompute/表头/单元格/汇总/菜单）看到的
         // 都是包装源与生成列；原始列与原始源仅在 PivotEnsure
         // 物化时使用——排序/筛选/汇总/状态栏因此原样可用，
-        // 无需独立的透视组件。
+        // 无需独立的透视组件。转置视图同法：生成只读文本列
+        // 挂在包装源上，管线其余部分无感知。
         if (st.pivotView) {
             DataTable.PivotEnsure(st, cols, src);
             cols = DataTable.PivotViewCols(st);
             src = DataTable.PivotViewSource(st, src);
+        } else if (st.transposeView) {
+            DataTable.TransposeEnsure(st);
+            cols = st.trViewCols;
+            src = DataTable.TransposeViewSource(st, src);
         }
 
         DataTableFrame f = DataTable.ComputeFrame(app, x, y, viewW, viewH, cols, src, st);
@@ -1730,6 +1873,26 @@ partial class DataTable {
                 if (gcoll) { chev = "chevron-right"; }
                 int chSz = app.Scale(14);
                 c.DrawGlyph(chev, gcx, ry + (rowH - chSz) / 2, chSz, sHeader.FgOr(0));
+                // 组表头三态复选框：整组选中/取消；部分选中画
+                // 短横线（半选态）。点击只改选择不改折叠——按压端
+                // 的折叠分支按几何让位（见下方按压处理）。成员收集
+                // 规则见 GroupCheckState。
+                int gcbSz = app.Scale(14);
+                int gcbX = gcx + chSz + app.Scale(4);
+                int gcbY = ry + (rowH - gcbSz) / 2;
+                int gcbId = app.focus.AllocId();
+                app.hitTester.RegisterRect(gcbId, gcbX - app.Scale(2), ry,
+                                           gcbSz + app.Scale(4), rowH, 0);
+                int gst = DataTable.GroupCheckState(st, grp, src);
+                if (gst == 1) { Checkbox.PaintBox(app, gcbX, gcbY, gcbSz, 1000); }
+                else if (gst == 2) { Checkbox.PaintBoxIndeterminate(app, gcbX, gcbY, gcbSz); }
+                else { Checkbox.PaintBox(app, gcbX, gcbY, gcbSz, 0); }
+                if (app.EventKind() == 3 && app.window.EventButton() == 0
+                    && app.hitTester.HitTest(app.mouseX, app.mouseY) == gcbId) {
+                    DataTable.SelectGroupRows(st, grp, src, gst != 1);
+                    st.SelectionChanged.Raise();
+                    app.RequestRedraw();
+                }
                 string glbl = grp.label + "  (" + Convert.ToString(grp.count) + ")";
                 // 为设置了 aggMode 的列追加组级聚合汇总
                 // （DevExpress 风格组小计）。
@@ -1740,7 +1903,7 @@ partial class DataTable {
                         glbl = glbl + "    " + cols[gagg].title + ": " + gat;
                     }
                 }
-                c.DrawText(gcx + chSz + app.Scale(4),
+                c.DrawText(gcbX + gcbSz + app.Scale(6),
                     ry + (rowH - Style.FontFallback(app, "medium")) / 2, glbl, sGroupRow.FgOr(0), Style.FontFallback(app, "medium"));
                 c.FillRect(x + 1, ry + rowH - 1, viewW - 2, 1, gridColor);
                 r = r + 1;
@@ -1973,13 +2136,79 @@ partial class DataTable {
                         string cellText = src.CellText(rowIdx, cc);
                         string fText = DataTable.FormulaText(cols, src, rowIdx, cc);
                         if (fText != null) { cellText = fText; }
-                        if (st.treeAdapter != null && cc == st.treeCol) {
+                        // 合并单元格（VTable mergeCells 同款：同值相邻
+                        // 数据行纵向合并）。沿显示顺序现场数相等文本的
+                        // 邻行（walk 以 MergeWalkCap 封顶，整列同值的
+                        // 大表不退化）。只走纯文本路径——布尔/按钮/
+                        // 组件列的值不是文本语义。
+                        int mu = 0;
+                        int md = 0;
+                        if (cols[cc].mergeSame && cols[cc].cellType < 6
+                            && !cols[cc].isBool) {
+                            while (mu < DataTable.MergeWalkCap
+                                   && oiRow - mu - 1 >= 0
+                                   && DataTable.DispKind(st, oiRow - mu - 1) == 0
+                                   && src.CellReady(DataTable.DispRowOf(st, oiRow - mu - 1), 0)
+                                   && src.CellText(DataTable.DispRowOf(st, oiRow - mu - 1), cc) == cellText) {
+                                mu = mu + 1;
+                            }
+                            while (md < DataTable.MergeWalkCap
+                                   && oiRow + md + 1 < total
+                                   && DataTable.DispKind(st, oiRow + md + 1) == 0
+                                   && src.CellReady(DataTable.DispRowOf(st, oiRow + md + 1), 0)
+                                   && src.CellText(DataTable.DispRowOf(st, oiRow + md + 1), cc) == cellText) {
+                                md = md + 1;
+                            }
+                        }
+                        if (mu + md > 0) {
+                            // 块的每一行都整块重绘：后续行的行底色与
+                            // 分隔线会盖掉先前绘制，末行重绘后收敛
+                            // 正确。裁剪从单行 band 条带换成块矩形——
+                            // 列本身不跨 band，水平方向安全。
+                            // 底色/字色都必须经主题兜底：合并块填充
+                            // 直接拿 rowBg（当前行刚算好的斑马底），
+                            // 字色 CellForeground 无 styler 时回 0，
+                            // 直传 DrawText 是全透明——正常格路径
+                            // 靠 sCell.FgOr 兜底，这里同款。
+                            int mTop = ry - mu * rowH;
+                            int mH = (mu + md + 1) * rowH;
+                            c.PopClip();
+                            c.PushClip(ccl, mTop, cw, mH);
+                            c.FillRect(ccl, mTop, cw, mH, rowBg);
+                            string mShown = DataTable.Truncate(
+                                DataTable.FormatCell(cols[cc], cellText), fs,
+                                cw - t.paddingSmall * 2);
+                            int mTw = Canvas.MeasureText(mShown, fs);
+                            int mTx = ccl + t.paddingSmall;
+                            if (cols[cc].align == 1) { mTx = ccl + (cw - mTw) / 2; }
+                            else if (cols[cc].align == 2) { mTx = ccl + cw - t.paddingSmall - mTw; }
+                            int mFg = DataTable.CellForeground(st, src, rowIdx, cc);
+                            if (mFg == 0) { mFg = sCellBox.FgOr(0); }
+                            c.DrawText(mTx, mTop + (mH - fs) / 2, mShown,
+                                       mFg, fs);
+                            c.PopClip();
+                            DataTable.PushBandClip(c, cBand, firstDataX, bandX, bandW,
+                                                   rightX, pinnedW, pinnedRW, ry, rowH,
+                                                   clipRight);
+                        } else if (st.treeAdapter != null && cc == st.treeCol) {
                             // 树列：缩进 + 行首展开箭头。命中区注册在
                             // 箭头上（含缩进头部），点击切换展开。
+                            // 懒加载进行中的行以 dots 占位——箭头让位，
+                            // 文本按叶子行缩进，加载完成（TreeLoaded）
+                            // 下一帧恢复箭头。
                             int depth = DataTable.DispDepth(st, oiRow);
                             bool canExp = DataTable.CanTreeExpand(st, src, rowIdx);
                             bool isExp = DataTable.IsTreeExpanded(st, src, rowIdx);
-                            if (canExp) {
+                            if (DataTable.TreeIsLoading(st, rowIdx)) {
+                                int ldSz = app.Scale(12);
+                                c.DrawGlyph("dots",
+                                    ccl + t.paddingSmall + depth * app.Scale(16),
+                                    ry + (rowH - ldSz) / 2, ldSz, sHint.FgOr(0));
+                                DataTable.DrawCellIndented(app, cols[cc], cellText,
+                                    ccl, ry, cw, rowH, cfLo, cfHi,
+                                    DataTable.CellForeground(st, src, rowIdx, cc),
+                                    depth, true, false, false);
+                            } else if (canExp) {
                                 int exId = app.focus.AllocId();
                                 int exW = app.Scale(16) * (depth + 1);
                                 app.hitTester.RegisterRect(exId, ccl, ry, exW, rowH, 0);
@@ -2285,6 +2514,67 @@ partial class DataTable {
         int eb = app.window.EventButton();
         int emods = app.window.EventMods();
 
+        // ---------------- 查找条键盘处理 ----------------
+        // 输入框聚焦时吞掉键盘（与筛选行同一模式）：可打印字符
+        // 进缓冲，Enter/Shift+Enter 与 F3/Shift+F3 沿显示顺序
+        // 导航，Escape 关闭或失焦。缓冲的提交（查询同步 + 命中
+        // 计数）在 FindEnsureCount 里做——查找条每帧调用。
+        if (st.findFocused && !st.editing) {
+            bool findKeyHandled = false;
+            if (ek == 6) {
+                int fkc = app.window.EventKeyCode();
+                if (fkc == 27) {
+                    // Escape：缓冲为空直接关条，否则先失焦保留查询
+                    if (st.findBuf.Length == 0) { DataTable.CloseFind(st); }
+                    else { st.findFocused = false; }
+                } else if (fkc == 8) {
+                    if (st.findCur > 0) {
+                        int fprev = Text.PrevCharStart(st.findBuf, st.findCur);
+                        st.findBuf = Text.DeleteBefore(st.findBuf, st.findCur);
+                        st.findCur = fprev;
+                    }
+                } else if (fkc == 46) {
+                    if (st.findCur < st.findBuf.Length) {
+                        st.findBuf = Text.RemoveAt(st.findBuf, st.findCur);
+                    }
+                } else if (fkc == 13) {
+                    DataTable.CommitFind(st, cols, src);
+                    DataTable.FindStep(st, cols, src,
+                                       (emods & 1) != 0 ? 0 - 1 : 1, visRows);
+                } else {
+                    string fch = Text.CharStr(fkc);
+                    if (fch.Length > 0) {
+                        st.findBuf = Text.InsertAt(st.findBuf, st.findCur, fch);
+                        st.findCur = st.findCur + fch.Length;
+                    }
+                }
+                findKeyHandled = true;
+            } else if (ek == 4) {
+                int fkc2 = app.window.EventKeyCode();
+                if (fkc2 == 114) {
+                    // F3：下一处；Shift+F3 上一处
+                    DataTable.CommitFind(st, cols, src);
+                    DataTable.FindStep(st, cols, src,
+                                       (emods & 1) != 0 ? 0 - 1 : 1, visRows);
+                } else if (fkc2 == 9) {
+                    st.findFocused = false;
+                } else if (fkc2 == 37) {
+                    if (st.findCur > 0) { st.findCur = Text.PrevCharStart(st.findBuf, st.findCur); }
+                } else if (fkc2 == 39) {
+                    if (st.findCur < st.findBuf.Length) { st.findCur = Text.NextCharEnd(st.findBuf, st.findCur); }
+                } else if (fkc2 == 36) {
+                    st.findCur = 0;
+                } else if (fkc2 == 35) {
+                    st.findCur = st.findBuf.Length;
+                }
+                findKeyHandled = true;
+            }
+            // 点击表格区域使输入框失焦（查询与高亮保留）；
+            // 查找条自身的命中在 RenderFindBar 的 release 里处理。
+            if (ek == 2) { st.findFocused = false; }
+            if (findKeyHandled) { ek = 0; app.RequestRedraw(); }
+        }
+
         // ---------------- 筛选行键盘处理 ----------------
         // 筛选行单元格获得焦点时会吞掉键盘事件
         // （可打印字符、Backspace、Delete、左右方向键、Escape、Enter/Tab），
@@ -2362,6 +2652,9 @@ partial class DataTable {
         if (st.ctxOpen) { ek = 0; }
         if (st.hdrCtxOpen) { ek = 0; }
         if (st.colChooserOpen) { ek = 0; }
+        // 清除条件格式规则弹窗是模态：打开时吞掉表格体事件，
+        // 弹窗自身的绘制与点击在浮层阶段自理。
+        if (st.cfClearOpen) { ek = 0; }
         // 打开的编辑器弹窗同理：其列表/日历已处理按压，
         // 下方的单元格不应将其视为新的选择。
         if (st.edPopHot) { ek = 0; }
@@ -2449,6 +2742,23 @@ partial class DataTable {
             }
         }
 
+        // Ctrl+F 打开查找条；F3/Shift+F3 在条未聚焦时也能导航
+        // （浏览器/Excel 习惯）。编辑器打开时让位。
+        if (!st.editing && ek == 4 && (emods & 1) != 0
+            && app.window.EventKeyCode() == 70) {
+            DataTable.OpenFind(st);
+            ek = 0;
+            app.RequestRedraw();
+        }
+        if (!st.editing && st.findOpen && ek == 4 && (emods & 1) == 0
+            && app.window.EventKeyCode() == 114) {
+            DataTable.CommitFind(st, cols, src);
+            DataTable.FindStep(st, cols, src,
+                               (emods & 2) != 0 ? 0 - 1 : 1, visRows);
+            ek = 0;
+            app.RequestRedraw();
+        }
+
         // F2 / Enter 在当前可编辑单元格上打开编辑器（类似 Excel）。
         // bool 单元格没有可编辑的文本：同样的按键直接切换它。
         if (!st.editing && ek == 4) {
@@ -2504,9 +2814,15 @@ partial class DataTable {
                 st.fillTC0 = 0; st.fillTC1 = -1;
                 app.RequestRedraw();
             } else if (DataTable.DispKind(st, ptrOi) == 1) {
-                // 分组标题按下：切换该组折叠状态
+                // 分组标题按下：切换该组折叠状态。三态复选框的
+                // 命中区让位——那里只改整组选择，不折叠。
                 int gi = DataTable.DispRowOf(st, ptrOi);
-                DataTable.ToggleCollapse(st, st.groups[gi].key);
+                GroupRow gRow = st.groups[gi];
+                int gcbPx = x + numW + selW + gRow.level * app.Scale(16)
+                            + app.Scale(6) + app.Scale(14) + app.Scale(4);
+                bool onCb = app.mouseX >= gcbPx - app.Scale(2)
+                            && app.mouseX < gcbPx + app.Scale(16);
+                if (!onCb) { DataTable.ToggleCollapse(st, gRow.key); }
                 app.RequestRedraw();
             } else if (app.mouseX >= x && app.mouseX < x + numW && !st.rowGripDrag) {
                 // 行号按下：选中该行并开始多选拖选（重排只能
@@ -3095,6 +3411,11 @@ partial class DataTable {
             }
         }
 
+        // ---------------- 查找条（非模态浮层，模态菜单盖住它） ----------------
+        if (st.findOpen) {
+            DataTable.RenderFindBar(app, x, y, viewW, cols, src, st, visRows);
+        }
+
         // ---------------- 表头集合筛选菜单（浮层，最后绘制） ----------------
         if (st.openMenu >= 0 && st.openMenu < cols.Count) {
             DataTable.RenderMenu(app, x, y, viewW, headerH, numW, selW, cols, src, st);
@@ -3113,6 +3434,11 @@ partial class DataTable {
         // ---------------- 列选择器弹层（浮层） ----------------
         if (st.colChooserOpen) {
             DataTable.RenderColumnChooser(app, x, y, viewW, viewH, cols, src, st);
+        }
+
+        // ---------------- 清除条件格式规则弹窗（居中模态） ----------------
+        if (st.cfClearOpen) {
+            DataTable.RenderCfClear(app, x, y, viewW, viewH, cols, st);
         }
 
         // ---------------- 选区生成图表浮层 ----------------
