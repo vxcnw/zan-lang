@@ -1,0 +1,179 @@
+using System;
+using Gui;
+using Gui.Component.Chart;
+
+partial class Charts {
+    // ===== ECharts 5 官方示例库（echarts.apache.org/examples）折线段
+    // 1:1 重建 =====。每例的类目/系列/数据逐项取自 ref5 对应 option 源
+    // 码（_scratch/ref5/<id>.js），标题取注册表官方中英文。ECharts 5
+    // 默认 smooth=false（直线），与 2.2 相反——每例显式设置。引擎暂缺
+    // 的特性（confidence-band 置信带系列、bump-chart endLabel、
+    // line-markline 标签位、line-log 对数轴小数）进引擎账本，不在此
+    // 用变通数据假装对齐。
+
+    /// line-simple 基础折线图：一周数据单系列直线。
+    static void E5LineSimple(App app, int x, int y, int w, int h) {
+        ChartOption o = ChartOption.Of(
+            Charts.T("Basic Line Chart", "基础折线图"), Charts.Week(),
+            new List<ChartSeries>{
+                ChartSeries.Line("", new List<int>{
+                    150, 230, 224, 218, 135, 147, 260 }) });
+        o.smooth = false;
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// line-smooth 基础平滑折线图：同一周类目，smooth: true。
+    static void E5LineSmooth(App app, int x, int y, int w, int h) {
+        ChartOption o = ChartOption.Of(
+            Charts.T("Smoothed Line Chart", "基础平滑折线图"), Charts.Week(),
+            new List<ChartSeries>{
+                ChartSeries.Line("", new List<int>{
+                    820, 932, 901, 934, 1290, 1330, 1320 }) });
+        o.smooth = true;
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// area-basic 基础面积图：boundaryGap=false + areaStyle: {}。
+    static void E5AreaBasic(App app, int x, int y, int w, int h) {
+        ChartSeries s = ChartSeries.Area("",
+            new List<int>{ 820, 932, 901, 934, 1290, 1330, 1320 });
+        ChartOption o = ChartOption.Of(
+            Charts.T("Basic area chart", "基础面积图"), Charts.Week(),
+            new List<ChartSeries>{ s });
+        o.smooth = false;
+        o.xAxes[0].boundaryGap = false;
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// line-stack 堆叠折线图：五条营销数据 stack: 'Total'，直线。
+    static void E5LineStack(App app, int x, int y, int w, int h) {
+        ChartOption o = ChartOption.Of(
+            Charts.T("Stacked Line Chart", "堆叠折线图"), Charts.Week(),
+            new List<ChartSeries>{
+                ChartSeries.StackedLine(Charts.T("Email", "邮件营销"),
+                    new List<int>{ 120, 132, 101, 134, 90, 230, 210 }),
+                ChartSeries.StackedLine(Charts.T("Union Ads", "联盟广告"),
+                    new List<int>{ 220, 182, 191, 234, 290, 330, 310 }),
+                ChartSeries.StackedLine(Charts.T("Video Ads", "视频广告"),
+                    new List<int>{ 150, 232, 201, 154, 190, 330, 410 }),
+                ChartSeries.StackedLine(Charts.T("Direct", "直接访问"),
+                    new List<int>{ 320, 332, 301, 334, 390, 330, 320 }),
+                ChartSeries.StackedLine(Charts.T("Search Engine", "搜索引擎"),
+                    new List<int>{ 820, 932, 901, 934, 1290, 1330, 1320 })
+            });
+        o.smooth = false;
+        o.xAxes[0].boundaryGap = false;
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// area-stack 堆叠面积图：同 line-stack 数据 + areaStyle，
+    /// 末系列（Search Engine）label.show 顶部标注。axisPointer
+    /// cross 与 emphasis.focus 系高亮，进交互账本。
+    static void E5AreaStack(App app, int x, int y, int w, int h) {
+        ChartSeries se = ChartSeries.StackedArea(Charts.T("Search Engine", "搜索引擎"),
+            new List<int>{ 820, 932, 901, 934, 1290, 1330, 1320 });
+        se.labelShow = true;
+        ChartOption o = ChartOption.Of(
+            Charts.T("Stacked Area Chart", "堆叠面积图"), Charts.Week(),
+            new List<ChartSeries>{
+                ChartSeries.StackedArea(Charts.T("Email", "邮件营销"),
+                    new List<int>{ 120, 132, 101, 134, 90, 230, 210 }),
+                ChartSeries.StackedArea(Charts.T("Union Ads", "联盟广告"),
+                    new List<int>{ 220, 182, 191, 234, 290, 330, 310 }),
+                ChartSeries.StackedArea(Charts.T("Video Ads", "视频广告"),
+                    new List<int>{ 150, 232, 201, 154, 190, 330, 410 }),
+                ChartSeries.StackedArea(Charts.T("Direct", "直接访问"),
+                    new List<int>{ 320, 332, 301, 334, 390, 330, 320 }),
+                se
+            });
+        o.smooth = false;
+        o.xAxes[0].boundaryGap = false;
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// line-style 自定义折线图样式：triangle 符号 20px、虚线宽 4
+    /// #5470C6、符号黄底 #EE6666 边 3。
+    static void E5LineStyle(App app, int x, int y, int w, int h) {
+        ChartSeries s = ChartSeries.Line("",
+            new List<int>{ 120, 200, 150, 80, 70, 110, 130 });
+        s.symbol = "triangle";
+        s.symbolSize = 20;
+        s.itemStyle.normal.lineStyle.color = Chart.Rgb(84, 112, 198);
+        s.itemStyle.normal.lineStyle.width = 4;
+        s.itemStyle.normal.lineStyle.type = "dashed";
+        s.itemStyle.normal.color = Chart.Rgb(255, 255, 0);
+        s.itemStyle.normal.borderColor = Chart.Rgb(238, 102, 102);
+        s.itemStyle.normal.borderWidth = 3;
+        ChartOption o = ChartOption.Of(
+            Charts.T("Line Style and Item Style", "自定义折线图样式"),
+            Charts.Week(), new List<ChartSeries>{ s });
+        o.smooth = false;
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// line-in-cartesian-coordinate-system 双数值轴折线图：
+    /// [[10,40],[50,100],[40,20]] 点对，X/Y 均为 value 轴。
+    static void E5LineInCartesian(App app, int x, int y, int w, int h) {
+        List<ChartPoint> pts = new List<ChartPoint>{
+            ChartPoint.Of(10, 40), ChartPoint.Of(50, 100), ChartPoint.Of(40, 20) };
+        ChartSeries s = ChartSeries.OfLinePoints(
+            Charts.T("Line Chart in Cartesian Coordinate System", "双数值轴折线图"),
+            pts);
+        ChartOption o = ChartOption.Of(
+            Charts.T("Line Chart in Cartesian Coordinate System", "双数值轴折线图"),
+            null, new List<ChartSeries>{ s });
+        o.X(ChartAxis.Value());
+        o.Y(ChartAxis.Value());
+        o.smooth = false;
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// line-step 阶梯折线图：step: 'start' | 'middle' | 'end' 三系列。
+    static void E5LineStep(App app, int x, int y, int w, int h) {
+        ChartSeries st = ChartSeries.Line(Charts.T("Step Start", "Step Start"),
+            new List<int>{ 120, 132, 101, 134, 90, 230, 210 });
+        st.step = "start";
+        ChartSeries sm = ChartSeries.Line(Charts.T("Step Middle", "Step Middle"),
+            new List<int>{ 220, 282, 201, 234, 290, 430, 410 });
+        sm.step = "middle";
+        ChartSeries se = ChartSeries.Line(Charts.T("Step End", "Step End"),
+            new List<int>{ 450, 432, 401, 454, 590, 530, 510 });
+        se.step = "end";
+        ChartOption o = ChartOption.Of(
+            Charts.T("Step Line", "阶梯折线图"), Charts.Week(),
+            new List<ChartSeries>{ st, sm, se });
+        o.smooth = false;
+        Charts.Show(app, o, x, y, w, h);
+    }
+
+    /// line-y-category 垂直折线图（Y 轴为类目轴）：高度 km 在 Y 且
+    /// boundaryGap=false，气温 °C 在 X value 轴，smooth 曲线 +
+    /// circle 符号 10 + 线宽 3。数据同官方（含小数，走定点管线）。
+    static void E5LineYCategory(App app, int x, int y, int w, int h) {
+        List<string> km = new List<string>{
+            "0", "10", "20", "30", "40", "50", "60", "70", "80" };
+        List<double> temps = new List<double>{
+            15.0, 0 - 50.0, 0 - 56.5, 0 - 46.5, 0 - 22.1,
+            0 - 2.5, 0 - 27.7, 0 - 55.7, 0 - 76.5 };
+        List<ChartData> data = new List<ChartData>();
+        for (int i = 0; i < temps.Count; i = i + 1) {
+            data.Add(ChartData.Numeric(temps[i]));
+        }
+        ChartSeries s = ChartSeries.Named(Charts.T(
+            "Altitude (km) vs. temperature (°C)", "高度(km)与气温(°C)变化关系"),
+            ChartType.Line, data);
+        s.symbol = "circle";
+        s.symbolSize = 10;
+        s.itemStyle.normal.lineStyle.width = 3;
+        ChartOption o = ChartOption.Of(
+            Charts.T("Line Y Category", "垂直折线图（Y轴为类目轴）"),
+            null, new List<ChartSeries>{ s });
+        o.Y(ChartAxis.CategoryTitled(km, ""));
+        o.yAxes[0].boundaryGap = false;
+        o.yAxes[0].labelFormatter = "{value} km";
+        o.X(ChartAxis.Value());
+        o.xAxes[0].labelFormatter = "{value} °C";
+        o.smooth = true;
+        Charts.Show(app, o, x, y, w, h);
+    }
+}

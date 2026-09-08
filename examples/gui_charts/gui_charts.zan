@@ -234,30 +234,21 @@ partial class Charts {
 
     static void BuildCatalog() {
         Charts.demos = new List<ChartsDemo>();
-        // 目录 1:1 对齐 ECharts 2.2.4 参考站 example.html：类目名、
-        // 条目顺序、id、标题与副标题均取自页面原文。暂未恢复真
-        // option 的条目先指向语义最近的现有实现，随批次逐个对齐。
-        // 折线图 — 10 例全部真 option。
-        Charts.Add("line", "line1", "Standard line", "标准折线图",
-            "markPoint, markLine, styled shadow", "标注，标线，个性化线条阴影");
-        Charts.Add("line", "line2", "Stacked line", "堆积折线图",
-            "multi-dimension stack", "任意系列多维度堆积");
-        Charts.Add("line", "line5", "Standard line", "标准折线图",
-            "swapped axes, smooth", "横纵坐标轴互换，平滑曲线");
-        Charts.Add("line", "line3", "Standard area", "标准面积图",
-            "area fill, smooth", "填充样式，平滑曲线");
-        Charts.Add("line", "line4", "Stacked area", "堆积面积图",
-            "multi-dimension stack", "任意系列多维度堆积");
-        Charts.Add("line", "line7", "Unequal interval", "不等距折线图",
-            "dual value axes", "双数值轴");
-        Charts.Add("line", "line8", "Unequal interval", "不等距折线图",
-            "time axis", "时间坐标轴折线图");
-        Charts.Add("line", "line6", "Area", "面积图",
-            "inverse value axis", "反向数值轴");
-        Charts.Add("line", "line", "Line", "折线图",
-            "multi-level control", "多级控制，个性化，填充、线条、拐点样式等");
-        Charts.Add("line", "line9", "Log axis", "对数轴",
-            "log axis", "log数轴");
+        // 目录对齐 ECharts 5 官方示例站（echarts.apache.org/examples）：
+        // 类目、条目顺序、id、标题均取官方注册表原文，逐批重建。
+        // 折线图 — 批次 1 已直迁 9 例（ChartsLine5.zan，option 逐项
+        // 取 ref5 源码）；带 dataZoom/visualMap/dataset 的例与引擎
+        // 账本项绑定，随批补入。
+        Charts.Add("line", "line-simple", "Basic Line Chart", "基础折线图", "", "");
+        Charts.Add("line", "line-smooth", "Smoothed Line Chart", "基础平滑折线图", "", "");
+        Charts.Add("line", "area-basic", "Basic area chart", "基础面积图", "", "");
+        Charts.Add("line", "line-stack", "Stacked Line Chart", "堆叠折线图", "", "");
+        Charts.Add("line", "area-stack", "Stacked Area Chart", "堆叠面积图", "", "");
+        Charts.Add("line", "line-style", "Line Style and Item Style", "自定义折线图样式", "", "");
+        Charts.Add("line", "line-in-cartesian-coordinate-system",
+            "Line Chart in Cartesian Coordinate System", "双数值轴折线图", "", "");
+        Charts.Add("line", "line-step", "Step Line", "阶梯折线图", "", "");
+        Charts.Add("line", "line-y-category", "Line Y Category", "垂直折线图（Y轴为类目轴）", "", "");
         // 柱状图 — 16 例（内容随批 2 对齐参考 option）。
         Charts.Add("bar", "bar1", "Standard bar", "标准柱状图",
             "markPoint, markLine", "标注，标线");
@@ -795,6 +786,18 @@ partial class Charts {
         // （届时未再引用的旧方法一并清理）。
         if (id == "line1") { Charts.Line1(app, x, y, w, h); }
         else if (id == "line2") { Charts.Line2(app, x, y, w, h); }
+        // ECharts 5 官方示例（ChartsLine5.zan，id = 官方注册表 id）。
+        else if (id == "line-simple") { Charts.E5LineSimple(app, x, y, w, h); }
+        else if (id == "line-smooth") { Charts.E5LineSmooth(app, x, y, w, h); }
+        else if (id == "area-basic") { Charts.E5AreaBasic(app, x, y, w, h); }
+        else if (id == "line-stack") { Charts.E5LineStack(app, x, y, w, h); }
+        else if (id == "area-stack") { Charts.E5AreaStack(app, x, y, w, h); }
+        else if (id == "line-style") { Charts.E5LineStyle(app, x, y, w, h); }
+        else if (id == "line-in-cartesian-coordinate-system") { Charts.E5LineInCartesian(app, x, y, w, h); }
+        else if (id == "line-step") { Charts.E5LineStep(app, x, y, w, h); }
+        else if (id == "line-y-category") { Charts.E5LineYCategory(app, x, y, w, h); }
+        // —— 旧 2.2 折线分发（目录已退役，函数随段完成删除）——
+        else if (id == "line1") { Charts.Line1(app, x, y, w, h); }
         else if (id == "line5") { Charts.Line5(app, x, y, w, h); }
         else if (id == "line3") { Charts.Line3(app, x, y, w, h); }
         else if (id == "line4") { Charts.Line4(app, x, y, w, h); }
