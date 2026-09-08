@@ -28,6 +28,11 @@ struct zan_parser {
      * parse_member_decl_inner; drained into the enclosing type's members list
      * right after the property declaration itself. */
     zan_ast_list_t pending_members;
+    /* Single-line multi-declarator (`int a = 0, b = 2;`): parse_var_decl
+     * returns the first declarator and queues the rest here; statement
+     * collectors splice them in right after, so every declarator lands in
+     * the enclosing scope in source order. */
+    zan_ast_list_t pending_stmts;
 };
 
 void zan_parser_init(zan_parser_t *p, zan_lexer_t *lex, zan_arena_t *arena,

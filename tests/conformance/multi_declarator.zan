@@ -1,0 +1,57 @@
+// 回归(D18):单行多声明符 `int a = 0, b = 2, c = a + b;` 之前报
+// "expected ';', got ','"。现在每个声明符共享类型与 const/let 修饰,
+// 各自可有初始化器,按源顺序声明(后面的初始化器能看到前面的声明符)。
+// 语句级/字段级两种形态都覆盖(var 形态、首声明符无初始化器)。
+using System;
+namespace Conf;
+
+class Program {
+    static int A = 0, B = 2, C = A + B;
+    static string S = "x", T = S + "y", U;
+    static long Lo, Hi = 7;          // 首声明符可以没有初始化器
+    static double D = 1.5, E;        // 每行的类型独立
+    const int K = 3, M = K * 2;
+
+    static void Main() {
+        var lst = new List<int>(), dummy = new List<int>();
+        lst.Add(B);
+        int a = 0, b = 2, c = a + b;
+        string s = "x", t = s + "y", u;
+        u = t + "!";
+        Console.WriteLine(A);
+        Console.WriteLine(B);
+        Console.WriteLine(C);
+        Console.WriteLine(S);
+        Console.WriteLine(T);
+        U = T + "!";
+        Console.WriteLine(U);
+        Console.WriteLine(Lo == 0);
+        Console.WriteLine(Hi);
+        Console.WriteLine(D + E);
+        Console.WriteLine(K + M);
+        Console.WriteLine(lst.Count);
+        Console.WriteLine(dummy == null);
+        Console.WriteLine(c);
+        Console.WriteLine(s);
+        Console.WriteLine(t);
+        Console.WriteLine(u);
+    }
+}
+/* expect:
+0
+2
+2
+x
+xy
+xy!
+True
+7
+1.5
+9
+1
+False
+2
+x
+xy
+xy!
+*/

@@ -93,6 +93,17 @@ static zan_ast_node_t *parse_embedded_stmt(zan_parser_t *p);
 static bool looks_like_var_decl(zan_parser_t *p);
 static zan_ast_node_t *parse_type_ref(zan_parser_t *p);
 static zan_ast_node_t *parse_type_decl(zan_parser_t *p, uint32_t modifiers);
+
+/* Move any multi-declarator siblings parse_var_decl just queued into `list`,
+ * in queue order. Must run immediately after pushing the statement that may
+ * have come from parse_var_decl -- never across an expression boundary that
+ * could itself parse a statement. */
+static void splice_pending_stmts(zan_parser_t *p, zan_ast_list_t *list) {
+    for (int i = 0; i < p->pending_stmts.count; i++) {
+        zan_ast_list_push(list, p->pending_stmts.items[i], p->arena);
+    }
+    p->pending_stmts.count = 0;
+}
 static void gen_record_class(zan_ast_node_t *unit, zan_istr_t rname,
                              zan_ast_list_t *params, zan_arena_t *arena,
                              zan_diag_t *diag);
@@ -2068,6 +2079,7 @@ static zan_ast_node_t *parse_block(zan_parser_t *p) {
         zan_ast_node_t *stmt = parse_statement(p);
         if (stmt) {
             zan_ast_list_push(&block->block.stmts, stmt, p->arena);
+            splice_pending_stmts(p, &block->block.stmts);
         }
         /* guarantee forward progress: if a malformed statement was not
          * consumed, skip a token so error recovery can't spin forever
@@ -2248,6 +2260,7 @@ static zan_ast_node_t *parse_embedded_stmt(zan_parser_t *p) {
     zan_ast_node_t *stmt = parse_statement(p);
     if (stmt) {
         zan_ast_list_push(&block->block.stmts, stmt, p->arena);
+        splice_pending_stmts(p, &block->block.stmts);
     }
     if (p->current.loc.offset == before && !parser_check(p, TK_EOF)) {
         parser_advance(p);
@@ -2502,14 +2515,44 @@ static zan_ast_node_t *parse_var_decl(zan_parser_t *p) {
         init = parse_expression(p);
     }
 
-    parser_expect(p, TK_SEMICOLON);
-
     zan_ast_node_t *decl = zan_ast_new(p->arena, AST_VAR_DECL, loc);
     decl->var_decl.name = name;
     decl->var_decl.type = type;
     decl->var_decl.initializer = init;
     decl->var_decl.is_const = is_const;
     decl->var_decl.is_let = is_let;
+
+    /* Single-line multi-declarator: `int a = 0, b = 2, c = a + b;` — every
+     * declarator after the first shares this declaration's type and const/
+     * let modifiers but carries its own initializer (or none). The first
+     * declarator is returned; the rest are queued in pending_stmts for the
+     * enclosing statement collector to splice in right after, keeping
+     * source order (so `c = a + b` sees `a`/`b` already declared). */
+    zan_ast_list_init(&p->pending_stmts);
+    while (parser_match(p, TK_COMMA)) {
+        zan_istr_t more = {0};
+        if (parser_check(p, TK_IDENT)) {
+            parser_advance(p);
+            more = p->previous.str_val;
+        } else {
+            zan_diag_emit(p->diag, DIAG_ERROR, p->current.loc,
+                          "expected variable name after ','");
+            break;
+        }
+        zan_ast_node_t *more_init = NULL;
+        if (parser_match(p, TK_EQ)) {
+            more_init = parse_expression(p);
+        }
+        zan_ast_node_t *md = zan_ast_new(p->arena, AST_VAR_DECL, loc);
+        md->var_decl.name = more;
+        md->var_decl.type = type;
+        md->var_decl.initializer = more_init;
+        md->var_decl.is_const = is_const;
+        md->var_decl.is_let = is_let;
+        zan_ast_list_push(&p->pending_stmts, md, p->arena);
+    }
+
+    parser_expect(p, TK_SEMICOLON);
     return decl;
 }
 
@@ -2729,6 +2772,7 @@ static zan_ast_node_t *parse_switch_stmt(zan_parser_t *p) {
             uint32_t before = p->current.loc.offset;
             zan_ast_node_t *stmt = parse_statement(p);
             zan_ast_list_push(&body_block->block.stmts, stmt, p->arena);
+            splice_pending_stmts(p, &body_block->block.stmts);
             if (p->current.loc.offset == before && !parser_check(p, TK_EOF)) {
                 parser_advance(p);
             }
