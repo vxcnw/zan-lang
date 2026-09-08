@@ -415,8 +415,67 @@ class Directory {
     }
     #endif
 
+    /// <summary>把枚举出的裸名字拼成完整路径（与 C# GetFiles 的返回
+    /// 形态一致）。拼接基准用磁盘枚举时 ReadPath 解析到的目录：随附
+    /// 资源回退后路径才真实存在。</summary>
+    static List<string> ToPaths(List<string> names, string baseDir) {
+        List<string> outp = new List<string>();
+        for (int i = 0; i < names.Count; i = i + 1) {
+            outp.Add(baseDir + "/" + names[i]);
+        }
+        return outp;
+    }
+
+    /// <summary>列出目录中的文件（不递归、含隐藏），返回完整路径——
+    /// 与 C# Directory.GetFiles 的语义对齐（审计 D22：本库 GetFiles
+    /// 返回裸文件名，是 C# 移植陷阱，但几十处既有调用都依赖裸名，
+    /// 不能直接改签名）。找不到磁盘目录时回退到随附资源并合并内嵌
+    /// 子项（内嵌项只有原始 path 可拼，基准取原始 path）。</summary>
+    static List<string> GetPaths(string path) {
+        string p = Directory.ReadPath(path);
+        #if WINDOWS
+        List<string> r = winList(p, false, true);
+        #else
+        List<string> r = posixList(p, false, true);
+        #endif
+        int diskCount = r.Count;
+        List<string> all = Directory.MergeEmbed(r, path, false);
+        // 磁盘项拼到解析后的真实目录，内嵌项拼到原始 path。
+        string baseDir = (p != null && p.Length > 0) ? p : path;
+        List<string> outp = new List<string>();
+        for (int i = 0; i < all.Count; i = i + 1) {
+            string name = all[i];
+            if (i >= diskCount) { baseDir = path; }
+            outp.Add(baseDir + "/" + name);
+        }
+        return outp;
+    }
+
+    /// <summary>列出目录中的子目录（不递归、含隐藏），返回完整路径。
+    /// 语义同 <see cref="GetPaths"/>：磁盘项拼 ReadPath 解析目录，
+    /// 内嵌项拼原始 path。</summary>
+    static List<string> GetDirectoryPaths(string path) {
+        string p = Directory.ReadPath(path);
+        #if WINDOWS
+        List<string> r = winList(p, true, true);
+        #else
+        List<string> r = posixList(p, true, true);
+        #endif
+        int diskCount = r.Count;
+        List<string> all = Directory.MergeEmbed(r, path, true);
+        string baseDir = (p != null && p.Length > 0) ? p : path;
+        List<string> outp = new List<string>();
+        for (int i = 0; i < all.Count; i = i + 1) {
+            string name = all[i];
+            if (i >= diskCount) { baseDir = path; }
+            outp.Add(baseDir + "/" + name);
+        }
+        return outp;
+    }
+
     /// <summary>列出目录中的文件（不递归、含隐藏）。找不到磁盘目录时
-    /// 回退到随附资源并合并内嵌子项。</summary>
+    /// 回退到随附资源并合并内嵌子项。注意：返回裸文件名（不含路径），
+    /// C# 形态的完整路径用 <see cref="GetPaths"/>。</summary>
     static List<string> GetFiles(string path) {
         string p = Directory.ReadPath(path);
         #if WINDOWS
@@ -428,7 +487,8 @@ class Directory {
     }
 
     /// <summary>列出目录中的子目录（不递归、含隐藏）。回退与合并
-    /// 语义同 <see cref="GetFiles"/>。</summary>
+    /// 语义同 <see cref="GetFiles"/>。注意：返回裸目录名（不含路径），
+    /// C# 形态的完整路径用 <see cref="GetDirectoryPaths"/>。</summary>
     static List<string> GetDirectories(string path) {
         string p = Directory.ReadPath(path);
         #if WINDOWS

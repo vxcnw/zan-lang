@@ -1,0 +1,57 @@
+// Directory.GetPaths/GetDirectoryPaths: C#-style full-path enumeration on
+// top of the bare-name GetFiles/GetDirectories (audit D22). Also pins the
+// bare-name contract that dozens of existing callers rely on.
+using System;
+using System.IO;
+namespace Conf;
+
+class Program {
+    static string Basenames(List<string> paths) {
+        string s = "";
+        for (int i = 0; i < paths.Count; i = i + 1) {
+            if (i > 0) { s = s + "|"; }
+            s = s + Path.GetFileName(paths[i]);
+        }
+        return s;
+    }
+
+    static void Main() {
+        string root = "_d22probe";
+        Directory.DeleteRecursive(root);
+        Directory.CreateDirectoryRecursive(root + "/sub");
+        File.WriteAllText(root + "/a.txt", "1");
+        File.WriteAllText(root + "/b.txt", "2");
+        File.WriteAllText(root + "/sub/c.txt", "3");
+
+        // full paths: every entry carries the requested directory prefix
+        List<string> files = Directory.GetPaths(root);
+        Console.WriteLine("files=" + Convert.ToString(files.Count));
+        Console.WriteLine("allPrefixed=" + (Basenames(files) == "a.txt|b.txt").ToString());
+        bool allFull = true;
+        for (int i = 0; i < files.Count; i = i + 1) {
+            if (!files[i].StartsWith(root + "/")) { allFull = false; }
+        }
+        Console.WriteLine("allFull=" + allFull.ToString());
+
+        // directories
+        List<string> dirs = Directory.GetDirectoryPaths(root);
+        Console.WriteLine("dirs=" + Convert.ToString(dirs.Count));
+        Console.WriteLine("dirFull=" + (dirs[0] == root + "/sub").ToString());
+
+        // GetPaths result is directly readable
+        Console.WriteLine((File.ReadAllText(files[0]) == "1").ToString());
+
+        // bare-name contract unchanged (existing callers depend on it)
+        List<string> bare = Directory.GetFiles(root);
+        Console.WriteLine("bare=" + (bare[0] == "a.txt" || bare[1] == "a.txt").ToString());
+        List<string> bareDirs = Directory.GetDirectories(root);
+        Console.WriteLine("bareDir=" + (bareDirs[0] == "sub").ToString());
+
+        // missing directory: empty results, no throw
+        Console.WriteLine("missing=" + Convert.ToString(Directory.GetPaths(root + "/nope").Count));
+        Console.WriteLine("missingD=" + Convert.ToString(Directory.GetDirectoryPaths(root + "/nope").Count));
+
+        Directory.DeleteRecursive(root);
+        Console.WriteLine("cleaned=" + (!Directory.Exists(root)).ToString());
+    }
+}

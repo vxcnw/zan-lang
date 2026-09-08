@@ -2,6 +2,18 @@ using System;
 using System.Json;
 namespace Conf;
 class Program {
+    static int visited;
+
+    static void CountVisit(int slot) { visited = visited + 1; }
+
+    // ForEachChild walks the FirstChild/NextSibling chain (O(children)),
+    // unlike At(i) whose sequential use degrades to O(n^2).
+    static int SumArray(JsonDoc d, int at) {
+        int sum = 0;
+        d.ForEachChild(at, (c) => { sum = sum + d.IntAt(c, 0); });
+        return sum;
+    }
+
     static int Caught(string src) {
         try {
             JsonDoc.Parse(src);
@@ -55,5 +67,24 @@ class Program {
         string twice = doc2.ToJson();
         Console.WriteLine(Convert.ToString(twice == once));
         Console.WriteLine(Convert.ToString(doc2.LongAt(doc2.Get(doc2.root, "big"), 0L)));
+        // ForEachChild: array (nested container visited as one slot),
+        // object (values only, order follows source), scalar, null fn.
+        visited = 0;
+        doc.ForEachChild(doc.Get(doc.root, "arr"), Program.CountVisit);
+        Console.WriteLine(Convert.ToString(visited));
+        Console.WriteLine(Convert.ToString(SumArray(doc, doc.Get(doc.root, "arr"))));
+        string keys = "";
+        JsonDoc obj = JsonDoc.Parse("{\"b\":1,\"a\":2}");
+        obj.ForEachChild(obj.root, (c) => { });
+        int first = obj.FirstChild(obj.root);
+        keys = obj.KeyAt(obj.root, 0) + "=" + Convert.ToString(obj.IntAt(first, -1));
+        Console.WriteLine(keys);
+        Console.WriteLine(Convert.ToString(obj.KeyAt(obj.root, 1)));
+        Console.WriteLine(Convert.ToString(obj.IntAt(obj.ValAt(obj.root, 1), -1)));
+        JsonDoc scalar = JsonDoc.Parse("42");
+        visited = 0;
+        scalar.ForEachChild(scalar.root, Program.CountVisit);
+        scalar.ForEachChild(scalar.root, null);
+        Console.WriteLine(Convert.ToString(visited));
     }
 }

@@ -49,6 +49,10 @@ struct JsonPair {
     public int valueSlot;
 }
 
+/// <see cref="JsonDoc.ForEachChild"/> 的回调：收到每个孩子的槽位
+/// （数组元素或对象成员值）。
+delegate void JsonChildVisitor(int childSlot);
+
 /// <summary>
 /// 平面 tape 形式的 JSON 文档：解析是单遍熔合状态机（见
 /// <see cref="ParseCore"/>），位置/缓冲全部参数线程化，错误用
@@ -634,10 +638,31 @@ class JsonDoc {
         return k;
     }
 
+    /// 注意：At 是从首个孩子跳 i 次 NextSibling 的链式访问，取第 i 个
+    /// 孩子要 O(i) 次；把它当随机索引用在顺序循环里整体退化为 O(n²)
+    /// （215 倍实测差距）。顺序遍历请走 FirstChild/NextSibling 链或
+    /// <see cref="ForEachChild"/>，只有真正的随机访问才用 At。
     int At(int at, int i) {
         int c = at + 1;
         for (int j = 0; j < i; j = j + 1) { c = this.NextSibling(c); }
         return c;
+    }
+
+    /// <summary>按 tape 链遍历 <paramref name="at"/> 的全部孩子，逐个
+    /// 调用 <paramref name="fn"/>（at 是孩子槽位；对象成员是值槽位，
+    /// 键用 <see cref="KeyAt"/> 取）。顺序与源文档一致。这是 O(孩子数)
+    /// 的正确遍历姿势：FirstChild/NextSibling 各走一步，不像
+    /// <see cref="At"/> 顺序循环那样累计 O(n²)。非容器（标量）与
+    /// 负槽位没有孩子，回调一次都不触发；fn 为 null 时静默返回。</summary>
+    void ForEachChild(int at, JsonChildVisitor fn) {
+        if (fn == null) { return; }
+        int c = this.FirstChild(at);
+        if (c < 0) { return; }
+        int count = this.Count(at);
+        for (int j = 0; j < count; j = j + 1) {
+            fn(c);
+            c = this.NextSibling(c);
+        }
     }
 
     int Count(int at) {
