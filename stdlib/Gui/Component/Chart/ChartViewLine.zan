@@ -546,7 +546,12 @@ partial class ChartView {
                             pys.Add(f.CatMidY(j, n));
                         } else {
                             pxs.Add(f.CatX(j, n));
-                            pys.Add(f.YOf(s.Value(oi) * g / 1000, ax));
+                            // 小数轴：值以 ×1000 定点过 YOfF（轴界
+                            // leftMinF/rightMinF 同域）；整数轴上
+                            // YOfF 回落原 int 映射。
+                            double dv = s.Number(oi);
+                            int vF = (int)(dv * 1000 + (dv >= 0 ? 0.5 : 0 - 0.5));
+                            pys.Add(f.YOfF(vF * g / 1000, ax));
                         }
                         gaps.Add(oi < s.data.Count && s.data[oi].gap);
                     }
@@ -673,7 +678,7 @@ partial class ChartView {
                             if (showSeriesValues) {
                                 string lbl = geoMode == 1
                                     ? Convert.ToString(s.points[i0 + m2].y)
-                                    : Convert.ToString(s.Value(i0 + m2));
+                                    : Chart.SeriesNumText(s, i0 + m2);
                                 int lw = Canvas.MeasureText(lbl, labelFs);
                                 int lx = pxs[m2] - lw / 2;
                                 if (lx < f.plotX) { lx = f.plotX; }
@@ -720,7 +725,9 @@ partial class ChartView {
         Chart.DrawMarkLine(app, f, o);
         if (axisN > 0) {
             // 值对/轴互换：无类目槽位，按最近点命中 + item tooltip。
-            ChartView.PointsHover(app, f, series, i0, i1, g);
+            // 双数值轴 + pointerCross（line7）先画十字虚线与
+            // ( x , y ) 轴值读数。
+            ChartView.PointsHover(app, f, series, i0, i1, g, o.pointerCross);
         } else {
             ChartView.OfferCategoryPointHits(app, f, winLabels, series, i0, g,
                 ChartElementType.LinePoint, false);

@@ -37,8 +37,12 @@ class ChartFrame {
     int plotH;
     int leftMin;
     int leftMax;
+    int leftMinF;        // 左轴 [lo,hi] ×1000 定点（小数轴专用，lo=hi=0 为整数轴）
+    int leftMaxF;
     int rightMin;
     int rightMax;
+    int rightMinF;       // 右轴同上（line6 降雨量 -1000..0 定点）
+    int rightMaxF;
     bool hasRight;
     bool reversed;       // 左轴翻转
     bool rightReversed;  // 右轴翻转（独立于左轴）
@@ -151,6 +155,23 @@ class ChartFrame {
         return this.plotY * 256 + this.plotH * 256 - d;
     }
 
+    /// 小数轴的 Y 映射：v 为 值×1000 定点，leftMinF/leftMaxF（或右轴
+    /// rightMinF/rightMaxF）是 ×1000 的轴界（line6 流量 0.86..1.5、
+    /// 降雨量 -0.005..-0.955 这类数据在 int Value() 四舍五入后全折成
+    /// 1..2 / 0..-1，画成平线）。轴不是小数轴时回落整数映射。
+    int YOfF(int vF, int axisIndex) {
+        int loF = this.leftMinF;
+        int hiF = this.leftMaxF;
+        bool rev = this.reversed;
+        if (axisIndex == 1) { loF = this.rightMinF; hiF = this.rightMaxF; rev = this.rightReversed; }
+        if (loF == 0 && hiF == 0) { return this.YOf(vF / 1000, axisIndex); }
+        long span = (long)hiF - (long)loF;
+        if (span == 0) { span = 1; }
+        int d = (int)(((long)vF - (long)loF) * (long)this.plotH / span);
+        if (rev) { return this.plotY + d; }
+        return this.plotY + this.plotH - d;
+    }
+
     /// 系列所在轴的零线像素（ECharts 面积/柱的填充基线）：
     /// 0 在该轴范围内时返回其映射（钳制进绘图区），否则返回
     /// 绘图区底——与 ECharts「0 不在范围内时填到对侧边缘」一致。
@@ -250,6 +271,27 @@ class ChartFrame {
         if (d < 0) { d = 0; }
         if (d > this.plotW) { d = this.plotW; }
         return this.plotX + d;
+    }
+
+    /// 像素 Y → 数值文本（左/右轴，follows negate 标志）。轴是
+    /// 小数轴（leftMinF/rightMinF 生效）时按 1/1000 定点输出小数，
+    /// 整数轴与原 Commas 行为一致。
+    string ValueTextAtY(int py, int axisIndex) {
+        int loF = this.leftMinF;
+        int hiF = this.leftMaxF;
+        bool rev = this.reversed;
+        bool yNeg = this.leftNegate;
+        if (axisIndex == 1) { loF = this.rightMinF; hiF = this.rightMaxF; rev = this.rightReversed; yNeg = this.rightNegate; }
+        int q = py - this.plotY;
+        if (q < 0) { q = 0; }
+        if (q > this.plotH) { q = this.plotH; }
+        int d = rev ? q : this.plotH - q;
+        if (loF != 0 || hiF != 0) {
+            long vf = (long)loF + (long)d * ((long)hiF - (long)loF) / this.plotH;
+            return Chart.FracText(yNeg ? (int)(0 - vf) : (int)vf);
+        }
+        int v = this.ValueAtY(py, axisIndex);
+        return Chart.Commas(yNeg ? 0 - v : v);
     }
 }
 
@@ -648,6 +690,43 @@ class Chart {
         return nice * mag;
     }
 
+
+    /// AxisMinFor 的 1/1000 定点对偶：与 AxisMaxForF 成对——原始
+    /// 数据下界直传（不许钳零），小数轴量程专用。
+    static int AxisMinForF(List<ChartSeries> series, int axisIndex) {
+        int mn = 0;
+        for (int i = 0; i < series.Count; i = i + 1) {
+            ChartSeries s = series[i];
+            if (!s.hidden && s.axisIndex == axisIndex) {
+                for (int j = 0; j < s.Count(); j = j + 1) {
+                    double v = s.Number(j);
+                    int vi = (int)(v * 1000 + (v >= 0 ? 0.5 : 0 - 0.5));
+                    if (vi < mn) { mn = vi; }
+                }
+                for (int j2 = 0; j2 < s.points.Count; j2 = j2 + 1) {
+                    int py = Chart.PointV(s.points[j2].y, s.pointG) * 1000;
+                    if (py < mn) { mn = py; }
+                }
+            }
+        }
+        return mn;
+    }
+
+    /// 小数轴 extent 下界（×1000 定点）：固定 min 直接生效，否则
+    /// 原始数据下界直传（不预设 nice——向下取整是 smartSteps 的
+    /// 职责，valueAxis._calculateValue 语义）。
+    static int FracAxisLoF(int fixedLo, List<ChartSeries> series, int axisIndex) {
+        if (fixedLo != ChartOption.Auto()) { return fixedLo * 1000; }
+        return Chart.AxisMinForF(series, axisIndex);
+    }
+
+    /// 小数轴 extent 上界（×1000 定点）：固定 max 直接生效，否则
+    /// 原始数据上界直传。
+    static int FracAxisHiF(int fixedHi, List<ChartSeries> series, int axisIndex) {
+        if (fixedHi != ChartOption.Auto()) { return fixedHi * 1000; }
+        return Chart.AxisMaxForF(series, axisIndex);
+    }
+
     /// ECharts 2 数值轴 nice 量程结果（lo/hi 取整到步长倍数）。
     class ChartSpan {
         int lo;
@@ -1000,6 +1079,16 @@ class Chart {
         long span = (long)hi - (long)lo;
         if (span < 1) { span = 1; }
         return plotY + plotH - (int)(((long)v - (long)lo) * (long)plotH / span);
+    }
+
+    /// 1/1000 定点值 → 垂直像素：lo/hi（值×1000）之间的线性映射，
+    /// 小数轴（leftMinF 定点域）的 YOfF 用——与 ValueY 同构，
+    /// 分子分母同放大 1000 后 long 相除，亚单位值不再量化。
+    static int ValueYF1000(int plotY, int plotH, int loF, int hiF, int vF) {
+        long span = (long)hiF - (long)loF;
+        if (span < 1) { span = 1; }
+        return plotY + plotH
+            - (int)(((long)vF - (long)loF) * (long)plotH / span);
     }
 
     /// 仅索引窗口 [i0,i1]（含端点）内的最大值，供 dataZoom
@@ -2405,6 +2494,42 @@ class Chart {
         return mx;
     }
 
+    /// AxisMaxFor 的 1/1000 定点对偶：小数系列按 Number（未取整）
+    /// 比较，整数按 Value×1000。ECharts extent 语义：原始数据上界
+    /// 直传（不许钳零），锚定/取整全部由 NiceRange（smartSteps）
+    /// 承担——见 valueAxis._calculateValue/_reformValue。
+    static int AxisMaxForF(List<ChartSeries> series, int axisIndex) {
+        int mx = 0;
+        for (int i = 0; i < series.Count; i = i + 1) {
+            ChartSeries s = series[i];
+            if (!s.hidden && s.axisIndex == axisIndex) {
+                for (int j = 0; j < s.Count(); j = j + 1) {
+                    double v = s.Number(j);
+                    int vi = (int)(v * 1000 + (v >= 0 ? 0.5 : 0 - 0.5));
+                    if (vi > mx) { mx = vi; }
+                }
+                for (int j2 = 0; j2 < s.points.Count; j2 = j2 + 1) {
+                    int py = Chart.PointV(s.points[j2].y, s.pointG) * 1000;
+                    if (py > mx) { mx = py; }
+                }
+            }
+        }
+        return mx;
+    }
+
+    /// 绑定到给定轴的可见系列是否存在小数数据（numberSet 且值
+    /// 非整数）。小数轴渲染/量程/提示共用的判定开关。
+    static bool SeriesFracAny(List<ChartSeries> series, int axisIndex) {
+        for (int i = 0; i < series.Count; i = i + 1) {
+            ChartSeries s = series[i];
+            if (s.hidden || s.axisIndex != axisIndex) { continue; }
+            for (int j = 0; j < s.Count(); j = j + 1) {
+                if (s.SeriesFrac(j)) { return true; }
+            }
+        }
+        return false;
+    }
+
     /// 绑定到给定数值轴的（可见）系列中的最小值
     /// （无负数时为 0），使轴天然覆盖负数。
     static int AxisMinFor(List<ChartSeries> series, int axisIndex) {
@@ -2524,6 +2649,39 @@ class Chart {
         return neg ? "-" + o : o;
     }
 
+    /// 1/1000 定点 → 小数文本：fr 为 0 时输出整数（500000 → "500"、
+    /// -1000 → "-1"），否则两位小数去尾零（500 → "0.5"、860 →
+    /// "0.86"）。折线小数值（line6 流量 0.86..1.5）在 int 渲染
+    /// 管线的承载约定：值 ×1000 存整型，展示前经此除回。
+    static string FracText(int v) {
+        bool neg = v < 0;
+        int av = neg ? 0 - v : v;
+        int ip = av / 1000;
+        int fr = (av - ip * 1000 + 5) / 10;
+        if (fr >= 100) { ip = ip + 1; fr = fr - 100; }
+        if (fr == 0) {
+            string whole = Chart.Commas(ip);
+            return neg ? "-" + whole : whole;
+        }
+        string fs = Convert.ToString(fr);
+        while (fs.Length > 1 && fs.Substring(fs.Length - 1, 1) == "0") {
+            fs = fs.Substring(0, fs.Length - 1);
+        }
+        string o = Convert.ToString(ip) + "." + fs;
+        return neg ? "-" + o : o;
+    }
+
+    /// 系列第 i 项的展示文本：小数系列（numberSet 且非整数）输出
+    /// 两位小数（ECharts2 数值默认 ×1000 定点），整数系列仍是
+    /// 千分位整数——与轴刻度、tooltip 的展示约定一致。
+    static string SeriesNumText(ChartSeries s, int i) {
+        if (s.SeriesFrac(i)) {
+            double dn = s.Number(i);
+            return Chart.FracText((int)(dn * 1000 + (dn >= 0 ? 0.5 : 0 - 0.5)));
+        }
+        return Chart.Commas(s.Value(i));
+    }
+
     /// [lo, hi] 范围分成 `ticks` 步时最宽的刻度标签（像素），
     /// 用于预留左/右轴 gut 宽度。
     static int TickLabelW(int lo, int hi, int ticks, int fs) {
@@ -2532,6 +2690,18 @@ class Chart {
         for (int k = 0; k <= ticks; k = k + 1) {
             int val = lo + span * k / ticks;
             int lw = Canvas.MeasureText(Chart.Commas(val), fs);
+            if (lw > wmax) { wmax = lw; }
+        }
+        return wmax;
+    }
+
+    /// TickLabelW 的 ×1000 定点对偶：小数轴刻度文本（FracText）
+    /// 的最宽像素。
+    static int TickLabelWF(int loF, int hiF, int ticks, int fs) {
+        int span = hiF - loF;
+        int wmax = 0;
+        for (int k = 0; k <= ticks; k = k + 1) {
+            int lw = Canvas.MeasureText(Chart.FracText(loF + span * k / ticks), fs);
             if (lw > wmax) { wmax = lw; }
         }
         return wmax;
@@ -2564,25 +2734,69 @@ class Chart {
 
         int lData = leftDataMax;
         if (lData < 0) { lData = Chart.AxisMaxFor(series, 0); }
+        bool leftFrac = Chart.SeriesFracAny(series, 0);
         int leftLo = Chart.AxisLo(y0.min, Chart.AxisMinFor(series, 0));
         int leftHi = Chart.AxisHi(y0.max, lData, leftLo);
+        int leftLoF = 0;
+        int leftHiF = 0;
+        if (leftFrac) {
+            // 小数轴（valueAxis 源码流程）：extent = 固定 min/max 或
+            // 原始数据上下界（×1000 定点）；双正锚 min=0 / 双负锚
+            // max=0 与向下/向上取整全部由 NiceRange（smartSteps）
+            // 承担（line6 流量 0.46..365 + 固定 max 500 → 0..500000
+            // 定点 5 段）。两端都固定走 _customerValue——精确等分
+            // 不取整（line8 0..30）。
+            leftLoF = Chart.FracAxisLoF(y0.min, series, 0);
+            leftHiF = Chart.FracAxisHiF(y0.max, series, 0);
+            if (y0.min != ChartOption.Auto() && y0.max != ChartOption.Auto()) {
+                leftLo = y0.min;
+                leftHi = y0.max;
+            } else {
+                ChartSpan fs2 = Chart.NiceRange(leftLoF, leftHiF);
+                leftLoF = fs2.lo;
+                leftHiF = fs2.hi;
+                ticks = fs2.ticks;
+                leftLo = leftLoF / 1000;
+                leftHi = leftHiF / 1000;
+            }
+        }
         bool hasRight = Chart.AnyOnAxis(series, 1);
         if (o.yAxes.Count > 1) { hasRight = true; }
         int rightLo = 0;
         int rightHi = 1;
+        int rightLoF = 0;
+        int rightHiF = 0;
+        bool rightFrac = false;
         int rt = ticks;
         if (hasRight) {
             int rData = rightDataMax;
             if (rData < 0) { rData = Chart.AxisMaxFor(series, 1); }
             rightLo = Chart.AxisLo(y1.min, Chart.AxisMinFor(series, 1));
             rightHi = Chart.AxisHi(y1.max, rData, rightLo);
+            rightFrac = Chart.SeriesFracAny(series, 1);
+            if (rightFrac) {
+                // 右小数轴（line6 降雨量 -0.955..-0.005 → 定点域
+                // -1000..0 步长 200），同左轴流程。
+                rightLoF = Chart.FracAxisLoF(y1.min, series, 1);
+                rightHiF = Chart.FracAxisHiF(y1.max, series, 1);
+                if (y1.min != ChartOption.Auto() && y1.max != ChartOption.Auto()) {
+                    rt = y1.ticks < 1 ? 5 : y1.ticks;
+                } else {
+                    ChartSpan rs2 = Chart.NiceRange(rightLoF, rightHiF);
+                    rightLoF = rs2.lo;
+                    rightHiF = rs2.hi;
+                    rt = rs2.ticks;
+                }
+                rightLo = rightLoF / 1000;
+                rightHi = rightHiF / 1000;
+            }
         }
         // 对数轴：仅正值，钳制下界到 ≥1（log10 对 ≤0 无定义）。
         bool leftLog = y0.type == ChartAxisType.Log;
         bool rightLog = hasRight && y1.type == ChartAxisType.Log;
         // 自动量程走 ECharts nice 步长（-76..15 → -80..20，
         // 0..1320 → 0..1400），刻度数随步长；固定 min/max 尊重不取整。
-        if (!leftLog && y0.type == ChartAxisType.Value
+        if (!leftLog && !leftFrac && y0.type == ChartAxisType.Value
             && y0.min == ChartOption.Auto() && y0.max == ChartOption.Auto()
             && leftDataMax < 0) {
             ChartSpan ls = Chart.NiceRange(Chart.AxisMinFor(series, 0), lData);
@@ -2598,7 +2812,7 @@ class Chart {
         if (rightLog) {
             if (rightLo < 1) { rightLo = 1; }
             if (rightHi < rightLo + 1) { rightHi = rightLo + 1; }
-        } else if (hasRight && y1.type == ChartAxisType.Value
+        } else if (hasRight && !rightFrac && y1.type == ChartAxisType.Value
             && y1.min == ChartOption.Auto() && y1.max == ChartOption.Auto()
             && rightDataMax < 0) {
             ChartSpan rs = Chart.NiceRange(Chart.AxisMinFor(series, 1),
@@ -2655,12 +2869,22 @@ class Chart {
             leftGut = mw + app.Scale(12);
         } else {
             leftGut = Chart.TickLabelW(leftLo, leftHi, ticks, fs) + app.Scale(12);
+            if (leftFrac) {
+                // 小数轴标签（"0.5"）比整数影子值（"0"）宽，按定点
+                // 域重估最宽刻度文本。
+                int fw = Chart.TickLabelWF(leftLoF, leftHiF, ticks, fs);
+                if (fw > leftGut) { leftGut = fw + app.Scale(12); }
+            }
             if (y0.labelFormatter.Length > 0) {
                 leftGut = leftGut + Chart.FormatterExtraW(y0.labelFormatter, leftHi, fs);
             }
         }
         int rightGut = pad;
         if (hasRight) { rightGut = Chart.TickLabelW(rightLo, rightHi, rt, fs) + app.Scale(12); }
+        if (rightFrac) {
+            int rw = Chart.TickLabelWF(rightLoF, rightHiF, rt, fs) + app.Scale(12);
+            if (rw > rightGut) { rightGut = rw; }
+        }
         int botGut = fh + app.Scale(12);
         if (x0.title.Length > 0) { botGut = botGut + fh + app.Scale(2); }
         if (xValue) { botGut = botGut + fh + app.Scale(2); }
@@ -2774,8 +2998,12 @@ class Chart {
         f.plotH = plotH;
         f.leftMin = leftLo;
         f.leftMax = leftHi;
+        f.leftMinF = leftLoF;
+        f.leftMaxF = leftHiF;
         f.rightMin = rightLo;
         f.rightMax = rightHi;
+        f.rightMinF = rightLoF;
+        f.rightMaxF = rightHiF;
         f.hasRight = hasRight;
         f.reversed = y0.reversed;
         f.rightReversed = y1.reversed;
@@ -2846,6 +3074,21 @@ class Chart {
                 c.DrawText(plotX - app.Scale(6) - lw, Canvas.CenterTextYAt(gy, fs),
                     ls, sAxis.FgOr(0), fs);
             }
+        } else if (leftFrac) {
+            // 小数轴刻度：×1000 定点域等分，标签 FracText 除回
+            // （0..500000 定点 5 段 → 0/100/…/500）。
+            int leftSpanF = leftHiF - leftLoF;
+            for (int k = 0; k <= ticks; k = k + 1) {
+                int lvF = leftLoF + leftSpanF * k / ticks;
+                int gy = f.YOfF(lvF, 0);
+                if (grid) { c.FillRect(plotX, gy, plotW, 1, sGrid.BgOr(0)); }
+                if (!y0Show) { continue; }
+                string ls = Chart.FracText(y0.labelNegate ? 0 - lvF : lvF);
+                if (y0.labelFormatter.Length > 0) { ls = y0.labelFormatter.Replace("{value}", ls); }
+                int lw = Canvas.MeasureText(ls, fs);
+                c.DrawText(plotX - app.Scale(6) - lw, Canvas.CenterTextYAt(gy, fs),
+                    ls, sAxis.FgOr(0), fs);
+            }
         } else {
             // 刻度取 Tick 副本（nice 端点）：映射范围留白外扩后，
             // 网格/标签仍落在整数 nice 值上，端格线悬在绘图区内侧。
@@ -2870,6 +3113,17 @@ class Chart {
                     int gy = f.YOfLog(rv, 1);
                     c.DrawText(plotRight + app.Scale(6), Canvas.CenterTextYAt(gy, fs),
                         Chart.Commas(rv), sAxis.FgOr(0), fs);
+                }
+            } else if (rightFrac) {
+                int rightSpanF = rightHiF - rightLoF;
+                for (int k = 0; k <= rt; k = k + 1) {
+                    int rvF = rightLoF + rightSpanF * k / rt;
+                    int gy = f.YOfF(rvF, 1);
+                    if (grid) { c.FillRect(plotX, gy, plotW, 1, sGrid.BgOr(0)); }
+                    string rs = Chart.FracText(y1.labelNegate ? 0 - rvF : rvF);
+                    if (y1.labelFormatter.Length > 0) { rs = y1.labelFormatter.Replace("{value}", rs); }
+                    c.DrawText(plotRight + app.Scale(6), Canvas.CenterTextYAt(gy, fs),
+                        rs, sAxis.FgOr(0), fs);
                 }
             } else {
                 int rightSpan = rightTickHi - rightTickLo;

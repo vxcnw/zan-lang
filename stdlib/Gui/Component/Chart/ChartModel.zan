@@ -1682,6 +1682,18 @@ class ChartSeries {
         return (int)(v + 0.5);
     }
 
+    /// 第 i 项是否小数（numberSet 且值非整）。折线族渲染/量程/
+    /// 提示对这类数据按 1/1000 定点承载（line6 流量 0.46..365、
+    /// 降雨量 -0.005..-0.955），轴走 leftMinF/rightMinF 定点域。
+    bool SeriesFrac(int i) {
+        if (this.data.Count > 0 && i >= 0 && i < this.data.Count) {
+            if (this.data[i].numberSet) {
+                return this.data[i].number != (double)this.data[i].val;
+            }
+        }
+        return false;
+    }
+
     /// 复制系列外壳和所有可变数据列表。Merge 只会替换这些列表
     /// 或显式样式字段，因此不会反向修改输入 option。
     static ChartSeries Clone(ChartSeries src) {
@@ -1922,6 +1934,7 @@ class ChartOption {
     bool showValues;  // 点/柱顶上的数值标签
     bool animate;     // 首次渲染时的增长入场动画
     bool smooth;      // 全局平滑（默认 true：ECharts 2.2.x 折线不写 smooth 也渲染曲线）；系列的 smooth 字段覆盖它
+    bool pointerCross; // tooltip.axisPointer.type='cross'（line7 双数值轴：十字虚线 + ( x , y ) 轴值读数）
     bool gradient;    // 垂直渐变填充（面积 / 柱状）
     bool rounded;     // 圆角柱帽
     int animMs;       // 入场动画时长（毫秒）
