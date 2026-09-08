@@ -1343,7 +1343,7 @@ class Layer {
 
         int drag = 0 - 1;
         for (int j = 0; j < list.Count; j = j + 1) {
-            if (list[j].dragging) { drag = j; }
+            if (list[j].dragging || list[j].sizing) { drag = j; }
         }
 
         int active = drag;
@@ -1496,23 +1496,6 @@ class Layer {
         app.focus.RegisterFocusable(s.maxId);
         app.focus.RegisterFocusable(s.closeId);
 
-        // 缩放把手（仅正常态）：左右缘 SIZEWE、下缘 SIZENS、
-        // 右下/左下角走对角缩放光标（wtype 7/8）。右缘从标题栏
-        // 下方开始，避免盖住关闭钮；后注册覆盖先注册，把手压过
-        // 窗体拦截区与标题栏左缘（与 Windows 边缘行为一致）。
-        if (s.state == 0) {
-            int g = app.Scale(5);
-            int cg = app.Scale(9);
-            app.hitTester.RegisterRect(s.rsLId, ex, ey, g, eh - cg, 4);
-            app.hitTester.RegisterRect(s.rsRId, ex + ew - g, ey + bar, g,
-                                       eh - bar - g, 4);
-            app.hitTester.RegisterRect(s.rsBId, ex + cg, ey + eh - g,
-                                       ew - cg * 2, g, 5);
-            app.hitTester.RegisterRect(s.rsSEId, ex + ew - cg,
-                                       ey + eh - cg, cg, cg, 7);
-            app.hitTester.RegisterRect(s.rsSWId, ex, ey + eh - cg, cg, cg, 8);
-        }
-
         if (!active) { ek = 0; }
 
         if (active && s.state == 0 && Ui.PressedDown(app, s.barId)) {
@@ -1658,6 +1641,27 @@ class Layer {
         Layer.CapButton(app, closeX, ey, bw, bar, "close", gl, true);
 
         Layer.RenderLayerBody(app, s, ex, ey, ew, eh, bar);
+
+        // 缩放把手（仅正常态）：左右缘 SIZEWE、下缘 SIZENS、
+        // 右下/左下角走对角缩放光标（wtype 7/8）。右缘从标题栏
+        // 下方开始，避免盖住关闭钮。在正文之后注册——正文里
+        // 的滚动视口（SizeToContent 包的 ScrollColumn）与页脚
+        // 按钮会先注册大块命中区，先前把手注册在正文之前，
+        // 边缘命区全被盖住，缩放基本拖不动（后注册覆盖先注册，
+        // 把手必须最后压上去）。按压检测仍在本帧上方按上一帧
+        // 的命中解析进行，不受此注册位置影响。
+        if (s.state == 0) {
+            int g = app.Scale(5);
+            int cg = app.Scale(9);
+            app.hitTester.RegisterRect(s.rsLId, ex, ey, g, eh - cg, 4);
+            app.hitTester.RegisterRect(s.rsRId, ex + ew - g, ey + bar, g,
+                                       eh - bar - g, 4);
+            app.hitTester.RegisterRect(s.rsBId, ex + cg, ey + eh - g,
+                                       ew - cg * 2, g, 5);
+            app.hitTester.RegisterRect(s.rsSEId, ex + ew - cg,
+                                       ey + eh - cg, cg, cg, 7);
+            app.hitTester.RegisterRect(s.rsSWId, ex, ey + eh - cg, cg, cg, 8);
+        }
     }
 
     /// 出场收场帧（closing 层专用）：与 RenderActive 的画法同一套
