@@ -209,6 +209,7 @@ class UnitRole {
     static int None() { return 0; }
     static int Engineer() { return 1; }   // captures the building he reaches
     static int Spy() { return 2; }        // infiltrates: steals or blackouts
+    static int Harvester() { return 3; }  // mines ore, unloads at a refinery
 }
 
 /// <summary>What a building is: footprint, health, cost, its power ledger
@@ -228,7 +229,7 @@ class BuildingDef {
     int armor;         // ArmorClass
     Weapon weapon;     // null = no gun
     bool powered;      // needs a positive power balance to work (defences)
-    bool refinery;     // trickles credits
+    bool refinery;     // hands out a free harvester on completion
     int sideMask;      // 1 allied, 2 soviet, 4 neutral civilian
     List<string> prereq;
 
@@ -314,13 +315,23 @@ class Rules {
 
     // Economy.
     int startMoney;
-    int refineryIncome;   // credits per built refinery per tick
     int oilIncome;        // credits per captured oil derrick per tick
     int oilCapture;       // one-shot bonus for grabbing an oil derrick
     int bombDamage;       // Ivan's bomb
     int bombDelay;        // ticks before Ivan's bomb goes off
     int blackoutTicks;    // spy-infiltrated power plant downtime
     int freezeTicks;      // chrono-beam freeze duration
+
+    // The [OverlayTypes] list, in rules order: the names the map overlay
+    // plane's byte values index into. The GEM* entries are RA2's ore fields.
+    List<string> overlayTypes;
+
+    // Ore regrowth, the shipped [General] TiberiumGrows / TiberiumSpreads /
+    // GrowthRate keys: whether fields richen and spread, and how many
+    // minutes pass between growth passes.
+    bool oreGrows;
+    bool oreSpreads;
+    int growthRate;
 
     static Rules Create() {
         Rules r = new Rules();
@@ -329,6 +340,10 @@ class Rules {
         r.units = new List<UnitDef>();
         r.buildings = new List<BuildingDef>();
         r.civs = new List<BuildingDef>();
+        r.overlayTypes = new List<string>();
+        r.oreGrows = true;
+        r.oreSpreads = true;
+        r.growthRate = 5;
         return r;
     }
 
@@ -354,13 +369,72 @@ class Rules {
     List<string> AiRadar() { return this.aiRadar; }
     List<string> AiDefense() { return this.aiDefense; }
     int StartMoney() { return this.startMoney; }
-    int RefineryIncome() { return this.refineryIncome; }
     int OilIncome() { return this.oilIncome; }
     int OilCapture() { return this.oilCapture; }
     int BombDamage() { return this.bombDamage; }
     int BombDelay() { return this.bombDelay; }
     int BlackoutTicks() { return this.blackoutTicks; }
     int FreezeTicks() { return this.freezeTicks; }
+
+    /// <summary>Whether a map overlay index carries ore: its [OverlayTypes]
+    /// name begins with GEM (RA2 has no separate ORE_* types). Unknown
+    /// indices are never ore.</summary>
+    bool IsOreOverlay(int idx) {
+        if (idx < 0 || idx >= this.overlayTypes.Count) { return false; }
+        string name = this.overlayTypes[idx];
+        if (name.Length < 3) { return false; }
+        return (name[0] & 0xDF) == 'G' && (name[1] & 0xDF) == 'E'
+            && (name[2] & 0xDF) == 'M';
+    }
+
+    /// <summary>Credits one unit of an overlay's ore is worth. The first six
+    /// GEM overlays are plain gold ore, the last six the sparkly crystal
+    /// fields the original pays double for.</summary>
+    int OreValue(int idx) {
+        int first = this.FirstOreOverlay();
+        if (first < 0 || idx < first + 6) { return 1; }
+        return 2;
+    }
+
+    /// <summary>The lowest ore overlay index, -1 when the rules list none.</summary>
+    int FirstOreOverlay() {
+        for (int i = 0; i < this.overlayTypes.Count; i = i + 1) {
+            if (this.IsOreOverlay(i)) { return i; }
+        }
+        return -1;
+    }
+
+    bool OreGrows() { return this.oreGrows; }
+    bool OreSpreads() { return this.oreSpreads; }
+
+    /// <summary>Minutes between ore growth passes, the shipped GrowthRate.</summary>
+    int GrowthRateMinutes() { return this.growthRate; }
+
+    /// <summary>An INI boolean: yes/true/1 are on, anything else off.</summary>
+    static bool YesNo(string v) {
+        if (v == null || v.Length == 0) { return false; }
+        int c = v[0] & 0xDF;
+        return c == 'Y' || c == 'T' || v[0] == '1';
+    }
+
+    /// <summary>The leading integer of a value like "5" or "5.0 minutes",
+    /// 0 when none. INI growth rates are written both ways.</summary>
+    static int LeadingInt(string v) {
+        if (v == null) { return 0; }
+        int at = 0;
+        while (at < v.Length && (v[at] == 32 || v[at] == 9)) { at = at + 1; }
+        int sign = 1;
+        if (at < v.Length && (v[at] == 45 || v[at] == 43)) {
+            if (v[at] == 45) { sign = -1; }
+            at = at + 1;
+        }
+        int n = 0;
+        while (at < v.Length && v[at] >= 48 && v[at] <= 57) {
+            n = n * 10 + (v[at] - 48);
+            at = at + 1;
+        }
+        return n * sign;
+    }
 
     Warhead WarheadNamed(string name) {
         for (int i = 0; i < this.warheads.Count; i = i + 1) {
@@ -620,6 +694,10 @@ class Rules {
             r.WarheadNamed("FlakTWH")));
         r.weapons.Add(Weapon.Create("HoverMissile", 25, 50, 6,
             r.WarheadNamed("HE")));
+        // The War Miner's nose gun, the shipped [20mmRapid]: an
+        // anti-infantry deterrent, so mining under fire is not free.
+        r.weapons.Add(Weapon.Create("20mmRapid", 30, 20, 5,
+            r.WarheadNamed("SA")));
 
         // -- the roster -------------------------------------------------------
         // Order matters: each side's menu ids come from filtering this list,
@@ -697,6 +775,14 @@ class Rules {
             "SREF.VXL");
         sref.AddPrereq("TECH");
         r.units.Add(sref);
+        // The Chrono Miner, the allied harvester: the shipped [CMIN] stats.
+        // The original teleports back to its refinery to unload; this engine
+        // drives the route instead, documented as a substitution until a
+        // chrono layer exists.
+        UnitDef cmin = UnitDef.Create("CMIN", "超时空采矿车", 1400, 1000, 4,
+            ArmorClass.Medium(), null, "GAWEAP", 1, "CMIN.VXL");
+        cmin.SetRole(UnitRole.Harvester());
+        r.units.Add(cmin);
 
         // Soviet infantry, plus the terror drone the war factory turns out.
         UnitDef shk = UnitDef.Create("SHK", "磁暴步兵", 500, 130, 4,
@@ -764,6 +850,14 @@ class Rules {
         apoc.SetSecondary(r.WeaponNamed("MammothTusk"));
         apoc.AddPrereq("TECH");
         r.units.Add(apoc);
+        // The War Miner, the Soviet harvester: the shipped [HARV] stats,
+        // including the nose gun that makes mining under fire survivable.
+        // The harvester role drives the mine-and-unload loop in World.
+        UnitDef harv = UnitDef.Create("HARV", "武装采矿车", 1400, 1000, 4,
+            ArmorClass.Heavy(), r.WeaponNamed("20mmRapid"), "NAWEAP", 2,
+            "HARV.VXL");
+        harv.SetRole(UnitRole.Harvester());
+        r.units.Add(harv);
         r.units.Add(UnitDef.Create("DRON", "恐怖机器人", 500, 100, 10,
             ArmorClass.Special1(), r.WeaponNamed("DroneJump"), "NAWEAP", 2,
             "DRON.SHP"));
@@ -897,7 +991,6 @@ class Rules {
 
         // -- economy -----------------------------------------------------------
         r.startMoney = 10000;
-        r.refineryIncome = 3;
         r.oilIncome = 1;
         r.oilCapture = 1000;
         r.bombDamage = 400;
@@ -1010,6 +1103,11 @@ class Rules {
         }
         IniSection general = ini.Section("General");
         if (general != null) {
+            this.oreGrows = Rules.YesNo(general.GetOr("TiberiumGrows", "yes"));
+            this.oreSpreads = Rules.YesNo(general.GetOr("TiberiumSpreads",
+                                                        "yes"));
+            this.growthRate = Rules.LeadingInt(general.GetOr("GrowthRate",
+                                                             "5"));
             this.preqPower = Rules.CsvOr(general, "PrerequisitePower",
                                          this.preqPower);
             this.preqFactory = Rules.CsvOr(general, "PrerequisiteFactory",
@@ -1033,6 +1131,22 @@ class Rules {
             this.aiTech = Rules.CsvOr(ai, "BuildTech", this.aiTech);
             this.aiRadar = Rules.CsvOr(ai, "BuildRadar", this.aiRadar);
             this.aiDefense = Rules.CsvOr(ai, "BuildDefense", this.aiDefense);
+        }
+        // The overlay type table: keys 1..n map to indices 0..n-1, exactly
+        // how the map's OverlayPack bytes index it (GEM01 is key 28,
+        // therefore byte value 27, in this install's rules).
+        IniSection ov = ini.Section("OverlayTypes");
+        if (ov != null) {
+            this.overlayTypes = new List<string>();
+            for (int i = 0; i < ov.Count(); i = i + 1) {
+                string name = ov.EntryAt(i).Value().Trim();
+                int semi = -1;
+                for (int c = 0; c < name.Length; c = c + 1) {
+                    if (name[c] == 59) { semi = c; break; }
+                }
+                if (semi >= 0) { name = name.Substring(0, semi).Trim(); }
+                this.overlayTypes.Add(name);
+            }
         }
         // Sidebar names come from the install's own string table, the same
         // labels the original menu showed: each unit/building's UIName points

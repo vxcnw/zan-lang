@@ -59,6 +59,11 @@ class WorldObject {
     int bombTimer;     // ticks until the planted bomb detonates, -1 = none
     bool civ;          // a map civilian structure (lives in the civ catalog)
 
+    // Harvester state (units with the harvester role): credits in the hold,
+    // and a countdown that paces mining passes and unloading.
+    int cargo;
+    int dockTimer;
+
     static WorldObject CreateStructure(int side, int buildId, int x, int y,
                                        int hp) {
         WorldObject o = new WorldObject();
@@ -81,6 +86,8 @@ class WorldObject {
         o.frozen = 0;
         o.bombTimer = -1;
         o.civ = false;
+        o.cargo = 0;
+        o.dockTimer = 0;
         return o;
     }
 
@@ -110,6 +117,8 @@ class WorldObject {
         o.frozen = 0;
         o.bombTimer = -1;
         o.civ = false;
+        o.cargo = 0;
+        o.dockTimer = 0;
         return o;
     }
 
@@ -156,6 +165,10 @@ class WorldObject {
     void SetBombTimer(int ticks) { this.bombTimer = ticks; }
     bool IsCiv() { return this.civ; }
     void SetCiv(bool on) { this.civ = on; }
+    int Cargo() { return this.cargo; }
+    void SetCargo(int credits) { this.cargo = credits; }
+    int DockTimer() { return this.dockTimer; }
+    void SetDockTimer(int ticks) { this.dockTimer = ticks; }
 
     // ---- production ------------------------------------------------------
 
@@ -438,6 +451,19 @@ class UnitCatalog {
         if (unitId < 0 || unitId >= l.Count) { return null; }
         return l[unitId];
     }
+
+    /// <summary>The side's harvester unit id, -1 when it fields none. The
+    /// refinery hands out one of these on completion, as the shipped
+    /// buildings always have.</summary>
+    int HarvesterIdFor(int side) {
+        List<UnitType> l = this.ListFor(side);
+        for (int i = 0; i < l.Count; i = i + 1) {
+            if (l[i] != null && l[i].Role() == UnitRole.Harvester()) {
+                return i;
+            }
+        }
+        return -1;
+    }
 }
 
 /// <summary>One building archetype: the fields a placed structure needs,
@@ -649,6 +675,14 @@ class World {
     // production exactly like a low-power state.
     List<int> blackout;
 
+    // The ore fields, in the same diamond cell space as the iso terrain.
+    // RA2 stores them as GEM overlays on the map; seeding copies the amount
+    // (the overlay's data byte) and the credits per unit here, and the
+    // harvester loop depletes and regrows the cells from this grid.
+    int[] oreAmt;
+    int[] oreVal;
+    int oreLeft;         // cells carrying ore, for the growth pass
+
     static World Create(IsoMap iso, StructureCatalog catalog, UnitCatalog units) {
         World w = new World();
         w.iso = iso;
@@ -669,6 +703,13 @@ class World {
         for (int i = 0; i < w.occupancy.Length; i = i + 1) {
             w.occupancy[i] = 0;
         }
+        w.oreAmt = new int[w.width * w.height];
+        w.oreVal = new int[w.width * w.height];
+        for (int i = 0; i < w.oreAmt.Length; i = i + 1) {
+            w.oreAmt[i] = 0;
+            w.oreVal[i] = 0;
+        }
+        w.oreLeft = 0;
         return w;
     }
 
@@ -732,6 +773,251 @@ class World {
     /// powered defences offline.</summary>
     bool SideLowPower(int side) {
         return this.PowerBalance(side) < 0 || this.SideBlackout(side);
+    }
+
+    // ---- ore fields --------------------------------------------------------
+
+    /// <summary>Seeds one cell's ore from the map overlay plane: amt is the
+    /// overlay's data byte (0 clears), val the credits per unit.</summary>
+    void SetOre(int x, int y, int amt, int val) {
+        if (!this.InBounds(x, y)) { return; }
+        int slot = this.CellSlot(x, y);
+        bool was = this.oreAmt[slot] > 0;
+        this.oreAmt[slot] = amt;
+        this.oreVal[slot] = amt > 0 ? val : 0;
+        if (amt > 0 && !was) { this.oreLeft = this.oreLeft + 1; }
+        if (amt <= 0 && was) { this.oreLeft = this.oreLeft - 1; }
+    }
+
+    /// <summary>How much ore sits at a cell, 0 when none.</summary>
+    int OreAt(int x, int y) {
+        if (!this.InBounds(x, y)) { return 0; }
+        return this.oreAmt[this.CellSlot(x, y)];
+    }
+
+    int OreValueAt(int x, int y) {
+        if (!this.InBounds(x, y)) { return 0; }
+        return this.oreVal[this.CellSlot(x, y)];
+    }
+
+    /// <summary>A mining pass: takes up to take units from the cell and
+    /// returns how many were actually taken.</summary>
+    int TakeOre(int x, int y, int take) {
+        if (!this.InBounds(x, y)) { return 0; }
+        int slot = this.CellSlot(x, y);
+        int amt = this.oreAmt[slot];
+        if (amt <= 0) { return 0; }
+        if (take > amt) { take = amt; }
+        this.oreAmt[slot] = amt - take;
+        if (this.oreAmt[slot] <= 0) {
+            this.oreAmt[slot] = 0;
+            this.oreVal[slot] = 0;
+            this.oreLeft = this.oreLeft - 1;
+        }
+        return take;
+    }
+
+    /// <summary>Raises a random ore cell by one stage and, now and then,
+    /// spreads to a neighbouring clear ground cell -- the shipped
+    /// TiberiumGrows / TiberiumSpreads rules. Tick calls this on the growth
+    /// cadence derived from the rules' GrowthRate.</summary>
+    void GrowOre() {
+        if (this.oreLeft <= 0) { return; }
+        // A handful of cells richen each pass.
+        for (int g = 0; g < 8; g = g + 1) {
+            int c = this.worldTick * 7 + g * 131 + g * g * 31;
+            int x = c % this.width;
+            int y = (c / this.width) % this.height;
+            if (this.oreAmt[this.CellSlot(x, y)] > 0) {
+                int amt = this.oreAmt[this.CellSlot(x, y)];
+                if (amt < 30) { this.oreAmt[this.CellSlot(x, y)] = amt + 1; }
+            }
+        }
+        // Spreading: a clear, walkable neighbour of an ore cell becomes ore.
+        if (!this.Rules().OreSpreads()) { return; }
+        for (int s = 0; s < 2; s = s + 1) {
+            int c = this.worldTick * 13 + s * 211 + s * s * 17;
+            int x = c % this.width;
+            int y = (c / this.width) % this.height;
+            if (this.oreAmt[this.CellSlot(x, y)] <= 0) { continue; }
+            int dx = (c >> 3) % 3 - 1;
+            int dy = (c >> 5) % 3 - 1;
+            if (dx == 0 && dy == 0) { continue; }
+            int nx = x + dx;
+            int ny = y + dy;
+            if (this.OreAt(nx, ny) > 0) { continue; }
+            if (!this.PassableForRoute(nx, ny, false)) { continue; }
+            int val = this.oreVal[this.CellSlot(x, y)];
+            this.SetOre(nx, ny, 2, val);
+            break;
+        }
+    }
+
+    /// <summary>How many credits a full ore hold is worth -- the shipped
+    /// harvester payload the original unloads at the refinery.</summary>
+    static int OreCapacity() { return 700; }
+
+    /// <summary>One harvester's mine-and-unload loop, run every tick. With
+    /// room in the hold it mines the cell underfoot and, when that runs
+    /// dry, seeks the nearest ore; with a full hold it docks at the nearest
+    /// own refinery and pours the cargo into the side's funds. The original
+    /// drives the harvester INTO the refinery while it unloads and lets the
+    /// chrono miner teleport home; this engine docks on the adjacent ring
+    /// and drives everything, documented as a substitution.</summary>
+    void TickHarvester(WorldObject o) {
+        if (o.Frozen() > 0) { return; }
+        // A countdown paces mining passes and unloading.
+        if (o.DockTimer() > 0) {
+            o.SetDockTimer(o.DockTimer() - 1);
+            if (o.DockTimer() == 0 && o.Cargo() >= World.OreCapacity()) {
+                this.AddMoneyEvent(o.Side(), o.Cargo());
+                o.SetCargo(0);
+            }
+            return;
+        }
+        if (o.Cargo() >= World.OreCapacity()) {
+            if (this.AtRefineryDock(o)) {
+                o.SetDockTimer(360);
+                return;
+            }
+            if (!o.HasRoute()) { this.RouteToRefinery(o); }
+            return;
+        }
+        // Room in the hold: mine underfoot, or go find ore.
+        if (!o.HasRoute()) {
+            int amt = this.OreAt(o.X(), o.Y());
+            if (amt > 0) {
+                // The pass can empty the cell, which zeroes its value, so
+                // the price is read before the take, not after.
+                int val = this.OreValueAt(o.X(), o.Y());
+                int taken = this.TakeOre(o.X(), o.Y(), 25);
+                if (taken > 0) {
+                    o.SetCargo(o.Cargo() + taken * val);
+                }
+                o.SetDockTimer(60);
+                return;
+            }
+            if (!this.RouteToOre(o)) { o.SetDockTimer(45); }
+        }
+    }
+
+    /// <summary>The nearest ore cell to (cx, cy), scanned ring by ring out
+    /// to 40 cells; fills slots 0 and 1 of outXy and returns true when one
+    /// exists. The renderer and the selftest use this to aim at a field;
+    /// the harvester's own search is RouteToOre, which also demands a path.
+    /// </summary>
+    bool FindOre(int cx, int cy, List<int> outXy) {
+        int span = this.width > this.height ? this.width : this.height;
+        for (int r = 0; r <= span; r = r + 1) {
+            for (int dy = -r; dy <= r; dy = dy + 1) {
+                for (int dx = -r; dx <= r; dx = dx + 1) {
+                    int adx = dx < 0 ? -dx : dx;
+                    int ady = dy < 0 ? -dy : dy;
+                    if (adx != r && ady != r) { continue; }
+                    int x = cx + dx;
+                    int y = cy + dy;
+                    if (this.OreAt(x, y) > 0) {
+                        World.SetSlot2(outXy, x, y);
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    static void SetSlot2(List<int> list, int a, int b) {
+        while (list.Count < 2) { list.Add(0); }
+        list[0] = a;
+        list[1] = b;
+    }
+
+    /// <summary>Routes a unit to the nearest ore cell within 30 cells of
+    /// its position, expanding rings outwards. Returns false when the scan
+    /// finds nothing reachable.</summary>
+    bool RouteToOre(WorldObject o) {
+        List<int> px = new List<int>();
+        List<int> py = new List<int>();
+        for (int r = 0; r <= 30; r = r + 1) {
+            for (int dy = -r; dy <= r; dy = dy + 1) {
+                for (int dx = -r; dx <= r; dx = dx + 1) {
+                    // Only this radius's ring: inner rings were scanned.
+                    int adx = dx < 0 ? -dx : dx;
+                    int ady = dy < 0 ? -dy : dy;
+                    if (adx != r && ady != r) { continue; }
+                    int x = o.X() + dx;
+                    int y = o.Y() + dy;
+                    if (this.OreAt(x, y) <= 0) { continue; }
+                    if (!this.PassableForRoute(x, y, o.Amphibious())) {
+                        continue;
+                    }
+                    if (this.FindPath(o.X(), o.Y(), x, y, px, py,
+                                      o.Amphibious())) {
+                        o.SetRoute(px, py);
+                        o.ClearMoveAttack();
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /// <summary>Routes a loaded harvester to a free cell beside the nearest
+    /// finished refinery it owns. Returns false -- leaving the harvester to
+    /// retry on a later tick -- when it owns none or none is reachable.</summary>
+    bool RouteToRefinery(WorldObject o) {
+        WorldObject best = null;
+        int bestDist = 0;
+        for (int i = 0; i < this.objects.Count; i = i + 1) {
+            WorldObject r = this.objects[i];
+            if (r.Kind() != ObjKind.Structure() || r.Side() != o.Side()) {
+                continue;
+            }
+            if (r.IsDead()) { continue; }
+            StructureType t = this.TypeOf(r);
+            if (t == null || !t.IsRefinery()) { continue; }
+            if (r.BuiltTicks() < t.BuildTime()) { continue; }
+            int dist = (r.X() - o.X()) * (r.X() - o.X())
+                     + (r.Y() - o.Y()) * (r.Y() - o.Y());
+            if (best == null || dist < bestDist) {
+                best = r;
+                bestDist = dist;
+            }
+        }
+        if (best == null) { return false; }
+        List<int> cell = new List<int>();
+        this.FindSpawnCell(best, cell);
+        if (cell.Count < 2) { return false; }
+        List<int> px = new List<int>();
+        List<int> py = new List<int>();
+        if (!this.FindPath(o.X(), o.Y(), cell[0], cell[1], px, py,
+                           o.Amphibious())) {
+            return false;
+        }
+        o.SetRoute(px, py);
+        o.ClearMoveAttack();
+        return true;
+    }
+
+    /// <summary>Whether the harvester stands on the docking ring of a
+    /// finished own refinery.</summary>
+    bool AtRefineryDock(WorldObject o) {
+        for (int i = 0; i < this.objects.Count; i = i + 1) {
+            WorldObject r = this.objects[i];
+            if (r.Kind() != ObjKind.Structure() || r.Side() != o.Side()) {
+                continue;
+            }
+            if (r.IsDead()) { continue; }
+            StructureType t = this.TypeOf(r);
+            if (t == null || !t.IsRefinery()) { continue; }
+            if (r.BuiltTicks() < t.BuildTime()) { continue; }
+            if (o.X() >= r.X() - 1 && o.X() <= r.X() + t.FootprintW()
+             && o.Y() >= r.Y() - 1 && o.Y() <= r.Y() + t.FootprintH()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ---- tech tree ----------------------------------------------------------
@@ -1903,6 +2189,20 @@ class World {
                 steps = steps - 1;
             }
         }
+        // Harvesters run the mine-and-unload loop: mine the cell underfoot,
+        // haul a full hold to the nearest own refinery, unload, repeat. The
+        // fields regrow on the rules' GrowthRate cadence.
+        for (int i = 0; i < this.objects.Count; i = i + 1) {
+            WorldObject o = this.objects[i];
+            if (o.Kind() != ObjKind.Unit()) { continue; }
+            if (o.UnitType() == null
+             || o.UnitType().Role() != UnitRole.Harvester()) { continue; }
+            this.TickHarvester(o);
+        }
+        if (this.Rules().OreGrows()
+         && this.worldTick % (this.Rules().GrowthRateMinutes() * 3600) == 0) {
+            this.GrowOre();
+        }
         // Production: every structure with a queue counts its head down and,
         // when one finishes, walks the new unit out onto a free neighbour. If
         // every neighbour is taken the finished unit waits at zero rather than
@@ -1916,6 +2216,23 @@ class World {
             WorldObject o = this.objects[i];
             if (o.Kind() != ObjKind.Structure()) { continue; }
             o.AdvanceBuilt();
+            // A finished refinery delivers one free harvester, as the
+            // shipped buildings always have -- the ore loop starts the
+            // moment the refinery opens, without a manual click.
+            StructureType bt = this.TypeOf(o);
+            if (bt != null && bt.IsRefinery()
+             && o.BuiltTicks() == bt.BuildTime()) {
+                int hid = this.units.HarvesterIdFor(o.Side());
+                if (hid >= 0) {
+                    UnitType hu = this.units.TypeFor(o.Side(), hid);
+                    List<int> hcell = new List<int>();
+                    this.FindSpawnCell(o, hcell);
+                    if (hcell.Count >= 2 && hu != null) {
+                        this.AddObject(WorldObject.CreateUnit(o.Side(), hid,
+                            hcell[0], hcell[1], hu.Hp(), hu));
+                    }
+                }
+            }
             if (!o.HasProduction()) { continue; }
             bool low = o.Side() == Side2.Soviet() ? sovietLow : playerLow;
             if (low && this.worldTick % 2 == 0) { continue; }   // every other tick

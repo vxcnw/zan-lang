@@ -24,6 +24,16 @@ class MapFile {
     int localWidth;
     int localHeight;
     IsoMap terrain;
+    // The overlay plane, as two byte arrays in diamond cell space. RA2 packs
+    // them as Format5 chunk streams whose chunks carry Format80, and lays
+    // them out on a fixed 512-wide canvas -- cell (x,y) lives at y*512+x
+    // (verified against MP02T2 and MP07T4; a span-sized grid does not fit the
+    // decoded data). OverlayPack holds the type index into the rules'
+    // [OverlayTypes] list, 0xFF for empty; OverlayDataPack holds the data
+    // byte -- the frame for walls, the ore amount for the GEM overlays. RA2's
+    // ore lives entirely in the GEM overlays; there are no ORE_* types.
+    int[] overlay;
+    int[] overlayData;
 
     static MapFile Parse(string text) {
         MapFile m = new MapFile();
@@ -43,18 +53,51 @@ class MapFile {
             m.localHeight = local[3];
         }
 
+        int span = m.width + m.height;
         string packed = MapPack.JoinSection(m.doc, "IsoMapPack5");
         if (packed.Length > 0) {
             List<int> len = new List<int>();
             len.Add(0);
             byte[] raw = MapPack.Decode(packed, len);
-            int span = m.width + m.height;
             m.terrain = IsoMap.Parse(raw, len[0], span, span);
         } else {
-            int span = m.width + m.height;
             m.terrain = IsoMap.Parse("", 0, span, span);
         }
+
+        m.overlay = new int[512 * 512];
+        m.overlayData = new int[512 * 512];
+        for (int c = 0; c < 512 * 512; c = c + 1) {
+            m.overlay[c] = -1;
+            m.overlayData[c] = 0;
+        }
+        m.ParseOverlay("OverlayPack", "OverlayDataPack");
         return m;
+    }
+
+    /// <summary>Reads the overlay plane from the two packed sections.</summary>
+    void ParseOverlay(string packName, string dataName) {
+        this.ParseOverlayPack(packName, this.overlay, true);
+        this.ParseOverlayPack(dataName, this.overlayData, false);
+    }
+
+    /// <summary>Decodes one packed overlay section into a plane. The type
+    /// plane stores -1 for the 0xFF empty marker; the data plane keeps the
+    /// raw byte, since 255 is a legitimate (fully rich) ore amount.</summary>
+    void ParseOverlayPack(string packName, int[] plane, bool ffe) {
+        string packed = MapPack.JoinSection(this.doc, packName);
+        if (packed.Length == 0) { return; }
+        List<int> b64Len = new List<int>();
+        b64Len.Add(0);
+        byte[] raw64 = Base64.Decode(packed, b64Len);
+        List<int> len = new List<int>();
+        len.Add(0);
+        byte[] raw = MapPack.DecodeChunks80(raw64, b64Len[0], len);
+        int n = len[0];
+        if (n > plane.Length) { n = plane.Length; }
+        for (int c = 0; c < n; c = c + 1) {
+            int v = raw[c] & 0xFF;
+            plane[c] = ffe && v == 0xFF ? -1 : v;
+        }
     }
 
     /// <summary>Splits a "a,b,c,d" value into integers, ignoring blanks.</summary>
@@ -81,6 +124,27 @@ class MapFile {
     int LocalWidth() { return this.localWidth; }
     int LocalHeight() { return this.localHeight; }
     IsoMap Terrain() { return this.terrain; }
+
+    /// <summary>The overlay type index at a cell, or -1 when the cell is
+    /// empty or outside the map. The index numbers the rules' [OverlayTypes]
+    /// list from zero -- GEM01, the first ore overlay, is 27 in this
+    /// install's rules.</summary>
+    int OverlayAt(int x, int y) {
+        return this.OverlayLookup(x, y, this.overlay);
+    }
+
+    /// <summary>The overlay's data byte: the wall's frame, or for the GEM
+    /// overlays the amount of ore in the cell.</summary>
+    int OverlayDataAt(int x, int y) {
+        int v = this.OverlayLookup(x, y, this.overlayData);
+        return v < 0 ? 0 : v;
+    }
+
+    int OverlayLookup(int x, int y, int[] plane) {
+        int span = this.width + this.height;
+        if (x < 0 || y < 0 || x >= span || y >= span) { return -1; }
+        return plane[y * 512 + x];
+    }
 
     string Name() { return this.doc.GetOr("Basic", "Name", ""); }
 

@@ -48,8 +48,15 @@ class AssetDb {
     /// shapes in conquer and generic, terrain in the iso* and theatre archives.
     static List<string> NestedOrder() {
         List<string> l = new List<string>();
+        // Base game first, Yuri's Revenge overrides after: later mounts
+        // lose the lookup race, and the shipped install is a YR one. The
+        // MD generic archives (LOCALMD/CONQMD/CACHEMD) and the YR theaters
+        // only enter the VFS through this list -- before they were added,
+        // everything they carry hashed as "absent".
         l.Add("LOCAL.MIX");
+        l.Add("LOCALMD.MIX");
         l.Add("CONQUER.MIX");
+        l.Add("CONQUERMD.MIX");
         l.Add("CONQMD.MIX");
         l.Add("GENERIC.MIX");
         l.Add("ISOTEMP.MIX");
@@ -58,9 +65,16 @@ class AssetDb {
         l.Add("SNOW.MIX");
         l.Add("ISOURB.MIX");
         l.Add("URBAN.MIX");
+        l.Add("ISONURB.MIX");
+        l.Add("NEWURBAN.MIX");
+        l.Add("ISODES.MIX");
+        l.Add("DESERT.MIX");
+        l.Add("ISOLUN.MIX");
+        l.Add("LUNAR.MIX");
         l.Add("SIDEC01.MIX");
         l.Add("SIDEC02.MIX");
         l.Add("CACHE.MIX");
+        l.Add("CACHEMD.MIX");
         return l;
     }
 

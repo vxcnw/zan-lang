@@ -178,6 +178,31 @@ class MapRenderer {
             }
         }
 
+        // Ore fields lie on the ground, under everything that moves. The
+        // install carries no GEM*.SHP overlay art -- every GEM name hashes
+        // absent from all 27 of its mix mounts, walls and twinkle survive --
+        // so the fields draw as deterministic lumps that densify with the
+        // cell's amount, standing in for the original's staged frames.
+        if (this.world != null) {
+            for (int i = 0; i < this.order.Count; i = i + 1) {
+                IsoTile t = this.iso.TileAt(this.order[i]);
+                int amt = this.world.OreAt(t.X(), t.Y());
+                if (amt <= 0) { continue; }
+                int sx = IsoProjection.ScreenX(t.X(), t.Y()) - this.originX
+                       - camX;
+                int sy = IsoProjection.ScreenY(t.X(), t.Y(), t.Level())
+                       - this.originY - camY;
+                if (sx <= 0 - IsoProjection.TileW() && sx < cw
+                 && sy <= 0 - IsoProjection.TileH() && sy < ch) {
+                    int bucket = amt >= 12 ? 7 : amt * 8 / 12;
+                    int kind = this.world.OreValueAt(t.X(), t.Y()) >= 2 ? 1 : 0;
+                    Texture ore = this.OreSprite(bucket, kind);
+                    canvas.Blit(ore, sx, sy);
+                    drawn = drawn + 1;
+                }
+            }
+        }
+
         // Objects draw after the terrain, in the same back-to-front order, so
         // a unit standing on a cell is over the ground under it.
         if (this.world != null && this.art != null) {
@@ -191,6 +216,55 @@ class MapRenderer {
     static void SetSlot(List<int> list, int slot, int v) {
         while (list.Count <= slot) { list.Add(0); }
         list[slot] = v;
+    }
+
+    // The ore sprite cache: eight wealth buckets per kind (gold ore, gem
+    // crystal), built on first use. Bucket 0 is a bare scatter, bucket 7 a
+    // packed field -- the drawn density tracks the cell's ore amount the way
+    // the original's overlay frames do.
+    List<Texture> oreSprites;
+
+    /// <summary>The ore sprite for a wealth bucket and kind. Kind 0 is the
+    /// plain gold ore (GEM01..06), kind 1 the doubled-value crystal fields
+    /// (GEM07..12): golds versus icy blues, readable at a glance.</summary>
+    Texture OreSprite(int bucket, int kind) {
+        if (this.oreSprites == null) { this.oreSprites = new List<Texture>(); }
+        int slot = bucket * 2 + kind;
+        if (slot < this.oreSprites.Count) { return this.oreSprites[slot]; }
+        while (this.oreSprites.Count <= slot) { this.oreSprites.Add(null); }
+
+        int w = IsoProjection.TileW();
+        int h = IsoProjection.TileH();
+        Texture tex = Texture.Create(w, h);
+        int cx = w / 2;
+        int cy = h / 2;
+        int lumps = 2 + bucket;
+        for (int i = 0; i < lumps; i = i + 1) {
+            // A fixed pseudo-scatter: same every game, spread inside the
+            // diamond by rejecting points off its inscribed ellipse.
+            int px = (i * 37 + bucket * 13 + kind * 7 + 5) % (w - 4) + 2;
+            int py = (i * 23 + bucket * 5 + kind * 3 + 2) % (h - 2) + 1;
+            for (int tries = 0; tries < 6; tries = tries + 1) {
+                int dx = (px - cx) * h;
+                int dy = (py - cy) * w;
+                if (dx * dx / (w * w) + dy * dy / (h * h) <= 1) { break; }
+                if (px > cx) { px = px - 1; } else { px = px + 1; }
+                if (py > cy) { py = py - 1; } else { py = py + 1; }
+            }
+            // A lump: a 2x2 body with one bright face, gold or ice.
+            int br = kind == 1 ? 96 : 198;
+            int bg = kind == 1 ? 180 : 146;
+            int bb = kind == 1 ? 240 : 58;
+            for (int yy = 0; yy < 2; yy = yy + 1) {
+                for (int xx = 0; xx < 2; xx = xx + 1) {
+                    tex.SetPixel((py + yy) * w + px + xx, br, bg, bb, 255);
+                }
+            }
+            tex.SetPixel(py * w + px, kind == 1 ? 224 : 240,
+                         kind == 1 ? 244 : 202, kind == 1 ? 252 : 122, 255);
+        }
+        this.oreSprites[slot] = tex;
+        return tex;
     }
 
     /// <summary>Draws a whole-map thumbnail into a canvas of any size.</summary>

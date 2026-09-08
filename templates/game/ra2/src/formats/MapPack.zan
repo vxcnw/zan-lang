@@ -11,10 +11,11 @@ namespace Ra2.Formats;
 //
 //   chunk: compressedSize(u16), uncompressedSize(u16), then compressedSize bytes
 //
-// Chunks repeat until the input is exhausted. The payload is LZO1X, not
-// Format80 -- the shared "Format5" name refers to the chunk framing only.
-// IsoMapPack5 chunks decode to 8192 bytes each; the decoded whole is an array
-// of 11-byte tile records.
+// Chunks repeat until the input is exhausted. The two formats split on the
+// payload: IsoMapPack5 chunks are LZO1X, the overlay chunks are Format80 --
+// same framing, different packer. IsoMapPack5 chunks decode to 8192 bytes
+// each; the decoded whole is an array of 11-byte tile records. OverlayPack
+// decodes to a u16 word per cell, OverlayDataPack to a byte per cell.
 class MapPack {
 
     /// <summary>Joins the numbered keys of a packed section back into one
@@ -41,6 +42,40 @@ class MapPack {
         byte[] raw = Base64.Decode(base64, rawLenOut);
         int rawLen = rawLenOut[0];
         return MapPack.DecodeChunks(raw, rawLen, outLen);
+    }
+
+    /// <summary>Decodes an already-base64-decoded Format5 stream whose chunks
+    /// are Format80 -- the OverlayPack/OverlayDataPack layout.</summary>
+    static byte[] DecodeChunks80(string raw, int rawLen, List<int> outLen) {
+        int total = 0;
+        int p = 0;
+        while (p + 4 <= rawLen) {
+            int cSize = (raw[p] & 0xFF) | ((raw[p + 1] & 0xFF) << 8);
+            int uSize = (raw[p + 2] & 0xFF) | ((raw[p + 3] & 0xFF) << 8);
+            if (cSize <= 0 || p + 4 + cSize > rawLen) { break; }
+            total = total + uSize;
+            p = p + 4 + cSize;
+        }
+
+        byte[] dest = new byte[total + 1];
+        int written = 0;
+        p = 0;
+        while (p + 4 <= rawLen && written < total) {
+            int cSize = (raw[p] & 0xFF) | ((raw[p + 1] & 0xFF) << 8);
+            int uSize = (raw[p + 2] & 0xFF) | ((raw[p + 3] & 0xFF) << 8);
+            if (cSize <= 0 || p + 4 + cSize > rawLen) { break; }
+            // Decompress each chunk into its own slot in the output. Match
+            // back-references are chunk-local, so this cannot be one long call.
+            byte[] slot = new byte[uSize + 1];
+            int n = Format80.DecompressInto(raw, p + 4, cSize, slot, uSize);
+            for (int i = 0; i < n && written < total; i = i + 1) {
+                dest[written] = (byte)(slot[i] & 0xFF);
+                written = written + 1;
+            }
+            p = p + 4 + cSize;
+        }
+        Format80.SetOut(outLen, written);
+        return dest;
     }
 
     /// <summary>Decodes an already-base64-decoded Format5 stream.</summary>

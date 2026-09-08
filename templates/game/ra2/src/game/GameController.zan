@@ -150,10 +150,11 @@ class GameController {
         }
     }
 
-    /// <summary>Every finished refinery trickles the Rules' income each tick;
-    /// a captured oil derrick (the only civilian structure with a reg the
-    /// controller knows by name) adds a smaller trickle. Nothing else pays:
-    /// without harvesters a base starves, exactly like the real game.</summary>
+    /// <summary>Credits flow from work done, never from thin air: harvesters
+    /// queue their unload through the world's money events, and a captured
+    /// oil derrick (the only civilian structure the controller knows by
+    /// name) trickles its shipped income. A base without miners starves,
+    /// exactly like the real game.</summary>
     void Economy() {
         Rules rules = this.world.Rules();
         for (int s = 0; s < 2; s = s + 1) {
@@ -165,9 +166,7 @@ class GameController {
                 StructureType t = this.world.TypeOf(o);
                 if (t == null) { continue; }
                 if (o.BuiltTicks() < t.BuildTime()) { continue; }
-                if (t.IsRefinery()) {
-                    income = income + rules.RefineryIncome();
-                } else if (t.Reg() == "CAOILD") {
+                if (t.Reg() == "CAOILD") {
                     income = income + rules.OilIncome();
                 }
             }
@@ -424,8 +423,21 @@ class GameController {
     /// <summary>Trains one unit for the AI when the army is under eight:
     /// first the barracks' armed regulars, then the war factory's. Each
     /// candidate must pass the same prereq and cost checks as the player's
-    /// clicks.</summary>
+    /// clicks. Harvesters outrank the army cap: two per finished refinery,
+    /// because a base without miners starves before it can fight.</summary>
     void AiTrainStep(int aiSide, Rules rules) {
+        int refs = this.CountRefineries(aiSide);
+        int miners = 0;
+        for (int i = 0; i < this.world.ObjectCount(); i = i + 1) {
+            WorldObject o = this.world.ObjectAt(i);
+            if (o.Side() != aiSide || o.Kind() != ObjKind.Unit()
+             || o.IsDead()) { continue; }
+            if (o.UnitType() != null
+             && o.UnitType().Role() == UnitRole.Harvester()) {
+                miners = miners + 1;
+            }
+        }
+        if (miners < refs * 2 && this.AiQueueHarvester(aiSide)) { return; }
         if (this.AiArmySize(aiSide) >= 8) { return; }
         StructureCatalog catalog = this.world.Catalog();
         int count = catalog.CountFor(aiSide);
@@ -458,6 +470,37 @@ class GameController {
                 }
             }
         }
+    }
+
+    /// <summary>Queues a harvester at the side's first idle, finished war
+    /// factory. Returns false when the factory is busy, missing or broke --
+    /// the step retries on a later tick.</summary>
+    bool AiQueueHarvester(int aiSide) {
+        StructureCatalog catalog = this.world.Catalog();
+        for (int b = 0; b < catalog.CountFor(aiSide); b = b + 1) {
+            StructureType t = catalog.TypeFor(aiSide, b);
+            if (t == null || t.Produces() == null
+             || !GameController.RegIn(this.world.Rules().AiWeapons(), t.Reg())) {
+                continue;
+            }
+            int idx = this.FindStructure(aiSide, b);
+            if (idx < 0) { continue; }
+            WorldObject obj = this.world.ObjectAt(idx);
+            if (obj.BuiltTicks() < t.BuildTime() || obj.ProdCount() > 0) {
+                continue;
+            }
+            List<int> prod = t.Produces();
+            for (int i = 0; i < prod.Count; i = i + 1) {
+                UnitType u = this.world.Units().TypeFor(aiSide, prod[i]);
+                if (u == null || u.Role() != UnitRole.Harvester()) { continue; }
+                if (this.aiMoney < u.Cost()) { return false; }
+                if (this.world.QueueUnit(idx, prod[i])) {
+                    this.aiMoney = this.aiMoney - u.Cost();
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /// <summary>The first armed regular a structure trains: engineers and

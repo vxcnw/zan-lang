@@ -680,6 +680,12 @@ class Ra2App {
         int panStep = 64;
         bool selfTest = Ra2App.SelfTestArmed();
         int frames = 0;
+        // The selftest's miner: held as an object reference, not an index --
+        // the fast-forward's border skirmish can kill something and compact
+        // the world's object list out from under an index.
+        WorldObject minerObj = null;
+        int oreX = -1;
+        int oreY = -1;
 
         // Box-select state: the cell where a left-drag began and whether a
         // drag is in progress. A drag wider than a few pixels selects the
@@ -864,6 +870,17 @@ class Ra2App {
                     world = World.Create(map.Terrain(),
                                          StructureCatalog.CreateWith(rules),
                                          UnitCatalog.CreateWith(rules));
+                    // Seed the ore fields from the map's GEM overlays: the
+                    // data byte is the amount in the cell, the type names
+                    // gold ore or the doubled-value crystal fields.
+                    for (int oy = 0; oy < world.Height(); oy = oy + 1) {
+                        for (int ox = 0; ox < world.Width(); ox = ox + 1) {
+                            int ov = map.OverlayAt(ox, oy);
+                            if (ov < 0 || !rules.IsOreOverlay(ov)) { continue; }
+                            world.SetOre(ox, oy, map.OverlayDataAt(ox, oy),
+                                         rules.OreValue(ov));
+                        }
+                    }
                     objArt = ObjectArt.Create(vfs, db);
                     int side = shell.SideIndex();
                     List<int> start = new List<int>();
@@ -1124,6 +1141,36 @@ class Ra2App {
                         world.SelectAt(o.X(), o.Y());
                         game.OnRightClick(o.X() + 4, o.Y() + 4);
                     }
+                    // A miner on the map's own ore field -- the seeded GEM
+                    // overlays. The frame-12 fast-forward then runs real
+                    // mining passes against it, and the printed cargo proves
+                    // the economy loop end to end on shipped data.
+                    List<int> oreAt = new List<int>();
+                    List<int> seed0 = new List<int>();
+                    int seedX = 10;
+                    int seedY = 10;
+                    if (map.StartCell(0, seed0) && seed0.Count >= 2) {
+                        seedX = seed0[0];
+                        seedY = seed0[1];
+                    }
+                    if (world.FindOre(seedX, seedY, oreAt)) {
+                        oreX = oreAt[0];
+                        oreY = oreAt[1];
+                        int pside = shell.SideIndex();
+                        string mreg = pside == 0 ? "CMIN" : "HARV";
+                        int mid = Ra2App.UnitIdOfReg(world, pside, mreg);
+                        for (int r2 = 0; r2 < 6 && minerObj == null; r2 = r2 + 1) {
+                            int minerId = world.SpawnUnit(pside, mid,
+                                                          oreX, oreY + r2);
+                            if (minerId < 0) {
+                                minerId = world.SpawnUnit(pside, mid,
+                                                          oreX + r2, oreY);
+                            }
+                            if (minerId >= 0) {
+                                minerObj = world.ObjectAt(minerId);
+                            }
+                        }
+                    }
                 }
                 if (frames == 12) {
                     // Close the frame first: a mid-frame ReadPixels sees the
@@ -1187,6 +1234,23 @@ class Ra2App {
                         game.Tick();
                         stepped = stepped + 1;
                     }
+                    // Aim the closing dump at ore that is still in the
+                    // ground: the miner may have emptied the first field, so
+                    // re-scan from where it stands.
+                    if (cam != null) {
+                        List<int> live = new List<int>();
+                        int fx0 = minerObj != null ? minerObj.X() : oreX;
+                        int fy0 = minerObj != null ? minerObj.Y() : oreY;
+                        if (oreX >= 0 && world.FindOre(fx0, fy0, live)) {
+                            int pox = IsoProjection.ScreenX(live[0], live[1])
+                                      - terrain.OriginX();
+                            int poy = IsoProjection.ScreenY(live[0], live[1], 0)
+                                      - terrain.OriginY();
+                            cam.MoveTo(pox - cam.SpanW() / 2,
+                                       poy - cam.SpanH() / 2);
+                            dirty = true;
+                        }
+                    }
                 }
                 if (frames == 13) {
                     // Frame 13 drew the post-fast-forward world (with the
@@ -1201,6 +1265,13 @@ class Ra2App {
                     int aiMoney = game == null ? -1 : game.AiMoney();
                     int sel = game == null ? -1 : game.World().SelectedIndex();
                     int result = game == null ? -1 : game.Result();
+                    int oreHere = oreX >= 0 ? world.OreAt(oreX, oreY) : -1;
+                    int cargo = minerObj != null && !minerObj.IsDead()
+                        ? minerObj.Cargo() : -1;
+                    Console.WriteLine("selftest ore at "
+                        + Convert.ToString(oreX) + "," + Convert.ToString(oreY)
+                        + " amt=" + Convert.ToString(oreHere)
+                        + " cargo=" + Convert.ToString(cargo));
                     Console.WriteLine("selftest scene=" + Convert.ToString(shell.CurrentScene())
                         + " drawn=" + Convert.ToString(drawn)
                         + " previewBuilt=" + Convert.ToString(previewIndex >= 0)
