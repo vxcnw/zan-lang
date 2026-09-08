@@ -1460,12 +1460,32 @@ static LLVMValueRef emit_binary_op_values(zan_irgen_t *g, zan_ast_node_t *expr,
                  * the division executes and yields the dividend (x/0 -> x,
                  * x%0 -> 0 mirrors what a select-folded zero would leave).
                  * Hard mode exits inside the report; checks-off keeps the
-                 * raw divisor and the historical fault. */
+                 * raw divisor and the historical fault.
+                 *
+                 * INT_MIN / -1 raises the same #DE even with a nonzero
+                 * divisor, and the resulting exception escapes the soft
+                 * report path entirely -- the process hung inside the OS
+                 * fault handler with no output. Fold that combination too:
+                 * divide by 1, which saturates to INT_MIN (ARM64 sdiv
+                 * semantics, same value C# unchecked produces on ARM).
+                 * MIN % -1 = 0 = MIN % 1, so the shared fold covers %. */
                 LLVMValueRef zero = LLVMConstInt(LLVMTypeOf(right), 0, 0);
                 LLVMValueRef one = LLVMConstInt(LLVMTypeOf(right), 1, 0);
                 LLVMValueRef is_zero = zan_icmp(g->builder, LLVMIntEQ, right, zero, "divz");
                 emit_runtime_check(g, is_zero, expr->loc, "division by zero");
-                LLVMValueRef divisor = LLVMBuildSelect(g->builder, is_zero,
+                LLVMValueRef unsafe = is_zero;
+                if (!is_unsigned) {
+                    unsigned w = LLVMGetIntTypeWidth(LLVMTypeOf(left));
+                    LLVMValueRef smin = LLVMConstInt(LLVMTypeOf(left),
+                        (unsigned long long)1 << (w - 1), 1);
+                    LLVMValueRef minus_one = LLVMConstAllOnes(LLVMTypeOf(right));
+                    LLVMValueRef is_min = zan_icmp(g->builder, LLVMIntEQ, left, smin, "divmin");
+                    LLVMValueRef is_m1 = zan_icmp(g->builder, LLVMIntEQ, right, minus_one, "divm1");
+                    unsafe = LLVMBuildOr(g->builder, unsafe,
+                        LLVMBuildAnd(g->builder, is_min, is_m1, "divovf"),
+                        "divunsafe");
+                }
+                LLVMValueRef divisor = LLVMBuildSelect(g->builder, unsafe,
                     one, right, "divz.safe");
                 return is_unsigned ? zan_udiv(g->builder, left, divisor, "div")
                                    : zan_sdiv(g->builder, left, divisor, "div");
@@ -1477,7 +1497,19 @@ static LLVMValueRef emit_binary_op_values(zan_irgen_t *g, zan_ast_node_t *expr,
                 LLVMValueRef one = LLVMConstInt(LLVMTypeOf(right), 1, 0);
                 LLVMValueRef is_zero = zan_icmp(g->builder, LLVMIntEQ, right, zero, "remz");
                 emit_runtime_check(g, is_zero, expr->loc, "division by zero (modulo)");
-                LLVMValueRef divisor = LLVMBuildSelect(g->builder, is_zero,
+                LLVMValueRef unsafe = is_zero;
+                if (!is_unsigned) {
+                    unsigned w = LLVMGetIntTypeWidth(LLVMTypeOf(left));
+                    LLVMValueRef smin = LLVMConstInt(LLVMTypeOf(left),
+                        (unsigned long long)1 << (w - 1), 1);
+                    LLVMValueRef minus_one = LLVMConstAllOnes(LLVMTypeOf(right));
+                    LLVMValueRef is_min = zan_icmp(g->builder, LLVMIntEQ, left, smin, "remmin");
+                    LLVMValueRef is_m1 = zan_icmp(g->builder, LLVMIntEQ, right, minus_one, "remm1");
+                    unsafe = LLVMBuildOr(g->builder, unsafe,
+                        LLVMBuildAnd(g->builder, is_min, is_m1, "removf"),
+                        "remunsafe");
+                }
+                LLVMValueRef divisor = LLVMBuildSelect(g->builder, unsafe,
                     one, right, "remz.safe");
                 return is_unsigned ? zan_urem(g->builder, left, divisor, "rem")
                                    : zan_srem(g->builder, left, divisor, "rem");
