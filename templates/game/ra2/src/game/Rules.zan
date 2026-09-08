@@ -198,6 +198,34 @@ class UnitDef {
     void SetPrimary(Weapon w) { this.primary = w; }
     void SetLabel(string label) { this.label = label; }
 
+    // ---- Infantry art sequences, from the art ini's Sequence= section
+    // (e.g. [GI] Sequence=GISequence, [GISequence] Walk=8,6,6). The frame
+    // layout differs per troop: the renderer picks walk/idle frames from
+    // these starts instead of assuming one layout. Defaults are the common
+    // layout (ready ring at 0, walk blocks of six from 8).
+    string artKey;
+    int readyStart = 0;
+    int walkStart = 8;
+    int walkFrames = 6;
+    bool hasSeq;
+
+    string ArtKey() { return this.artKey; }
+    void SetArtKey(string key) { this.artKey = key; }
+    int ReadyStart() { return this.readyStart; }
+    int WalkStart() { return this.walkStart; }
+    int WalkFrames() { return this.walkFrames; }
+    bool HasSeq() { return this.hasSeq; }
+    void SetReadySeq(int start) {
+        this.readyStart = start;
+        this.hasSeq = true;
+    }
+    void SetWalkSeq(int start, int frames) {
+        if (frames < 1) { frames = 1; }
+        this.walkStart = start;
+        this.walkFrames = frames;
+        this.hasSeq = true;
+    }
+
     /// <summary>Cells the unit covers per tick. RA2's speed classes map to
     /// foot soldiers at one cell and fast movers (dogs, terror drones) at
     /// two.</summary>
@@ -323,6 +351,7 @@ class Rules {
     int oilCapture;       // one-shot bonus for grabbing an oil derrick
     int bombDamage;       // Ivan's bomb
     int bombDelay;        // ticks before Ivan's bomb goes off
+    int splashScale;      // splash damage at the impact point, % of direct dmg
     int blackoutTicks;    // spy-infiltrated power plant downtime
     int freezeTicks;      // chrono-beam freeze duration
     int refundPercent;    // sell refund, percent of the building's cost
@@ -381,6 +410,7 @@ class Rules {
     int OilCapture() { return this.oilCapture; }
     int BombDamage() { return this.bombDamage; }
     int BombDelay() { return this.bombDelay; }
+    int SplashScale() { return this.splashScale; }
     int BlackoutTicks() { return this.blackoutTicks; }
     int FreezeTicks() { return this.freezeTicks; }
     int RefundPercent() { return this.refundPercent; }
@@ -1214,6 +1244,7 @@ class Rules {
         r.oilCapture = 1000;
         r.bombDamage = 400;
         r.bombDelay = 300;
+        r.splashScale = 50;
         r.blackoutTicks = 300;
         r.freezeTicks = 90;
         // The shipped [General] sell/repair block: half the price back for a
@@ -1309,6 +1340,9 @@ class Rules {
             string image = s.Get("Image");
             if (image.Length > 0) {
                 d.SetShp(image + Rules.ArtExtension(d.Shp()));
+                d.SetArtKey(image);
+            } else {
+                d.SetArtKey(d.Reg());
             }
             string primary = s.Get("Primary");
             if (primary.Length > 0 && this.WeaponNamed(primary) != null) {
@@ -1405,6 +1439,44 @@ class Rules {
                 if (text != null && text.Length > 0) { d.SetLabel(text); }
             }
         }
+    }
+
+    /// <summary>Applies the art ini (ART.INI with ARTMD.INI layered on top):
+    /// each infantry's Sequence= section tells where its walk and stand
+    /// frames start, and the walk cycle's length -- e.g. [GI]
+    /// Sequence=GISequence, [GISequence] Walk=8,6,6 Ready=0,1,1. Without
+    /// this, every trooper would march through the wrong frames.</summary>
+    void ApplyArtIni(IniDocument art) {
+        if (art == null) { return; }
+        for (int i = 0; i < this.units.Count; i = i + 1) {
+            UnitDef d = this.units[i];
+            if (d.ArtKey() == null) { continue; }
+            IniSection section = art.Section(d.ArtKey());
+            if (section == null) { continue; }
+            string seqName = section.Get("Sequence");
+            if (seqName.Length == 0) { continue; }
+            IniSection seq = art.Section(seqName);
+            if (seq == null) { continue; }
+            List<int> ready = Rules.LeadingInts(seq.Get("Ready"));
+            if (ready.Count >= 1) { d.SetReadySeq(ready[0]); }
+            List<int> walk = Rules.LeadingInts(seq.Get("Walk"));
+            if (walk.Count >= 2) { d.SetWalkSeq(walk[0], walk[1]); }
+        }
+    }
+
+    /// <summary>Leading comma-separated integers of "8,6,6" into [8,6];
+    /// stops at the first token that starts with a non-number. Empty input
+    /// yields an empty list.</summary>
+    static List<int> LeadingInts(string s) {
+        List<int> vals = new List<int>();
+        if (s == null) { return vals; }
+        List<string> parts = Rules.Csv(s);
+        for (int i = 0; i < parts.Count; i = i + 1) {
+            string part = parts[i];
+            if (part.Length == 0 || part[0] < 48 || part[0] > 57) { break; }
+            vals.Add(Rules.LeadingInt(part));
+        }
+        return vals;
     }
 
     // ---- small string helpers ------------------------------------------------

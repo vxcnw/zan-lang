@@ -15,6 +15,8 @@ class GameController {
     bool sellMode;       // sidebar 卖 armed: next own-structure click sells it
     bool repairMode;     // sidebar 修 armed: next own-structure click repairs
     int aiMoney;         // the opponent's credits
+    int aiDiff;          // the skirmish screen's AI skill (Difficulty.*)
+    bool shortGame;      // 快速游戏: wrecking the base ends it, units or no
     int tick;            // ticks since the game started
     int result;          // 0 playing, 1 player won, 2 player lost
     int aiBuildIdx;      // position in the AI's [AI]-section build order
@@ -26,14 +28,27 @@ class GameController {
     List<List<WorldObject>> squads;
 
     static GameController Create(World world, int side) {
+        return GameController.CreateWith(world, side,
+                                         world.Rules().StartMoney(),
+                                         Difficulty.Normal());
+    }
+
+    /// <summary>The skirmish setup's starting conditions: both houses open on
+    /// the chosen credits, and the AI fights at the chosen skill. The skill
+    /// scales the AI's trickle income and how often it makes build and train
+    /// decisions -- the honest way to make 冷酷的敌人 brutal and 简单的敌人
+    /// beatable.</summary>
+    static GameController CreateWith(World world, int side, int credits,
+                                     int aiDiff) {
         GameController g = new GameController();
         g.world = world;
         g.side = side;
-        // Both wallets open at the Rules' starting credits; from then on
+        // Both wallets open at the skirmish screen's credits; from then on
         // money only enters through refineries, captured oil derricks and
         // a spy's theft.
-        g.money = world.Rules().StartMoney();
-        g.aiMoney = world.Rules().StartMoney();
+        g.money = credits;
+        g.aiMoney = credits;
+        g.aiDiff = aiDiff;
         g.tick = 0;
         g.result = 0;
         g.aiBuildIdx = 0;
@@ -74,6 +89,11 @@ class GameController {
         this.paused = !this.paused;
         this.dirty = true;
     }
+
+    /// <summary>The setup screen's 快速游戏: with it on, razing every enemy
+    /// structure wins outright; with it off, any surviving enemy units keep
+    /// the fight going too.</summary>
+    void SetShortGame(bool on) { this.shortGame = on; }
 
     /// <summary>Steps the game one tick regardless of pause -- the space key's
     /// single step for inspecting a frozen moment. The pause state is
@@ -180,9 +200,14 @@ class GameController {
                     income = income + rules.OilIncome();
                 }
             }
-            if (income == 0) { continue; }
-            if (s == this.side) { this.money = this.money + income; }
-            else { this.aiMoney = this.aiMoney + income; }
+        if (income == 0) { continue; }
+        if (s == this.side) { this.money = this.money + income; }
+        else {
+            // The AI's derrick trickle rides the skill multiplier too, so a
+            // 简单的敌人 really is poorer, not just slower.
+            this.aiMoney = this.aiMoney
+                + (int)(income * Difficulty.Multiplier(this.aiDiff));
+        }
         }
     }
 
@@ -406,10 +431,13 @@ class GameController {
         int aiSide = this.EnemySide();
         if (this.result != 0) { return; }
         Rules rules = this.world.Rules();
-        // One construction decision per second of game time.
-        if (this.tick % 15 == 0) { this.AiBuildStep(aiSide, rules); }
-        // One training decision per second and a bit.
-        if (this.tick % 20 == 0) { this.AiTrainStep(aiSide, rules); }
+        // Decision cadence rides the skill: 冷酷的敌人 thinks faster, 简单的
+        // 敌人 slower. One construction decision per second of game time at
+        // the normal setting.
+        int buildEvery = (int)(15 / Difficulty.Multiplier(this.aiDiff));
+        int trainEvery = (int)(20 / Difficulty.Multiplier(this.aiDiff));
+        if (this.tick % buildEvery == 0) { this.AiBuildStep(aiSide, rules); }
+        if (this.tick % trainEvery == 0) { this.AiTrainStep(aiSide, rules); }
         // Attack: every unit without a live target acquires the nearest
         // player object. The world's chase logic then walks it into range.
         for (int i = 0; i < this.world.ObjectCount(); i = i + 1) {
@@ -688,10 +716,28 @@ class GameController {
     /// through, or lose its base first.</summary>
     void CheckResult() {
         if (this.result != 0) { return; }
-        if (this.world.SideEliminated(this.EnemySide())) {
+        if (this.world.SideEliminated(this.EnemySide())
+         && (this.shortGame || !this.WorldHasUnits(this.EnemySide()))) {
             this.result = 1;
             return;
         }
-        if (this.world.SideEliminated(this.side)) { this.result = 2; return; }
+        if (this.world.SideEliminated(this.side)
+         && (this.shortGame || !this.WorldHasUnits(this.side))) {
+            this.result = 2;
+            return;
+        }
+    }
+
+    /// <summary>Whether the side still fields a living unit -- the half of
+    /// the win condition that 快速游戏 switches off.</summary>
+    bool WorldHasUnits(int side) {
+        for (int i = 0; i < this.world.ObjectCount(); i = i + 1) {
+            WorldObject o = this.world.ObjectAt(i);
+            if (o.Side() == side && o.Kind() == ObjKind.Unit()
+             && !o.IsDead()) {
+                return true;
+            }
+        }
+        return false;
     }
 }

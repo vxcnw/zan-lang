@@ -22,6 +22,7 @@ class TmpTile {
     // (0xCDCDCDCD shows through), so the flag is the only reliable test.
     bool hasExtra;
     int extraOffset;
+    int extraZOffset;
     int extraX;
     int extraY;
     int extraWidth;
@@ -36,6 +37,7 @@ class TmpTile {
     bool IsEmpty() { return this.offset == 0; }
 
     bool HasExtra() { return this.hasExtra; }
+    int ExtraOff() { return this.extraOffset; }
     int ExtraWidth() { return this.extraWidth; }
     int ExtraHeight() { return this.extraHeight; }
     /// <summary>Where the extra graphic sits relative to the tile's own
@@ -50,18 +52,25 @@ class TmpTile {
 // "extra" (cliff) data is parsed but not drawn by default -- see
 // ExtraEnabled. Clean-room: tests synthesize tiles.
 //
-// Layout (little-endian):
+// Layout (little-endian), verified byte-by-byte against CLIFF01, WCLIFF02
+// and WCLIFF03 of this install's ISOTEMP.MIX:
 //   header    : blocksX(u32), blocksY(u32), tileWidth(u32), tileHeight(u32)
 //   directory : u32 offset per tile (0 = empty)
-//   tile      : 52-byte header, then base pixels (tileWidth*tileHeight/2),
-//               then depth pixels; base rows are runs 4,8,.. centered, growing
-//               by 4 while row < height/2-1 then shrinking by 4.
-//   tile hdr  : x(i32), y(i32), extraOfs(u32), zOfs(u32), extraZOfs(u32),
+//   tile hdr  : x(i32), y(i32), extraOfs(u32), extraZOfs(u32),
 //               extraX(i32), extraY(i32), extraW(u32), extraH(u32),
-//               flags(u32), height(u8), terrain(u8), ramp(u8), ...
-//               Bit 0 of flags says the extra fields are meaningful; when it
-//               is clear they hold uninitialised memory, so the flag -- not a
-//               range check on the rectangle -- is what decides.
+//               flags(u32), height(u8), terrain(u8), ramp(u8),
+//               radarRGB(6), pad(3) -- 52 bytes total.
+//               Both offsets are relative to the tile's own header. The body
+//               behind a header is [base pixels tw*th/2][base depth tw*th/2]
+//               [extra pixels extraW*extraH][extra depth extraW*extraH], so
+//               for the shipped 60x30 tiles extraOfs is 1852 and the extra
+//               pixels run [hdr+1852, hdr+extraZOfs). In files that leave a
+//               block unused the offsets keep their section values while the
+//               pixel fields are 0xCDCDCDCD; the flag's bit 0 vouches for the
+//               rectangle, and the range guard below catches the junk.
+//   tile body : base rows are runs 4,8,.. centered, growing by 4 while
+//               row < height/2-1 then shrinking by 4; the depth plane and
+//               both extra planes are plain rectangles.
 class TmpTemplate {
     string data;
     int length;
@@ -71,17 +80,18 @@ class TmpTemplate {
     int tileHeight;
     List<TmpTile> tiles;
 
-    // The extra-graphic pass is parsed but OFF by default. Measured over four
-    // shipped maps it only moved the transparent-hole count from 61673 to
-    // 60406 (-2%), and it made MP01T4 and MP02T2 *worse* -- so the placement
-    // is still wrong somewhere and enabling it would trade one artefact for
-    // another. Set RA2_EXTRA=1 to opt in while working on it.
+    // The extra-graphic pass draws the cliff faces and their cast shadows:
+    // the vertical art a raised cell needs below and behind its diamond. With
+    // the extra offset misread every overhang decoded from the wrong file
+    // position and produced striped garbage, which is why this used to be
+    // gated off behind RA2_EXTRA. It is on by default now; RA2_EXTRA=0 opts
+    // out while debugging.
     [DllImport("crt")]
     static extern string getenv(string name);
 
     static bool ExtraEnabled() {
         string v = TmpTemplate.getenv("RA2_EXTRA");
-        return v != null && v.Length > 0 && v != "0";
+        return v == null || v.Length == 0 || v != "0";
     }
 
     static TmpTemplate Parse(string data, int length) {
@@ -106,8 +116,15 @@ class TmpTemplate {
                 r.Seek(off);
                 tile.x = r.ReadI32();
                 tile.y = r.ReadI32();
-                tile.extraOffset = (int)r.ReadU32();
-                r.Seek(off + 20);
+                // +8 points at the start of the extra's pixels (right after
+                // the base's pixels+depth), +12 at the base's own depth plane
+                // (52 + tw*th/2), and +16 at the extra's depth plane -- so the
+                // extra pixels are [hdr+u32@8, hdr+u32@16). Read as file
+                // absolutes they land in unrelated depth data, which is where
+                // the striped garbage used to come from.
+                tile.extraOffset = off + (int)r.ReadU32();
+                r.Seek(off + 16);
+                tile.extraZOffset = off + (int)r.ReadU32();
                 tile.extraX = r.ReadI32();
                 tile.extraY = r.ReadI32();
                 tile.extraWidth = (int)r.ReadU32();

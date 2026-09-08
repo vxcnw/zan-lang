@@ -30,7 +30,9 @@ class ShpFrame {
 //   header      : zero(u16), width(u16), height(u16), frameCount(u16)
 //   frameHeader : x(u16), y(u16), w(u16), h(u16),
 //                 format(u32, low byte used), unknown(u32), zero(u32), offset(u32)
-//   frame data  : format 1 = w*h raw bytes;
+//   frame data  : format 0 = 2 skipped bytes then w*h raw indices (the
+//                 shell's MNBTTN.SHP ships this way);
+//                 format 1 = w*h raw bytes;
 //                 format 2/3 = per row: rowLen(u16, incl. the 2 length bytes)
 //                              then rowLen-2 bytes (format 3 uses zero-RLE:
 //                              a 0 byte is followed by a transparent run count).
@@ -89,6 +91,15 @@ class ShpImage {
 
         BinaryReader r = BinaryReader.FromBuffer(this.data, this.length);
         r.Seek(f.Offset());
+
+        if (f.Format() == 0) {
+            r.Skip(2);                 // frame lead bytes, not pixel data
+            int total = w * h;
+            for (int i = 0; i < total; i = i + 1) {
+                outBuf[i] = (byte)r.ReadU8();
+            }
+            return outBuf;
+        }
 
         if (f.Format() == 1) {
             int total = w * h;

@@ -30,6 +30,12 @@ class MapRenderer {
     World world;          // objects drawn on top; null until the game sets one
     ObjectArt art;
     int playerSide;       // Side2 of the human player, for selection colours
+    // [Terrain] scatter (trees, rocks), sorted back-to-front like cells: the
+    // parallel arrays hold cell x, cell y, level and the art name.
+    List<int> terrX;
+    List<int> terrY;
+    List<int> terrLevel;
+    List<string> terrName;
 
     /// <summary>The pixel size of a map's full diamond, and the offset that
     /// shifts it into positive coordinates.</summary>
@@ -87,6 +93,31 @@ class MapRenderer {
         this.world = world;
         this.art = art;
         this.playerSide = playerSide;
+    }
+
+    /// <summary>Takes the map's [Terrain] objects, sorted into painter order
+    /// (x+y, then level) so a tree in front covers the one behind it.</summary>
+    void SetTerrain(MapFile map) {
+        this.terrX = new List<int>();
+        this.terrY = new List<int>();
+        this.terrLevel = new List<int>();
+        this.terrName = new List<string>();
+        List<int> keys = new List<int>();
+        for (int i = 0; i < map.TerrainCount(); i = i + 1) {
+            int x = map.TerrainX(i);
+            int y = map.TerrainY(i);
+            int lvl = 0;
+            IsoTile cell = this.iso.At(x, y);
+            if (cell != null) { lvl = cell.Level(); }
+            int key = (x + y) * 64 + lvl;
+            int at = 0;
+            while (at < keys.Count && keys[at] <= key) { at = at + 1; }
+            keys.Insert(at, key);
+            this.terrX.Insert(at, x);
+            this.terrY.Insert(at, y);
+            this.terrLevel.Insert(at, lvl);
+            this.terrName.Insert(at, map.TerrainType(i));
+        }
     }
 
     int WorldWidth() { return this.worldW; }
@@ -156,6 +187,7 @@ class MapRenderer {
         int drawn = 0;
         int cw = canvas.Width();
         int ch = canvas.Height();
+        bool trace = RenderTrace();
         for (int i = 0; i < this.order.Count; i = i + 1) {
             IsoTile t = this.iso.TileAt(this.order[i]);
             int sx = IsoProjection.ScreenX(t.X(), t.Y()) - this.originX - camX;
@@ -175,6 +207,42 @@ class MapRenderer {
                     canvas.Blit(tile, sx + ox, sy + oy);
                     drawn = drawn + 1;
                 }
+                if (trace && sx >= 280 && sx <= 580 && sy >= 130 && sy <= 360) {
+                    Console.WriteLine("cell " + Convert.ToString(t.X()) + ","
+                        + Convert.ToString(t.Y()) + " lvl="
+                        + Convert.ToString(t.Level()) + " tile="
+                        + Convert.ToString(t.Tile()) + " sub="
+                        + Convert.ToString(t.SubTile()) + " at "
+                        + Convert.ToString(sx) + "," + Convert.ToString(sy)
+                        + (tile == null ? " NULLTEX" : ""));
+                }
+            }
+        }
+
+        // Terrain scatter draws after the flat tiles: trees and rocks stand
+        // on the ground and must cover the tiles behind them, but sit under
+        // anything that moves.
+        if (this.terrX != null) {
+            for (int i = 0; i < this.terrX.Count; i = i + 1) {
+                int sx = IsoProjection.ScreenX(this.terrX[i], this.terrY[i])
+                       - this.originX - camX;
+                int sy = IsoProjection.ScreenY(this.terrX[i], this.terrY[i],
+                                               this.terrLevel[i])
+                       - this.originY - camY;
+                if (sx <= 0 - IsoProjection.TileW() * 2 || sx >= cw
+                 || sy <= 0 - IsoProjection.TileH() * 6 || sy >= ch) {
+                    continue;
+                }
+                string name = this.terrName[i];
+                if (name.Length == 0) { continue; }
+                Texture spr = this.theater.TerrainSprite(name);
+                if (spr == null) { continue; }
+                // A scatter sprite stands on its cell: the art's bottom-centre
+                // sits at the diamond's centre.
+                int px = sx + IsoProjection.TileW() / 2 - spr.Width() / 2;
+                int py = sy + IsoProjection.TileH() / 2 - spr.Height();
+                canvas.Blit(spr, px, py);
+                drawn = drawn + 1;
             }
         }
 
@@ -216,6 +284,18 @@ class MapRenderer {
     static void SetSlot(List<int> list, int slot, int v) {
         while (list.Count <= slot) { list.Add(0); }
         list[slot] = v;
+    }
+
+    [DllImport("crt")]
+    static extern string getenv(string name);
+
+    static bool RenderTrace() {
+        string v = RenderTraceEnv();
+        return v != null && v.Length > 0 && v != "0";
+    }
+
+    static string RenderTraceEnv() {
+        return getenv("RA2_TRACE");
     }
 
     // The ore sprite cache: eight wealth buckets per kind (gold ore, gem

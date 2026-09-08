@@ -117,6 +117,32 @@ class Ra2App {
         return v != null && v.Length > 0 && v != "0";
     }
 
+    // A headless run (RA2_HEADLESS=1) needs no desktop: the dummy SDL video
+    // driver renders every frame into offscreen memory, so CI can walk the
+    // same selftest, and the short-game verdicts, without a window.
+    static bool SelfTestHeadless() {
+        string v = Ra2App.getenv("RA2_HEADLESS");
+        return v != null && v.Length > 0 && v != "0";
+    }
+
+    // Must run before the first SDL call: SDL_VIDEODRIVER only takes effect
+    // at Sdl.Init time.
+    [DllImport("crt")]
+    static extern int _putenv(string spec);
+
+    static void MaybeForceDummyVideo() {
+        if (!Ra2App.SelfTestHeadless()) { return; }
+        Ra2App._putenv("SDL_VIDEODRIVER=dummy");
+    }
+
+    // RA2_SELFTEST_SIDE=soviet runs the same walk as the player's side, so
+    // the sidebars' faction tints (Soviet red vs the Allied default) land in
+    // the dumps for a visual check.
+    static bool SelfTestSoviet() {
+        string v = Ra2App.getenv("RA2_SELFTEST_SIDE");
+        return v != null && v == "soviet";
+    }
+
     static int PreviewW() { return 396; }
     static int PreviewH() { return 212; }
     static int MiniW() { return 220; }
@@ -145,7 +171,10 @@ class Ra2App {
         int side = game.Side();
         int n = catalog.CountFor(side);
         int rows = (n + 2) / 3;
-        KitUi.Panel(r, x + 8, y - 4, w - 16, rows * (bh + 5) + 35, 22, 26, 36, 200);
+        List<int> tint = new List<int>();
+        Ra2App.SideUiTint(side, tint);
+        KitUi.Panel(r, x + 8, y - 4, w - 16, rows * (bh + 5) + 35,
+                    tint[0], tint[1], tint[2], 210);
         Text.Draw(r, "建造", x + 22, y + 4, 2, 236, 208, 120, 255);
         int i = 0;
         for (; i < n; i = i + 1) {
@@ -156,7 +185,7 @@ class Ra2App {
             bool unlocked = game.BuildUnlocked(i);
             // The frame first: it fills its whole rect opaquely, so an icon
             // blitted before it would be painted over.
-            Ra2App.ButtonFrame(r, mouseX, mouseY, bx, by, bw, bh, kind);
+            Ra2App.ButtonFrame(r, mouseX, mouseY, bx, by, bw, bh, kind, side);
             // The building's own finished art as a small icon above its label,
             // so the menu reads as real RA2 buildings rather than text rows.
             // Locked entries hide the icon: no tech, no picture.
@@ -209,11 +238,11 @@ class Ra2App {
         int sellKind = game.SellModeArmed() ? 2 : 0;
         int repairKind = game.RepairModeArmed() ? 2 : 0;
         Ra2App.ButtonFrame(r, mouseX, mouseY, Ra2App.SellBtnX(), srY, 62, 30,
-                           sellKind);
+                           sellKind, side);
         Text.DrawCentered(r, "卖", Ra2App.SellBtnX() + 31, srY + 8, 2,
                           236, 236, 236, 255);
         Ra2App.ButtonFrame(r, mouseX, mouseY, Ra2App.RepairBtnX(), srY, 62, 30,
-                           repairKind);
+                           repairKind, side);
         Text.DrawCentered(r, "修", Ra2App.RepairBtnX() + 31, srY + 8, 2,
                           236, 236, 236, 255);
         Ra2App.DrawProduction(r, game, art, mouseX, mouseY);
@@ -243,22 +272,53 @@ class Ra2App {
     /// <summary>The button's chrome without its label, so a caller can put an
     /// icon inside and draw the text where it fits. kind: 0 normal, 1 accent,
     /// 2 selected.</summary>
+    /// <summary>The house's UI palette -- 盟军 steel blue, 苏军 red, 尤里
+    /// purple, the colours each side's sidebar wore in the original. Fills
+    /// nine slots: 0-2 panel base, 3-5 panel hover, 6-8 hover glow.</summary>
+    static void SideUiTint(int side, List<int> rgb) {
+        int p0 = 26; int p1 = 36; int p2 = 54;
+        int h0 = 42; int h1 = 56; int h2 = 80;
+        int g0 = 110; int g1 = 160; int g2 = 230;
+        if (side == Side2.Soviet()) {
+            p0 = 56; p1 = 22; p2 = 22;
+            h0 = 84; h1 = 32; h2 = 32;
+            g0 = 240; g1 = 110; g2 = 90;
+        } else if (side == Side2.Yuri()) {
+            p0 = 44; p1 = 26; p2 = 60;
+            h0 = 62; h1 = 38; h2 = 82;
+            g0 = 190; g1 = 120; g2 = 240;
+        }
+        Ra2App.TintSet(rgb, 0, p0, p1, p2);
+        Ra2App.TintSet(rgb, 3, h0, h1, h2);
+        Ra2App.TintSet(rgb, 6, g0, g1, g2);
+    }
+
+    static void TintSet(List<int> rgb, int at, int r, int g, int b) {
+        while (rgb.Count < at + 3) { rgb.Add(0); }
+        rgb[at] = r;
+        rgb[at + 1] = g;
+        rgb[at + 2] = b;
+    }
+
     static void ButtonFrame(SdlRenderer r, int mx, int my, int x, int y,
-                            int w, int h, int kind) {
+                            int w, int h, int kind, int side) {
+        List<int> tint = new List<int>();
+        Ra2App.SideUiTint(side, tint);
         bool hov = Draw.PointIn(mx, my, x, y, w, h);
-        int mr = 58; int mg = 64; int mb = 80;
-        int dr = 30; int dg = 34; int db = 46;
+        int mr = tint[0]; int mg = tint[1]; int mb = tint[2];
+        int dr = tint[0] * 2 / 3; int dg = tint[1] * 2 / 3; int db = tint[2] * 2 / 3;
         if (kind == 1) {
             mr = 52; mg = 138; mb = 92; dr = 30; dg = 96; db = 62;
             if (hov) { mr = 64; mg = 162; mb = 108; }
         } else if (kind == 2) {
             mr = 224; mg = 176; mb = 66; dr = 196; dg = 146; db = 40;
         } else if (hov) {
-            mr = 74; mg = 82; mb = 102; dr = 42; dg = 48; db = 62;
+            mr = tint[3]; mg = tint[4]; mb = tint[5];
+            dr = tint[0] * 2 / 3; dg = tint[1] * 2 / 3; db = tint[2] * 2 / 3;
         }
         int rad = 12;
         if (hov) {
-            int gr = 120; int gg = 180; int gb = 240;
+            int gr = tint[6]; int gg = tint[7]; int gb = tint[8];
             if (kind == 1) { gr = 120; gg = 230; gb = 170; }
             if (kind == 2) { gr = 250; gg = 210; gb = 110; }
             Draw.RoundRectFill(r, x - 5, y - 5, w + 10, h + 10, rad + 5, gr, gg, gb, 55);
@@ -333,10 +393,13 @@ class Ra2App {
         if (n == 0) { return; }
         int x = Ra2App.ViewW() - 296;
         int y = Ra2App.ProdPanelY(game);
-        KitUi.Panel(r, x + 8, y - 8, 280,
-                 ((n + 1) / 2) * (Ra2App.ProdBtnH() + 8) + 24, 22, 26, 36, 190);
-        Text.Draw(r, "训练", x + 22, y + 2, 2, 236, 208, 120, 255);
         WorldObject sel = game.World().ObjectAt(game.World().SelectedIndex());
+        List<int> ptint = new List<int>();
+        Ra2App.SideUiTint(sel.Side(), ptint);
+        KitUi.Panel(r, x + 8, y - 8, 280,
+                 ((n + 1) / 2) * (Ra2App.ProdBtnH() + 8) + 24,
+                 ptint[0], ptint[1], ptint[2], 200);
+        Text.Draw(r, "训练", x + 22, y + 2, 2, 236, 208, 120, 255);
         for (int i = 0; i < n; i = i + 1) {
             int id = Ra2App.ProdUnitAt(game, i);
             int bx = Ra2App.ProdBtnX(i);
@@ -350,7 +413,7 @@ class Ra2App {
             // price beside it -- the build menu's treatment carried over to
             // trainable units. Locked entries stay text-only.
             Ra2App.ButtonFrame(r, mouseX, mouseY, bx, by, Ra2App.ProdBtnW(),
-                               Ra2App.ProdBtnH(), kind);
+                               Ra2App.ProdBtnH(), kind, sel.Side());
             int textX = bx + 8;
             if (unlocked) {
                 Texture icon = art.UnitIconTexture(u, sel.Side());
@@ -675,6 +738,7 @@ class Ra2App {
     }
 
     static void Main() {
+        Ra2App.MaybeForceDummyVideo();
         string dir = Ra2App.DataDir();
         string missing = Ra2App.MissingArchive(dir);
         if (missing != "") {
@@ -697,7 +761,9 @@ class Ra2App {
         // The shell's backdrop comes from the player's own install, so the menu
         // shows the game's artwork rather than something drawn here.
         ShellArt art = ShellArt.Load(host.Renderer(), vfs);
-        Console.WriteLine("shell art title=" + Convert.ToString(art.HasTitle()));
+        Console.WriteLine("shell art title=" + Convert.ToString(art.HasTitle())
+            + " buttons=" + Convert.ToString(art.HasBtns())
+            + " dialog=" + Convert.ToString(art.HasDialog()));
         // The menu text: the install's own CSF table (RA2MD.CSF on a Yuri's
         // Revenge install, RA2.CSF otherwise), so the buttons carry the
         // original labels. Screens falls back to transcribed text without it.
@@ -886,9 +952,9 @@ class Ra2App {
                                                   maps[shell.MapIndex()]);
                     previewIndex = shell.MapIndex();
                 }
-                int act = Screens.DrawSkirmish(host.Renderer(), shell, maps,
-                    preview, ui, Ra2App.ViewW(), Ra2App.ViewH(), mouseX, mouseY,
-                    clicked);
+                int act = Screens.DrawSkirmish(host.Renderer(), art, shell,
+                    maps, preview, ui, Ra2App.ViewW(), Ra2App.ViewH(),
+                    mouseX, mouseY, clicked);
                 if (act == 1) { shell.StartGame(); }
                 if (act == 2) { shell.Back(); }
             } else {
@@ -905,6 +971,7 @@ class Ra2App {
                     map = db.MapNamed(maps[shell.MapIndex()]);
                     theater = Theater.Load(vfs, db, map.Theater());
                     terrain = MapRenderer.Create(map.Terrain(), theater);
+                    terrain.SetTerrain(map);
                     // A fresh game: an empty world over the map's terrain, the
                     // player's side, and the starter base. The bases sit on the
                     // map's own waypoints -- the old hardcoded (1,2) is outside
@@ -917,6 +984,10 @@ class Ra2App {
                     // string table rides along so sidebar labels read the
                     // original text (RA2MD.CSF, falling back to RA2.CSF).
                     Rules rules = Rules.LoadWith(db.Rules(), db.Strings());
+                    // The art ini carries each infantry's frame layout (its
+                    // Sequence= section); layered on after the rules so the
+                    // Image= keys the art sections use are already known.
+                    rules.ApplyArtIni(db.Art());
                     world = World.Create(map.Terrain(),
                                          StructureCatalog.CreateWith(rules),
                                          UnitCatalog.CreateWith(rules));
@@ -933,31 +1004,75 @@ class Ra2App {
                     }
                     objArt = ObjectArt.Create(vfs, db);
                     int side = shell.SideIndex();
+                    // The skirmish screen's start-spot pick: waypoints 0..7
+                    // are the map's start positions, 0 means 随机 -- any free
+                    // spot, drawn here as a rotation over the map's own
+                    // waypoints so consecutive games open in different
+                    // corners -- and the two houses must not share one.
+                    int spot = 0;
+                    if (shell.StartPosIndex() > 0) {
+                        spot = shell.StartPosIndex() - 1;
+                    } else {
+                        spot = (int)(Sdl.Ticks() / 997 % 8);
+                    }
                     List<int> start = new List<int>();
                     int sx = 1;
                     int sy = 2;
-                    if (map.StartCell(0, start) && start.Count >= 2) {
+                    if (map.StartCell(spot, start) && start.Count >= 2) {
                         sx = start[0];
                         sy = start[1];
                     }
                     int yardIdx = world.PlaceBase(side, sx, sy);
                     if (yardIdx < 0) { yardIdx = world.PlaceBase(side, 1, 2); }
-                    int scout = world.SpawnNear(yardIdx, 0);
+                    // The opening squad, sized by the setup screen's 部队数:
+                    // each walks out beside the construction yard, and the
+                    // first stays selected so its click orders a move
+                    // immediately.
+                    int scout = 0 - 1;
+                    int su = 0;
+                    while (su < shell.UnitCount()) {
+                        int u = world.SpawnNear(yardIdx, 0);
+                        if (u < 0) { break; }
+                        if (scout < 0) { scout = u; }
+                        su = su + 1;
+                    }
                     if (scout >= 0) {
                         WorldObject s = world.ObjectAt(scout);
                         world.SelectAt(s.X(), s.Y());
                     }
-                    // The opponent opens on the map's second start, so the two
-                    // bases face each other across the terrain; maps without a
-                    // second waypoint fall back to the far corner. The AI
-                    // plays the next side after the player's, matching the
-                    // controller's round-robin.
+                    // The opponent opens on the first start position the
+                    // player did not take, so the two bases face each other
+                    // across the terrain; maps without a second waypoint
+                    // fall back to the far corner. The AI plays the next
+                    // side after the player's, matching the controller's
+                    // round-robin.
                     int aiSide = (side + 1) % Side2.Count();
                     List<int> eStart = new List<int>();
-                    if (map.StartCell(1, eStart) && eStart.Count >= 2) {
-                        world.PlaceBase(aiSide, eStart[0], eStart[1]);
+                    int eSpot = 0 - 1;
+                    for (int w = 0; w < 8 && eSpot < 0; w = w + 1) {
+                        if (w == spot) { continue; }
+                        eStart = new List<int>();
+                        if (map.StartCell(w, eStart) && eStart.Count >= 2) {
+                            eSpot = w;
+                        }
+                    }
+                    if (eSpot < 0 && spot != 1) {
+                        eStart = new List<int>();
+                        if (map.StartCell(1, eStart) && eStart.Count >= 2) {
+                            eSpot = 1;
+                        }
+                    }
+                    int aiYard = 0 - 1;
+                    if (eSpot >= 0) {
+                        aiYard = world.PlaceBase(aiSide, eStart[0],
+                                                 eStart[1]);
                     } else {
                         world.PlaceEnemyBase(aiSide);
+                    }
+                    int au = 0;
+                    while (aiYard >= 0 && au < shell.UnitCount()) {
+                        if (world.SpawnNear(aiYard, 0) < 0) { break; }
+                        au = au + 1;
                     }
                     // Neutral civilian structures from the map's [Structures]:
                     // oil derricks, hospitals and city props an engineer can
@@ -979,7 +1094,9 @@ class Ra2App {
                         world.PlaceCivStructure(civId, Convert.ToInt32(f[3]),
                                                 Convert.ToInt32(f[4]), hp);
                     }
-                    game = GameController.Create(world, side);
+                    game = GameController.CreateWith(world, side,
+                        shell.StartCredits(), shell.EnemyDifficulty(0));
+                    game.SetShortGame(shell.ShortGame());
                     terrain.SetWorld(world, objArt, side);
                     cam = Camera.Create(Ra2App.ViewW(), Ra2App.ViewH(),
                                         terrain.WorldWidth(), terrain.WorldHeight());
@@ -1010,22 +1127,26 @@ class Ra2App {
                         + " obj=" + Convert.ToString(world.ObjectCount()));
                 }
 
-                // Real time: each full 66ms chunk that accumulated since the
+                // Real time: each full chunk that accumulated since the
                 // last frame spends one logic tick, up to a small burst cap so
-                // a lagging frame never fast-forwards the battle. While paused
-                // or after the result is decided the clock just re-anchors.
+                // a lagging frame never fast-forwards the battle. The chunk
+                // length is the setup screen's 游戏速度: 6 runs at the
+                // original's pace, each step slower stretches the tick by a
+                // third. While paused or after the result is decided the
+                // clock just re-anchors.
                 int nowMs = Sdl.Ticks();
+                int tickMs = 66 + (6 - shell.GameSpeed()) * 33;
                 if (game != null && !game.Paused() && game.Result() == 0) {
                     if (lastMs >= 0) { accMs = accMs + (nowMs - lastMs); }
                     lastMs = nowMs;
                     int steps = 0;
-                    while (accMs >= 66 && steps < 4) {
+                    while (accMs >= tickMs && steps < 4) {
                         game.Tick();
-                        accMs = accMs - 66;
+                        accMs = accMs - tickMs;
                         steps = steps + 1;
                         dirty = true;
                     }
-                    if (accMs > 66 * 4) { accMs = 0; }
+                    if (accMs > tickMs * 4) { accMs = 0; }
                 } else {
                     lastMs = nowMs;
                     accMs = 0;
@@ -1123,28 +1244,48 @@ class Ra2App {
                 }
             }
 
+            // --selftest walks the whole flow without a human at the keyboard:
+            // menu, setup, then a rendered frame of the first map.
+            if (selfTest) {
+                // Screenshot dumps read the renderer's pixels, so they must
+                // run while the finished frame is still the current target.
+                // After host.End() presents, the swapchain hands back an
+                // arbitrary buffer -- the menu shot used to survive by luck
+                // of the rotation while the skirmish one came back blank.
+                if (frames == 2) {
+                    Ra2App.DumpScreen("build/ra2_shot_menu.bmp",
+                                      host.Renderer());
+                }
+                if (frames == 4) {
+                    Ra2App.DumpScreen("build/ra2_shot_sk5.bmp",
+                                      host.Renderer());
+                }
+                if (frames == 6) {
+                    Ra2App.DumpScreen("build/ra2_shot_skirmish.bmp",
+                                      host.Renderer());
+                }
+            }
+
             host.End();
 
             // --selftest walks the whole flow without a human at the keyboard:
             // menu, setup, then a rendered frame of the first map.
             frames = frames + 1;
             if (selfTest) {
-                // Screenshot dumps read the renderer's pixels, which lag the
-                // frame being drawn; each one closes the frame first so the
-                // capture is that frame's finished draw, then reopens.
-                if (frames == 3) {
-                    host.End();
-                    Ra2App.DumpScreen("build/ra2_shot_menu.bmp", host.Renderer());
-                    host.Begin(16, 20, 16);
-                }
                 if (frames == 4) { shell.OpenSkirmish(); }
                 // Linger on setup so a preview is actually built, then step
-                // the selection once so the rebuild path runs too.
+                // the selection once so the rebuild path runs too. The
+                // country dropdown is opened for the shot so its panel is
+                // exercised as well.
+                if (frames == 5) { shell.SetCountryListOpen(true); }
                 if (frames == 6) { shell.SelectMap(1); }
-                if (frames == 7) {
-                    host.End();
-                    Ra2App.DumpScreen("build/ra2_shot_skirmish.bmp", host.Renderer());
-                    host.Begin(16, 20, 16);
+                // The Soviet run: the sidebar's red chrome and the Soviet
+                // roster ride shell's side flag, so flipping it before
+                // StartGame re-themes the whole game view. Frame 9 keeps the
+                // Allied shot already dumped; the Soviet game_ui dump comes
+                // at frame 15 below.
+                if (frames == 7 && Ra2App.SelfTestSoviet()) {
+                    shell.SetSide(Side.Soviet());
                 }
                 if (frames == 8) { shell.StartGame(); }
                 // Once the game is running, arm the second build (a power
@@ -1239,7 +1380,10 @@ class Ra2App {
                     host.End();
                     // Dump before the fast-forward so the parked tanks are
                     // captured without combat effects over them.
-                    Ra2App.DumpScreen("build/ra2_shot_tanks.bmp",
+                    int pside = shell.SideIndex();
+                    Ra2App.DumpScreen(pside == 0
+                                      ? "build/ra2_shot_tanks.bmp"
+                                      : "build/ra2_shot_tanks_sov.bmp",
                                       host.Renderer());
                     host.Begin(16, 20, 16);
                     // Then put a producing structure on screen and select it,
@@ -1251,21 +1395,22 @@ class Ra2App {
                     if (game != null) {
                         int pileId = -1;
                         StructureCatalog cat = game.World().Catalog();
-                        for (int ci = 0; ci < cat.CountFor(0); ci = ci + 1) {
-                            StructureType ct = cat.TypeFor(0, ci);
-                            if (ct != null && ct.Reg() == "GAWEAP") {
+                        for (int ci = 0; ci < cat.CountFor(pside); ci = ci + 1) {
+                            StructureType ct = cat.TypeFor(pside, ci);
+                            string reg = pside == 0 ? "GAWEAP" : "NAWEAP";
+                            if (ct != null && ct.Reg() == reg) {
                                 pileId = ci;
                             }
                         }
                         int newId = -1;
                         if (pileId >= 0) {
                             List<int> sc0 = new List<int>();
-                            if (map.StartCell(0, sc0) && sc0.Count >= 2) {
+                            if (map.StartCell(pside, sc0) && sc0.Count >= 2) {
                                 for (int r = 0; r < 8 && newId < 0; r = r + 1) {
-                                    newId = world.PlaceStructure(0, pileId,
+                                    newId = world.PlaceStructure(pside, pileId,
                                         sc0[0] + 2 + r, sc0[1] - 4);
                                     if (newId < 0) {
-                                        newId = world.PlaceStructure(0, pileId,
+                                        newId = world.PlaceStructure(pside, pileId,
                                             sc0[0] - 3, sc0[1] + r);
                                     }
                                 }
@@ -1277,9 +1422,10 @@ class Ra2App {
                             for (int oi = 0; oi < world.ObjectCount()
                                     && prod == null; oi = oi + 1) {
                                 WorldObject o = world.ObjectAt(oi);
-                                if (o == null || o.Side() != 0
+                                if (o == null || o.Side() != pside
                                  || o.Kind() != ObjKind.Structure()) { continue; }
-                                StructureType st = cat.TypeFor(0, o.BuildId());
+                                StructureType st = cat.TypeFor(pside,
+                                    o.BuildId());
                                 if (st != null && st.Produces() != null
                                  && st.Produces().Count > 0) {
                                     prod = o;
@@ -1318,7 +1464,9 @@ class Ra2App {
                     // selected structure's training panel); close the frame
                     // so the capture is this draw, then report and leave.
                     host.End();
-                    Ra2App.DumpScreen("build/ra2_shot_game_ui.bmp",
+                    Ra2App.DumpScreen(shell.SideIndex() == 0
+                                      ? "build/ra2_shot_game_ui.bmp"
+                                      : "build/ra2_shot_game_ui_sov.bmp",
                                       host.Renderer());
                     host.Begin(16, 20, 16);
                     int objCount = world == null ? -1 : world.ObjectCount();
@@ -1342,7 +1490,25 @@ class Ra2App {
                         + " aiMoney=" + Convert.ToString(aiMoney)
                         + " sel=" + Convert.ToString(sel)
                         + " result=" + Convert.ToString(result));
-                    host.Quit();
+                    // The Soviet walk ends here; the Allied walk backs out to
+                    // the setup screen and runs a second, Soviet-side game so
+                    // one invocation dumps both faction UIs. The second run
+                    // lands here a second time with the side already Soviet,
+                    // so the flipped-side check is what actually stops it --
+                    // without it frames=4 restarts the walk forever.
+                    if (Ra2App.SelfTestSoviet()
+                     || shell.SideIndex() != Side.Allied()) { host.Quit(); }
+                    shell.SetSide(Side.Soviet());
+                    shell.Back();
+                    loadedIndex = -1;
+                    preview = null;
+                    game = null;
+                    cam = null;
+                    world = null;
+                    minerObj = null;
+                    oreX = -1;
+                    oreY = -1;
+                    frames = 4;
                 }
             }
         }

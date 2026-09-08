@@ -34,6 +34,12 @@ class MapFile {
     // ore lives entirely in the GEM overlays; there are no ORE_* types.
     int[] overlay;
     int[] overlayData;
+    // Terrain objects -- the trees, rocks and other scatter art of the
+    // [Terrain] section -- as parallel cell/type arrays. The section's keys
+    // are cell numbers in the same y*1000+x packing the waypoints use
+    // ("98101" -> x=101, y=98 on MP02T2).
+    List<int> terrainXy;
+    List<string> terrainType;
 
     static MapFile Parse(string text) {
         MapFile m = new MapFile();
@@ -71,6 +77,29 @@ class MapFile {
             m.overlayData[c] = 0;
         }
         m.ParseOverlay("OverlayPack", "OverlayDataPack");
+
+        m.terrainXy = new List<int>();
+        m.terrainType = new List<string>();
+        IniSection terr = m.doc.Section("Terrain");
+        if (terr != null) {
+            for (int i = 0; i < terr.Count(); i = i + 1) {
+                IniEntry en = terr.EntryAt(i);
+                int packed = 0;
+                string k = en.Key().Trim();
+                bool ok = k.Length > 0;
+                for (int c = 0; ok && c < k.Length; c = c + 1) {
+                    if (k[c] < 48 || k[c] > 57) { ok = false; }
+                }
+                if (ok) { packed = Convert.ToInt32(k); }
+                if (!ok || en.Value().Trim().Length == 0) { continue; }
+                int x = packed % 1000;
+                int y = packed / 1000;
+                if (x < 0 || y < 0 || x >= span || y >= span) { continue; }
+                m.terrainXy.Add(x);
+                m.terrainXy.Add(y);
+                m.terrainType.Add(en.Value().Trim().ToUpper());
+            }
+        }
         return m;
     }
 
@@ -124,6 +153,15 @@ class MapFile {
     int LocalWidth() { return this.localWidth; }
     int LocalHeight() { return this.localHeight; }
     IsoMap Terrain() { return this.terrain; }
+
+    /// <summary>How many [Terrain] objects the map carries.</summary>
+    int TerrainCount() {
+        return this.terrainType == null ? 0 : this.terrainType.Count;
+    }
+
+    int TerrainX(int i) { return this.terrainXy[i * 2]; }
+    int TerrainY(int i) { return this.terrainXy[i * 2 + 1]; }
+    string TerrainType(int i) { return this.terrainType[i]; }
 
     /// <summary>The overlay type index at a cell, or -1 when the cell is
     /// empty or outside the map. The index numbers the rules' [OverlayTypes]

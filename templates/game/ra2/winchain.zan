@@ -1,0 +1,148 @@
+// 快速游戏胜负全链路的回归程序。在一个程序化铺出的平地地图上放下两座
+// 基地,不读 data/:地形是构造出来的 IsoMap,规则是 Rules.Default()。
+// 三个场景各断言一个结果,任何一条 FAIL 都以非零码退出:
+//   长局:打光敌方建筑但留一个兵 -> result 保持 0(还要继续清兵)
+//   短局:同样局面 -> result 立即变 1(打光建筑就算赢)
+//   反向短局:己方建筑全灭 -> result 变 2(判负)
+using System;
+using Ra2.Formats;
+using Ra2.Game;
+
+class WinChainTest {
+    // 铺一张 40x40 的平地:level 4 是真实地图的地面高度,可通行。
+    static IsoMap FlatMap(int w, int h) {
+        IsoMap iso = new IsoMap();
+        iso.width = w;
+        iso.height = h;
+        iso.tiles = new List<IsoTile>();
+        iso.cellIndex = new List<int>();
+        for (int c = 0; c < w * h; c = c + 1) { iso.cellIndex.Add(0); }
+        for (int y = 0; y < h; y = y + 1) {
+            for (int x = 0; x < w; x = x + 1) {
+                IsoTile t = new IsoTile();
+                t.x = x;
+                t.y = y;
+                t.tile = 0xFFFF;   // clear ground
+                t.subTile = 0;
+                t.level = 4;
+                iso.tiles.Add(t);
+                iso.cellIndex[y * w + x] = iso.tiles.Count;
+            }
+        }
+        return iso;
+    }
+
+    static int StructuresOf(World world, int side) {
+        int n = 0;
+        for (int i = 0; i < world.ObjectCount(); i = i + 1) {
+            WorldObject o = world.ObjectAt(i);
+            if (o.Side() == side && o.Kind() == ObjKind.Structure()
+             && !o.IsDead()) { n = n + 1; }
+        }
+        return n;
+    }
+
+    static int UnitsOf(World world, int side) {
+        int n = 0;
+        for (int i = 0; i < world.ObjectCount(); i = i + 1) {
+            WorldObject o = world.ObjectAt(i);
+            if (o.Side() == side && o.Kind() == ObjKind.Unit()
+             && !o.IsDead()) { n = n + 1; }
+        }
+        return n;
+    }
+
+    static int KillStructuresOf(World world, int side) {
+        int killed = 0;
+        for (int i = 0; i < world.ObjectCount(); i = i + 1) {
+            WorldObject o = world.ObjectAt(i);
+            if (o.Side() == side && o.Kind() == ObjKind.Structure()
+             && !o.IsDead()) {
+                o.TakeDamage(o.Hp());
+                killed = killed + 1;
+            }
+        }
+        return killed;
+    }
+
+    static int failures = 0;
+
+    static void Report(string tag, int got, int want) {
+        string verdict = got == want ? "PASS" : "FAIL";
+        Console.WriteLine(verdict + " " + tag
+            + " got=" + Convert.ToString(got)
+            + " want=" + Convert.ToString(want));
+        if (got != want) { failures = failures + 1; }
+    }
+
+    // 场景 1+2:玩家(盟军)与敌人(苏军)各一座基地。先验证长局规则,
+    // 同一局面再用短局规则重摆一遍。
+    static void Main() {
+        Rules rules = Rules.Default();
+        StructureCatalog sc = StructureCatalog.CreateWith(rules);
+        UnitCatalog uc = UnitCatalog.CreateWith(rules);
+
+        // ---- 长局:清掉敌方建筑、留兵,结果必须还是 0 ----
+        World world = World.Create(FlatMap(40, 40), sc, uc);
+        world.PlaceBase(0, 3, 3);
+        world.PlaceBase(1, 30, 30);
+        GameController game = GameController.CreateWith(world, 0, 10000,
+                                                        Difficulty.Normal());
+        game.SetShortGame(false);
+        int step = 0;
+        while (step < 200 && game.Result() == 0) { game.Tick(); step = step + 1; }
+        Report("long pre-game stays undecided", game.Result(), 0);
+        Report("long both bases stand (player)",
+               StructuresOf(world, 0) > 0 ? 1 : 0, 1);
+        Report("long both bases stand (enemy)",
+               StructuresOf(world, 1) > 0 ? 1 : 0, 1);
+        int killed = KillStructuresOf(world, 1);
+        Report("long enemy structures razed", killed > 0 ? 1 : 0, 1);
+        game.Tick();
+        Report("long surviving enemy units keep fight going",
+               game.Result(), 0);
+        // 敌方最后一个兵也阵亡后,长局才算分晓。
+        for (int i = 0; i < world.ObjectCount(); i = i + 1) {
+            WorldObject o = world.ObjectAt(i);
+            if (o.Side() == 1 && o.Kind() == ObjKind.Unit() && !o.IsDead()) {
+                o.TakeDamage(o.Hp());
+            }
+        }
+        game.Tick();
+        Report("long win once the last enemy unit dies", game.Result(), 1);
+
+        // ---- 短局:同一开局,清建筑即胜,不用清兵 ----
+        World world2 = World.Create(FlatMap(40, 40), sc, uc);
+        world2.PlaceBase(0, 3, 3);
+        world2.PlaceBase(1, 30, 30);
+        GameController game2 = GameController.CreateWith(world2, 0, 10000,
+                                                         Difficulty.Normal());
+        game2.SetShortGame(true);
+        // Sit out the opening ticks first: the first tick alone must not
+        // have already decided the game, which is what "got=2 want=0" used
+        // to catch before this loop existed.
+        int step2 = 0;
+        while (step2 < 50 && game2.Result() == 0) { game2.Tick(); step2 = step2 + 1; }
+        Report("short pre-game stays undecided", game2.Result(), 0);
+        KillStructuresOf(world2, 1);
+        game2.Tick();
+        Report("short surviving enemy units do not matter",
+               game2.Result(), 1);
+
+        // ---- 反向:短局下己方建筑全灭即判负 ----
+        World world3 = World.Create(FlatMap(40, 40), sc, uc);
+        world3.PlaceBase(0, 3, 3);
+        world3.PlaceBase(1, 30, 30);
+        GameController game3 = GameController.CreateWith(world3, 0, 10000,
+                                                         Difficulty.Normal());
+        game3.SetShortGame(true);
+        KillStructuresOf(world3, 0);
+        game3.Tick();
+        Report("short player loss when own base is razed", game3.Result(), 2);
+
+        Console.WriteLine(failures == 0 ? "winchain ok"
+                          : "winchain FAILED " + Convert.ToString(failures));
+        if (failures > 0) { return 1; }
+        return 0;
+    }
+}

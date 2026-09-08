@@ -117,11 +117,14 @@ class ObjectArt {
     /// (dog, spy, sniper); units whose SHP name is empty get a side-coloured
     /// placeholder drawn by the renderer instead.
     ///
-    /// The TS/RA2 unit SHP layout is fixed: frames 0-7 are the eight facing
-    /// directions of the still pose, 8-13 the south-facing idle animation, and
-    /// 14+ the eight facing directions' walk cycles in blocks of six (S, SW,
-    /// W, NW, N, NE, E, SE). Walking cycles the block of the unit's facing;
-    /// idle cycles the south-facing idle frames.</summary>
+    /// Infantry SHPs lay their frames out as the art ini's Sequence= section
+    /// describes: a ring of stand poses (one per facing, Ready=0 for GI),
+    /// then the walk cycle as one block of frames per facing (Walk=8,6,6 --
+    /// start 8, six frames a block). The sprite ring runs counter-clockwise
+    /// from north -- N, NW, W, SW, S, SE, E, NE, read off the shipped GI.SHP
+    /// -- while the engine's facing ring runs clockwise, so the block a
+    /// facing lands on is its mirror (8 - facing). Vehicles are voxels and
+    /// bake per facing below.</summary>
     Texture UnitTexture(UnitType ut, bool moving, int animFrame, int facing,
                         int side) {
         if (ut == null) { return null; }
@@ -130,20 +133,27 @@ class ObjectArt {
         if (ObjectArt.IsVxlName(name)) {
             return this.VehicleTexture(name, facing, side);
         }
-        if (moving) {
-            // Walk blocks run S, SW, W, NW, N, NE, E, SE -- the facing ring
-            // rotated four places, since facing 0 is north.
-            int frame = 14 + ((facing + 4) % 8) * 6 + (animFrame % 6);
-            // Guard: a shape with fewer than 20 frames is not a unit sprite;
-            // fall back to frame 0 rather than reading past the end.
-            int count = this.ShapeFrameCount(name);
-            if (frame >= count) { frame = 0; }
-            return this.ShapeTextureFrame(name, frame, this.UnitPalFor(side));
+        int ring = (8 - (facing % 8)) % 8;
+        int count = this.ShapeFrameCount(name);
+        if (ut.HasSeq()) {
+            if (moving) {
+                int per = ut.WalkFrames();
+                int frame = ut.WalkStart() + ring * per + (animFrame % per);
+                if (frame >= count) { return this.ShapeTextureFrame(name,
+                    ut.ReadyStart() + ring, this.UnitPalFor(side)); }
+                return this.ShapeTextureFrame(name, frame,
+                                              this.UnitPalFor(side));
+            }
+            int stand = ut.ReadyStart() + ring;
+            if (stand < count) {
+                return this.ShapeTextureFrame(name, stand,
+                                              this.UnitPalFor(side));
+            }
+            return this.ShapeTextureFrame(name, 0, this.UnitPalFor(side));
         }
-        int idle = 8 + (animFrame % 6);
-        int idleCount = this.ShapeFrameCount(name);
-        if (idle >= idleCount) { idle = 0; }
-        return this.ShapeTextureFrame(name, idle, this.UnitPalFor(side));
+        // No sequence known for this sprite: it is not troop art (the old
+        // guard tower crew, civilians), so a single still frame serves.
+        return this.ShapeTextureFrame(name, 0, this.UnitPalFor(side));
     }
 
     /// <summary>Whether a unit art name names a voxel model rather than an
@@ -396,26 +406,39 @@ class ObjectArt {
             counts[keys[i] - kmin] = counts[keys[i] - kmin] + 1;
         }
 
-        // Stamp far-to-near. Lighting from the occupancy gradient: a voxel
-        // facing empty space gets a normal along that axis, lit by a screen
-        // light from the upper left.
-        double lx = -0.5; double ly = -0.5; double lz = 0.7;
+        // Stamp far-to-near. Lighting from the occupancy gradient, smoothed
+        // over the voxel's neighbourhood so a hull side is one continuous
+        // shade rather than six discrete steps, lit from the upper left the
+        // way the original's fixed light vector reads on screen.
+        double lx = -0.35; double ly = -0.35; double lz = 0.87;
         for (int i = 0; i < n; i = i + 1) {
             int vi = order[i];
             int x = gx[vi]; int y = gy[vi]; int z = gz[vi];
-            int nx = ObjectArt.Face(l, x - 1, y, z)
-                   - ObjectArt.Face(l, x + 1, y, z);
-            int ny = ObjectArt.Face(l, x, y - 1, z)
-                   - ObjectArt.Face(l, x, y + 1, z);
-            int nz = ObjectArt.Face(l, x, y, z - 1)
-                   - ObjectArt.Face(l, x, y, z + 1);
+            // Sum the axis gradients over a 3x3x3 block: a flat wall keeps
+            // its axis normal, an edge or rib bends the shade across it.
+            int nx = 0; int ny = 0; int nz = 0;
+            for (int by = -1; by <= 1; by = by + 1) {
+                for (int bx = -1; bx <= 1; bx = bx + 1) {
+                    for (int bz = -1; bz <= 1; bz = bz + 1) {
+                        nx = nx + ObjectArt.Face(l, x + bx - 1, y + by,
+                                                 z + bz)
+                           - ObjectArt.Face(l, x + bx + 1, y + by, z + bz);
+                        ny = ny + ObjectArt.Face(l, x + bx, y + by - 1,
+                                                 z + bz)
+                           - ObjectArt.Face(l, x + bx, y + by + 1, z + bz);
+                        nz = nz + ObjectArt.Face(l, x + bx, y + by,
+                                                 z + bz - 1)
+                           - ObjectArt.Face(l, x + bx, y + by, z + bz + 1);
+                    }
+                }
+            }
             int n2 = nx * nx + ny * ny + nz * nz;
             if (n2 == 0) { nx = 0; ny = 0; nz = 1; n2 = 1; }
             double nl = Math.Sqrt((double)n2);
             double dot = ((double)nx * lx + (double)ny * ly
                         + (double)nz * lz) / nl;
-            double shade = 0.45 + 0.55 * dot;
-            if (shade < 0.15) { shade = 0.15; }
+            double shade = 0.58 + 0.42 * dot;
+            if (shade < 0.25) { shade = 0.25; }
             if (shade > 1.0) { shade = 1.0; }
             int color = l.VoxelAt(x, y, z);
             int r = (int)((double)pal.R8(color) * shade);
@@ -488,7 +511,25 @@ class ObjectArt {
                 ShpFrame f = shp.FrameAt(frame);
                 if (f != null && !f.IsEmpty()) {
                     byte[] idx = shp.DecodeFrame(frame);
-                    tex = Texture.FromIndexed(idx, f.Width(), f.Height(), pal);
+                    // Troop frames sit at their own offset inside the
+                    // sprite's bounding box, and the box is what aligns the
+                    // frames of a cycle -- a walk sprite's feet stay planted
+                    // only if every frame lands at its shipped offset.
+                    // Buildings fill their box exactly, so this composes to
+                    // the plain decode for them.
+                    if (shp.Width() > f.Width() || shp.Height() > f.Height()
+                     || f.X() != 0 || f.Y() != 0) {
+                        Texture full = Texture.Create(shp.Width(),
+                                                      shp.Height());
+                        Texture part = Texture.FromIndexedShp(idx, f.Width(),
+                                                           f.Height(), pal);
+                        full.Blit(part, f.X(), f.Y());
+                        part.Close();
+                        tex = full;
+                    } else {
+                        tex = Texture.FromIndexedShp(idx, f.Width(), f.Height(),
+                                                  pal);
+                    }
                 }
             }
         }

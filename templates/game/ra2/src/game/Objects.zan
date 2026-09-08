@@ -404,6 +404,13 @@ class UnitType {
     int steps;         // cells covered per tick
     int role;          // UnitRole: engineer captures, spy infiltrates
     bool mindImmune;   // dogs and Tanya shrug off mind control
+    // Infantry art sequence (from the art ini's Sequence= section): where
+    // the stand ring and the walk blocks start, and how long a walk block
+    // is. Without it the sprite carries no troop layout to read.
+    bool hasSeq;
+    int readyStart;
+    int walkStart;
+    int walkFrames;
     // Tech tree: prereq slots resolved to build ids of this side's catalog.
     // Every slot needs one living built building from its list.
     List<List<int>> prereqs;
@@ -448,6 +455,17 @@ class UnitType {
     bool MindImmune() { return this.mindImmune; }
     List<List<int>> Prereqs() { return this.prereqs; }
     void SetPrereqs(List<List<int>> prereqs) { this.prereqs = prereqs; }
+
+    bool HasSeq() { return this.hasSeq; }
+    int ReadyStart() { return this.readyStart; }
+    int WalkStart() { return this.walkStart; }
+    int WalkFrames() { return this.walkFrames; }
+    void SetSequence(bool has, int ready, int walk, int frames) {
+        this.hasSeq = has;
+        this.readyStart = ready;
+        this.walkStart = walk;
+        this.walkFrames = frames;
+    }
 
     /// <summary>Primary-weapon damage for the info panel; 0 for the unarmed
     /// specialists.</summary>
@@ -509,6 +527,8 @@ class UnitCatalog {
                 d.MindImmune());
             t.SetTurretVxl(d.TurretVxl());
             t.SetPrereqs(Rules.ResolvePrereqs(rules, d.Prereq(), bdefs));
+            t.SetSequence(d.HasSeq(), d.ReadyStart(), d.WalkStart(),
+                          d.WalkFrames());
             l.Add(t);
         }
         return l;
@@ -2523,7 +2543,7 @@ class World {
         if (wh.KillsInfantry() && t.Kind() == ObjKind.Unit()) {
             dmg = t.Hp();   // dogs take infantry down regardless of health
         }
-        t.TakeDamage(dmg);
+        this.SplashAround(shooter, wh, t.X(), t.Y(), t, dmg);
         if (t.IsDead()) { return; }
         if (wh.Freeze() && t.Kind() == ObjKind.Unit()) {
             t.SetFrozen(this.Rules().FreezeTicks());
@@ -2544,6 +2564,39 @@ class World {
          && t.UnitType().Primary() != null && shooter.Side() != t.Side()) {
             int sIdx = this.IndexOfObject(shooter);
             if (sIdx >= 0) { t.SetTarget(sIdx); }
+        }
+    }
+
+    /// <summary>Lands a warhead at (cx,cy) around its target: the primary
+    /// damage hits the target itself, and a warhead with CellSpread>0 hits
+    /// every other object standing within that many cells. Splash falls off
+    /// linearly to zero at the spread radius, scales by each victim's armour
+    /// verse like a direct shot, and skips friends and neutrals -- the
+    /// original punishes careless artillery, it does not friendly-fire a
+    /// whole squad. Special effects stay direct-hit only.</summary>
+    void SplashAround(WorldObject shooter, Warhead wh, int cx, int cy,
+                      WorldObject t, int dmg) {
+        if (wh.Spread() <= 0) { t.TakeDamage(dmg); return; }
+        t.TakeDamage(dmg);
+        int radius = wh.Spread() + 2;   // cells around the impact point
+        for (int i = 0; i < this.objects.Count; i = i + 1) {
+            WorldObject o = this.objects[i];
+            if (o == t || o.IsDead() || o.Side() == shooter.Side()
+             || o.Side() == Side2.Neutral()) { continue; }
+            int vx = o.X() - cx;
+            int vy = o.Y() - cy;
+            if (vx < 0) { vx = 0 - vx; }
+            if (vy < 0) { vy = 0 - vy; }
+            if (vx > radius || vy > radius) { continue; }
+            int d = vx + vy;
+            if (d > radius) { continue; }
+            int armor = this.ArmorOf(o);
+            int half = this.Rules().SplashScale() > 0
+                ? this.Rules().SplashScale() : 50;
+            int scaled = dmg * half / 100;
+            int damp = (radius - d) * scaled / radius;
+            if (damp <= 0) { continue; }
+            o.TakeDamage(damp);
         }
     }
 

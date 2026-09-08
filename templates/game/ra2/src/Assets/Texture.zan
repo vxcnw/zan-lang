@@ -35,6 +35,25 @@ class Texture {
         return t;
     }
 
+    /// <summary>As FromIndexed, but with the TS/RA2 SHP conventions: index
+    /// 0 is transparent, and index 4 -- the shadow slot the unit palettes
+    /// carry as a reserved placeholder colour -- decodes to the translucent
+    /// black the engine paints for a sprite's baked shadow.</summary>
+    static Texture FromIndexedShp(string indices, int width, int height,
+                                  Palette pal) {
+        Texture t = Texture.Create(width, height);
+        int n = width * height;
+        for (int i = 0; i < n; i = i + 1) {
+            int idx = indices[i] & 0xFF;
+            if (idx == 4) {
+                t.SetPixel(i, 0, 0, 0, 110);
+            } else if (idx != 0) {
+                t.SetPixel(i, pal.R8(idx), pal.G8(idx), pal.B8(idx), 255);
+            }
+        }
+        return t;
+    }
+
     /// <summary>Converts a PCX image, which carries its own 8-bit palette.</summary>
     ///
     /// Unlike sprite art, a shell backdrop is fully opaque -- index 0 is a real

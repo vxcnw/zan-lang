@@ -192,6 +192,16 @@ class Theater {
                 TmpTemplate tmp = TmpTemplate.Parse(raw, len[0]);
                 if (sub < tmp.TileCount()) {
                     TmpTile t = tmp.TileAt(sub);
+                    if (Theater.Trace()) {
+                        Console.WriteLine("tex tile=" + Convert.ToString(tileId)
+                            + " sub=" + Convert.ToString(sub) + " " + file
+                            + " extra=" + (t != null && t.HasExtra() ? 1 : 0)
+                            + " off=" + (t != null ? t.ExtraOff() : 0)
+                            + " rect=" + (t != null ? t.ExtraOffsetX() : 0) + ","
+                            + (t != null ? t.ExtraOffsetY() : 0)
+                            + " " + (t != null ? t.ExtraWidth() : 0) + "x"
+                            + (t != null ? t.ExtraHeight() : 0));
+                    }
                     int baseW = tmp.TileWidth();
                     int baseH = tmp.TileHeight();
 
@@ -258,6 +268,64 @@ class Theater {
             if (this.cache[i].key == key) { return i; }
         }
         return -1;
+    }
+
+    // Terrain-object sprites ([Terrain] trees and rocks), cached by name the
+    // way tiles are cached by id: a busy map repeats the same few species.
+    List<string> tSpriteNames;
+    List<Texture> tSpriteTex;
+
+    /// <summary>The terrain object's frame-0 sprite, or null when the theater
+    /// has no art for the name. Cached; the caller must not free it.</summary>
+    ///
+    /// Terrain objects are Theater=yes art: the shipped trees live in the
+    /// theater mixes under the theater's own extension (TREE05.TEM in
+    /// TEMPERAT.MIX), so the extension first, the plain SHP second.
+    Texture TerrainSprite(string name) {
+        if (this.tSpriteNames == null) {
+            this.tSpriteNames = new List<string>();
+            this.tSpriteTex = new List<Texture>();
+        }
+        for (int i = 0; i < this.tSpriteNames.Count; i = i + 1) {
+            if (this.tSpriteNames[i] == name) { return this.tSpriteTex[i]; }
+        }
+        Texture tex = this.LoadTerrainFrame(name + this.extension);
+        if (tex == null) {
+            tex = this.LoadTerrainFrame(name + ".SHP");
+        }
+        this.tSpriteNames.Add(name);
+        this.tSpriteTex.Add(tex);
+        return tex;
+    }
+
+    Texture LoadTerrainFrame(string file) {
+        if (this.palette == null) { return null; }
+        List<int> len = new List<int>();
+        len.Add(0);
+        byte[] raw = this.vfs.Read(file, len);
+        if (len[0] == 0) { return null; }
+        ShpImage shp = ShpImage.Parse(raw, len[0]);
+        ShpFrame f = shp.FrameAt(0);
+        if (f == null || f.IsEmpty()) { return null; }
+        byte[] idx = shp.DecodeFrame(0);
+        if (shp.Width() > f.Width() || shp.Height() > f.Height()
+         || f.X() != 0 || f.Y() != 0) {
+            Texture full = Texture.Create(shp.Width(), shp.Height());
+            Texture part = Texture.FromIndexed(idx, f.Width(), f.Height(),
+                                               this.palette);
+            full.Blit(part, f.X(), f.Y());
+            part.Close();
+            return full;
+        }
+        return Texture.FromIndexed(idx, f.Width(), f.Height(), this.palette);
+    }
+
+    [DllImport("crt")]
+    static extern string getenv(string name);
+
+    static bool Trace() {
+        string v = Theater.getenv("RA2_TRACE");
+        return v != null && v.Length > 0 && v != "0";
     }
 
     void Close() {
