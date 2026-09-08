@@ -942,6 +942,9 @@ class Ime {
     #if ANDROID
     [DllImport("zan_gui")]
     static extern void zan_gui_set_ime_open(int on);
+
+    [DllImport("zan_gui")]
+    static extern string zan_gui_ime_composing();
     #endif
 
     /// <summary>将 IME 组合 + 候选窗口定位到给定的
@@ -963,6 +966,19 @@ class Ime {
     static void SetOpen(bool on) {
         #if ANDROID
         zan_gui_set_ime_open(on ? 1 : 0);
+        #endif
+    }
+
+    /// <summary>输入法正在组合、尚未上屏的串（拼音等 CJK
+    /// 输入的组词预览）。随帧轮询：组合中非空，commit
+    /// 或取消即清空。组合窗口由系统键盘自己显示，这里
+    /// 供文本控件在光标处补一份应用内的预览；非 Android
+    /// 平台（桌面 IME 自带组合 UI）恒返回 ""。</summary>
+    static string Composing() {
+        #if ANDROID
+        return zan_gui_ime_composing();
+        #else
+        return "";
         #endif
     }
 }

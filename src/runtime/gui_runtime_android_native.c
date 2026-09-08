@@ -988,6 +988,35 @@ static jchar *ant_utf8_to_utf16(const char *in, jsize *out_len) {
 static jclass g_ime_cls;
 static jmethodID g_ime_show, g_ime_hide;
 static void ant_ime_commit(JNIEnv *env, jclass clazz, jstring text);
+static void ant_ime_set_composing(JNIEnv *env, jclass clazz, jstring text);
+
+/* Composing (pinyin pre-commit) preview text, UTF-8, guarded by the event
+ * ring lock: written on the IME thread, polled every frame by the GUI
+ * thread. Empty whenever a commit lands (the composing string became real
+ * text) or the editor clears it. */
+static char g_composing[256];
+static size_t g_composing_len;
+
+static void ant_composing_store(const char *utf8) {
+    pthread_mutex_lock(&g_aq_lock);
+    if (utf8) {
+        size_t n = strlen(utf8);
+        if (n >= sizeof(g_composing)) n = sizeof(g_composing) - 1;
+        memcpy(g_composing, utf8, n);
+        g_composing[n] = 0;
+        g_composing_len = n;
+    } else {
+        g_composing[0] = 0;
+        g_composing_len = 0;
+    }
+    /* The composing buffer lives outside the event ring, so a change is
+     * invisible to a loop blocked in WaitEvent (no key event reaches the
+     * ring while the IME owns the keys). Push the kind-14 repaint wake the
+     * exposed-surface contract uses, or the preview would not show until
+     * the next touch. */
+    aq_push_locked(14, 0, 0, 0, 0, 0);
+    pthread_mutex_unlock(&g_aq_lock);
+}
 
 static int ant_ime_init(JNIEnv *env, jobject act) {
     static int done = -1; /* -1 untried, 0 ok, 1 failed */
@@ -1030,14 +1059,18 @@ static int ant_ime_init(JNIEnv *env, jobject act) {
      * (UnsatisfiedLinkError on the first commit). RegisterNatives binds the
      * method on the jclass itself and ignores classloader namespaces. */
     {
-        static const JNINativeMethod k_commit[] = {
+        static const JNINativeMethod k_methods[] = {
             { "zanCommit", "(Ljava/lang/String;)V", (void *)&ant_ime_commit },
+            { "zanSetComposing", "(Ljava/lang/String;)V",
+              (void *)&ant_ime_set_composing },
         };
-        if ((*env)->RegisterNatives(env, g_ime_cls, k_commit, 1) != 0 ||
-            (*env)->ExceptionCheck(env)) {
-            if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
-            goto fail;
-        }
+    if ((*env)->RegisterNatives(env, g_ime_cls, k_methods, 2) != 0 ||
+        (*env)->ExceptionCheck(env)) {
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        ZAN_LOG("RegisterNatives FAILED");
+        goto fail;
+    }
+    ZAN_LOG("RegisterNatives ok (commit+setComposing)");
     }
     done = 0;
     return 0;
@@ -1066,8 +1099,30 @@ static void ant_ime_commit(JNIEnv *env, jclass clazz, jstring text) {
         }
         aq_push_locked(6, 0, 0, 0, (i32)cp, 0);
     }
+    g_composing[0] = 0;
+    g_composing_len = 0;
     pthread_mutex_unlock(&g_aq_lock);
     (*env)->ReleaseStringChars(env, text, chars);
+}
+
+static void ant_ime_set_composing(JNIEnv *env, jclass clazz, jstring text) {
+    (void)clazz;
+    if (!env) return;
+    if (!text) { ant_composing_store(NULL); return; }
+    jsize n = (*env)->GetStringLength(env, text);
+    const jchar *chars = (*env)->GetStringChars(env, text, NULL);
+    if (!chars) { ant_composing_store(NULL); return; }
+    char *utf8 = ant_utf16_to_utf8(chars, n);
+    (*env)->ReleaseStringChars(env, text, chars);
+    if (!utf8) return;
+    ant_composing_store(utf8);
+    free(utf8);
+}
+
+JNIEXPORT void JNICALL
+Java_dev_zan_app_ZanIme_zanSetComposing(JNIEnv *env, jclass clazz,
+                                        jstring text) {
+    ant_ime_set_composing(env, clazz, text);
 }
 
 JNIEXPORT void JNICALL
@@ -1217,6 +1272,18 @@ EXPORT i32 zan_gui_set_ime_open(i32 on) {
             ANATIVEACTIVITY_HIDE_SOFT_INPUT_NOT_ALWAYS);
     }
     return 0;
+}
+
+/* Composing preview for text widgets (pinyin etc.): the pre-commit string
+ * the IME is still composing, UTF-8. Mirrors the clipboard ABI -- returns a
+ * NUL-terminated string valid until the next call, "" when nothing is being
+ * composed. */
+EXPORT const char *zan_gui_ime_composing(void) {
+    static char buf[sizeof(g_composing)];
+    pthread_mutex_lock(&g_aq_lock);
+    memcpy(buf, g_composing, g_composing_len + 1);
+    pthread_mutex_unlock(&g_aq_lock);
+    return buf;
 }
 
 EXPORT i32 zan_gui_enable_glass(iptr hwnd_val, i32 tint_argb) {

@@ -42,6 +42,22 @@ public class ZanIme {
                                 send(text.toString());
                                 return true;
                             }
+                            /* Pinyin etc. keep the pre-commit string in the
+                             * connection; forward it so the focused widget
+                             * can render a dim preview. An empty string
+                             * clears the preview. */
+                            @Override public boolean setComposingText(
+                                    CharSequence text, int newCursorPosition) {
+                                sendComposing(text == null ? ""
+                                                           : text.toString());
+                                return true;
+                            }
+                            /* The IME folds the composing string into a
+                             * commit (or abandons it): drop the preview. */
+                            @Override public boolean finishComposingText() {
+                                sendComposing("");
+                                return true;
+                            }
                             /* IMEs erase through the connection when they
                              * manage the text themselves; surface each erase
                              * as the backspace control the native side maps
@@ -86,6 +102,9 @@ public class ZanIme {
      * bound via RegisterNatives at init. */
     public static native void zanCommit(String s);
 
+    /** Native half of the composing preview; see zanCommit. */
+    public static native void zanSetComposing(String s);
+
     /** A commit that cannot reach the native side must not kill the app
      * (an unbound native is a log, not a crash). */
     private static void send(String s) {
@@ -94,6 +113,14 @@ public class ZanIme {
             zanCommit(s);
         } catch (UnsatisfiedLinkError e) {
             android.util.Log.w("ZanIme", "zanCommit not bound: " + e);
+        }
+    }
+
+    private static void sendComposing(String s) {
+        try {
+            zanSetComposing(s);
+        } catch (UnsatisfiedLinkError e) {
+            android.util.Log.w("ZanIme", "zanSetComposing not bound: " + e);
         }
     }
 }

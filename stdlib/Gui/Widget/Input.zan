@@ -670,11 +670,14 @@ class Input : Control {
             c.FillRect(innerX - scrollX + selPx0, textY, selPx1 - selPx0, selH,
                        selectionStyle.BgOr(accent));
         }
-        if (txt == "") {
+        // 组词中（拼音等尚未上屏）不画 placeholder：预览会占住文本
+        // 起点，两者叠在一起没法读。桌面端 Composing() 恒为 ""。
+        string composing = focused ? Ime.Composing() : "";
+        if (txt == "" && composing == "") {
             int placeholderY = Canvas.CenterTextY(y, h, placeholderFont);
             c.DrawText(innerX, placeholderY, hint,
                        placeholderStyle.FgOr(s.fg), placeholderFont);
-        } else {
+        } else if (disp != "") {
             c.DrawText(innerX - scrollX, textY, disp, s.fg, fs);
         }
 
@@ -685,6 +688,12 @@ class Input : Control {
             c.FillRect(cursorX, textY, cursorWidth, cursorH, caretColor);
             // 让 IME 组合窗口保持在光标处。
             app.SetImeCaret(cursorX, textY + cursorH);
+            // 组词预览：拼音等组合中、尚未上屏的串以 placeholder 色画在
+            // 光标右侧；上屏后 native 清空预览，真文本接在原文本后面。
+            if (composing != "") {
+                c.DrawText(cursorX + cursorWidth + pad, textY, composing,
+                           placeholderStyle.FgOr(s.fg), fs);
+            }
         }
         c.PopClip();
 
