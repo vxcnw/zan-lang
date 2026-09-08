@@ -126,19 +126,20 @@ class ObjectArt {
         if (ObjectArt.IsVxlName(name)) {
             return this.VehicleTexture(name, facing, side);
         }
-        int frame = 0;
         if (moving) {
             // Walk blocks run S, SW, W, NW, N, NE, E, SE -- the facing ring
             // rotated four places, since facing 0 is north.
-            frame = 14 + ((facing + 4) % 8) * 6 + (animFrame % 6);
-        } else {
-            frame = 8 + (animFrame % 6);
+            int frame = 14 + ((facing + 4) % 8) * 6 + (animFrame % 6);
+            // Guard: a shape with fewer than 20 frames is not a unit sprite;
+            // fall back to frame 0 rather than reading past the end.
+            int count = this.ShapeFrameCount(name);
+            if (frame >= count) { frame = 0; }
+            return this.ShapeTextureFrame(name, frame, this.UnitPalFor(side));
         }
-        // Guard: a shape with fewer than 20 frames is not a unit sprite; fall
-        // back to frame 0 rather than reading past the end.
-        int count = this.ShapeFrameCount(name);
-        if (frame >= count) { frame = 0; }
-        return this.ShapeTextureFrame(name, frame, this.UnitPalFor(side));
+        int idle = 8 + (animFrame % 6);
+        int idleCount = this.ShapeFrameCount(name);
+        if (idle >= idleCount) { idle = 0; }
+        return this.ShapeTextureFrame(name, idle, this.UnitPalFor(side));
     }
 
     /// <summary>Whether a unit art name names a voxel model rather than an
@@ -238,6 +239,31 @@ class ObjectArt {
             tex = ObjectArt.BakeFacing(img, this.UnitPalFor(side), facing);
         }
         this.vehNames.Add(name);
+        this.vehFacings.Add(facing);
+        this.vehSides.Add(side);
+        this.vehTex.Add(tex);
+        return tex;
+    }
+
+    /// <summary>The baked turret texture for a turreted vehicle: the same
+    /// voxel bake as the hull, from the turret model, at the turret's own
+    /// facing. Cached under a "TUR:" key in the vehicle cache, so the same
+    /// list serves both; the prefix keeps turret and hull entries apart even
+    /// when a model shares its name with its hull.</summary>
+    Texture TurretTexture(string turretVxl, int facing, int side) {
+        string key = "TUR:" + turretVxl;
+        for (int i = 0; i < this.vehNames.Count; i = i + 1) {
+            if (this.vehNames[i] == key && this.vehFacings[i] == facing
+             && this.vehSides[i] == side) {
+                return this.vehTex[i];
+            }
+        }
+        Texture tex = null;
+        VxlImage img = this.VxlNamed(turretVxl);
+        if (img != null && this.UnitPalFor(side) != null) {
+            tex = ObjectArt.BakeFacing(img, this.UnitPalFor(side), facing);
+        }
+        this.vehNames.Add(key);
         this.vehFacings.Add(facing);
         this.vehSides.Add(side);
         this.vehTex.Add(tex);
@@ -656,7 +682,22 @@ class ObjectRenderer {
             // places below the apex.
             canvas.Blit(tex, wx + (0 - tex.Width() / 2),
                         wy + (0 - tex.Height()));
-        } else {
+        }
+        // A turreted vehicle's gun mounts over the hull: bake the turret
+        // model at its own facing and stamp it on the same anchor, so the
+        // gun slews independently of the body. A turret the install lacks
+        // falls back to the hull sprite alone, like the original without art.
+        if (u != null && tex != null && u.TurretVxl() != null) {
+            Texture tur = art.TurretTexture(u.TurretVxl(), o.TurretFacing(),
+                                            o.Side());
+            if (tur != null) {
+                // The turret model is smaller than the hull and sits toward
+                // its rear; the hull centre reads as the right mount point.
+                canvas.Blit(tur, wx + (0 - tur.Width() / 2),
+                            wy + (0 - tur.Height() / 2));
+            }
+        }
+        if (tex == null) {
             Texture ph = ObjectRenderer.Placeholder(o.Side(), u);
             int pw = ph.Width();
             canvas.Blit(ph, wx - pw / 2, wy - pw);

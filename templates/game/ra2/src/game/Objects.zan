@@ -38,6 +38,8 @@ class WorldObject {
     int pathAt;
     int animFrame;      // walk-cycle frame counter (units only)
     int facing;         // 0-7 compass direction the unit faces
+    int turretFacing;   // 0-8: compass ring, 8 = resetting toward the body
+    int turretTurn;     // ticks until the turret takes its next step
     // Move-attack: a destination cell the unit walks to, attacking any enemy
     // it comes across on the way. -1 when inactive.
     int maX;
@@ -112,6 +114,8 @@ class WorldObject {
         o.builtTicks = 0;
         o.animFrame = 0;
         o.facing = 0;
+        o.turretFacing = 0;
+        o.turretTurn = 0;
         o.maX = -1;
         o.maY = -1;
         o.frozen = 0;
@@ -239,10 +243,52 @@ class WorldObject {
         this.facing = f;
     }
 
+    /// <summary>The turret's own compass facing, on the same ring as the
+    /// body. A turreted vehicle turns this toward its target while the hull
+    /// keeps its travel facing, and lets it drift back when the fight ends.
+    /// Unturreted units always report the body facing.</summary>
+    int TurretFacing() {
+        if (this.unitType == null || this.unitType.TurretVxl() == null) {
+            return this.facing;
+        }
+        return this.turretFacing;
+    }
+
+    void SetTurretFacing(int f) {
+        if (f < 0) { f = 0; }
+        if (f > 7) { f = 7; }
+        this.turretFacing = f;
+    }
+
+    /// <summary>Advances the turret one compass step toward `want`, paced by
+    /// the turret turn counter (one step every six ticks, like the shipped
+    /// ROT pacing). Returns the facing after the step.</summary>
+    int TurnTurretToward(int want) {
+        if (this.turretTurn > 0) {
+            this.turretTurn = this.turretTurn - 1;
+            return this.turretFacing;
+        }
+        this.turretTurn = 5;
+        if (this.turretFacing == want) { return this.turretFacing; }
+        // Walk the shorter arc around the eight-point ring.
+        int up = (want - this.turretFacing + 8) % 8;
+        if (up <= 4) {
+            this.turretFacing = (this.turretFacing + 1) % 8;
+        } else {
+            this.turretFacing = (this.turretFacing + 7) % 8;
+        }
+        return this.turretFacing;
+    }
+
+    /// <summary>Compass direction from this unit's cell to (x,y), for the
+    /// turret to aim at. Same conversion as FacingOf.</summary>
+    int FacingToward(int x, int y) {
+        return WorldObject.FacingOf(x - this.x, y - this.y);
+    }
+
     /// <summary>Maps a step direction (dx,dy in cell space) onto the eight
     /// compass directions of the TS/RA2 ring (0=N, 1=NE, 2=E, 3=SE, 4=S,
     /// 5=SW, 6=W, 7=NW).
-    ///
     /// A cell step is not a screen step: the isometric projection turns cell
     /// +x into screen down-right and +y into screen down-left. Convert first,
     /// then snap the screen vector to the compass rose by its dominant axis,
@@ -328,6 +374,7 @@ class UnitType {
     int hp;            // full health
     bool amphibious;   // can move over water (kept for the interface; unused)
     string shpName;    // SHP art file
+    string turretVxl;  // turret art (<unit>TUR.VXL), null = fixed superstructure
     int armor;         // ArmorClass the warhead verses are applied against
     Weapon primary;    // null = unarmed (engineer, spy)
     Weapon secondary;  // picked per shot when its verse beats the primary's
@@ -350,6 +397,7 @@ class UnitType {
         t.hp = hp;
         t.amphibious = false;
         t.shpName = shpName;
+        t.turretVxl = null;
         t.armor = armor;
         t.primary = primary;
         t.secondary = secondary;
@@ -367,6 +415,8 @@ class UnitType {
     int Hp() { return this.hp; }
     bool Amphibious() { return this.amphibious; }
     string ShpName() { return this.shpName; }
+    string TurretVxl() { return this.turretVxl; }
+    void SetTurretVxl(string vxl) { this.turretVxl = vxl; }
     int ArmorClass() { return this.armor; }
     Weapon Primary() { return this.primary; }
     Weapon Secondary() { return this.secondary; }
@@ -432,6 +482,7 @@ class UnitCatalog {
                 Rules.UnitBuildTicks(d.Cost()), d.Hp(), d.Shp(), d.Armor(),
                 d.Primary(), d.Secondary(), d.Steps(), d.Role(),
                 d.MindImmune());
+            t.SetTurretVxl(d.TurretVxl());
             t.SetPrereqs(Rules.ResolvePrereqs(rules, d.Prereq(), bdefs));
             l.Add(t);
         }
@@ -2093,6 +2144,11 @@ class World {
                     // Stand and fire: the unit stops walking while it has a
                     // reachable target, so it does not walk into melee.
                     o.SetRoute(null, null);
+                    // A turreted vehicle slews its gun toward the target while
+                    // the hull keeps its travel facing.
+                    if (o.UnitType().TurretVxl() != null) {
+                        o.TurnTurretToward(o.FacingToward(t.X(), t.Y()));
+                    }
                     // Steady fire: reload ticks down each frame, and a shot
                     // lands when the counter reaches zero.
                     int r = o.Reload();
@@ -2130,8 +2186,13 @@ class World {
                     }
                 }
             } else {
-                // No live target (never set, destroyed, or out of sight).
+                // No live target (never set, destroyed, or out of sight): the
+                // turret drifts back to the hull facing, one step per turn.
                 o.SetReload(0);
+                if (o.UnitType().TurretVxl() != null
+                 && o.TurretFacing() != o.Facing()) {
+                    o.TurnTurretToward(o.Facing());
+                }
             }
         }
         // Defence buildings fire at the nearest enemy within range on their
@@ -2183,7 +2244,13 @@ class World {
                 this.occupancy[this.CellSlot(oldX, oldY)] = 0;
                 o.Advance();
                 o.AdvanceAnim();
-                o.SetFacing(WorldObject.FacingOf(o.X() - oldX, o.Y() - oldY));
+                int stepFacing = WorldObject.FacingOf(o.X() - oldX, o.Y() - oldY);
+                o.SetFacing(stepFacing);
+                // A travelling turreted vehicle's gun follows the hull only
+                // while it has no target of its own to track.
+                if (o.UnitType().TurretVxl() != null && o.TargetIndex() < 0) {
+                    o.SetTurretFacing(stepFacing);
+                }
                 this.occupancy[this.CellSlot(o.X(), o.Y())] = i + 1;
                 moved = moved + 1;
                 steps = steps - 1;

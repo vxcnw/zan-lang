@@ -697,5 +697,74 @@ class ObjTest {
             Console.WriteLine("eng_art=" + Convert.ToString(
                 wD.ObjectAt(eng).UnitType().ShpName() == "ENGINEER.SHP"));
         }
+
+        // ---- turret facing ------------------------------------------------
+        // The Grizzly's shipped rules say Turret=yes, so the def carries the
+        // GTNKTUR art name and the world object slews its gun independently
+        // of the hull: toward a target while it fights, back to the hull
+        // facing when the fight ends. The Tank Destroyer (Turret=no) never
+        // gains one.
+        {
+            IsoMap isoT = ObjTest.BuildMap();
+            World wT = World.Create(isoT, StructureCatalog.Create(),
+                                    UnitCatalog.Create());
+            int grizzly = 0 - 1;
+            int dest = 0 - 1;
+            List<UnitType> roster = wT.Units().ListFor(Side2.Allied());
+            for (int i = 0; i < roster.Count; i = i + 1) {
+                if (roster[i] != null && roster[i].Reg() == "MTNK") {
+                    grizzly = i;
+                }
+                if (roster[i] != null && roster[i].Reg() == "TNKD") {
+                    dest = i;
+                }
+            }
+            Console.WriteLine("tur_grizzly_art=" + Convert.ToString(
+                roster[grizzly].TurretVxl()));
+            Console.WriteLine("tur_dest_art=" + Convert.ToString(
+                roster[dest].TurretVxl() == null ? "null" : roster[dest].TurretVxl()));
+            int tank = wT.SpawnUnit(Side2.Allied(), grizzly, 5, 5);
+            int dId = wT.SpawnUnit(Side2.Allied(), dest, 6, 6);
+            Console.WriteLine("tur_spawn=" + Convert.ToString(tank >= 0)
+                + "," + Convert.ToString(dId >= 0));
+            // Unturreted: the turret facing mirrors the hull at once.
+            wT.ObjectAt(dId).SetFacing(6);
+            Console.WriteLine("tur_mirror=" + Convert.ToString(
+                wT.ObjectAt(dId).TurretFacing() == 6));
+            // Turreted: turning toward a far cell walks the shorter arc one
+            // step per paced tick. From north (0), east (2) is two steps
+            // clockwise; the first call takes one step and starts pacing,
+            // so the next move waits out the counter.
+            WorldObject gunner = wT.ObjectAt(tank);
+            int after = gunner.TurnTurretToward(2);
+            Console.WriteLine("tur_step=" + Convert.ToString(after));
+            int paced = gunner.TurnTurretToward(2);
+            Console.WriteLine("tur_paced=" + Convert.ToString(paced));
+            // Drain the pace counter, then the shorter arc from 1 to 6 goes
+            // counterclockwise (1 -> 0 -> 7 -> 6), never the long way.
+            gunner.SetTurretFacing(1);
+            for (int i = 0; i < 10; i = i + 1) {
+                int before = gunner.TurretFacing();
+                gunner.TurnTurretToward(6);
+                int after1 = gunner.TurretFacing();
+                if (after1 != before) { break; }
+            }
+            Console.WriteLine("tur_short=" + Convert.ToString(
+                gunner.TurretFacing() == 0));
+            // A real fight: an enemy in range drags the turret off the hull
+            // facing within a few ticks; the hull facing stays put.
+            int foe = wT.SpawnUnit(Side2.Soviet(), 2, 7, 5);
+            wT.ObjectAt(tank).SetFacing(0);
+            wT.ObjectAt(tank).SetTurretFacing(0);
+            wT.AttackObject(tank, wT.ObjectAt(foe));
+            List<int> tr = null;
+            for (int i = 0; i < 20; i = i + 1) {
+                tr = wT.Tick();
+            }
+            Console.WriteLine("tur_combat=" + Convert.ToString(
+                wT.ObjectAt(tank).TurretFacing() != 0)
+                + " hull=" + Convert.ToString(wT.ObjectAt(tank).Facing() == 0)
+                + " fired=" + Convert.ToString(ObjTest.Fired(tr) > 0));
+        }
     }
 }

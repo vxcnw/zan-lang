@@ -146,6 +146,7 @@ class UnitDef {
     int role;          // UnitRole
     bool mindImmune;   // dogs and Tanya shrug off mind control
     string shp;
+    string turretVxl;  // turret art (<unit>TUR.VXL), null = fixed superstructure
 
     static UnitDef Create(string reg, string label, int cost, int hp,
                           int speed, int armor, Weapon primary,
@@ -165,6 +166,7 @@ class UnitDef {
         d.role = UnitRole.None();
         d.mindImmune = false;
         d.shp = shp;
+        d.turretVxl = null;
         return d;
     }
 
@@ -182,6 +184,7 @@ class UnitDef {
     int Role() { return this.role; }
     bool MindImmune() { return this.mindImmune; }
     string Shp() { return this.shp; }
+    string TurretVxl() { return this.turretVxl; }
     void SetSecondary(Weapon w) { this.secondary = w; }
     void SetRole(int role) { this.role = role; }
     void SetMindImmune(bool on) { this.mindImmune = on; }
@@ -191,6 +194,7 @@ class UnitDef {
     void SetSpeed(int speed) { this.speed = speed; }
     void SetArmor(int armor) { this.armor = armor; }
     void SetShp(string shp) { this.shp = shp; }
+    void SetTurretVxl(string vxl) { this.turretVxl = vxl; }
     void SetPrimary(Weapon w) { this.primary = w; }
     void SetLabel(string label) { this.label = label; }
 
@@ -758,13 +762,18 @@ class Rules {
         UnitDef mtnk = UnitDef.Create("MTNK", "灰熊坦克", 700, 300, 7,
             ArmorClass.Heavy(), r.WeaponNamed("105mm"), "GAWEAP", 1,
             "GTNK.VXL");
+        // Turret=yes in the shipped rules; the art section GTNK turns the
+        // turret model into GTNKTUR.VXL, which the install carries.
+        mtnk.SetTurretVxl("GTNKTUR.VXL");
         r.units.Add(mtnk);
         // The rest of the allied motor pool in factory-menu order: the IFV's
         // missile rack, the Tank Destroyer's armour-piercing SABOT and the
         // Prism Tank's long-range beam.
-        r.units.Add(UnitDef.Create("FV", "甲弹斗车", 600, 200, 10,
+        UnitDef fv = UnitDef.Create("FV", "甲弹斗车", 600, 200, 10,
             ArmorClass.Light(), r.WeaponNamed("HoverMissile"), "GAWEAP", 1,
-            "FV.VXL"));
+            "FV.VXL");
+        fv.SetTurretVxl("FVTUR.VXL");
+        r.units.Add(fv);
         UnitDef tnkd = UnitDef.Create("TNKD", "坦克杀手", 900, 400, 5,
             ArmorClass.Heavy(), r.WeaponNamed("SABOT"), "GAWEAP", 1,
             "TNKD.VXL");
@@ -773,6 +782,7 @@ class Rules {
         UnitDef sref = UnitDef.Create("SREF", "棱镜坦克", 1200, 150, 4,
             ArmorClass.Light(), r.WeaponNamed("Comet"), "GAWEAP", 1,
             "SREF.VXL");
+        sref.SetTurretVxl("SREFTUR.VXL");
         sref.AddPrereq("TECH");
         r.units.Add(sref);
         // The Chrono Miner, the allied harvester: the shipped [CMIN] stats.
@@ -827,6 +837,7 @@ class Rules {
         UnitDef htnk = UnitDef.Create("HTNK", "犀牛坦克", 900, 400, 6,
             ArmorClass.Heavy(), r.WeaponNamed("120mm"), "NAWEAP", 2,
             "HTNK.VXL");
+        htnk.SetTurretVxl("HTNKTUR.VXL");
         r.units.Add(htnk);
         r.units.Add(UnitDef.Create("HTK", "防空履带车", 500, 180, 8,
             ArmorClass.Heavy(), r.WeaponNamed("FlakTrackGun"), "NAWEAP", 2,
@@ -839,6 +850,7 @@ class Rules {
         UnitDef ttnk = UnitDef.Create("TTNK", "磁能坦克", 1200, 300, 6,
             ArmorClass.Heavy(), r.WeaponNamed("TankBolt"), "NAWEAP", 2,
             "TTNK.VXL");
+        ttnk.SetTurretVxl("TTNKTUR.VXL");
         ttnk.AddPrereq("RADAR");
         r.units.Add(ttnk);
         // The Apocalypse: the ship's Image key borrows the MTNK voxel, the
@@ -856,6 +868,7 @@ class Rules {
         UnitDef harv = UnitDef.Create("HARV", "武装采矿车", 1400, 1000, 4,
             ArmorClass.Heavy(), r.WeaponNamed("20mmRapid"), "NAWEAP", 2,
             "HARV.VXL");
+        harv.SetTurretVxl("HARVTUR.VXL");
         harv.SetRole(UnitRole.Harvester());
         r.units.Add(harv);
         r.units.Add(UnitDef.Create("DRON", "恐怖机器人", 500, 100, 10,
