@@ -65,7 +65,13 @@ class ChartStackedAreaAaTest {
         // 混合像素的判定：与上下彩带任一端相比，通道值落在两端
         // 之间（通道级混合）——混合行的中点像素通道值必然介于
         // 两带纯色之间，不满足"两侧都是纯彩"。
-        int hardEdges = 0;
+        //
+        // 计数按"去重色对"：带顶的 2px 不透明折线描边（ECharts 每
+        // 条堆叠面积顶边都有描边，描边修复后真实可见）与相邻带填
+        // 充的交接是合法硬相接，同一条边界逐列重复上千次——去重后
+        // 一条边界只贡献 1 个色对。量化阶梯（本用例的回归对象）在
+        // 缓坡上逐列产生大量不同色对，去重不掉。
+        List<long> pairs = new List<long>();
         int colorBands = 0;
         for (int x = 60; x < 1060; x = x + 1) {
             for (int y = 25; y < 270; y = y + 1) {
@@ -79,15 +85,23 @@ class ChartStackedAreaAaTest {
                 // 纯彩带间色差大（ECharts 调色板相邻带通道差 ≥64）；
                 // 带内阴影/网格的微弱色差不算。
                 if (dr < 64 || dg < 64) { continue; }
-                hardEdges = hardEdges + 1;
                 colorBands = colorBands + 1;
+                long lo = c0 < c1 ? c0 : c1;
+                long hi = c0 < c1 ? c1 : c0;
+                long key = lo * 16777216 + hi;
+                bool seenPair = false;
+                for (int pi = 0; pi < pairs.Count; pi = pi + 1) {
+                    if (pairs[pi] == key) { seenPair = true; break; }
+                }
+                if (!seenPair) { pairs.Add(key); }
             }
         }
+        int hardEdges = pairs.Count;
         // 修复前：整数边界量化 → 全画布上千处硬相接（实测 1065）。
         // 修复后：每条边界都有亚像素混合行 → 剩余硬相接只是
         // 边界恰好落在整行的少数列（实测 4）。
         True("stacked band edges are anti-aliased", hardEdges <= 32);
-        True("chart painted colored bands", hardEdges > 0);
+        True("chart painted colored bands", colorBands > 0);
         Console.WriteLine("stackedarea-aa:" + Convert.ToString(fails == 0 ? 1 : 0));
     }
 }

@@ -969,19 +969,24 @@ partial class ChartView {
                     List<int> rb = new List<int>();
                     List<int> rtFx = new List<int>();
                     List<int> rbFx = new List<int>();
+                    // inFx=true 要求 x/y 同为 16.8 定点：y 来自 YOfFx，
+                    // x 是整数像素，这里统一升定点——否则 x 落在定点域
+                    // 1/256 处，整条描边/带体被压到绘图区左缘裁没
+                    //（line2/line4 只剩拐点符号的根因）。
+                    List<int> rxsFx = new List<int>();
                     for (int rm = r0; rm <= r1; rm = rm + 1) {
                         rxs.Add(xs[rm]); rt.Add(topY[rm]); rb.Add(botY[rm]);
                         rtFx.Add(topYFx[rm]); rbFx.Add(botYFx[rm]);
+                        rxsFx.Add(xs[rm] * 256);
                     }
                     List<int> topFx = new List<int>();
                     List<int> topPath = new List<int>();
                     List<int> botFx = new List<int>();
                     List<int> botPath = new List<int>();
-                    // 填充边界走定点（亚像素 AA）；描边路径仍用整数
-                    // 顶点（rt/rb → BuildPathFx 自乘 256），两条路径
-                    // 几何一致。
-                    ChartView.BuildPathFxEx(rxs, rtFx, smooth, true, topFx, topPath);
-                    ChartView.BuildPathFxEx(rxs, rbFx, botSmooth, true, botFx, botPath);
+                    // 填充与描边共用定点路径（x/y 同域）；虚线分支仍走
+                    // 整数 BuildPath（rt/rb）。
+                    ChartView.BuildPathFxEx(rxsFx, rtFx, smooth, true, topFx, topPath);
+                    ChartView.BuildPathFxEx(rxsFx, rbFx, botSmooth, true, botFx, botPath);
                     if (s.areaStyle) {
                         // ECharts 2 堆积面积 = 实色带（255）；o.gradient
                         // （邮件营销式纵向渐变）保留半透明衰减。

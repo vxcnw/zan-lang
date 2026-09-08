@@ -1168,6 +1168,9 @@ class ChartSeries {
                      //   的第几个坐标系（默认 0；单 polar 时忽略）
     int selectedOffset; // ECharts pie.selectedOffset：选中扇区外偏像素（默认 10）
     int barWidth;    // ECharts bar.barWidth：柱宽像素；0 = 自动
+    int barHeight;   // ECharts bar.barHeight：>0 时双数值轴值对柱画横条
+                     //   （厚度 px、垂直中心在 y 值、从 x=0 基线长到 x 值，
+                     //   官方 _buildOther 横向分支）；0 = 竖柱
     int barGapPct;   // ECharts bar.barGap：同系列柱间距百分比；-1 = 旧固定缝
     string symbol;   // ECharts series.symbol 形状族（Sanitized：circle/emptyCircle/
                      //   rectangle/diamond/triangle；"" = 按族默认）
@@ -1232,6 +1235,8 @@ class ChartSeries {
     ChartItemStyle itemStyle; // ECharts series.itemStyle：normal / emphasis
     ChartTextStyle label;     // ECharts series.label 的静态样式
     bool labelShow;           // series.label.show；渲染器可选择显示数据值
+    bool pieLabels;           // 系列级内标百分比（多饼同板逐系列开关，
+                              //   覆盖 option.pieLabels；false = 跟随 option）
     string labelFmt;          // ECharts label.formatter 模板：{a}=系列名 {b}=类目 {c}=值
     string labelPos;          // ECharts label.position："top"/"bottom"/"insideTop"/
                               //   "left"/"right"/"insideLeft"/"insideRight"；"" = 渲染器缺省
@@ -1270,6 +1275,7 @@ class ChartSeries {
         s.polarIndex = 0;
         s.selectedOffset = 10;
         s.barWidth = 0;
+        s.barHeight = 0;
         s.barGapPct = 0 - 1;
         s.symbol = "";
         s.symbolSize = 0;
@@ -1312,6 +1318,7 @@ class ChartSeries {
         s.itemStyle = ChartItemStyle.Create();
         s.label = ChartTextStyle.Create();
         s.labelShow = false;
+        s.pieLabels = false;
         s.labelFmt = "";
         s.labelPos = "";
         s.data = new List<ChartData>();
@@ -1664,8 +1671,14 @@ class ChartSeries {
         return 0.0;
     }
 
-    /// 第 i 项的值截断为 int（越界同 Number 返回 0）。
-    int Value(int i) { return (int)this.Number(i); }
+    /// 第 i 项的值取整为 int（四舍五入、半数远离零；越界同 Number
+    /// 返回 0）。不截断：小数数据（line6 流量基流 0.86..1.5）截断后
+    /// 全体归 0，画出的基线与悬停数值（number 保留小数）对不上。
+    int Value(int i) {
+        double v = this.Number(i);
+        if (v < 0) { return (int)(v - 0.5); }
+        return (int)(v + 0.5);
+    }
 
     /// 复制系列外壳和所有可变数据列表。Merge 只会替换这些列表
     /// 或显式样式字段，因此不会反向修改输入 option。
@@ -1682,6 +1695,7 @@ class ChartSeries {
         s.radius = ChartScalar.Clone(src.radius);
         s.radiusInner = ChartScalar.Clone(src.radiusInner);
         s.selectedOffset = src.selectedOffset; s.barWidth = src.barWidth;
+        s.barHeight = src.barHeight;
         s.barGapPct = src.barGapPct; s.symbol = src.symbol;
         s.symbolSize = src.symbolSize; s.symbolSizeFn = src.symbolSizeFn;
         s.pointG = src.pointG;
@@ -1714,6 +1728,7 @@ class ChartSeries {
         s.wcRotateList = src.wcRotateList;
         s.itemStyle = ChartItemStyle.Clone(src.itemStyle);
         s.label = ChartTextStyle.Clone(src.label); s.labelShow = src.labelShow;
+        s.pieLabels = src.pieLabels;
         s.labelFmt = src.labelFmt; s.labelPos = src.labelPos;
         s.gauge = GaugeOption.Clone(src.gauge);
         s.data = new List<ChartData>();
@@ -1911,6 +1926,8 @@ class ChartOption {
     int donutPct;     // 环形内半径占外半径的百分比
     int gaugeMax;     // Gauge / 径向条形图的满刻度值（默认 100）
     bool pieLabels;   // 在饼/环扇区上绘制百分比标签
+    bool pieCenterText; // 环心总数/选中项名标注（ECharts 默认无此行为，
+                        //   仅 emphasis 时显示；显式开启才画）
     bool pieRings;    // 多系列嵌套环饼图
     bool overlay;     // 混搭覆盖层 option（DrawOverlaySeries 内部构造）：
                       //   跳过面板底/头，直接在同一面板上叠加绘制
@@ -1986,6 +2003,7 @@ class ChartOption {
         o.smooth = src.smooth; o.gradient = src.gradient; o.rounded = src.rounded;
         o.animMs = src.animMs; o.donutPct = src.donutPct; o.gaugeMax = src.gaugeMax;
         o.pieLabels = src.pieLabels; o.pieRings = src.pieRings;
+        o.pieCenterText = src.pieCenterText;
         o.overlay = src.overlay;
         o.radarShape = src.radarShape; o.radarSplitArea = src.radarSplitArea;
         o.legendOrient = src.legendOrient; o.legendSelectedMode = src.legendSelectedMode;
@@ -2495,6 +2513,7 @@ class ChartOption {
         JsonValue label = v.Get("label");
         if (label != null && label.IsObject()) {
             s.labelShow = label.Bool("show", s.labelShow);
+            s.pieLabels = label.Bool("pieLabels", s.pieLabels);
             ChartOption.ParseTextStyle(label, s.label);
         }
         if (v.Has("show")) { s.labelShow = v.Bool("show", s.labelShow); }
@@ -3020,6 +3039,7 @@ class ChartOption {
                 cs.startAngle = s.Int("startAngle", cs.startAngle);
                 cs.selectedOffset = s.Int("selectedOffset", cs.selectedOffset);
                 cs.barWidth = s.Int("barWidth", cs.barWidth);
+                cs.barHeight = s.Int("barHeight", cs.barHeight);
                 JsonValue bgp = s.Get("barGap");
                 if (bgp != null && bgp.IsString() && bgp.AsString("").EndsWith("%")) {
                     string pct = bgp.AsString("");

@@ -13,32 +13,91 @@ partial class Charts {
         };
     }
 
+    /// pie1（ECharts2 pie.opt.js）1:1：同一 option 三个 pie 系列
+    /// ——35% 处小实心饼（radius 80px，内标百分比）+ 大环形
+    ///（radius [110,140]px，8 项外标）+ 75% 处环形（radius
+    /// [80,120]px，无标签）。半径沿用官方绝对像素：尺寸不随窗口
+    /// 缩放，多饼圆心按百分比相对面板——窗口变化只动位置不动
+    /// 大小，图形间关系（同心/间距/搭接）保持稳定。
+    /// 百度径向渐变以单色近似；calculable/逐 data 隐藏标签、
+    /// star 徽标未支持（偏差）。
     static void Pie1(App app, int x, int y, int w, int h) {
+        List<ChartData> small = new List<ChartData>{
+            ChartData.Named(335, Charts.T("Direct", "直达")),
+            ChartData.Named(679, Charts.T("Marketing", "营销广告")),
+            ChartData.Named(1548, Charts.T("Search Engine", "搜索引擎")) };
+        List<ChartData> ring = new List<ChartData>{
+            ChartData.Named(335, Charts.T("Direct", "直达")),
+            ChartData.Named(310, Charts.T("Mail", "邮件营销")),
+            ChartData.Named(234, Charts.T("Affiliate", "联盟广告")),
+            ChartData.Named(135, Charts.T("Video", "视频广告")),
+            ChartData.Named(1048, Charts.T("Baidu", "百度")),
+            ChartData.Named(251, Charts.T("Google", "谷歌")),
+            ChartData.Named(102, Charts.T("Bing", "必应")),
+            ChartData.Named(147, Charts.T("Other", "其他")) };
+        ring[4].color = Chart.Rgb(30, 144, 250);
+        List<ChartData> right = new List<ChartData>{
+            ChartData.Named(335, Charts.T("Direct", "直达")),
+            ChartData.Named(310, Charts.T("Mail", "邮件营销")),
+            ChartData.Named(234, Charts.T("Affiliate", "联盟广告")),
+            ChartData.Named(135, Charts.T("Video", "视频广告")),
+            ChartData.Named(1548, Charts.T("Search Engine", "搜索引擎")) };
+        ChartSeries p1 = ChartSeries.Named(Charts.T("Source", "访问来源"),
+            ChartType.Pie, small);
+        p1.center = ChartPosition.Of(ChartScalar.Pct(35), ChartScalar.Pct(57));
+        p1.radius = ChartScalar.Px(80);
+        p1.pieLabels = true;
+        ChartSeries p2 = ChartSeries.Named(Charts.T("Source", "访问来源"),
+            ChartType.Pie, ring);
+        p2.center = ChartPosition.Of(ChartScalar.Pct(35), ChartScalar.Pct(57));
+        p2.radius = ChartScalar.Px(140);
+        p2.radiusInner = ChartScalar.Px(110);
+        p2.labelShow = true;
+        ChartSeries p3 = ChartSeries.Named(Charts.T("Source", "访问来源"),
+            ChartType.Pie, right);
+        p3.center = ChartPosition.Of(ChartScalar.Pct(75), ChartScalar.Pct(57));
+        p3.radius = ChartScalar.Px(120);
+        p3.radiusInner = ChartScalar.Px(80);
         ChartOption o = ChartOption.Of(Charts.T("Traffic sources", "访问来源"),
-            null, new List<ChartSeries>{
-                ChartSeries.Named(Charts.T("Source", "访问来源"), ChartType.Pie, Charts.PieTraffic())
-            });
-        o.donutPct = 0;
-        o.pieLabels = true;
+            null, new List<ChartSeries>{ p1, p2, p3 });
+        o.pieLabels = false;
+        o.titleSub = Charts.T("", "纯属虚构");
+        o.titleAlign = "center";
+        o.legendOrient = "vertical";
+        o.legendX = "left";
+        o.legendData = new List<string>{
+            Charts.T("Direct", "直达"), Charts.T("Marketing", "营销广告"),
+            Charts.T("Search Engine", "搜索引擎"), Charts.T("Mail", "邮件营销"),
+            Charts.T("Affiliate", "联盟广告"), Charts.T("Video", "视频广告"),
+            Charts.T("Baidu", "百度"), Charts.T("Google", "谷歌"),
+            Charts.T("Bing", "必应"), Charts.T("Other", "其他") };
         Charts.Show(app, o, x, y, w, h);
     }
 
+    /// pie2（ECharts2 pie2.opt.js 1:1）：环形 radius [50%,70%]
+    ///（内孔 50%，外径缺省 72%≈70%），标签关闭（官方 emphasis
+    /// 悬停才在中心显示项名），图例左侧竖排，无标题。
     static void Pie2(App app, int x, int y, int w, int h) {
-        ChartOption o = ChartOption.Of(Charts.T("Traffic (donut)", "访问来源（环形）"),
+        ChartOption o = ChartOption.Of(Charts.T("", ""),
             null, new List<ChartSeries>{
                 ChartSeries.Named(Charts.T("Source", "访问来源"), ChartType.Pie, Charts.PieTraffic())
             });
-        o.donutPct = 55;
-        o.pieLabels = true;
+        o.donutPct = 50;
+        o.legendOrient = "vertical";
+        o.legendX = "left";
         Charts.Show(app, o, x, y, w, h);
     }
 
-    /// pie3 嵌套环形图（ECharts2 radius [0,40%] + [55%,70%]）：
-    /// 系列按内→外排列，内环 innerPct=0 画成从圆心起的实心饼。
-    /// ref 偏差：环带宽度不支持逐环 radius 百分比，按环数均分
-    /// （内饼 0..50%、外环 50..100%）。
+    /// pie3（ECharts2 pie3.opt.js 1:1）：嵌套双环同圆心——内环实心
+    ///（radius [0,40%]，3 项内标项名 labelFmt={b}，搜索引擎默认
+    /// 选中）+ 外环（radius [57%,80%]，8 项）。图例左侧竖排 10 项
+    /// 白名单；同名同色按名字全 option 首现序。
     static void Pie3(App app, int x, int y, int w, int h) {
-        List<ChartData> inner = Charts.PieTraffic();
+        List<ChartData> inner = new List<ChartData>{
+            ChartData.Named(335, Charts.T("Direct", "直达")),
+            ChartData.Named(679, Charts.T("Marketing", "营销广告")),
+            ChartData.Named(1548, Charts.T("Search Engine", "搜索引擎")) };
+        inner[2].selected = true;
         List<ChartData> outer = new List<ChartData>{
             ChartData.Named(335, Charts.T("Direct", "直达")),
             ChartData.Named(310, Charts.T("Mail", "邮件营销")),
@@ -49,12 +108,26 @@ partial class Charts {
             ChartData.Named(147, Charts.T("Bing", "必应")),
             ChartData.Named(102, Charts.T("Other", "其他"))
         };
-        ChartOption o = ChartOption.OfRings(Charts.T("Nested sources", "访问来源（嵌套）"),
-            new List<ChartSeries>{
-                ChartSeries.Named(Charts.T("Source", "来源"), ChartType.Pie, inner),
-                ChartSeries.Named(Charts.T("Detail", "细分"), ChartType.Pie, outer)
-            });
-        o.showLegend = false;
+        ChartSeries pIn = ChartSeries.Named(Charts.T("Source", "访问来源"),
+            ChartType.Pie, inner);
+        pIn.innerPct = 0;
+        pIn.radius = ChartScalar.Pct(40);
+        pIn.pieLabels = true;
+        pIn.labelFmt = "{b}";
+        ChartSeries pOut = ChartSeries.Named(Charts.T("Detail", "访问来源"),
+            ChartType.Pie, outer);
+        pOut.radius = ChartScalar.Pct(80);
+        pOut.radiusInner = ChartScalar.Pct(57);
+        ChartOption o = ChartOption.OfRings(Charts.T("", ""),
+            new List<ChartSeries>{ pIn, pOut });
+        o.legendOrient = "vertical";
+        o.legendX = "left";
+        o.legendData = new List<string>{
+            Charts.T("Direct", "直达"), Charts.T("Marketing", "营销广告"),
+            Charts.T("Search Engine", "搜索引擎"), Charts.T("Mail", "邮件营销"),
+            Charts.T("Affiliate", "联盟广告"), Charts.T("Video", "视频广告"),
+            Charts.T("Baidu", "百度"), Charts.T("Google", "谷歌"),
+            Charts.T("Bing", "必应"), Charts.T("Other", "其他") };
         Charts.Show(app, o, x, y, w, h);
     }
 

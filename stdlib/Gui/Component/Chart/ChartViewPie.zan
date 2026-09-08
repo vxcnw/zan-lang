@@ -193,7 +193,7 @@ class PieLayout {
                         if (a0 < 0) { a0 = 0; }
                         if (a1 > 360) { a1 = 360; }
                     }
-                    l.slices.Add(PieSlice.Of(v, PieLayout.SliceColor(t, s, order[oi2], origIdx[si] * 16 + order[oi2]),
+                    l.slices.Add(PieSlice.Of(v, PieLayout.SliceColor(t, s, order[oi2], PieLayout.SlicePalIndex(o, s, order[oi2], origIdx[si] * 16 + order[oi2])),
                         PieLayout.SliceName(s, order[oi2]), origIdx[si], order[oi2], a0, a1,
                         pies.Count - 1 - si));
                     l.slices[l.slices.Count - 1].selected = d.selected;
@@ -243,7 +243,7 @@ class PieLayout {
                 if (v <= 0) { continue; }
                 int a0 = (int)(acc2 * 360 / total);
                 int a1 = (int)((acc2 + v) * 360 / total);
-                l.slices.Add(PieSlice.Of(v, PieLayout.SliceColor(t, s, di2, origIdx[p2] * 16 + di2),
+                l.slices.Add(PieSlice.Of(v, PieLayout.SliceColor(t, s, di2, PieLayout.SlicePalIndex(o, s, di2, origIdx[p2] * 16 + di2)),
                     PieLayout.SliceName(s, di2), origIdx[p2], di2, a0, a1, 0));
                 l.slices[l.slices.Count - 1].selected = d.selected;
                 acc2 = acc2 + v;
@@ -260,10 +260,47 @@ class PieLayout {
         return (int)v;
     }
 
+    /// ECharts2 同名同色：扇区调色板下标按名字在整个 option 中首次
+    /// 出现的顺序（去重）分配——多饼同板时同名项恒取同色（官方
+    /// pie.opt.js 三饼里 直达 恒为第 1 色、邮件营销 恒为第 4 色）。
+    /// 无名项回落 fallback（系列下标*16+项下标）。
+    static int GlobalColorIndex(ChartOption o, string nm, int fallback) {
+        if (nm == null || nm.Length == 0) { return fallback; }
+        List<string> seen = new List<string>();
+        for (int a = 0; a < o.series.Count; a = a + 1) {
+            ChartSeries ps = o.series[a];
+            for (int b = 0; b < ps.data.Count; b = b + 1) {
+                string pn = PieLayout.SliceName(ps, b);
+                if (pn.Length == 0) { continue; }
+                bool dup = false;
+                for (int c3 = 0; c3 < seen.Count; c3 = c3 + 1) {
+                    if (seen[c3] == pn) { dup = true; break; }
+                }
+                if (!dup) { seen.Add(pn); }
+            }
+        }
+        for (int c4 = 0; c4 < seen.Count; c4 = c4 + 1) {
+            if (seen[c4] == nm) { return c4; }
+        }
+        return fallback;
+    }
+
+    /// 扇区调色板下标入口：数据项自带名字才参与同名同色去重
+    /// （ECharts2 语义按项名，不是系列名）；无名项回落 fallback
+    /// （系列下标*16+项下标），各项取各自的色。不能拿 SliceName
+    /// 的系列名回退去重——同一系列的无名项会全部共享系列名的
+    /// 同一个下标，整张单色。
+    static int SlicePalIndex(ChartOption o, ChartSeries s, int di,
+                             int fallback) {
+        if (di >= 0 && di < s.data.Count && s.data[di].name.Length > 0) {
+            return PieLayout.GlobalColorIndex(o, s.data[di].name, fallback);
+        }
+        return fallback;
+    }
+
     /// 扇区颜色：数据项色 > 单数据项系列的系列色 > 按数据项下标调色板。
     /// 用 di（而不是可见扇区序）着色，图例开关后颜色不会错位。
-    static int SliceColor(Theme t, ChartSeries s, int di, int sliceIndex) {
-        if (di >= 0 && di < s.data.Count && s.data[di].color != 0) {
+    static int SliceColor(Theme t, ChartSeries s, int di, int sliceIndex) {        if (di >= 0 && di < s.data.Count && s.data[di].color != 0) {
             return s.data[di].color;
         }
         if (s.data.Count <= 1 && s.color != 0) { return s.color; }
@@ -361,70 +398,88 @@ partial class ChartView {
         int hotDi = 0 - 1;
         int bodyY = top;
         if (o.showLegend) {
-            int x0 = x + pad;
-            int maxX = x + w - pad;
-            int rowH = Canvas.FontHeight(Style.FontFallback(app, "small")) + app.Scale(6);
-            int gap = app.Scale(8);
-            int rowW = 0;
-            int nChip = 0;
-            for (int sm = 0; sm < o.series.Count; sm = sm + 1) {
-                ChartSeries pm = o.series[sm];
-                if (pm.type != ChartType.Pie) { continue; }
-                int visM = 0;
-                for (int dvm = 0; dvm < pm.data.Count; dvm = dvm + 1) {
-                    if (!pm.data[dvm].hidden && pm.Value(dvm) > 0) {
-                        visM = PieLayout.ClampInt((long)visM + pm.Value(dvm));
-                    }
-                }
-                for (int dim = 0; dim < pm.data.Count; dim = dim + 1) {
-                    string nmm = PieLayout.SliceName(pm, dim);
-                    int pctM = 0;
-                    if (!pm.data[dim].hidden && visM > 0) {
-                        pctM = (int)((long)pm.Value(dim) * 100 / visM);
-                    }
-                    string lbm = nmm + "  " + Convert.ToString(pctM) + "%";
-                    rowW = rowW + Chart.LegendChipW(app, lbm) + gap;
-                    nChip = nChip + 1;
-                }
-            }
-            if (nChip > 0) { rowW = rowW - gap; }
-            int xCur = x0;
-            if (nChip > 0 && rowW > 0 && rowW <= maxX - x0) {
-                xCur = x0 + (maxX - x0 - rowW) / 2;
-            }
-            int yCur = top;
+            // ECharts2 饼图图例：逐数据项、跨系列同名去重（取首个）；
+            // legend.data 白名单存在时按白名单过滤并排序；项文本只有
+            // 名字（百分比在扇区标签里）。orient=vertical 左侧整列
+            //（legend.x=left），否则顶部一行放不下换行。
+            List<int> candSi = new List<int>();
+            List<int> candDi = new List<int>();
+            List<string> candNm = new List<string>();
             for (int si = 0; si < o.series.Count; si = si + 1) {
                 ChartSeries ps = o.series[si];
                 if (ps.type != ChartType.Pie) { continue; }
-                int visTot = 0;
-                for (int dv = 0; dv < ps.data.Count; dv = dv + 1) {
-                    if (!ps.data[dv].hidden && ps.Value(dv) > 0) {
-                        visTot = PieLayout.ClampInt((long)visTot + ps.Value(dv));
+                for (int di = 0; di < ps.data.Count; di = di + 1) {
+                    string nmm = PieLayout.SliceName(ps, di);
+                    bool dup = false;
+                    for (int ci = 0; ci < candNm.Count; ci = ci + 1) {
+                        if (candNm[ci] == nmm) { dup = true; break; }
+                    }
+                    if (dup) { continue; }
+                    if (o.legendData != null && o.legendData.Count > 0) {
+                        bool white = false;
+                        for (int wl = 0; wl < o.legendData.Count; wl = wl + 1) {
+                            if (o.legendData[wl] == nmm) { white = true; break; }
+                        }
+                        if (!white) { continue; }
+                    }
+                    candSi.Add(si);
+                    candDi.Add(di);
+                    candNm.Add(nmm);
+                }
+            }
+            if (o.legendData != null && o.legendData.Count > 1) {
+                for (int wi = 0; wi < o.legendData.Count && wi < candNm.Count; wi = wi + 1) {
+                    for (int ci = wi; ci < candNm.Count; ci = ci + 1) {
+                        if (candNm[ci] == o.legendData[wi]) {
+                            int tsi = candSi[wi]; candSi[wi] = candSi[ci]; candSi[ci] = tsi;
+                            int tdi = candDi[wi]; candDi[wi] = candDi[ci]; candDi[ci] = tdi;
+                            string tnm = candNm[wi]; candNm[wi] = candNm[ci]; candNm[ci] = tnm;
+                            break;
+                        }
                     }
                 }
-                for (int di = 0; di < ps.data.Count; di = di + 1) {
-                    int col = PieLayout.SliceColor(t, ps, di, si * 16 + di);
-                    string nm = PieLayout.SliceName(ps, di);
-                    bool hid = ps.data[di].hidden;
-                    int pctL = 0;
-                    if (!hid && visTot > 0) {
-                        pctL = (int)((long)ps.Value(di) * 100 / visTot);
-                    }
-                    string lbl = nm + "  " + Convert.ToString(pctL) + "%";
-                    int cw = Chart.LegendChipW(app, lbl);
-                    if (xCur > x0 && xCur + cw > maxX) {
-                        xCur = x0;
-                        yCur = yCur + rowH;
-                    }
-                    if (app.mouseX >= xCur && app.mouseX < xCur + cw
-                        && app.mouseY >= yCur && app.mouseY < yCur + rowH) {
-                        hotSi = si;
-                        hotDi = di;
-                    }
-                    int key = 0;
-                    if (o.iwid != 0) { key = Chart.LegendSliceKey(o.iwid, si, di); }
-                    Chart.DrawLegendChip(app, xCur, yCur, cw, rowH, col, lbl, hid, key);
-                    xCur = xCur + cw + app.Scale(8);
+            }
+            int rowH = Canvas.FontHeight(Style.FontFallback(app, "small")) + app.Scale(6);
+            int gap = app.Scale(8);
+            int x0 = x + pad;
+            int maxX = x + w - pad;
+            int xCur = x0;
+            int yCur = top;
+            bool legVert = o.legendOrient == "vertical";
+            if (!legVert && candNm.Count > 0) {
+                int rowW = 0 - gap;
+                for (int ci = 0; ci < candNm.Count; ci = ci + 1) {
+                    rowW = rowW + Chart.LegendChipW(app, candNm[ci]) + gap;
+                }
+                if (rowW > 0 && rowW <= maxX - x0) { xCur = x0 + (maxX - x0 - rowW) / 2; }
+            }
+            for (int ci = 0; ci < candNm.Count; ci = ci + 1) {
+                int si = candSi[ci];
+                int di = candDi[ci];
+                ChartSeries ps = o.series[si];
+                int col = PieLayout.SliceColor(t, ps, di, PieLayout.SlicePalIndex(o, ps, di, si * 16 + di));
+                bool hid = ps.data[di].hidden;
+                string lbl = candNm[ci];
+                int cw = Chart.LegendChipW(app, lbl);
+                if (legVert) { xCur = x0; }
+                else if (xCur > x0 && xCur + cw > maxX) {
+                    xCur = x0;
+                    yCur = yCur + rowH;
+                }
+                if (app.mouseX >= xCur && app.mouseX < xCur + cw
+                    && app.mouseY >= yCur && app.mouseY < yCur + rowH) {
+                    hotSi = si;
+                    hotDi = di;
+                }
+                int key = 0;
+                if (o.iwid != 0) { key = Chart.LegendSliceKey(o.iwid, si, di); }
+                Chart.DrawLegendChip(app, xCur, yCur, cw, rowH, col, lbl, hid, key);
+                if (legVert) {
+                    // ECharts 图例是浮层：竖排列不占几何空间，饼体仍按
+                    // 整板布局（official pie.opt 左侧图例压在空区）。
+                    yCur = yCur + rowH;
+                } else {
+                    xCur = xCur + cw + gap;
                     bodyY = yCur + rowH + app.Scale(4);
                 }
             }
@@ -513,8 +568,10 @@ partial class ChartView {
                     int offHit = app.Scale(ChartView.PieSelectedOffset(
                         o.series[sh.seriesIndex].selectedOffset));
                     int midHit = rot + (sh.a0 + sh.a1) / 2;
-                    hitCx = cx + ChartView.FillDx(midHit) * offHit / 1000;
-                    hitCy = cy + ChartView.FillDy(midHit) * offHit / 1000;
+                    // 选中弹出沿本环圆心偏移（多饼各自 center 时
+                    // 默认圆心不属于任何环，命中会整体错位）。
+                    hitCx = hitCx + ChartView.FillDx(midHit) * offHit / 1000;
+                    hitCy = hitCy + ChartView.FillDy(midHit) * offHit / 1000;
                 }
                 int ddxH = mx0 - hitCx;
                 int ddyH = my0 - hitCy;
@@ -621,7 +678,15 @@ partial class ChartView {
 
         // 可选的分片百分比标签，位于扇区中角处。百分比按
         // 该片所属环的 total 计算（环模式各环独立）。
-        if (sliceLabels) {
+        // option 级 pieLabels 之外，系列可用 series.pieLabels
+        // 单独开启（多饼同板逐系列开关，pie1 三饼三态标签）。
+        bool anySliceLabels = sliceLabels;
+        for (int qa = 0; qa < o.series.Count; qa = qa + 1) {
+            if (o.series[qa].pieLabels || o.series[qa].labelShow) {
+                anySliceLabels = true;
+            }
+        }
+        if (anySliceLabels) {
             for (int p = 0; p < slices.Count; p = p + 1) {
                 PieSlice sl = slices[p];
                 int ring = sl.ring;
@@ -631,15 +696,18 @@ partial class ChartView {
                 if (ring < layout.ringTotalWide.Count && layout.ringTotalWide[ring] > 0) {
                     ringTot = layout.ringTotalWide[ring];
                 }
-                int pct = (int)(sl.value * 100 / ringTot);
+                // ECharts percent = Math.round(v/sum*100)（26.5% → 27%）。
+                int pct = (int)((sl.value * 200 + ringTot) / (ringTot * 2));
                 // 系列级外置标签：series.label.show + labelLine（ECharts
                 // 2.x 语义）。引导线两段：沿中角出弧 L1，再水平收尾；
                 // 文本按左右半球锚定在水平段外侧。
+                bool showPct = sliceLabels;
                 bool outerLabel = sliceLabels && ringCount == 1;
                 ChartTextStyle lblStyle = null;
                 if (sl.seriesIndex >= 0 && sl.seriesIndex < o.series.Count) {
                     lblStyle = o.series[sl.seriesIndex].label;
                     if (o.series[sl.seriesIndex].labelShow) { outerLabel = true; }
+                    if (o.series[sl.seriesIndex].pieLabels) { showPct = true; }
                 }
                 int lblColor = Chart.ContrastFg(sl.color);
                 if (lblStyle != null && lblStyle.color != 0) { lblColor = lblStyle.color; }
@@ -657,7 +725,7 @@ partial class ChartView {
                     lcx = cx + ChartView.FillDx(midPop) * offPx / 1000;
                     lcy = cy + ChartView.FillDy(midPop) * offPx / 1000;
                 }
-                if (sl.a1 <= sweepMax && pct >= 4 && !outerLabel) {
+                if (showPct && sl.a1 <= sweepMax && pct >= 4 && !outerLabel) {
                     int roLblMid = ChartView.PieSliceRo(geoRi[ring], geoRo[ring],
                         sl.roseP);
                     int rLbl = (geoRi[ring] + roLblMid) / 2;
@@ -667,7 +735,18 @@ partial class ChartView {
                     int mid = rot + (sl.a0 + sl.a1) / 2;
                     int lxp = ChartView.FillX(lcx, rLbl, mid);
                     int lyp = ChartView.FillY(lcy, rLbl, mid);
+                    // series.label.formatter 模板覆盖缺省百分比
+                    //（{a}=系列名 {b}=项名 {c}=值；官方 pie3 内环
+                    // position:'inner' 缺省 {b} = 项名）。
                     string pl = Convert.ToString(pct) + "%";
+                    if (sl.seriesIndex >= 0 && sl.seriesIndex < o.series.Count
+                        && o.series[sl.seriesIndex].labelFmt.Length > 0) {
+                        string r5 = o.series[sl.seriesIndex].labelFmt;
+                        r5 = r5.Replace("{a}", o.series[sl.seriesIndex].name);
+                        r5 = r5.Replace("{b}", sl.name);
+                        r5 = r5.Replace("{c}", Convert.ToString(sl.value));
+                        pl = r5;
+                    }
                     int pw = Canvas.MeasureText(pl, Style.FontFallback(app, "small"));
                     c.DrawText(lxp - pw / 2, Canvas.CenterTextYAt(lyp, Style.FontFallback(app, "small")),
                         pl, lblColor, Style.FontFallback(app, "small"));
@@ -687,9 +766,8 @@ partial class ChartView {
                     int x3 = rightSide ? x2 + tail : x2 - tail;
                     c.DrawLine(x1, y1, x2, y2, sl.color, 1);
                     c.DrawLine(x2, y2, x3, y2, sl.color, 1);
+                    // ECharts2 外标 formatter 默认 {b}：只有项名。
                     string txt = sl.name;
-                    if (txt.Length > 0) { txt = txt + " "; }
-                    txt = txt + Convert.ToString(pct) + "%";
                     int tw2 = Canvas.MeasureText(txt, Style.FontFallback(app, "small"));
                     int txp = rightSide ? x3 + app.Scale(3) : x3 - app.Scale(3) - tw2;
                     if (txp < x + pad) { txp = x + pad; }
@@ -741,10 +819,11 @@ partial class ChartView {
                 rot, slices, worstI, "min", t, o.series);
         }
 
-        // 环形图中心标注：选中扇区名优先，否则累计值。
+        // 环形图中心标注：选中扇区名优先，否则累计值。ECharts 默认
+        // 不显示（仅 emphasis），故须 pieCenterText 显式开启；
         // 混搭覆盖层（多个饼叠在同一面板）不画，避免多环
         // 中心文本互相叠印；官方在 hover 时才显示。
-        if (!o.overlay && ringCount == 1 && layout.ringInner.Count > 0) {
+        if (o.pieCenterText && !o.overlay && ringCount == 1 && layout.ringInner.Count > 0) {
             int centerInner = geoRi[0];
             if (centerInner > app.Scale(18) && total > 0) {
                 string tot = Convert.ToString(total);

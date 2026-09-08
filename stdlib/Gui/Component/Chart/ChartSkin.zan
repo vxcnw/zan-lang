@@ -5,8 +5,8 @@ namespace Gui.Component.Chart;
 
 /// 图表皮肤（ChartSkin）：图表配色的独立板块，与全局皮肤主题
 /// （Theme）解耦——一套皮肤就是一份命名的定性调色板，取自
-/// ECharts 2.2 官方主题（src/theme/default.js 与 doc/example/theme/
-/// 下的 infographic/shine/macarons2，各前 8 档）。Chart.Palette 在
+/// ECharts 2.2 官方主题（default 取内置默认色板，infographic/shine/
+/// macarons2 取 doc/example/theme/ 各前 8 档）。Chart.Palette 在
 /// 主题 chart token 未定义时回落到当前皮肤，换肤一次即生效于
 /// 全部图型（折/柱/饼/漏斗……）。未知名一律按 default 处理。
 static class ChartSkin {
@@ -91,14 +91,30 @@ static class ChartSkin {
             return (int)0xFFD3758F;                    // #D3758F
         }
         if (name == "default") {
-            if (m == 0) { return (int)0xFF2EC7C9; }   // #2EC7C9
-            if (m == 1) { return (int)0xFFB6A2DE; }   // #B6A2DE
-            if (m == 2) { return (int)0xFF5AB1EF; }   // #5AB1EF
-            if (m == 3) { return (int)0xFFFFB980; }   // #FFB980
-            if (m == 4) { return (int)0xFFD87A80; }   // #D87A80
-            if (m == 5) { return (int)0xFF8D98B3; }   // #8D98B3
-            if (m == 6) { return (int)0xFFE5CF0D; }   // #E5CF0D
-            return (int)0xFF97B552;                    // #97B552
+            // ECharts2 内置默认主题色板（echarts-all.js 顶部 color 数组
+            // 全 20 档，官方示例页不注册主题时的实际取色），非 repo 的
+            // theme/default.js（那套 #2EC7C9 是可下载主题文件）。
+            int m20 = ((i % 20) + 20) % 20;
+            if (m20 == 0) { return (int)0xFFFF7F50; }   // #FF7F50 coral
+            if (m20 == 1) { return (int)0xFF87CEFA; }   // #87CEFA lightskyblue
+            if (m20 == 2) { return (int)0xFFDA70D6; }   // #DA70D6 orchid
+            if (m20 == 3) { return (int)0xFF32CD32; }   // #32CD32 limegreen
+            if (m20 == 4) { return (int)0xFF6495ED; }   // #6495ED cornflower
+            if (m20 == 5) { return (int)0xFFFF69B4; }   // #FF69B4 hotpink
+            if (m20 == 6) { return (int)0xFFBA55D3; }   // #BA55D3 mediumorchid
+            if (m20 == 7) { return (int)0xFFCD5C5C; }   // #CD5C5C indianred
+            if (m20 == 8) { return (int)0xFFFFA500; }   // #FFA500 orange
+            if (m20 == 9) { return (int)0xFF40E0D0; }   // #40E0D0 turquoise
+            if (m20 == 10) { return (int)0xFF1E90FF; }  // #1E90FF dodgerblue
+            if (m20 == 11) { return (int)0xFFFF6347; }  // #FF6347 tomato
+            if (m20 == 12) { return (int)0xFF7B68EE; }  // #7B68EE mediumslateblue
+            if (m20 == 13) { return (int)0xFF00FA9A; }  // #00FA9A mediumspringgreen
+            if (m20 == 14) { return (int)0xFFFFD700; }  // #FFD700 gold
+            if (m20 == 15) { return (int)0xFF6699FF; }  // #6699FF
+            if (m20 == 16) { return (int)0xFFFF6666; }  // #FF6666
+            if (m20 == 17) { return (int)0xFF3CB371; }  // #3CB371 mediumseagreen
+            if (m20 == 18) { return (int)0xFFB8860B; }  // #B8860B darkgoldenrod
+            return (int)0xFF30E0E0;                     // #30E0E0
         }
         return 0;
     }

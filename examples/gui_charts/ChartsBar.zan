@@ -396,11 +396,12 @@ partial class Charts {
         Charts.Show(app, o, x, y, w, h);
     }
 
-    /// bar13 不等距柱形图（双数值轴）：x/y 都是数值轴，柱画在
-    /// x 值处；纵/横两套 max/min markPoint + max/min/average
-    /// markLine（纵 #dc143c、横 #1e90ff）。y 轴线 #dc143c。
-    /// ref 偏差：数据1 首点 x=1.5 取整为 2；数据2 barHeight:10 以
-    /// barWidth 表达（引擎竖柱只有宽度概念）。
+    /// bar13 不等距柱形图（双数值轴）：x/y 都是数值轴，数据1 竖柱
+    /// 画在 x 值处；数据2 barHeight:10 → 横条（厚度 10px、中心在
+    /// y 值行、从 x=0 基线长到 x 值）——纵横两组柱同板。纵/横两套
+    /// max/min markPoint + max/min/average markLine（纵 #dc143c、
+    /// 横 #1e90ff）。y 轴线 #dc143c。
+    /// ref 偏差：数据1 首点 x=1.5 取整为 2。
     static void Bar12(App app, int x, int y, int w, int h) {
         int crimson = Chart.Rgb(220, 20, 60);
         int dodger = Chart.Rgb(30, 144, 255);
@@ -457,7 +458,7 @@ partial class Charts {
             ChartPoint.Of(1, 2), ChartPoint.Of(2, 3), ChartPoint.Of(4, 4),
             ChartPoint.Of(7, 5), ChartPoint.Of(11, 11), ChartPoint.Of(18, 15) };
         ChartSeries s2 = ChartSeries.OfBarPoints(Charts.T("Data 2", "数据2"), pts2);
-        s2.barWidth = 10;
+        s2.barHeight = 10;
         ChartOption o = ChartOption.Of(Charts.T("Dual value axes bar", "双数值柱形图"),
             null, new List<ChartSeries>{ s1, s2 });
         o.titleSub = Charts.T("Purely fictional", "纯属虚构");

@@ -572,9 +572,12 @@ partial class ChartView {
         }
     }
 
-    /// 双数值轴柱形（ECharts bar13）：points[i] = (x, y)，柱画在
-    /// x 值处、从零线长到 y；柱宽自动取相邻 x 间隙或量程 1/4。
-    /// 数值标签在柱顶（v>0）或柱底（v<0）；悬停命中出 tooltip。
+    /// 双数值轴柱形（ECharts bar13）：points[i] = (x, y)。默认竖柱
+    /// 画在 x 值处、从零线长到 y（宽取相邻 x 间隙或量程 1/4，数值
+    /// 标签在柱顶/柱底）；barHeight>0 时为横条——厚度 = barHeight px、
+    /// 垂直中心在 y 值处、从 x=0 基线长到 x 值（官方 _buildOther
+    /// barHeight 横向分支：value[0]>0 向左铺、<0 向右铺）。悬停
+    /// 命中出 tooltip。
     static void DrawValueXBars(App app, ChartFrame f, ChartSeries s, int si,
                                int i0, int i1, int g, ChartOption o) {
         Canvas c = app.canvas;
@@ -598,6 +601,9 @@ partial class ChartView {
         if (bw > halfPlot) { bw = halfPlot; }
         if (bw < app.Scale(2)) { bw = app.Scale(2); }
         int zeroY = f.YOf(0, s.axisIndex);
+        // 横条基线：x=0 的像素列（ECharts _buildOther 横向分支的
+        // baseX）；x 值点所在行的垂直中心用 YOf(y)。
+        int baseX = f.XOfValue(0);
         int valFs = Style.FontFallback(app, "medium");
         if (s.label.fontSize > 0) { valFs = s.label.fontSize; }
         int valFh = Canvas.FontHeight(valFs);
@@ -611,6 +617,42 @@ partial class ChartView {
             if (s.points[j].color != 0) { col = s.points[j].color; }
             int px = f.XOfValue(xv);
             int py = f.YOf(yv, s.axisIndex);
+            if (s.barHeight > 0) {
+                // 横条（barHeight：官方数据2）：厚度固定、中心在 y
+                // 值行，长度 = x 值相对 0 基线的有向距离。
+                int th = app.Scale(s.barHeight);
+                if (th < app.Scale(2)) { th = app.Scale(2); }
+                int bxh = px < baseX ? px : baseX;
+                int bwid = px < baseX ? baseX - px : px - baseX;
+                int byh = py - th / 2;
+                bool hovH = mx >= bxh && mx < bxh + bwid
+                    && my >= byh && my < byh + th;
+                if (hovH && bwid > 0) {
+                    ChartView.OfferActiveHit(ChartView.MakeDataHit(s, si, j,
+                        "[" + Convert.ToString(xv) + ", "
+                        + Convert.ToString(s.points[j].y) + "]",
+                        ChartElementType.Bar, mx, my, s.points[j].y));
+                }
+                if (bwid > 0) {
+                    ChartView.BarCellR4(c, bxh, byh, bwid, th, null,
+                        app.Scale(1), col, o.gradient);
+                }
+                if (o.showValues || s.labelShow) {
+                    string lbl = ChartView.LabelText(s, j, "", s.points[j].y);
+                    int lw = Canvas.MeasureText(lbl, valFs);
+                    int ly = py - valFh / 2;
+                    int lx2 = bwid > 0
+                        ? (px < baseX ? bxh - lw - app.Scale(4)
+                                      : bxh + bwid + app.Scale(4))
+                        : px - lw / 2;
+                    if (lx2 < f.plotX) { lx2 = bxh + app.Scale(4); }
+                    if (lx2 + lw > f.plotX + f.plotW) {
+                        lx2 = bxh - lw - app.Scale(4);
+                    }
+                    c.DrawText(lx2, ly, lbl, valCol, valFs);
+                }
+                continue;
+            }
             int bx = px - bw / 2;
             int y0 = py < zeroY ? py : zeroY;
             int bh = py < zeroY ? zeroY - py : py - zeroY;
