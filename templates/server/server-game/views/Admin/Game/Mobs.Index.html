@@ -17,10 +17,10 @@
         <th style="width:130px">怪物</th>
         <th style="width:110px">地图</th>
         <th class="num" style="width:52px">等级</th>
-        <th class="num" style="width:70px">HP</th>
-        <th class="num" style="width:52px">攻</th>
-        <th class="num" style="width:52px">防</th>
-        <th class="num" style="width:64px">经验</th>
+        <th style="width:92px">HP</th>
+        <th style="width:74px">攻</th>
+        <th style="width:74px">防</th>
+        <th style="width:74px">经验</th>
         <th class="num" style="width:100px">金币</th>
         <th class="num" style="width:56px">重生</th>
         <th class="num" style="width:48px">数量</th>
@@ -36,10 +36,30 @@
         <td class="ellip">{{name}}</td>
         <td class="ellip">{{map}}</td>
         <td class="num">{{level}}</td>
-        <td class="num">{{hp}}</td>
-        <td class="num">{{atk}}</td>
-        <td class="num">{{def}}</td>
-        <td class="num">{{exp}}</td>
+        <td>
+          <form class="inline-rate" data-submit action="/admin/game/mobs/stat">
+            <input type="hidden" name="id" value="{{id}}"><input type="hidden" name="field" value="hp">
+            <input class="input w60" name="val" type="number" min="1" value="{{hp}}"><button class="btn sm" type="submit">存</button>
+          </form>
+        </td>
+        <td>
+          <form class="inline-rate" data-submit action="/admin/game/mobs/stat">
+            <input type="hidden" name="id" value="{{id}}"><input type="hidden" name="field" value="atk">
+            <input class="input w60" name="val" type="number" min="0" value="{{atk}}"><button class="btn sm" type="submit">存</button>
+          </form>
+        </td>
+        <td>
+          <form class="inline-rate" data-submit action="/admin/game/mobs/stat">
+            <input type="hidden" name="id" value="{{id}}"><input type="hidden" name="field" value="def">
+            <input class="input w60" name="val" type="number" min="0" value="{{def}}"><button class="btn sm" type="submit">存</button>
+          </form>
+        </td>
+        <td>
+          <form class="inline-rate" data-submit action="/admin/game/mobs/stat">
+            <input type="hidden" name="id" value="{{id}}"><input type="hidden" name="field" value="exp">
+            <input class="input w60" name="val" type="number" min="0" value="{{exp}}"><button class="btn sm" type="submit">存</button>
+          </form>
+        </td>
         <td class="num muted">{{gold}}</td>
         <td class="num muted">{{respawn}}s</td>
         <td class="num">{{count}}</td>

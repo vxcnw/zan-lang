@@ -235,7 +235,10 @@ class Schema {
             if (!await Schema.SeedMaps(db)) { GameSnapshot.Close(); return false; }
             if (!await Schema.SeedItems(db)) { GameSnapshot.Close(); return false; }
             if (!await Schema.SeedMobs(db)) { GameSnapshot.Close(); return false; }
+            if (!await Schema.SeedSkillsFromSnap(db)) { GameSnapshot.Close(); return false; }
             GameSnapshot.Close();
+        } else {
+            if (!await Schema.SeedSkills(db)) { return false; }
         }
         int ann = await db.Select<Announce>().CountAsync();
         if (ann == 0) {
@@ -252,6 +255,51 @@ class Schema {
     }
 
     /* ---- 游戏目录种子：全部由 M2.DB 快照驱动，见 GameSnapshot ---- */
+
+    /* 技能：skills 表原值 24 条（三职业各 8：4 主动 + 4 被动，伤害/
+       治疗系数、冷却、耗蓝、升级花费全是原值）。快照 id 不保留；
+       job 0/1/2 与原表一致。老库补种路径自己开关快照连接。 */
+    static async bool SeedSkills(IDbConnection db) {
+        int n = await db.Select<Skill>().CountAsync();
+        if (n > 0) { return true; }
+        if (!await GameSnapshot.Open("data/M2.DB")) { return false; }
+        bool ok = await Schema.SeedSkillsFromSnap(db);
+        GameSnapshot.Close();
+        return ok;
+    }
+
+    /* 种子主体：假定快照连接已打开（冷启动路径由 SeedGame 打开）。 */
+    static async bool SeedSkillsFromSnap(IDbConnection db) {
+        DbResult snap = await GameSnapshot.Table("skills");
+        for (int i = 0; i < snap.RowCount(); i = i + 1) {
+            string name = GameSnapshot.Str(snap, i, "name");
+            if (name.Length == 0) { continue; }
+            Skill s = new Skill();
+            s.name = name;
+            s.job = GameSnapshot.Int(snap, i, "job");
+            s.slot = GameSnapshot.Int(snap, i, "slot");
+            s.kind = GameSnapshot.Str(snap, i, "kind");
+            s.target = GameSnapshot.Str(snap, i, "target");
+            s.cooldown = GameSnapshot.Int(snap, i, "cooldown");
+            s.mana = GameSnapshot.Int(snap, i, "mana");
+            s.damagePct = GameSnapshot.Int(snap, i, "damage_pct");
+            s.damagePerLevel = GameSnapshot.Int(snap, i, "damage_per_level");
+            s.healPct = GameSnapshot.Int(snap, i, "heal_pct");
+            s.healPerLevel = GameSnapshot.Int(snap, i, "heal_per_level");
+            s.passiveDamagePct =
+                GameSnapshot.Int(snap, i, "passive_damage_pct");
+            s.passiveDefensePct =
+                GameSnapshot.Int(snap, i, "passive_defense_pct");
+            s.maxLevel = GameSnapshot.Int(snap, i, "max_level");
+            s.trainGold = GameSnapshot.Long(snap, i, "train_gold");
+            s.trainIron = GameSnapshot.Int(snap, i, "train_iron");
+            s.school = GameSnapshot.Str(snap, i, "school");
+            s.status = 1;
+            int _id = await db.Insert<Skill>(s).ExecuteIdentityAsync();
+            if (_id <= 0) { return false; }
+        }
+        return true;
+    }
 
     /* 地图：gamemap 原值（名称/门槛/美术键），sortOrder=快照 id，
        掉落换算按它回查运行时 id。 */

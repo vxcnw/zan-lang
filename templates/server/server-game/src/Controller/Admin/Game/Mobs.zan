@@ -146,6 +146,43 @@ class Mobs : AdminController {
     }
 
     [HttpPost]
+    [Custom(Perm = PermBit.Update)]
+    [Description("行内改属性")]
+    async void Stat() {
+        int id = this.InInt("id", 0);
+        Mob have = await this.Reach(id);
+        string field = this.In("field").Trim();
+        int val = this.InInt("val", 0);
+        int n = 0;
+        if (field == "hp") {
+            if (val < 1) { val = 1; }
+            n = await this.Mob.Update().Set(a => a.hp, val)
+                .Where(a => a.id == id).ExecuteAffrowsAsync();
+        } else if (field == "atk") {
+            if (val < 0) { val = 0; }
+            n = await this.Mob.Update().Set(a => a.atk, val)
+                .Where(a => a.id == id).ExecuteAffrowsAsync();
+        } else if (field == "def") {
+            if (val < 0) { val = 0; }
+            n = await this.Mob.Update().Set(a => a.def, val)
+                .Where(a => a.id == id).ExecuteAffrowsAsync();
+        } else if (field == "exp") {
+            if (val < 0) { val = 0; }
+            n = await this.Mob.Update().Set(a => a.exp, val)
+                .Where(a => a.id == id).ExecuteAffrowsAsync();
+        } else if (field == "level") {
+            if (val < 1) { val = 1; }
+            n = await this.Mob.Update().Set(a => a.level, val)
+                .Where(a => a.id == id).ExecuteAffrowsAsync();
+        } else {
+            this.Fail(400, "0003", "未知字段");
+        }
+        await this.Note("改怪物属性", have.name + " " + field + "→"
+            + Convert.ToString(val), n > 0, "");
+        this.Saved(have.name + " " + field + " 已改为 " + Convert.ToString(val));
+    }
+
+    [HttpPost]
     [Custom(Perm = PermBit.Create | PermBit.Update)]
     [Description("保存刷怪点")]
     async void Save() {

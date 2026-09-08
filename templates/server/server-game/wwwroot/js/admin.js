@@ -196,6 +196,20 @@
     path = normalize(path);
     var same = state.active === path;
     var i = find(path);
+    if (i < 0) {
+      /* Same screen, different query (pager / filter / detail link) reuses
+         its tab in place: the tab strip stays one-per-screen and the URL
+         still tracks what the panel shows. */
+      var root = base(path);
+      for (var j = 0; j < state.tabs.length; j++) {
+        if (base(state.tabs[j].path) === root) {
+          i = j;
+          state.tabs[j].path = path;
+          if (title) { state.tabs[j].title = title; }
+          break;
+        }
+      }
+    }
     if (i < 0) { state.tabs.push({ path: path, title: title || path }); }
     state.active = path;
     paint();
