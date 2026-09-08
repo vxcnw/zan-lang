@@ -3,6 +3,7 @@ using System.Data;
 using System.Data.Orm;
 using System.Web;
 using ZanWeb;
+using ZanWeb.Game;
 using ZanWeb.Model.Game;
 
 namespace ZanWeb.Admin.Game;
@@ -179,7 +180,9 @@ class Mobs : AdminController {
         }
         await this.Note("改怪物属性", have.name + " " + field + "→"
             + Convert.ToString(val), n > 0, "");
-        this.Saved(have.name + " " + field + " 已改为 " + Convert.ToString(val));
+        Fight.ReloadCatalog();
+        this.Saved(have.name + " " + field + " 已改为 " + Convert.ToString(val)
+            + "，战斗内存已热重载");
     }
 
     [HttpPost]
@@ -241,7 +244,8 @@ class Mobs : AdminController {
                 .ExecuteAffrowsAsync();
             await this.Note("编辑刷怪点", "#" + Convert.ToString(id)
                 + " " + have.name, n > 0, "");
-            this.Saved("刷怪点已保存");
+            Fight.ReloadCatalog();
+            this.Saved("刷怪点已保存，战斗内存已热重载");
             return;
         }
         Mob row = new Mob();
@@ -261,7 +265,8 @@ class Mobs : AdminController {
         int newId = await this.Mob.Insert(row).ExecuteIdentityAsync();
         await this.Note("新增刷怪点", "#" + Convert.ToString(newId)
             + " " + name, newId > 0, "");
-        this.Saved("刷怪点已创建");
+        Fight.ReloadCatalog();
+        this.Saved("刷怪点已创建，战斗内存已热重载");
     }
 
     [HttpPost]
@@ -277,7 +282,8 @@ class Mobs : AdminController {
             .ExecuteAffrowsAsync();
         await this.Note("删除刷怪点", "#" + Convert.ToString(id)
             + " " + have.name, n > 0, "");
-        this.Saved("刷怪点已删除");
+        Fight.ReloadCatalog();
+        this.Saved("刷怪点已删除，战斗内存已热重载");
     }
 
     async Mob Reach(int id) {

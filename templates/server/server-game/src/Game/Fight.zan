@@ -124,57 +124,112 @@ class Fight {
 
     static async void Bootstrap(DbContext ctx) {
         if (Fight.items.Count > 0) { return; }
+        await Fight.LoadCatalog(ctx, true);
+    }
+
+    /* 装载/重载目录（物品、怪物模板、掉落表）。bootstrap=true 首次
+       铺怪并打日志；false 为 GM 改完数据后的热重载：目录内存整体
+       换新，刷怪实例按新模板重铺（正在打的怪重置为满血），挂机目标
+       已被删除/停用的会话自动关闭挂机。全程不重启服务。 */
+    static async void LoadCatalog(DbContext ctx, bool bootstrap) {
         IDbConnection db = await ctx.Acquire();
         if (db == null) {
             Console.WriteLine("[fight] 数据库不可用，战斗系统未装载");
             return;
         }
         try {
-            Fight.items = await db.Select<ZanWeb.Model.Game.Item>()
+            List<ZanWeb.Model.Game.Item> newItems = await db
+                .Select<ZanWeb.Model.Game.Item>()
                 .Where(a => a.status == 1).OrderBy(a => a.id).ToListAsync();
-            for (int i = 0; i < Fight.items.Count; i = i + 1) {
-                Fight.itemById.Add(Fight.items[i].id, Fight.items[i]);
+            Dictionary<int, ZanWeb.Model.Game.Item> newItemById =
+                new Dictionary<int, ZanWeb.Model.Game.Item>();
+            for (int i = 0; i < newItems.Count; i = i + 1) {
+                newItemById.Add(newItems[i].id, newItems[i]);
             }
             List<ZanWeb.Model.Game.Mob> rows = await db
                 .Select<ZanWeb.Model.Game.Mob>()
                 .Where(a => a.status == 1).OrderBy(a => a.id).ToListAsync();
-            long now = WebApp.NowSeconds();
-            for (int i = 0; i < rows.Count; i = i + 1) {
-                ZanWeb.Model.Game.Mob t = rows[i];
-                Fight.mobs.Add(t);
-                Fight.mobById.Add(t.id, t);
-                for (int n = 0; n < t.count; n = n + 1) {
-                    Fight.Spawn(t, now);
-                }
-            }
             List<ZanWeb.Model.Game.Drop> drops = await db
                 .Select<ZanWeb.Model.Game.Drop>()
                 .OrderBy(a => a.mobId).OrderBy(a => a.sort)
                 .ToListAsync();
+            Dictionary<int, List<ZanWeb.Model.Game.Drop>> newDrops =
+                new Dictionary<int, List<ZanWeb.Model.Game.Drop>>();
             for (int i = 0; i < drops.Count; i = i + 1) {
                 ZanWeb.Model.Game.Drop dr = drops[i];
                 List<ZanWeb.Model.Game.Drop> list = null;
-                if (!Fight.dropsByMob.TryGetValue(dr.mobId, out list)) {
+                if (!newDrops.TryGetValue(dr.mobId, out list)) {
                     list = new List<ZanWeb.Model.Game.Drop>();
-                    Fight.dropsByMob.Add(dr.mobId, list);
+                    newDrops.Add(dr.mobId, list);
                 }
                 list.Add(dr);
             }
-            Console.WriteLine("[fight] 怪物 " + Convert.ToString(Fight.instId.Count)
-                + " 只 / 物品 " + Convert.ToString(Fight.items.Count)
-                + " 种 / 掉落条目 " + Convert.ToString(drops.Count));
+
+            long now = WebApp.NowSeconds();
+            List<int> newInstId = new List<int>();
+            List<int> newInstTpl = new List<int>();
+            List<int> newInstHp = new List<int>();
+            List<bool> newInstAlive = new List<bool>();
+            List<long> newInstRespawnAt = new List<long>();
+            for (int i = 0; i < rows.Count; i = i + 1) {
+                ZanWeb.Model.Game.Mob t = rows[i];
+                for (int n = 0; n < t.count; n = n + 1) {
+                    newInstId.Add(Fight.nextInst);
+                    Fight.nextInst = Fight.nextInst + 1;
+                    newInstTpl.Add(t.id);
+                    newInstHp.Add(t.hp);
+                    newInstAlive.Add(true);
+                    newInstRespawnAt.Add(0);
+                }
+            }
+
+            /* 全部就绪后一次切换，战斗协程看到的目录始终完整。 */
+            Fight.items = newItems;
+            Fight.itemById = newItemById;
+            Fight.mobs = rows;
+            Fight.mobById = new Dictionary<int, ZanWeb.Model.Game.Mob>();
+            for (int i = 0; i < rows.Count; i = i + 1) {
+                Fight.mobById.Add(rows[i].id, rows[i]);
+            }
+            Fight.dropsByMob = newDrops;
+            Fight.instId = newInstId;
+            Fight.instTpl = newInstTpl;
+            Fight.instHp = newInstHp;
+            Fight.instAlive = newInstAlive;
+            Fight.instRespawnAt = newInstRespawnAt;
+
+            /* 挂机目标已不存在的会话关掉挂机，避免永远打不中。 */
+            List<Session> sessions = World.All();
+            for (int i = 0; i < sessions.Count; i = i + 1) {
+                Session s = sessions[i];
+                if (s == null || s.row == null || s.kicked) { continue; }
+                if (s.autoMobId > 0 && Fight.Tpl(s.autoMobId) == null) {
+                    Fight.Auto(s, null, false);
+                }
+            }
+
+            if (bootstrap) {
+                Console.WriteLine("[fight] 怪物 "
+                    + Convert.ToString(Fight.instId.Count) + " 只 / 物品 "
+                    + Convert.ToString(Fight.items.Count) + " 种 / 掉落条目 "
+                    + Convert.ToString(drops.Count));
+            } else {
+                Console.WriteLine("[fight] 目录热重载：怪物 "
+                    + Convert.ToString(Fight.instId.Count) + " 只 / 物品 "
+                    + Convert.ToString(Fight.items.Count) + " 种 / 掉落条目 "
+                    + Convert.ToString(drops.Count));
+            }
         } finally {
             ctx.Release(db);
         }
     }
 
-    static void Spawn(ZanWeb.Model.Game.Mob t, long now) {
-        Fight.instId.Add(Fight.nextInst);
-        Fight.nextInst = Fight.nextInst + 1;
-        Fight.instTpl.Add(t.id);
-        Fight.instHp.Add(t.hp);
-        Fight.instAlive.Add(true);
-        Fight.instRespawnAt.Add(0);
+    /* GM 后台改完目录数据（怪物/物品/爆率）后调用：重载内存，
+       不重启服务。 */
+    static void ReloadCatalog() {
+        if (World.dbctx == null) { return; }
+        DbContext ctx = World.dbctx;
+        Task.Spawn(Fight.LoadCatalog(ctx, false));
     }
 
     /* ---- tick：重生 + 自动挂机 ---- */
@@ -524,6 +579,11 @@ class Fight {
     static string Auto(Session s, JsonValue m) {
         int tplId = m.Int("mob", 0);
         bool on = m.Bool("on", true);
+        return Fight.Auto(s, tplId, on);
+    }
+
+    /* Auto 的内部形态：热重载关挂机时没有消息体可解析。 */
+    static string Auto(Session s, int tplId, bool on) {
         if (!on) {
             s.autoMobId = 0;
             return "";

@@ -4,14 +4,15 @@ using System.Data;
 using System.Data.Orm;
 using System.Web;
 using ZanWeb;
+using ZanWeb.Game;
 using ZanWeb.Model.Game;
 
 namespace ZanWeb.Admin.Game;
 
 /* /admin/game/drops 爆率管理（怪物主视图）：左列怪物、右列它的掉落
    清单（game_drop），选中怪物一次看完+改完。概率用行内小表单直接改
-   （rate 行内保存，不弹窗）；加条目用页内表单，删=×。改完重启生效
-   （Fight 启动装载掉落表）。 */
+   （rate 行内保存，不弹窗）；加条目用页内表单，删=×。保存即热重载
+   战斗内存（Fight.ReloadCatalog），无需重启。 */
 [Route("admin/game/drops/[action]")]
 [Custom(Authorization = CustomAuthorization.Grant)]
 [Description("爆率管理")]
@@ -121,7 +122,8 @@ class Drops : AdminController {
             .ExecuteAffrowsAsync();
         await this.Note("改爆率", dr.mobId + "号怪 条目#" + Convert.ToString(id)
             + " → " + Convert.ToString(rate) + "/万", n > 0, "");
-        this.Saved("概率已改为 " + Convert.ToString(rate) + "/万");
+        Fight.ReloadCatalog();
+        this.Saved("概率已改为 " + Convert.ToString(rate) + "/万，已热重载");
     }
 
     /* 页内加条目：mob/item/rate。 */
@@ -152,7 +154,8 @@ class Drops : AdminController {
         int newId = await this.Drop.Insert(row).ExecuteIdentityAsync();
         await this.Note("加掉落", mob.name + " ← " + item.name
             + " " + Convert.ToString(rate) + "/万", newId > 0, "");
-        this.Saved("已加 " + item.name);
+        Fight.ReloadCatalog();
+        this.Saved("已加 " + item.name + "，已热重载");
     }
 
     [HttpPost]
@@ -164,7 +167,8 @@ class Drops : AdminController {
         int n = await this.Drop.Delete().Where(a => a.id == id)
             .ExecuteAffrowsAsync();
         await this.Note("删掉落", "#" + Convert.ToString(id), n > 0, "");
-        this.Saved("已删除");
+        Fight.ReloadCatalog();
+        this.Saved("已删除，已热重载");
     }
 
     async Drop Reach(int id) {

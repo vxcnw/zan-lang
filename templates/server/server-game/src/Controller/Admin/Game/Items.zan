@@ -3,6 +3,7 @@ using System.Data;
 using System.Data.Orm;
 using System.Web;
 using ZanWeb;
+using ZanWeb.Game;
 using ZanWeb.Model.Game;
 
 namespace ZanWeb.Admin.Game;
@@ -153,7 +154,8 @@ class Items : AdminController {
                 .ExecuteAffrowsAsync();
             await this.Note("编辑物品", "#" + Convert.ToString(id)
                 + " " + have.name, n > 0, "");
-            this.Saved("物品已保存");
+            Fight.ReloadCatalog();
+            this.Saved("物品已保存，战斗内存已热重载");
             return;
         }
         Item row = new Item();
@@ -169,7 +171,8 @@ class Items : AdminController {
         int newId = await this.Item.Insert(row).ExecuteIdentityAsync();
         await this.Note("新增物品", "#" + Convert.ToString(newId)
             + " " + brief, newId > 0, "");
-        this.Saved("物品已创建");
+        Fight.ReloadCatalog();
+        this.Saved("物品已创建，战斗内存已热重载");
     }
 
     [HttpPost]
@@ -182,7 +185,8 @@ class Items : AdminController {
             .ExecuteAffrowsAsync();
         await this.Note("删除物品", "#" + Convert.ToString(id)
             + " " + have.name, n > 0, "");
-        this.Saved("物品已删除");
+        Fight.ReloadCatalog();
+        this.Saved("物品已删除，战斗内存已热重载");
     }
 
     async Item Reach(int id) {
