@@ -1,0 +1,194 @@
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Data.Orm;
+using System.Web;
+using ZanWeb;
+using ZanWeb.Model.Game;
+
+namespace ZanWeb.Admin.Game;
+
+/* /admin/game/drops 爆率管理：每只怪物的掉落清单（game_drop，一怪
+   多条、各自独立掷万分比）。种子来自 M2.DB 快照掉落串（权重×10），
+   GM 在这里增删改；改完重启生效（Fight 启动装载掉落表）。 */
+[Route("admin/game/drops/[action]")]
+[Custom(Authorization = CustomAuthorization.Grant)]
+[Description("爆率管理")]
+class Drops : AdminController {
+    [HttpGet]
+    [Route("/admin/game/drops")]
+    [Custom(IsMenu = true, Icon = "mdi:dice-multiple", Perm = PermBit.View)]
+    [Description("爆率管理")]
+    async void Index() {
+        ViewData d = await this.Layout("爆率管理");
+        if (!this.DbReady()) { d.Set("dbDown", "1"); this.Page(d); return; }
+        ListQuery q = this.Paged("mobId", 20);
+        int mobId = this.InInt("mob", 0);
+        d.Set("mobFilter", Convert.ToString(mobId));
+        string kw = q.Kw();
+
+        /* 掉落表几千行，整表读进内存过滤分页：kw 按物品名、mob 按
+           刷怪点，都不走 SQL Contains/In，ORM 表达式保持最朴素。 */
+        List<Drop> all = await this.Drop.OrderBy(a => a.mobId)
+            .OrderBy(a => a.sort).ToListAsync();
+        List<Item> items = await this.Item.ToListAsync();
+        List<Drop> picked = new List<Drop>();
+        for (int i = 0; i < all.Count; i = i + 1) {
+            if (mobId > 0 && all[i].mobId != mobId) { continue; }
+            if (kw.Length > 0
+                    && Drops.ItemName(items, all[i].itemId).Contains(kw)
+                            == false) {
+                continue;
+            }
+            picked.Add(all[i]);
+        }
+        int total = picked.Count;
+        int skip = q.Skip();
+        int limit = q.Limit();
+
+        List<Mob> mobs = await this.Mob.OrderBy(a => a.id).ToListAsync();
+        List<StrMap> mopts = d.AddList("mobs");
+        for (int i = 0; i < mobs.Count; i = i + 1) {
+            StrMap o = new StrMap();
+            o.Set("id", Convert.ToString(mobs[i].id));
+            o.Set("name", mobs[i].name);
+            if (mobs[i].id == mobId) { o.Set("selected", "selected"); }
+            mopts.Add(o);
+        }
+        List<StrMap> list = d.AddList("rows");
+        for (int i = skip; i < picked.Count && i < skip + limit;
+                i = i + 1) {
+            Drop dr = picked[i];
+            StrMap row = new StrMap();
+            row.Set("id", Convert.ToString(dr.id));
+            row.Set("mob", Drops.MobName(mobs, dr.mobId));
+            row.Set("item", Drops.ItemName(items, dr.itemId));
+            row.Set("rate", Convert.ToString(dr.rate));
+            row.Set("pct", Convert.ToString(dr.rate / 100) + "%");
+            list.Add(row);
+        }
+        if (total == 0) { d.Set("empty", "1"); }
+        this.Pager(d, q, total);
+        this.Page(d);
+    }
+
+    [HttpGet]
+    [Custom(Perm = PermBit.Create | PermBit.Update)]
+    [Description("爆率表单")]
+    async void Form() {
+        int id = this.InInt("id", 0);
+        int selMob = id > 0 ? 0 : this.InInt("mob", 0);
+        int selItem = 0;
+        List<Mob> mobs = await this.Mob.OrderBy(a => a.id).ToListAsync();
+        List<Item> items = await this.Item.OrderBy(a => a.id).ToListAsync();
+        ViewData d = new ViewData();
+        d.Set("id", Convert.ToString(id));
+        d.Set("dialogTitle", "新增掉落");
+        d.Set("new", "1");
+        d.Set("rate", "1000");
+        if (id > 0) {
+            Drop dr = await this.Reach(id);
+            selMob = dr.mobId;
+            selItem = dr.itemId;
+            d.Set("dialogTitle", "编辑掉落 #" + Convert.ToString(id));
+            d.Set("rate", Convert.ToString(dr.rate));
+            d.Set("edit", "1");
+            d.Set("new", "");
+        }
+        List<StrMap> mopts = d.AddList("mobs");
+        for (int i = 0; i < mobs.Count; i = i + 1) {
+            StrMap o = new StrMap();
+            o.Set("id", Convert.ToString(mobs[i].id));
+            o.Set("name", mobs[i].name);
+            if (mobs[i].id == selMob) { o.Set("selected", "selected"); }
+            mopts.Add(o);
+        }
+        List<StrMap> iopts = d.AddList("items");
+        for (int i = 0; i < items.Count; i = i + 1) {
+            StrMap o = new StrMap();
+            o.Set("id", Convert.ToString(items[i].id));
+            o.Set("name", items[i].name + "（"
+                + Convert.ToString(items[i].id) + "）");
+            if (items[i].id == selItem) { o.Set("selected", "selected"); }
+            iopts.Add(o);
+        }
+        this.Dialog(d);
+    }
+
+    [HttpPost]
+    [Custom(Perm = PermBit.Create | PermBit.Update)]
+    [Description("保存掉落")]
+    async void Save() {
+        int id = this.InInt("id", 0);
+        int mobId = this.InInt("mobId", 0);
+        int itemId = this.InInt("itemId", 0);
+        int rate = this.InInt("rate", 0);
+        Mob mob = await this.Mob.Where(a => a.id == mobId).FirstAsync();
+        if (mob == null) { this.Fail(400, "0003", "刷怪点不存在"); }
+        Item item = await this.Item.Where(a => a.id == itemId).FirstAsync();
+        if (item == null) { this.Fail(400, "0003", "物品不存在"); }
+        if (rate < 1) { rate = 1; }
+        if (rate > 10000) { rate = 10000; }
+        if (id > 0) {
+            Drop have = await this.Reach(id);
+            int n = await this.Drop.Update()
+                .Set(a => a.mobId, mobId)
+                .Set(a => a.itemId, itemId)
+                .Set(a => a.rate, rate)
+                .Where(a => a.id == id)
+                .ExecuteAffrowsAsync();
+            await this.Note("编辑掉落", "#" + Convert.ToString(id)
+                + " " + mob.name + " ← " + item.name, n > 0, "");
+            this.Saved("掉落已保存");
+            return;
+        }
+        /* 排到该怪清单末尾。 */
+        int sort = 0;
+        List<Drop> have = await this.Drop
+            .Where(a => a.mobId == mobId).ToListAsync();
+        for (int i = 0; i < have.Count; i = i + 1) {
+            if (have[i].sort >= sort) { sort = have[i].sort + 1; }
+        }
+        Drop row = new Drop();
+        row.mobId = mobId;
+        row.itemId = itemId;
+        row.rate = rate;
+        row.sort = sort;
+        int newId = await this.Drop.Insert(row).ExecuteIdentityAsync();
+        await this.Note("新增掉落", mob.name + " ← " + item.name
+            + " " + Convert.ToString(rate) + "/万", newId > 0, "");
+        this.Saved("掉落已创建");
+    }
+
+    [HttpPost]
+    [Custom(Perm = PermBit.Delete)]
+    [Description("删除掉落")]
+    async void Delete() {
+        int id = this.InInt("id", 0);
+        Drop have = await this.Reach(id);
+        int n = await this.Drop.Delete().Where(a => a.id == id)
+            .ExecuteAffrowsAsync();
+        await this.Note("删除掉落", "#" + Convert.ToString(id), n > 0, "");
+        this.Saved("掉落已删除");
+    }
+
+    async Drop Reach(int id) {
+        Drop d = await this.Drop.Where(a => a.id == id).FirstAsync();
+        if (d == null) { this.Fail(404, "0404", "掉落不存在"); }
+        return d;
+    }
+
+    static string MobName(List<Mob> mobs, int mobId) {
+        for (int i = 0; i < mobs.Count; i = i + 1) {
+            if (mobs[i].id == mobId) { return mobs[i].name; }
+        }
+        return "—" + Convert.ToString(mobId);
+    }
+
+    static string ItemName(List<Item> items, int itemId) {
+        for (int i = 0; i < items.Count; i = i + 1) {
+            if (items[i].id == itemId) { return items[i].name; }
+        }
+        return "—" + Convert.ToString(itemId);
+    }
+}

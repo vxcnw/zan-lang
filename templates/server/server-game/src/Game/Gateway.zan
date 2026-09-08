@@ -174,12 +174,15 @@ class Gateway {
 
     /* 未登录连接的心跳超时：登录会话由 World.Sweep 看管，这里只清理
        连上却一直不登录的僵尸连接，省得半开连接攒着占内存。先拍快照
-       再关：Close 触发 onClose 会改正在遍历的表。 */
+       再关：Close 触发 onClose 会改正在遍历的表。快照走 Values 列表，
+       OnClose 与本循环并发窗口里删除条目可能让快照里出现空槽——逐项
+       判空跳过（每秒一拍，空槽只出现在跨拍删除的那一轮）。 */
     static void SweepIdle(long now) {
         List<Connection> rows = new List<Connection>();
         List<int> ids = new List<int>();
         for (int i = 0; i < Gateway.conns.Values.Count; i = i + 1) {
             Connection conn = Gateway.conns.Values[i];
+            if (conn == null) { continue; }
             rows.Add(conn);
             ids.Add(conn.GetId());
         }
@@ -671,6 +674,7 @@ class Gateway {
             row.weaponId = 0;
             row.armorId = 0;
             row.hp = Fight.MaxHp(row);
+            row.mp = Fight.MaxMp(row);
             row.status = 1;
             row.lastLoginAt = now;
             row.lastLogoutAt = 0;
@@ -684,18 +688,30 @@ class Gateway {
             }
             /* 自增主键不自动回填内存行，会话与 GM 页都按 row.id 定位角色。 */
             row.id = id;
-            /* 开局装备：木剑+布衣直接入背包（按名字取模板，与掉落/后台
-               发物品同一规则），进区 LoadBag 即载入——新角色进世界就能
-               穿上，不必先去商店。 */
-            string[] starters = new string[] { "木剑", "布衣" };
-            for (int i = 0; i < starters.Length; i = i + 1) {
-                ZanWeb.Model.Game.Item it = await db
-                    .Select<ZanWeb.Model.Game.Item>()
-                    .Where(a => a.name == starters[i]).FirstAsync();
-                if (it == null) { continue; }
+            /* 开局装备：木剑+布衣直接入背包（精确名取模板——快照目录
+               全名是"布衣(男)"，先男后女兜底），进区 LoadBag 即载入——
+               新角色进世界就能穿上，不必先去商店。表达式里不写变量：
+               字面量查询最稳（表达式树对局部串变量的求值不稳）。 */
+            ZanWeb.Model.Game.Item starter = await db
+                .Select<ZanWeb.Model.Game.Item>()
+                .Where(a => a.name == "木剑").FirstAsync();
+            if (starter != null) {
                 ZanWeb.Model.Game.Bag b = new ZanWeb.Model.Game.Bag();
                 b.playerId = row.id;
-                b.itemId = it.id;
+                b.itemId = starter.id;
+                b.count = 1;
+                await db.Insert<ZanWeb.Model.Game.Bag>(b).ExecuteAffrowsAsync();
+            }
+            starter = await db.Select<ZanWeb.Model.Game.Item>()
+                .Where(a => a.name == "布衣(男)").FirstAsync();
+            if (starter == null) {
+                starter = await db.Select<ZanWeb.Model.Game.Item>()
+                    .Where(a => a.name == "布衣(女)").FirstAsync();
+            }
+            if (starter != null) {
+                ZanWeb.Model.Game.Bag b = new ZanWeb.Model.Game.Bag();
+                b.playerId = row.id;
+                b.itemId = starter.id;
                 b.count = 1;
                 await db.Insert<ZanWeb.Model.Game.Bag>(b).ExecuteAffrowsAsync();
             }
@@ -749,10 +765,17 @@ class Gateway {
                 offline.Set("gold", JsonValue.NewNum(Convert.ToString(gain)));
             }
             row.lastLoginAt = now;
+            /* 曲线归一：上限随 ClassCurves（升级/改职业后旧值可能越界），
+               进区先夹回上限再入库。 */
+            row.hp = Fight.ClampHp(row);
+            int maxMp = Fight.MaxMp(row);
+            if (row.mp > maxMp) { row.mp = maxMp; }
             /* 进区即落一次库：最后登录时间与离线收益不入内存 dirty 流。 */
             int _u = await db.Update<ZanWeb.Model.Game.Player>()
                 .Set(a => a.lastLoginAt, now)
                 .Set(a => a.gold, row.gold)
+                .Set(a => a.hp, row.hp)
+                .Set(a => a.mp, row.mp)
                 .Where(a => a.id == row.id)
                 .ExecuteAffrowsAsync();
 
@@ -1022,13 +1045,20 @@ class Gateway {
         o.Set("map", JsonValue.NewNum(Convert.ToString(s.row.mapId)));
         o.Set("x", JsonValue.NewNum(Convert.ToString(s.row.x)));
         o.Set("y", JsonValue.NewNum(Convert.ToString(s.row.y)));
-        /* 战斗态：血量/经验/攻防/装备位。数值公式在 Fight，客户端可复算。 */
+        /* 战斗态：血量/法力/经验/攻防区间/装备位。数值公式在
+           Fight+ClassCurves，客户端可复算；攻防 lo-hi 是原版属性
+           区间形状，结算取上限（hi）。 */
         o.Set("hp", JsonValue.NewNum(Convert.ToString(s.row.hp)));
         o.Set("maxhp", JsonValue.NewNum(Convert.ToString(Fight.MaxHp(s.row))));
+        o.Set("mp", JsonValue.NewNum(Convert.ToString(s.row.mp)));
+        o.Set("maxmp", JsonValue.NewNum(Convert.ToString(Fight.MaxMp(s.row))));
         o.Set("exp", JsonValue.NewNum(Convert.ToString(s.row.exp)));
         o.Set("expnext", JsonValue.NewNum(Convert.ToString(Fight.ExpNext(s.row.level))));
         o.Set("atk", JsonValue.NewNum(Convert.ToString(Fight.Atk(s.row))));
+        o.Set("atkLo", JsonValue.NewNum(Convert.ToString(Fight.AtkLo(s.row))));
         o.Set("def", JsonValue.NewNum(Convert.ToString(Fight.Def(s.row))));
+        o.Set("defLo", JsonValue.NewNum(Convert.ToString(Fight.DefLo(s.row))));
+        o.Set("mac", JsonValue.NewNum(Convert.ToString(Fight.MacHi(s.row))));
         o.Set("weapon", JsonValue.NewNum(Convert.ToString(s.row.weaponId)));
         o.Set("armor", JsonValue.NewNum(Convert.ToString(s.row.armorId)));
         /* 装备名与累计击杀（主线任务“首次击杀”进度）随 self 下发，

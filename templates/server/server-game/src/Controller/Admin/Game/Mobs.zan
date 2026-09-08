@@ -9,8 +9,9 @@ namespace ZanWeb.Admin.Game;
 
 /* /admin/game/mobs 刷怪点管理：搜索、按图筛选、增删改。一行 = 一个
    刷怪点（同图 count 只同名怪，respawnSec 秒重生），种子来自 M2.DB
-   快照的 gamemap×gamemonster 结构。掉落是单件 game_item + 万分比
-   概率（0=不掉）；战斗实例态在内存，改数值后重启或等重生生效。 */
+   快照的 gamemap×gamemonster 结构。掉落清单在「爆率管理」页按怪维护
+   （game_drop，一怪多条）；战斗实例态在内存，改数值后重启或等重生
+   生效。 */
 [Route("admin/game/mobs/[action]")]
 [Custom(Authorization = CustomAuthorization.Grant)]
 [Description("刷怪管理")]
@@ -48,7 +49,20 @@ class Mobs : AdminController {
             if (maps[i].id == mapId) { o.Set("selected", "selected"); }
             mopts.Add(o);
         }
-        List<Item> items = await this.Item.ToListAsync();
+        /* 爆率条目计数：整表轻量读（几千行）按 mobId 并列计数，
+           比每行一个 Count 查询省事。 */
+        List<Drop> allDrops = await this.Drop.ToListAsync();
+        List<int> dropIds = new List<int>();
+        List<int> dropCounts = new List<int>();
+        for (int i = 0; i < allDrops.Count; i = i + 1) {
+            int at = dropIds.IndexOf(allDrops[i].mobId);
+            if (at >= 0) {
+                dropCounts[at] = dropCounts[at] + 1;
+            } else {
+                dropIds.Add(allDrops[i].mobId);
+                dropCounts.Add(1);
+            }
+        }
         List<StrMap> mobs = d.AddList("rows");
         for (int i = 0; i < rows.Count; i = i + 1) {
             Mob m = rows[i];
@@ -65,7 +79,9 @@ class Mobs : AdminController {
                 + Convert.ToString(m.goldMax));
             row.Set("respawn", Convert.ToString(m.respawnSec));
             row.Set("count", Convert.ToString(m.count));
-            row.Set("drop", Mobs.DropText(items, m.dropItemId, m.dropRate));
+            int at = dropIds.IndexOf(m.id);
+            row.Set("drops", at >= 0
+                ? Convert.ToString(dropCounts[at]) + " 条" : "—");
             row.Set("onText", m.status == 1 ? "启用" : "停用");
             row.Set("onClass", m.status == 1 ? "ok" : "off");
             mobs.Add(row);
@@ -82,7 +98,6 @@ class Mobs : AdminController {
         int selMap = id > 0 ? 0 : this.InInt("map", 0);
         List<GameMap> maps = await this.GameMap.OrderBy(a => a.sortOrder)
             .ToListAsync();
-        List<Item> items = await this.Item.OrderBy(a => a.id).ToListAsync();
         ViewData d = new ViewData();
         d.Set("id", Convert.ToString(id));
         d.Set("dialogTitle", "新增刷怪点");
@@ -97,9 +112,6 @@ class Mobs : AdminController {
         d.Set("goldMax", "20");
         d.Set("respawnSec", "10");
         d.Set("count", "4");
-        d.Set("dropItemId", "0");
-        d.Set("dropRate", "0");
-        d.Set("curDrop", "");
         d.Set("picture", "");
         if (id > 0) {
             Mob m = await this.Reach(id);
@@ -115,12 +127,9 @@ class Mobs : AdminController {
             d.Set("goldMax", Convert.ToString(m.goldMax));
             d.Set("respawnSec", Convert.ToString(m.respawnSec));
             d.Set("count", Convert.ToString(m.count));
-            d.Set("dropItemId", Convert.ToString(m.dropItemId));
-            d.Set("dropRate", Convert.ToString(m.dropRate));
             d.Set("picture", Fmt.Text(m.picture, ""));
             d.Set("edit", "1");
             d.Set("new", "");
-            d.Set("curDrop", Mobs.DropText(items, m.dropItemId, m.dropRate));
             if (m.status == 1) { d.Set("on1", "selected"); }
             else { d.Set("on0", "selected"); }
         }
@@ -158,8 +167,6 @@ class Mobs : AdminController {
         long goldMax = this.InLong("goldMax", 0);
         int respawnSec = this.InInt("respawnSec", 10);
         int count = this.InInt("count", 4);
-        int dropItemId = this.InInt("dropItemId", 0);
-        int dropRate = this.InInt("dropRate", 0);
         if (level < 1) { level = 1; }
         if (hp < 1) { hp = 1; }
         if (atk < 0) { atk = 0; }
@@ -170,14 +177,6 @@ class Mobs : AdminController {
         if (respawnSec < 1) { respawnSec = 1; }
         if (count < 1) { count = 1; }
         if (count > 99) { count = 99; }
-        if (dropItemId > 0) {
-            Item drop = await this.Item.Where(a => a.id == dropItemId)
-                .FirstAsync();
-            if (drop == null) { dropItemId = 0; }
-        } else { dropItemId = 0; }
-        if (dropRate < 0) { dropRate = 0; }
-        if (dropRate > 10000) { dropRate = 10000; }
-        if (dropItemId == 0) { dropRate = 0; }
         string picture = this.In("picture").Trim();
         if (Fmt.CharCount(picture) > 64) {
             this.Fail(400, "0003", "美术键最长 64 字符");
@@ -199,8 +198,6 @@ class Mobs : AdminController {
                 .Set(a => a.goldMax, goldMax)
                 .Set(a => a.respawnSec, respawnSec)
                 .Set(a => a.count, count)
-                .Set(a => a.dropItemId, dropItemId)
-                .Set(a => a.dropRate, dropRate)
                 .Set(a => a.picture, picture)
                 .Set(a => a.status, status)
                 .Where(a => a.id == id)
@@ -222,8 +219,6 @@ class Mobs : AdminController {
         row.goldMax = goldMax;
         row.respawnSec = respawnSec;
         row.count = count;
-        row.dropItemId = dropItemId;
-        row.dropRate = dropRate;
         row.picture = picture;
         row.status = status;
         int newId = await this.Mob.Insert(row).ExecuteIdentityAsync();
@@ -239,6 +234,9 @@ class Mobs : AdminController {
         int id = this.InInt("id", 0);
         Mob have = await this.Reach(id);
         int n = await this.Mob.Delete().Where(a => a.id == id)
+            .ExecuteAffrowsAsync();
+        /* 爆率清单随怪走：孤儿行没人再掷。 */
+        int _nd = await this.Drop.Delete().Where(a => a.mobId == id)
             .ExecuteAffrowsAsync();
         await this.Note("删除刷怪点", "#" + Convert.ToString(id)
             + " " + have.name, n > 0, "");
@@ -256,15 +254,5 @@ class Mobs : AdminController {
             if (maps[i].id == mapId) { return maps[i].name; }
         }
         return "—" + Convert.ToString(mapId);
-    }
-
-    /* 掉落描述：物品名 + 概率百分数（万分比换算），未配置为 —。 */
-    static string DropText(List<Item> items, int dropItemId, int dropRate) {
-        if (dropItemId == 0 || dropRate == 0) { return "—"; }
-        string name = Convert.ToString(dropItemId);
-        for (int i = 0; i < items.Count; i = i + 1) {
-            if (items[i].id == dropItemId) { name = items[i].name; break; }
-        }
-        return name + " " + Convert.ToString(dropRate / 100) + "%";
     }
 }

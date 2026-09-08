@@ -25,14 +25,19 @@ class Player {
     [Column(StringLength = 32, IsNullable = false)]
     string nickname;
 
-    /* 0=战士 1=法师 2=道士；模板只用职业名，玩法扩展自定。 */
+    /* 0=战士 1=法师 2=道士。三职业成长曲线（血量/法力/主属性/防御）
+       见 Game.ClassCurves——形状忠实移植传奇2 服务端源码
+       RecalcLevelAbilitys，数值带按迷你传奇真怪表校准。 */
     int job;
 
     int level;
 
-    /* 战斗态：当前血量、累计经验（升级曲线 ExpNext=15*level），
-       已穿戴装备（game_item.id，0=空位；穿戴中的物品不在背包）。 */
+    /* 战斗态：当前血量/法力、累计经验（升级曲线 ExpNext=44*level²），
+       已穿戴装备（game_item.id，0=空位；穿戴中的物品不在背包）。
+       血量/法力上限由 ClassCurves 三职业曲线推出，升级与登录时回满
+       上限约束。 */
     int hp;
+    int mp;
     long exp;
     int weaponId;
     int armorId;

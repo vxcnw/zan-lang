@@ -31,9 +31,16 @@ class Fight {
     static List<long> instRespawnAt = new List<long>();
     static int nextInst = 1;
 
+    /* 掉落表（启动装载）：每刷怪点一个独立掷骰清单。 */
+    static Dictionary<int, List<ZanWeb.Model.Game.Drop>> dropsByMob =
+        new Dictionary<int, List<ZanWeb.Model.Game.Drop>>();
+
     static Random rng = new Random();
 
-    /* 数值曲线：升级所需经验 = 15*level；血量/攻防由等级、职业与装备推出。 */
+    /* 数值曲线：升级所需经验 = 44*level*level（迷你传奇挂机节奏校准；
+       传奇2 源码另有 NEEDEXPS 逐级表，量级到 4e9，与地图经验 20-80
+       不匹配，不采用）。血量/法力/攻防 = ClassCurves 三职业曲线 +
+       装备追加（原版 RecalcAbilitys 同构）。 */
     static long ExpNext(int level) {
         return 44 * level * level;
     }
@@ -47,41 +54,51 @@ class Fight {
             JsonValue.NewNum(Convert.ToString(Fight.ExpNext(s.row.level))));
     }
 
-    static int JobAtk(int job) {
-        if (job == 0) { return 5; }
-        if (job == 1) { return 3; }
-        return 2;
-    }
-
-    static int JobHp(int job) {
-        if (job == 0) { return 20; }
-        if (job == 1) { return 8; }
-        return 12;
-    }
-
     static ZanWeb.Model.Game.Item Equipped(int itemId) {
         if (itemId <= 0) { return null; }
         return Fight.ById(itemId);
     }
 
-    /* 攻击 = 基础 + 职业 + 武器 + 强化星 + 五行；防御 = 基础 + 防具
-       + 强化星；血量上限 = 基础 + 职业 + 等级成长 + 五行。全服统一
-       公式，客户端 state 可复算。 */
+    /* 攻击 = 职业主属性上限（战 DC / 法 MC / 道 SC，ClassCurves）+
+       武器 + 强化星 + 五行；防御 = 职业物防上限 + 防具 + 强化星。
+       全服统一公式，客户端 state 可复算。 */
     static int Atk(ZanWeb.Model.Game.Player row) {
         ZanWeb.Model.Game.Item weapon = Fight.Equipped(row.weaponId);
         int bonus = weapon != null ? weapon.atk : 0;
-        return 6 + row.level * 2 + Fight.JobAtk(row.job) + bonus
+        return ClassCurves.AtkHi(row.job, row.level) + bonus
             + row.weaponStar * 2 + row.wuxing;
     }
 
     static int Def(ZanWeb.Model.Game.Player row) {
         ZanWeb.Model.Game.Item armor = Fight.Equipped(row.armorId);
         int bonus = armor != null ? armor.def : 0;
-        return 1 + row.level + bonus + row.armorStar * 2;
+        return ClassCurves.AcHi(row.job, row.level) + bonus
+            + row.armorStar * 2;
     }
 
     static int MaxHp(ZanWeb.Model.Game.Player row) {
-        return 40 + row.level * 20 + Fight.JobHp(row.job) + row.wuxing * 5;
+        return ClassCurves.MaxHp(row.job, row.level) + row.wuxing * 5;
+    }
+
+    static int MaxMp(ZanWeb.Model.Game.Player row) {
+        return ClassCurves.MaxMp(row.job, row.level);
+    }
+
+    /* 属性面板：主属性/物防/魔防的 lo-hi 区间（协议展示用）。 */
+    static int AtkLo(ZanWeb.Model.Game.Player row) {
+        int base_ = ClassCurves.AtkLo(row.job, row.level);
+        ZanWeb.Model.Game.Item weapon = Fight.Equipped(row.weaponId);
+        return base_ + (weapon != null ? weapon.atk : 0)
+            + row.weaponStar * 2 + row.wuxing;
+    }
+
+    static int DefLo(ZanWeb.Model.Game.Player row) {
+        ZanWeb.Model.Game.Item armor = Fight.Equipped(row.armorId);
+        return (armor != null ? armor.def : 0) + row.armorStar * 2;
+    }
+
+    static int MacHi(ZanWeb.Model.Game.Player row) {
+        return ClassCurves.MacHi(row.job, row.level);
     }
 
     static ZanWeb.Model.Game.Item ById(int id) {
@@ -130,8 +147,22 @@ class Fight {
                     Fight.Spawn(t, now);
                 }
             }
+            List<ZanWeb.Model.Game.Drop> drops = await db
+                .Select<ZanWeb.Model.Game.Drop>()
+                .OrderBy(a => a.mobId).OrderBy(a => a.sort)
+                .ToListAsync();
+            for (int i = 0; i < drops.Count; i = i + 1) {
+                ZanWeb.Model.Game.Drop dr = drops[i];
+                List<ZanWeb.Model.Game.Drop> list = null;
+                if (!Fight.dropsByMob.TryGetValue(dr.mobId, out list)) {
+                    list = new List<ZanWeb.Model.Game.Drop>();
+                    Fight.dropsByMob.Add(dr.mobId, list);
+                }
+                list.Add(dr);
+            }
             Console.WriteLine("[fight] 怪物 " + Convert.ToString(Fight.instId.Count)
-                + " 只 / 物品 " + Convert.ToString(Fight.items.Count) + " 种");
+                + " 只 / 物品 " + Convert.ToString(Fight.items.Count)
+                + " 种 / 掉落条目 " + Convert.ToString(drops.Count));
         } finally {
             ctx.Release(db);
         }
@@ -240,9 +271,10 @@ class Fight {
         return d;
     }
 
-    /* 击杀结算：经验（连升）、金币（区间随机）、掉落（万分比）；
-       累计击杀进角色行（主线任务“首次击杀”进度，与客户端 quests.csv
-       首任务对齐），满 5 杀发一次性奖励公告。 */
+    /* 击杀结算：经验（连升）、金币（区间随机，原版金币不进掉落表）、
+       掉落逐条独立掷骰（原版每怪挂多条、各自 roll 万分比）；命中的
+       物品合并成一次 ev drop 下发（挂机一秒一杀，省往返）。累计击杀
+       进角色行（主线任务"首次击杀"进度），满 5 杀发一次性奖励公告。 */
     static void OnKill(Session s, ZanWeb.Model.Game.Mob t, JsonValue f) {
         s.row.exp = s.row.exp + t.exp;
         s.row.kills = s.row.kills + 1;
@@ -264,6 +296,7 @@ class Fight {
             s.row.exp = s.row.exp - Fight.ExpNext(s.row.level);
             s.row.level = s.row.level + 1;
             s.row.hp = Fight.MaxHp(s.row);
+            s.row.mp = Fight.MaxMp(s.row);
             ups = ups + 1;
         }
         if (ups > 0) {
@@ -271,25 +304,42 @@ class Fight {
             JsonValue up = Gateway.Ev("levelup",
                 "升到 " + Convert.ToString(s.row.level) + " 级！");
             up.Set("level", JsonValue.NewNum(Convert.ToString(s.row.level)));
-            /* 升级同时改等级/血量上限/经验曲线：整份 self 随事件下发，
-               客户端整体替换，面板数字不再停在进场旧值。 */
+            /* 升级同时改等级/血量/法力上限/经验曲线：整份 self 随事件
+               下发，客户端整体替换，面板数字不再停在进场旧值。 */
             up.Set("self", Gateway.SelfJson(s));
             Gateway.Send(s.conn, up);
         }
-        if (t.dropItemId > 0 && Fight.rng.NextBelow(10000) < t.dropRate) {
-            ZanWeb.Model.Game.Item it = Fight.ById(t.dropItemId);
-            if (it != null) {
+        string hitNames = "";
+        int hitCount = 0;
+        List<ZanWeb.Model.Game.Drop> table = null;
+        if (Fight.dropsByMob.TryGetValue(t.id, out table)) {
+            for (int i = 0; i < table.Count; i = i + 1) {
+                ZanWeb.Model.Game.Drop dr = table[i];
+                if (dr.rate <= 0) { continue; }
+                if (Fight.rng.NextBelow(10000) >= dr.rate) { continue; }
+                ZanWeb.Model.Game.Item it = Fight.ById(dr.itemId);
+                if (it == null) { continue; }
                 Fight.BagAdd(s, it.id, 1);
-                JsonValue drop = Gateway.Ev("drop",
-                    "获得了 " + it.name);
-                drop.Set("item", JsonValue.NewStr(it.name));
-                drop.Set("count", JsonValue.NewNum("1"));
-                /* 背包快照随掉落走：客户端缓存即时同步，不必每掉一次
-                   再发一轮 bag 拉取（挂机时一秒一掉，省一半往返）。 */
-                drop.Set("bag", Fight.BagJson(s));
-                Gateway.Send(s.conn, drop);
-                f.Set("drop", JsonValue.NewStr(it.name));
+                hitCount = hitCount + 1;
+                if (hitCount <= 3) {
+                    hitNames = hitNames.Length > 0
+                        ? hitNames + "、" + it.name : it.name;
+                }
             }
+        }
+        if (hitCount > 0) {
+            string text = "获得了 " + hitNames;
+            if (hitCount > 3) {
+                text = text + " 等 " + Convert.ToString(hitCount) + " 件";
+            }
+            JsonValue drop = Gateway.Ev("drop", text);
+            drop.Set("item", JsonValue.NewStr(hitNames));
+            drop.Set("count", JsonValue.NewNum(Convert.ToString(hitCount)));
+            /* 背包快照随掉落走：客户端缓存即时同步，不必每掉一次
+               再发一轮 bag 拉取（挂机时一秒一掉，省一半往返）。 */
+            drop.Set("bag", Fight.BagJson(s));
+            Gateway.Send(s.conn, drop);
+            f.Set("drop", JsonValue.NewStr(hitNames));
         }
         s.dirty = true;
     }
@@ -637,8 +687,7 @@ class Fight {
                 + "-" + Convert.ToString(t.goldMax)));
             o.Set("alive", JsonValue.NewNum(alive ? "1" : "0"));
             o.Set("respawnIn", JsonValue.NewNum(Convert.ToString(respawnIn)));
-            ZanWeb.Model.Game.Item drop = Fight.ById(t.dropItemId);
-            o.Set("drop", JsonValue.NewStr(drop != null ? drop.name : ""));
+            o.Set("drop", JsonValue.NewStr(Fight.DropNames(t.id, 2)));
             arr.Append(o);
         }
         return arr;
@@ -815,13 +864,29 @@ class Fight {
             o.Set("def", JsonValue.NewNum(Convert.ToString(t.def)));
             o.Set("map", JsonValue.NewNum(Convert.ToString(t.mapId)));
             o.Set("boss", JsonValue.NewNum(t.count == 1 ? "1" : "0"));
-            ZanWeb.Model.Game.Item drop = Fight.ById(t.dropItemId);
-            o.Set("drop", JsonValue.NewStr(drop != null ? drop.name : ""));
+            o.Set("drop", JsonValue.NewStr(Fight.DropNames(t.id, 2)));
             mobs.Append(o);
         }
         JsonValue all = JsonValue.NewObject();
         all.Set("items", items);
         all.Set("mobs", mobs);
         return all;
+    }
+
+    /* 掉落描述：某刷怪点概率最高的前 max 件（Boss 之家/图鉴展示）。 */
+    static string DropNames(int mobId, int max) {
+        List<ZanWeb.Model.Game.Drop> table = null;
+        if (!Fight.dropsByMob.TryGetValue(mobId, out table)) {
+            return "";
+        }
+        string names = "";
+        int n = 0;
+        for (int i = 0; i < table.Count && n < max; i = i + 1) {
+            ZanWeb.Model.Game.Item it = Fight.ById(table[i].itemId);
+            if (it == null) { continue; }
+            names = names.Length > 0 ? names + "、" + it.name : it.name;
+            n = n + 1;
+        }
+        return names;
     }
 }

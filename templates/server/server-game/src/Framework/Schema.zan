@@ -221,10 +221,11 @@ class Schema {
         int maps = await db.Select<GameMap>().CountAsync();
         int itemsN = await db.Select<Item>().CountAsync();
         int mobsN = await db.Select<Mob>().CountAsync();
-        if (maps == 0 || itemsN == 0 || mobsN == 0) {
-            /* 游戏目录（地图/物品/刷怪点）整体来自 M2.DB 快照——迷你
-               传奇 data.dll 的原值。三张种子表任一为空都整表重建；
-               快照缺失则拒绝启动（空目录开不出来）。 */
+        int dropsN = await db.Select<Drop>().CountAsync();
+        if (maps == 0 || itemsN == 0 || mobsN == 0 || dropsN == 0) {
+            /* 游戏目录（地图/物品/刷怪点/爆率）整体来自 M2.DB 快照——
+               迷你传奇 data.dll 的原值。任一为空都整表重建；快照缺失
+               则拒绝启动（空目录开不出来）。 */
             if (!await GameSnapshot.Open("data/M2.DB")) {
                 Console.WriteLine("[game] catalog seeds pending but"
                     + " data/M2.DB is missing"
@@ -362,9 +363,11 @@ class Schema {
         return true;
     }
 
-    /* 一个刷怪点 = 一行 Mob。gamemonster 里有原值（zhp>0）就用原值，
-       否则按地图门槛补：普通 hp=150+90·lvl 攻=8+4·lvl 防=4+lvl；
-       BOSS hp=800+120·lvl 攻=30+3·lvl 防=20+2·lvl。 */
+    /* 一个刷怪点 = 一行 Mob + 它的爆率清单（game_drop）。gamemonster
+       里有原值（zhp>0）就用原值，否则按地图门槛补——合成曲线对齐真怪
+       表（稻草人 200hp@2 … 赤月恶魔 3000hp@50）：普通 hp=150+45·lvl
+       攻=8+1.8·lvl 防=2+0.9·lvl；BOSS hp=400+42·lvl 攻=10+3·lvl
+       防=5+0.8·lvl。 */
     static async bool SeedSpawn(IDbConnection db, DbResult mons,
             List<int> snapIds, List<string> snapNames,
             List<string> snapClass, List<Item> items, string name,
@@ -388,19 +391,16 @@ class Schema {
         if (hp == 0) {
             lvl = mapLvl;
             if (boss) {
-                hp = 800 + 120 * mapLvl;
-                atk = 30 + 3 * mapLvl;
-                def = 20 + 2 * mapLvl;
+                hp = 400 + 42 * mapLvl;
+                atk = 10 + 3 * mapLvl;
+                def = 5 + 4 * mapLvl / 5;
             } else {
-                hp = 150 + 90 * mapLvl;
-                atk = 8 + 4 * mapLvl;
-                def = 4 + mapLvl;
+                hp = 150 + 45 * mapLvl;
+                atk = 8 + 9 * mapLvl / 5;
+                def = 2 + 9 * mapLvl / 10;
             }
         }
         if (drops.Length == 0) { drops = mapDrop; }
-        int rate = 0;
-        int dropItemId = Schema.DropOf(drops, snapIds, snapNames,
-            snapClass, items, out rate);
         Mob m = new Mob();
         m.name = name;
         m.mapId = mapId;
@@ -413,12 +413,43 @@ class Schema {
         m.goldMax = money * 3;
         m.respawnSec = boss ? 300 : 10;
         m.count = boss ? 1 : 4;
-        m.dropItemId = dropItemId;
-        m.dropRate = rate;
         m.picture = picture;
         m.status = 1;
         int _id = await db.Insert<Mob>(m).ExecuteIdentityAsync();
-        return _id > 0;
+        if (_id <= 0) { return false; }
+        return await Schema.SeedDrops(db, drops, snapIds, snapNames,
+            snapClass, items, _id);
+    }
+
+    /* 爆率种子：掉落串 "快照id|数量|?|权重/..." 的全部条目逐条写入
+       game_drop（权重×10 = 万分比，封顶 5000；含消耗品——原表就有，
+       GM 可在爆率管理页删改）。 */
+    static async bool SeedDrops(IDbConnection db, string drops,
+            List<int> snapIds, List<string> snapNames,
+            List<string> snapClass, List<Item> items, int mobId) {
+        List<string> entries = Schema.SplitList(drops, 47 /* '/' */);
+        int sort = 0;
+        for (int i = 0; i < entries.Count; i = i + 1) {
+            List<string> f = Schema.SplitList(entries[i], 124 /* '|' */);
+            if (f.Count < 4) { continue; }
+            int snapId = Convert.ToInt(f[0]);
+            string nm = Schema.SnapAt(snapIds, snapNames, snapId);
+            if (nm.Length == 0) { continue; }
+            int rtId = Schema.ItemIdByName(items, nm);
+            if (rtId == 0) { continue; }
+            int rate = Convert.ToInt(f[3]) * 10;
+            if (rate <= 0) { continue; }
+            if (rate > 5000) { rate = 5000; }
+            Drop d = new Drop();
+            d.mobId = mobId;
+            d.itemId = rtId;
+            d.rate = rate;
+            d.sort = sort;
+            sort = sort + 1;
+            int _id = await db.Insert<Drop>(d).ExecuteIdentityAsync();
+            if (_id <= 0) { return false; }
+        }
+        return true;
     }
 
     /* 按分隔符拆串（sep 传字符码：'|'=124、'/'=47），跳过空段。 */
@@ -453,32 +484,6 @@ class Schema {
         int v = GameSnapshot.Int(mons, row, hi);
         if (v > 0) { return v; }
         return GameSnapshot.Int(mons, row, lo);
-    }
-
-    /* 掉落串 "id|n|?|weight/..."：取第一个非消耗项。返回运行时物品
-       id（快照 id 经名称换算，0=无），rate 输出 weight×10 的万分比
-       （封顶 5000）。 */
-    static int DropOf(string drops, List<int> snapIds,
-                      List<string> snapNames, List<string> snapClass,
-                      List<Item> items, out int rate) {
-        rate = 0;
-        List<string> entries = Schema.SplitList(drops, 47 /* '/' */);
-        for (int i = 0; i < entries.Count; i = i + 1) {
-            List<string> f = Schema.SplitList(entries[i], 124 /* '|' */);
-            if (f.Count < 4) { continue; }
-            int snapId = Convert.ToInt(f[0]);
-            if (Schema.SnapAt(snapIds, snapClass, snapId) == "消耗") {
-                continue;
-            }
-            string nm = Schema.SnapAt(snapIds, snapNames, snapId);
-            if (nm.Length == 0) { continue; }
-            int rtId = Schema.ItemIdByName(items, nm);
-            if (rtId == 0) { continue; }
-            rate = Convert.ToInt(f[3]) * 10;
-            if (rate > 5000) { rate = 5000; }
-            return rtId;
-        }
-        return 0;
     }
 
     /* 快照 id → 并列表取值（缺 → 空串）。 */

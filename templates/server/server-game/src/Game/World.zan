@@ -164,6 +164,8 @@ class World {
         s.row.mapId = mapId;
         if (nickname.Length > 0) { s.row.nickname = nickname; }
         s.row.hp = Fight.ClampHp(s.row);
+        int maxMp = Fight.MaxMp(s.row);
+        if (s.row.mp > maxMp) { s.row.mp = maxMp; }
         s.dirty = true;
         Gateway.PushState(s);
         return true;

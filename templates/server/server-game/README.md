@@ -77,10 +77,14 @@ src/Dao/Game/AccountDao.zan   账号读写唯一入口：注册/验密/密保散
 src/Controller/Account/     玩家网页：Register（注册）/ Forgot（找回密码三步）
 src/Controller/Index/       首页：区服列表（开放/维护、实时在线）+ 注册/找回入口
 src/Controller/Admin/Game/  GM 页：Realms（区服）/ Players（角色）/ Online（在线）/ Announces（公告）/
-                        Items（物品）/ Mobs（刷怪）/ Maps（地图）
+                        Items（物品）/ Mobs（刷怪）/ Maps（地图）/ Drops（爆率）
+src/Game/ClassCurves.zan    三职业成长曲线：形状忠实移植传奇2 服务端源码
+                        RecalcLevelAbilitys（血量/法力/主属性/物防/魔防），
+                        数值带按迷你传奇真怪表校准；Fight 在其上叠加装备
 src/Framework/Schema.zan    建表 + 种子（3 区服、内置角色、欢迎公告；游戏目录——35 图/
-                        732 物品/232 刷怪点——由 data/M2.DB 快照整表种入，见
-                        src/Framework/GameSnapshot.zan 与 tools/sync_csv_to_db.py）
+                        732 物品/232 刷怪点/2662 掉落条目——由 data/M2.DB
+                        快照整表种入，见 src/Framework/GameSnapshot.zan 与
+                        tools/sync_csv_to_db.py）
 views/                  视图（与控制器一一对应；Account/Index/Admin 三套布局）
 tools/e2e.py            端到端自检：注册/找回 + 完整协议 + GM + 战斗闭环（114 项断言）
 ```
@@ -232,10 +236,23 @@ $ nc 127.0.0.1 7100
 | 踢线/顶号/心跳超时 | `ev kick` 后立即 Leave：角色与背包当场落库、会话移出世界（连接本体由 worker 懒收口） |
 
 `game_account / game_realm / game_player / game_map / game_announce /
-game_mob / game_item / game_bag` 八张表由 `Schema.Ensure` 建表。种子三个
-区服（三区为维护态演示）与欢迎公告写死在 `Schema.SeedGame`；游戏目录
-（35 张地图、732 种物品、232 个刷怪点）从 `data/M2.DB` 快照整表种入
-（缺快照则拒绝启动），数值与结构均可在 GM 后台逐条改。
+game_mob / game_item / game_bag / game_drop` 九张表由 `Schema.Ensure`
+建表。种子三个区服（三区为维护态演示）与欢迎公告写死在
+`Schema.SeedGame`；游戏目录（35 张地图、732 种物品、232 个刷怪点、
+2662 条爆率）从 `data/M2.DB` 快照整表种入（缺快照则拒绝启动），数值
+与结构均可在 GM 后台逐条改。
+
+## 三职业与爆率（原版对齐）
+
+- **三职业**：战（血厚防高）/ 法（血薄魔厚）/ 道（中庸带魔防），
+  成长公式在 `src/Game/ClassCurves.zan`——形状移植传奇2 服务端
+  `RecalcLevelAbilitys`：1 级战 160hp/35mp、法 147/60、道 153/45
+  （道士带魔防），35 级战 840hp。装备/强化星/五行在曲线上追加
+  （`Fight.Atk/Def/MaxHp`），`self` 协议带 atk/def 的 lo-hi 区间。
+- **爆率**：`game_drop` 一怪多条、每次击杀独立掷万分比（原版
+  TBL_MONITEM 语义），种子取自快照掉落串全部条目（权重×10、封顶
+  5000）；GM 后台「爆率管理」页按怪增删改，重启生效。金币掉落不在
+  此表，走 `game_mob` 的 `[goldMin, goldMax]`。
 
 ## 配置 `[game]`
 
