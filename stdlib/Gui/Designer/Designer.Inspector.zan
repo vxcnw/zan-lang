@@ -258,6 +258,47 @@ partial class Designer {
                 app.RequestRedraw();
             }
             iy = iy + app.Scale(34);
+
+            // 组件声明的对外属性（v1 文本型）：每行一个输入框，
+            // 实例值写入 f.extra 的 "props" 直通表——随 SaveJson
+            // 进 .zform，GenForm 展开时落给目标内部控件；画布
+            // 预览同步应用。目标名/声明都来自组件文档根。
+            this.EnsureCompPropDecls(f.customKind);
+            if (compPropKeys.Count > 0) {
+                string rowId = f.fname + "|" + f.customKind
+                    + "|" + Convert.ToString(pvCompGen);
+                if (compPropEditFor != rowId) {
+                    compPropEditFor = rowId;
+                    compPropInputs = new List<Input>();
+                    compPropShadow = new List<string>();
+                    for (int pi = 0; pi < compPropKeys.Count; pi = pi + 1) {
+                        Input pin = new Input("");
+                        pin.SetText(this.CompPropValue(f, compPropKeys[pi],
+                            compPropDefs[pi]));
+                        compPropInputs.Add(pin);
+                        compPropShadow.Add(pin.GetText());
+                    }
+                }
+                Label pl = new Label(Designer.T("COMPONENT PROPS", "组件属性"));
+                pl.Class = "tertiary small";
+                pl.RenderInside(app, new Rect(ix, iy, iw, app.Scale(18)));
+                iy = iy + app.Scale(20);
+                for (int pi = 0; pi < compPropKeys.Count; pi = pi + 1) {
+                    Label rl = new Label(compPropLabels[pi]);
+                    rl.Class = "secondary small";
+                    rl.RenderInside(app, new Rect(ix, iy, app.Scale(84), app.Scale(28)));
+                    compPropInputs[pi].Render(app, ix + app.Scale(84), iy,
+                        iw - app.Scale(84), app.Scale(28));
+                    string cur = compPropInputs[pi].GetText();
+                    if (cur != compPropShadow[pi]) {
+                        this.SetCompPropValue(f, compPropKeys[pi], cur);
+                        compPropShadow[pi] = cur;
+                        app.RequestRedraw();
+                    }
+                    iy = iy + app.Scale(32);
+                }
+                iy = iy + app.Scale(6);
+            }
         }
 
         // 双向绑定选择器：从配对的代码文件扫描出的变量。

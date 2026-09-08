@@ -28,6 +28,9 @@ class CompRefDesignerTest {
     static string CompDoc() {
         return "{\"name\":\"BadgeCard\",\"role\":\"control\","
             + "\"winW\":260,\"winH\":120,\"layoutMode\":0,"
+            + "\"props\":[{\"key\":\"btnText\",\"label\":\"按钮文字\","
+            + "\"kind\":\"text\",\"target\":\"InnerBtn\",\"prop\":\"text\","
+            + "\"def\":\"Go\"}],"
             + "\"fields\":["
             + "{\"kind\":\"Label\",\"label\":\"inner title\",\"name\":\"InnerTitle\","
             + "\"span\":24,\"fx\":16,\"fy\":12,\"fw\":200,\"fh\":24,\"options\":[]},"
@@ -85,7 +88,42 @@ class CompRefDesignerTest {
             // label is findable by caption, the button by design name.
             Ok("preview label", pv.Find("inner title") != null);
             Ok("preview button", pv.Find("InnerBtn") != null);
+            // Declared prop with no instance value: the default applies.
+            Control pb = pv.Find("InnerBtn");
+            Eq("preview default prop", pb == null ? "" : pb.GetProp("text"), "Go");
         }
+
+        // ---- declared props: schema, instance values, serialization ----
+        d.EnsureCompPropDecls("BadgeCard");
+        Eq("decl count", Convert.ToString(d.compPropKeys.Count), "1");
+        Eq("decl key", d.compPropKeys.Count == 1 ? d.compPropKeys[0] : "", "btnText");
+        Eq("decl default", d.compPropDefs.Count == 1 ? d.compPropDefs[0] : "", "Go");
+
+        // Writing an instance value refreshes the preview (cache key folds
+        // the instance props in) and lands it on the target control.
+        d.SetCompPropValue(d.fields[0], "btnText", "HEY!");
+        Control pv2 = d.PvCompCtl(d.fields[0], 260, 120);
+        Ok("preview rebuilt for new props", pv2 != null);
+        if (pv2 != null) {
+            Control pb2 = pv2.Find("InnerBtn");
+            Eq("preview instance prop", pb2 == null ? "" : pb2.GetProp("text"), "HEY!");
+        }
+
+        // The instance value round-trips through Save/Load via the
+        // unmodeled "props" passthrough on the ref node.
+        string pSaved = d.SaveJson();
+        Ok("props serialized", pSaved.Contains("\"btnText\"")
+            && pSaved.Contains("HEY!"));
+        d.LoadJson(pSaved);
+        Ok("reload clean with props", !d.loadError);
+        Eq("props reload",
+            d.CompPropValue(d.fields[0], "btnText", "<def>"), "HEY!");
+        Control pv3 = d.PvCompCtl(d.fields[0], 260, 120);
+        if (pv3 != null) {
+            Control pb3 = pv3.Find("InnerBtn");
+            Eq("preview after reload", pb3 == null ? "" : pb3.GetProp("text"), "HEY!");
+        } else { Ok("preview after reload built", false); }
+
         // Preview off -> the designer falls back to the placeholder chip.
         d.fields[0].pvPreview = false;
         // (placeholder path draws via canvas; nothing to assert headlessly

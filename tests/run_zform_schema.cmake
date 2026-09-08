@@ -29,6 +29,9 @@ foreach(item IN LISTS object_matches get_matches)
 endforeach()
 set(allowed_region_keys t x y w h r)
 list(APPEND allowed_region_keys files)
+# generator-request region (not .zform): the design request carries the
+# component documents for ref expansion alongside the form files.
+list(APPEND allowed_region_keys components)
 foreach(key IN LISTS source_keys)
   list(FIND documented "${key}" found)
   list(FIND allowed_region_keys "${key}" region)

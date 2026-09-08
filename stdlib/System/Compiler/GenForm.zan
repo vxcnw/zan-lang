@@ -442,6 +442,27 @@ class GenForm {
         return null;
     }
 
+    /// JsonValue 深拷贝：对象/数组递归新建，标量节点原样共享
+    /// （不可变）。组件文档缓存 per 实例展开必须用它。
+    static JsonValue DeepCopy(JsonValue v) {
+        if (v == null) { return v; }
+        if (v.IsObject()) {
+            JsonValue r = JsonValue.NewObject();
+            for (int i = 0; i < v.Count(); i = i + 1) {
+                r.Put(v.KeyAt(i), GenForm.DeepCopy(v.ValAt(i)));
+            }
+            return r;
+        }
+        if (v.IsArray()) {
+            JsonValue r = JsonValue.NewArray();
+            for (int i = 0; i < v.Count(); i = i + 1) {
+                r.Append(GenForm.DeepCopy(v.At(i)));
+            }
+            return r;
+        }
+        return v;
+    }
+
     /// 展开字段数组里的用户组件引用节点（带 "ref" 键）。就地
     /// 改写：引用节点变成 Panel 外壳（名字/几何/停靠/绑定等
     /// 自身键全部保留），组件文档的字段匿名挂进 kids——内部名
@@ -461,7 +482,7 @@ class GenForm {
                 string e = GenForm.ExpandRefs(kids, depth);
                 if (e != "") { return e; }
             }
-            string rk = o.Str("ref", "");
+            string rk = GenForm.ObjStr(o, "ref");
             if (rk == "") { continue; }
             JsonValue doc = GenForm.CompDoc(rk);
             if (doc == null) {
@@ -470,6 +491,11 @@ class GenForm {
             }
             JsonValue cf = doc.Get("fields");
             if (cf == null || !cf.IsArray()) { cf = JsonValue.NewArray(); }
+            /* 组件文档是全部实例共享的解析缓存，展开会原地改写字段
+             * （dock、壳名前缀、props 直通）——不深拷贝，第一个实例
+             * 的改名会漏进后续实例（第二个拿到 "Card2_Card1_InnerBtn"
+             * 这样的叠前缀名）。标量节点不可变，共享无妨。 */
+            cf = GenForm.DeepCopy(cf);
             string e2 = GenForm.ExpandRefs(cf, depth + 1);
             if (e2 != "") { return e2; }
             bool compFree = doc.Int("layoutMode", 0) == 1;
@@ -490,6 +516,48 @@ class GenForm {
                     kid.Set("name", JsonValue.NewStr(shellName + "_" + kn));
                 }
                 anonKids.Append(kid);
+            }
+            /* 组件声明的对外属性（组件文档根上 "props":
+             * [{key,target,prop,def}]）：实例值（引用节点自己的
+             * "props" 直通对象，键 = 声明 key）优先，缺省取 def，
+             * 落给目标内部控件的 props 直通——EmitField 本来就会
+             * 对 kid 的 props 发 SetProp。壳上消费过的实例 props
+             * 必须清空，否则 EmitField 把它们发到 Panel 壳上会
+             * 退化成样式类。目标控件不存在是组件作者的错，报错
+             * 指名道姓。 */
+            JsonValue instProps = o.Get("props");
+            JsonValue decls = doc.Get("props");
+            if (decls != null && decls.IsArray() && decls.Count() > 0) {
+                for (int d = 0; d < decls.Count(); d = d + 1) {
+                    JsonValue dd = decls.At(d);
+                    if (dd == null || !dd.IsObject()) { continue; }
+                    string target = dd.Str("target", "");
+                    if (target == "") { continue; }
+                    string dkey = dd.Str("key", "");
+                    string val = instProps != null && instProps.IsObject()
+                        ? instProps.Str(dkey, dd.Str("def", ""))
+                        : dd.Str("def", "");
+                    if (val == "") { continue; }
+                    string tn = shellName + "_" + target;
+                    JsonValue tk = null;
+                    for (int k = 0; k < anonKids.Count(); k = k + 1) {
+                        JsonValue kd = anonKids.At(k);
+                        if (kd != null && kd.Str("name", "") == tn) { tk = kd; break; }
+                    }
+                    if (tk == null) {
+                        return "component '" + rk + "' prop '" + dkey
+                            + "' targets missing control '" + target + "'";
+                    }
+                    JsonValue tp = tk.Get("props");
+                    if (tp == null || !tp.IsObject()) {
+                        tp = JsonValue.NewObject();
+                        tk.Put("props", tp);
+                    }
+                    tp.Set(dd.Str("prop", "text"), JsonValue.NewStr(val));
+                }
+            }
+            if (instProps != null && instProps.IsObject()) {
+                o.Set("props", JsonValue.NewObject());
             }
             /* 同上：引用节点自身这些键都已存在，一律 Set 覆盖。 */
             o.Set("kind", JsonValue.NewStr("Panel"));

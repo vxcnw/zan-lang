@@ -47,11 +47,21 @@ class CompRefTest {
         Control title = app.Card1.Find("inner title");
         Ok("inner label by caption", title != null);
 
-        // The Button keeps its shell-prefixed design name and its text.
+        // The Button keeps its shell-prefixed design name. Card1 carries an
+        // instance value for the component's declared prop btnText, so its
+        // caption is the override, not the declared default "Go".
         Control btn = app.Card1.Find("Card1_InnerBtn");
         Ok("inner button found", btn != null);
         if (btn != null) {
-            CompRefTest.Eq("inner button text", btn.GetProp("text"), "Go");
+            CompRefTest.Eq("inner button text (instance prop)", btn.GetProp("text"), "OK!");
+        }
+
+        // Card2 has no instance props: the declared default still applies.
+        CompRefTest.Eq("shell kind 2", app.Card2.Kind(), "Panel");
+        Control btn2 = app.Card2.Find("Card2_InnerBtn");
+        Ok("inner button 2 found", btn2 != null);
+        if (btn2 != null) {
+            CompRefTest.Eq("inner button 2 text (default prop)", btn2.GetProp("text"), "Go");
         }
 
         // The window's own fields are untouched.

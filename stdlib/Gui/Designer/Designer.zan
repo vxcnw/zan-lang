@@ -304,6 +304,22 @@ partial class Designer {
     List<Control> pvCompCtls;
     int pvCompGen;
 
+    // 当前选中引用节点的组件属性声明缓存（组件文档根上的
+    // "props":[{key,label,kind,target,prop,def}]，v1 只消费 text 型）。
+    // 实例值存引用节点 extra 的 "props" 直通表，序列化/展开全链路
+    // 复用既有通道。
+    string compPropFor;
+    List<string> compPropKeys;
+    List<string> compPropLabels;
+    List<string> compPropDefs;
+
+    // 检查器里的组件属性行（即时模式）：每条声明一个输入框 +
+    // 影子值，选中节点/组件代次变化时重建；输入变化写回
+    // f.extra 的 "props" 直通表。
+    string compPropEditFor;
+    List<Input> compPropInputs;
+    List<string> compPropShadow;
+
     /// 切换被设计窗口的布局模型。宿主在打开一份设计时
     /// 调用（.zform 里存了 layoutMode），设计器自己不提供
     /// 切换命令：两种布局不共享坐标，来回切会丢摆放。
@@ -457,6 +473,13 @@ partial class Designer {
         this.pvCompKeys = new List<string>();
         this.pvCompCtls = new List<Control>();
         this.pvCompGen = 0;
+        this.compPropFor = "";
+        this.compPropKeys = new List<string>();
+        this.compPropLabels = new List<string>();
+        this.compPropDefs = new List<string>();
+        this.compPropEditFor = "";
+        this.compPropInputs = new List<Input>();
+        this.compPropShadow = new List<string>();
     }
 
     /// 把工具箱滚到末尾。
@@ -683,22 +706,96 @@ partial class Designer {
         msg = Designer.T("unpacked ", "已解包 ") + f.customKind;
     }
 
+    /// 组件文档根上声明的对外属性（"props":[{key,label,kind,
+    /// target,prop,def}]，v1 只消费 text 型），解析进并行表缓存，
+    /// 缓存键为 组件名|代次。组件没声明或文档缺失时表为空。
+    void EnsureCompPropDecls(string compName) {
+        string id = compName + "|" + Convert.ToString(pvCompGen);
+        if (compPropFor == id) { return; }
+        compPropFor = id;
+        compPropKeys.Clear();
+        compPropLabels.Clear();
+        compPropDefs.Clear();
+        string doc = this.UserCompJson(compName);
+        if (doc == "") { return; }
+        JsonValue root = JsonValue.ParseLenient(doc);
+        if (root == null) { return; }
+        JsonValue decls = root.Get("props");
+        if (decls == null || !decls.IsArray()) { return; }
+        for (int i = 0; i < decls.Count(); i = i + 1) {
+            JsonValue dd = decls.At(i);
+            if (dd == null || !dd.IsObject()) { continue; }
+            string key = dd.Str("key", "");
+            string target = dd.Str("target", "");
+            if (key == "" || target == "") { continue; }
+            compPropKeys.Add(key);
+            compPropLabels.Add(dd.Str("label", key));
+            compPropDefs.Add(dd.Str("def", ""));
+        }
+    }
+
+    /// 引用节点实例值读/写：存 f.extra 的 "props" 直通对象
+    /// （"props" 不在 IsModeledKey 里，SaveJson/LoadJson 原样
+    /// 透传，GenForm 展开时落给目标内部控件）。
+    string CompPropValue(FormField f, string key, string def) {
+        if (f.extra == null) { return def; }
+        JsonValue props = f.extra.Get("props");
+        if (props == null || !props.IsObject()) { return def; }
+        return props.Str(key, def);
+    }
+
+    void SetCompPropValue(FormField f, string key, string val) {
+        if (f.extra == null) { f.extra = JsonValue.NewObject(); }
+        JsonValue props = f.extra.Get("props");
+        if (props == null || !props.IsObject()) {
+            props = JsonValue.NewObject();
+            f.extra.Put("props", props);
+        }
+        props.Set(key, JsonValue.NewStr(val));
+    }
+
+    /// 预览树上应用组件属性：目标控件按组件文档里的原始名找
+    /// （FormBuilder 直接用文档建树，无 shell 前缀）；实例值
+    /// 优先，缺省取声明里的 def。与 GenForm 展开语义一致
+    /// （那里落到目标 kid 的 props 直通，最终同为 SetProp）。
+    void ApplyCompProps(Control root, JsonValue compRoot, FormField f) {
+        JsonValue decls = compRoot.Get("props");
+        if (decls == null || !decls.IsArray()) { return; }
+        for (int i = 0; i < decls.Count(); i = i + 1) {
+            JsonValue dd = decls.At(i);
+            if (dd == null || !dd.IsObject()) { continue; }
+            string target = dd.Str("target", "");
+            if (target == "") { continue; }
+            string val = this.CompPropValue(f, dd.Str("key", ""), dd.Str("def", ""));
+            if (val == "") { continue; }
+            Control t = root.Find(target);
+            if (t != null) { t.SetProp(dd.Str("prop", "text"), val); }
+        }
+    }
+
     /// 引用节点画布预览的构建缓存：组件文档只在代次变化时
-    /// 重建（SetUserComponents / 尺寸变化），其余帧复用整棵
-    /// FormBuilder 树只重渲染。找不到组件或解析失败返回 null，
-    /// 调用方退回占位块。
+    /// 重建（SetUserComponents / 尺寸变化 / 实例属性变化），
+    /// 其余帧复用整棵 FormBuilder 树只重渲染。找不到组件或
+    /// 解析失败返回 null，调用方退回占位块。
     Control PvCompCtl(FormField f, int w, int h) {
         if (f.customKind == "") { return null; }
         string doc = this.UserCompJson(f.customKind);
         if (doc == "") { return null; }
+        string instFp = "";
+        if (f.extra != null) {
+            JsonValue ip = f.extra.Get("props");
+            if (ip != null) { instFp = ip.PrettyToJson(); }
+        }
         string key = Convert.ToString(pvCompGen) + "|" + f.customKind
-            + "|" + Convert.ToString(w) + "x" + Convert.ToString(h);
+            + "|" + Convert.ToString(w) + "x" + Convert.ToString(h)
+            + "|" + instFp;
         for (int i = 0; i < pvCompKeys.Count; i = i + 1) {
             if (pvCompKeys[i] == key) { return pvCompCtls[i]; }
         }
         JsonValue root = JsonValue.ParseLenient(doc);
         if (root == null) { return null; }
         Control ctl = FormBuilder.Build(root);
+        this.ApplyCompProps(ctl, root, f);
         pvCompKeys.Add(key);
         pvCompCtls.Add(ctl);
         if (pvCompKeys.Count > 64) {
