@@ -402,6 +402,9 @@ class Chart {
     /// 本帧 option（图例子字段 orient/selectedMode/formatter 的来源）；
     /// Render() 分派前置位，与 toolReserve 同为帧内静态。
     static ChartOption legendOpt;
+    /// 本帧水平图例占用的底部高度（ECharts 6 默认图例在底部，
+    /// BuildAxesR 从绘图区底边扣除；竖排图例在顶部占位，此值为 0）。
+    static int legendBottomReserve;
 
     /// 多段线性色带插值（visualMap inRange）：t ∈ [0,1000] 均匀映射
     /// 到 colors 首尾之间，段内线性混合。colors 少于 2 个时取首色。
@@ -423,8 +426,8 @@ class Chart {
     /// 定性调色板第 i 档：图表皮肤（ChartSkin）优先——图表配色是
     /// 独立板块，不占全局皮肤主题的 token；当前皮肤 8 档齐全，
     /// 命中即返回。皮肤之后依次是主题的 --chart-1 .. --chart-8
-    /// token（Theme.chart1..8，0 = 该槽位未定义）与 ECharts 2.2
-    /// 默认调色板兜底。i 自动取模 8 循环。
+    /// token（Theme.chart1..8，0 = 该槽位未定义）与 ECharts 6.1
+    /// 默认主题调色板（src/visual/tokens.ts，9 档）兜底。
     static int Palette(Theme t, int i) {
         int skc = ChartSkin.ColorAt(ChartSkin.Current(), i);
         if (skc != 0) { return skc; }
@@ -439,15 +442,18 @@ class Chart {
             if (m == 6 && t.chart7 != 0) { return t.chart7; }
             if (m == 7 && t.chart8 != 0) { return t.chart8; }
         }
-        // ECharts 2.x 默认调色板（theme/default.js）前 8 档。
-        if (m == 0) { return Chart.Rgb(193, 44, 43); }    // #C1232B
-        if (m == 1) { return Chart.Rgb(181, 195, 52); }   // #B5C334
-        if (m == 2) { return Chart.Rgb(252, 206, 16); }   // #FCCE10
-        if (m == 3) { return Chart.Rgb(232, 124, 37); }   // #E87C25
-        if (m == 4) { return Chart.Rgb(39, 114, 123); }   // #27727B
-        if (m == 5) { return Chart.Rgb(254, 132, 99); }   // #FE8463
-        if (m == 6) { return Chart.Rgb(155, 202, 99); }   // #9BCA63
-        return Chart.Rgb(250, 216, 96);                    // #FAD860
+        // ECharts 6.1 默认主题调色板（src/visual/tokens.ts color.theme，
+        // 9 档；v5 及更早为 #5470c6 系 9 档，2.2 为 #c12c2b 系 8 档）。
+        int m9 = i % 9;
+        if (m9 == 0) { return Chart.Rgb(80, 112, 221); }   // #5070DD
+        if (m9 == 1) { return Chart.Rgb(182, 214, 52); }   // #B6D634
+        if (m9 == 2) { return Chart.Rgb(80, 83, 114); }    // #505372
+        if (m9 == 3) { return Chart.Rgb(255, 153, 77); }   // #FF994D
+        if (m9 == 4) { return Chart.Rgb(12, 168, 223); }   // #0CA8DF
+        if (m9 == 5) { return Chart.Rgb(255, 209, 10); }   // #FFD10A
+        if (m9 == 6) { return Chart.Rgb(251, 98, 139); }   // #FB628B
+        if (m9 == 7) { return Chart.Rgb(120, 93, 176); }   // #785DB0
+        return Chart.Rgb(63, 190, 149);                    // #3FBE95
     }
 
     /// 系列普通状态的统一颜色回退：显式系列色、normal.color、调色板。
@@ -2024,7 +2030,9 @@ class Chart {
         }
         int belowGap = 0;
         int extra = 0;
-        if (showLegend) {
+        // ECharts 6：水平图例在面板底部（legendBottomReserve，
+        // BuildAxesR 扣除），只有竖排图例还从内容区顶部占行。
+        if (showLegend && Chart.LegendVertical()) {
             extra = Chart.LegendRowCount(app, x, w, title, series);
             if (Chart.toolReserve > 0) { belowGap = app.Scale(4); }
         }
@@ -2094,8 +2102,11 @@ class Chart {
             }
             series[hsi].hidden = hs0;
         }
-        // 有工具箱或 orient=vertical：图例整排下移到标题/工具箱行之下。
-        // vertical 时每个色块独占一行（左对齐）；否则从右往左排，放不下换行。
+        // ECharts 6 默认（LegendModel defaultOption：left 'center' +
+        // bottom tokens.size.m）：水平图例画在面板底部居中，行数计入
+        // legendBottomReserve，由 BuildAxesR 从绘图区底边扣除；竖排
+        // 图例保持顶部标题行之下左对齐（官方例显式 orient:'vertical'
+        // 才纵向，位置随例声明）。
         StyleBox sLegend = Style.Part(app, "chart", "legend", "", "", "",
                                       Style.SNormal());
         StyleBox sLegendOff = Style.Part(app, "chart", "legend", "", "off", "",
@@ -2106,15 +2117,37 @@ class Chart {
         string fmt = Chart.LegendFmt();
         int lmode = Chart.LegendSelMode();
         bool vert = Chart.LegendVertical();
-        bool below = vert || Chart.toolReserve > 0;
         int headH = titleH;
-        if (below) {
+        if (vert) {
             int toolH = ChartToolbox.Height(app);
             if (toolH > headH) { headH = toolH; }
         }
         int lgY = y + pad;
-        if (below) {
+        if (vert) {
             lgY = y + pad + headH + app.Scale(4);
+        } else {
+            // 底部：先用与绘制完全相同的换行规则量出行数，再从面板
+            // 底边起排（绘图区一侧留 app.Scale(4) 间隙）。
+            int availL = x + pad;
+            int availR = x + w - pad;
+            int rows = 1;
+            int wCur = availL;
+            for (int sm = 0; sm < prim.Count; sm = sm + 1) {
+                int chipW = sw + app.Scale(6)
+                    + Canvas.MeasureText(Chart.LegendLabel(fmt, series[prim[sm]].name), lgFs);
+                if (wCur > availL && wCur + chipW > availR) {
+                    rows = rows + 1;
+                    wCur = availL;
+                }
+                wCur = wCur + chipW + app.Scale(14);
+            }
+            lgY = y + h - pad - rows * rowH;
+            // 除图例行高外，还要给 x 轴刻度文本带留 gutter
+            // （BuildAxesR 的 botGut = 刻度字高 + Scale(8)），
+            // 否则类目标签与图例同行相撞。
+            Chart.legendBottomReserve = rows * rowH + app.Scale(4)
+                + Canvas.FontHeight(lgFs) + app.Scale(8);
+        }
             int xCur = x + pad;
             int maxX = x + w - pad;
             if (!vert) {
@@ -2168,63 +2201,6 @@ class Chart {
                 series[p].hidden = hid;
                 xCur = xCur + chipW + app.Scale(14);
             }
-        } else {
-        int lx = x + w - pad;
-        int leftLimit = x + pad;
-        if (title.Length > 0) {
-            leftLimit = x + pad
-                + Canvas.MeasureText(title, titleFs)
-                + app.Scale(14);
-        }
-        int pi = prim.Count - 1;
-        while (pi >= 0) {
-            int p = prim[pi];
-            bool hid = series[p].hidden;
-
-            string nm = Chart.LegendLabel(fmt, series[p].name);
-            int tw = Canvas.MeasureText(nm, lgFs);
-            int rowLeft = lx - tw - app.Scale(6) - sw;
-            if (rowLeft < leftLimit) {
-                lgY = lgY + rowH;
-                lx = x + w - pad;
-                leftLimit = x + pad;
-                rowLeft = lx - tw - app.Scale(6) - sw;
-                if (rowLeft < leftLimit) { rowLeft = leftLimit; }
-            }
-            int swatchX = rowLeft;
-
-            int txtCol = sLegend.FgOr(0);
-            int swCol = Chart.SeriesPaintColor(series[p], t, p);
-            if (hid) { txtCol = sLegendOff.FgOr(0); swCol = sLegendOff.BgOr(0); }
-
-            c.DrawText(lx - tw, lgY + app.Scale(2), nm, txtCol, lgFs);
-            c.FillRoundRect(swatchX, lgY + app.Scale(3), sw, sw, t.borderRadiusSmall, swCol);
-            if (hid) {
-                int my = lgY + app.Scale(2) + Canvas.FontHeight(lgFs) / 2;
-                c.FillRect(lx - tw, my, tw, 1, sLegendOff.FgOr(0));
-            }
-
-            if (wid != 0 && lmode != 0 - 1) {
-                int hitId = app.focus.AllocId();
-                app.hitTester.RegisterRect(hitId, rowLeft,
-                    lgY, (lx) - rowLeft, sw + app.Scale(4), 3);
-                if (Ui.Clicked(app, hitId)) {
-                    hid = Chart.LegendClick(app, wid, series, p, hid, lmode);
-                    // 同名系列随主项一起开关（single 模式下
-                    // LegendClick 先全隐藏，这里把本组改回来）。
-                    for (int gm = 0; gm < series.Count; gm = gm + 1) {
-                        if (gm != p && series[gm].name == series[p].name) {
-                            app.StateSet(Chart.LegendKey(wid, gm), hid ? 1 : 0);
-                        }
-                    }
-                }
-            }
-
-            series[p].hidden = hid;
-            lx = rowLeft - app.Scale(14);
-            pi = pi - 1;
-        }
-        }
         }
 
         return Chart.PanelContentTop(app, x, y, w, title, series, showLegend);
@@ -2371,7 +2347,8 @@ class Chart {
         int plotX = x + pad + leftGut;
         int plotY = plotTop;
         int plotW = (x + w - pad) - plotX;
-        int plotH = (y + h - pad - botGut) - plotY;
+        // 底部图例（ECharts 6 默认）从绘图区底边扣除。
+        int plotH = (y + h - pad - botGut - Chart.legendBottomReserve) - plotY;
         if (plotW < app.Scale(20)) { plotW = app.Scale(20); }
         if (plotH < app.Scale(20)) { plotH = app.Scale(20); }
 
@@ -2438,7 +2415,8 @@ class Chart {
         int plotX = x + pad + leftGut;
         int plotY = plotTop;
         int plotW = (x + w - pad) - plotX;
-        int plotH = (y + h - pad - botGut) - plotY;
+        // 底部图例（ECharts 6 默认）从绘图区底边扣除。
+        int plotH = (y + h - pad - botGut - Chart.legendBottomReserve) - plotY;
         if (plotW < app.Scale(20)) { plotW = app.Scale(20); }
         if (plotH < app.Scale(20)) { plotH = app.Scale(20); }
 
@@ -3014,7 +2992,8 @@ class Chart {
         }
         int plotRight = x + w - rightGut;
         if (o.gridRight >= 0) { plotRight = x + w - app.Scale(o.gridRight); }
-        int plotBot = y + h - pad - botGut;
+        // 底部图例（ECharts 6 默认）从绘图区底边扣除。
+        int plotBot = y + h - pad - botGut - Chart.legendBottomReserve;
         if (o.gridBottom >= 0) { plotBot = y + h - app.Scale(o.gridBottom); }
         int plotW = plotRight - plotX;
         int plotH = plotBot - plotY;

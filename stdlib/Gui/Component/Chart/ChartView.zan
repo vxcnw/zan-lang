@@ -1376,6 +1376,8 @@ partial class ChartView {
         ChartOption option = this.option;
         string kind = ChartView.DispatchKind(option);
         ChartSeries leadS = ChartView.LeadSeries(option);
+        // 底部图例占位每图清零（不经 DrawPanelI 的视图不背上一图的值）。
+        Chart.legendBottomReserve = 0;
         if (kind == "pie") {
             ChartView.DrawPie(app, x, y, w, h, option, option.pieLabels, g);
         } else if (kind == "rose") {

@@ -4,10 +4,10 @@ using Gui;
 namespace Gui.Component.Chart;
 
 /// 图表皮肤（ChartSkin）：图表配色的独立板块，与全局皮肤主题
-/// （Theme）解耦——一套皮肤就是一份命名的定性调色板，取自
-/// ECharts 2.2 官方主题（default 取内置默认色板，infographic/shine/
-/// macarons2 取 doc/example/theme/ 各前 8 档）。Chart.Palette 在
-/// 主题 chart token 未定义时回落到当前皮肤，换肤一次即生效于
+/// （Theme）解耦——一套皮肤就是一份命名的定性调色板：default 取
+/// ECharts 6.1 默认主题色板（src/visual/tokens.ts color.theme 9 档），
+/// infographic/shine/macarons2 取官方主题包各前 8 档。Chart.Palette
+/// 在主题 chart token 未定义时回落到当前皮肤，换肤一次即生效于
 /// 全部图型（折/柱/饼/漏斗……）。未知名一律按 default 处理。
 static class ChartSkin {
     /// 当前全局图表皮肤名。null = "default"。
@@ -91,30 +91,18 @@ static class ChartSkin {
             return (int)0xFFD3758F;                    // #D3758F
         }
         if (name == "default") {
-            // ECharts2 内置默认主题色板（echarts-all.js 顶部 color 数组
-            // 全 20 档，官方示例页不注册主题时的实际取色），非 repo 的
-            // theme/default.js（那套 #2EC7C9 是可下载主题文件）。
-            int m20 = ((i % 20) + 20) % 20;
-            if (m20 == 0) { return (int)0xFFFF7F50; }   // #FF7F50 coral
-            if (m20 == 1) { return (int)0xFF87CEFA; }   // #87CEFA lightskyblue
-            if (m20 == 2) { return (int)0xFFDA70D6; }   // #DA70D6 orchid
-            if (m20 == 3) { return (int)0xFF32CD32; }   // #32CD32 limegreen
-            if (m20 == 4) { return (int)0xFF6495ED; }   // #6495ED cornflower
-            if (m20 == 5) { return (int)0xFFFF69B4; }   // #FF69B4 hotpink
-            if (m20 == 6) { return (int)0xFFBA55D3; }   // #BA55D3 mediumorchid
-            if (m20 == 7) { return (int)0xFFCD5C5C; }   // #CD5C5C indianred
-            if (m20 == 8) { return (int)0xFFFFA500; }   // #FFA500 orange
-            if (m20 == 9) { return (int)0xFF40E0D0; }   // #40E0D0 turquoise
-            if (m20 == 10) { return (int)0xFF1E90FF; }  // #1E90FF dodgerblue
-            if (m20 == 11) { return (int)0xFFFF6347; }  // #FF6347 tomato
-            if (m20 == 12) { return (int)0xFF7B68EE; }  // #7B68EE mediumslateblue
-            if (m20 == 13) { return (int)0xFF00FA9A; }  // #00FA9A mediumspringgreen
-            if (m20 == 14) { return (int)0xFFFFD700; }  // #FFD700 gold
-            if (m20 == 15) { return (int)0xFF6699FF; }  // #6699FF
-            if (m20 == 16) { return (int)0xFFFF6666; }  // #FF6666
-            if (m20 == 17) { return (int)0xFF3CB371; }  // #3CB371 mediumseagreen
-            if (m20 == 18) { return (int)0xFFB8860B; }  // #B8860B darkgoldenrod
-            return (int)0xFF30E0E0;                     // #30E0E0
+            // ECharts 6.1 默认主题色板（src/visual/tokens.ts color.theme
+            // 全 9 档，官方示例页不注册主题时的实际取色）。
+            int m9 = ((i % 9) + 9) % 9;
+            if (m9 == 0) { return (int)0xFF5070DD; }   // #5070DD
+            if (m9 == 1) { return (int)0xFFB6D634; }   // #B6D634
+            if (m9 == 2) { return (int)0xFF505372; }   // #505372
+            if (m9 == 3) { return (int)0xFFFF994D; }   // #FF994D
+            if (m9 == 4) { return (int)0xFF0CA8DF; }   // #0CA8DF
+            if (m9 == 5) { return (int)0xFFFFD10A; }   // #FFD10A
+            if (m9 == 6) { return (int)0xFFFB628B; }   // #FB628B
+            if (m9 == 7) { return (int)0xFF785DB0; }   // #785DB0
+            return (int)0xFF3FBE95;                    // #3FBE95
         }
         return 0;
     }

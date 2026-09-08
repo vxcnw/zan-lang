@@ -587,7 +587,7 @@ partial class ChartView {
         int plotX = x + pad + leftGut;
         int plotY = plotTop;
         int plotW = (x + w - pad) - plotX;
-        int plotH = (y + h - zoomH - pad - botGut) - plotY;
+        int plotH = (y + h - zoomH - pad - botGut - Chart.legendBottomReserve) - plotY;
         if (plotW < app.Scale(20)) { plotW = app.Scale(20); }
         if (plotH < app.Scale(20)) { plotH = app.Scale(20); }
 

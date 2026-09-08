@@ -963,7 +963,8 @@ partial class ChartView {
         int plotX = x + pad + leftGut;
         int plotY = plotTop;
         int plotW = (x + w - pad) - plotX;
-        int plotH = (y + h - pad - botGut) - plotY;
+        // 底部图例（ECharts 6 默认）从绘图区底边扣除。
+        int plotH = (y + h - pad - botGut - Chart.legendBottomReserve) - plotY;
         if (plotW < app.Scale(20)) { plotW = app.Scale(20); }
         if (plotH < app.Scale(8)) { c.PopClip(); return null; }
 

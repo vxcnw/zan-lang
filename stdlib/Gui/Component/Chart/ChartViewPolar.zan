@@ -79,7 +79,7 @@ partial class ChartView {
         }
 
         int areaW = w - pad * 2;
-        int areaH = (y + h - pad) - top;
+        int areaH = (y + h - pad - Chart.legendBottomReserve) - top;
         int r = ChartView.RadialRadius(areaW, areaH, 62);
         if (r < app.Scale(10)) { r = app.Scale(10); }
         int cx = x + pad + areaW / 2;
@@ -256,7 +256,7 @@ partial class ChartView {
         int top = Chart.DrawPanelI(app, x, y, w, h, o.title, o.series, o.iwid, o.showLegend);
         List<string> labels = o.XCategories();
         int areaW = w - pad * 2;
-        int areaH = (y + h - pad) - top;
+        int areaH = (y + h - pad - Chart.legendBottomReserve) - top;
         int baseSize = areaW;
         if (areaH < baseSize) { baseSize = areaH; }
         int boxX = x + pad;

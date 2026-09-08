@@ -137,7 +137,8 @@ partial class ChartView {
         int plotX = x + pad + leftGut;
         int plotY = top;
         int plotW = (x + w - pad - rightGut) - plotX;
-        int plotH = (y + h - zoomH - pad - botGut) - plotY;
+        // 底部图例（ECharts 6 默认）从绘图区底边扣除。
+        int plotH = (y + h - zoomH - pad - botGut - Chart.legendBottomReserve) - plotY;
         if (plotW < app.Scale(20)) { plotW = app.Scale(20); }
         if (plotH < app.Scale(20)) { plotH = app.Scale(20); }
 
@@ -466,7 +467,8 @@ partial class ChartView {
         int plotX = x + pad + leftGut;
         int plotY = top;
         int plotW = (x + w - pad - rightGut) - plotX;
-        int plotH = (y + h - zoomH - pad - botGut) - plotY;
+        // 底部图例（ECharts 6 默认）从绘图区底边扣除。
+        int plotH = (y + h - zoomH - pad - botGut - Chart.legendBottomReserve) - plotY;
         if (plotW < app.Scale(20)) { plotW = app.Scale(20); }
         if (plotH < app.Scale(20)) { plotH = app.Scale(20); }
 

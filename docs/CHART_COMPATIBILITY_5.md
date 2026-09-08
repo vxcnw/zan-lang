@@ -1,19 +1,24 @@
-# Zan Chart 与 ECharts 5 官方示例的迁移账本
+# Zan Chart 与 ECharts 官方示例的迁移账本
 
 ## 目标与口径
 
-图表引擎的对照基准从 ECharts 2.2.7 迁移到 **ECharts 5**（apache/echarts，
-echarts.apache.org/examples）。画廊 `examples/gui_charts` 按**官方示例注册表**
-的类目与顺序 1:1 重建：id = 官方注册表 id，标题取注册表中英文原文，option
-与数据**逐字**取自官方示例源码；`Math.random` 一律换成固定种子 LCG（同点数
-同分布，截图可复现）。
+图表引擎的对照基准从 ECharts 2.2.7 迁移到 **ECharts 官方示例站当前版本
+（2026-09 起为 6.1.0+）**（apache/echarts，echarts.apache.org/examples）。
+画廊 `examples/gui_charts` 按**官方示例注册表**的类目与顺序 1:1 重建：
+id = 官方注册表 id，标题取注册表中英文原文，option 与数据**逐字**取自
+官方示例源码；`Math.random` 一律换成固定种子 LCG（同点数同分布，截图
+可复现）。
 
-- 参考源码快照：`_scratch/ref5/<id>.js`（306 例）+ `_scratch/ref5_manifest.md`
-  （官方顺序与依赖标注）。快照属于一次性工作材料，不进版本库；本文件是
-  长期账本。
+- 参考源码快照：`_scratch/ref5/<id>.js`（306 例，官网拉取即 6.x 行为）+
+  `_scratch/ref5_manifest.md`（官方顺序与依赖标注）；引擎默认值的权威
+  基准是 v6.1.0 源码 `_scratch/echarts-master/`（临时工作材料，不入库）：
+  色板/组件色 `src/visual/tokens.ts`，根默认 `src/model/globalDefault.ts`，
+  轴默认 `src/coord/axisDefault.ts`，图例默认 `src/component/legend/LegendModel.ts`。
+  本文件是长期账本。
 - **缺口不绕过**：引擎暂缺的特性（下表）在示例侧记录并跳过对应视觉/交互，
   不用变通数据假装对齐；修引擎后回归补齐。
-- 引擎**默认值**随 5.x 走，2.2 时代的默认在引擎层翻转，不逐例覆盖。
+- 引擎**默认值**随官方当前版本走（6.x），旧版默认在引擎层翻转，不逐例覆盖。
+- 只收官方注册表里的示例：不掺旧版画廊演示，不创造官方没有的示例。
 
 ## 进度（按官方顺序逐批补位）
 
@@ -53,11 +58,29 @@ echarts.apache.org/examples）。画廊 `examples/gui_charts` 按**官方示例�
 | 动态数据流（定时追加） | dynamic-data2 | |
 | 时间轴组件 timeline | — | |
 
-## 引擎默认值已随 5.x 翻转
+## 引擎默认值已随官方当前版本（6.x）翻转
 
 - `yAxis.splitArea`：2.2 数值轴默认开、5.x 默认关。已加 `ChartAxis.splitArea`
   字段（默认 false，工厂/clone/JSON parse 三处一致），Chart.zan 底纹绘制按
   字段开关（2026-09-09）。
+- **默认色板 = ECharts 6.1 主题九档**（2026-09-09）。权威值
+  `_scratch/echarts-master/src/visual/tokens.ts` color.theme：
+  `#5070DD #B6D634 #505372 #FF994D #0CA8DF #FFD10A #FB628B #785DB0 #3FBE95`。
+  `ChartSkin.ColorAt("default")` 从 2.x 的 20 档（#FF7F50 coral 系）整排
+  换成 v6 九档（%9）；`Chart.Palette` 末级兜底同批换成 v6。infographic/
+  shine/macarons2 等官方主题包皮肤保持原样。
+- **水平图例默认画在面板底部居中**（2026-09-09）。权威值
+  `src/component/legend/LegendModel.ts` defaultOption：`left 'center' +
+  bottom tokens.size.m`。引擎 DrawPanelI：水平图例底部起排（行数计入
+  `Chart.legendBottomReserve`，BuildAxesR/DrawFrameLoHiT/散点/极坐标/
+  误差棒各绘图区公式从底边扣除，含 x 轴刻度带 gutter）；竖排图例
+  （orient vertical，官方例显式声明）保持顶部标题行之下左对齐。
+  旧 2.2 式"顶部右侧从右往左"图例布局删除。
+- v6 其余默认差异（未翻转，随需要再动）：轴轴线/刻度/标签色
+  `#54555A`（neutral70）、分割线 `#DBDEE4`（neutral15，现随 Gui 皮肤
+  token，视觉中性）；grid outerBounds 标签防溢出（轴可能微移，
+  `outerBoundsMode:'none'` 可关）；label.rich 继承普通标签字体属性
+  （`richInheritPlainLabel:false` 可关）。
 
 ### 已修的引擎缺陷（来自官方示例移植）
 
