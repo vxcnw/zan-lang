@@ -46,6 +46,15 @@ class LegendApp {
     string rememberPath; string serversPath;
     string ArtPath(string name) { return artData.Get(name).Text("path"); }
     string EquipmentArtPath(Equipment e) { return equipmentArtData.At(e.definitionId).Text("path"); }
+    /* 联网服务端 picture 编号 → 提取原图：怪物走 boss 包帧 01，物品/地图
+       走 item/map 包；编号缺失时回退到占位图，不让缺图卡住页面。 */
+    string PicturePath(string kind, int picture) {
+        string path = "assets/" + kind + "/"
+            + (kind == "boss"
+                ? Rules.N(picture).PadLeft(3, "0") + "01.png"
+                : Rules.N(picture).PadLeft(5, "0") + (kind == "map" ? ".jpg" : ".png"));
+        return File.Exists(path) ? path : ArtPath("empty");
+    }
     string CompareEquipment(Equipment e) {
         if (inspectWorn) { return "\n点击穿戴/卸下可放回背包。"; }
         Equipment old = g.equipped[e.slot]; string text = "\n【与当前" + Rules.Slots()[e.slot] + "比较】";
@@ -92,7 +101,7 @@ class LegendApp {
     }
 
     Label Text(string value, string cls, int height) { Label l = new Label(value); l.Class = cls; l.wrap = true; l.Prefer(0, height); return l; }
-    Button Btn(string text, string id, Action action) { Button b = new Button(text); b.Named(id); b.Class = "small"; b.Prefer(0, 28); b.Click += action; return b; }
+    Button Btn(string text, string id, Action action) { Button b = new Button(text); b.Named(id); b.Class = "small"; b.Prefer(0, 28); b.Click.Add(action); return b; }
     Image Art(string name, int w, int h) { Image i = new Image(ArtPath(name), "", "contain"); i.Prefer(w, h); return i; }
     Panel PaperDollCanvas() {
         // The reference body stays as a backdrop; equipped artwork is layered
@@ -714,7 +723,10 @@ class LegendApp {
                 if (tpl <= 0 || mob.Int("alive", 0) != 1) { continue; }
                 string label = mob.Str("name", "怪物") + " · " + Rules.N(mob.Int("level", 1)) + "级 · 血" + Rules.N(mob.Int("hp", 0));
                 Panel card = Col("frame");
-                card.With(Text(label, "cyan small", 24));
+                Panel top = Panel.Row(); top.Gap(6); top.Prefer(0, 44);
+                Image micon = new Image(PicturePath("boss", mob.Int("picture", 0)), mob.Str("name", "怪物"), "contain"); micon.Prefer(52, 44); top.With(micon);
+                Label mlabel = Text(label, "cyan small", 0); mlabel.Grow(); top.With(mlabel);
+                card.With(top);
                 Panel row2 = Panel.Row(); row2.Gap(4); row2.Prefer(0, 28);
                 Button autoBtn = Btn("挂机", "net-auto-" + Rules.N(tpl), () => { net.AutoHunt(tpl, true); }); autoBtn.Prefer(0, 26); row2.With(autoBtn);
                 Button hitBtn = Btn("打一只", "net-hunt-" + Rules.N(tpl), () => { net.Hunt(tpl); }); hitBtn.Prefer(0, 26); row2.With(hitBtn);
@@ -792,6 +804,8 @@ class LegendApp {
             Button cell = Btn((sel ? "▶ " : "") + it.Str("name", "物品") + " ×" + Rules.N(it.Int("count", 1)) + "\n" + desc,
                 "net-sel-" + Rules.N(id), () => { bagSel = id; BuildPage(); });
             cell.Prefer(0, 108);
+            Image cellIcon = new Image(PicturePath("item", it.Int("picture", 0)), it.Str("name", "物品"), "contain");
+            cellIcon.Prefer(36, 36); cell.With(cellIcon);
             cells.With(cell);
         }
         Panel cmp = Col("frame"); cmp.Pad(10); cmp.Gap(4); cmp.Prefer(0, 172); right.With(cmp);
@@ -894,6 +908,8 @@ class LegendApp {
             bool locked = myLv < minLv;
             bool secret = minLv >= 15 && id >= 6;
             Panel card = Col("frame"); card.Pad(10); card.Gap(6); card.Prefer(0, 128);
+            Image thumb = new Image(PicturePath("map", id), mp.Str("name", "地图"), "cover");
+            thumb.Prefer(0, 44); thumb.Grow(); card.With(thumb);
             card.With(Text(mp.Str("name", "地图"), here ? "green strong" : "yellow strong", 36));
             card.With(Text((secret ? "秘境打宝图\n" : "") + "进入门槛 " + Rules.N(minLv) + " 级", "secondary", 44));
             Panel foot = Panel.Row(); foot.Gap(4); foot.Prefer(0, 28);
@@ -927,6 +943,8 @@ class LegendApp {
             bool alive = b.Int("alive", 0) == 1;
             bool here = st != null && st.Int("map", 0) == mapId;
             Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 64);
+            Image bicon = new Image(PicturePath("boss", b.Int("picture", 0)), b.Str("name", "BOSS"), "contain");
+            bicon.Prefer(56, 56); row.With(bicon);
             string line = b.Str("name", "BOSS") + " · " + Rules.N(b.Int("level", 1)) + "级 · 血"
                 + Rules.N(b.Int("hp", 0)) + (alive ? " · 在场" : " · 重生 " + Rules.N(b.Int("respawnIn", 0)) + "s")
                 + "\n" + MapName(mapId) + " · 掉落：" + b.Str("drop", "无")

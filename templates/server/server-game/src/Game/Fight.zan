@@ -547,6 +547,7 @@ class Fight {
             o.Set("tpl", JsonValue.NewNum(Convert.ToString(t.id)));
             o.Set("name", JsonValue.NewStr(t.name));
             o.Set("level", JsonValue.NewNum(Convert.ToString(t.level)));
+            o.Set("picture", JsonValue.NewNum(Convert.ToString(t.picture)));
             o.Set("alive", JsonValue.NewNum(Fight.instAlive[i] ? "1" : "0"));
             if (Fight.instAlive[i]) {
                 o.Set("hp", JsonValue.NewNum(Convert.ToString(Fight.instHp[i])));
@@ -611,6 +612,7 @@ class Fight {
             o.Set("heal", JsonValue.NewNum(Convert.ToString(it.hp)));
             o.Set("price", JsonValue.NewNum(Convert.ToString(it.price)));
             o.Set("minLevel", JsonValue.NewNum(Convert.ToString(it.minLevel)));
+            o.Set("picture", JsonValue.NewNum(Convert.ToString(it.picture)));
             arr.Append(o);
         }
         return arr;
@@ -743,11 +745,13 @@ class Fight {
             o.Set("def", JsonValue.NewNum(Convert.ToString(t.def)));
             o.Set("map", JsonValue.NewNum(Convert.ToString(t.mapId)));
             o.Set("exp", JsonValue.NewNum(Convert.ToString(t.exp)));
-            o.Set("gold", JsonValue.NewNum(Convert.ToString(t.goldMin)
+            /* 金币区间是展示文本（20-60），必须走字符串，不能进数值通道。 */
+            o.Set("gold", JsonValue.NewStr(Convert.ToString(t.goldMin)
                 + "-" + Convert.ToString(t.goldMax)));
             o.Set("alive", JsonValue.NewNum(alive ? "1" : "0"));
             o.Set("respawnIn", JsonValue.NewNum(Convert.ToString(respawnIn)));
             o.Set("drop", JsonValue.NewStr(Fight.DropNames(t.id, 2)));
+            o.Set("picture", JsonValue.NewNum(Convert.ToString(t.picture)));
             arr.Append(o);
         }
         return arr;
