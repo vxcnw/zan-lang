@@ -445,11 +445,15 @@
     }
 
     function fill(w, opts) {
+      var entry = stack[stack.length - 1];
       if (opts.content !== undefined) {
         w.body.innerHTML = opts.content;
         ready(w, opts);
         return Promise.resolve(w.id);
       }
+      entry.url = opts.url;
+      entry.body = w.body;
+      entry.head = w.head;
       w.body.innerHTML = '<div class="lay-loading">加载中…</div>';
       return fetch(opts.url, {
         headers: { 'X-Fragment': '1' }, credentials: 'same-origin'
@@ -547,6 +551,34 @@
           return;
         }
       },
+      // The topmost URL-loaded dialog entry, for in-window navigation.
+      topUrl: function () {
+        for (var i = stack.length - 1; i >= 0; i--) {
+          if (stack[i].url) { return stack[i]; }
+        }
+        return null;
+      },
+      // Image viewer: a bare frame around one picture, closed by click.
+      img: function (src, title) {
+        var w = shell({ title: title || '预览', width: 'min(90vw, 860px)',
+                        bare: true, maskClose: true });
+        w.box.classList.add('photo');
+        w.body.innerHTML = '';
+        var im = node('img', 'photo-img');
+        im.src = src;
+        im.onclick = function () { Layer.close(w.id); };
+        w.body.appendChild(im);
+        return w.id;
+      },
+      // Every URL-loaded dialog entry, bottom-up: a write inside a stacked
+      // dialog refreshes the ones beneath it (the list a form came from).
+      urlEntries: function () {
+        var out = [];
+        for (var i = 0; i < stack.length; i++) {
+          if (stack[i].url) { out.push(stack[i]); }
+        }
+        return out;
+      },
       closeTop: function () {
         if (!stack.length) { return false; }
         var top = stack[stack.length - 1];
@@ -566,7 +598,45 @@
                         width: wide ? '820px' : '560px' });
   }
 
+  // Writes launched from INSIDE a dialog (row delete, form save opened over a
+  // dialog list) must not close that dialog: afterWrite() refreshes it. Only
+  // close the top window when the write was NOT itself a dialog interaction --
+  // i.e. when the confirming layer was ours, the dialog stack is unchanged.
   function closeDialog() { Layer.closeTop(); }
+
+  // A dialog whose body is itself a screen (pager, filter, forms -- e.g. the
+  // generic data manager). Its own [data-load]/[data-search]/[data-dialog]
+  // links must stay INSIDE the window: the page's handlers would otherwise
+  // swap the panel or move the tab underneath. Every filled dialog remembers
+  // its URL; this re-fetches and repaints just that body.
+  function dialogLoad(entry, url) {
+    if (url) { entry.url = url; }
+    return fetch(entry.url, {
+      headers: { 'X-Fragment': '1' }, credentials: 'same-origin'
+    }).then(function (r) {
+      if (r.ok) { return r.text(); }
+      return r.json().then(function (j) { throw new Error(j.msg || '加载失败'); });
+    }).then(function (html) {
+      entry.body.innerHTML = html;
+      var t = entry.body.querySelector('[data-title]');
+      if (t) { entry.head.querySelector('.title').textContent = t.getAttribute('data-title'); }
+      if (window.applyFragmentWidgets) { window.applyFragmentWidgets(entry.body); }
+      if (window.wireModelPick) { window.wireModelPick(entry.body); }
+      entry.body.querySelectorAll('script').forEach(function (old) {
+        var s = document.createElement('script');
+        s.textContent = old.textContent;
+        old.replaceWith(s);
+      });
+    }).catch(function (e) {
+      Layer.msg(e.message || '加载失败', 'bad');
+    });
+  }
+
+  // The topmost dialog that came from a URL (an entry loaded from `content`
+  // has nothing to reload).
+  function topDialog() {
+    return Layer.topUrl();
+  }
 
   // ---- writes -------------------------------------------------------------
 
@@ -583,6 +653,16 @@
       if (r.status === 401) { location.href = '/admin/login'; return null; }
       return r.json();
     });
+  }
+
+  // After a successful write: close the form window, then refresh whatever
+  // the write happened over. The write's own dialog (if URL-loaded) is gone by
+  // now, so every remaining URL entry is a list beneath it -- refresh them all,
+  // then the panel quietly (rows update in place, no scroll jump).
+  function afterWrite() {
+    var subs = Layer.urlEntries();
+    for (var i = 0; i < subs.length; i++) { dialogLoad(subs[i]); }
+    reload(true);
   }
 
   function submit(form) {
@@ -610,9 +690,7 @@
       if (j.code === '0000') {
         toast(j.msg || '已保存', 'ok');
         closeDialog();
-        // The dialog just closed over the list: refresh it quietly so the
-        // rows update in place instead of jumping back to the top.
-        reload(true);
+        afterWrite();
         return;
       }
       toast(j.msg || '保存失败', 'bad');
@@ -1082,8 +1160,13 @@
 
   document.addEventListener('click', function (ev) {
     hideTabMenu();
+    // A link inside a URL-loaded dialog navigates that dialog, not the page:
+    // pager / filter / drill-down links keep their window and never touch the
+    // tab strip or the panel underneath.
+    var top = Layer.topUrl();
+    var inBox = top && top.body.contains(ev.target);
     var a = ev.target.closest('[data-tab]');
-    if (a) {
+    if (a && !inBox) {
       ev.preventDefault();
       open(a.getAttribute('href'), a.getAttribute('data-title') || a.textContent.trim());
       document.body.classList.remove('side-open');
@@ -1093,6 +1176,11 @@
     if (l) {
       ev.preventDefault();
       var href = l.getAttribute('href');
+      if (inBox) {
+        var target = href.charAt(0) === '?' ? base(top.url) + href : href;
+        dialogLoad(top, target);
+        return;
+      }
       var path = href.charAt(0) === '?' ? base(state.active) + href : href;
       open(path, l.getAttribute('data-title') || l.textContent.trim());
       return;
@@ -1113,15 +1201,55 @@
                      width: dr.getAttribute('data-width') || '420px' });
       return;
     }
+    // Exports download in place: confirm (if asked), fetch to a blob so the
+    // SPA shell never navigates away, then toast. No new tab, no reload.
+    var x = ev.target.closest('[data-export]');
+    if (x) {
+      ev.preventDefault();
+      var runExport = function () {
+        Layer.msg('正在导出…');
+        fetch(x.getAttribute('href') || x.getAttribute('data-export'),
+              { credentials: 'same-origin' })
+          .then(function (r) {
+            if (r.status === 401) { location.href = '/admin/login'; return null; }
+            if (!r.ok) { throw new Error('http ' + r.status); }
+            return r.blob().then(function (b) {
+              var cd = r.headers.get('Content-Disposition') || '';
+              var m = /filename\*=UTF-8''([^;]+)/.exec(cd) ||
+                      /filename="?([^";]+)"?/.exec(cd);
+              var name = m ? decodeURIComponent(m[1])
+                : (x.getAttribute('data-filename') || 'export');
+              var a = document.createElement('a');
+              a.href = URL.createObjectURL(b);
+              a.download = name;
+              document.body.appendChild(a);
+              a.click();
+              setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+              toast('已导出 ' + name, 'ok');
+            });
+          })
+          .catch(function () { toast('导出失败', 'bad'); });
+      };
+      var exportConfirm = x.getAttribute('data-confirm');
+      if (exportConfirm) { Layer.confirm(exportConfirm, runExport); } else { runExport(); }
+      return;
+    }
     var p = ev.target.closest('[data-post]');
     if (p) {
       ev.preventDefault();
       var run = function () {
+        // The confirm layer is the top window; remember how many URL dialogs
+        // were beneath it. After the write those are the lists to refresh --
+        // none of them should be closed, whatever kind of write this was.
+        var overDialog = Layer.topUrl() != null;
         post(p.getAttribute('data-post'), p.getAttribute('data-args') || '')
           .then(function (j) {
             if (!j) { return; }
             toast(j.msg || '完成', j.code === '0000' ? 'ok' : 'bad');
-            if (j.code === '0000') { closeDialog(); reload(true); }
+            if (j.code !== '0000') { return; }
+            if (overDialog) { afterWrite(); return; }
+            closeDialog();
+            reload(true);
           })
           .catch(function () { toast('请求失败', 'bad'); });
       };
@@ -1154,7 +1282,8 @@
     var search = ev.target.closest('[data-search]');
     if (search) {
       // A filter bar is a GET: it changes which rows the panel shows, so it
-      // reloads the panel in place and leaves the tab where it is.
+      // reloads its surface in place -- the dialog it lives in, else the
+      // panel (the tab stays where it is either way).
       ev.preventDefault();
       var parts = [];
       new FormData(search).forEach(function (v, k) {
@@ -1162,6 +1291,15 @@
           parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(v));
         }
       });
+      var top = Layer.topUrl();
+      if (top && top.body.contains(search)) {
+        var sbase = top.url.split('?')[0];
+        var spath = search.getAttribute('action') || sbase;
+        if (spath.charAt(0) !== '/') { spath = sbase.split('?')[0]; }
+        if (parts.length) { spath = spath.split('?')[0] + '?' + parts.join('&'); }
+        dialogLoad(top, spath);
+        return;
+      }
       var path = search.getAttribute('action') || base(state.active);
       if (parts.length) { path = path + '?' + parts.join('&'); }
       open(path, search.getAttribute('data-title') || path);
@@ -1180,6 +1318,15 @@
   });
   document.addEventListener('mouseout', function (ev) {
     if (ev.target.closest('[data-tip]')) { Layer.untip(); }
+  });
+
+  // An image URL clicked with data-img opens the photo viewer; plain links
+  // and buttons carry it, so views decide per-element which images preview.
+  document.addEventListener('click', function (ev) {
+    var im = ev.target.closest('[data-img]');
+    if (!im) { return; }
+    ev.preventDefault();
+    Layer.img(im.getAttribute('data-img'), im.getAttribute('data-title'));
   });
 
   document.addEventListener('keydown', function (ev) {

@@ -445,11 +445,15 @@
     }
 
     function fill(w, opts) {
+      var entry = stack[stack.length - 1];
       if (opts.content !== undefined) {
         w.body.innerHTML = opts.content;
         ready(w, opts);
         return Promise.resolve(w.id);
       }
+      entry.url = opts.url;
+      entry.body = w.body;
+      entry.head = w.head;
       w.body.innerHTML = '<div class="lay-loading">加载中…</div>';
       return fetch(opts.url, {
         headers: { 'X-Fragment': '1' }, credentials: 'same-origin'
@@ -547,6 +551,34 @@
           return;
         }
       },
+      // The topmost URL-loaded dialog entry, for in-window navigation.
+      topUrl: function () {
+        for (var i = stack.length - 1; i >= 0; i--) {
+          if (stack[i].url) { return stack[i]; }
+        }
+        return null;
+      },
+      // Image viewer: a bare frame around one picture, closed by click.
+      img: function (src, title) {
+        var w = shell({ title: title || '预览', width: 'min(90vw, 860px)',
+                        bare: true, maskClose: true });
+        w.box.classList.add('photo');
+        w.body.innerHTML = '';
+        var im = node('img', 'photo-img');
+        im.src = src;
+        im.onclick = function () { Layer.close(w.id); };
+        w.body.appendChild(im);
+        return w.id;
+      },
+      // Every URL-loaded dialog entry, bottom-up: a write inside a stacked
+      // dialog refreshes the ones beneath it (the list a form came from).
+      urlEntries: function () {
+        var out = [];
+        for (var i = 0; i < stack.length; i++) {
+          if (stack[i].url) { out.push(stack[i]); }
+        }
+        return out;
+      },
       closeTop: function () {
         if (!stack.length) { return false; }
         var top = stack[stack.length - 1];
@@ -566,7 +598,45 @@
                         width: wide ? '820px' : '560px' });
   }
 
+  // Writes launched from INSIDE a dialog (row delete, form save opened over a
+  // dialog list) must not close that dialog: afterWrite() refreshes it. Only
+  // close the top window when the write was NOT itself a dialog interaction --
+  // i.e. when the confirming layer was ours, the dialog stack is unchanged.
   function closeDialog() { Layer.closeTop(); }
+
+  // A dialog whose body is itself a screen (pager, filter, forms -- e.g. the
+  // generic data manager). Its own [data-load]/[data-search]/[data-dialog]
+  // links must stay INSIDE the window: the page's handlers would otherwise
+  // swap the panel or move the tab underneath. Every filled dialog remembers
+  // its URL; this re-fetches and repaints just that body.
+  function dialogLoad(entry, url) {
+    if (url) { entry.url = url; }
+    return fetch(entry.url, {
+      headers: { 'X-Fragment': '1' }, credentials: 'same-origin'
+    }).then(function (r) {
+      if (r.ok) { return r.text(); }
+      return r.json().then(function (j) { throw new Error(j.msg || '加载失败'); });
+    }).then(function (html) {
+      entry.body.innerHTML = html;
+      var t = entry.body.querySelector('[data-title]');
+      if (t) { entry.head.querySelector('.title').textContent = t.getAttribute('data-title'); }
+      if (window.applyFragmentWidgets) { window.applyFragmentWidgets(entry.body); }
+      if (window.wireModelPick) { window.wireModelPick(entry.body); }
+      entry.body.querySelectorAll('script').forEach(function (old) {
+        var s = document.createElement('script');
+        s.textContent = old.textContent;
+        old.replaceWith(s);
+      });
+    }).catch(function (e) {
+      Layer.msg(e.message || '加载失败', 'bad');
+    });
+  }
+
+  // The topmost dialog that came from a URL (an entry loaded from `content`
+  // has nothing to reload).
+  function topDialog() {
+    return Layer.topUrl();
+  }
 
   // ---- writes -------------------------------------------------------------
 
@@ -583,6 +653,16 @@
       if (r.status === 401) { location.href = '/admin/login'; return null; }
       return r.json();
     });
+  }
+
+  // After a successful write: close the form window, then refresh whatever
+  // the write happened over. The write's own dialog (if URL-loaded) is gone by
+  // now, so every remaining URL entry is a list beneath it -- refresh them all,
+  // then the panel quietly (rows update in place, no scroll jump).
+  function afterWrite() {
+    var subs = Layer.urlEntries();
+    for (var i = 0; i < subs.length; i++) { dialogLoad(subs[i]); }
+    reload(true);
   }
 
   function submit(form) {
@@ -610,9 +690,7 @@
       if (j.code === '0000') {
         toast(j.msg || '已保存', 'ok');
         closeDialog();
-        // The dialog just closed over the list: refresh it quietly so the
-        // rows update in place instead of jumping back to the top.
-        reload(true);
+        afterWrite();
         return;
       }
       toast(j.msg || '保存失败', 'bad');
@@ -1077,8 +1155,6 @@
     }
     wireCodeGen(root);
   }
-  window.applyFragmentWidgets = applyFragmentWidgets;
-
   // 激活码生成对话框：POST 生成端点，明文码在文本域里显示一次并提供
   // 复制按钮——服务器只存摘要，关掉对话框就再也拿不回明文。
   function wireCodeGen(root) {
@@ -1139,12 +1215,19 @@
     }
   }
 
+  window.applyFragmentWidgets = applyFragmentWidgets;
+
   // ---- wiring -------------------------------------------------------------
 
   document.addEventListener('click', function (ev) {
     hideTabMenu();
+    // A link inside a URL-loaded dialog navigates that dialog, not the page:
+    // pager / filter / drill-down links keep their window and never touch the
+    // tab strip or the panel underneath.
+    var top = Layer.topUrl();
+    var inBox = top && top.body.contains(ev.target);
     var a = ev.target.closest('[data-tab]');
-    if (a) {
+    if (a && !inBox) {
       ev.preventDefault();
       open(a.getAttribute('href'), a.getAttribute('data-title') || a.textContent.trim());
       document.body.classList.remove('side-open');
@@ -1154,6 +1237,11 @@
     if (l) {
       ev.preventDefault();
       var href = l.getAttribute('href');
+      if (inBox) {
+        var target = href.charAt(0) === '?' ? base(top.url) + href : href;
+        dialogLoad(top, target);
+        return;
+      }
       var path = href.charAt(0) === '?' ? base(state.active) + href : href;
       open(path, l.getAttribute('data-title') || l.textContent.trim());
       return;
@@ -1174,15 +1262,55 @@
                      width: dr.getAttribute('data-width') || '420px' });
       return;
     }
+    // Exports download in place: confirm (if asked), fetch to a blob so the
+    // SPA shell never navigates away, then toast. No new tab, no reload.
+    var x = ev.target.closest('[data-export]');
+    if (x) {
+      ev.preventDefault();
+      var runExport = function () {
+        Layer.msg('正在导出…');
+        fetch(x.getAttribute('href') || x.getAttribute('data-export'),
+              { credentials: 'same-origin' })
+          .then(function (r) {
+            if (r.status === 401) { location.href = '/admin/login'; return null; }
+            if (!r.ok) { throw new Error('http ' + r.status); }
+            return r.blob().then(function (b) {
+              var cd = r.headers.get('Content-Disposition') || '';
+              var m = /filename\*=UTF-8''([^;]+)/.exec(cd) ||
+                      /filename="?([^";]+)"?/.exec(cd);
+              var name = m ? decodeURIComponent(m[1])
+                : (x.getAttribute('data-filename') || 'export');
+              var a = document.createElement('a');
+              a.href = URL.createObjectURL(b);
+              a.download = name;
+              document.body.appendChild(a);
+              a.click();
+              setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+              toast('已导出 ' + name, 'ok');
+            });
+          })
+          .catch(function () { toast('导出失败', 'bad'); });
+      };
+      var exportConfirm = x.getAttribute('data-confirm');
+      if (exportConfirm) { Layer.confirm(exportConfirm, runExport); } else { runExport(); }
+      return;
+    }
     var p = ev.target.closest('[data-post]');
     if (p) {
       ev.preventDefault();
       var run = function () {
+        // The confirm layer is the top window; remember how many URL dialogs
+        // were beneath it. After the write those are the lists to refresh --
+        // none of them should be closed, whatever kind of write this was.
+        var overDialog = Layer.topUrl() != null;
         post(p.getAttribute('data-post'), p.getAttribute('data-args') || '')
           .then(function (j) {
             if (!j) { return; }
             toast(j.msg || '完成', j.code === '0000' ? 'ok' : 'bad');
-            if (j.code === '0000') { closeDialog(); reload(true); }
+            if (j.code !== '0000') { return; }
+            if (overDialog) { afterWrite(); return; }
+            closeDialog();
+            reload(true);
           })
           .catch(function () { toast('请求失败', 'bad'); });
       };
@@ -1215,7 +1343,8 @@
     var search = ev.target.closest('[data-search]');
     if (search) {
       // A filter bar is a GET: it changes which rows the panel shows, so it
-      // reloads the panel in place and leaves the tab where it is.
+      // reloads its surface in place -- the dialog it lives in, else the
+      // panel (the tab stays where it is either way).
       ev.preventDefault();
       var parts = [];
       new FormData(search).forEach(function (v, k) {
@@ -1223,6 +1352,15 @@
           parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(v));
         }
       });
+      var top = Layer.topUrl();
+      if (top && top.body.contains(search)) {
+        var sbase = top.url.split('?')[0];
+        var spath = search.getAttribute('action') || sbase;
+        if (spath.charAt(0) !== '/') { spath = sbase.split('?')[0]; }
+        if (parts.length) { spath = spath.split('?')[0] + '?' + parts.join('&'); }
+        dialogLoad(top, spath);
+        return;
+      }
       var path = search.getAttribute('action') || base(state.active);
       if (parts.length) { path = path + '?' + parts.join('&'); }
       open(path, search.getAttribute('data-title') || path);
@@ -1241,6 +1379,15 @@
   });
   document.addEventListener('mouseout', function (ev) {
     if (ev.target.closest('[data-tip]')) { Layer.untip(); }
+  });
+
+  // An image URL clicked with data-img opens the photo viewer; plain links
+  // and buttons carry it, so views decide per-element which images preview.
+  document.addEventListener('click', function (ev) {
+    var im = ev.target.closest('[data-img]');
+    if (!im) { return; }
+    ev.preventDefault();
+    Layer.img(im.getAttribute('data-img'), im.getAttribute('data-title'));
   });
 
   document.addEventListener('keydown', function (ev) {
@@ -1362,5 +1509,421 @@
   })();
 
 
+  // Settings screen: one pane per group, the SMTP test button and the AI
+  // presets. The screen arrives as a fragment, so every handler is delegated
+  // from the document instead of bound to the elements at load time.
+  document.addEventListener('click', function (ev) {
+    var paneBtn = ev.target.closest('[data-setting-tabs] [data-pane]');
+    if (paneBtn) {
+      var name = paneBtn.getAttribute('data-pane');
+      paneMemo[base(state.active)] = name;
+      var tabs = paneBtn.closest('[data-setting-tabs]');
+      var all = tabs.querySelectorAll('[data-pane]');
+      for (var i = 0; i < all.length; i++) { all[i].classList.toggle('on', all[i] === paneBtn); }
+      var panes = document.querySelectorAll('[data-pane-body]');
+      for (var p = 0; p < panes.length; p++) {
+        panes[p].classList.toggle('open', panes[p].getAttribute('data-pane-body') === name);
+      }
+      // Cards that belong to one group only (the AI presets) follow the pane.
+      var extras = document.querySelectorAll('[data-pane-extra]');
+      for (var e = 0; e < extras.length; e++) {
+        extras[e].hidden = extras[e].getAttribute('data-pane-extra') !== name;
+      }
+      return;
+    }
+
+    // A preset fills the two fields that differ between providers and moves
+    // the form to the AI pane; the key is still typed by hand.
+    var preset = ev.target.closest('[data-preset]');
+    if (preset) {
+      var set = function (n, v) {
+        var f = document.querySelector('[name="' + n + '"]');
+        if (f) { f.value = v; }
+      };
+      set('ai.provider', preset.getAttribute('data-preset'));
+      set('ai.baseUrl', preset.getAttribute('data-url'));
+      set('ai.model', preset.getAttribute('data-model'));
+      var aiTab = document.querySelector('[data-setting-tabs] [data-pane="AI 助手"]');
+      if (aiTab) { aiTab.click(); }
+      var key = document.querySelector('[name="ai.apiKey"]');
+      if (key) { key.focus(); }
+      Layer.msg('已填入 ' + preset.parentNode.parentNode.querySelector('.vendor-name').textContent);
+      return;
+    }
+
+    var test = ev.target.closest('[data-mail-test]');
+    if (test) {
+      var to = document.getElementById('mail-to');
+      if (!to || !to.value) { if (to) { to.focus(); } return; }
+      test.disabled = true;
+      fetch('/admin/system/settings/mailtest', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ to: to.value }).toString()
+      }).then(function (r) { return r.json(); }).then(function (j) {
+        if (j && j.code === '0000') { Layer.msg(j.msg || '测试邮件已发送'); }
+        else { Layer.notify('发送失败', (j && j.msg) || '请检查邮件配置', 'bad'); }
+      }).catch(function () {
+        Layer.notify('发送失败', '请求未完成', 'bad');
+      }).then(function () { test.disabled = false; });
+    }
+  });
+
+  // ---- assistant ----------------------------------------------------------
+
+  // A docked chat, WeChat-style: the agents down the left, one conversation per
+  // agent on the right. The corner button toggles it; closing only hides it, so
+  // the threads, the open agent and the scroll position all survive until the
+  // page itself is left. Each agent keeps its own thread in localStorage and the
+  // whole thread is sent back on every turn, so the model has the conversation
+  // and not just the last line. An unconfigured assistant offers to open the
+  // settings screen rather than a chat that could not answer.
+  (function assistant() {
+    var STORE = 'zanweb.ai';
+    var state = { ready: false, agents: [], agent: '', dock: null, built: false };
+    var mem = load();
+
+    function load() {
+      try {
+        var raw = localStorage.getItem(STORE);
+        if (raw) { return JSON.parse(raw); }
+      } catch (e) { /* private mode: the thread just does not persist */ }
+      return { agent: '', sessions: {} };
+    }
+    function persist() {
+      try { localStorage.setItem(STORE, JSON.stringify(mem)); } catch (e) {}
+    }
+    function thread(code) {
+      if (!mem.sessions[code]) { mem.sessions[code] = []; }
+      return mem.sessions[code];
+    }
+    function agentOf(code) {
+      for (var i = 0; i < state.agents.length; i++) {
+        if (state.agents[i].code === code) { return state.agents[i]; }
+      }
+      return state.agents[0] || null;
+    }
+
+    // The one and only <style> and dock, injected once so nothing here depends
+    // on admin.css.
+    function styles() {
+      if (document.getElementById('ai-dock-css')) { return; }
+      var s = document.createElement('style');
+      s.id = 'ai-dock-css';
+      s.textContent =
+        '.ai-dock{position:fixed;right:20px;bottom:84px;width:720px;max-width:calc(100vw - 40px);'
+        + 'height:520px;max-height:calc(100vh - 120px);display:none;flex-direction:column;'
+        + 'background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 18px 48px rgba(0,0,0,.22);'
+        + 'z-index:1200;overflow:hidden}'
+        + '.ai-dock.on{display:flex}'
+        + '.ai-dock-top{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #eee;background:#f7f8fa}'
+        + '.ai-dock-top b{font-size:14px}.ai-dock-top .sp{flex:1}'
+        + '.ai-dock-top button{border:0;background:transparent;cursor:pointer;font-size:16px;color:#6b7280;padding:2px 6px;border-radius:6px}'
+        + '.ai-dock-top button:hover{background:#eceef1;color:#111}'
+        + '.ai-dock-body{flex:1;display:flex;min-height:0}'
+        + '.ai-side{width:190px;border-right:1px solid #eee;overflow:auto;background:#fafbfc}'
+        + '.ai-agent{display:flex;flex-direction:column;gap:2px;padding:10px 12px;cursor:pointer;border-bottom:1px solid #f1f2f4}'
+        + '.ai-agent:hover{background:#f0f2f5}.ai-agent.on{background:#e7f0ff}'
+        + '.ai-agent .n{font-size:13px;font-weight:600;color:#1f2937}'
+        + '.ai-agent .h{font-size:11px;color:#8a94a6;line-height:1.4}'
+        + '.ai-main{flex:1;display:flex;flex-direction:column;min-width:0}'
+        + '.ai-log{flex:1;overflow:auto;padding:14px;background:#f2f3f5}'
+        + '.ai-row{display:flex;margin-bottom:12px}.ai-row.me{justify-content:flex-end}'
+        + '.ai-bubble{max-width:78%;padding:8px 11px;border-radius:10px;font-size:13px;line-height:1.55;'
+        + 'white-space:pre-wrap;word-break:break-word;background:#fff;border:1px solid #e6e8eb;color:#1f2937}'
+        + '.ai-row.me .ai-bubble{background:#95ec69;border-color:#86df5c}'
+        + '.ai-bubble.bad{background:#fde8e8;border-color:#f5c2c2;color:#b42318}'
+        + '.ai-apply{margin-top:8px}'
+        + '.ai-apply button{border:1px solid #2563eb;background:#2563eb;color:#fff;border-radius:6px;'
+        + 'padding:4px 10px;font-size:12px;cursor:pointer}'
+        + '.ai-apply button:disabled{opacity:.6;cursor:default}'
+        + '.ai-send{display:flex;gap:8px;padding:10px;border-top:1px solid #eee;background:#fff}'
+        + '.ai-send textarea{flex:1;resize:none;border:1px solid #d7dbe0;border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit}'
+        + '.ai-send button{border:0;background:#2563eb;color:#fff;border-radius:8px;padding:0 16px;cursor:pointer;font-size:13px}'
+        + '.ai-empty{color:#9aa3b2;font-size:12px;text-align:center;margin-top:40px}';
+      document.head.appendChild(s);
+    }
+
+    function esc(t) {
+      return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    // The first ```sql fenced block, or the first fenced block that looks like a
+    // CREATE TABLE -- the confirm button runs exactly this text.
+    function sqlOf(text) {
+      var m = /```sql\s*([\s\S]*?)```/i.exec(text);
+      if (m) { return m[1].trim(); }
+      m = /```\s*([\s\S]*?)```/i.exec(text);
+      if (m && /create\s+table/i.test(m[1])) { return m[1].trim(); }
+      return '';
+    }
+
+    function build() {
+      styles();
+      var dock = document.createElement('div');
+      dock.className = 'ai-dock';
+      dock.innerHTML =
+        '<div class="ai-dock-top"><b>AI 助手</b><span class="sp"></span>'
+        + '<button type="button" data-ai-clear title="清空当前会话">清空</button>'
+        + '<button type="button" data-ai-hide title="收起">—</button></div>'
+        + '<div class="ai-dock-body"><div class="ai-side" data-ai-side></div>'
+        + '<div class="ai-main"><div class="ai-log" data-ai-log></div>'
+        + '<div class="ai-send"><textarea rows="2" data-ai-input '
+        + 'placeholder="说说你要做什么，Enter 发送，Shift+Enter 换行"></textarea>'
+        + '<button type="button" data-ai-go>发送</button></div></div></div>';
+      document.body.appendChild(dock);
+      state.dock = dock;
+      state.built = true;
+
+      dock.querySelector('[data-ai-hide]').addEventListener('click', hide);
+      dock.querySelector('[data-ai-clear]').addEventListener('click', function () {
+        Layer.confirm('清空「' + (agentOf(state.agent) || {}).name + '」的对话记录？', function () {
+          mem.sessions[state.agent] = [];
+          persist();
+          renderLog();
+        });
+      });
+      var input = dock.querySelector('[data-ai-input]');
+      dock.querySelector('[data-ai-go]').addEventListener('click', send);
+      input.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); send(); }
+      });
+      dock.querySelector('[data-ai-side]').addEventListener('click', function (ev) {
+        var row = ev.target.closest('[data-agent]');
+        if (!row) { return; }
+        pick(row.getAttribute('data-agent'));
+      });
+      renderSide();
+      renderLog();
+    }
+
+    function renderSide() {
+      if (!state.dock) { return; }
+      var side = state.dock.querySelector('[data-ai-side]');
+      var h = '';
+      for (var i = 0; i < state.agents.length; i++) {
+        var a = state.agents[i];
+        h += '<div class="ai-agent' + (a.code === state.agent ? ' on' : '')
+          + '" data-agent="' + a.code + '"><span class="n">' + esc(a.name)
+          + '</span><span class="h">' + esc(a.hint) + '</span></div>';
+      }
+      side.innerHTML = h;
+    }
+
+    function renderLog() {
+      if (!state.dock) { return; }
+      var log = state.dock.querySelector('[data-ai-log]');
+      log.innerHTML = '';
+      var msgs = thread(state.agent);
+      if (!msgs.length) {
+        var a = agentOf(state.agent);
+        log.innerHTML = '<div class="ai-empty">' + esc(a ? a.hint : '开始对话') + '</div>';
+        return;
+      }
+      for (var i = 0; i < msgs.length; i++) { paint(log, msgs[i]); }
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function paint(log, msg) {
+      var row = document.createElement('div');
+      row.className = 'ai-row ' + (msg.who === 'me' ? 'me' : 'ai');
+      var bubble = document.createElement('div');
+      bubble.className = 'ai-bubble' + (msg.bad ? ' bad' : '');
+      bubble.textContent = msg.text;
+      row.appendChild(bubble);
+      // A proposal from an agent that may act gets a confirm button; the SQL is
+      // only ever run after this second, explicit click.
+      var a = agentOf(state.agent);
+      if (msg.who === 'ai' && !msg.bad && a && a.apply) {
+        var sql = sqlOf(msg.text);
+        if (sql) { bubble.appendChild(applyBtn(sql)); }
+      }
+      log.appendChild(row);
+      return bubble;
+    }
+
+    function applyBtn(sql) {
+      var wrap = document.createElement('div');
+      wrap.className = 'ai-apply';
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = '确认建表';
+      btn.addEventListener('click', function () {
+        Layer.confirm('确认执行下面的建表语句？\n\n' + sql, function () {
+          btn.disabled = true;
+          btn.textContent = '执行中…';
+          fetch('/admin/dev/ai/apply', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ sql: sql, confirm: '1' }).toString()
+          }).then(function (r) { return r.json(); }).then(function (j) {
+            if (j && j.code === '0000') { Layer.msg('建表成功'); btn.textContent = '已建表'; }
+            else { Layer.notify('建表失败', (j && j.msg) || '请稍后再试', 'bad'); btn.disabled = false; btn.textContent = '确认建表'; }
+          }).catch(function () {
+            Layer.notify('建表失败', '请求未完成', 'bad');
+            btn.disabled = false; btn.textContent = '确认建表';
+          });
+        });
+      });
+      wrap.appendChild(btn);
+      return wrap;
+    }
+
+    function pick(code) {
+      state.agent = code;
+      mem.agent = code;
+      persist();
+      renderSide();
+      renderLog();
+      if (state.dock) { state.dock.querySelector('[data-ai-input]').focus(); }
+    }
+
+    function send() {
+      var input = state.dock.querySelector('[data-ai-input]');
+      var text = input.value.trim();
+      if (!text) { return; }
+      input.value = '';
+      var msgs = thread(state.agent);
+      msgs.push({ who: 'me', text: text });
+      persist();
+      var log = state.dock.querySelector('[data-ai-log]');
+      if (log.querySelector('.ai-empty')) { log.innerHTML = ''; }
+      paint(log, { who: 'me', text: text });
+      var pending = paint(log, { who: 'ai', text: '思考中…' });
+      log.scrollTop = log.scrollHeight;
+
+      var history = [];
+      for (var i = 0; i < msgs.length - 1; i++) {
+        history.push({ role: msgs[i].who === 'me' ? 'user' : 'assistant', content: msgs[i].text });
+      }
+      // The answer is streamed: /admin/dev/ai/stream replies with a
+      // text/event-stream and the bubble grows as the deltas land, so the
+      // operator sees the model writing instead of a spinner. The stream is
+      // read with fetch (not EventSource) because the request is a POST that
+      // carries the thread.
+      stream(text, history, msgs, log, pending);
+    }
+
+    // Reads an event stream of `delta` / `done` / `error` frames off a POST and
+    // paints each delta into the pending bubble. One connection, no polling.
+    function stream(text, history, msgs, log, pending) {
+      var body = new URLSearchParams({ agent: state.agent, q: text,
+                                       history: JSON.stringify(history) }).toString();
+      var answer = '';
+      var failed = '';
+      function finish() {
+        msgs.push({ who: 'ai', text: failed || answer || '（空回复）',
+                    bad: !!failed });
+        persist();
+        renderLog();
+      }
+      fetch('/admin/dev/ai/stream', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body
+      }).then(function (r) {
+        if (!r.body || !r.body.getReader) {
+          // No streaming in this browser: the non-streaming endpoint answers
+          // the same conversation in one shot.
+          return fetch('/admin/dev/ai/chat', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body
+          }).then(function (r2) { return r2.json(); }).then(function (j) {
+            var ok = j && j.code === '0000' && j.data;
+            if (ok) { answer = j.data.text || ''; }
+            else { failed = (j && j.msg) || '请求失败'; }
+            finish();
+          });
+        }
+        var reader = r.body.getReader();
+        var dec = new TextDecoder();
+        var buf = '';
+        function frame(block) {
+          var ev = 'message';
+          var data = '';
+          var lines = block.split('\n');
+          for (var i = 0; i < lines.length; i++) {
+            var ln = lines[i];
+            if (ln.indexOf('event:') === 0) { ev = ln.slice(6).trim(); }
+            else if (ln.indexOf('data:') === 0) { data += ln.slice(5).trim(); }
+          }
+          if (!data) { return; }
+          var d = null;
+          try { d = JSON.parse(data); } catch (e) { return; }
+          if (ev === 'delta') {
+            answer += d.text || '';
+            pending.textContent = answer;
+            log.scrollTop = log.scrollHeight;
+          } else if (ev === 'done') {
+            answer = d.text || answer;
+          } else if (ev === 'error') {
+            failed = d.text || '请求失败';
+          }
+        }
+        function pump() {
+          return reader.read().then(function (res) {
+            if (res.done) { finish(); return; }
+            buf += dec.decode(res.value, { stream: true });
+            var at = buf.indexOf('\n\n');
+            while (at >= 0) {
+              frame(buf.slice(0, at));
+              buf = buf.slice(at + 2);
+              at = buf.indexOf('\n\n');
+            }
+            return pump();
+          });
+        }
+        return pump();
+      }).catch(function () {
+        pending.textContent = '请求失败';
+        pending.classList.add('bad');
+        msgs.push({ who: 'ai', text: '请求失败', bad: true });
+        persist();
+      });
+    }
+
+    function show() {
+      if (!state.built) { build(); }
+      if (!state.agent || !agentOf(state.agent)) {
+        state.agent = (mem.agent && agentOf(mem.agent)) ? mem.agent
+          : (state.agents[0] ? state.agents[0].code : '');
+      }
+      renderSide();
+      renderLog();
+      state.dock.classList.add('on');
+      var input = state.dock.querySelector('[data-ai-input]');
+      if (input) { input.focus(); }
+    }
+    function hide() { if (state.dock) { state.dock.classList.remove('on'); } }
+
+    function refresh() {
+      return fetch('/admin/dev/ai/state', { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (j && j.code === '0000' && j.data) {
+            state.ready = !!j.data.ready;
+            state.agents = j.data.agents || [];
+          }
+        }).catch(function () {});
+    }
+
+    document.addEventListener('click', function (ev) {
+      if (!ev.target.closest('[data-ai-btn]')) { return; }
+      if (state.dock && state.dock.classList.contains('on')) { hide(); return; }
+      refresh().then(function () {
+        if (!state.ready) {
+          Layer.confirm('AI 助手还没有配置，现在去填服务商和 API Key？', function () {
+            var a = document.querySelector('.ad-side a[href="/admin/system/settings"]');
+            if (a) { a.click(); } else { location.href = '/admin/system/settings'; }
+          });
+          return;
+        }
+        show();
+      });
+    });
+
+    document.addEventListener('DOMContentLoaded', refresh);
+  })();
 
 })();
