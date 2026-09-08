@@ -29,11 +29,14 @@
  * APP_CMD_INIT_WINDOW, which pushes the repaint-wake event.
  *
  * IME: NativeActivity offers show/hide soft input natively
- * (ANativeActivity_showSoftInput); committed text needs the GameTextInput
- * static lib (or a small Java InputConnection) -- a later layer. v1
- * shows/hides the keyboard so single-line entry works where the IME
- * commits through key events; rich composing text waits for the JNI
- * bridge.
+ * (ANativeActivity_showSoftInput), but IMEs that commit through
+ * commitText (every CJK keyboard, most Latin ones) never produce key
+ * events a NativeActivity sees. The apk-shell dex carries dev.zan.app.ZanIme
+ * -- a hidden 1px view whose InputConnection receives the soft keyboard's
+ * commit stream and hands it to Java_dev_zan_app_ZanIme_zanCommit below,
+ * which pushes kind-6 (WM_CHAR) events. Clipboard set/get goes through the
+ * same activity's ClipboardManager over JNI, so both text plumbing needs
+ * ship with zero extra libraries.
  */
 
 #ifdef ZAN_GUI_ANDROID_NATIVE
@@ -905,17 +908,307 @@ static jobject zan_anw_bridge_activity(void) {
     return app && app->activity ? (jobject)app->activity->clazz : NULL;
 }
 
-EXPORT i32 zan_gui_set_clipboard(const char *utf8) { (void)utf8; return 1; }
-EXPORT const char *zan_gui_get_clipboard(void)     { return ""; }
+/* ---- JNI reach: clipboard + IME -----------------------------------------
+ * The activity's classloader resolves dev.zan.app.ZanIme (plain FindClass
+ * from a native thread only sees the system loader). Every helper degrades
+ * to the old stub behaviour when the dex predates the class: a shell built
+ * without ZanIme still runs, just without IME commits and clipboard. */
+
+/* UTF-16 -> UTF-8 (JNI strings are UTF-16): malloc'd NUL-terminated UTF-8,
+ * surrogate pairs folded, or NULL. */
+static char *ant_utf16_to_utf8(const jchar *in, jsize n) {
+    char *out = (char *)malloc((size_t)n * 4 + 1);
+    if (!out) return NULL;
+    size_t o = 0;
+    for (jsize i = 0; i < n; ) {
+        unsigned cp = in[i++];
+        if (cp >= 0xD800 && cp <= 0xDBFF && i < n &&
+            in[i] >= 0xDC00 && in[i] <= 0xDFFF) {
+            cp = 0x10000 + ((cp - 0xD800) << 10) + (unsigned)(in[i++] - 0xDC00);
+        }
+        if (cp < 0x80) {
+            out[o++] = (char)cp;
+        } else if (cp < 0x800) {
+            out[o++] = (char)(0xC0 | (cp >> 6));
+            out[o++] = (char)(0x80 | (cp & 63));
+        } else if (cp < 0x10000) {
+            out[o++] = (char)(0xE0 | (cp >> 12));
+            out[o++] = (char)(0x80 | ((cp >> 6) & 63));
+            out[o++] = (char)(0x80 | (cp & 63));
+        } else {
+            out[o++] = (char)(0xF0 | (cp >> 18));
+            out[o++] = (char)(0x80 | ((cp >> 12) & 63));
+            out[o++] = (char)(0x80 | ((cp >> 6) & 63));
+            out[o++] = (char)(0x80 | (cp & 63));
+        }
+    }
+    out[o] = 0;
+    return out;
+}
+
+/* UTF-8 -> UTF-16 (malloc'd jchars, *out_len set): invalid bytes become
+ * U+FFFD so a malformed clipboard can't overrun the caller's expectations. */
+static jchar *ant_utf8_to_utf16(const char *in, jsize *out_len) {
+    size_t n = strlen(in);
+    jchar *out = (jchar *)malloc((n + 1) * sizeof(jchar));
+    if (!out) return NULL;
+    size_t i = 0, o = 0;
+    while (i < n) {
+        unsigned char b = (unsigned char)in[i];
+        unsigned cp; int extra;
+        if (b < 0x80) { cp = b; extra = 0; i += 1; }
+        else if ((b & 0xE0) == 0xC0) { cp = b & 0x1F; extra = 1; i += 1; }
+        else if ((b & 0xF0) == 0xE0) { cp = b & 0x0F; extra = 2; i += 1; }
+        else if ((b & 0xF8) == 0xF0) { cp = b & 0x07; extra = 3; i += 1; }
+        else { out[o++] = 0xFFFD; i += 1; continue; }
+        int ok = 1;
+        for (int k = 0; k < extra; k++) {
+            if (i >= n || (in[i] & 0xC0) != 0x80) { ok = 0; break; }
+            cp = (cp << 6) | (unsigned char)(in[i++] & 0x3F);
+        }
+        if (!ok || (extra == 0 && cp > 0x7F) ||
+            (extra == 1 && cp < 0x80) || (extra == 2 && cp < 0x800) ||
+            (extra == 3 && cp < 0x10000) || cp > 0x10FFFF) {
+            out[o++] = 0xFFFD;
+            continue;
+        }
+        if (cp >= 0x10000) {
+            cp -= 0x10000;
+            out[o++] = (jchar)(0xD800 + (cp >> 10));
+            out[o++] = (jchar)(0xDC00 + (cp & 0x3FF));
+        } else {
+            out[o++] = (jchar)cp;
+        }
+    }
+    *out_len = (jsize)o;
+    return out;
+}
+
+/* dev.zan.app.ZanIme (apk-shell dex) + show/hide statics, cached. */
+static jclass g_ime_cls;
+static jmethodID g_ime_show, g_ime_hide;
+static void ant_ime_commit(JNIEnv *env, jclass clazz, jstring text);
+
+static int ant_ime_init(JNIEnv *env, jobject act) {
+    static int done = -1; /* -1 untried, 0 ok, 1 failed */
+    if (done == 0) return 0;
+    if (done == 1) return -1;
+    jclass aclazz = (*env)->GetObjectClass(env, act);
+    jmethodID gcl = (*env)->GetMethodID(env, aclazz, "getClassLoader",
+                                        "()Ljava/lang/ClassLoader;");
+    (*env)->DeleteLocalRef(env, aclazz);
+    if (!gcl) goto fail;
+    jobject loader = (*env)->CallObjectMethod(env, act, gcl);
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); goto fail; }
+    jclass lclazz = (*env)->GetObjectClass(env, loader);
+    jmethodID load = (*env)->GetMethodID(env, lclazz, "loadClass",
+                                         "(Ljava/lang/String;)Ljava/lang/Class;");
+    (*env)->DeleteLocalRef(env, lclazz);
+    if (!load) { (*env)->DeleteLocalRef(env, loader); goto fail; }
+    jstring name = (*env)->NewStringUTF(env, "dev.zan.app.ZanIme");
+    jclass cls = (jclass)(*env)->CallObjectMethod(env, loader, load, name);
+    (*env)->DeleteLocalRef(env, loader);
+    (*env)->DeleteLocalRef(env, name);
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); goto fail; }
+    if (!cls) goto fail;
+    g_ime_show = (*env)->GetStaticMethodID(env, cls, "show",
+                                           "(Landroid/app/Activity;)V");
+    g_ime_hide = (*env)->GetStaticMethodID(env, cls, "hide",
+                                           "(Landroid/app/Activity;)V");
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); }
+    if (!g_ime_show || !g_ime_hide) {
+        (*env)->DeleteLocalRef(env, cls);
+        goto fail;
+    }
+    g_ime_cls = (jclass)(*env)->NewGlobalRef(env, cls);
+    (*env)->DeleteLocalRef(env, cls);
+    if (!g_ime_cls) goto fail;
+    /* Register zanCommit explicitly: the framework NativeActivity loads
+     * libmain.so under the boot classloader, and Android 7+ scopes the
+     * automatic Java_* name lookup to the loading classloader -- the
+     * app-classloader-loaded ZanIme would never find the symbol that way
+     * (UnsatisfiedLinkError on the first commit). RegisterNatives binds the
+     * method on the jclass itself and ignores classloader namespaces. */
+    {
+        static const JNINativeMethod k_commit[] = {
+            { "zanCommit", "(Ljava/lang/String;)V", (void *)&ant_ime_commit },
+        };
+        if ((*env)->RegisterNatives(env, g_ime_cls, k_commit, 1) != 0 ||
+            (*env)->ExceptionCheck(env)) {
+            if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+            goto fail;
+        }
+    }
+    done = 0;
+    return 0;
+fail:
+    done = 1;
+    return -1;
+}
+
+/* Soft keyboard commits from ZanIme's InputConnection: one kind-6
+ * (WM_CHAR-equivalent) event per codepoint, mirroring the SDL shell's
+ * SDL_EVENT_TEXT_INPUT translation. Arrives on the UI thread; the ring
+ * lock makes that safe. Reached through the RegisterNatives binding set
+ * in ant_ime_init; the Java_* export below is kept for direct loads. */
+static void ant_ime_commit(JNIEnv *env, jclass clazz, jstring text) {
+    (void)clazz;
+    if (!env || !text) return;
+    jsize n = (*env)->GetStringLength(env, text);
+    const jchar *chars = (*env)->GetStringChars(env, text, NULL);
+    if (!chars) return;
+    pthread_mutex_lock(&g_aq_lock);
+    for (jsize i = 0; i < n; ) {
+        unsigned cp = chars[i++];
+        if (cp >= 0xD800 && cp <= 0xDBFF && i < n &&
+            chars[i] >= 0xDC00 && chars[i] <= 0xDFFF) {
+            cp = 0x10000 + ((cp - 0xD800) << 10) + (unsigned)(chars[i++] - 0xDC00);
+        }
+        aq_push_locked(6, 0, 0, 0, (i32)cp, 0);
+    }
+    pthread_mutex_unlock(&g_aq_lock);
+    (*env)->ReleaseStringChars(env, text, chars);
+}
+
+JNIEXPORT void JNICALL
+Java_dev_zan_app_ZanIme_zanCommit(JNIEnv *env, jclass clazz, jstring text) {
+    ant_ime_commit(env, clazz, text);
+}
+
+EXPORT i32 zan_gui_set_clipboard(const char *utf8) {
+    JNIEnv *env = zan_anw_bridge_env();
+    jobject ctx = zan_anw_bridge_activity();
+    if (!env || !ctx || !utf8) return 1;
+    jsize len = 0;
+    jchar *u16 = ant_utf8_to_utf16(utf8, &len);
+    if (!u16) return 1;
+    jstring text = (*env)->NewString(env, u16, len);
+    free(u16);
+    if (!text) { if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env); return 1; }
+    jclass cctx = (*env)->FindClass(env, "android/content/Context");
+    jmethodID getService = cctx ? (*env)->GetMethodID(env, cctx, "getSystemService",
+        "(Ljava/lang/String;)Ljava/lang/Object;") : NULL;
+    jstring name = getService ? (*env)->NewStringUTF(env, "clipboard") : NULL;
+    jobject cm = getService
+        ? (*env)->CallObjectMethod(env, ctx, getService, name) : NULL;
+    if (name) (*env)->DeleteLocalRef(env, name);
+    if (cctx) (*env)->DeleteLocalRef(env, cctx);
+    if ((*env)->ExceptionCheck(env) || !cm) {
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        (*env)->DeleteLocalRef(env, text);
+        return 1;
+    }
+    jclass cd = (*env)->FindClass(env, "android/content/ClipData");
+    jmethodID npt = cd ? (*env)->GetStaticMethodID(env, cd, "newPlainText",
+        "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)"
+        "Landroid/content/ClipData;") : NULL;
+    jstring label = npt ? (*env)->NewStringUTF(env, "zan") : NULL;
+    jobject clip = npt
+        ? (*env)->CallStaticObjectMethod(env, cd, npt, label, text) : NULL;
+    if (label) (*env)->DeleteLocalRef(env, label);
+    if (cd) (*env)->DeleteLocalRef(env, cd);
+    if ((*env)->ExceptionCheck(env) || !clip) {
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        (*env)->DeleteLocalRef(env, cm);
+        (*env)->DeleteLocalRef(env, text);
+        return 1;
+    }
+    jclass cmc = (*env)->GetObjectClass(env, cm);
+    jmethodID setc = (*env)->GetMethodID(env, cmc, "setPrimaryClip",
+                                         "(Landroid/content/ClipData;)V");
+    (*env)->DeleteLocalRef(env, cmc);
+    if (setc) (*env)->CallVoidMethod(env, cm, setc, clip);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    (*env)->DeleteLocalRef(env, clip);
+    (*env)->DeleteLocalRef(env, cm);
+    (*env)->DeleteLocalRef(env, text);
+    return setc ? 0 : 1;
+}
+
+/* Read the clipboard's text as UTF-8. Mirrors the Windows/X11/macOS ABI:
+ * returns a NUL-terminated string valid until the next call, or "" when
+ * the clipboard holds no text. */
+EXPORT const char *zan_gui_get_clipboard(void) {
+    static char *g_clip_buf = NULL;
+    JNIEnv *env = zan_anw_bridge_env();
+    jobject ctx = zan_anw_bridge_activity();
+    if (!env || !ctx) return "";
+    jclass cctx = (*env)->FindClass(env, "android/content/Context");
+    jmethodID getService = cctx ? (*env)->GetMethodID(env, cctx, "getSystemService",
+        "(Ljava/lang/String;)Ljava/lang/Object;") : NULL;
+    jstring name = getService ? (*env)->NewStringUTF(env, "clipboard") : NULL;
+    jobject cm = getService
+        ? (*env)->CallObjectMethod(env, ctx, getService, name) : NULL;
+    if (name) (*env)->DeleteLocalRef(env, name);
+    if (cctx) (*env)->DeleteLocalRef(env, cctx);
+    if ((*env)->ExceptionCheck(env) || !cm) {
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        return "";
+    }
+    jclass cmc = (*env)->GetObjectClass(env, cm);
+    jmethodID getc = (*env)->GetMethodID(env, cmc, "getPrimaryClip",
+                                         "()Landroid/content/ClipData;");
+    jobject clip = getc ? (*env)->CallObjectMethod(env, cm, getc) : NULL;
+    (*env)->DeleteLocalRef(env, cmc);
+    jstring text = NULL;
+    if (!(*env)->ExceptionCheck(env) && clip) {
+        jclass clc = (*env)->GetObjectClass(env, clip);
+        jmethodID geti = (*env)->GetMethodID(env, clc, "getItemAt",
+            "(I)Landroid/content/ClipData$Item;");
+        jobject item = geti ? (*env)->CallObjectMethod(env, clip, geti, 0) : NULL;
+        (*env)->DeleteLocalRef(env, clc);
+        if (!(*env)->ExceptionCheck(env) && item) {
+            jclass itc = (*env)->GetObjectClass(env, item);
+            jmethodID gt = (*env)->GetMethodID(env, itc, "getText",
+                                               "()Ljava/lang/CharSequence;");
+            jobject cs = gt ? (*env)->CallObjectMethod(env, item, gt) : NULL;
+            (*env)->DeleteLocalRef(env, itc);
+            if (!(*env)->ExceptionCheck(env) && cs) {
+                jclass csc = (*env)->GetObjectClass(env, cs);
+                jmethodID ts = (*env)->GetMethodID(env, csc, "toString",
+                                                   "()Ljava/lang/String;");
+                (*env)->DeleteLocalRef(env, csc);
+                if (ts) text = (jstring)(*env)->CallObjectMethod(env, cs, ts);
+                (*env)->DeleteLocalRef(env, cs);
+            }
+            (*env)->DeleteLocalRef(env, item);
+        }
+        (*env)->DeleteLocalRef(env, clip);
+    }
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); }
+    (*env)->DeleteLocalRef(env, cm);
+    if (!text) return "";
+    jsize n = (*env)->GetStringLength(env, text);
+    const jchar *chars = (*env)->GetStringChars(env, text, NULL);
+    if (!chars) { (*env)->DeleteLocalRef(env, text); return ""; }
+    char *nb = ant_utf16_to_utf8(chars, n);
+    (*env)->ReleaseStringChars(env, text, chars);
+    (*env)->DeleteLocalRef(env, text);
+    if (!nb) return "";
+    free(g_clip_buf);
+    g_clip_buf = nb;
+    return g_clip_buf;
+}
+
 EXPORT int  zan_gui_drop_pending(void)             { return 0; }
 EXPORT const char *zan_gui_drop_take(void)         { return ""; }
 EXPORT void zan_gui_set_ime_pos(i32 x, i32 y)      { (void)x; (void)y; }
 
-/* Soft keyboard show/hide through the framework (the part NativeActivity
- * does natively). Committed text waits for the GameTextInput bridge. */
+/* Soft keyboard open/close. Preferred path: ZanIme (hidden InputConnection
+ * view + IMM), which is also what carries commitText-based IMEs (CJK).
+ * Falls back to the framework's NativeActivity entry points when the dex
+ * predates the class -- key-event IMEs still work there. */
 EXPORT i32 zan_gui_set_ime_open(i32 on) {
     struct android_app *app = g_anw.app;
     if (!app || !app->activity) return 1;
+    JNIEnv *env = zan_anw_bridge_env();
+    jobject act = zan_anw_bridge_activity();
+    if (env && act && ant_ime_init(env, act) == 0) {
+        (*env)->CallStaticVoidMethod(env, g_ime_cls,
+                                     on ? g_ime_show : g_ime_hide, act);
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        return 0;
+    }
     if (on) {
         ANativeActivity_showSoftInput(app->activity,
             ANATIVEACTIVITY_SHOW_SOFT_INPUT_FORCED);

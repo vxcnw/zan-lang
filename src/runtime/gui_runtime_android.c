@@ -1,10 +1,10 @@
 /* gui_runtime_android.c -- Android system-WebView backend for the embedded
  * browser control (Gui.Component.WebView's WebViewBackend).
  *
- * #included by gui_runtime.c after gui_runtime_sdl.c; compiles only in
+ * #included by gui_runtime.c after the windowing backend part; compiles only in
  * __ANDROID__ builds of the zan_gui driver. The engine is the per-device
  * system WebView: one android.webkit.WebView per Zan handle, overlaid on the
- * SDL surface by the Java side (org.zan.app.ZanWeb, packaged in the APK
+ * app surface by the Java side (org.zan.app.ZanWeb, packaged in the APK
  * shell's classes.dex -- see toolchain/apk-shell/java). Every view operation
  * hops to the UI thread inside ZanWeb; page events come back through the
  * single zanGuiWebEvent JNI sink and update the per-handle state cache that
@@ -20,14 +20,11 @@
 
 #include <errno.h>
 #include <jni.h>
-#if !defined(ZAN_GUI_SDL)
-/* NativeActivity shell: the bridge reaches the JVM through the activity the
- * glue recorded instead of SDL's helpers (which don't exist in this build). */
+/* The JNI reach goes through the windowing shell's bridge helpers: the
+ * NativeActivity shell (gui_runtime_android_native.c) hands out the glue's
+ * env/activity. */
 static JNIEnv *zan_anw_bridge_env(void);
 static jobject  zan_anw_bridge_activity(void);
-#define SDL_GetAndroidJNIEnv()  ((JNIEnv *)zan_anw_bridge_env())
-#define SDL_GetAndroidActivity() (zan_anw_bridge_activity())
-#endif
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -143,18 +140,18 @@ static char *awv_cstr(JNIEnv *env, jstring s) {
 
 /* Cache the bridge class and entry points. Runs on the first webview call:
  * the app classloader is reached through the activity because FindClass from
- * an SDL thread only sees the system loader. */
+ * a native thread only sees the system loader. */
 static int awv_init(void) {
     static int done = -1;
     if (done == 0) { return 0; }
     if (done > 0) { return -1; }
-    JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
+    JNIEnv *env = zan_anw_bridge_env();
     if (!env) { AWV_LOG("init: no JNIEnv"); return -1; }
     if ((*env)->GetJavaVM(env, &g_awv_vm) != JNI_OK) {
         AWV_LOG("init: GetJavaVM failed");
         return -1;
     }
-    jobject act = SDL_GetAndroidActivity();
+    jobject act = zan_anw_bridge_activity();
     if (!act) { AWV_LOG("init: no activity"); return -1; }
 
     jclass aclazz = (*env)->GetObjectClass(env, act);
@@ -259,10 +256,11 @@ fail:
     return -1;
 }
 
-/* JNIEnv for the calling thread: SDL threads arrive attached, UI/Javascript
- * threads come pre-attached with their own env through the JNI sink. */
+/* JNIEnv for the calling thread: native threads arrive attached via the
+ * shell bridge, UI/Javascript threads come pre-attached with their own
+ * env through the JNI sink. */
 static JNIEnv *awv_env(void) {
-    JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
+    JNIEnv *env = zan_anw_bridge_env();
     if (env) { return env; }
     if (!g_awv_vm) { return NULL; }
     if ((*g_awv_vm)->AttachCurrentThread(g_awv_vm, &env, NULL) != JNI_OK) {
@@ -271,14 +269,14 @@ static JNIEnv *awv_env(void) {
     return env;
 }
 
-/* ZanWeb's static methods all start with the Activity (fetched from SDL);
+/* ZanWeb's static methods all start with the Activity (from the bridge);
  * these helpers dispatch each argument shape and clear any Java exception.
  * String arguments accept NULL. */
 static int awv_begin(JNIEnv **env, jobject *act) {
     if (!g_awv_bridge) { return -1; }
     *env = awv_env();
     if (!*env) { return -1; }
-    *act = SDL_GetAndroidActivity();
+    *act = zan_anw_bridge_activity();
     if (!*act) { return -1; }
     return 0;
 }
@@ -433,7 +431,7 @@ Java_org_zan_app_ZanWeb_zanGuiWebEvent(JNIEnv *env, jclass clazz, jint id,
 /* ---- zan_gui_webview_* exports (see WebViewBackend.zan for the contract) */
 
 EXPORT i32 zan_gui_webview_create(i64 hwnd, const char *profileId) {
-    (void)hwnd;      /* one SDL window == the whole activity surface */
+    (void)hwnd;      /* one app window == the whole activity surface */
     (void)profileId; /* CookieManager is process-global: no per-profile stores */
     if (awv_init() != 0) { AWV_LOG("create: init failed"); return 0; }
     pthread_mutex_lock(&g_awv_lock);

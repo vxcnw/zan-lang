@@ -2977,6 +2977,19 @@ int main(int argc, char **argv) {
                                    driver_reg.entries[didx].module,
                                    zan_driver_subdir(&target), nlen, nm);
                           resolvable = zan_file_exists(stubso);
+                          if (!resolvable) {
+                              /* --link-mode static: the driver may ship
+                               * only the static archive shape, no shared
+                               * library (the android zan_gui driver does).
+                               * The link branch resolves it through
+                               * drivers/<target>/static. */
+                              snprintf(stubso, sizeof(stubso),
+                                       "%s/%s/drivers/%s/static/lib%.*s.a",
+                                       resolved_stdlib_root,
+                                       driver_reg.entries[didx].module,
+                                       zan_driver_subdir(&target), nlen, nm);
+                              resolvable = zan_file_exists(stubso);
+                          }
                       }
                   }
                 }
@@ -4281,15 +4294,17 @@ int main(int argc, char **argv) {
                     }
                 } else if (cross_compiling &&
                            target.os == ZAN_OS_ANDROID) {
-                    /* Android shared library: an SDLActivity-shell program
-                     * (libmain.so inside an APK). SDL3's Java activity
-                     * dlopens the app's "main" shared library and calls
-                     * SDL_main(argc, argv); SDL_main.o (in the sysroot
-                     * subset) adapts that to the module's main(i32, i8**).
-                     * The library links against the same stub .so files as
-                     * the dynamic exe path, and any [DllImport] drivers
-                     * resolve from the search dirs above at APK install
-                     * time (nativeLibraryDir holds every packaged .so). */
+                    /* Android shared library: the NativeActivity shell's
+                     * libmain.so inside an APK. The framework dlopens the
+                     * app's "main" shared library and calls
+                     * ANativeActivity_onCreate -- provided by
+                     * android_native_app_glue.o (in the sysroot subset),
+                     * which spawns the app thread and enters the module's
+                     * main(i32, i8**). The library links against the same
+                     * stub .so files as the dynamic exe path, and any
+                     * [DllImport] drivers resolve from the search dirs
+                     * above at APK install time (nativeLibraryDir holds
+                     * every packaged .so). */
                     char exe_dir3[1024] = {0};
                     zan_exe_dir(exe_dir3, sizeof(exe_dir3));
                     const char *asub3 = (target.arch == ZAN_ARCH_AARCH64)
@@ -4297,7 +4312,8 @@ int main(int argc, char **argv) {
                     char sys3[1200];
                     snprintf(sys3, sizeof(sys3), "%s/%s", exe_dir3, asub3);
                     char probe3[1300];
-                    snprintf(probe3, sizeof(probe3), "%s/SDL_main.o", sys3);
+                    snprintf(probe3, sizeof(probe3),
+                             "%s/android_native_app_glue.o", sys3);
                     if (!zan_file_exists(probe3)) {
                         fprintf(stderr,
                                 "error: bundled %s sysroot subset not found "
@@ -4311,8 +4327,9 @@ int main(int argc, char **argv) {
                         return 1;
                     }
                     snprintf(cmd, sizeof(cmd),
-                             "ld.lld -shared -o \"%s\" \"%s/SDL_main.o\""
-                             " \"%s\"", obj_path, sys3, obj_tmp);
+                             "ld.lld -shared -o \"%s\""
+                             " \"%s/android_native_app_glue.o\" \"%s\"",
+                             obj_path, sys3, obj_tmp);
                     for (int di = 0; di < zan_lib_ndirs; di++) {
                         size_t cur = strlen(cmd);
                         snprintf(cmd + cur, sizeof(cmd) - cur, " -L\"%s\"",
@@ -4371,31 +4388,19 @@ int main(int argc, char **argv) {
                                " \"%s/libc.so\" \"%s/libm.so\""
                                " \"%s/liblog.so\" \"%s/libdl.so\"",
                                sys3, sys3, sys3, sys3); }
-                    /* NativeActivity shell support: the glue object
-                     * (NDK's android_native_app_glue, providing
-                     * ANativeActivity_onCreate and the android_main
-                     * that calls the module's main) links whenever the
-                     * staged shell exists, in both link flavors -- SDL
-                     * builds simply never call it, and the module
-                     * carries both entries. libandroid
+                    /* NativeActivity system libraries: libandroid
                      * (ANativeWindow/ANativeActivity/ALooper/
                      * AInputQueue), libEGL and libGLESv2 (the EGL
                      * present path) go on as sysroot stubs so the
                      * dlopened library records its full dependency
                      * group, the same policy as the OHOS branch below
-                     * (libc etc. stay explicit above). */
-                    {
-                        char glue[1400];
-                        snprintf(glue, sizeof(glue),
-                                 "%s/android_native_app_glue.o", sys3);
-                        if (zan_file_exists(glue)) {
-                            size_t cur = strlen(cmd);
-                            snprintf(cmd + cur, sizeof(cmd) - cur,
-                                     " \"%s/libandroid.so\" \"%s/libEGL.so\""
-                                     " \"%s/libGLESv2.so\" \"%s\"",
-                                     sys3, sys3, sys3, glue);
-                        }
-                    }
+                     * (libc etc. stay explicit above; the glue object is
+                     * already at the head of the line). */
+                    { size_t cur = strlen(cmd);
+                      snprintf(cmd + cur, sizeof(cmd) - cur,
+                               " \"%s/libandroid.so\" \"%s/libEGL.so\""
+                               " \"%s/libGLESv2.so\"",
+                               sys3, sys3, sys3); }
                     { size_t cur = strlen(cmd);
                       snprintf(cmd + cur, sizeof(cmd) - cur,
                                " \"%s/libclang_rt.builtins.a\"",
