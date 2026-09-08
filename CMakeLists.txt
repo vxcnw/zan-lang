@@ -2404,6 +2404,17 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
       -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_zform_grid${_exe_ext}
       -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
 
+  # Navigation layer: route table + Tabs-as-outlet (lazy build, keepAlive,
+  # ephemeral destroy-on-leave) + window back-stack bookkeeping, headless.
+  add_test(NAME conformance_gui_nav
+    COMMAND ${CMAKE_COMMAND}
+      -DZANC=$<TARGET_FILE:zanc>
+      -DSRC=${CMAKE_SOURCE_DIR}/tests/gui/nav_test.zan
+      "-DZANC_ARGS=--auto-stdlib${_gui_driver_tail}"
+      -DEXPECTED=${CMAKE_SOURCE_DIR}/tests/conformance/gui_nav.out
+      -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_nav${_exe_ext}
+      -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
+
   # The generated IGameScene adapter: a .zscene projects a nested
   # `partial class <Name>Scene : Game.Foundation.IGameScene` whose Enter/Exit
   # route through the code-behind's OnScene* hooks, Doc() exposes the live
