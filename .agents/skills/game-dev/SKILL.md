@@ -83,6 +83,40 @@ description: Zan 上做 2D 游戏(templates/game/* 与 stdlib/Game)的帧循环�
 审计:grep `DrawText(`、内联 `dpiScale`/`Scale(` 乘法、裸字号数字——
 每处命中都是错乱候选;HUD 截图里量一遍字号,与 theme 阶梯对照。
 
+## 游戏舞台的统一 DPI 契约（GuiHost，脱 SDL 定式）
+
+固定分辨率游戏走 `Game.Foundation.Gui.GuiHost` + `Game.Kit.CanvasPrims`，
+**不要自创"物理像素窗口"路径**——三条坑都踩过：①普通 `CreateDark` 按显示
+器 DPI 放大客户区，150% 屏上 1280x720 舞台只占 1920x1080 画布的左上角；
+②自建物理像素窗口又丢了标题栏，且撞上工作区 82% 钳制（副屏把 1280x720
+钳成 868x517）；③chrome 字号跟 dpiScale、标题条高度跟设备 DPI，两套来源
+在舞台窗口里对不齐（32px 字挤 48px 条）。统一契约（已在 stdlib 实现，
+模板只需遵守）：
+
+- 窗口:`App.CreateDarkStage(title, w, h)`——客户区 = 舞台 w×h + 标准标题
+  条（设备像素），不做 DPI 放大、不参与工作区/最小尺寸钳制、不做
+  AdjustWindowRect 补偿（NCCALCSIZE 已把客户区扩成整窗）。
+- 绘制:模板按 0 基舞台坐标作画，帧首 `CDraw.Origin(0, host.ContentTop())`，
+  清屏用 `CDraw.Clear`（只铺内容区）；所有 C* 助手自动叠加原点，绕开 C*
+  直调 canvas 的绘制会漏偏移。chrome 由宿主在 `loop.Render` 之后
+  `RenderChrome` 叠画，皮肤按钮默认关；全屏（ContentTop==0）自然退化。
+- 输入:鼠标是客户区坐标，y 减 `host.ContentTop()` 换回舞台坐标。
+- 验证:客户区物理尺寸应为 `w × (h + 32*dpi/96)`。
+
+**非 DPI 感知进程的测量是假象**:150% 屏上 1280x768 物理窗会报成
+853x512（÷1.5 虚拟化），别拿它反推"钳制/缩放 bug"——截图/测量脚本先
+`SetProcessDpiAwarenessContext(-4)`（见 `_scratch/GuiHostProbe/shotpid.ps1`）。
+同理，ctest 冒烟在并行会话构建时会假失败（共享 build\zanc.exe），单独
+重跑一次再定论。
+
+## 追逐平衡：吸力/拉力必须压过目标速度
+
+"每帧向移动目标收拢"的磁吸（糖果吸向蛇头、相机跟角色、吸附对齐），
+若吸力是**固定值**且 ≤ 目标速度，目标一跑起来吸附物会吊在触发圈边缘
+一路跟跑、永远到不了——观感即"糖果粘在身上跟着跑"。吸力绑定目标当前
+速度取倍数（如 `1.5×速度 + 常数`），保证圈内确定性捕获；蛇蛇乐磁吸
+260px/s 固定值 vs 冲刺 348px/s 即踩坑。
+
 ## 手感：参数曲线，不是常数
 
 - "速度"是一个**按对象属性分档的曲线**（如收线速度=重的慢轻的快，轻重差

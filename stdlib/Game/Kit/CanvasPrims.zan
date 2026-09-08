@@ -1,0 +1,190 @@
+// Game.Kit 的画布直绘层：Sprite/Draw/Text/KitUi 在 stdlib/Gui Canvas 上的
+// 等价实现，供 GuiHost（Game.Foundation.Gui）主循环的游戏模板使用——
+// SDL 版烘焙纹理（SdlTexture.CreateTarget）的地方改成立即模式直绘，
+// 窗口/事件/呈现由 Gui 原生外壳承担，不依赖 SDL。
+using System;
+using Gui;
+
+namespace Game.Kit;
+
+// 光晕与实心圆盘：SDL 版 Sprite 把圆盘/径向衰减烘焙成纹理再一个四边形
+// 贴出；画布版 FillRadial 原生就是"中心 innerAlpha 平滑衰减到半径处 0"。
+class CSprite {
+    // 柔和光环（边缘 alpha 衰减到 0）。
+    static void Glow(Canvas c, int cx, int cy, int rad,
+                     int cr, int cg, int cb, int ca) {
+        if (rad <= 0) { return; }
+        c.FillRadial(cx + CDraw.originX, cy + CDraw.originY, rad,
+                     CDraw.Argb(255, cr, cg, cb), ca);
+    }
+
+    // 实心带透明度的圆盘。
+    static void Ball(Canvas c, int cx, int cy, int rad,
+                     int cr, int cg, int cb, int ca) {
+        if (rad <= 0) { return; }
+        c.FillCircle(cx + CDraw.originX, cy + CDraw.originY, rad,
+                     CDraw.Argb(ca, cr, cg, cb));
+    }
+}
+
+// 画布上的整数几何原语（SDL 版 Draw 的等价子集）。
+// 所有 C* 绘制都叠加模块级原点（Origin）：GuiHost 的窗口带标准
+// 标题栏，模板按 0 基舞台坐标绘制，帧首 Origin(0, host.ContentTop())
+// 即可整体落到标题栏之下；全屏（ContentTop()==0）自然退化。
+class CDraw {
+    static int originX;
+    static int originY;
+
+    /// 设置本帧舞台绘制的画布原点；模板 Render 开头调用一次。
+    static void Origin(int x, int y) {
+        CDraw.originX = x;
+        CDraw.originY = y;
+    }
+
+    // 画布颜色是 0xAARRGGBB。
+    static int Argb(int a, int r, int g, int b) {
+        return a * 16777216 + r * 65536 + g * 256 + b;
+    }
+
+    static void FillRect(Canvas c, int x, int y, int w, int h, int color) {
+        c.FillRect(x + originX, y + originY, w, h, color);
+    }
+
+    static void FillVGrad(Canvas c, int x, int y, int w, int h,
+                          int colorTop, int colorBottom) {
+        c.FillVGrad(x + originX, y + originY, w, h, colorTop, colorBottom);
+    }
+
+    // 清舞台矩形（清屏色只铺内容区，标题栏由 chrome 自绘）。
+    static void Clear(Canvas c, int w, int h, int color) {
+        c.FillRect(originX, originY, w, h, color);
+    }
+
+    // 按路径缩放绘制整幅图片（解码缓存由画布持有）。
+    static void BlitImage(Canvas c, string path, int dx, int dy, int dw, int dh) {
+        c.BlitImage(path, dx + originX, dy + originY, dw, dh, 0, 0, 0, 0);
+    }
+
+    static void RoundRectFill(Canvas c, int x, int y, int w, int h, int rad,
+                              int cr, int cg, int cb, int ca) {
+        if (w <= 0 || h <= 0) { return; }
+        if (rad * 2 > w) { rad = w / 2; }
+        if (rad * 2 > h) { rad = h / 2; }
+        c.FillRoundRect(x + originX, y + originY, w, h, rad, Argb(ca, cr, cg, cb));
+    }
+
+    // 矩形描边环（厚度 t，画在矩形内侧）。
+    static void RingRect(Canvas c, int x, int y, int w, int h, int t,
+                         int cr, int cg, int cb, int ca) {
+        if (w <= 0 || h <= 0 || t <= 0) { return; }
+        int col = Argb(ca, cr, cg, cb);
+        c.FillRect(x + originX, y + originY, w, t, col);
+        c.FillRect(x + originX, y + originY + h - t, w, t, col);
+        c.FillRect(x + originX, y + originY, t, h, col);
+        c.FillRect(x + originX + w - t, y + originY, t, h, col);
+    }
+
+    static void FillCircle(Canvas c, int cx, int cy, int rad,
+                           int cr, int cg, int cb, int ca) {
+        if (rad <= 0) { return; }
+        c.FillCircle(cx + originX, cy + originY, rad, Argb(ca, cr, cg, cb));
+    }
+
+    static bool PointIn(int px, int py, int x, int y, int w, int h) {
+        return px >= x && px < x + w && py >= y && py < y + h;
+    }
+}
+
+// 系统字体文字（SDL 版 Text 走 SysFont；画布版 DrawText 本就是系统
+// 字体，scale 沿用 Kit 的"字号档"语义：PxOf = scale*9 像素）。
+class CText {
+    // Kit scale 档 → 画布字号（对齐 SysFont.PxOf，HUD 版式不用重调）。
+    static int FontPx(int scale) {
+        if (scale < 1) { scale = 1; }
+        return scale * 9;
+    }
+    static int LineHeight(int scale) { return CText.FontPx(scale); }
+
+    // 左上角锚定（y 是行盒顶，不是基线）——与 Text.Draw 契约一致。
+    // 其余 CText 入口（居中/阴影）全部经此落笔，原点只加这一处。
+    static void Draw(Canvas c, string text, int x, int y, int scale,
+                     int cr, int cg, int cb, int ca) {
+        if (text == null || text.Length == 0) { return; }
+        c.DrawText(x + CDraw.originX, y + CDraw.originY, text,
+                   CDraw.Argb(ca, cr, cg, cb), CText.FontPx(scale));
+    }
+
+    static void DrawCentered(Canvas c, string text, int centerX, int y,
+                             int scale, int cr, int cg, int cb, int ca) {
+        if (text == null || text.Length == 0) { return; }
+        int w = Canvas.MeasureText(text, CText.FontPx(scale));
+        CText.Draw(c, text, centerX - w / 2, y, scale, cr, cg, cb, ca);
+    }
+
+    // 软阴影：偏移随字号取小值，主文字透明度单独给（同 Text.DrawShadow）。
+    static void DrawShadow(Canvas c, string text, int x, int y, int scale,
+                           int cr, int cg, int cb, int ca) {
+        if (text == null || text.Length == 0) { return; }
+        int so = 1 + scale;
+        CText.Draw(c, text, x + so, y + so, scale, 0, 0, 0, 150);
+        CText.Draw(c, text, x, y, scale, cr, cg, cb, ca);
+    }
+
+    static void DrawCenteredShadow(Canvas c, string text, int centerX, int y,
+                                   int scale, int cr, int cg, int cb, int ca) {
+        if (text == null || text.Length == 0) { return; }
+        int w = Canvas.MeasureText(text, CText.FontPx(scale));
+        CText.DrawShadow(c, text, centerX - w / 2, y, scale, cr, cg, cb, ca);
+    }
+}
+
+// 共享 UI 套件（SDL 版 KitUi 的画布等价）：整幅铺底图 + 压暗纱，
+// 三态圆角按钮。颜色/层次与 KitUi 逐项对齐，游戏菜单观感不变。
+class CKitUi {
+    // 背景图铺满画布（路径为空退化为竖向渐变），再叠可读性压暗纱。
+    static void Backdrop(Canvas c, string bgPath, int w, int h) {
+        if (bgPath != null && bgPath.Length > 0) {
+            CDraw.BlitImage(c, bgPath, 0, 0, w, h);
+        } else {
+            CDraw.FillVGrad(c, 0, 0, w, h, CDraw.Argb(255, 18, 22, 32),
+                            CDraw.Argb(255, 8, 10, 16));
+        }
+        CDraw.FillVGrad(c, 0, 0, w, h, CDraw.Argb(70, 6, 8, 14),
+                        CDraw.Argb(70, 6, 8, 14));
+        CDraw.FillVGrad(c, 0, h * 3 / 5, w, h * 2 / 5, CDraw.Argb(150, 6, 8, 14),
+                        CDraw.Argb(150, 8, 10, 16));
+    }
+
+    // 三态扁平圆角按钮（kind: 0 普通、1 强调、2 选中），悬停返回 true。
+    // 配色与 KitUi.Button 逐项一致。
+    static bool Button(Canvas c, int mx, int my, int x, int y, int w, int h,
+                       string label, int scale, int kind) {
+        bool hov = CDraw.PointIn(mx, my, x, y, w, h);
+        int mr = 47; int mg = 54; int mb = 72;
+        int tc = 238;
+        if (kind == 1) {
+            mr = 44; mg = 128; mb = 88;
+        } else if (kind == 2) {
+            mr = 226; mg = 178; mb = 64; tc = 36;
+        }
+        if (hov) {
+            if (kind == 1) { mr = 56; mg = 152; mb = 104; }
+            else if (kind == 2) { mr = 244; mg = 196; mb = 78; }
+            else { mr = 62; mg = 71; mb = 96; }
+        }
+        if (hov) {
+            int gr = 130; int gg = 190; int gb = 245;
+            if (kind == 1) { gr = 120; gg = 230; gb = 170; }
+            if (kind == 2) { gr = 250; gg = 210; gb = 110; }
+            CDraw.RoundRectFill(c, x - 5, y - 5, w + 10, h + 10, 17, gr, gg, gb, 50);
+        }
+        // 深色外圈 + 平色主体 + 一道极细内亮边（无中线分缝）。
+        CDraw.RoundRectFill(c, x - 2, y - 2, w + 4, h + 4, 14, 10, 12, 20, 240);
+        CDraw.RoundRectFill(c, x, y, w, h, 12, mr, mg, mb, 255);
+        c.DrawRoundRect(x + 1 + CDraw.originX, y + 1 + CDraw.originY,
+                        w - 2, h - 2, 11, CDraw.Argb(28, 255, 255, 255), 1);
+        CText.DrawCenteredShadow(c, label, x + w / 2, y + (h - CText.LineHeight(scale)) / 2,
+                                 scale, tc, tc, tc, 255);
+        return hov;
+    }
+}

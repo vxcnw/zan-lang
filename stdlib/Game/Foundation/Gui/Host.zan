@@ -19,8 +19,10 @@ namespace Game.Foundation.Gui;
 interface IGuiHostLoop {
     /// 主循环开始前调用一次（窗口已就绪）。
     void Start(GuiHost host);
-    /// 每个键盘事件回调一次：kind 4=按下，5=抬起；keycode 是
-    /// Gui 的键码空间（8=退格、13=回车、方向键 37..40 等）。
+    /// 每个输入事件回调一次：kind 4=按下，5=抬起，keycode 是
+    /// Gui 的键码空间（8=退格、13=回车、方向键 37..40 等）；
+    /// kind 1=鼠标按下，2=移动，3=释放，keycode 传按钮索引
+    /// （0=左键）。鼠标坐标直接读 host.App().mouseX/mouseY。
     void Event(GuiHost host, int kind, int keycode);
     /// 固定步长模拟回调（步长毫秒数由构造参数决定）。
     void FixedUpdate(GuiHost host, int deltaMilliseconds);
@@ -35,9 +37,14 @@ interface IGuiHostLoop {
 /// <summary>
 /// GUI 运行时宿主：确定性固定更新、语义化输入状态、连续帧驱动
 /// （SetPollEventMode + 每帧 RequestRedraw，由 App 的 16ms 帧预算
-/// 自限速在约 60fps）。逻辑分辨率即窗口客户区尺寸（Gui 画布
-/// 坐标系），无 SDL 版 Letterbox 的独立缩放——画布按窗口实际
-/// 大小呈现，模板用 canvas.Width()/Height() 取绘制范围。
+/// 自限速在约 60fps）。窗口经 App.CreateDarkStage 创建——统一 DPI
+/// 契约：不做显示器 DPI 放大，游戏舞台（内容区）尺寸恒等于请求的
+/// 逻辑分辨率，拖到任何缩放率的显示器都不变，输入坐标 1:1（高
+/// DPI 屏上窗口视觉尺寸变小，同 SDL 时代的行为）。窗口模式带标准
+/// Gui 标题栏（皮肤按钮默认关，宿主每帧在内容之上画 chrome，模板
+/// 绘制与鼠标 y 以 ContentTop() 为界）；全屏收起标题栏后舞台即整
+/// 个客户区。模板按固定逻辑分辨率绘制，用 canvas.Width()/Height()
+/// 取绘制范围。
 /// </summary>
 class GuiHost {
     string title;
@@ -75,8 +82,8 @@ class GuiHost {
     /// </summary>
     bool Run(IGuiHostLoop loop) {
         if (loop == null) { return false; }
-        this.app = App.CreateDark(this.title, this.logicalWidth,
-                                  this.logicalHeight);
+        this.app = App.CreateDarkStage(this.title, this.logicalWidth,
+                                       this.logicalHeight);
         if (this.app == null) { return false; }
         // 窗口建好后必须 Show：App.RunLoop 的第一步同样是它。
         this.app.Show();
@@ -104,6 +111,9 @@ class GuiHost {
 
             this.app.BeginFrame();
             loop.Render(this, this.app.canvas, this.clock.Alpha());
+            // 标准 Gui 标题栏画在游戏内容之上（内容区从
+            // ContentTop() 之下开始）；全屏收起标题栏后自然消失。
+            this.app.RenderChrome(this.title);
             this.app.PresentFrame();
             // 连续渲染：游戏每帧都要画，下一圈继续出帧（App 的
             // 帧预算睡眠承担限速，这里不再额外 Delay）。
@@ -115,14 +125,19 @@ class GuiHost {
         return true;
     }
 
-    /// 键事件转发：喂语义输入映射并回调 loop.Event。
+    /// 输入事件转发：键盘喂语义输入映射，键盘与鼠标都回调 loop.Event。
     void DispatchKeyEvent(IGuiHostLoop loop) {
         int kind = this.app.EventKind();
-        if (kind != 4 && kind != 5) { return; }
-        int keycode = this.app.window.EventKeyCode();
-        if (kind == 4) { this.input.ProcessKey(keycode, true); }
-        else { this.input.ProcessKey(keycode, false); }
-        loop.Event(this, kind, keycode);
+        if (kind == 4 || kind == 5) {
+            int keycode = this.app.window.EventKeyCode();
+            if (kind == 4) { this.input.ProcessKey(keycode, true); }
+            else { this.input.ProcessKey(keycode, false); }
+            loop.Event(this, kind, keycode);
+            return;
+        }
+        if (kind == 1 || kind == 2 || kind == 3) {
+            loop.Event(this, kind, this.app.window.EventButton());
+        }
     }
 
     /// 请求退出主循环（下一圈生效）。
@@ -137,4 +152,7 @@ class GuiHost {
     int Height() { return this.logicalHeight; }
     /// 宿主的 App（Start 之后有效；一般只在需要控件/皮肤时用）。
     App App() { return this.app; }
+    /// 内容区（游戏舞台）顶部在画布中的 y——标准标题栏占住其上的
+    /// 一条。模板把鼠标 y 减去它换回舞台坐标（X 不变）。
+    int ContentTop() { return this.app.ContentTop(); }
 }

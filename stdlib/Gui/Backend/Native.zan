@@ -238,15 +238,35 @@ class Window {
 
 
 
-    /// <summary>创建新的平台窗口。</summary>
-    Window(string title, int width, int height) {
+    /// <summary>创建新的平台窗口（96 DPI 逻辑像素；Windows 上按显示
+    /// 器 DPI 放大客户区，其余平台原样）。</summary>
+    Window(string title, int width, int height) : this(title, width, height, false) { }
+
+    /// <summary>physical=true 时 width/height 为内容区物理像素，任何
+    /// 平台都不做 DPI 放大（Windows 上客户区额外加标准标题条高度，
+    /// 内容区从 App.ContentTop() 之下开始）。</summary>
+    Window(string title, int width, int height, bool physical) {
         #if WINDOWS
-        this.handle = Win32Shell.CreateWindow(title, width, height);
+        if (physical) {
+            this.handle = Win32Shell.CreateWindowPhysical(title, width, height);
+        } else {
+            this.handle = Win32Shell.CreateWindow(title, width, height);
+        }
         #else
         this.handle = zan_gui_create_window(title, width, height);
         #endif
         this.width = width;
         this.height = height;
+    }
+
+    /// <summary>physical=true 时 width/height 为内容区（游戏舞台）的
+    /// 物理像素，运行时不做 DPI 放大；Windows 上客户区 = 舞台 + 标准
+    /// 标题条（内容从 App.ContentTop() 之下开始）——游戏舞台契约：
+    /// 画布舞台区尺寸恒等于请求值，与显示器 DPI 无关，输入坐标 1:1。
+    /// 非 Windows 后端原样创建（全屏表面，无标题条预留）。</summary>
+    static Window CreatePhysical(string title, int width, int height) {
+        Window w = new Window(title, width, height, true);
+        return w;
     }
 
     /// <summary>注册一个在系统模态尺寸调整循环里被调用的帧体。

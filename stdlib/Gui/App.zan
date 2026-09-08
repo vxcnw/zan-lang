@@ -79,6 +79,9 @@ class App {
     // 这两个值把 dpiScale 重新拟合到「设计整页放进客户区」。
     int designW;
     int designH;
+    // 游戏舞台窗口（CreateDarkStage）：客户区 = 设计尺寸的物理 1:1，
+    // chrome 度量仍跟随设备 DPI（见 Show 的拟合豁免）。
+    bool physicalStage;
     int titlebarH;
     int captionBtnW;
     // 应用在系统标题按钮左侧追加的功能按钮（玻璃胶囊）：
@@ -667,8 +670,18 @@ class App {
     List<int> fxTouched;
     bool fxTouchedFull;
 
-    App(string title, int width, int height) {
-        this.window = new Window(title, width, height);
+    App(string title, int width, int height) : this(title, width, height, false) { }
+
+    /// <summary>physicalStage=true 时不做显示器 DPI 放大，窗口客户区
+    /// 物理像素 == 请求尺寸（游戏舞台契约，画布逻辑尺寸恒等于请求
+    /// 值）；普通 Gui 应用保持按 DPI 放大、控件度量随 DPI 缩放。</summary>
+    App(string title, int width, int height, bool physicalStage) {
+        this.physicalStage = physicalStage;
+        if (physicalStage) {
+            this.window = Window.CreatePhysical(title, width, height);
+        } else {
+            this.window = new Window(title, width, height);
+        }
         this.designW = width;
         this.designH = height;
         this.theme = Theme.Light();
@@ -922,6 +935,23 @@ class App {
         app.theme = Theme.Dark();
         app.isDark = true;
         app.EnableSkins(0);
+        return app;
+    }
+
+    /// <summary>游戏舞台变体：窗口客户区物理像素 == 请求尺寸，不做
+    /// 显示器 DPI 放大。画布逻辑尺寸恒等于请求尺寸——任何 DPI 的
+    /// 显示器、拖到哪块屏都不变，鼠标/键盘坐标 1:1。GuiHost 主循环
+    /// 用它创建窗口，游戏模板因此可以按固定逻辑分辨率绘制整个画布
+    /// （普通 CreateDark 的窗口客户区随 DPI 放大，控件用 dpiScale
+    /// 度量自适应；固定分辨率的游戏舞台不适应该方案）。</summary>
+    static App CreateDarkStage(string title, int width, int height) {
+        App app = new App(title, width, height, true);
+        app.theme = Theme.Dark();
+        app.isDark = true;
+        app.EnableSkins(0);
+        // 游戏默认禁用标题栏皮肤选择按钮（皮肤抽屉会盖住游戏画面，
+        // 且游戏不换肤）；置顶/最小化/最大化/关闭照常。
+        app.showThemeButton = false;
         return app;
     }
 
@@ -2793,6 +2823,14 @@ class App {
                 if (fit < dpiScale) { dpiScale = fit; }
             }
         }
+        if (physicalStage) {
+            // 舞台窗口的客户区就是设计尺寸的物理 1:1，上面的拟合必然
+            // 把 dpiScale 压回 100，chrome（标题文字/按钮/图标）就跟
+            // 不上设备 DPI 的标题栏高度了（150% 屏上 32px 字挤在 48px
+            // 条里）。舞台恢复设备 DPI：内容区绘制不经过 dpiScale
+            // （模板按物理像素直接作画），只有 chrome 度量跟随。
+            dpiScale = Canvas.GetDpiScale();
+        }
         this.ScaleThemeMetrics();
         scrollSpeed = 40 * dpiScale / 100;
         titlebarH = Window.TitlebarHeight();
@@ -3178,10 +3216,12 @@ class App {
         StyleBox closeHoverStyle = Style.Part(this, "titlebar", "cap", "",
                                                "danger", "", Style.SHover());
         int bw = captionBtnW;
-        // 标题按钮固定钉在右上角的标准条带里（标准标题栏高度），
-        // 不随加高的品牌栏拉高：栏的其余部分照常是原生拖动区。
-        int stripH = Scale(32);
-        if (stripH > hbar) { stripH = hbar; }
+        // 标题按钮固定钉在右上角的标准条带里，高度与标题栏默认高度
+        // 一致（曾用 Scale(32)：按钮条跟随 dpiScale，而标题栏高度跟
+        // 随设备 DPI，两者来源不同——舞台窗口 dpiScale=100 时按钮只
+        // 有 32px 高、悬停带与原生拖动带错位 16px）。hbar 就是标准
+        // 标题栏高度，直接取它；加高的品牌栏照常是原生拖动区。
+        int stripH = hbar;
         // 阴影带把内容轮廓推离画布原点 (offX, offY)：布局先按内容
         // 宽 W 计算，再整体平移到画布坐标——绘制、命中区与原生
         // 拖动条带三方才对得上。不偏移的话整排按钮缩进一圈阴影

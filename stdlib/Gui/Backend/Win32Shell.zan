@@ -1343,30 +1343,62 @@ class Win32Shell {
         int deviceDpi = Win32Shell.GetDeviceCaps(screenDc, 88);
         Win32Shell.ReleaseDC(0, screenDc);
         if (deviceDpi <= 0) { deviceDpi = 96; }
+        return Win32Shell.CreateWindowSized(title,
+            width * deviceDpi / 96, height * deviceDpi / 96, deviceDpi, false);
+    }
+
+    /// 游戏舞台变体（统一 DPI 契约）：width/height 是内容区（舞台）
+    /// 的物理像素，不做显示器 DPI 放大；窗口客户区 = 舞台 + 标准标
+    /// 题条（App.RenderChrome 把 chrome 画在条里，内容从 App.
+    /// ContentTop() 之下开始；全屏收起标题栏后舞台即整个客户区）。
+    /// ① 不参与工作区 82% 与最小尺寸钳制——舞台分辨率是模板的契约，
+    ///    被钳小后画布小于请求值（实测副屏工作区 82% 钳制把
+    ///    1280x720 压成 868x517，模板画满全屏的右/下边整块出界）；
+    /// ② 不做 AdjustWindowRect 框架补偿——本壳 WM_NCCALCSIZE 把客
+    ///    户区扩成整个窗口矩形，普通路径的补偿只是给客户区添一圈
+    ///    死边（150% 屏实测右 22px/下 56px 白条）。
+    /// 高 DPI 屏上窗口视觉尺寸变小（物理 1:1），同 SDL 时代的行为。
+    static nint CreateWindowPhysical(string title, int width, int height) {
+        Win32Shell.Init();
+        nint screenDc = Win32Shell.GetDC(0);
+        int deviceDpi = Win32Shell.GetDeviceCaps(screenDc, 88);
+        Win32Shell.ReleaseDC(0, screenDc);
+        if (deviceDpi <= 0) { deviceDpi = 96; }
+        int tb = 32 * deviceDpi / 96;
+        return Win32Shell.CreateWindowSized(title,
+            width, height + tb, deviceDpi, true);
+    }
+
+    // 共同尾段：clientW/H 是客户区物理像素；deviceDpi 只用于外壳
+    // 度量；stage=true 时客户区一个像素不差（游戏舞台契约）。
+    static nint CreateWindowSized(string title, int clientW, int clientH,
+                                  int deviceDpi, bool stage) {
         Win32Shell.dpi = deviceDpi;
         Win32Shell.titlebarH = 32 * deviceDpi / 96;
         Win32Shell.buttonW = 46 * deviceDpi / 96;
 
-        int scaledW = width * deviceDpi / 96;
-        int scaledH = height * deviceDpi / 96;
-        // 按显示器 DPI 放大的逻辑尺寸很容易超过
-        // 屏幕（150% 缩放下还原的 2133x1293 会请求 3200x1940），因此窗口
-        // 打开时不会大于其显示器的大部分工作区。
-        if (Win32Shell.WorkArea(0, 1)) {
-            int maxW = (Win32Shell.S32(Win32Shell.scratchRect, 8)
-                - Win32Shell.S32(Win32Shell.scratchRect, 0)) * 82 / 100;
-            int maxH = (Win32Shell.S32(Win32Shell.scratchRect, 12)
-                - Win32Shell.S32(Win32Shell.scratchRect, 4)) * 82 / 100;
-            if (maxW > 0 && scaledW > maxW) { scaledW = maxW; }
-            if (maxH > 0 && scaledH > maxH) { scaledH = maxH; }
+        int scaledW = clientW;
+        int scaledH = clientH;
+        if (!stage) {
+            // 按显示器 DPI 放大的逻辑尺寸很容易超过
+            // 屏幕（150% 缩放下还原的 2133x1293 会请求 3200x1940），因此窗口
+            // 打开时不会大于其显示器的大部分工作区。
+            if (Win32Shell.WorkArea(0, 1)) {
+                int maxW = (Win32Shell.S32(Win32Shell.scratchRect, 8)
+                    - Win32Shell.S32(Win32Shell.scratchRect, 0)) * 82 / 100;
+                int maxH = (Win32Shell.S32(Win32Shell.scratchRect, 12)
+                    - Win32Shell.S32(Win32Shell.scratchRect, 4)) * 82 / 100;
+                if (maxW > 0 && scaledW > maxW) { scaledW = maxW; }
+                if (maxH > 0 && scaledH > maxH) { scaledH = maxH; }
+            }
+            // ……下限只保证窗口还画得出标题栏和一点客户区。设计出
+            // 160x450 这种窄窗口就得开成 160x450：以前主窗口被强行抬到
+            // 800x600，设计器里设的尺寸在运行时一律失效。
+            int minW = 120 * deviceDpi / 96;
+            int minH = (Win32Shell.titlebarH + 40 * deviceDpi / 96);
+            if (scaledW < minW) { scaledW = minW; }
+            if (scaledH < minH) { scaledH = minH; }
         }
-        // ……下限只保证窗口还画得出标题栏和一点客户区。设计出
-        // 160x450 这种窄窗口就得开成 160x450：以前主窗口被强行抬到
-        // 800x600，设计器里设的尺寸在运行时一律失效。
-        int minW = 120 * deviceDpi / 96;
-        int minH = (Win32Shell.titlebarH + 40 * deviceDpi / 96);
-        if (scaledW < minW) { scaledW = minW; }
-        if (scaledH < minH) { scaledH = minH; }
         Win32Shell.windowWidth = scaledW;
         Win32Shell.windowHeight = scaledH;
         if (Win32Shell.mainHwnd == 0) {
@@ -1381,15 +1413,21 @@ class Win32Shell {
             Win32Shell.minTrackH = trackH;
         }
 
-        nint rc = NativeMemory.Alloc(16);
-        new Span<int>(rc, 1)[0] = 0;
-        new Span<int>(rc + 4, 1)[0] = 0;
-        new Span<int>(rc + 8, 1)[0] = scaledW;
-        new Span<int>(rc + 12, 1)[0] = scaledH;
-        Win32Shell.AdjustWindowRect(rc, 13565952, 0);   // WS_OVERLAPPEDWINDOW
-        int frameW = Win32Shell.S32(rc, 8) - Win32Shell.S32(rc, 0);
-        int frameH = Win32Shell.S32(rc, 12) - Win32Shell.S32(rc, 4);
-        NativeMemory.Free(rc);
+        // 舞台路径直接把请求值当窗口矩形（客户区 == 窗口矩形，见上）；
+        // 普通路径按 OS 框架补偿外扩。
+        int frameW = scaledW;
+        int frameH = scaledH;
+        if (!stage) {
+            nint rc = NativeMemory.Alloc(16);
+            new Span<int>(rc, 1)[0] = 0;
+            new Span<int>(rc + 4, 1)[0] = 0;
+            new Span<int>(rc + 8, 1)[0] = scaledW;
+            new Span<int>(rc + 12, 1)[0] = scaledH;
+            Win32Shell.AdjustWindowRect(rc, 13565952, 0);   // WS_OVERLAPPEDWINDOW
+            frameW = Win32Shell.S32(rc, 8) - Win32Shell.S32(rc, 0);
+            frameH = Win32Shell.S32(rc, 12) - Win32Shell.S32(rc, 4);
+            NativeMemory.Free(rc);
+        }
 
         nint wtitle = Wide.Of(title);
         // 次要窗口由主框架 OWNED：系统会保持它们在主框架之上，
