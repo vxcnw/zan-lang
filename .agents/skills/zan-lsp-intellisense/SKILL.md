@@ -11,6 +11,12 @@ description: Zan LSP（src/lsp/zan-lsp）与 intellisense 引擎的供数定式�
 
 ## 数据流（改供数前必读）
 
+- **线程模型（四期2 第三批起）**：dispatch 全程持 doc_lock（串行，
+  与单线程时代语义一致）；didChange 在请求线程只做 range 拼接 +
+  便宜的项目索引刷新，昂贵的编译器前端跑在 worker 线程（编辑静默
+  200ms 后快照→无锁跑→publish）。协议帧经 lsp_write 的 write_lock
+  串行化。改诊断/编辑路径时别把共享状态碰出锁外，也别把前端跑
+  挪回请求线程——那是这个批次修掉的 46–63ms 击键阻塞。
 - 补全/导航的数据源有两层：打开文档的即时解析（每次请求新建
   intellisense_t 单文件解析）→ 未命中回退 `g_project_intel`
   （工作区扫描 + stdlib 一次性解析，共享缓存）。
@@ -37,8 +43,10 @@ description: Zan LSP（src/lsp/zan-lsp）与 intellisense 引擎的供数定式�
 - **首开代价**：项目扫描 + stdlib 解析落在首个 didOpen 的诊断上
   （实测 +2.4~16.6s 视根大小）。把它挪进后台/懒化之前，先想清楚
   首次补全请求会接住同样的代价。
-- didChange 是全文同步重解析（736KB 文档每击键 ~46ms）——改这个
-  就是"编译器前端增量入口"批次本身，别在 lsp_main.c 里绕。
+- didChange 已是增量同步（change:2）+ 静默合并诊断：didChange→诊断
+  延迟读数约 200ms+ 是**设计值**（静默窗），不是回退；看
+  completion-after-change 指标判断击键是否被前端跑阻塞。探针的
+  didChange 段带拼接正确性断言（垃圾行注入/清除），改编辑路径必跑。
 - **接收者解析必须文档优先**：把 `d.` 的接收者名直接喂项目索引
   intel_resolve_type，反向扫描会被任何无关文件里的同名变量顶掉
   （后者覆盖前者）→ 成员列表整批是陌生类型的。先对打开文档的

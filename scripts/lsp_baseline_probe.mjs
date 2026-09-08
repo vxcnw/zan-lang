@@ -1,14 +1,12 @@
-// scripts/lsp_baseline_probe.mjs -- zan-lsp baseline measurement (四期1).
+// scripts/lsp_baseline_probe.mjs -- zan-lsp baseline measurement.
 // Speaks LSP over stdio to build/zan-lsp.exe and reports: initialize time,
 // open->diagnostics latency, completion P50/P90 + hit-rate, goto-definition
-// results, documentSymbol, and didChange->diagnostics latency (full sync).
-// Baseline numbers + findings: TASKS.md "四期1" entry.
+// results, documentSymbol, didChange->diagnostics (quiet-coalesced) and
+// completion-after-change latency.
+// Baseline numbers + findings: TASKS.md 四期1/四期2 entries.
 // Usage:  node scripts/lsp_baseline_probe.mjs            # monorepo root
 //         LSP_PROBE_MODE=gallery node scripts/...        # mid-size root
 //         LSP_PROBE_MODE=ra2 node scripts/...            # small project root
-// LSP baseline probe (四期1): measures current zan-lsp completion/navigation
-// latency (P50/P90), diagnostics latency, and completion hit-rate on a
-// realistic workload. Throwaway benchmark per workspace rules (_scratch).
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -16,8 +14,8 @@ import path from 'path';
 // MODE=repo (whole zan-lang monorepo, worst case)
 // MODE=ra2  (templates/game/ra2 as a realistic user project root)
 // MODE=gallery (examples/gui_gallery, mid-size root)
-// default 'ra2': fast and representative. 'repo' demonstrates the
-// monorepo indexing divergence recorded in TASKS.md (minutes, GBs).
+// default 'ra2': fast and representative. 'repo' exercises the
+// full monorepo workspace (17s first-open converge, see TASKS.md).
 const MODE = process.env.LSP_PROBE_MODE || 'ra2';
 const ROOTS = {
   repo: 'D:/project/zan-lang',
@@ -84,6 +82,21 @@ function waitFor(method, uri, timeoutMs) {
       if (perf() - t0 > timeoutMs) { resolve(-1); return; }
       setTimeout(tick, 5);
     };
+    tick();
+  });
+}
+
+// like waitFor, but resolves with the notification itself (or null)
+function waitForMsg(method, uri, timeoutMs) {
+  return new Promise((resolve) => {
+    const tick = () => {
+      const i = notes.findIndex(n => n.method === method &&
+        (!uri || JSON.stringify(n.params || {}).includes(uri)));
+      if (i >= 0) { resolve(notes.splice(i, 1)[0]); return; }
+      if (perf() - t0 > timeoutMs) { resolve(null); return; }
+      setTimeout(tick, 5);
+    };
+    const t0 = perf();
     tick();
   });
 }
@@ -223,7 +236,12 @@ const sym = await request('textDocument/documentSymbol', { textDocument: { uri: 
 const symCount = Array.isArray(sym.result) ? sym.result.length : -1;
 console.log(`documentSymbol (${symRel}): ${sym.ms.toFixed(0)} ms, ${symCount} top-level symbols`);
 
-// didChange -> diagnostics latency (full-text sync), 5 rounds on a small file
+// didChange -> diagnostics (server coalesces edits with a ~200ms quiet
+// window, so the metric reads quiet+run; the win is that requests no
+// longer wait behind the front-end pass — see completion-after-change).
+// Rounds 0-2 send full-text edits (legacy client shape), 3-5 send range
+// edits (incremental sync). The garbage rounds assert the front-end
+// actually saw the spliced text; the clean rounds assert it was removed.
 const smallRel = { ra2: 'src/main.zan', gallery: 'gui_gallery.zan' }[MODE] || 'tests/gui/compref_test.zan';
 const smallUri = fileUri(path.join(ROOT, smallRel));
 const smallText = fs.readFileSync(path.join(ROOT, smallRel), 'utf8');
@@ -231,16 +249,40 @@ if (!docs.has(smallUri)) {
   send('textDocument/didOpen', { textDocument: { uri: smallUri, languageId: 'zan', version: 1, text: smallText } });
   await waitFor('textDocument/publishDiagnostics', smallUri, 60000);
 }
-const chMs = [];
+const cleanErrCount = (() => {
+  const m = notes.find(n => n.method === 'textDocument/publishDiagnostics' && JSON.stringify(n.params || {}).includes(smallUri));
+  return m ? (m.params.diagnostics || []).length : -1;
+})();
+const lineCount = smallText.split('\n').length; // append position for range edits
+const chMs = [], compAfterChMs = [], chFails = [];
 let version = 2;
-for (let i = 0; i < 5; i++) {
+for (let i = 0; i < 6; i++) {
+  const incremental = i >= 3;
+  const garbage = (i === 0 || i === 3); // syntax error the front-end must see
+  const line = garbage ? '???garbage' + i : '// probe edit ' + i;
+  const edits = incremental
+    ? [{ range: { start: { line: lineCount, character: 0 }, end: { line: lineCount, character: 0 } }, text: line + '\n' }]
+    : [{ text: smallText + '\n' + line + '\n' }];
   const t0 = perf();
   send('textDocument/didChange', {
     textDocument: { uri: smallUri, version: version++ },
-    contentChanges: [{ text: smallText + '\n// probe edit ' + i + '\n' }],
+    contentChanges: edits,
   });
-  const d = await waitFor('textDocument/publishDiagnostics', smallUri, 60000);
-  if (d >= 0) chMs.push(perf() - t0);
+  // typing responsiveness: a completion fired mid-edit must not queue
+  // behind the diagnostics run
+  const tc = perf();
+  await request('textDocument/completion', {
+    textDocument: { uri: smallUri },
+    position: { line: lineCount + 1, character: 0 },
+  });
+  compAfterChMs.push(perf() - tc);
+  const msg = await waitForMsg('textDocument/publishDiagnostics', smallUri, 60000);
+  if (!msg) { chFails.push(i); continue; }
+  chMs.push(perf() - t0);
+  const errCount = (msg.params.diagnostics || []).filter(d => d.severity === 1).length;
+  if (garbage && errCount === 0) chFails.push(i + ':garbage-not-seen');
+  if (!garbage && cleanErrCount >= 0 && errCount !== cleanErrCount)
+    chFails.push(i + ':edit-leaked(err=' + errCount + ',want=' + cleanErrCount + ')');
 }
 
 await request('shutdown', null);
@@ -256,4 +298,5 @@ console.log(`hit-rate: ${hits.length}/${hits.length + misses.filter(m => !m.incl
 for (const m of misses) console.log('  miss/skip: ' + m);
 for (const h of hits) console.log('  hit: ' + h);
 console.log(`definition: n=${defMs.length} P50=${pct(defMs, .5).toFixed(1)} ms; results: ${defOk.join(',')}`);
-console.log(`didChange->diag (small file, full sync): n=${chMs.length} P50=${pct(chMs, .5).toFixed(1)} P90=${pct(chMs, .9).toFixed(1)} ms`);
+console.log(`didChange->diag (quiet-coalesced; full+range edits): n=${chMs.length} P50=${pct(chMs, .5).toFixed(1)} P90=${pct(chMs, .9).toFixed(1)} ms${chFails.length ? ' FAIL:[' + chFails.join(',') + ']' : ' ok'}`);
+console.log(`completion-after-change: n=${compAfterChMs.length} P50=${pct(compAfterChMs, .5).toFixed(1)} P90=${pct(compAfterChMs, .9).toFixed(1)} max=${pct(compAfterChMs, 1).toFixed(1)} ms`);

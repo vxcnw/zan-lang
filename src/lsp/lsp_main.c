@@ -36,6 +36,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <ctype.h>
 
 #ifdef _WIN32
@@ -50,6 +51,8 @@ typedef SOCKET lsp_sock_t;
 #include <netinet/in.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <time.h>
 typedef int lsp_sock_t;
 #define LSP_INVALID_SOCK (-1)
 #endif
@@ -59,9 +62,16 @@ typedef int lsp_sock_t;
 
 #define LSP_MAX_DOCS 256
 
+/* Diagnostics are published by a worker thread once edits go quiet for
+ * this long; keystrokes never wait on the front-end run. */
+#define LSP_DIAG_QUIET_MS 200
+
 typedef struct {
     char *uri;
     char *text;
+    long    version;         /* bumped on every accepted didChange */
+    bool    diag_pending;    /* front-end run queued for this doc */
+    uint64_t last_change_ms; /* when the latest edit landed */
 } lsp_doc_t;
 
 typedef struct {
@@ -73,6 +83,22 @@ typedef struct {
     FILE     *out;
     bool       use_sock;  /* true when framing over a TCP socket */
     lsp_sock_t sock;      /* connected client socket (server mode) */
+    /* doc_lock guards the doc store and is held for the duration of one
+     * dispatched message (serial dispatch, same ordering guarantees as the
+     * pre-worker design). write_lock keeps protocol frames from
+     * interleaving between the main thread and the diagnostics worker;
+     * the worker never holds doc_lock while running the front-end. */
+#ifdef _WIN32
+    CRITICAL_SECTION doc_lock;
+    CRITICAL_SECTION write_lock;
+    HANDLE diag_thread;
+#else
+    pthread_mutex_t doc_lock;
+    pthread_mutex_t write_lock;
+    pthread_t diag_thread;
+    bool diag_thread_valid;
+#endif
+    volatile bool diag_stop;
 } lsp_server_t;
 
 /* ---- TCP transport (--port): same single-client server as zan-dap ---- */
@@ -104,12 +130,23 @@ static void rpc_write_message_sock(lsp_sock_t s, const char *payload) {
 }
 
 /* All protocol output funnels through here so the socket transport is a
- * drop-in replacement for stdio. */
+ * drop-in replacement for stdio, and so frames from the main thread and
+ * the diagnostics worker can never interleave mid-frame. */
 static void lsp_write(lsp_server_t *s, const char *payload) {
+#ifdef _WIN32
+    EnterCriticalSection(&s->write_lock);
+#else
+    pthread_mutex_lock(&s->write_lock);
+#endif
     if (s->use_sock)
         rpc_write_message_sock(s->sock, payload);
     else
         rpc_write_message(s->out, payload);
+#ifdef _WIN32
+    LeaveCriticalSection(&s->write_lock);
+#else
+    pthread_mutex_unlock(&s->write_lock);
+#endif
 }
 
 /* Listen on 127.0.0.1:port and accept a single client. Returns the connected
@@ -152,6 +189,63 @@ static char *dup_str(const char *s) {
     char *d = (char *)malloc(n + 1);
     if (d) memcpy(d, s, n + 1);
     return d;
+}
+
+static uint64_t lsp_now_ms(void) {
+#ifdef _WIN32
+    return (uint64_t)GetTickCount64();
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000ull + (uint64_t)ts.tv_nsec / 1000000ull;
+#endif
+}
+
+static void lsp_locks_init(lsp_server_t *s) {
+#ifdef _WIN32
+    InitializeCriticalSection(&s->doc_lock);
+    InitializeCriticalSection(&s->write_lock);
+#else
+    pthread_mutex_init(&s->doc_lock, NULL);
+    pthread_mutex_init(&s->write_lock, NULL);
+#endif
+}
+
+static void lsp_locks_free(lsp_server_t *s) {
+#ifdef _WIN32
+    DeleteCriticalSection(&s->doc_lock);
+    DeleteCriticalSection(&s->write_lock);
+#else
+    pthread_mutex_destroy(&s->doc_lock);
+    pthread_mutex_destroy(&s->write_lock);
+#endif
+}
+
+static void lsp_doc_lock(lsp_server_t *s) {
+#ifdef _WIN32
+    EnterCriticalSection(&s->doc_lock);
+#else
+    pthread_mutex_lock(&s->doc_lock);
+#endif
+}
+
+static void lsp_doc_unlock(lsp_server_t *s) {
+#ifdef _WIN32
+    LeaveCriticalSection(&s->doc_lock);
+#else
+    pthread_mutex_unlock(&s->doc_lock);
+#endif
+}
+
+static void lsp_sleep_ms(unsigned ms) {
+#ifdef _WIN32
+    Sleep(ms);
+#else
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (long)(ms % 1000) * 1000000L;
+    nanosleep(&ts, NULL);
+#endif
 }
 
 static lsp_doc_t *lsp_find_doc(lsp_server_t *s, const char *uri) {
@@ -672,7 +766,13 @@ static void handle_initialize(lsp_server_t *s, json_value *id, json_value *param
     }
 
     json_value *caps = json_new_obj();
-    json_obj_set(caps, "textDocumentSync", json_new_num(1)); /* full sync */
+    /* Incremental document sync: clients may send range-based edits.
+     * Full-text changes (range absent) are still accepted, so full-sync
+     * clients keep working unchanged. */
+    json_value *sync = json_new_obj();
+    json_obj_set(sync, "openClose", json_new_bool(true));
+    json_obj_set(sync, "change", json_new_num(2)); /* incremental */
+    json_obj_set(caps, "textDocumentSync", sync);
 
     /* Completion with trigger characters */
     json_value *completion = json_new_obj();
@@ -843,20 +943,81 @@ static void handle_did_open(lsp_server_t *s, json_value *params) {
     publish_diagnostics(s, uri, text);
 }
 
+/* Apply one contentChanges entry to a document: range-spliced for
+ * incremental sync, whole-document replace when no range is present
+ * (full-sync clients). */
+static void lsp_doc_apply_change(lsp_doc_t *d, json_value *change) {
+    const char *text = json_get_str(json_obj_get(change, "text"));
+    if (!text) return;
+    json_value *range = json_obj_get(change, "range");
+    json_value *start = range ? json_obj_get(range, "start") : NULL;
+    json_value *end   = range ? json_obj_get(range, "end") : NULL;
+    if (!start || !end) {
+        free(d->text);
+        d->text = dup_str(text);
+        return;
+    }
+    size_t soff = pos_to_offset(d->text,
+                                (int)json_get_num(json_obj_get(start, "line"), 0),
+                                (int)json_get_num(json_obj_get(start, "character"), 0));
+    size_t eoff = pos_to_offset(d->text,
+                                (int)json_get_num(json_obj_get(end, "line"), 0),
+                                (int)json_get_num(json_obj_get(end, "character"), 0));
+    size_t dlen = strlen(d->text);
+    if (eoff > dlen) eoff = dlen;
+    if (eoff < soff) eoff = soff;
+    size_t tlen = strlen(text);
+    char *nt = (char *)malloc(dlen - (eoff - soff) + tlen + 1);
+    if (!nt) {
+        free(d->text);
+        d->text = dup_str(text);
+        return;
+    }
+    memcpy(nt, d->text, soff);
+    memcpy(nt + soff, text, tlen);
+    memcpy(nt + soff + tlen, d->text + eoff, dlen - eoff);
+    nt[dlen - (eoff - soff) + tlen] = '\0';
+    free(d->text);
+    d->text = nt;
+}
+
 static void handle_did_change(lsp_server_t *s, json_value *params) {
     json_value *td = json_obj_get(params, "textDocument");
     const char *uri = json_get_str(json_obj_get(td, "uri"));
     json_value *changes = json_obj_get(params, "contentChanges");
     if (!uri || !changes) return;
-    /* full sync: last change carries the whole document */
     int n = json_arr_count(changes);
     if (n <= 0) return;
-    json_value *last = json_arr_at(changes, n - 1);
-    const char *text = json_get_str(json_obj_get(last, "text"));
-    if (!text) return;
-    lsp_set_doc(s, uri, text);
-    update_project_index(s, uri, text);
-    publish_diagnostics(s, uri, text);
+
+    lsp_doc_t *d = lsp_find_doc(s, uri);
+    if (!d) {
+        /* Edit for a document we never saw opened: recover from a
+         * full-text change if the client sent one. */
+        for (int i = 0; i < n && !d; i++) {
+            json_value *ch = json_arr_at(changes, i);
+            if (!json_obj_get(ch, "range")) {
+                const char *text = json_get_str(json_obj_get(ch, "text"));
+                if (text) {
+                    lsp_set_doc(s, uri, text);
+                    d = lsp_find_doc(s, uri);
+                }
+            }
+        }
+        if (!d) return;
+    } else {
+        /* LSP: changes apply in order, each to the result of the previous */
+        for (int i = 0; i < n; i++)
+            lsp_doc_apply_change(d, json_arr_at(changes, i));
+    }
+
+    d->version++;
+    d->last_change_ms = lsp_now_ms();
+    d->diag_pending = true;
+
+    /* Cheap heuristic re-index stays on the request thread so cross-file
+     * completions see the edit immediately; the expensive front-end run
+     * (lex/parse/bind/check) is the diagnostics worker's job. */
+    update_project_index(s, uri, d->text);
 }
 
 static void handle_did_close(lsp_server_t *s, json_value *params) {
@@ -867,6 +1028,47 @@ static void handle_did_close(lsp_server_t *s, json_value *params) {
     /* clear diagnostics */
     publish_diagnostics(s, uri, "");
 }
+
+/* ===================== diagnostics worker thread ===================== */
+
+/* Runs the compiler front-end (lex/parse/bind/check) for documents whose
+ * edits have gone quiet, so a keystroke on a large file costs the request
+ * thread only a splice + heuristic re-index — never the 30-60ms front-end
+ * pass. The worker snapshots text under doc_lock and runs the front-end
+ * with no lock held; publishes serialize through lsp_write's write_lock. */
+static int diag_worker_loop(lsp_server_t *s) {
+    while (!s->diag_stop) {
+        lsp_sleep_ms(20);
+        char *uri = NULL, *text = NULL;
+        lsp_doc_lock(s);
+        uint64_t now = lsp_now_ms();
+        for (int i = 0; i < s->doc_count; i++) {
+            lsp_doc_t *d = &s->docs[i];
+            if (d->diag_pending && now - d->last_change_ms >= LSP_DIAG_QUIET_MS) {
+                uri = dup_str(d->uri);
+                text = dup_str(d->text);
+                d->diag_pending = false;
+                break;
+            }
+        }
+        lsp_doc_unlock(s);
+        if (!uri) continue;
+        publish_diagnostics(s, uri, text);
+        free(uri);
+        free(text);
+    }
+    return 0;
+}
+
+#ifdef _WIN32
+static DWORD WINAPI diag_worker_main(LPVOID arg) {
+    return (DWORD)diag_worker_loop((lsp_server_t *)arg);
+}
+#else
+static void *diag_worker_main(void *arg) {
+    return (void *)(intptr_t)diag_worker_loop((lsp_server_t *)arg);
+}
+#endif
 
 /* Extract (uri, line, character) common to positional requests. */
 static bool get_position(json_value *params, const char **uri,
@@ -1882,6 +2084,9 @@ static void dispatch(lsp_server_t *s, json_value *msg) {
     json_value *params = json_obj_get(msg, "params");
     if (!method) return;
 
+    /* Handlers read/mutate the doc store and g_project_intel; the
+     * diagnostics worker only touches the store to snapshot text. */
+    lsp_doc_lock(s);
     if (strcmp(method, "initialize") == 0) {
         handle_initialize(s, id, params);
     } else if (strcmp(method, "initialized") == 0) {
@@ -1923,6 +2128,7 @@ static void dispatch(lsp_server_t *s, json_value *msg) {
         /* unknown request: reply null so the client isn't left hanging */
         send_response(s, id, json_new_null());
     }
+    lsp_doc_unlock(s);
 }
 
 int main(int argc, char **argv) {
@@ -1935,6 +2141,14 @@ int main(int argc, char **argv) {
     lsp_server_t server;
     memset(&server, 0, sizeof(server));
     server.out = stdout;
+    lsp_locks_init(&server);
+
+#ifdef _WIN32
+    server.diag_thread = CreateThread(NULL, 0, diag_worker_main, &server, 0, NULL);
+#else
+    server.diag_thread_valid =
+        pthread_create(&server.diag_thread, NULL, diag_worker_main, &server) == 0;
+#endif
 
     if (port > 0) {
         server.sock = lsp_listen_accept(port);
@@ -1968,6 +2182,20 @@ int main(int argc, char **argv) {
 
         if (is_exit) break;
     }
+
+    /* Stop the diagnostics worker before tearing the doc store down, and
+     * flush any diagnostics still pending for open documents. */
+    server.diag_stop = true;
+#ifdef _WIN32
+    if (server.diag_thread) {
+        WaitForSingleObject(server.diag_thread, INFINITE);
+        CloseHandle(server.diag_thread);
+    }
+#else
+    if (server.diag_thread_valid)
+        pthread_join(server.diag_thread, NULL);
+#endif
+    lsp_locks_free(&server);
 
     for (int i = 0; i < server.doc_count; i++) {
         free(server.docs[i].uri);
