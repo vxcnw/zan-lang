@@ -69,8 +69,8 @@ class Ra2App {
     /// cannot build it. Lets the selftest name a unit instead of hardcoding
     /// menu positions.</summary>
     static int UnitIdOfReg(World world, int side, string reg) {
-        for (int i = 0; i < world.Units().ListFor(side).Count; i = i + 1) {
-            UnitType t = world.Units().TypeFor(side, i);
+        for (int i = 0; i < world.Units().ListFor(world, side).Count; i = i + 1) {
+            UnitType t = world.Units().TypeFor(world, side, i);
             if (t != null && t.Reg() == reg) { return i; }
         }
         return -1;
@@ -169,7 +169,7 @@ class Ra2App {
         int armed = game.BuildingId();
         StructureCatalog catalog = game.World().Catalog();
         int side = game.Side();
-        int n = catalog.CountFor(side);
+        int n = catalog.CountFor(game.World(), side);
         int rows = (n + 2) / 3;
         List<int> tint = new List<int>();
         Ra2App.SideUiTint(side, tint);
@@ -216,7 +216,7 @@ class Ra2App {
                 iconTex.Close();
                 labelY = by + bh - 20;
             }
-            Text.DrawCentered(r, StructureLabel(catalog, side, i),
+            Text.DrawCentered(r, StructureLabel(game.World(), catalog, side, i),
                               bx + bw / 2, labelY, 1,
                               unlocked ? 236 : 96, unlocked ? 236 : 102,
                               unlocked ? 236 : 112, 255);
@@ -225,7 +225,7 @@ class Ra2App {
         if (game.LowPower()) { powerText = "电力 不足!"; }
         int infoY = y + 30 + rows * (bh + 5) + 6;
         Text.Draw(r, "资金 " + Convert.ToString(game.Money())
-                  + "   敌方 " + Convert.ToString(game.AiMoney()),
+                  + "   敌方 " + Convert.ToString(game.AiMoneyTotal()),
                   x + 22, infoY, 2, 170, 178, 192, 255);
         Text.Draw(r, powerText, x + 22, infoY + 22, 2,
                   game.LowPower() ? 232 : 170,
@@ -254,7 +254,7 @@ class Ra2App {
     /// <summary>The 卖/修 row's y, riding the build menu's row count the way
     /// ProdPanelY does, so the hit test matches what was drawn.</summary>
     static int SellRepairY(GameController game) {
-        int rows = (game.World().Catalog().CountFor(game.Side()) + 2) / 3;
+        int rows = (game.World().Catalog().CountFor(game.World(), game.Side()) + 2) / 3;
         return 16 + 30 + rows * (54 + 5) + 6 + 50;
     }
 
@@ -291,6 +291,21 @@ class Ra2App {
         Ra2App.TintSet(rgb, 0, p0, p1, p2);
         Ra2App.TintSet(rgb, 3, h0, h1, h2);
         Ra2App.TintSet(rgb, 6, g0, g1, g2);
+    }
+
+    /// <summary>The minimap dot colour for a house: the player is green
+    /// (handled by the caller); each AI house gets a distinct hostile hue so
+    /// an 8-way free-for-all reads at a glance.</summary>
+    static void MiniDotTint(int house, List<int> rgb) {
+        int r = 232; int g = 60; int b = 60;
+        if (house == 1) { r = 232; g = 60; b = 60; }        // red
+        else if (house == 2) { r = 230; g = 130; b = 40; }  // orange
+        else if (house == 3) { r = 60; g = 140; b = 232; }  // blue
+        else if (house == 4) { r = 220; g = 80; b = 200; }  // magenta
+        else if (house == 5) { r = 230; g = 200; b = 50; }  // yellow
+        else if (house == 6) { r = 60; g = 210; b = 200; }  // cyan
+        else if (house == 7) { r = 240; g = 240; b = 240; } // white
+        Ra2App.TintSet(rgb, 0, r, g, b);
     }
 
     static void TintSet(List<int> rgb, int at, int r, int g, int b) {
@@ -338,7 +353,7 @@ class Ra2App {
     /// what its queue is already building. Its top follows the build menu's
     /// row count, which differs per side.</summary>
     static int ProdPanelY(GameController game) {
-        int rows = (game.World().Catalog().CountFor(game.Side()) + 2) / 3;
+        int rows = (game.World().Catalog().CountFor(game.World(), game.Side()) + 2) / 3;
         int y = 16;
         int bh = 54;
         return y + 30 + rows * (bh + 5) + 6 + 50;
@@ -356,7 +371,7 @@ class Ra2App {
         WorldObject sel = game.World().Selected();
         if (sel == null || sel.Kind() != ObjKind.Structure()) { return 0; }
         if (sel.Side() != game.Side()) { return 0; }   // enemy buildings hide
-        StructureType t = game.World().Catalog().TypeFor(sel.Side(), sel.BuildId());
+        StructureType t = game.World().Catalog().TypeFor(game.World(), sel.Side(), sel.BuildId());
         if (t == null) { return 0; }
         List<int> prod = t.Produces();
         if (prod == null) { return 0; }
@@ -366,7 +381,7 @@ class Ra2App {
     static int ProdUnitAt(GameController game, int i) {
         WorldObject sel = game.World().Selected();
         if (sel == null) { return -1; }
-        StructureType t = game.World().Catalog().TypeFor(sel.Side(), sel.BuildId());
+        StructureType t = game.World().Catalog().TypeFor(game.World(), sel.Side(), sel.BuildId());
         if (t == null) { return -1; }
         List<int> prod = t.Produces();
         if (prod == null || i >= prod.Count) { return -1; }
@@ -404,7 +419,7 @@ class Ra2App {
             int id = Ra2App.ProdUnitAt(game, i);
             int bx = Ra2App.ProdBtnX(i);
             int by = Ra2App.ProdBtnY(game, i);
-            UnitType u = game.World().Units().TypeFor(sel.Side(), id);
+            UnitType u = game.World().Units().TypeFor(game.World(), sel.Side(), id);
             if (u == null) { continue; }
             bool unlocked = game.UnitUnlocked(id);
             int kind = 0;
@@ -467,7 +482,7 @@ class Ra2App {
                           int mouseY, int originX, int originY, Camera cam) {
         int buildId = game.BuildingId();
         if (buildId < 0) { return; }
-        StructureType t = game.World().Catalog().TypeFor(game.Side(), buildId);
+        StructureType t = game.World().Catalog().TypeFor(game.World(), game.Side(), buildId);
         if (t == null) { return; }
         int wx = cam.X() + Ra2App.ScaleX(mouseX, cam.ZoomNum(), cam.ZoomDen());
         int wy = cam.Y() + Ra2App.ScaleY(mouseY, cam.ZoomNum(), cam.ZoomDen());
@@ -593,6 +608,7 @@ class Ra2App {
         r.DrawRect(x + vx, y + vy, vw, vh);
 
         // Object dots: each object projects to one minimap pixel.
+        List<int> tint = new List<int>();
         for (int i = 0; i < world.ObjectCount(); i = i + 1) {
             WorldObject o = world.ObjectAt(i);
             if (o.IsDead()) { continue; }
@@ -602,8 +618,15 @@ class Ra2App {
             int py = y + wy * Ra2App.MiniH() / terrain.WorldHeight();
             if (px < x || py < y || px >= x + Ra2App.MiniW()
              || py >= y + Ra2App.MiniH()) { continue; }
+            // Per-house dot colours: the player is green, the AIs get
+            // distinct hues so an 8-way free-for-all reads on the minimap.
             bool mine = o.Side() == game.Side();
-            r.SetColor(mine ? 120 : 232, mine ? 200 : 60, 60, 255);
+            if (mine) {
+                r.SetColor(120, 200, 60, 255);
+            } else {
+                Ra2App.MiniDotTint(o.Side(), tint);
+                r.SetColor(tint[0], tint[1], tint[2], 255);
+            }
             r.FillRect(px, py, 3, 3);
         }
 
@@ -694,8 +717,8 @@ class Ra2App {
                           170, 178, 192, 255);
     }
 
-    static string StructureLabel(StructureCatalog catalog, int side, int buildId) {
-        StructureType t = catalog.TypeFor(side, buildId);
+    static string StructureLabel(World world, StructureCatalog catalog, int side, int buildId) {
+        StructureType t = catalog.TypeFor(world, side, buildId);
         if (t == null) { return ""; }
         return t.Label();
     }
@@ -1040,39 +1063,67 @@ class Ra2App {
                         WorldObject s = world.ObjectAt(scout);
                         world.SelectAt(s.X(), s.Y());
                     }
-                    // The opponent opens on the first start position the
-                    // player did not take, so the two bases face each other
-                    // across the terrain; maps without a second waypoint
-                    // fall back to the far corner. The AI plays the next
-                    // side after the player's, matching the controller's
-                    // round-robin.
-                    int aiSide = (side + 1) % Side2.Count();
-                    List<int> eStart = new List<int>();
-                    int eSpot = 0 - 1;
-                    for (int w = 0; w < 8 && eSpot < 0; w = w + 1) {
-                        if (w == spot) { continue; }
-                        eStart = new List<int>();
-                        if (map.StartCell(w, eStart) && eStart.Count >= 2) {
-                            eSpot = w;
+                    // Every open enemy slot gets a house: ids follow the
+                    // player's (1..N), factions rotate after the player's so
+                    // the roster mix mirrors the original's slots. Houses --
+                    // not factions -- are the sides in the war, so two AIs on
+                    // one faction still fight each other; the world's
+                    // NearestEnemy treats every foreign non-neutral house as
+                    // hostile, which is the free-for-all.
+                    List<int> aiHouses = new List<int>();
+                    List<int> aiDiffs = new List<int>();
+                    for (int s = 0; s < 7; s = s + 1) {
+                        if (!shell.EnemyOpen(s)) { continue; }
+                        aiHouses.Add(aiHouses.Count + 1);
+                        aiDiffs.Add(shell.EnemyDifficulty(s));
+                    }
+                    world.SetFactions(side, aiHouses);
+
+                    // Start spots: the player's waypoint first, then each AI
+                    // takes the next free waypoint. A taken-spot set replaces
+                    // the old single-enemy scan; when the map runs out of
+                    // waypoints the leftover AIs fall back to the far corner,
+                    // diagonal offsets keeping them from stacking on one spot.
+                    int aiN = aiHouses.Count;
+                    int a = 0;
+                    int fallback = 0;
+                    while (a < aiN) {
+                        int aiSide = aiHouses[a];
+                        List<int> eStart = new List<int>();
+                        int eSpot = 0 - 1;
+                        for (int w = 0; w < 8 && eSpot < 0; w = w + 1) {
+                            if (w == spot) { continue; }
+                            bool taken = false;
+                            for (int t = 0; t < a && !taken; t = t + 1) {
+                                taken = t == w;
+                            }
+                            if (taken) { continue; }
+                            eStart = new List<int>();
+                            if (map.StartCell(w, eStart) && eStart.Count >= 2) {
+                                eSpot = w;
+                            }
                         }
-                    }
-                    if (eSpot < 0 && spot != 1) {
-                        eStart = new List<int>();
-                        if (map.StartCell(1, eStart) && eStart.Count >= 2) {
-                            eSpot = 1;
+                        int aiYard = 0 - 1;
+                        if (eSpot >= 0) {
+                            aiYard = world.PlaceBase(aiSide, eStart[0],
+                                                     eStart[1]);
+                        } else {
+                            // Far corner, nudged diagonally per fallback so
+                            // two corner AIs do not overlap their yards.
+                            int fy = 0 - 1 - fallback * 6;
+                            int fyy = fy < 0 ? 0 - fy : 0;
+                            aiYard = world.PlaceBase(aiSide,
+                                world.Width() - 4 - fallback * 5,
+                                fyy > 0 ? fyy : 1);
+                            fallback = fallback + 1;
+                            if (aiYard < 0) { world.PlaceEnemyBase(aiSide); }
                         }
-                    }
-                    int aiYard = 0 - 1;
-                    if (eSpot >= 0) {
-                        aiYard = world.PlaceBase(aiSide, eStart[0],
-                                                 eStart[1]);
-                    } else {
-                        world.PlaceEnemyBase(aiSide);
-                    }
-                    int au = 0;
-                    while (aiYard >= 0 && au < shell.UnitCount()) {
-                        if (world.SpawnNear(aiYard, 0) < 0) { break; }
-                        au = au + 1;
+                        int au = 0;
+                        while (aiYard >= 0 && au < shell.UnitCount()) {
+                            if (world.SpawnNear(aiYard, 0) < 0) { break; }
+                            au = au + 1;
+                        }
+                        a = a + 1;
                     }
                     // Neutral civilian structures from the map's [Structures]:
                     // oil derricks, hospitals and city props an engineer can
@@ -1094,8 +1145,8 @@ class Ra2App {
                         world.PlaceCivStructure(civId, Convert.ToInt32(f[3]),
                                                 Convert.ToInt32(f[4]), hp);
                     }
-                    game = GameController.CreateWith(world, side,
-                        shell.StartCredits(), shell.EnemyDifficulty(0));
+                    game = GameController.CreateMulti(world, side, aiHouses,
+                        aiDiffs, shell.StartCredits());
                     game.SetShortGame(shell.ShortGame());
                     terrain.SetWorld(world, objArt, side);
                     cam = Camera.Create(Ra2App.ViewW(), Ra2App.ViewH(),
@@ -1170,10 +1221,10 @@ class Ra2App {
                         } else {
                         int bx = (mouseX - (Ra2App.ViewW() - 282)) / 90;
                         int by = (mouseY - 46) / 59;
-                        int rows = (game.World().Catalog().CountFor(game.Side()) + 2) / 3;
+                        int rows = (game.World().Catalog().CountFor(game.World(), game.Side()) + 2) / 3;
                         int bid = by * 3 + bx;
                         if (by >= 0 && by < rows && bx >= 0 && bx < 3
-                         && bid < game.World().Catalog().CountFor(game.Side())) {
+                         && bid < game.World().Catalog().CountFor(game.World(), game.Side())) {
                             game.OnClickBuild(bid);
                         }
                         }
@@ -1395,8 +1446,8 @@ class Ra2App {
                     if (game != null) {
                         int pileId = -1;
                         StructureCatalog cat = game.World().Catalog();
-                        for (int ci = 0; ci < cat.CountFor(pside); ci = ci + 1) {
-                            StructureType ct = cat.TypeFor(pside, ci);
+                        for (int ci = 0; ci < cat.CountFor(world, pside); ci = ci + 1) {
+                            StructureType ct = cat.TypeFor(world, pside, ci);
                             string reg = pside == 0 ? "GAWEAP" : "NAWEAP";
                             if (ct != null && ct.Reg() == reg) {
                                 pileId = ci;
@@ -1424,7 +1475,7 @@ class Ra2App {
                                 WorldObject o = world.ObjectAt(oi);
                                 if (o == null || o.Side() != pside
                                  || o.Kind() != ObjKind.Structure()) { continue; }
-                                StructureType st = cat.TypeFor(pside,
+                                StructureType st = cat.TypeFor(world, pside,
                                     o.BuildId());
                                 if (st != null && st.Produces() != null
                                  && st.Produces().Count > 0) {

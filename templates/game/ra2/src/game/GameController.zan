@@ -10,16 +10,20 @@ class GameController {
     World world;
     int side;
     int money;
+    // One wallet/skill/build-cursor per AI house (house id -> slot), plus
+    // the roster of the AI houses this controller drives. The classic
+    // one-enemy game is houses[1] with the rest of the arrays unused.
+    List<int> aiHouses;
+    int[] aiWallets;
+    int[] aiDiffs;
+    int[] aiBuildIdx;
     int building;        // buildId armed for placement, or -1
     bool moveAttack;     // A key armed: next map click is a move-attack order
     bool sellMode;       // sidebar 卖 armed: next own-structure click sells it
     bool repairMode;     // sidebar 修 armed: next own-structure click repairs
-    int aiMoney;         // the opponent's credits
-    int aiDiff;          // the skirmish screen's AI skill (Difficulty.*)
     bool shortGame;      // 快速游戏: wrecking the base ends it, units or no
     int tick;            // ticks since the game started
     int result;          // 0 playing, 1 player won, 2 player lost
-    int aiBuildIdx;      // position in the AI's [AI]-section build order
     bool paused;
     bool dirty;
     // Squads: up to 10 numbered groups of selected units (Ctrl+number to save,
@@ -40,18 +44,38 @@ class GameController {
     /// beatable.</summary>
     static GameController CreateWith(World world, int side, int credits,
                                      int aiDiff) {
+        List<int> houses = new List<int>();
+        houses.Add((side + 1) % Side2.Count());
+        List<int> diffs = new List<int>();
+        diffs.Add(aiDiff);
+        return GameController.CreateMulti(world, side, houses, diffs, credits);
+    }
+
+    /// <summary>The multi-opponent form: each AI house gets its own wallet,
+    /// skill and build-order cursor, all opening at the same credits. The
+    /// world's faction table must already be set (World.SetFactions).</summary>
+    static GameController CreateMulti(World world, int side, List<int> houses,
+                                      List<int> diffs, int credits) {
         GameController g = new GameController();
         g.world = world;
         g.side = side;
-        // Both wallets open at the skirmish screen's credits; from then on
-        // money only enters through refineries, captured oil derricks and
-        // a spy's theft.
+        // The player's wallet opens at the skirmish screen's credits; from
+        // then on money only enters through refineries, captured oil
+        // derricks and a spy's theft.
         g.money = credits;
-        g.aiMoney = credits;
-        g.aiDiff = aiDiff;
+        g.aiHouses = new List<int>();
+        g.aiWallets = new int[8];
+        g.aiDiffs = new int[8];
+        g.aiBuildIdx = new int[8];
+        for (int i = 0; i < houses.Count && i < 7; i = i + 1) {
+            int h = houses[i];
+            if (h == side || h < 0 || h >= 8) { continue; }
+            g.aiHouses.Add(h);
+            g.aiWallets[h] = credits;
+            g.aiDiffs[h] = i < diffs.Count ? diffs[i] : Difficulty.Normal();
+        }
         g.tick = 0;
         g.result = 0;
-        g.aiBuildIdx = 0;
         g.paused = false;
         g.building = -1;
         g.moveAttack = false;
@@ -67,7 +91,20 @@ class GameController {
     World World() { return this.world; }
     int Side() { return this.side; }
     int Money() { return this.money; }
-    int AiMoney() { return this.aiMoney; }
+    // First AI house's wallet: kept for the sidebar's single-enemy line.
+    int AiMoney() {
+        return this.aiHouses.Count > 0
+            ? this.aiWallets[this.aiHouses[0]] : 0;
+    }
+
+    // Every AI house's credits combined, the sidebar's 多方 opponent line.
+    int AiMoneyTotal() {
+        int sum = 0;
+        for (int i = 0; i < this.aiHouses.Count; i = i + 1) {
+            sum = sum + this.aiWallets[this.aiHouses[i]];
+        }
+        return sum;
+    }
     int TickCount() { return this.tick; }
     /// <summary>0 while the game is on, 1 when the player destroyed the enemy
     /// base, 2 when the enemy destroyed the player's.</summary>
@@ -159,24 +196,56 @@ class GameController {
             int side = this.world.EventSideAt(i);
             int amount = this.world.EventAmountAt(i);
             if (kind == 1) {
-                if (side == this.side) { this.money = this.money + amount; }
-                else { this.aiMoney = this.aiMoney + amount; }
-                if (amount < 0 && side == this.side && this.money < 0) {
-                    this.money = 0;   // a bill cannot drive the wallet under
+                if (side == this.side) {
+                    this.money = this.money + amount;
+                    if (amount < 0 && this.money < 0) {
+                        this.money = 0;   // a bill cannot drive the wallet under
+                    }
+                } else if (this.IsAiHouse(side)) {
+                    this.aiWallets[side] = this.aiWallets[side] + amount;
+                    if (amount < 0 && this.aiWallets[side] < 0) {
+                        this.aiWallets[side] = 0;
+                    }
                 }
             } else if (kind == 2) {
                 int victim = amount;
-                int victimMoney = victim == this.side ? this.money : this.aiMoney;
+                int thief = side;
+                int victimMoney = this.WalletOf(victim);
                 int stolen = victimMoney / 2;
-                if (victim == this.side) { this.money = this.money - stolen; }
-                else { this.aiMoney = this.aiMoney - stolen; }
-                if (side == this.side) { this.money = this.money + stolen; }
-                else { this.aiMoney = this.aiMoney + stolen; }
+                this.TakeFromWallet(victim, stolen);
+                this.GiveToWallet(thief, stolen);
             }
         }
         if (n > 0) {
             this.world.ClearEvents();
             this.dirty = true;
+        }
+    }
+
+    // Wallet helpers: one place knows how the per-house wallets map to the
+    // player's own credits. Neutral-side events (a captured derrick that
+    // flips through a civil structure) land nowhere -- only houses have cash.
+    bool IsAiHouse(int house) {
+        return this.aiHouses != null && this.aiHouses.Contains(house);
+    }
+
+    int WalletOf(int house) {
+        if (house == this.side) { return this.money; }
+        if (this.IsAiHouse(house)) { return this.aiWallets[house]; }
+        return 0;
+    }
+
+    void GiveToWallet(int house, int amount) {
+        if (house == this.side) { this.money = this.money + amount; }
+        else if (this.IsAiHouse(house)) {
+            this.aiWallets[house] = this.aiWallets[house] + amount;
+        }
+    }
+
+    void TakeFromWallet(int house, int amount) {
+        if (house == this.side) { this.money = this.money - amount; }
+        else if (this.IsAiHouse(house)) {
+            this.aiWallets[house] = this.aiWallets[house] - amount;
         }
     }
 
@@ -187,7 +256,8 @@ class GameController {
     /// exactly like the real game.</summary>
     void Economy() {
         Rules rules = this.world.Rules();
-        for (int s = 0; s < Side2.Count(); s = s + 1) {
+        for (int s = 0; s < Side2.Count() + 1; s = s + 1) {
+            if (s != this.side && !this.IsAiHouse(s)) { continue; }
             int income = 0;
             for (int i = 0; i < this.world.ObjectCount(); i = i + 1) {
                 WorldObject o = this.world.ObjectAt(i);
@@ -200,14 +270,14 @@ class GameController {
                     income = income + rules.OilIncome();
                 }
             }
-        if (income == 0) { continue; }
-        if (s == this.side) { this.money = this.money + income; }
-        else {
-            // The AI's derrick trickle rides the skill multiplier too, so a
-            // 简单的敌人 really is poorer, not just slower.
-            this.aiMoney = this.aiMoney
-                + (int)(income * Difficulty.Multiplier(this.aiDiff));
-        }
+            if (income == 0) { continue; }
+            if (s == this.side) { this.money = this.money + income; }
+            else {
+                // The AI's derrick trickle rides the skill multiplier too,
+                // so a 简单的敌人 really is poorer, not just slower.
+                this.aiWallets[s] = this.aiWallets[s]
+                    + (int)(income * Difficulty.Multiplier(this.aiDiffs[s]));
+            }
         }
     }
 
@@ -332,7 +402,7 @@ class GameController {
     /// uses it to darken locked entries; cost is settled at placement time,
     /// so being broke does not lock a menu slot.</summary>
     bool BuildUnlocked(int buildId) {
-        StructureType t = this.world.Catalog().TypeFor(this.side, buildId);
+        StructureType t = this.world.Catalog().TypeFor(this.world, this.side, buildId);
         if (t == null) { return false; }
         return this.world.SatisfiesPrereqs(this.side, t.Prereqs());
     }
@@ -340,7 +410,7 @@ class GameController {
     /// <summary>True when a unit's tech tree is satisfied -- the production
     /// panel's gate.</summary>
     bool UnitUnlocked(int unitId) {
-        UnitType u = this.world.Units().TypeFor(this.side, unitId);
+        UnitType u = this.world.Units().TypeFor(this.world, this.side, unitId);
         if (u == null) { return false; }
         return this.world.SatisfiesPrereqs(this.side, u.Prereqs());
     }
@@ -364,7 +434,7 @@ class GameController {
             if (prod[i] == unitId) { can = true; }
         }
         if (!can) { return; }
-        UnitType u = this.world.Units().TypeFor(sel.Side(), unitId);
+        UnitType u = this.world.Units().TypeFor(this.world, sel.Side(), unitId);
         if (u == null) { return; }
         if (!this.world.SatisfiesPrereqs(this.side, u.Prereqs())) { return; }
         if (this.money < u.Cost()) { return; }
@@ -392,7 +462,7 @@ class GameController {
         StructureCatalog catalog = this.world.Catalog();
         int buildId = this.building;
         if (buildId < 0) { return false; }
-        StructureType t = catalog.TypeFor(this.side, buildId);
+        StructureType t = catalog.TypeFor(this.world, this.side, buildId);
         if (t == null) { return false; }
         // No yard, no construction: the arm drops, exactly like a broke
         // order. A base whose construction yard fell stays fallen -- that is
@@ -415,10 +485,13 @@ class GameController {
 
     // ---- opponent AI -------------------------------------------------------
 
-    /// <summary>The side the skirmish AI plays: the next side round-robin
-    /// after the player's, so each choice meets a different opponent.</summary>
+    /// <summary>The side the classic one-enemy skirmish AI plays: the next
+    /// side round-robin after the player's, so each choice meets a different
+    /// opponent. Multi-AI games bypass this and drive every house in
+    /// aiHouses directly.</summary>
     int EnemySide() {
-        return (this.side + 1) % Side2.Count();
+        return this.aiHouses.Count > 0 ? this.aiHouses[0]
+            : (this.side + 1) % Side2.Count();
     }
 
     /// <summary>Runs the enemy's turn: the AI follows the [AI] section's
@@ -428,22 +501,35 @@ class GameController {
     /// player object. The AI is honest -- it follows the same placement,
     /// production, prereq and combat rules as the player.</summary>
     void UpdateAi() {
-        int aiSide = this.EnemySide();
         if (this.result != 0) { return; }
-        Rules rules = this.world.Rules();
-        // Decision cadence rides the skill: 冷酷的敌人 thinks faster, 简单的
-        // 敌人 slower. One construction decision per second of game time at
-        // the normal setting.
-        int buildEvery = (int)(15 / Difficulty.Multiplier(this.aiDiff));
-        int trainEvery = (int)(20 / Difficulty.Multiplier(this.aiDiff));
+        // Each AI house runs its own decision loop: separate wallets, skill
+        // levels and build orders, so two 冷酷的敌人 grow at full pace
+        // independently instead of sharing one brain's budget.
+        for (int a = 0; a < this.aiHouses.Count; a = a + 1) {
+            this.UpdateAiHouse(this.aiHouses[a], this.world.Rules());
+        }
+    }
+
+    /// <summary>One AI house's decisions: build on its own cadence, train on
+    /// its own cadence, then send every idle unit at the nearest hostile of
+    /// ANY house -- in a free-for-all that includes the other AIs.</summary>
+    void UpdateAiHouse(int aiSide, Rules rules) {
+        double mult = Difficulty.Multiplier(this.aiDiffs[aiSide]);
+        int buildEvery = (int)(15.0 / mult);
+        int trainEvery = (int)(20.0 / mult);
+        if (buildEvery < 1) { buildEvery = 1; }
+        if (trainEvery < 1) { trainEvery = 1; }
         if (this.tick % buildEvery == 0) { this.AiBuildStep(aiSide, rules); }
         if (this.tick % trainEvery == 0) { this.AiTrainStep(aiSide, rules); }
         // Attack: every unit without a live target acquires the nearest
-        // player object. The world's chase logic then walks it into range.
+        // hostile object. The world's chase logic then walks it into range.
         for (int i = 0; i < this.world.ObjectCount(); i = i + 1) {
             WorldObject o = this.world.ObjectAt(i);
             if (o.Side() != aiSide || o.Kind() != ObjKind.Unit()) { continue; }
             if (this.world.Target(o) != null) { continue; }
+            // Stagger the omniscient scan so N idle armies cost N scans per
+            // 15 ticks instead of N per tick: house+index spreads the hits.
+            if ((this.tick + i + aiSide) % 15 != 0) { continue; }
             int enemy = this.world.NearestEnemy(aiSide, o.X(), o.Y());
             if (enemy >= 0) {
                 this.world.AttackObject(i, this.world.ObjectAt(enemy));
@@ -455,7 +541,7 @@ class GameController {
     /// fixed build order; after that the AI tops up power when the grid runs
     /// thin, adds a second refinery, and keeps sprinkling defences.</summary>
     void AiBuildStep(int aiSide, Rules rules) {
-        if (this.aiBuildIdx < 8) {
+        if (this.aiBuildIdx[aiSide] < 8) {
             List<List<string>> order = new List<List<string>>();
             order.Add(rules.AiPower());
             order.Add(rules.AiRefinery());
@@ -465,8 +551,9 @@ class GameController {
             order.Add(rules.AiRadar());
             order.Add(rules.AiTech());
             order.Add(rules.AiDefense());
-            if (this.AiBuyFromList(aiSide, order[this.aiBuildIdx], false)) {
-                this.aiBuildIdx = this.aiBuildIdx + 1;
+            if (this.AiBuyFromList(aiSide, order[this.aiBuildIdx[aiSide]],
+                                   false)) {
+                this.aiBuildIdx[aiSide] = this.aiBuildIdx[aiSide] + 1;
             }
             return;
         }
@@ -495,7 +582,8 @@ class GameController {
         // reserve (so unit training never starves), and the ring stops at
         // four towers -- an endless wall turns the endgame into a siege the
         // infantry-heavy roster cannot crack.
-        if (this.CountDefenses(aiSide, rules) < 4 && this.aiMoney > 1200) {
+        if (this.CountDefenses(aiSide, rules) < 4
+         && this.aiWallets[aiSide] > 1200) {
             this.AiBuyFromList(aiSide, rules.AiDefense(), true);
         }
     }
@@ -514,27 +602,27 @@ class GameController {
             return false;
         }
         StructureCatalog catalog = this.world.Catalog();
-        int count = catalog.CountFor(side);
+        int count = catalog.CountFor(this.world, side);
         for (int i = 0; i < regs.Count; i = i + 1) {
             int buildId = -1;
             for (int b = 0; b < count; b = b + 1) {
-                StructureType t = catalog.TypeFor(side, b);
+                StructureType t = catalog.TypeFor(this.world, side, b);
                 if (t != null && t.Reg() == regs[i]) { buildId = b; break; }
             }
             if (buildId < 0) { continue; }   // not in this side's roster
-            StructureType t2 = catalog.TypeFor(side, buildId);
+            StructureType t2 = catalog.TypeFor(this.world, side, buildId);
             if (t2 == null) { return true; }
             if (!allowMany && this.HasStructure(side, buildId)) { return true; }
             if (!this.world.SatisfiesPrereqs(side, t2.Prereqs())) {
                 return false;   // tech missing: retry on a later step
             }
-            if (this.aiMoney < t2.Cost()) { return false; }
+            if (this.aiWallets[side] < t2.Cost()) { return false; }
             List<int> xy = new List<int>();
             if (!this.world.AiPlaceSpot(side, t2, xy)) { return false; }
             if (this.world.PlaceStructure(side, buildId, xy[0], xy[1]) < 0) {
                 return false;
             }
-            this.aiMoney = this.aiMoney - t2.Cost();
+            this.aiWallets[side] = this.aiWallets[side] - t2.Cost();
             return true;
         }
         return true;
@@ -558,12 +646,16 @@ class GameController {
             }
         }
         if (miners < refs * 2 && this.AiQueueHarvester(aiSide)) { return; }
-        if (this.AiArmySize(aiSide) >= 8) { return; }
+        // The army cap rides the skill: a 冷酷的敌人 fields more before
+        // it stops training, a 简单的敌人 fewer.
+        int cap = this.aiDiffs[aiSide] == Difficulty.Brutal() ? 10
+                : this.aiDiffs[aiSide] == Difficulty.Easy() ? 6 : 8;
+        if (this.AiArmySize(aiSide) >= cap) { return; }
         StructureCatalog catalog = this.world.Catalog();
-        int count = catalog.CountFor(aiSide);
+        int count = catalog.CountFor(this.world, aiSide);
         for (int pass = 0; pass < 2; pass = pass + 1) {
             for (int b = 0; b < count; b = b + 1) {
-                StructureType t = catalog.TypeFor(aiSide, b);
+                StructureType t = catalog.TypeFor(this.world, aiSide, b);
                 if (t == null || t.Produces() == null
                  || t.Produces().Count == 0) { continue; }
                 bool isBarracks = GameController.RegIn(rules.AiBarracks(),
@@ -578,14 +670,14 @@ class GameController {
                 if (obj.ProdCount() > 0) { continue; }
                 int unitId = this.AiPickUnit(aiSide, t);
                 if (unitId < 0) { continue; }
-                UnitType u = this.world.Units().TypeFor(aiSide, unitId);
+                UnitType u = this.world.Units().TypeFor(this.world, aiSide, unitId);
                 if (u == null) { continue; }
                 if (!this.world.SatisfiesPrereqs(aiSide, u.Prereqs())) {
                     continue;
                 }
-                if (this.aiMoney < u.Cost()) { continue; }
+                if (this.aiWallets[aiSide] < u.Cost()) { continue; }
                 if (this.world.QueueUnit(idx, unitId)) {
-                    this.aiMoney = this.aiMoney - u.Cost();
+                    this.aiWallets[aiSide] = this.aiWallets[aiSide] - u.Cost();
                     return;
                 }
             }
@@ -597,8 +689,8 @@ class GameController {
     /// the step retries on a later tick.</summary>
     bool AiQueueHarvester(int aiSide) {
         StructureCatalog catalog = this.world.Catalog();
-        for (int b = 0; b < catalog.CountFor(aiSide); b = b + 1) {
-            StructureType t = catalog.TypeFor(aiSide, b);
+        for (int b = 0; b < catalog.CountFor(this.world, aiSide); b = b + 1) {
+            StructureType t = catalog.TypeFor(this.world, aiSide, b);
             if (t == null || t.Produces() == null
              || !GameController.RegIn(this.world.Rules().AiWeapons(), t.Reg())) {
                 continue;
@@ -611,11 +703,11 @@ class GameController {
             }
             List<int> prod = t.Produces();
             for (int i = 0; i < prod.Count; i = i + 1) {
-                UnitType u = this.world.Units().TypeFor(aiSide, prod[i]);
+                UnitType u = this.world.Units().TypeFor(this.world, aiSide, prod[i]);
                 if (u == null || u.Role() != UnitRole.Harvester()) { continue; }
-                if (this.aiMoney < u.Cost()) { return false; }
+                if (this.aiWallets[aiSide] < u.Cost()) { return false; }
                 if (this.world.QueueUnit(idx, prod[i])) {
-                    this.aiMoney = this.aiMoney - u.Cost();
+                    this.aiWallets[aiSide] = this.aiWallets[aiSide] - u.Cost();
                     return true;
                 }
             }
@@ -628,7 +720,7 @@ class GameController {
     int AiPickUnit(int aiSide, StructureType t) {
         List<int> prod = t.Produces();
         for (int i = 0; i < prod.Count; i = i + 1) {
-            UnitType u = this.world.Units().TypeFor(aiSide, prod[i]);
+            UnitType u = this.world.Units().TypeFor(this.world, aiSide, prod[i]);
             if (u == null || u.Role() != UnitRole.None()) { continue; }
             if (u.Primary() == null) { continue; }
             return prod[i];
@@ -686,11 +778,11 @@ class GameController {
     /// war factory never waits on one.</summary>
     bool HasRegBuilding(int side, List<string> regs) {
         StructureCatalog catalog = this.world.Catalog();
-        int count = catalog.CountFor(side);
+        int count = catalog.CountFor(this.world, side);
         bool anyInRoster = false;
         for (int i = 0; i < regs.Count; i = i + 1) {
             for (int b = 0; b < count; b = b + 1) {
-                StructureType t = catalog.TypeFor(side, b);
+                StructureType t = catalog.TypeFor(this.world, side, b);
                 if (t == null || t.Reg() != regs[i]) { continue; }
                 anyInRoster = true;
                 if (this.HasStructure(side, b)) { return true; }
@@ -710,14 +802,24 @@ class GameController {
         return n;
     }
 
-    /// <summary>Sets the result when either side's base is gone: the player
-    /// wins by destroying every enemy structure, and vice versa. There is no
-    /// draw -- a side that cannot reach the other simply has to build a way
-    /// through, or lose its base first.</summary>
+    /// <summary>Sets the result when the base situation is decided: the
+    /// player wins when EVERY AI house is down to no structures (and, off
+    /// the quick game, no units either), and loses the same way. In a
+    /// free-for-all the AIs take each other's bases into account -- an AI
+    /// destroyed by its rival stays destroyed and counts toward the win.
+    /// There is no draw -- a side that cannot reach the others simply has
+    /// to build a way through, or lose its base first.</summary>
     void CheckResult() {
         if (this.result != 0) { return; }
-        if (this.world.SideEliminated(this.EnemySide())
-         && (this.shortGame || !this.WorldHasUnits(this.EnemySide()))) {
+        bool allDown = true;
+        for (int i = 0; i < this.aiHouses.Count; i = i + 1) {
+            int h = this.aiHouses[i];
+            if (this.world.SideEliminated(h)
+             && (this.shortGame || !this.WorldHasUnits(h))) { continue; }
+            allDown = false;
+            break;
+        }
+        if (allDown) {
             this.result = 1;
             return;
         }

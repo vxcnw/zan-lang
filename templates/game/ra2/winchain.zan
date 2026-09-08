@@ -1,9 +1,10 @@
 // 快速游戏胜负全链路的回归程序。在一个程序化铺出的平地地图上放下两座
 // 基地,不读 data/:地形是构造出来的 IsoMap,规则是 Rules.Default()。
-// 三个场景各断言一个结果,任何一条 FAIL 都以非零码退出:
+// 场景各断言一个结果,任何一条 FAIL 都以非零码退出:
 //   长局:打光敌方建筑但留一个兵 -> result 保持 0(还要继续清兵)
 //   短局:同样局面 -> result 立即变 1(打光建筑就算赢)
 //   反向短局:己方建筑全灭 -> result 变 2(判负)
+//   多房:玩家+两个 AI 房,清一个 AI 局面继续,清光才判胜
 using System;
 using Ra2.Formats;
 using Ra2.Game;
@@ -139,6 +140,45 @@ class WinChainTest {
         KillStructuresOf(world3, 0);
         game3.Tick();
         Report("short player loss when own base is razed", game3.Result(), 2);
+
+        // ---- 多房:玩家 + 两个 AI 房(1 苏军、2 盟军),全员混战 ----
+        // 清掉 1 号 AI 的建筑与兵后局面对 2 号 AI 仍是 0(还活着就继续打);
+        // 再清 2 号 AI 才判胜。
+        World world4 = World.Create(FlatMap(40, 40), sc, uc);
+        world4.PlaceBase(0, 3, 3);
+        world4.PlaceBase(1, 30, 3);
+        world4.PlaceBase(2, 3, 30);
+        List<int> houses4 = new List<int>();
+        houses4.Add(1);
+        houses4.Add(2);
+        List<int> diffs4 = new List<int>();
+        diffs4.Add(Difficulty.Brutal());
+        diffs4.Add(Difficulty.Normal());
+        world4.SetFactions(0, houses4);
+        GameController game4 = GameController.CreateMulti(world4, 0, houses4,
+                                                          diffs4, 10000);
+        game4.SetShortGame(true);
+        int step4 = 0;
+        while (step4 < 50 && game4.Result() == 0) { game4.Tick(); step4 = step4 + 1; }
+        Report("multi pre-game stays undecided", game4.Result(), 0);
+        Report("multi both AI houses stand",
+               StructuresOf(world4, 1) > 0 && StructuresOf(world4, 2) > 0
+                   ? 1 : 0, 1);
+        Report("multi AI factions rotated (soviet + yuri)",
+               world4.FactionOf(1) == Side2.Soviet()
+               && world4.FactionOf(2) == Side2.Yuri() ? 1 : 0, 1);
+        KillStructuresOf(world4, 1);
+        for (int i = 0; i < world4.ObjectCount(); i = i + 1) {
+            WorldObject o = world4.ObjectAt(i);
+            if (o.Side() == 1 && o.Kind() == ObjKind.Unit() && !o.IsDead()) {
+                o.TakeDamage(o.Hp());
+            }
+        }
+        game4.Tick();
+        Report("multi killing one AI keeps the game on", game4.Result(), 0);
+        KillStructuresOf(world4, 2);
+        game4.Tick();
+        Report("multi killing the last AI wins", game4.Result(), 1);
 
         Console.WriteLine(failures == 0 ? "winchain ok"
                           : "winchain FAILED " + Convert.ToString(failures));

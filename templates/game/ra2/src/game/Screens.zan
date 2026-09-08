@@ -329,33 +329,39 @@ class Screens {
                   dy + 22 * aw / 640, 1, 150, 158, 172, 255);
 
         // ---- player and enemy slots ------------------------------------
-        // Slot 0 is the player; slot 1 is the one opponent the engine
-        // hosts; slots 2 and 3 draw closed, the way the original drew an
-        // empty slot nobody had taken. Each open row: start-spot chip, name
-        // or difficulty plate, country field, colour swatch.
+        // Slot 0 is the player; slots 1..7 are the AI opponents, each
+        // openable or closable with its own difficulty. Rows are compact
+        // (28 design px) so all eight fit between the header and the map
+        // preview. Each open row: start-spot chip, name or difficulty
+        // plate, country field, colour swatch.
         int slotX = dx + 20 * aw / 640;
         int slotW = 360 * aw / 640;
-        int slotH = 40 * aw / 640;
-        int slotPitch = 46 * aw / 640;
+        int slotH = 24 * aw / 640;
+        int slotPitch = 28 * aw / 640;
         int used = 0;
 
         // The dropdown's geometry, needed by the hit tests before the draw
         // pass reaches it. One flat list across the sides, like the
         // original's country box: 美国..英国, 苏俄..伊拉克, 尤里.
         int dropX = slotX + 174 * aw / 640;
-        int dropY = dy + 100 * aw / 640;
+        int dropY = dy + 84 * aw / 640;
         int dropW = 140 * aw / 640;
         int dropH = (Shell.FlatCount() * 24 + 8) * aw / 640;
 
-        for (int i = 0; i < 4; i = i + 1) {
-            int ry = dy + (56 + i * 46) * aw / 640;
+        for (int i = 0; i < 8; i = i + 1) {
+            int ry = dy + (52 + i * 28) * aw / 640;
             bool player = i == 0;
-            bool enemy = i == 1;
-            if (!player && !enemy) {
+            if (!player && !shell.EnemyOpen(i - 1)) {
+                // A closed enemy slot: dim plate, click it to join.
                 Draw.RoundRectFill(r, slotX, ry, slotW, slotH, 4,
                                    26, 30, 40, 140);
-                Text.DrawCentered(r, "关闭", slotX + slotW / 2,
-                                  ry + slotH / 2 - 8, 2, 96, 100, 112, 200);
+                Text.DrawCentered(r, "关闭(点击加入)", slotX + slotW / 2,
+                                  ry + slotH / 2 - 7, 1, 96, 100, 112, 200);
+                if (clicked && Draw.PointIn(mouseX, mouseY, slotX, ry,
+                                            slotW, slotH)) {
+                    shell.ToggleEnemyOpen(i - 1);
+                    used = 1;
+                }
                 continue;
             }
 
@@ -367,7 +373,7 @@ class Screens {
 120, 128, 142, 200);
             }
 
-            // Start-spot chip. The player's cycles 随机 → 1..4; the enemy's
+            // Start-spot chip. The player's cycles 随机 → 1..4; the AI's
             // just reports the spot it will take (the next one over).
             string spotText = "随";
             if (player) {
@@ -375,30 +381,30 @@ class Screens {
                     spotText = Convert.ToString(shell.StartPosIndex());
                 }
             } else {
-                spotText = Convert.ToString(shell.StartPosIndex() % 4 + 1);
+                spotText = Convert.ToString(shell.StartPosIndex() % 4 + i);
             }
-            Draw.RoundRectFill(r, slotX + 4 * aw / 640, ry + 4 * aw / 640, 32 * aw / 640,
-                               slotH - 8 * aw / 640, 4, 40, 44, 58, 255);
-            Text.DrawCentered(r, spotText, slotX + 20 * aw / 640,
-                              ry + slotH / 2 - 8, 2, 236, 208, 120, 255);
+            Draw.RoundRectFill(r, slotX + 4 * aw / 640, ry + 3 * aw / 640, 26 * aw / 640,
+                               slotH - 6 * aw / 640, 4, 40, 44, 58, 255);
+            Text.DrawCentered(r, spotText, slotX + 17 * aw / 640,
+                              ry + slotH / 2 - 7, 1, 236, 208, 120, 255);
 
-            // Name plate: the player, or the enemy's skill -- clicking the
+            // Name plate: the player, or the AI's skill -- clicking the
             // enemy's plate walks 简单的敌人 → 普通的敌人 → 冷酷的敌人,
             // exactly what the original's slot did.
             string name = player ? "指挥官"
-                : Difficulty.NameOf(shell.EnemyDifficulty(0));
-            Draw.RoundRectFill(r, slotX + 42 * aw / 640, ry + 4 * aw / 640, 126 * aw / 640,
-                               slotH - 8 * aw / 640, 4, 40, 44, 58, 255);
-            Text.DrawCentered(r, name, slotX + 105 * aw / 640, ry + slotH / 2 - 8,
-                              2, 224, 228, 238, 255);
-            bool hovName = Draw.PointIn(mouseX, mouseY, slotX + 42 * aw / 640,
-                                        ry + 4 * aw / 640, 126 * aw / 640, slotH - 8 * aw / 640);
-            if (hovName && enemy) {
-                Draw.RoundRectStroke(r, slotX + 42 * aw / 640, ry + 4 * aw / 640, 126 * aw / 640,
-                                     slotH - 8 * aw / 640, 4, 236, 2, 208, 120, 255);
+                : Difficulty.NameOf(shell.EnemyDifficulty(i - 1));
+            Draw.RoundRectFill(r, slotX + 34 * aw / 640, ry + 3 * aw / 640, 106 * aw / 640,
+                               slotH - 6 * aw / 640, 4, 40, 44, 58, 255);
+            Text.DrawCentered(r, name, slotX + 87 * aw / 640, ry + slotH / 2 - 7,
+                              1, 224, 228, 238, 255);
+            bool hovName = Draw.PointIn(mouseX, mouseY, slotX + 34 * aw / 640,
+                                        ry + 3 * aw / 640, 106 * aw / 640, slotH - 6 * aw / 640);
+            if (hovName && !player) {
+                Draw.RoundRectStroke(r, slotX + 34 * aw / 640, ry + 3 * aw / 640, 106 * aw / 640,
+                                     slotH - 6 * aw / 640, 4, 236, 2, 208, 120, 255);
             }
-            if (hovName && enemy && clicked) {
-                shell.CycleEnemyDifficulty(0);
+            if (hovName && !player && clicked) {
+                shell.CycleEnemyDifficulty(i - 1);
                 used = 1;
             }
 
@@ -407,26 +413,34 @@ class Screens {
             // sub-faction, written the way the original wrote it.
             string country = player
                 ? Shell.FlatName(shell.FlatIndex()) : "随机(???)";
-            Draw.RoundRectFill(r, slotX + 174 * aw / 640, ry + 4 * aw / 640, 110 * aw / 640,
-                               slotH - 8 * aw / 640, 4, 40, 44, 58, 255);
-            Text.DrawCentered(r, country, slotX + 229 * aw / 640, ry + slotH / 2 - 8,
-                              2, 224, 228, 238, 255);
+            Draw.RoundRectFill(r, slotX + 146 * aw / 640, ry + 3 * aw / 640, 110 * aw / 640,
+                               slotH - 6 * aw / 640, 4, 40, 44, 58, 255);
+            Text.DrawCentered(r, country, slotX + 201 * aw / 640, ry + slotH / 2 - 7,
+                              1, 224, 228, 238, 255);
             if (player) {
-                bool hovC = Draw.PointIn(mouseX, mouseY, slotX + 174 * aw / 640,
-                                         ry + 4 * aw / 640, 110 * aw / 640, slotH - 8 * aw / 640);
+                bool hovC = Draw.PointIn(mouseX, mouseY, slotX + 146 * aw / 640,
+                                         ry + 3 * aw / 640, 110 * aw / 640, slotH - 6 * aw / 640);
                 if (hovC) {
-                    Draw.RoundRectStroke(r, slotX + 174 * aw / 640, ry + 4 * aw / 640,
-                                         110 * aw / 640, slotH - 8 * aw / 640, 4, 2,
+                    Draw.RoundRectStroke(r, slotX + 146 * aw / 640, ry + 3 * aw / 640,
+                                         110 * aw / 640, slotH - 6 * aw / 640, 4, 2,
 236, 208, 120, 255);
                 }
                 if (hovC && clicked) {
                     shell.SetCountryListOpen(!shell.CountryListOpen());
                     used = 1;
                 }
+            } else {
+                // Open slots can be left again -- click the country field.
+                bool hovC = Draw.PointIn(mouseX, mouseY, slotX + 146 * aw / 640,
+                                         ry + 3 * aw / 640, 110 * aw / 640, slotH - 6 * aw / 640);
+                if (hovC && clicked) {
+                    shell.ToggleEnemyOpen(i - 1);
+                    used = 1;
+                }
             }
 
             // Colour swatch: the player cycles the original's eight; the
-            // enemy is painted the aggressor red.
+            // enemies wear per-slot hostile hues (matches the minimap dots).
             int cr = 196;
             int cg = 32;
             int cb = 32;
@@ -436,24 +450,28 @@ class Screens {
                 cr = rgb[0];
                 cg = rgb[1];
                 cb = rgb[2];
+            } else {
+                List<int> dot = new List<int>();
+                Screens.EnemySwatch(i, dot);
+                cr = dot[0];
+                cg = dot[1];
+                cb = dot[2];
             }
-            int swX = slotX + 290 * aw / 640;
-            int swW = slotW - 294 * aw / 640;
-            Draw.RoundRectFill(r, swX, ry + 4 * aw / 640, swW, slotH - 8 * aw / 640, 4,
+            int swX = slotX + 262 * aw / 640;
+            int swW = slotW - 266 * aw / 640;
+            Draw.RoundRectFill(r, swX, ry + 3 * aw / 640, swW, slotH - 6 * aw / 640, 4,
                                cr, cg, cb, 255);
-            Draw.RoundRectStroke(r, swX, ry + 4 * aw / 640, swW, slotH - 8 * aw / 640, 4, 2,
+            Draw.RoundRectStroke(r, swX, ry + 3 * aw / 640, swW, slotH - 6 * aw / 640, 4, 2,
 16, 18, 24, 255);
             if (player) {
-                bool hovSw = Draw.PointIn(mouseX, mouseY, swX, ry + 4 * aw / 640,
-                                          swW, slotH - 8 * aw / 640);
+                bool hovSw = Draw.PointIn(mouseX, mouseY, swX, ry + 3 * aw / 640,
+                                          swW, slotH - 6 * aw / 640);
                 if (hovSw && clicked) {
                     shell.SetColor((shell.ColorIndex() + 1) % 8);
                     used = 1;
                 }
-            }
-            if (player) {
                 bool hovSpot = Draw.PointIn(mouseX, mouseY, slotX + 4 * aw / 640,
-                                            ry + 4 * aw / 640, 32 * aw / 640, slotH - 8 * aw / 640);
+                                            ry + 3 * aw / 640, 26 * aw / 640, slotH - 6 * aw / 640);
                 if (hovSpot && clicked) {
                     shell.SetStartPos((shell.StartPosIndex() + 1) % 5);
                     used = 1;
@@ -463,9 +481,9 @@ class Screens {
 
         // ---- map preview -------------------------------------------------
         int pvX = slotX;
-        int pvY = dy + 246 * aw / 640;
+        int pvY = dy + 278 * aw / 640;
         int pvW = slotW;
-        int pvH = 148 * aw / 640;
+        int pvH = 116 * aw / 640;
         Draw.RoundRectFill(r, pvX, pvY, pvW, pvH, 6, 26, 30, 40, 220);
         Text.Draw(r, ui.Or("GUI:Map", "地图") + ":", pvX + 10 * aw / 640,
                   pvY + 5 * aw / 640, 1, 236, 208, 120, 255);
@@ -625,6 +643,26 @@ class Screens {
 
     /// <summary>One checkbox row: the square, a gold tick fill when on, the
     /// label. Returns true when the click landed on the row.</summary>
+    /// <summary>The setup screen's per-slot enemy colour, matching the
+    /// minimap dots: slot i wears hue i so every AI is distinguishable.</summary>
+    static void EnemySwatch(int slot, List<int> rgb) {
+        int r = 196; int g = 32; int b = 32;
+        if (slot == 2) { r = 230; g = 130; b = 40; }      // orange
+        else if (slot == 3) { r = 60; g = 140; b = 232; } // blue
+        else if (slot == 4) { r = 220; g = 80; b = 200; } // magenta
+        else if (slot == 5) { r = 230; g = 200; b = 50; } // yellow
+        else if (slot == 6) { r = 60; g = 210; b = 200; } // cyan
+        else if (slot == 7) { r = 240; g = 240; b = 240; } // white
+        Ra2AppLikeSet(rgb, r, g, b);
+    }
+
+    static void Ra2AppLikeSet(List<int> rgb, int r, int g, int b) {
+        while (rgb.Count < 3) { rgb.Add(0); }
+        rgb[0] = r;
+        rgb[1] = g;
+        rgb[2] = b;
+    }
+
     static bool CheckRow(SdlRenderer r, int mx, int my, int x, int y,
                          string label, bool on) {
         bool hov = Draw.PointIn(mx, my, x, y, 200, 20);

@@ -115,7 +115,8 @@ class Shell {
     bool shortGame;
     bool mcvRedeploy;
     bool crates;
-    int[] enemyDiff;   // difficulty per enemy slot, up to three
+    int[] enemyDiff;   // difficulty per enemy slot, up to seven AIs
+    bool[] enemyOpen;  // which enemy slots are in the game (slot 0 always on)
     bool countryOpen;  // the skirmish screen's country dropdown is down
     bool quit;
 
@@ -135,10 +136,13 @@ class Shell {
         s.shortGame = false;
         s.mcvRedeploy = true;
         s.crates = false;
-        s.enemyDiff = new int[3];
-        s.enemyDiff[0] = Difficulty.Normal();
-        s.enemyDiff[1] = Difficulty.Normal();
-        s.enemyDiff[2] = Difficulty.Normal();
+        s.enemyDiff = new int[7];
+        s.enemyOpen = new bool[7];
+        for (int i = 0; i < 7; i = i + 1) {
+            s.enemyDiff[i] = Difficulty.Brutal();
+            // The classic 1v1: one AI. More open from the setup screen.
+            s.enemyOpen[i] = i == 0;
+        }
         s.quit = false;
         return s;
     }
@@ -160,13 +164,32 @@ class Shell {
     bool WantsQuit() { return this.quit; }
 
     int EnemyDifficulty(int slot) {
-        if (slot < 0 || slot >= 3) { return Difficulty.Normal(); }
+        if (slot < 0 || slot >= 7) { return Difficulty.Normal(); }
         return this.enemyDiff[slot];
     }
 
     void CycleEnemyDifficulty(int slot) {
-        if (slot < 0 || slot >= 3) { return; }
+        if (slot < 0 || slot >= 7) { return; }
         this.enemyDiff[slot] = (this.enemyDiff[slot] + 1) % 3;
+    }
+
+    bool EnemyOpen(int slot) {
+        if (slot < 0 || slot >= 7) { return false; }
+        return this.enemyOpen[slot];
+    }
+
+    void ToggleEnemyOpen(int slot) {
+        if (slot < 1 || slot >= 7) { return; }   // slot 0 stays in the game
+        this.enemyOpen[slot] = !this.enemyOpen[slot];
+    }
+
+    // How many enemy slots are open -- the load path's AI count.
+    int EnemySlotsOpen() {
+        int n = 0;
+        for (int i = 0; i < 7; i = i + 1) {
+            if (this.enemyOpen[i]) { n = n + 1; }
+        }
+        return n;
     }
 
     string CountryName() {

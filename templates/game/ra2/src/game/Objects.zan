@@ -64,9 +64,12 @@ class WorldObject {
     bool civ;          // a map civilian structure (lives in the civ catalog)
 
     // Harvester state (units with the harvester role): credits in the hold,
-    // and a countdown that paces mining passes and unloading.
+    // a countdown that paces mining passes and unloading, and a retry delay
+    // that keeps a stranded harvester from re-running whole-map pathing
+    // every single tick.
     int cargo;
     int dockTimer;
+    int routeCooldown;
 
     // Structures under the wrench: true while the owner pays to patch the
     // building up. Cleared automatically at full health.
@@ -98,6 +101,7 @@ class WorldObject {
         o.civ = false;
         o.cargo = 0;
         o.dockTimer = 0;
+        o.routeCooldown = 0;
         o.repairing = false;
         o.repairAt = 0;
         o.repairCarry = 0;
@@ -134,6 +138,7 @@ class WorldObject {
         o.civ = false;
         o.cargo = 0;
         o.dockTimer = 0;
+        o.routeCooldown = 0;
         o.repairing = false;
         o.repairAt = 0;
         o.repairCarry = 0;
@@ -196,6 +201,11 @@ class WorldObject {
     void SetRepairAtTick(int t) { this.repairAt = t; }
     int DockTimer() { return this.dockTimer; }
     void SetDockTimer(int ticks) { this.dockTimer = ticks; }
+    /// <summary>True while a failed route search is still in its cooldown,
+    /// so the harvester idles instead of rescanning the whole map.</summary>
+    bool RouteRetry() { return this.routeCooldown > 0; }
+    int RouteCooldown() { return this.routeCooldown; }
+    void SetRouteCooldown(int ticks) { this.routeCooldown = ticks; }
 
     // ---- production ------------------------------------------------------
 
@@ -536,15 +546,19 @@ class UnitCatalog {
 
     Rules Rules() { return this.rules; }
 
-    /// <summary>A side's units, in build order.</summary>
-    List<UnitType> ListFor(int side) {
-        if (side == Side2.Soviet()) { return this.soviet; }
-        if (side == Side2.Yuri()) { return this.yuri; }
+    /// <summary>A side's units, in build order. `side` is a house id in the
+    /// multi-house skirmish, so roster selection rides the faction table;
+    /// the campaign's one-house-per-side default maps 0/1/2 straight
+    /// through.</summary>
+    List<UnitType> ListFor(World world, int side) {
+        int f = world == null ? side : world.FactionOf(side);
+        if (f == Side2.Soviet()) { return this.soviet; }
+        if (f == Side2.Yuri()) { return this.yuri; }
         return this.allied;
     }
 
-    UnitType TypeFor(int side, int unitId) {
-        List<UnitType> l = this.ListFor(side);
+    UnitType TypeFor(World world, int side, int unitId) {
+        List<UnitType> l = this.ListFor(world, side);
         if (unitId < 0 || unitId >= l.Count) { return null; }
         return l[unitId];
     }
@@ -552,8 +566,8 @@ class UnitCatalog {
     /// <summary>The side's harvester unit id, -1 when it fields none. The
     /// refinery hands out one of these on completion, as the shipped
     /// buildings always have.</summary>
-    int HarvesterIdFor(int side) {
-        List<UnitType> l = this.ListFor(side);
+    int HarvesterIdFor(World world, int side) {
+        List<UnitType> l = this.ListFor(world, side);
         for (int i = 0; i < l.Count; i = i + 1) {
             if (l[i] != null && l[i].Role() == UnitRole.Harvester()) {
                 return i;
@@ -706,17 +720,19 @@ class StructureCatalog {
 
     Rules Rules() { return this.rules; }
 
-    /// <summary>A side's structures, in build order.</summary>
-    List<StructureType> ListFor(int side) {
-        if (side == Side2.Soviet()) { return this.soviet; }
-        if (side == Side2.Yuri()) { return this.yuri; }
+    /// <summary>A side's structures, in build order. House id + faction
+    /// table, see the unit catalog's ListFor.</summary>
+    List<StructureType> ListFor(World world, int side) {
+        int f = world == null ? side : world.FactionOf(side);
+        if (f == Side2.Soviet()) { return this.soviet; }
+        if (f == Side2.Yuri()) { return this.yuri; }
         return this.allied;
     }
 
-    int CountFor(int side) { return this.ListFor(side).Count; }
+    int CountFor(World world, int side) { return this.ListFor(world, side).Count; }
 
-    StructureType TypeFor(int side, int buildId) {
-        List<StructureType> l = this.ListFor(side);
+    StructureType TypeFor(World world, int side, int buildId) {
+        List<StructureType> l = this.ListFor(world, side);
         if (buildId < 0 || buildId >= l.Count) { return null; }
         return l[buildId];
     }
@@ -759,6 +775,37 @@ class World {
     List<int> selection; // all selected indices, first is the primary
     int worldTick;       // ticks elapsed since creation, for periodic rules
 
+    // House -> faction map. A house is who owns the stuff (0..7, one per
+    // skirmish slot); a faction is what tech roster it draws from (Side2
+    // 0/1/2). The original campaign's one-house-per-side is just houses
+    // 0..2 mapped straight through, set by default in Create; a multi-AI
+    // skirmish rewrites the tail so each AI house rides a rotating faction.
+    int[] factions;
+
+    // FactionOf(house): the tech roster a house builds from. Out-of-range
+    // houses (Neutral) fall back to the Allied roster, which nothing but
+    // display code ever asks for.
+    int FactionOf(int house) {
+        if (this.factions == null || house < 0
+         || house >= this.factions.Length) { return Side2.Allied(); }
+        return this.factions[house];
+    }
+
+    // Sets the house->faction table at game start. playerHouse keeps its
+    // identity; every AI house rotates through the factions after it so two
+    // AIs can share a faction yet still fight each other (houses, not
+    // factions, are the sides in a war).
+    void SetFactions(int playerHouse, List<int> aiHouses) {
+        this.factions = new int[8];
+        for (int i = 0; i < 8; i = i + 1) { this.factions[i] = i % 3; }
+        this.factions[playerHouse] = playerHouse % 3;
+        for (int i = 0; i < aiHouses.Count; i = i + 1) {
+            int h = aiHouses[i];
+            if (h < 0 || h >= 8) { continue; }
+            this.factions[h] = (playerHouse + 1 + i) % 3;
+        }
+    }
+
     // Combat effects for the renderer: a flat list of (kind, cellX, cellY,
     // life) quadruples. Spawned on shots and kills, aged in Tick, drawn by the
     // render layer.
@@ -775,6 +822,13 @@ class World {
     // production exactly like a low-power state.
     List<int> blackout;
 
+    // One low-power flag per house (8), recomputed once per tick by
+    // CacheLowPower at the top of Tick. SideLowPower reads this cache so a
+    // full-house skirmish doesn't rescan every building for every one of
+    // its structures.
+    bool[] lowPowerCache;
+    int lowPowerTick;
+
     // The ore fields, in the same diamond cell space as the iso terrain.
     // RA2 stores them as GEM overlays on the map; seeding copies the amount
     // (the overlay's data byte) and the credits per unit here, and the
@@ -787,8 +841,7 @@ class World {
         World w = new World();
         w.iso = iso;
         w.width = iso.Width();
-        w.height = iso.Height();
-        w.catalog = catalog;
+        w.height = iso.Height();        w.catalog = catalog;
         w.units = units;
         w.objects = new List<WorldObject>();
         w.selectedIndex = -1;
@@ -796,10 +849,16 @@ class World {
         w.worldTick = 0;
         w.effects = new List<int>();
         w.events = new List<int>();
+        // One blackout slot per house (8), not per faction: a spy blacks out
+        // the house whose plant he walked into.
         w.blackout = new List<int>();
-        w.blackout.Add(0);
-        w.blackout.Add(0);
-        w.blackout.Add(0);
+        for (int b = 0; b < 8; b = b + 1) { w.blackout.Add(0); }
+        w.lowPowerCache = new bool[8];
+        w.lowPowerTick = -1;
+        // Campaign-shaped default: houses 0..2 are their own factions. A
+        // multi-AI skirmish overwrites this via SetFactions.
+        w.factions = new int[8];
+        for (int f = 0; f < 8; f = f + 1) { w.factions[f] = f % 3; }
         w.occupancy = new int[w.width * w.height];
         for (int i = 0; i < w.occupancy.Length; i = i + 1) {
             w.occupancy[i] = 0;
@@ -827,7 +886,7 @@ class World {
     /// structures to the civ catalog where they live.</summary>
     StructureType TypeOf(WorldObject o) {
         if (o.IsCiv()) { return this.catalog.CivType(o.BuildId()); }
-        return this.catalog.TypeFor(o.Side(), o.BuildId());
+        return this.catalog.TypeFor(this, o.Side(), o.BuildId());
     }
 
     // ---- events ---------------------------------------------------------
@@ -871,9 +930,27 @@ class World {
 
     /// <summary>True when a side runs short of power: the balance is negative
     /// or the grid is blacked out. Powers the production penalty and takes
-    /// powered defences offline.</summary>
+    /// powered defences offline. Reads the cache filled by CacheLowPower
+    /// once per tick; falls back to a live scan for out-of-band callers
+    /// (tests, the controller) whose house was never cached.</summary>
     bool SideLowPower(int side) {
+        if (side >= 0 && side < 8 && this.lowPowerTick == this.worldTick) {
+            return this.lowPowerCache[side];
+        }
         return this.PowerBalance(side) < 0 || this.SideBlackout(side);
+    }
+
+    /// <summary>Computes every house's low-power state once per tick. With
+    /// up to eight houses the per-building scans are the hottest repeated
+    /// work in the tick, so the production loop and the defence loop both
+    /// read this cache instead of rescanning for each structure.</summary>
+    void CacheLowPower() {
+        if (this.lowPowerTick == this.worldTick) { return; }
+        for (int s = 0; s < 8; s = s + 1) {
+            this.lowPowerCache[s] = this.PowerBalance(s) < 0
+                                    || this.SideBlackout(s);
+        }
+        this.lowPowerTick = this.worldTick;
     }
 
     // ---- ore fields --------------------------------------------------------
@@ -967,6 +1044,9 @@ class World {
     /// and drives everything, documented as a substitution.</summary>
     void TickHarvester(WorldObject o) {
         if (o.Frozen() > 0) { return; }
+        // A failed route search idles the harvester for a while; mining and
+        // unloading stay gated on the dock countdown.
+        if (o.RouteCooldown() > 0) { o.SetRouteCooldown(o.RouteCooldown() - 1); }
         // A countdown paces mining passes and unloading.
         if (o.DockTimer() > 0) {
             o.SetDockTimer(o.DockTimer() - 1);
@@ -981,7 +1061,13 @@ class World {
                 o.SetDockTimer(360);
                 return;
             }
-            if (!o.HasRoute()) { this.RouteToRefinery(o); }
+            // A failed refinery search (none owned, or none pathable) parks
+            // the harvester on a cooldown, exactly like the ore search: the
+            // fallback is a whole-map BFS, not something to repeat per tick.
+            if (!o.HasRoute() && !o.RouteRetry()) {
+                if (this.RouteToRefinery(o)) { return; }
+                o.SetRouteCooldown(45);
+            }
             return;
         }
         // Room in the hold: mine underfoot, or go find ore.
@@ -1143,7 +1229,7 @@ class World {
             WorldObject o = this.objects[i];
             if (o.Side() != side || o.Kind() != ObjKind.Structure()
              || o.IsDead() || o.BuildId() != buildId || o.IsCiv()) { continue; }
-            StructureType t = this.catalog.TypeFor(side, buildId);
+            StructureType t = this.catalog.TypeFor(this, side, buildId);
             if (t != null && o.BuiltTicks() >= t.BuildTime()) { return true; }
         }
         return false;
@@ -1176,7 +1262,7 @@ class World {
     /// <summary>Public wrapper for the ghost preview: can the armed structure
     /// be placed with its anchor at (x,y)?</summary>
     bool CanPlaceBuilding(int side, int buildId, int x, int y) {
-        StructureType t = this.catalog.TypeFor(side, buildId);
+        StructureType t = this.catalog.TypeFor(this, side, buildId);
         if (t == null) { return false; }
         return this.CanPlace(t, x, y);
     }
@@ -1184,7 +1270,7 @@ class World {
     /// <summary>Places a structure, occupying its footprint. Returns the new
     /// object's index, or -1 when the footprint does not fit.</summary>
     int PlaceStructure(int side, int buildId, int x, int y) {
-        StructureType t = this.catalog.TypeFor(side, buildId);
+        StructureType t = this.catalog.TypeFor(this, side, buildId);
         if (t == null) { return -1; }
         if (!this.CanPlace(t, x, y)) { return -1; }
         WorldObject o = WorldObject.CreateStructure(side, buildId, x, y, t.Hp());
@@ -1278,7 +1364,7 @@ class World {
     /// unknown, the cell is taken, or the cell is outside the playable area.
     /// Health comes from the unit's archetype.</summary>
     int SpawnUnit(int side, int unitId, int x, int y) {
-        UnitType u = this.units.TypeFor(side, unitId);
+        UnitType u = this.units.TypeFor(this, side, unitId);
         if (u == null) { return -1; }
         if (!this.InBounds(x, y)) { return -1; }
         if (this.occupancy[this.CellSlot(x, y)] != 0) { return -1; }
@@ -1377,7 +1463,7 @@ class World {
             if (prod[i] == unitId) { can = true; }
         }
         if (!can) { return false; }
-        UnitType u = this.units.TypeFor(o.Side(), unitId);
+        UnitType u = this.units.TypeFor(this, o.Side(), unitId);
         if (u == null) { return false; }
         o.QueueUnit(unitId, u.BuildTime());
         return true;
@@ -1749,7 +1835,7 @@ class World {
     /// waypoint. Writes the anchor to outXy; false only when the map has no
     /// flat 4x3 area at all.</summary>
     bool YardAnchor(int side, int wx, int wy, List<int> outXy) {
-        StructureType yard = this.catalog.TypeFor(side, 0);
+        StructureType yard = this.catalog.TypeFor(this, side, 0);
         if (yard == null) { return false; }
         for (int dy = 0; dy < yard.FootprintH(); dy = dy + 1) {
             for (int dx = 0; dx < yard.FootprintW(); dx = dx + 1) {
@@ -1783,13 +1869,13 @@ class World {
     /// and a guard unit -- with the yard anchored at (ax, ay). Returns the
     /// yard's object index, or -1 when the anchor cannot be used.</summary>
     int PlaceBaseAt(int side, int ax, int ay) {
-        StructureType yard = this.catalog.TypeFor(side, 0);
+        StructureType yard = this.catalog.TypeFor(this, side, 0);
         if (yard == null) { return -1; }
         if (!this.FlatFit(yard, ax, ay)) { return -1; }
         int yardIdx = this.PlaceStructure(side, 0, ax, ay);
         if (yardIdx < 0) { return -1; }
         // Power plant beside the yard, trying each side in turn.
-        StructureType power = this.catalog.TypeFor(side, 1);
+        StructureType power = this.catalog.TypeFor(this, side, 1);
         if (power != null) {
             int px = ax;
             int py = ay;
@@ -1843,7 +1929,7 @@ class World {
     /// with the largest x+y. Returns the number of objects placed, or -1
     /// when no anchor for the yard fits.</summary>
     int PlaceEnemyBase(int side) {
-        StructureType yard = this.catalog.TypeFor(side, 0);
+        StructureType yard = this.catalog.TypeFor(this, side, 0);
         if (yard == null) { return -1; }
         int ax = -1;
         int ay = -1;
@@ -2397,10 +2483,9 @@ class World {
         // being lost, so a boxed-in factory still delivers eventually. Every
         // structure also advances its own construction progress.
         int produced = 0;
-        // A side short of power (or blacked out) produces at half speed.
-        bool playerLow = this.SideLowPower(Side2.Allied());
-        bool sovietLow = this.SideLowPower(Side2.Soviet());
-        bool yuriLow = this.SideLowPower(Side2.Yuri());
+        // A side short of power (or blacked out) produces at half speed;
+        // the per-house flags were cached once at the top of the tick.
+        this.CacheLowPower();
         for (int i = 0; i < this.objects.Count; i = i + 1) {
             WorldObject o = this.objects[i];
             if (o.Kind() != ObjKind.Structure()) { continue; }
@@ -2438,9 +2523,9 @@ class World {
             StructureType bt = this.TypeOf(o);
             if (bt != null && bt.IsRefinery()
              && o.BuiltTicks() == bt.BuildTime()) {
-                int hid = this.units.HarvesterIdFor(o.Side());
+                int hid = this.units.HarvesterIdFor(this, o.Side());
                 if (hid >= 0) {
-                    UnitType hu = this.units.TypeFor(o.Side(), hid);
+                    UnitType hu = this.units.TypeFor(this, o.Side(), hid);
                     List<int> hcell = new List<int>();
                     this.FindSpawnCell(o, hcell);
                     if (hcell.Count >= 2 && hu != null) {
@@ -2450,16 +2535,16 @@ class World {
                 }
             }
             if (!o.HasProduction()) { continue; }
-            bool low = o.Side() == Side2.Soviet() ? sovietLow
-                     : o.Side() == Side2.Yuri() ? yuriLow : playerLow;
-            if (low && this.worldTick % 2 == 0) { continue; }   // every other tick
+            if (this.SideLowPower(o.Side()) && this.worldTick % 2 == 0) {
+                continue;   // every other tick
+            }
             int left = o.ProdLeftAt(0);
             if (left > 0) { o.SetProdLeftAt(0, left - 1); continue; }
             int unitId = o.ProdUnitAt(0);
             List<int> cell = new List<int>();
             this.FindSpawnCell(o, cell);
             if (cell.Count < 2) { continue; }
-            UnitType u = this.units.TypeFor(o.Side(), unitId);
+            UnitType u = this.units.TypeFor(this, o.Side(), unitId);
             if (u == null) { continue; }
             WorldObject n = WorldObject.CreateUnit(o.Side(), unitId, cell[0],
                                                    cell[1], u.Hp(), u);

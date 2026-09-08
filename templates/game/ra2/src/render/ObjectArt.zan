@@ -85,9 +85,9 @@ class ObjectArt {
     /// skeleton in the later frames, so a partially built structure shows the
     /// appropriate stage: the last frame is the earliest construction and the
     /// finished structure appears once progress passes all of them.</summary>
-    Texture StructureTexture(int side, int buildId, StructureCatalog catalog,
+    Texture StructureTexture(int faction, int buildId, StructureCatalog catalog,
                              int progress, int buildTime) {
-        return this.StructureTextureOf(catalog.TypeFor(side, buildId),
+        return this.StructureTextureOf(catalog.TypeFor(null, faction, buildId),
                                        progress, buildTime);
     }
 
