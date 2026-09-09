@@ -778,6 +778,14 @@ partial class Designer {
     /// 只列设计期有意义的形态/展示属性；运行态开关（如 Countdown
     /// 的 active）不进来。没有行的 kind 返回 null。
     static List<string> BuiltinPropRows(string kind) {
+        if (kind == "Chart") {
+            List<string> r = new List<string>();
+            r.Add("type|" + Designer.T(
+                "Type (line/bar/area/stacked/hbar/pie/donut/scatter/gauge/funnel/radar/wordCloud)",
+                "类型 (line/bar/area/stacked/hbar/pie/donut/scatter/gauge/funnel/radar/wordCloud)"));
+            r.Add("title|" + Designer.T("Title", "标题"));
+            return r;
+        }
         if (kind == "Image") {
             List<string> r = new List<string>();
             r.Add("src|" + Designer.T("Src", "图片地址"));
@@ -1839,7 +1847,7 @@ partial class Designer {
         if (ft == 40) { return Designer.T("Scrollable list of rows", "可滚动行列表"); }
         if (ft == 41) { return Designer.T("Sortable data grid", "可排序数据网格"); }
         if (ft == 42) { return Designer.T("Image / slide carousel", "图片 / 幻灯轮播"); }
-        if (ft == 43) { return Designer.T("Bar chart", "柱状图"); }
+        if (ft == 43) { return Designer.T("Chart (line/bar/pie/gauge... set Type)", "图表（折线/柱状/饼图/仪表盘…属性里选类型）"); }
         if (ft == 44) { return Designer.T("Truncated text with ellipsis", "带省略号的截断文本"); }
         if (ft == 45) { return Designer.T("Titled content panel", "带标题内容面板"); }
         if (ft == 46) { return Designer.T("Vertical scrollbar", "垂直滚动条"); }

@@ -245,6 +245,7 @@ class GenForm {
         out0.Append("using Gui.Widget;\n");
         out0.Append("using Gui.Hmi;\n");
         out0.Append("using Gui.Component;\n");
+        out0.Append("using Gui.Component.Chart;\n");
         out0.Append("using Gui.Component.DataTable;\n");
         out0.Append("using Gui.Component.WebView;\n");
         /* CefBrowserBox 和 WebViewBox 一样是设计器一等控件
@@ -686,12 +687,17 @@ class GenForm {
         // Control（Table 只是设计器画布的静态表头渲染器），统一
         // 归到泛型 DataGrid<T>。
         if (kind == "Table" || kind == "DataTable") { kind = "DataGrid"; }
-        // 4eb8601d5 之后的存量文档可能带 Chart/Scrollbar/Layer/
+        // 4eb8601d5 之后的存量文档可能带 Scrollbar/Layer/
         // Ellipsis/Ribbon 这些"画布渲染器/宿主绘制"的 kind——它们
         // 不是 Control，按 KindForType 现行规则归到占位容器/文本。
-        if (kind == "Chart" || kind == "Scrollbar" || kind == "Layer") {
+        if (kind == "Scrollbar" || kind == "Layer") {
             kind = "Panel";
         }
+        // Chart 画布 kind 升级为保留控件：ChartHost 包住立即模式
+        // ChartView，生成代码真正持有图表（此前归一成 Panel 占位，
+        // 发布窗体里图表整体消失；类型走 "props" 直通表发射
+        // SetProp("type", ...)）。
+        if (kind == "Chart") { kind = "ChartHost"; }
         if (kind == "Ellipsis") { kind = "Label"; }
         if (kind == "Ribbon") { kind = "ToolStrip"; }
         string of = GenForm.ObjStr(o, "of");

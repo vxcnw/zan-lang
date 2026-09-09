@@ -2694,70 +2694,31 @@ partial class Designer {
         return true;
     }
 
-    /// 图表类型的人类可读名称（Chart 字段把类型存在 uiState 中）。
-    static string ChartKindName(int k) {
-        if (k == 1) { return "Line"; }
-        if (k == 2) { return "Area"; }
-        if (k == 3) { return "Stacked"; }
-        if (k == 4) { return "H-Bar"; }
-        if (k == 5) { return "Pie"; }
-        if (k == 6) { return "Donut"; }
-        if (k == 7) { return "Scatter"; }
-        return "Bar";
+    /// 旧 uiState 图型序号（0 柱状 .. 7 散点）到 SampleOf 别名
+    /// 字符串的映射（存量设计稿的直通行还没有 "type" 时回退用）。
+    static string ChartKindAlias(int k) {
+        if (k == 1) { return "line"; }
+        if (k == 2) { return "area"; }
+        if (k == 3) { return "stacked"; }
+        if (k == 4) { return "hbar"; }
+        if (k == 5) { return "pie"; }
+        if (k == 6) { return "donut"; }
+        if (k == 7) { return "scatter"; }
+        return "bar";
     }
 
-    /// Chart 组件的预览。图表类型保存在字段的
-    /// uiState 中（0 柱状图 .. 7 散点图），因此一个面板条目即可组合出
-    /// stdlib Chart 控件提供的所有图表类型。
+    /// Chart 组件的画布预览。类型优先取直通行（extra["props"] 的
+    /// "type"，ECharts 注册表字符串/别名，经 ChartHost.SampleOf 现拼
+    /// 示例——与生成代码 ChartHost.SetProp("type") 同一份示例数据，
+    /// 设计器所见即发布窗体初见）；旧设计稿类型存 uiState
+    /// （0 柱状 .. 7 散点），回退映射。
     void PreviewChart(App app, Canvas c, Theme t, FormField f, int x, int y, int w, int avail) {
-        int kind = f.uiState.Get();
         int hh = avail - PvS(app, 6);
         if (hh < PvS(app, 120)) { hh = PvS(app, 120); }
-
-        List<string> labels = new List<string>{
-            "Mon", "Tue", "Wed",
-            "Thu", "Fri" };
-        List<int> a = new List<int>{
-            24, 52, 38, 66, 45 };
-        List<int> b = new List<int>{
-            30, 20, 50, 40, 60 };
-
-        if (kind == 5 || kind == 6) {
-            ChartOption opt = ChartOption.With(ChartType.Pie, f.label, labels);
-            opt.Add("Series A", a);
-            if (kind == 6) { opt.series[0].innerPct = 55; }
-            BeginCtrlZoom(app);
-            ChartView.Of(opt).Render(app, x, y, w, hh);
-            EndCtrlZoom(app);
-            return;
-        }
-        if (kind == 7) {
-            List<ChartPoint> points = new List<ChartPoint>{
-                ChartPoint.Of(12, 24), ChartPoint.Of(28, 52), ChartPoint.Of(40, 38),
-                ChartPoint.Of(55, 66), ChartPoint.Of(70, 45)
-            };
-            ChartOption opt = ChartOption.Scatter(f.label);
-            ChartSeries s0 = ChartSeries.OfPoints("Series A", points);
-            s0.color = Chart.Palette(t, 0);
-            opt.Add(s0);
-            BeginCtrlZoom(app);
-            ChartView.Of(opt).Render(app, x, y, w, hh);
-            EndCtrlZoom(app);
-            return;
-        }
-
-        ChartType ct = ChartType.Bar;
-        if (kind == 1 || kind == 2) { ct = ChartType.Line; }
-        ChartOption opt = ChartOption.With(ct, f.label, labels);
-        if (kind == 2) {
-            opt.Add(ChartSeries.Area("Series A", a)).Add(ChartSeries.Area("Series B", b));
-        } else if (kind == 3) {
-            opt.Add(ChartSeries.StackedBar("Series A", a)).Add(ChartSeries.StackedBar("Series B", b));
-        } else if (kind == 4) {
-            opt.Add(ChartSeries.HBar("Series A", a)).Add(ChartSeries.HBar("Series B", b));
-        } else {
-            opt.Add("Series A", a).Add("Series B", b);
-        }
+        string ts = CompPropValue(f, "type", "");
+        if (ts == "") { ts = ChartKindAlias(f.uiState.Get()); }
+        ChartOption opt = ChartHost.SampleOf(ts);
+        opt.title = f.label;
         BeginCtrlZoom(app);
         ChartView.Of(opt).Render(app, x, y, w, hh);
         EndCtrlZoom(app);

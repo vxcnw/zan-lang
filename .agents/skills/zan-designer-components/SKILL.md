@@ -115,6 +115,13 @@ description: Zan 窗口设计器用户组件（components/*.zcomp）的全链路
   "props" 不在 IsModeledKey），GenForm 泛化发射 SetProp、画布预览经
   ApplyFieldProps 逐键落真控件；运行态开关（Countdown.active 等）不进
   设计器行。枚举键直接填选项名（PropSpec.Write 认名字）。
+- **立即模式组件进设计器必须先有保留式包装**：ChartView 这类
+  "宿主逐帧 Render" 的件不是 Control，控件树/生成代码无法持有——
+  GenForm 只能归一成占位，画布预览再漂亮发布也消失（Chart 条目
+  曾因此发布即蒸发）。正解是补一层薄包装（ChartHost：持有
+  ChartOption+ChartView，OnPaint 转发 Render，SetProp("type") 切型）+
+  SampleOf 示例数据工厂，设计器画布与生成窗体共用同一份示例，
+  所见即初见；类型/标题走直通行，零新增发射逻辑。
 - .zform 建模键 "orient"（Tabs 标签条方向，已入 IsModeledKey）：
   FieldJson 写 "horizontal"/"vertical"，GenForm 仅在 vertical 时发射
   `SetProp("orient","vertical")`；画布 KidInsetX/Y 与 RenderTabStrip 按
