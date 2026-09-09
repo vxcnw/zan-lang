@@ -1403,8 +1403,8 @@ class GameNet {
         });
     }
 
-    void SiegeAttack() {
-        this.Op("{\"op\":\"siege\",\"attack\":1}", (JsonValue r) => {
+    void SiegeAttack(int city) {
+        this.Op("{\"op\":\"siege\",\"attack\":1,\"city\":" + Convert.ToString(city) + "}", (JsonValue r) => {
             if (this.TakeSelf(r)) {
                 JsonValue a = r.Get("siege");
                 if (a != null && a.IsObject()) { this.playSiege = a; }

@@ -1815,7 +1815,8 @@ class LegendApp {
         Note(content, "行会是攻城的门槛：只有行会成员能去「城池争夺」宣战攻打沙巴克。");
     }
 
-    /* 页 7 城池争夺：行会成员花 2000 金币宣战，按战力掷骰易主。 */
+    /* 页 7 城池争夺：8 座钱庄卡（照原版——城名、攻占按钮、绿字条件与
+       产出、黄字城主、占领日期）。攻占 = 2000 金币掷骰，行会成员可用。 */
     void BuildNetSiege() {
         JsonValue st = net.Self();
         if (net.PlaySiege() == null) { net.RefreshSiege(); }
@@ -1823,42 +1824,103 @@ class LegendApp {
         JsonValue a = net.PlaySiege();
         if (a == null) {
             content.With(Text("正在拉取城池状态…", "secondary", 48));
-            Note(content, "先入行会，再花 2000 金币宣战；战胜守军城池易主并全服公告。");
+            Note(content, "先入行会，再花 2000 金币攻占钱庄；战胜守军城池易主并全服公告。");
             return;
         }
-        string owner = a.Str("owner", "");
-        Panel card = Col("frame");
-        card.With(Text(owner.Length > 0
-            ? "现任城主：" + owner + "（" + a.Str("guild", "-") + "）\n已驻守 " + Rules.N(a.Int("holdSeconds", 0) / 60) + " 分钟"
-            : "沙巴克城目前无主——第一个攻下来的行会将名震全服！", "green", 52));
+        Panel head = Panel.Row(); head.Gap(4); head.Prefer(0, 28);
+        head.With(Btn("刷新", "net-siege-reload", () => { net.RefreshSiege(); }));
+        head.With(Text("服务器：" + net.RealmName() + " · 每座钱庄占领后按产出发放金币。", "secondary small", 0));
+        content.With(head);
+        Grid cities = Grid.Of(2); cities.Gap(6);
+        JsonValue rows = a.Get("cities");
+        int myGold = st != null ? st.Int("gold", 0) : 0;
         int myGuild = st != null ? st.Int("guildId", 0) : 0;
-        Button attack = Btn("宣战攻城（2000 金币）", "net-siege-attack", () => { net.SiegeAttack(); });
-        attack.Disabled = myGuild <= 0 || st == null || st.Int("gold", 0) < 2000;
-        attack.Prefer(190, 32); card.With(attack);
-        if (myGuild <= 0) { card.With(Text("你还没有行会——先去「行会」页加入或创建。", "secondary small", 24)); }
-        content.With(card);
-        Note(content, "宣战胜率 = 40% + 战力/10；败了金币不退，赢了全服公告、城头换旗。");
+        for (int i = 0; rows != null && i < rows.Count(); i = i + 1) {
+            JsonValue c = rows.At(i);
+            int cityId = c.Int("id", i + 1);
+            string owner = c.Str("owner", "");
+            string guild = c.Str("guild", "");
+            string date = c.Str("date", "");
+            Panel card = Col("frame");
+            card.With(Text(c.Str("name", "钱庄"), "yellow strong", 26));
+            card.With(Text("每小时产出 " + Rules.N(c.Int("income", 0)) + " 金币\n需行会成员 · 攻占费 2000 金币 · 胜率 40%+战力/10", "green", 56));
+            if (owner.Length > 0) {
+                card.With(Text("城主：" + owner + "（" + guild + "）" + (date.Length > 0 ? "\n占领日：" + date : ""), "yellow", 48));
+            } else {
+                card.With(Text("此城目前无主——第一个攻占的行会将名震全服！", "secondary", 32));
+            }
+            Panel actions = Panel.Row(); actions.Gap(4); actions.Prefer(0, 28);
+            Button attack = Btn(owner.Length > 0 ? "夺回城池" : "攻占城池", "net-siege-attack-" + Rules.N(cityId),
+                () => { net.SiegeAttack(cityId); });
+            attack.Disabled = myGuild <= 0 || myGold < 2000;
+            attack.Prefer(96, 26); actions.With(attack);
+            card.With(actions);
+            cities.With(card);
+        }
+        if (rows == null || rows.Count() == 0) {
+            cities.With(Text("正在拉取钱庄列表…", "secondary", 48));
+        }
+        content.With(cities);
+        if (myGuild <= 0) { Note(content, "你还没有行会——先去「行会」页加入或创建，再回来攻占城池。"); }
+        else { Note(content, "攻占掷骰胜率 = 40% + 战力/10；败了金币不退，赢了全服公告、城头换旗。"); }
     }
 
-    /* 页 8 传说塔：每日 20 次尝试；敌人随层变强，胜利楼层+1 并入账。 */
+    /* 页 8 传说塔：塔层页签（第一层..塔顶，照原版）+ 服务器/挑战次数行
+       + 挑战者卡列表（本区层榜前 15，含自己一卡）+ 挑战按钮。每日 10 次
+       （原版 挑战次数 10/10）；敌人随层变强，胜利楼层+1 并入账。 */
     void BuildNetTower() {
         net.MaybeRefreshTower();
         content.With(Text("传说塔", "yellow strong", 28));
         JsonValue a = net.PlayTower();
         if (a == null) {
             content.With(Text("正在拉取塔层信息…", "secondary", 48));
-            Note(content, "每日 20 次尝试；每攻克一层金币与经验入账，下一层更强。");
+            Note(content, "每日 10 次尝试；每攻克一层金币与经验入账，下一层更强。");
             return;
         }
         int floor = a.Int("floor", 0);
         int tries = a.Int("tries", 0);
-        Panel card = Col("frame");
-        card.With(Text("当前进度：第 " + Rules.N(floor) + " 层已攻克 · 下一层是第 " + Rules.N(floor + 1)
-            + " 层 · 今日剩余 " + Rules.N(tries) + "/" + Rules.N(a.Int("maxTries", 20)) + " 次", "cyan", 30));
+        int maxTries = a.Int("maxTries", 10);
+        /* 塔层页签：当前层高亮；签本身只是进度指示，挑战按钮统一在下方
+           （塔层由服务端权威推进，客户端只做可视化）。 */
+        Panel tabs = Panel.Row(); tabs.Gap(2); tabs.Prefer(0, 26);
+        int shown = floor < 5 ? 5 : floor + 1;
+        for (int t = 0; t < shown; t = t + 1) {
+            Button tab = Btn(t == floor ? "【第 " + Rules.N(t + 1) + " 层】"
+                : "第 " + Rules.N(t + 1) + " 层", "net-tower-tab-" + Rules.N(t), () => { });
+            tab.Disabled = t != floor;
+            tab.Prefer(0, 24); tabs.With(tab);
+        }
+        Button top = Btn(floor >= 5 ? "【塔顶】" : "塔顶", "net-tower-tab-top", () => { });
+        top.Disabled = floor < 5;
+        tabs.With(top);
+        content.With(tabs);
+        Panel status = Panel.Row(); status.Gap(8); status.Prefer(0, 26);
+        status.With(Text("服务器：" + net.RealmName(), "cyan", 24));
+        Label stl = Text("挑战次数 " + Rules.N(tries) + "/" + Rules.N(maxTries), tries > 0 ? "green" : "red", 24);
+        stl.DockRight(); status.Add(stl);
+        content.With(status);
+        ScrollColumn list = new ScrollColumn(); list.Named("net-tower-rivals"); list.Grow(); content.With(list);
+        /* 挑战者卡：自己一卡置顶，然后是本区前 15。 */
+        Panel mine = Panel.Row(); mine.Class = "frame"; mine.Pad(8); mine.Gap(8); mine.Prefer(0, 44);
+        Label mineLabel = Text("我的进度：已攻克第 " + Rules.N(floor) + " 层 · 下一层是第 "
+            + Rules.N(floor + 1) + " 层\n守卫强度随层数上涨，挑战失败层数保留、次数照扣。", "green", 40);
+        mineLabel.Grow(); mine.With(mineLabel);
         Button climb = Btn("挑战第 " + Rules.N(floor + 1) + " 层", "net-tower-climb", () => { net.TowerClimb(); });
         climb.Disabled = tries <= 0;
-        climb.Prefer(170, 32); card.With(climb);
-        content.With(card);
+        climb.Prefer(120, 28); climb.DockRight(); mine.Add(climb);
+        list.With(mine);
+        JsonValue rivals = a.Get("rivals");
+        if (rivals == null || rivals.Count() == 0) {
+            list.With(Text("本区还没有其它挑战者——你就是传说塔的第一个传说。", "secondary", 32));
+        }
+        for (int i = 0; rivals != null && i < rivals.Count(); i = i + 1) {
+            JsonValue p = rivals.At(i);
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 40);
+            Label name = Text(Rules.N(i + 1) + ". " + p.Str("name", "???") + "（" + Rules.N(p.Int("level", 1)) + " 级）"
+                + "\n已攻克第 " + Rules.N(p.Int("floor", 0)) + " 层", "yellow", 36);
+            name.Grow(); row.With(name);
+            list.With(row);
+        }
         Note(content, "失败层位保留，明天免费再战；层数没有上限，塔里全是你自己的极限。");
     }
 

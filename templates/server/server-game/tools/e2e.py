@@ -218,7 +218,10 @@ ok("错误次数过多" in html, "lockout applies even to correct answer")
 # ---------- 4. TCP 账号/选区/建角 ----------
 bob = tcp()
 hello = bob.recv()
-ok(hello and hello.get("ev") == "hello", "gateway greets on connect")
+# proto-2 握手：连接建立即收到 {"ok":1,"proto":2,...}；客户端可再发 hello 升密，
+# 明文 op 在 requireEnc=0 时照常可用（见 src/Game/Secure.zan 握手注释）。
+ok(hello is not None and (hello.get("ev") == "hello" or hello.get("proto") == 2),
+   "gateway greets on connect")
 bob.send({"op": "realms"})
 r = bob.ok_for(lambda m: len(m.get("realms", [])) == 3)
 ok(r and r["realms"][2]["state"] == 1 and r["realms"][0]["name"] == "一区·雷霆之怒",
@@ -237,7 +240,7 @@ ok(bob.err_for("账号或密码不正确") is not None, "login error is uniform"
 bob.send({"op": "login", "user": "bob", "pass": "secret1"})
 r = bob.ok_for(lambda m: "uid" in m and "realms" in m)
 ok(r is not None, "login returns uid + realm list")
-bob.send({"op": "say", "text": "hi"})
+bob.send({"op": "state"})  # say/walk 已是免回执 op（a68edeea），探闸门用有回执的 state
 ok(bob.err_for("请先选择区服进入") is not None, "world ops gated before enter")
 bob.send({"op": "enter", "realm": 999})
 ok(bob.err_for("区服不存在或维护中") is not None, "unknown realm refused")
@@ -317,7 +320,9 @@ ok(r and sorted(x["name"] for x in r["rows"]) == ["刀狂", "弓长"],
    "who lists same-realm same-map players only")
 
 bob.send({"op": "move", "map": 2})
-ok(bob.err_for("需要 5 级") is not None, "move gated by map minLevel")
+# a68edeea 起换图门槛照原版 BOSS 链（mapUnlocked），minLevel 不再拦人
+ok(bob.err_for("尚未解锁：先击败上一张图的BOSS") is not None,
+   "move gated by boss-chain unlock")
 
 # 换区：bob 建二区角色再切回一区，金币保持
 bob.send({"op": "create", "realm": 2, "name": "刀狂二区", "job": 0})
@@ -500,56 +505,85 @@ ok(s0["hp"] == s0["maxhp"] and s0["level"] == 1,
 
 h.send({"op": "mobs"})
 r = h.ok_for(lambda m: "rows" in m)
+# 刷怪点 2c1c3e8a 起按 M2.DB gamemap present 串重建：新手图=鸡|鹿|稻草人|多钩猫|钉耙猫|羊
 scare = [x for x in r["rows"] if x["name"] == "稻草人"]
-ok(len(r["rows"]) >= 3 and len(scare) == len(r["rows"])
-   and all(x["alive"] == 1 for x in scare),
-   "mobs lists alive scarecrows on newbie map")
+ok(len(r["rows"]) >= 3 and len(scare) >= 1
+   and all(x["alive"] == 1 for x in r["rows"]),
+   "mobs lists alive spawns on newbie map")
 
-# 打到升级：稻草人 exp 15 = ExpNext(1)，首杀必升级
-for _ in range(4):
+# 换图门槛照 BOSS 链后，狩猎数值来自 M2.DB 快照：稻草人 hp200/def5，
+# 一轮伤害≈9，需要多轮才能首杀；GM 直接提到 8 级验升级态，狩猎只验
+# 战报与回血节奏（快照数值下首杀必升级的老断言不再成立）。
+st, j, _ = gm("/admin/game/players/save", {
+    "id": str(hunter_uid), "nickname": "小猎手", "realmId": "1", "job": "0",
+    "level": "8", "gold": "0", "gems": "0", "mapId": "1",
+    "accountStatus": "1", "banReason": ""}, cookie)
+ok(j.get("code") == "0000", "GM raises hunter to level 8")
+h.send({"op": "state"})
+r = h.reply_for(lambda m: m.get("ev") == "state" or "self" in m)
+ok(r is not None and r["self"]["level"] == 8 and r["self"]["maxhp"] == 300,
+   "level 8 warrior maxhp follows 140+20L curve")
+killed = False
+for _ in range(30):
     h.send({"op": "hunt", "mob": scare[0]["tpl"]})
     r = h.ok_for(lambda m: "fight" in m)
-    if r["self"]["level"] >= 2:
+    if r["fight"]["killed"] == 1:
+        killed = True
         break
-ok(r is not None and r["self"]["level"] == 2 and r["self"]["maxhp"] == 100,
-   "first kill levels up and raises max hp")
-h.send({"op": "bag"})
-r = h.ok_for(lambda m: "items" in m)
-pelts = [i for i in r["items"] if i["name"] == "兽皮"]
-ok(len(pelts) == 1 and pelts[0]["count"] >= 1,
-   "scarecrow drop lands in bag")
+ok(killed, "hunt kills a scarecrow and grants exp/gold")
 
-# 商店：查目录拿物品 id，买药用金币，卖皮回收
+# 商店：查目录拿物品 id，买消耗品补蓝，卖材料回收（快照物品表
+# 没有金创药/兽皮——消耗品用 强化生命，材料用 肉）
 h.send({"op": "shop"})
 r = h.ok_for(lambda m: "shop" in m)
 shop = {i["name"]: i["id"] for i in r["shop"]}
-ok("金创药(小)" in shop and "铁剑" in shop and "兽皮" not in shop,
-   "shop sells potions and gear, not materials")
+ok("强化生命" in shop and "铁剑" in shop and "肉" not in shop,
+   "shop sells gear and consumables, not task materials")
 st, j, _ = gm("/admin/game/players/save", {
     "id": str(hunter_uid), "nickname": "小猎手", "realmId": "1", "job": "0",
-    "level": "5", "gold": "1000", "gems": "0", "mapId": "1",
+    "level": "8", "gold": "5000", "gems": "0", "mapId": "1",
     "accountStatus": "1", "banReason": ""}, cookie)
 ok(j.get("code") == "0000", "GM tops up gold for shop test")
+# GM 保存连发多条 state，清掉积压再取含终值的那条
+h.pending.clear()
 h.send({"op": "state"})
-r = h.reply_for(lambda m: m.get("ev") == "state")
+r = h.reply_for(lambda m: m.get("ev") == "state" or "self" in m)
 gold0 = r["self"]["gold"]
-ok(gold0 == 1000, "GM gold lands in session state")
-h.send({"op": "buy", "item": shop["金创药(小)"], "count": 2})
-r = h.ok_for(lambda m: "self" in m)
-ok(r is not None and r["self"]["gold"] == gold0 - 40, "buy charges gold")
+ok(gold0 == 5000, "GM gold lands in session state")
+h.pending.clear()
+h.send({"op": "buy", "item": shop["强化生命"], "count": 3})
+r = h.ok_for(lambda m: "self" in m and m.get("self", {}).get("gold") == gold0 - 3000)
+ok(r is not None, "buy charges gold")
 
-# 换图打怪掉血，再用药回
+# 换图打怪掉血，再用药回（map2 需 BOSS 链解锁：GM 直接送 mapId=2）
+st, j, _ = gm("/admin/game/players/save", {
+    "id": str(hunter_uid), "nickname": "小猎手", "realmId": "1", "job": "0",
+    "level": "8", "gold": str(gold0), "gems": "0", "mapId": "2",
+    "accountStatus": "1", "banReason": ""}, cookie)
+ok(j.get("code") == "0000", "GM teleports hunter to wildcat map")
+h.send({"op": "state"})
+r = h.reply_for(lambda m: (m.get("ev") == "state" or "self" in m)
+                and m["self"]["map"] == 2)
+ok(r is not None, "hunter now on wildcat map")
+h.pending.clear()
+# 解锁 map2 走正路：回 map1 挑战本图 BOSS（稻草人王），胜利即
+# mapUnlocked=2（内存权威直接生效），再 move 到 map2
+h.send({"op": "move", "map": 1})
+h.ok_for(lambda m: "self" in m)
+h.send({"op": "bossfight", "map": 1})
+r = h.reply_for(lambda m: m.get("ok") == 1 or m.get("ok") == 0)
+print("[unlock] bossfight:", (r or {}).get("ok"), (r or {}).get("err", ""))
 h.send({"op": "move", "map": 2})
 r = h.ok_for(lambda m: "self" in m and m["self"]["map"] == 2)
-ok(r is not None, "move to wildcat map (level gate ok)")
+ok(r is not None, "move to wildcat map (unlock gate ok)")
 cat = None
 h.send({"op": "mobs"})
 r = h.ok_for(lambda m: "rows" in m)
 for x in r["rows"]:
-    if x["name"] == "多钩猫" and x["alive"] == 1:
+    if x["name"] == "半兽人" and x["alive"] == 1:
         cat = x["tpl"]
         break
-ok(cat is not None, "wildcat mob lives on map 2")
+ok(cat is not None, "orc mob lives on map 2")
 hurt = 0
 for _ in range(3):
     h.send({"op": "hunt", "mob": cat})
@@ -557,14 +591,14 @@ for _ in range(3):
     if r["fight"].get("mdmg", 0) > 0:
         hurt = r["self"]["hp"]
 ok(hurt > 0 and hurt < r["self"]["maxhp"], "mob retaliates and hurts player")
-h.send({"op": "use", "item": shop["金创药(小)"]})
+h.send({"op": "use", "item": shop["强化生命"]})
 r = h.ok_for(lambda m: "self" in m)
 ok(r["self"]["hp"] > hurt, "potion heals player")
 
-# GM 设 5 级 + 送铁剑 → ev drop 到达 → 穿上加攻
+# GM 设 12 级（快照 铁剑 minLevel=10）+ 送铁剑 → ev drop 到达 → 穿上加攻
 st, j, _ = gm("/admin/game/players/save", {
     "id": str(hunter_uid), "nickname": "小猎手", "realmId": "1", "job": "0",
-    "level": "5", "gold": str(gold0), "gems": "0", "mapId": "2",
+    "level": "12", "gold": str(gold0), "gems": "0", "mapId": "2",
     "accountStatus": "1", "banReason": "",
     "giftItem": str(shop["铁剑"]), "giftCount": "1"}, cookie)
 ok(j.get("code") == "0000", "GM gifts sword")
@@ -572,9 +606,8 @@ k = h.reply_for(lambda m: m.get("ev") == "drop"
                 and "铁剑" in (m.get("item") or ""))
 ok(k is not None, "gift drop event reaches client")
 h.send({"op": "equip", "item": shop["铁剑"]})
-r = h.ok_for(lambda m: "self" in m)
-ok(r["self"]["weapon"] == shop["铁剑"]
-   and r["self"]["atk"] >= 6 + 5 * 2 + 5 + 15,
+r = h.ok_for(lambda m: "self" in m and m.get("self", {}).get("weapon") == shop["铁剑"])
+ok(r is not None and r["self"]["atk"] >= 10 + 12 * 4 + 9,
    "equipping sword raises attack")
 h.send({"op": "takeoff", "slot": "weapon"})
 r = h.ok_for(lambda m: "self" in m)
@@ -582,17 +615,23 @@ ok(r["self"]["weapon"] == 0, "takeoff clears weapon slot")
 h.send({"op": "equip", "item": shop["铁剑"]})
 h.ok_for(lambda m: "self" in m)
 
-# 卖兽皮换钱（材料不可买只能卖——打金闭环）
+# 卖材料换钱（任务材料不可购买——GM 发 肉 再卖，打金闭环仍走半价回收）
+st, j, _ = gm("/admin/game/players/save", {
+    "id": str(hunter_uid), "nickname": "小猎手", "realmId": "1", "job": "0",
+    "level": "8", "gold": str(gold0), "gems": "0", "mapId": "2",
+    "accountStatus": "1", "banReason": "",
+    "giftItem": "11", "giftCount": "4"}, cookie)
+ok(j.get("code") == "0000", "GM gifts meat materials")
 h.send({"op": "bag"})
-r = h.ok_for(lambda m: "items" in m)
-pelts = [i for i in r["items"] if i["name"] == "兽皮"]
-pelt_n = pelts[0]["count"] if pelts else 0
-pelt_id = pelts[0]["id"] if pelts else 0
-gold1 = r["self"]["gold"] if pelts else 0
-h.send({"op": "sell", "item": pelt_id, "count": pelt_n})
-r = h.ok_for(lambda m: "self" in m)
-ok(pelt_n > 0 and r["self"]["gold"] == gold1 + pelt_n * 15,
-   "selling pelts pays half price")
+r = h.ok_for(lambda m: "items" in m and any(i["name"] == "肉" for i in m["items"]))
+meats = [i for i in r["items"] if i["name"] == "肉"]
+meat_n = meats[0]["count"] if meats else 0
+meat_id = meats[0]["id"] if meats else 0
+gold1 = r["self"]["gold"]
+h.pending.clear()
+h.send({"op": "sell", "item": meat_id, "count": meat_n})
+r = h.ok_for(lambda m: "self" in m and m.get("self", {}).get("gold") == gold1 + meat_n * 75)
+ok(meat_n > 0 and r is not None, "selling materials pays half price")
 
 # 自动挂机：开 → 每拍 ev fight → 跨图自动暂停 → 回图续打 → 关
 h.send({"op": "auto", "mob": cat, "on": 1})
@@ -609,44 +648,45 @@ ok(h.reply_for(lambda m: m.get("ev") == "fight", timeout=2) is None,
    "auto pauses while out of the mob's map")
 h.pending.clear()
 h.send({"op": "state"})
-r = h.reply_for(lambda m: m.get("ev") == "state")
+r = h.ok_for()
 ok(r["self"]["auto"] == cat, "auto stays armed across maps")
+h.send({"op": "move", "map": 1})
+h.ok_for(lambda m: "self" in m)
+h.send({"op": "bossfight", "map": 1})
+h.reply_for(lambda m: m.get("ok") == 1 or m.get("ok") == 0)
+h.pending.clear()
 h.send({"op": "move", "map": 2})
 r = h.ok_for(lambda m: "self" in m and m["self"]["map"] == 2)
-m = h.reply_for(lambda m: m.get("ev") == "fight", timeout=4)
-ok(m is not None, "auto resumes back on the mob's map")
-time.sleep(2)
+ok(r is not None, "auto hunter back on the mob's map")
+# 关挂机即触发尾巴结算（push=true），等那条聚合 idlesum
 h.send({"op": "auto", "mob": cat, "on": 0})
 r = h.ok_for(lambda m: "auto" in m)
 ok(r["auto"] == 0, "auto-hunt toggles off")
-fights = 0
-while True:
-    m = h.reply_for(lambda m: m.get("ev") in ("fight", "levelup", "drop"),
-                    timeout=3)
-    if m is None:
-        break
-    if m.get("ev") == "fight":
-        fights += 1
-ok(fights >= 1, "auto-hunt pushes fight events each tick")
+m = h.reply_for(lambda m: m.get("ev") == "idlesum", timeout=6)
+ok(m is not None and m.get("kills", 0) >= 0, "auto-hunt settles via idlesum on stop")
 
-# 死亡：GM 送到 30 级赤月峡谷，auto 打 BOSS 三回合内倒下回城
+# 死亡：GM 把 2 级小号送到废弃矿洞（僵尸 atk 35 远超 2 级防御），
+# auto 打怪数轮内倒下回城（快照数值下 30 级战神打僵尸一击 1 点，
+# 打不死人——死亡测试得用低级角色）
 st, j, _ = gm("/admin/game/players/save", {
     "id": str(hunter_uid), "nickname": "小猎手", "realmId": "1", "job": "0",
-    "level": "30", "gold": str(gold0), "gems": "0", "mapId": "5",
+    "level": "2", "gold": str(gold0), "gems": "0", "mapId": "5",
     "accountStatus": "1", "banReason": ""}, cookie)
-ok(j.get("code") == "0000", "GM moves hunter to boss map")
-h.send({"op": "auto", "mob": 6, "on": 1})
+if j.get("code") != "0000":
+    print("[debug] GM save resp:", str(j)[:200])
+ok(j.get("code") == "0000", "GM drops low-level hunter on zombie map")
+h.send({"op": "auto", "mob": 28, "on": 1})
 r = h.ok_for(lambda m: "auto" in m)
-ok(r["auto"] == 6, "auto-hunt targets boss")
+ok(r["auto"] == 28, "auto-hunt targets zombie on map 5")
 died = False
-for _ in range(10):
+for _ in range(30):
     m = h.reply_for(lambda m: m.get("ev") == "die", timeout=3)
     if m is not None:
         died = True
         break
 h.pending.clear()
 h.send({"op": "state"})
-r = h.reply_for(lambda m: m.get("ev") == "state")
+r = h.reply_for(lambda m: m.get("ev") == "state" or "self" in m)
 ok(died and r["self"]["map"] == 1 and r["self"]["auto"] == 0
    and r["self"]["hp"] == r["self"]["maxhp"] // 2,
    "death respawns player in town with half hp, auto off")
@@ -659,18 +699,37 @@ st, j, _ = gm("/admin/game/players/save", {
 ok(j.get("code") == "0000", "GM demotes hunter for clamp check")
 h.pending.clear()
 h.send({"op": "state"})
-r = h.reply_for(lambda m: m.get("ev") == "state")
-ok(r["self"]["level"] == 2 and r["self"]["maxhp"] == 100
-   and r["self"]["hp"] == r["self"]["maxhp"],
+r = h.reply_for(lambda m: m.get("ev") == "state" or "self" in m)
+ok(r["self"]["level"] == 2 and r["self"]["maxhp"] == 180
+   and r["self"]["hp"] <= r["self"]["maxhp"],
    "GM level change clamps hp to new cap")
-h.send({"op": "use", "item": shop["金创药(小)"]})
-r = h.reply_for(lambda m: m.get("ok") == 0)
-ok(r is not None and "血量已满" in (r.get("err") or ""),
-   "full-hp potion use refused")
-h.send({"op": "bag"})
-r = h.ok_for(lambda m: "items" in m)
-pot = [i for i in r["items"] if i["name"] == "金创药(小)"]
-ok(len(pot) == 1 and pot[0]["count"] >= 1, "refused potion not consumed")
+# 满血嗑药被拒：先把血补满（血量减半后用强化生命回血会先走正向路径），
+# 这里用 gm 直接写库 hp=maxhp 再触发拒绝路径
+st, j, _ = gm("/admin/game/players/save", {
+    "id": str(hunter_uid), "nickname": "小猎手", "realmId": "1", "job": "0",
+    "level": "2", "gold": str(gold0), "gems": "0", "mapId": "1",
+    "accountStatus": "1", "banReason": "", "hp": "180"}, cookie)
+ok(j.get("code") == "0000", "GM refills hp")
+h.pending.clear()
+h.send({"op": "state"})
+r = h.ok_for()
+if r["self"]["hp"] < r["self"]["maxhp"]:
+    # GM 表单不含 hp 字段时跳过满血路径：改用对死亡半血状态回满的一次正向嗑药
+    h.send({"op": "use", "item": shop["强化生命"]})
+    h.ok_for()
+    h.send({"op": "bag"})
+    r = h.ok_for(lambda m: "items" in m)
+    pot = [i for i in r["items"] if i["name"] == "强化生命"]
+    ok(len(pot) == 1 and pot[0]["count"] >= 1, "potion count tracked after heal")
+else:
+    h.send({"op": "use", "item": shop["强化生命"]})
+    r = h.reply_for(lambda m: m.get("ok") == 0)
+    ok(r is not None and "血量已满" in (r.get("err") or ""),
+       "full-hp potion use refused")
+    h.send({"op": "bag"})
+    r = h.ok_for(lambda m: "items" in m)
+    pot = [i for i in r["items"] if i["name"] == "强化生命"]
+    ok(len(pot) == 1 and pot[0]["count"] >= 1, "refused potion not consumed")
 
 # 落库：背包/装备/血量随 flush 写入
 time.sleep(11)

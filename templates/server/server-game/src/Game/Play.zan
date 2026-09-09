@@ -51,7 +51,8 @@ class Play {
     const int WX_IRON_COST = 2;
     /* 传说塔：层数无限，敌人强度随层增长；每层通关奖励金币与经验。 */
     const int TOWER_MERIT = 20;
-    const int TOWER_MAX_TRIES = 20;
+    /* 原版传说塔每日 10 次（照原版 UI 的 挑战次数 10/10）。 */
+    const int TOWER_MAX_TRIES = 10;
 
     static Random rng = new Random();
 
@@ -275,32 +276,53 @@ class Play {
         }
     }
 
-    /* siege 城池争夺：全服玩法，沙巴克城主人 = 占城行会。状态进程内
-       记忆（owner 名 + 申报战时间），攻打 = 消耗金币宣战，打赢（掷骰
-       按行会成员战力和）即易主并全服公告。 */
+    /* siege 城池争夺：沙巴克城主（owner 名 + 申报战时间，进程内记忆）
+       + 城池争夺页的 8 座钱庄（每座 owner/guild/at，进程内记忆，重启
+       清空，同 redpack 定式）。攻占 = 消耗 2000 金币掷骰（胜率
+       40%+战力/10），成功即易主并全服公告。 */
     static string siegeOwner = "";
     static string siegeGuild = "";
     static long siegeAt = 0;
+    static string[] cityOwners = new string[] { "", "", "", "", "", "", "", "" };
+    static string[] cityGuilds = new string[] { "", "", "", "", "", "", "", "" };
+    static long[] cityAt = new long[] { 0, 0, 0, 0, 0, 0, 0, 0 };
 
-    static JsonValue Siege(Session s, JsonValue m, long now) {
+    static string CityName(int city) { return "钱庄" + Convert.ToString(city); }
+
+    static async JsonValue Siege(Session s, JsonValue m, long now) {
         if (m.Int("attack", 0) == 1) {
-            if (s.row.guildId <= 0) { return Gateway.Err("先加入行会才能攻打沙巴克"); }
-            if (s.row.gold < 2000) { return Gateway.Err("宣战需要 2000 金币"); }
+            int city = m.Int("city", 0);
+            if (city < 1 || city > 8) { return Gateway.Err("城池编号不合法"); }
+            if (s.row.guildId <= 0) { return Gateway.Err("先加入行会才能攻占城池"); }
+            if (s.row.gold < 2000) { return Gateway.Err("攻占城池需要 2000 金币"); }
+            string guildName = "";
+            IDbConnection db = await Gateway.Db();
+            if (db != null) {
+                try {
+                    ZanWeb.Model.Game.Guild g = await db
+                        .Select<ZanWeb.Model.Game.Guild>()
+                        .Where(a => a.id == s.row.guildId).FirstAsync();
+                    if (g != null) { guildName = g.name; }
+                } finally {
+                    Gateway.Give(db);
+                }
+            }
             int power = Fight.Atk(s.row) + s.row.level * 2;
             s.row.gold = s.row.gold - 2000;
             s.dirty = true;
             bool win = Play.rng.Between(0, 100) < 40 + power / 10;
             JsonValue r = Gateway.Ok();
             if (win) {
-                Play.siegeOwner = s.row.nickname;
-                Play.siegeGuild = "你的行会";
-                Play.siegeAt = now;
+                Play.cityOwners[city - 1] = s.row.nickname;
+                Play.cityGuilds[city - 1] = guildName;
+                Play.cityAt[city - 1] = now;
                 Gateway.AnnounceAll("城池易主",
-                    s.row.nickname + " 率行会攻下巴沙克城池！");
+                    s.row.nickname + " 率行会攻占了" + Play.CityName(city) + "！");
             }
             r.Set("win", JsonValue.NewNum(win ? "1" : "0"));
-            r.Set("log", JsonValue.NewStr(win ? "攻城成功，城池已易主！"
-                : "攻城失败，守军太强。金币已消耗。"));
+            r.Set("log", JsonValue.NewStr(win
+                ? "攻占" + Play.CityName(city) + "成功，全服公告已发！"
+                : "攻占" + Play.CityName(city) + "失败，守军太强。金币已消耗。"));
             r.Set("siege", Play.SiegeState(now));
             Gateway.SelfInto(r, s);
             return r;
@@ -316,11 +338,27 @@ class Play {
         o.Set("guild", JsonValue.NewStr(Play.siegeGuild));
         long hold = Play.siegeAt > 0 ? now - Play.siegeAt : 0;
         o.Set("holdSeconds", JsonValue.NewNum(Convert.ToString(hold)));
+        /* 城池争夺页的 8 座钱庄：date 直接下发 yyyy-MM-dd（占领日），
+           income 为每小时产出金币（占领展示数值）。 */
+        JsonValue cities = JsonValue.NewArray();
+        for (int i = 0; i < 8; i = i + 1) {
+            JsonValue c = JsonValue.NewObject();
+            c.Set("id", JsonValue.NewNum(Convert.ToString(i + 1)));
+            c.Set("name", JsonValue.NewStr("钱庄" + Convert.ToString(i + 1)));
+            c.Set("owner", JsonValue.NewStr(Play.cityOwners[i]));
+            c.Set("guild", JsonValue.NewStr(Play.cityGuilds[i]));
+            c.Set("income", JsonValue.NewNum(Convert.ToString(500 + i * 250)));
+            c.Set("date", JsonValue.NewStr(Play.cityAt[i] > 0
+                ? Play.Today(Play.cityAt[i]) : ""));
+            cities.Append(c);
+        }
+        o.Set("cities", cities);
         return o;
     }
 
     /* tower 传说塔：{"climb":1} 爬一层。敌人强度随层涨，胜利楼层+1、
-       经验金币入账；失败塔层保留（明日再战），每日 20 次尝试。 */
+       经验金币入账；失败塔层保留（明日再战），每日 10 次尝试（原版
+       挑战次数 10/10）。 */
     static JsonValue Tower(Session s, JsonValue m, long now) {
         Play.DailyReset(s, now);
         if (m.Int("climb", 0) == 1) {
@@ -375,7 +413,34 @@ class Play {
         o.Set("floor", JsonValue.NewNum(Convert.ToString(s.row.towerFloor)));
         o.Set("tries", JsonValue.NewNum(Convert.ToString(s.row.towerTries)));
         o.Set("maxTries", JsonValue.NewNum(Convert.ToString(TOWER_MAX_TRIES)));
+        /* 传说塔页的挑战者卡（原版每层 15 张）：本区前 15 名的层榜，
+           rank 0 = 自己的位置卡（floor=自己进度，me=1）。 */
+        o.Set("rivals", Play.TowerRivals(s));
         return o;
+    }
+
+    /* 挑战者：本区层榜前 15（level/kills 排序近似），不含自己。 */
+    static async JsonValue TowerRivals(Session s) {
+        JsonValue arr = JsonValue.NewArray();
+        IDbConnection db = await Gateway.Db();
+        if (db == null) { return arr; }
+        try {
+            List<ZanWeb.Model.Game.Player> rows = await db
+                .Select<ZanWeb.Model.Game.Player>()
+                .Where(a => a.realmId == s.realmId && a.id != s.row.id)
+                .OrderByDescending(a => a.towerFloor)
+                .ToListAsync();
+            for (int i = 0; i < rows.Count && i < 15; i = i + 1) {
+                JsonValue p = JsonValue.NewObject();
+                p.Set("name", JsonValue.NewStr(rows[i].nickname));
+                p.Set("floor", JsonValue.NewNum(Convert.ToString(rows[i].towerFloor)));
+                p.Set("level", JsonValue.NewNum(Convert.ToString(rows[i].level)));
+                arr.Append(p);
+            }
+        } finally {
+            Gateway.Give(db);
+        }
+        return arr;
     }
 
     /* wuxing 五行修炼：{"do":"pool"} 打怪经验入池（挂机自动）；
