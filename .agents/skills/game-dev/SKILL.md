@@ -151,6 +151,30 @@ Post 调用核对编码，别信二手注释。
   游戏对象（`this.g.c = c;`），别在 Start 抓。坑出处：goldminer
   APK 黑屏，探针逐段排除（v1 参数画全亮 → v2 复刻 goldminer 原语
   全亮）才定位到画布身份，不是图元/字体/资产问题。
+- **视口适配（StageViewport 契约，零黑边）**：GuiHost.Run 每帧在
+  BeginFrame 后调 `CDraw.StageViewport(canvas, ContentTop, 设计宽,
+  设计高, marginColor)`——短轴贴设计、长轴延展逻辑空间；模板 Render
+  开头取 `Data.W = host.StageWidth()` 当帧值、布局全部锚定活的
+  `Data.W`（锚点如 HOOK_X=W/2 帧首随 W 更新），指针用
+  `host.MouseX/Y()`（内含 Unmap 反变换）。**物理状态绝不能在 Render
+  里归位/钳制**：Render 跑在 FixedUpdate 之后，帧内推进的摆角会被拍
+  回、摆钩冻死。坑出处：用户报"改窗口后显示位置变了实际位置没变、
+  摆幅太小绳子太短抓物品还在原位"——旧代码在 Render 里
+  `clawLen=110` 重置 + 物理坐标用 Start 时的私有副本，显示跟随新锚
+  而物理留在旧锚；修法=物理全部锚定每帧刷新的 Data.HOOK_X/HOOK_Y
+  单源，Render 只读不写物理。桌面 1200x800 与安卓竖屏 1080x2400 双
+  端数值扫描验证（绳像素跨伸→收变化、灯=44 恒定）。
+- **APK 启动即崩 `UnsatisfiedLinkError: cannot locate symbol
+  "zan_audio_load_wav"`**：gui_runtime.c 单 TU 末尾 `#include
+  "zan_audio.c"`，其 WASAPI 静态量（`zan_audio_dev_freq` 等）收在
+  `#ifdef _WIN32` 块内，但 `zan_audio_play()` 有行在守卫外引用了它——
+  Windows 能编，Android NDK 交叉编译时整个 zan_audio.c 静默缺符号
+  （llvm-nm 看 .o：0 个 zan_audio 符号），打包出的 libmain.so dlopen
+  失败、NativeActivity 秒退。**APK 能装上≠能启动**，装完必须
+  `am start` + `pidof` 确认进程活着；崩了先 `logcat -d | grep
+  LoadNativeLibrary`。修法=守卫外的引用收进 `#ifdef _WIN32`（非
+  Windows 设备永不 open，play 早已 return 0，该行不可达）。坑出处：
+  goldminer v3 APK 装上即退，桌面全绿毫无征兆。
 - 出包：`--publish --target android-arm64 --emit-apk` 一条命令；assets
   自动内嵌，加载路径保持"磁盘优先、内嵌兜底"。窗口要可自适应（横竖屏/
   任意尺寸），布局别写死像素。

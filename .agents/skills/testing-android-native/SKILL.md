@@ -40,6 +40,18 @@ description: Zan GUI 的 Android NativeActivity 实机验证仪式——probe AP
   probe 包名 `dev.zan.probe2`，activity `android.app.NativeActivity`。
 - 模拟器约 0.4-1fps：每次交互（tap/swipe/截图）间隔 4-6 秒，判定前
   多等几秒再截图，别把旧帧当结果。
+- **模拟器截屏会拍到壁纸/启动器的"假游戏帧"**（踩坑：金色高亮全无、
+  四色签名几乎全零）：桌面被 Home 回退后 Launcher 挡在最上，screencap
+  拍的是壁纸，不是游戏。判定渲染前先 `dumpsys window | grep
+  mCurrentFocus` 确认游戏窗口在前台、`pidof` 确认进程活着——APK 装上
+  ≠能启动，`am start` 后必须 `pidof` 复核（v3 APK dlopen 缺符号秒退，
+  桌面全绿毫无征兆；`logcat -d | grep LoadNativeLibrary` 看真实死因）。
+- **截图视觉判断不可靠时用数值扫描收口**：PowerShell LockBits
+  Format24bppRgb 按已知绘制色签名扫描（灯/绳/钢的 RGB ±容差），数
+  像素数与质心、跨帧对比。竖屏构图 x/y 要按真实方向读——screencap
+  竖屏回 1080x2400，扫描循环 y 走到 h、x 走到 w 别写反。坑出处：
+  三帧"看起来一样"实为一帧渲染重复，视觉无法分辨伸/收；绳像素的
+  spanY 跨伸→收从 310→1075 一眼定案。
 - 截图 1080x2400 原生分辨率，Read 显示约 880 宽——显示坐标 ×1.2273
   才是 `input tap` 的原生坐标。算错两次打错键的教训：打字前先截一张
   键盘图，按当前布局算键位。

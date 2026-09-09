@@ -169,6 +169,7 @@ static void anw_attach(ANativeWindow *nw) {
     g_anw.attached = 1;
     g_window_width = w;
     g_window_height = h;
+    /* The app's canvas follows the logical stage, not the surface. */
     aq_push_locked(7, w, h, 0, 0, 0);
     /* Surface (re)attached: every pixel is undefined, and an idle app in
      * WaitEvent would keep sleeping (the OHOS shell's kind-14 contract). */
@@ -710,8 +711,37 @@ EXPORT i32 zan_gui_present(iptr hwnd_val, i32 surface_id) {
 
 /* ---- window management (phone: no chrome) ------------------------------- */
 
+/* JNI: Activity.setRequestedOrientation — the NDK ships no
+ * ANativeActivity_setOrientation export despite the docs, so the
+ * orientation pin goes through the activity object. Values are
+ * ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE=0 / PORTRAIT=1. */
+static void ant_set_orientation(int landscape) {
+    struct android_app *app = g_anw.app;
+    if (!app || !app->activity || !app->activity->vm) return;
+    JavaVM *vm = app->activity->vm;
+    JNIEnv *env = NULL;
+    if ((*vm)->GetEnv(vm, (void **)&env, JNI_VERSION_1_6) != JNI_OK &&
+        (*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return;
+    jobject act = (jobject)app->activity->clazz;
+    if (!env || !act) return;
+    jclass cls = (*env)->GetObjectClass(env, act);
+    if (!cls) return;
+    jmethodID mid = (*env)->GetMethodID(env, cls,
+        "setRequestedOrientation", "(I)V");
+    if (mid) (*env)->CallVoidMethod(env, act, mid, landscape ? 0 : 1);
+    (*env)->DeleteLocalRef(env, cls);
+}
+
 EXPORT iptr zan_gui_create_window(const char *title, i32 width, i32 height) {
-    (void)title; (void)width; (void)height; /* the NativeActivity decides */
+    (void)title; /* the NativeActivity owns the surface; the canvas
+                  * follows it (the CDraw stage viewport scales the game
+                  * to whatever the device gives). */
+    if (width > 0 && height > 0) {
+        /* Pin the activity orientation to the requested stage aspect so
+         * landscape designs get landscape (the sensor would otherwise
+         * fight a fixed-aspect design). */
+        ant_set_orientation(width > height);
+    }
     return ZAN_ANW_HWND;
 }
 EXPORT i32 zan_gui_show_window(iptr hwnd_val)         { (void)hwnd_val; return 1; }
