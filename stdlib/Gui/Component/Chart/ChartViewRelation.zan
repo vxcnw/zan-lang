@@ -404,6 +404,18 @@ partial class ChartView {
         return Chart.Palette(t, i);
     }
 
+    /// graph 节点 i 的颜色：显式 itemStyle.color 优先，其次类别
+    /// 调色板（ECharts category 着色，同类别同色），无类别回退
+    /// 节点序调色板。
+    static int GraphNodeColor(ChartSeries s, Theme t, int i) {
+        if (i < s.data.Count) {
+            ChartData d = s.data[i];
+            if (d.color != 0) { return d.color; }
+            if (d.hasCat) { return Chart.Palette(t, d.cat); }
+        }
+        return Chart.Palette(t, i);
+    }
+
     /// 力导向边的目标端箭头（ECharts force.linkSymbol 'arrow'）：
     /// 由 a→b 流向在 b 节点圆周外画实心三角，尖指向圆心。
     static void DrawForceArrow(Canvas c, int ax, int ay, int bx, int by,
@@ -572,6 +584,8 @@ partial class ChartView {
             app.Scale(lead.forceMinRadius), app.Scale(lead.forceMaxRadius));
         // ECharts2 force 的节点即 series.data 项：按名匹配逐节点
         // symbol/symbolSize 覆盖（同样只改元数据，幂等）。
+        // symbolSize 直径语义（db5a53bf）：graph JSON（graphLayout
+        // 非空）直接存直径；旧 force 路径沿用「半径 ×2」约定。
         for (int di = 0; di < lead.data.Count; di = di + 1) {
             ChartData dd = lead.data[di];
             if (dd.name.Length < 1) { continue; }
@@ -579,9 +593,11 @@ partial class ChartView {
             for (int i = 0; i < layout.nodes.Count; i = i + 1) {
                 if (layout.nodes[i].name != dd.name) { continue; }
                 if (dd.symbol.Length > 0) { layout.nodes[i].symbol = dd.symbol; }
-                // ECharts symbolSize 语义 = 半径；ForceNode.size 存直径，
-                // 绘制端取 /2，这里 ×2 回填。
-                if (dd.sizeSet && dd.size > 0) { layout.nodes[i].size = dd.size * 2; }
+                // ForceNode.size 存直径，绘制端取 /2。
+                if (dd.sizeSet && dd.size > 0) {
+                    if (lead.graphLayout.Length > 0) { layout.nodes[i].size = dd.size; }
+                    else { layout.nodes[i].size = dd.size * 2; }
+                }
                 break;
             }
         }
@@ -605,7 +621,13 @@ partial class ChartView {
         for (int ni = 0; ni < nn; ni = ni + 1) {
             bool h = false;
             if (o.iwid != 0) {
-                h = app.StateGet(Chart.LegendSliceKey(o.iwid, 0, ni), 0) == 1;
+                // graph 类别节点：图例键按类别下标（点类别 chip 隐整类，
+                // 与官方 legend.data=categories 一致）；其余按节点下标。
+                int lk = ni;
+                if (ni < lead.data.Count && lead.data[ni].hasCat) {
+                    lk = lead.data[ni].cat;
+                }
+                h = app.StateGet(Chart.LegendSliceKey(o.iwid, 0, lk), 0) == 1;
             }
             nodeHid.Add(h);
         }
@@ -661,8 +683,11 @@ partial class ChartView {
             ForceEdge e = layout.edges[i];
             if (e.a < nodeHid.Count && nodeHid[e.a]) { continue; }
             if (e.b < nodeHid.Count && nodeHid[e.b]) { continue; }
+            // ECharts graph.lineStyle.color='source'（les-miserables）：
+            // 边随源端节点色——GraphNodeColor 无显式色时按类别/序
+            // 调色板取源端，语义一致。
             int col = linkCol0;
-            if (col == 0) { col = Chart.Palette(t, e.a); }
+            if (col == 0) { col = ChartView.GraphNodeColor(lead, t, e.a); }
             int w2 = 1 + app.Scale(2) * e.val / maxVal;
             int dxe = px[e.b] - px[e.a];
             int dye = py[e.b] - py[e.a];
@@ -691,7 +716,7 @@ partial class ChartView {
                 ForceEdge e = layout.edges[i];
                 if (e.a != hoverNode && e.b != hoverNode) { continue; }
                 int col = linkCol0;
-                if (col == 0) { col = Chart.Palette(t, e.a); }
+                if (col == 0) { col = ChartView.GraphNodeColor(lead, t, e.a); }
                 int dxe = px[e.b] - px[e.a];
                 int dye = py[e.b] - py[e.a];
                 int lene = ChartView.ISqrt(dxe * dxe + dye * dye);
@@ -710,29 +735,78 @@ partial class ChartView {
 
         // 节点 + 标签。显式形状经 series.tree 的 ChartNode.Shaped
         // 叶按名匹配（ECharts force 的逐节点 symbol/symbolSize）。
+        // 标签：data[i].label.show=false 逐点隐藏（les-miserables
+        // 77 节点仅 5 个枢纽显标，全画必然层层叠字）；label.position
+        // 'right'/'left' 挂左右；circular 沿半径向外（上半圆右对齐、
+        // 下半圆左对齐），与官方 rotateLabel 版式等价。
+        int scx = ox + areaW / 2;
+        int scy = oy + areaH / 2;
+        int lblCol = Style.Part(app, "chart", "label", "", "", "",
+                                Style.SNormal()).FgOr(0);
+        int fs = Style.FontFallback(app, "small");
         for (int i = 0; i < nn; i = i + 1) {
             if (i < nodeHid.Count && nodeHid[i]) { continue; }
             ForceNode nd = layout.nodes[i];
-            int col = ChartView.ChordNodeColor(lead, t, i, nd.name);
+            int col = ChartView.GraphNodeColor(lead, t, i);
             if (col == Chart.Palette(t, i) && nodeCol0 != 0) { col = nodeCol0; }
             int nr = nodeR;
             if (nd.size > 0) { nr = app.Scale(nd.size) / 2; }
             Chart.DrawSymbol(c, px[i], py[i], nr, nd.symbol, col,
                 4294967295, app.Scale(1));
+            bool showLbl = true;
+            int side = 0;
+            if (i < lead.data.Count) {
+                if (lead.data[i].labelHide) { showLbl = false; }
+                side = lead.data[i].labelSide;
+            }
+            if (!showLbl) { continue; }
             string nm = nd.name;
-            int tw = Canvas.MeasureText(nm, Style.FontFallback(app, "small"));
-            int fs = Style.FontFallback(app, "small");
-            ChartView.DrawTextClamped(c, px[i] - tw / 2, py[i] + nr + app.Scale(3),
-                nm,
-                Style.Part(app, "chart", "label", "", "", "", Style.SNormal()).FgOr(0),
-                fs, ox, oy, areaW, areaH);
+            int tw = Canvas.MeasureText(nm, fs);
+            if (lead.graphLayout == "circular") {
+                // 径向：节点在外环上，标签沿半径向外推。
+                int dxn = px[i] - scx;
+                int dyn = py[i] - scy;
+                int dist = ChartView.ISqrt(dxn * dxn + dyn * dyn);
+                int angN = ChartView.AngleOf(dxn, dyn);
+                int lxN = ChartView.FillX(scx, dist + nr + app.Scale(5), angN);
+                int lyN = Canvas.CenterTextYAt(
+                    ChartView.FillY(scy, dist + nr + app.Scale(5), angN), fs);
+                if (ChartView.FillDx(angN) < 0) { lxN = lxN - tw; }
+                ChartView.DrawTextClamped(c, lxN, lyN, nm, lblCol, fs,
+                    ox, oy, areaW, areaH);
+            } else if (side == 2) {
+                ChartView.DrawTextClamped(c, px[i] + nr + app.Scale(4),
+                    Canvas.CenterTextYAt(py[i], fs), nm, lblCol, fs,
+                    ox, oy, areaW, areaH);
+            } else if (side == 1) {
+                ChartView.DrawTextClamped(c, px[i] - nr - app.Scale(4) - tw,
+                    Canvas.CenterTextYAt(py[i], fs), nm, lblCol, fs,
+                    ox, oy, areaW, areaH);
+            } else {
+                ChartView.DrawTextClamped(c, px[i] - tw / 2,
+                    py[i] + nr + app.Scale(3), nm, lblCol, fs,
+                    ox, oy, areaW, areaH);
+            }
         }
 
-        // 图例：节点名 + 对应颜色（每节点一行）。graph 动辄几十
-        // 上百节点（les-miserables 77），一节点一行放不下——超
-        // 过 16 个节点就不画节点图例（官方此类 demo 的图例是
-        // 类别图例，非节点图例）。
-        if (o.showLegend && nn <= 16) {
+        // 图例：graph categories 有名表时按类别画（点 chip 隐整类，
+        // 节点色 = 类别调色板，与官方 legend.data=categories 一致）；
+        // 否则逐节点一行——节点多（les-miserables 77）放不下就停画。
+        if (o.showLegend && lead.graphCats.Count > 0) {
+            int lx2 = x + w - pad - legendW;
+            int ly2 = Chart.LegendStartY(app, y, top);
+            int lh2 = Canvas.FontHeight(Style.FontFallback(app, "small")) + app.Scale(6);
+            for (int i = 0; i < lead.graphCats.Count; i = i + 1) {
+                string cn = lead.graphCats[i];
+                if (cn.Length < 1) { cn = "cat-" + Convert.ToString(i); }
+                int key = 0;
+                if (o.iwid != 0) { key = Chart.LegendSliceKey(o.iwid, 0, i); }
+                bool hid = app.StateGet(key, 0) == 1;
+                Chart.DrawLegendChip(app, lx2, ly2, legendW, lh2,
+                    Chart.Palette(t, i), cn, hid, key);
+                ly2 = ly2 + lh2;
+            }
+        } else if (o.showLegend && nn <= 16) {
             int lx2 = x + w - pad - legendW;
             int ly2 = Chart.LegendStartY(app, y, top);
             int lh2 = Canvas.FontHeight(Style.FontFallback(app, "small")) + app.Scale(6);
@@ -743,7 +817,7 @@ partial class ChartView {
                 bool hid = false;
                 if (i < nodeHid.Count) { hid = nodeHid[i]; }
                 Chart.DrawLegendChip(app, lx2, ly2, legendW, lh2,
-                    ChartView.ChordNodeColor(lead, t, i, nd.name), nd.name, hid, key);
+                    ChartView.GraphNodeColor(lead, t, i), nd.name, hid, key);
                 ly2 = ly2 + lh2;
             }
         }
@@ -752,7 +826,7 @@ partial class ChartView {
             ForceNode nd = layout.nodes[hoverNode];
             List<TooltipRow> rows = new List<TooltipRow>{
                 TooltipRow.Of(0, o.title),
-                TooltipRow.Of(ChartView.ChordNodeColor(lead, t, hoverNode, nd.name),
+                TooltipRow.Of(ChartView.GraphNodeColor(lead, t, hoverNode),
                     nd.name + "  " + Convert.ToString(nd.weight)) };
             ChartView.TooltipCard(app, app.mouseX, app.mouseY, x + w, rows);
         }
