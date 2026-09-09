@@ -686,6 +686,14 @@ class GenForm {
         // Control（Table 只是设计器画布的静态表头渲染器），统一
         // 归到泛型 DataGrid<T>。
         if (kind == "Table" || kind == "DataTable") { kind = "DataGrid"; }
+        // 4eb8601d5 之后的存量文档可能带 Chart/Scrollbar/Layer/
+        // Ellipsis/Ribbon 这些"画布渲染器/宿主绘制"的 kind——它们
+        // 不是 Control，按 KindForType 现行规则归到占位容器/文本。
+        if (kind == "Chart" || kind == "Scrollbar" || kind == "Layer") {
+            kind = "Panel";
+        }
+        if (kind == "Ellipsis") { kind = "Label"; }
+        if (kind == "Ribbon") { kind = "ToolStrip"; }
         string of = GenForm.ObjStr(o, "of");
         if (of.Length == 0) { of = GenForm.DefaultTypeArgs(kind); }
         if (of.Length == 0) { return kind; }

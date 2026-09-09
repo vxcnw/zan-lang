@@ -445,6 +445,14 @@ class FormField : Control {
         // "DataTable") kind reads back as 41 instead of whichever type the
         // scan hits first.
         if (key == "DataGrid" || key == "DataTable") { return 41; }
+        // Canvas-drawn types keep their display kind in documents; the
+        // generator substitutes a placeable stand-in, but loading must
+        // restore the original designer type.
+        if (key == "Chart") { return 43; }
+        if (key == "Ellipsis") { return 44; }
+        if (key == "Scrollbar") { return 46; }
+        if (key == "Ribbon") { return 53; }
+        if (key == "Layer") { return 56; }
         // The inverse of KindForType, so a document written by the designer
         // reads back as the same field type. Several types share a widget
         // (a date and a colour entry are both an Input); the first match wins,
@@ -945,6 +953,10 @@ class FormField : Control {
         if (ft == 40) { return "ListView"; }
         if (ft == 48) { return "Dropdown"; }
         if (ft == 42) { return "Carousel"; }
+        // 43/44/46/53/56 keep their display kind for round-trip identity
+        // (Chart, Ellipsis, Scrollbar, Ribbon, Layer). None is a Control —
+        // the canvas draws them itself — so GenForm.TypeOf falls back to a
+        // placeable stand-in (Panel/Label/ToolStrip) when generating code.
         if (ft == 43) { return "Chart"; }
         if (ft == 44) { return "Ellipsis"; }
         if (ft == 46) { return "Scrollbar"; }
