@@ -30,6 +30,10 @@ $files += (Join-Path (Get-Location) "examples\gui_gallery\MapChinaData.zan")
 $zanArgs = @()
 $zanArgs += $files
 $zanArgs += @("-o", "build\charts_test.exe", "--subsystem", "windows")
+# 官方示例全量以 JSON 资源内嵌（options/ 目录递归，含 doc-example/
+# 子目录）+ 官方注册表（菜单目录），Zan 侧只做装载与渲染。
+$zanArgs += @("--embed", "examples\gui_charts\options")
+$zanArgs += @("--embed", "examples\gui_charts\charts-registry.json=charts-registry")
 $zanArgs += @("--libpath", "build", "--link-lib", "zan_gui_charts_gnu")
 # Native Win32 backend needs only the system libs it imports directly (the
 # runtime's #pragma libs: dwmapi/user32/gdi32/imm32) plus the reactor deps.

@@ -87,6 +87,8 @@ partial class ChartView {
                 app.Scale(12), o.iwid, fullN);
         }
         Chart.DrawMarkArea(app, f, o);
+        ChartView.DrawMarkAreaBands(app, f, o, i0, n,
+            series.Count > 0 ? series[0].color : 0);
         int maxV = f.leftMax;
         if (ns < 1) { return; }
 
@@ -684,7 +686,7 @@ partial class ChartView {
                 if (!ps.hidden && ps.points.Count > 0) {
                     // x 轴标注线（markLine valueIndex:0）在柱形上也照画
                     // （ECharts2 bar13 的蓝色 max/min 竖虚线）。
-                    ChartView.DrawValueXMarkLines(app, f, ps, i0, i1);
+                    ChartView.DrawValueXMarkLines(app, f, ps, i0, i1, n);
                     ChartView.DrawPointsMarkPoints(app, f, ps, i0, i1);
                 }
             }

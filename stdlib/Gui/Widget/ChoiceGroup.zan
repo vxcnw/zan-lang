@@ -548,7 +548,10 @@ class RadioGroup : ChoiceGroup {
         this.ReconcileButtons();
         RadioButtonGroup bg = this.buttonGroup;
         bg.SetSize(sizeCls);
-        bg.SetGap(this.RowGapPx(), this.ColGapPx());
+        // 连体按钮形态的列缝恒 0（SetGap 契约）：段间留缝就散成
+        // 一排独立方块，接缝（rb-first/rb-last）失去意义；行距仍
+        // 用于折行。
+        bg.SetGap(this.RowGapPx(), 0);
         bg.LayoutRows(this.InnerW(this.bw));
         for (int i = 0; i < bg.items.Count; i = i + 1) {
             RadioButton it = bg.items[i];

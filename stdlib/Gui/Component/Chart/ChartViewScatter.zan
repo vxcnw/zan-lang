@@ -387,7 +387,8 @@ partial class ChartView {
                     ChartView.DrawSeriesMarkLines(app, f, s2, i0, i1, o);
                     // valueIndex:0 的 x 轴标注线（scatter4 的 x平均值
                     // 竖线）由专门通道绘制，DrawSeriesMarkLines 跳过它。
-                    ChartView.DrawValueXMarkLines(app, f, s2, i0, i1);
+                    // 散点是纯数值 X：类目槽位不适用，nCat 传 0。
+                    ChartView.DrawValueXMarkLines(app, f, s2, i0, i1, 0);
                 }
             }
         }

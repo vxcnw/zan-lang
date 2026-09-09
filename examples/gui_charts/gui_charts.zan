@@ -1,7 +1,9 @@
-/// Zan Charts — gallery rebuilt 1:1 from the ECharts 5 official examples
-/// (echarts.apache.org/examples): nav id/title 取官方注册表原文，option 与
-/// 数据逐字取 _scratch/ref5/<id>.js；引擎缺口进账本，不做变通数据。
+/// Zan Charts — gallery of the OFFICIAL ECharts examples (v6.1.0 注册表全量
+/// 377 条)。菜单与标题来自内嵌 charts-registry（官方 chart-list 原文），
+/// 每例 option/数据取内嵌 options/<id>.json —— 由官方源码 _scratch/ref5/
+/// 逐字转换，Zan 侧只有加载与渲染调用；渲染失败=引擎缺口，进账本修复。
 using System;
+using System.Json;
 using Gui;
 using Gui.Widget;
 using Gui.Component.Chart;
@@ -15,6 +17,7 @@ class ChartsDemo {
     string zh;
     string den;
     string zhd;
+    bool ready;
 }
 
 class ChartsNavRow {
@@ -55,13 +58,33 @@ partial class Charts {
     static List<ChartsDemo> demos;
 
     static void Main() {
+        Charts.BuildCatalog();
+        // --parsecheck：无头全量校验——每个注册表例的 option 资源
+        // 逐个 FromJson，失败清单写 _scratch/parsecheck.txt。渲染
+        // 缺口另有账本，这里只验证"全部能装载"。
+        if (Environment.ArgCount() > 0 && Environment.ArgAt(0) == "--parsecheck") {
+            List<string> bad = new List<string>();
+            int n = 0;
+            for (int i = 0; i < Charts.demos.Count; i = i + 1) {
+                ChartsDemo d = Charts.demos[i];
+                if (!d.ready) { continue; }
+                string src = Skin.EmbedRead("options/" + d.id + ".json");
+                if (src == "") { bad.Add(d.id + ": resource missing"); continue; }
+                ChartOption o = ChartOption.FromJson(src);
+                if (o == null) { bad.Add(d.id + ": parse failed"); continue; }
+                n = n + 1;
+            }
+            string report = "parsed " + n + " / " + Charts.demos.Count + " ready";
+            for (int i = 0; i < bad.Count; i = i + 1) { report = report + "\n" + bad[i]; }
+            System.IO.File.WriteAllText("_scratch/parsecheck.txt", report);
+            return;
+        }
         // ECharts 示例页是白底亮色，画廊默认亮色主题（标题栏内置
         // 皮肤选择器，EnableSkins(1) 预选 Light）。
         App app = new App("Zan Charts", 1160, 760);
         Charts.app = app;
         Charts.lang = new SignalInt(1);
         Charts.selected = new SignalInt(0);
-        Charts.BuildCatalog();
         Charts.InitNav();
         // 列表选中与示例选中从第一帧起就是一回事（否则首例只
         // 有反色文字、没有主色带）。
@@ -179,59 +202,23 @@ partial class Charts {
         }
     }
 
-    static void Add(string cat, string id, string en, string zh,
-                    string den, string zhd) {
-        ChartsDemo d = new ChartsDemo();
-        d.cat = cat;
-        d.id = id;
-        d.en = en;
-        d.zh = zh;
-        d.den = den;
-        d.zhd = zhd;
-        Charts.demos.Add(d);
-    }
-
     static void BuildCatalog() {
+        // 目录 = 官方注册表全量（chart-list 377 条，官方首现顺序）：
+        // 内嵌 charts-registry（--embed 注入），这里只做装载映射。
         Charts.demos = new List<ChartsDemo>();
-        // 目录对齐 ECharts 5 官方示例站（echarts.apache.org/examples）：
-        // 类目、条目顺序、id、标题均取官方注册表原文，逐批重建。
-        // 折线图 — 官方 line 段已直迁 13 例（ChartsLine5.zan，option
-        // 逐项取 ref5 源码）；visualMap/dataset/graphic/多轴等缺口例
-        // 与引擎账本项绑定，随批按官方位置补入。
-        Charts.Add("line", "line-simple", "Basic Line Chart", "基础折线图", "", "");
-        Charts.Add("line", "line-smooth", "Smoothed Line Chart", "基础平滑折线图", "", "");
-        Charts.Add("line", "area-basic", "Basic area chart", "基础面积图", "", "");
-        Charts.Add("line", "line-stack", "Stacked Line Chart", "堆叠折线图", "", "");
-        Charts.Add("line", "area-stack", "Stacked Area Chart", "堆叠面积图", "", "");
-        Charts.Add("line", "line-marker", "Temperature Change in the Coming Week", "未来一周气温变化", "", "");
-        // 标题 = 官方注册表 title/titleCN 原文（chart-list-data.js），
-        // 不是示例 option 内部的 title.text（如 area-time-axis 图题
-        // 'Large Ara Chart' 是官网源码原文，列表名以注册表为准）。
-        Charts.Add("line", "area-simple", "Large scale area chart", "大数据量面积图", "", "");
-        Charts.Add("line", "area-rainfall", "Rainfall", "雨量流量关系图", "", "");
-        Charts.Add("line", "area-time-axis", "Area Chart with Time Axis", "时间轴折线图", "", "");
-        Charts.Add("line", "line-style", "Line Style and Item Style", "自定义折线图样式", "", "");
-        Charts.Add("line", "line-in-cartesian-coordinate-system",
-            "Line Chart in Cartesian Coordinate System", "双数值轴折线图", "", "");
-        Charts.Add("line", "line-step", "Step Line", "阶梯折线图", "", "");
-        Charts.Add("line", "line-y-category", "Line Y Category", "垂直折线图（Y轴为类目轴）", "", "");
-        // ===== bar 段（官方注册表顺序，实现见 ChartsBar5.zan）=====
-        Charts.Add("bar", "bar-simple", "Basic Bar", "基础柱状图", "", "");
-        Charts.Add("bar", "bar-tick-align", "Axis Align with Tick", "坐标轴刻度与标签对齐", "", "");
-        Charts.Add("bar", "bar-background", "Bar with Background", "带背景色的柱状图", "", "");
-        Charts.Add("bar", "bar-data-color", "Set Style of Single Bar.", "自定义单个柱子颜色", "", "");
-        Charts.Add("bar", "bar-waterfall", "Waterfall Chart", "瀑布图（柱状图模拟）", "", "");
-        Charts.Add("bar", "bar-negative2", "Bar Chart with Negative Value", "交错正负轴标签", "", "");
-        Charts.Add("bar", "bar-y-category", "World Population", "世界人口总量 - 条形图", "", "");
-        Charts.Add("bar", "bar-label-rotation", "Bar Label Rotation", "柱状图标签旋转", "", "");
-        Charts.Add("bar", "bar-stack", "Stacked Column Chart", "堆叠柱状图", "", "");
-        Charts.Add("bar", "bar-stack-borderRadius", "Stacked Bar with borderRadius", "带圆角的堆积柱状图", "", "");
-        Charts.Add("bar", "bar-stack-normalization", "Stacked Bar Normalization", "堆叠柱状图的归一化", "", "");
-        Charts.Add("bar", "bar-waterfall2", "Waterfall Chart", "阶梯瀑布图（柱状图模拟）", "", "");
-        Charts.Add("bar", "bar-y-category-stack", "Stacked Horizontal Bar", "堆叠条形图", "", "");
-        Charts.Add("bar", "bar-negative", "Bar Chart with Negative Value", "正负条形图", "", "");
-        Charts.Add("bar", "bar1", "Rainfall and Evaporation", "某地区蒸发量和降水量", "", "");
-        Charts.Add("bar", "mix-line-bar", "Mixed Line and Bar", "折柱混合", "", "");
+        JsonValue root = JsonValue.ParseLenient(Skin.EmbedRead("charts-registry"));
+        for (int i = 0; i < root.Count(); i = i + 1) {
+            JsonValue e = root.At(i);
+            ChartsDemo d = new ChartsDemo();
+            d.id = e.Str("id", "");
+            d.cat = e.Str("cat", "other");
+            d.en = e.Str("en", d.id);
+            d.zh = e.Str("zh", d.en);
+            d.den = "";
+            d.zhd = "";
+            d.ready = e.Bool("ready", false);
+            Charts.demos.Add(d);
+        }
     }
 
     static string T(string en, string zh) {
@@ -242,25 +229,34 @@ partial class Charts {
     static string NameOf(ChartsDemo d) { return Charts.T(d.en, d.zh); }
 
     static string CatLabel(string cat) {
-        // 类目名取自参考站 example.html 的 h3 原文。
-        if (cat == "line") { return Charts.T("Line", "折线图"); }
+        // 类目 = 官方注册表（chart-list 6.x）的 category 原文，
+        // 中英名对齐官方示例站导航。
         if (cat == "bar") { return Charts.T("Bar", "柱状图"); }
-        if (cat == "scatter") { return Charts.T("Scatter", "散点图"); }
-        if (cat == "k") { return Charts.T("Candlestick", "K线图"); }
+        if (cat == "line") { return Charts.T("Line", "折线图"); }
         if (cat == "pie") { return Charts.T("Pie", "饼图"); }
-        if (cat == "radar") { return Charts.T("Radar", "雷达图"); }
-        if (cat == "chord") { return Charts.T("Chord", "和弦图"); }
-        if (cat == "force") { return Charts.T("Force", "力导向布局图"); }
+        if (cat == "scatter") { return Charts.T("Scatter", "散点图"); }
         if (cat == "map") { return Charts.T("Map", "地图"); }
-        if (cat == "gauge") { return Charts.T("Gauge", "仪表盘"); }
-        if (cat == "funnel") { return Charts.T("Funnel", "漏斗图"); }
-        if (cat == "eventRiver") { return Charts.T("Event river", "事件河流图"); }
-        if (cat == "venn") { return Charts.T("Venn", "韦恩图"); }
+        if (cat == "candlestick") { return Charts.T("Candlestick", "K线图"); }
+        if (cat == "radar") { return Charts.T("Radar", "雷达图"); }
         if (cat == "treemap") { return Charts.T("Treemap", "矩形树图"); }
         if (cat == "tree") { return Charts.T("Tree", "树图"); }
-        if (cat == "wordCloud") { return Charts.T("Word cloud", "字符云"); }
-        if (cat == "mix") { return Charts.T("Mix", "混搭"); }
-        if (cat == "component") { return Charts.T("Component", "组件"); }
+        if (cat == "sunburst") { return Charts.T("Sunburst", "旭日图"); }
+        if (cat == "boxplot") { return Charts.T("Boxplot", "箱型图"); }
+        if (cat == "parallel") { return Charts.T("Parallel", "平行坐标"); }
+        if (cat == "sankey") { return Charts.T("Sankey", "桑基图"); }
+        if (cat == "themeRiver") { return Charts.T("Theme River", "主题河流"); }
+        if (cat == "pictorialBar") { return Charts.T("Pictorial Bar", "象形柱图"); }
+        if (cat == "graph") { return Charts.T("Graph", "关系图"); }
+        if (cat == "gauge") { return Charts.T("Gauge", "仪表盘"); }
+        if (cat == "funnel") { return Charts.T("Funnel", "漏斗图"); }
+        if (cat == "calendar") { return Charts.T("Calendar", "日历图"); }
+        if (cat == "heatmap") { return Charts.T("Heatmap", "热力图"); }
+        if (cat == "custom") { return Charts.T("Custom", "自定义系列"); }
+        if (cat == "lines") { return Charts.T("Lines", "路线图"); }
+        if (cat == "dataset") { return Charts.T("Dataset", "数据集"); }
+        if (cat == "graphic") { return Charts.T("Graphic", "原生图形元素"); }
+        if (cat == "chord") { return Charts.T("Chord", "和弦图"); }
+        if (cat == "matrix") { return Charts.T("Matrix", "矩阵坐标"); }
         return Charts.T("Other", "其他");
     }
 
@@ -276,19 +272,11 @@ partial class Charts {
     static int skinLang = 0 - 1;
 
     static void Show(App app, ChartOption o, int x, int y, int w, int h) {
-        o.toolboxShow = true;
+        // toolbox/legend/tooltip 一律按 option 声明渲染（ECharts 6
+        // 语义），不再整图强制开启。
         if (Charts.nomouse) { o.showTooltip = false; }
         ChartView.Keyed(o, Charts.KeyOf(Charts.selected.Get(), 0)).Render(app, x, y, w, h);
     }
-
-    static List<string> Week() {
-        return new List<string>{
-            Charts.T("Mon", "周一"), Charts.T("Tue", "周二"),
-            Charts.T("Wed", "周三"), Charts.T("Thu", "周四"),
-            Charts.T("Fri", "周五"), Charts.T("Sat", "周六"),
-            Charts.T("Sun", "周日") };
-    }
-
 
     static void Render(App app) {
         Canvas c = app.canvas;
@@ -462,37 +450,31 @@ partial class Charts {
     }
 
     static void Draw(App app, string id, int x, int y, int w, int h) {
-        // ECharts 5 官方示例分发：id = 官方注册表 id，实现见
-        // ChartsLine5.zan（每例 option 逐项取 ref5 源码）。
-        if (id == "line-simple") { Charts.E5LineSimple(app, x, y, w, h); }
-        else if (id == "line-smooth") { Charts.E5LineSmooth(app, x, y, w, h); }
-        else if (id == "area-basic") { Charts.E5AreaBasic(app, x, y, w, h); }
-        else if (id == "line-stack") { Charts.E5LineStack(app, x, y, w, h); }
-        else if (id == "area-stack") { Charts.E5AreaStack(app, x, y, w, h); }
-        else if (id == "line-marker") { Charts.E5LineMarker(app, x, y, w, h); }
-        else if (id == "area-simple") { Charts.E5AreaSimple(app, x, y, w, h); }
-        else if (id == "area-rainfall") { Charts.E5AreaRainfall(app, x, y, w, h); }
-        else if (id == "area-time-axis") { Charts.E5AreaTimeAxis(app, x, y, w, h); }
-        else if (id == "line-style") { Charts.E5LineStyle(app, x, y, w, h); }
-        else if (id == "line-in-cartesian-coordinate-system") { Charts.E5LineInCartesian(app, x, y, w, h); }
-        else if (id == "line-step") { Charts.E5LineStep(app, x, y, w, h); }
-        else if (id == "line-y-category") { Charts.E5LineYCategory(app, x, y, w, h); }
-        // ECharts 5 官方示例 bar 段（ChartsBar5.zan）。
-        else if (id == "bar-simple") { Charts.E5BarSimple(app, x, y, w, h); }
-        else if (id == "bar-tick-align") { Charts.E5BarTickAlign(app, x, y, w, h); }
-        else if (id == "bar-background") { Charts.E5BarBackground(app, x, y, w, h); }
-        else if (id == "bar-data-color") { Charts.E5BarDataColor(app, x, y, w, h); }
-        else if (id == "bar-waterfall") { Charts.E5BarWaterfall(app, x, y, w, h); }
-        else if (id == "bar-negative2") { Charts.E5BarNegative2(app, x, y, w, h); }
-        else if (id == "bar-y-category") { Charts.E5BarYCategory(app, x, y, w, h); }
-        else if (id == "bar-label-rotation") { Charts.E5BarLabelRotation(app, x, y, w, h); }
-        else if (id == "bar-stack") { Charts.E5BarStack(app, x, y, w, h); }
-        else if (id == "bar-stack-borderRadius") { Charts.E5BarStackBorderRadius(app, x, y, w, h); }
-        else if (id == "bar-stack-normalization") { Charts.E5BarStackNormalization(app, x, y, w, h); }
-        else if (id == "bar-waterfall2") { Charts.E5BarWaterfall2(app, x, y, w, h); }
-        else if (id == "bar-y-category-stack") { Charts.E5BarYCategoryStack(app, x, y, w, h); }
-        else if (id == "bar-negative") { Charts.E5BarNegative(app, x, y, w, h); }
-        else if (id == "bar1") { Charts.E5Bar1(app, x, y, w, h); }
-        else if (id == "mix-line-bar") { Charts.E5MixLineBar(app, x, y, w, h); }
+        // 通用装载：id = 官方注册表 id，option 逐字来自内嵌资源
+        // options/<id>.json（含 doc-example/ 子目录）。Zan 侧没有
+        // 任何示例数据装配代码——渲染不对就是引擎缺口，进账本。
+        string src = Skin.EmbedRead("options/" + id + ".json");
+        if (src == "") {
+            Charts.DrawEmpty(app, id, x, y, w, h);
+            return;
+        }
+        Charts.Show(app, ChartOption.FromJson(src), x, y, w, h);
+    }
+
+    /// 注册表里未内置的例（ready=false）：运行时依赖桌面引擎
+    /// 不具备的环境，明示原因而不是渲染空图。
+    static void DrawEmpty(App app, string id, int x, int y, int w, int h) {
+        string why = id == "custom-wind"
+            ? Charts.T("depends on echarts-gl (WebGL globe)", "依赖 WebGL 地球（echarts-gl）")
+            : id == "lines-ny"
+                ? Charts.T("streams 32 binary chunks (1M points)", "32 分片二进制流式加载 100 万点")
+                : Charts.T("runtime dependency unavailable", "运行时依赖不可用");
+        Canvas c = app.canvas;
+        Theme t = app.theme;
+        string head = Charts.T("Not bundled: ", "未内置：") + id;
+        c.DrawText(x + w / 2 - app.Scale(120), y + h / 2 - app.Scale(10),
+            head, t.textSecondary, t.fontSizeMedium);
+        c.DrawText(x + w / 2 - app.Scale(120), y + h / 2 + app.Scale(16),
+            why, t.textTertiary, t.fontSizeSmall);
     }
 }

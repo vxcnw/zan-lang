@@ -749,6 +749,14 @@ class Chart {
             if (ChartView.GroupIndex(grp, s.stackName) >= 0) { return true; }
             grp.Add(s.stackName);
         }
+        // 堆叠面积折线（confidence-band L/U）同样抬升定点量程。
+        for (int i2 = 0; i2 < series.Count; i2 = i2 + 1) {
+            ChartSeries s2 = series[i2];
+            if (s2.hidden || s2.axisIndex != axisIndex) { continue; }
+            if (!ChartView.IsLineFamily(s2.type)) { continue; }
+            if (s2.stackName.Length == 0 && s2.stack == 0) { continue; }
+            return true;
+        }
         return false;
     }
 
@@ -795,6 +803,34 @@ class Chart {
                 if (accs[a2] > hi) { hi = accs[a2]; }
                 if (negAccs[a2] < lo) { lo = negAccs[a2]; }
             }
+        }
+        // 堆叠面积折线（confidence-band L/U 带、stream-graph）：与
+        // 柱族不同，渲染按原始值逐类累计（prev+val 链），极值取
+        // 各类目全体堆叠折线之和（正负不分组）。
+        int ln = 0;
+        for (int c2 = 0; c2 < series.Count; c2 = c2 + 1) {
+            ChartSeries cs4 = series[c2];
+            if (!cs4.hidden && cs4.axisIndex == axisIndex
+                && ChartView.IsLineFamily(cs4.type)
+                && (cs4.stackName.Length > 0 || cs4.stack != 0)) {
+                if (cs4.Count() > ln) { ln = cs4.Count(); }
+            }
+        }
+        for (int i3 = 0; i3 < ln; i3 = i3 + 1) {
+            int accL = 0;
+            for (int s4 = 0; s4 < series.Count; s4 = s4 + 1) {
+                ChartSeries cs5 = series[s4];
+                if (cs5.hidden || cs5.axisIndex != axisIndex
+                    || !ChartView.IsLineFamily(cs5.type)
+                    || (cs5.stackName.Length == 0 && cs5.stack == 0)) {
+                    continue;
+                }
+                if (i3 >= cs5.Count()) { continue; }
+                double dv2 = cs5.Number(i3);
+                accL = accL + (int)(dv2 * 1000.0 + (dv2 >= 0 ? 0.5 : 0 - 0.5));
+            }
+            if (accL > hi) { hi = accL; }
+            if (accL < lo) { lo = accL; }
         }
         ChartSpan sp = new ChartSpan();
         sp.lo = lo;
@@ -2980,21 +3016,37 @@ class Chart {
         if (y0.title.Length > 0 || y1.title.Length > 0) { topGut = fh + app.Scale(2); }
 
         int plotX = x + pad + leftGut;
-        if (o.gridLeft >= 0) { plotX = x + app.Scale(o.gridLeft); }
+        if (o.gridLeft >= 0) {
+            plotX = x + app.Scale(o.gridLeft) + (o.containLabel ? leftGut : 0);
+        } else if (o.gridLeftPct >= 0) {
+            plotX = x + w * o.gridLeftPct / 100 + (o.containLabel ? leftGut : 0);
+        }
         int plotY = plotTop + topGut;
         if (o.gridTop >= 0) {
             // grid.top 是 ECharts 绝对偏移，但不得小于面板头
             //（标题/副标题/图例行）底边——头部内容永远优先显示，
             // gridTop 只在头部之下继续往下推（bar12 的 70 压住
             // 图例行的根因）。
-            int topAbs = y + app.Scale(o.gridTop);
+            int topAbs = y + app.Scale(o.gridTop) + (o.containLabel ? topGut : 0);
+            if (topAbs > plotY) { plotY = topAbs; }
+        } else if (o.gridTopPct >= 0) {
+            int topAbs = y + h * o.gridTopPct / 100 + (o.containLabel ? topGut : 0);
             if (topAbs > plotY) { plotY = topAbs; }
         }
         int plotRight = x + w - rightGut;
-        if (o.gridRight >= 0) { plotRight = x + w - app.Scale(o.gridRight); }
+        if (o.gridRight >= 0) {
+            plotRight = x + w - app.Scale(o.gridRight) - (o.containLabel ? rightGut : 0);
+        } else if (o.gridRightPct >= 0) {
+            plotRight = x + w - w * o.gridRightPct / 100
+                - (o.containLabel ? rightGut : 0);
+        }
         // 底部图例（ECharts 6 默认）从绘图区底边扣除。
         int plotBot = y + h - pad - botGut - Chart.legendBottomReserve;
-        if (o.gridBottom >= 0) { plotBot = y + h - app.Scale(o.gridBottom); }
+        if (o.gridBottom >= 0) {
+            plotBot = y + h - app.Scale(o.gridBottom) - (o.containLabel ? botGut : 0);
+        } else if (o.gridBottomPct >= 0) {
+            plotBot = y + h - h * o.gridBottomPct / 100 - (o.containLabel ? botGut : 0);
+        }
         int plotW = plotRight - plotX;
         int plotH = plotBot - plotY;
         if (plotW < app.Scale(20)) { plotW = app.Scale(20); }

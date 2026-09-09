@@ -378,12 +378,125 @@ partial class ChartView {
         }
     }
 
+    /// 多 grid 布局（line-gradient/grid-multiple）：按 series.
+    /// xAxisIndex 分组，每组用自己的轴组与 grid 矩形重入 DrawLines。
+    /// grid.top/bottom 百分比按面板高定位；标题数组（位置为面板
+    /// 百分比）统一在本层绘制，子调用不再画标题。
+    static void DrawMultiGridLines(App app, int x, int y, int w, int h,
+                                   ChartOption o, int g) {
+        Canvas c = app.canvas;
+        int nG = o.grids.Count;
+        if (nG > o.xAxes.Count && o.xAxes.Count > 0) { nG = o.xAxes.Count; }
+        if (nG < 1) { return; }
+        int headerH = app.Scale(o.titles.Count > 0 ? 52 : 30);
+        for (int gi = 0; gi < nG; gi = gi + 1) {
+            ChartGridSpec gs = o.grids[gi];
+            int gx0 = x + app.theme.paddingMedium;
+            int gx1 = x + w - app.theme.paddingMedium;
+            if (gs.lPct >= 0) { gx0 = x + w * gs.lPct / 100; }
+            else if (gs.lPx >= 0) { gx0 = x + app.Scale(gs.lPx); }
+            if (gs.rPct >= 0) { gx1 = x + w - w * gs.rPct / 100; }
+            else if (gs.rPx >= 0) { gx1 = x + w - app.Scale(gs.rPx); }
+            int gy0 = y + headerH;
+            if (gs.tPct >= 0) { gy0 = y + h * gs.tPct / 100; }
+            else if (gs.tPx >= 0) { gy0 = y + app.Scale(gs.tPx); }
+            int gy1 = y + h - Chart.legendBottomReserve;
+            if (gs.bPct >= 0) { gy1 = y + h - h * gs.bPct / 100; }
+            else if (gs.bPx >= 0) { gy1 = y + h - app.Scale(gs.bPx); }
+            if (gy1 - gy0 < app.Scale(40) || gx1 - gx0 < app.Scale(40)) { continue; }
+
+            // 系列按 xAxisIndex 分组；visualMap.seriesIndex 重映射到
+            // 组内新下标（visualMap 是全局面板语义）。
+            List<ChartSeries> grp = new List<ChartSeries>();
+            List<int> origIdx = new List<int>();
+            for (int si3 = 0; si3 < o.series.Count; si3 = si3 + 1) {
+                if (o.series[si3].xIndex != gi) { continue; }
+                grp.Add(o.series[si3]);
+                origIdx.Add(si3);
+            }
+            if (grp.Count < 1) { continue; }
+            ChartOption sub = ChartOption.Clone(o);
+            if (sub == null) { continue; }
+            sub.series = grp;
+            sub.xAxes = new List<ChartAxis>();
+            if (gi < o.xAxes.Count) { sub.xAxes.Add(o.xAxes[gi]); }
+            sub.yAxes = new List<ChartAxis>();
+            if (gi < o.yAxes.Count) { sub.yAxes.Add(o.yAxes[gi]); }
+            sub.grids = new List<ChartGridSpec>();
+            sub.title = ""; sub.titleSub = "";
+            sub.titles = new List<ChartTitleSpec>();
+            for (int vi3 = 0; vi3 < sub.visualMaps.Count; vi3 = vi3 + 1) {
+                ChartVisualMap vm3 = sub.visualMaps[vi3];
+                // 不属于本组的 visualMap 置为不可命中值（-1 是
+                // "全部系列"通配，置 -1 会让别格的映射串场）。
+                int newsi = 0 - 999;
+                for (int oi3 = 0; oi3 < origIdx.Count; oi3 = oi3 + 1) {
+                    if (origIdx[oi3] == vm3.seriesIndex) { newsi = oi3; break; }
+                }
+                vm3.seriesIndex = newsi;
+            }
+            ChartView.DrawLines(app, gx0, gy0, gx1 - gx0, gy1 - gy0, sub, g);
+        }
+        // 标题数组：面板坐标绘制（top/left 百分比），子调用已抑制。
+        for (int ti3 = 0; ti3 < o.titles.Count; ti3 = ti3 + 1) {
+            ChartTitleSpec ts = o.titles[ti3];
+            if (ts.text.Length < 1) { continue; }
+            int fs = Style.FontFallback(app, "large");
+            int subFs = Style.FontFallback(app, "small");
+            int tH = Canvas.FontHeight(fs)
+                + (ts.sub.Length > 0 ? Canvas.FontHeight(subFs) + app.Scale(2) : 0);
+            int ty = y + app.theme.paddingMedium;
+            if (ts.topPct >= 0) { ty = y + h * ts.topPct / 100; }
+            else if (ts.topPx >= 0) { ty = y + app.Scale(ts.topPx); }
+            int tx = x + app.theme.paddingMedium;
+            int tW = Canvas.MeasureText(ts.text, fs);
+            int maxW = w - app.theme.paddingMedium * 2;
+            if (ts.align == "center") {
+                tx = x + (w - tW) / 2;
+            } else if (ts.leftPct >= 0) {
+                tx = x + w * ts.leftPct / 100;
+            } else if (ts.leftPx >= 0) {
+                tx = x + app.Scale(ts.leftPx);
+            } else if (ts.align == "right") {
+                tx = x + w - app.theme.paddingMedium - tW;
+            }
+            // 官方 title left:'center' 是最常用形态：left 未声明但
+            // 前一项居中的多标题示例均按 center 处理。
+            if (ts.align.Length == 0 && ts.leftPct < 0 && ts.leftPx < 0) {
+                tx = x + (w - tW) / 2;
+            }
+            if (tx < x) { tx = x; }
+            int subCol = Style.Part(app, "chart", "axis-title", "", "", "",
+                Style.SNormal()).FgOr(0);
+            c.DrawText(tx, ty, ts.text, sPanelFg(app), fs);
+            if (ts.sub.Length > 0) {
+                int sW = Canvas.MeasureText(ts.sub, subFs);
+                int sx = tx;
+                if (ts.align.Length == 0 && ts.leftPct < 0 && ts.leftPx < 0) {
+                    sx = x + (w - sW) / 2;
+                }
+                c.DrawText(sx, ty + Canvas.FontHeight(fs) + app.Scale(2),
+                    ts.sub, subCol, subFs);
+            }
+        }
+    }
+
+    /// 面板前景色（标题用，与 DrawPanelI 同源）。
+    static int sPanelFg(App app) {
+        StyleBox sp = Style.Full(app, "chart", "", "", Style.SNormal());
+        return sp.FgOr(0);
+    }
+
     /// 折线/面积/阶梯线渲染入口：折线族可平滑/渐变/虚线，可
     /// 混入柱状与散点覆盖层；带 dataZoom 窗口、markPoint/markLine、
     /// typed 命中与笛卡尔十字线 tooltip。
     static void DrawLines(App app, int x, int y, int w, int h,
                           ChartOption o, int g) {
         Canvas c = app.canvas;
+        if (o.grids.Count > 1) {
+            ChartView.DrawMultiGridLines(app, x, y, w, h, o, g);
+            return;
+        }
         List<ChartSeries> series = o.series;
         List<string> labels = o.XCategories();
 
@@ -424,6 +537,8 @@ partial class ChartView {
         int n = winLabels.Count;
         if (n < 1 && axisN > 0) { n = i1 - i0 + 1; }
         if (n < 1) { return; }
+        ChartView.DrawMarkAreaBands(app, f, o, i0, n,
+            series.Count > 0 ? series[0].color : 0);
         int step = f.plotW / n;
         int half = step / 2;
         int th = app.Scale(2);
@@ -444,6 +559,12 @@ partial class ChartView {
         // 浮动柱（mix6 销售数据）靠它成立。下标 = 类目槽位。
         List<long> barStackAcc = new List<long>();
         List<string> barStackNames = new List<string>();
+        // endLabel 帧内收集：绘图区 clip 会裁掉 plot 外的线尾标注
+        // （ECharts endLabel 画在 grid 右侧预留带），PopClip 后补画。
+        List<int> endLblX = new List<int>();
+        List<int> endLblY = new List<int>();
+        List<int> endLblColor = new List<int>();
+        List<string> endLblText = new List<string>();
         for (int bz = 0; bz < n; bz = bz + 1) { barStackAcc.Add(0); }
         for (int si = 0; si < series.Count; si = si + 1) {
             ChartSeries s = series[si];
@@ -597,13 +718,69 @@ partial class ChartView {
                         ChartView.BuildPathFx(rxs, rys, smooth, fxX, fxY);
 
                         if (area && geoMode != 2) {
-                            // ECharts2 line.js 非堆积面积同样 = 系列色
-                            // alpha 0.5（无显式 areaStyle.color 时）。
-                            ChartView.FillUnder(c, pathX, pathY, fillBase,
-                                drawColor, o.gradient, 128, 128);
+                            // ECharts 6.1 LineView.ts：面积多边形缺省
+                            // opacity 0.7（fill=系列色，显式 areaStyle.
+                            // color 同权），areaStyle.opacity 声明则
+                            // 用声明值。旧 0.5（zrColor.alpha）已清除。
+                            int areaA = s.itemStyle.normal.areaStyle.alpha;
+                            if (areaA == 0) { areaA = 179; }
+                            List<int> areaGrad =
+                                s.itemStyle.normal.areaStyle.gradStops;
+                            if (areaGrad != null && areaGrad.Count >= 2) {
+                                // __grad 线性渐变面积（area-simple 橙→
+                                // 桃红）：按填充形状包围盒纵向 32 条带
+                                // PushClip 逐带取色（LinearGradient
+                                // y0→y2 语义），近似连续渐变。
+                                int topY = pathY[0];
+                                for (int gyi = 1; gyi < pathY.Count;
+                                    gyi = gyi + 1) {
+                                    if (pathY[gyi] < topY) { topY = pathY[gyi]; }
+                                }
+                                int spanY = fillBase - topY;
+                                if (spanY < 1) { spanY = 1; }
+                                int bandH = spanY / 32;
+                                if (bandH < 1) { bandH = 1; }
+                                int x0g = pathX[0];
+                                int wG = pathX[pathX.Count - 1] - x0g;
+                                for (int b = 0; b < 32; b = b + 1) {
+                                    int by0 = topY + b * bandH;
+                                    int bh = bandH;
+                                    if (by0 + bh > fillBase) { bh = fillBase - by0; }
+                                    if (bh <= 0) { break; }
+                                    int tt = (by0 + bh / 2 - topY) * 1000 / spanY;
+                                    c.PushClip(x0g, by0, wG, bh);
+                                    ChartView.FillUnder(c, pathX, pathY, fillBase,
+                                        Chart.RampAt(areaGrad, tt), false, areaA, areaA);
+                                    c.PopClip();
+                                }
+                            } else {
+                                int areaCol = s.itemStyle.normal.areaStyle.color;
+                                ChartView.FillUnder(c, pathX, pathY, fillBase,
+                                    areaCol != 0 ? areaCol : drawColor,
+                                    o.gradient, areaA, areaA);
+                            }
+                            // visualMap piecewise（area-pieces）：piece
+                            // 是类目域上的 x 区间，与子段 [k,k+1] 有交集
+                            // 即以 piece 色覆盖该子段——同一多边形
+                            // opacity（v6 0.7）整体生效。
+                            for (int vk = r0; vk < r1; vk = vk + 1) {
+                                int absK = i0 + vk;
+                                int colK = ChartOption.VisualSegmentColorAt(o, si,
+                                    absK, absK + 1);
+                                if (colK == 0) { continue; }
+                                List<int> gx = new List<int>();
+                                List<int> gy = new List<int>();
+                                gx.Add(pxs[vk]); gx.Add(pxs[vk + 1]);
+                                gy.Add(pys[vk]); gy.Add(pys[vk + 1]);
+                                ChartView.FillUnder(c, gx, gy, fillBase,
+                                    colK, false, areaA, areaA);
+                            }
                         }
 
-                        if (stepped) {
+                        if (s.itemStyle.normal.lineStyle.transparent) {
+                            // lineStyle.opacity:0：隐线只参与带体填充，
+                            // 不描边（confidence-band L/U）。
+                        } else if (stepped) {
                             // 阶梯线：水平步进 + 每点垂直跳变的连续
                             // 路径，单次描边拐角干净。
                             List<int> sx = new List<int>();
@@ -622,6 +799,28 @@ partial class ChartView {
                             }
                         } else if (dashed) {
                             ChartView.DrawDashed(c, pathX, pathY, drawColor, drawWidth, dashLen, gapLen);
+                        } else if (ChartView.VisualStrokeOn(o, si, s)) {
+                            // visualMap 逐点着色线（line-gradient/
+                            // line-sections）：continuous 段内取两端
+                            // 点色中点插值；piecewise 段整段取起点
+                            // piece 色（ECharts 分段硬切换）。
+                            bool pwSeg = ChartView.VisualPiecewiseOn(o, si);
+                            for (int vk4 = r0; vk4 < r1; vk4 = vk4 + 1) {
+                                int absA = i0 + vk4;
+                                int absB = absA + 1;
+                                int rawA = s.pointG > 1 ? s.Value(absA) / s.pointG : s.Value(absA);
+                                int rawB = s.pointG > 1 ? s.Value(absB) / s.pointG : s.Value(absB);
+                                int cA = ChartOption.VisualColorAt(o, si, absA, rawA);
+                                int cB = ChartOption.VisualColorAt(o, si, absB, rawB);
+                                if (cA == 0) { cA = drawColor; }
+                                if (cB == 0) { cB = drawColor; }
+                                int cm = pwSeg ? cA : ChartOption.Lerp2(cA, cB, 500);
+                                List<int> lx4 = new List<int>();
+                                List<int> ly4 = new List<int>();
+                                lx4.Add(rxs[vk4 - r0]); lx4.Add(rxs[vk4 - r0 + 1]);
+                                ly4.Add(rys[vk4 - r0]); ly4.Add(rys[vk4 - r0 + 1]);
+                                c.DrawPolyline(lx4, ly4, cm, drawWidth);
+                            }
                         } else {
                             c.DrawPolylineFx(fxX, fxY, drawColor, drawWidth);
                         }
@@ -692,10 +891,34 @@ partial class ChartView {
                             }
                         }
                     }
+                    // ECharts line.endLabel：最后一个非断点右侧的
+                    // 系列标注（formatter '{a}' 占位系列名）。绘图区
+                    // clip 内画会被裁掉，先收集、PopClip 后补画——
+                    // 官方示例用 grid.right 预留空间。
+                    if (s.endLabelShow && geoMode != 2 && pxs.Count > 0) {
+                        int lei = pxs.Count - 1;
+                        while (lei > 0 && gaps[lei]) { lei = lei - 1; }
+                        if (!gaps[lei]) {
+                            string elTxt = s.endLabelFormatter.Replace("{a}", s.name);
+                            if (elTxt.Length == 0) { elTxt = s.name; }
+                            endLblX.Add(pxs[lei] + app.Scale(s.endLabelDistance));
+                            endLblY.Add(pys[lei]);
+                            endLblColor.Add(drawColor);
+                            endLblText.Add(elTxt);
+                        }
+                    }
                 }
             }
         }
         c.PopClip();
+        // ECharts line.endLabel 补画（绘图区 clip 外）。
+        if (endLblText.Count > 0) {
+            int elFs = Style.FontFallback(app, "small");
+            for (int eli = 0; eli < endLblText.Count; eli = eli + 1) {
+                c.DrawText(endLblX[eli], Canvas.CenterTextYAt(endLblY[eli], elFs),
+                    endLblText[eli], endLblColor[eli], elFs);
+            }
+        }
 
         // markPoint：自动 max/min + 显式 marks（仅折线族；points
         // 系列的标注走值对坐标，见下）。折线没有组内柱偏，axOv 传
@@ -716,9 +939,13 @@ partial class ChartView {
         // max/min/average 线）与该系列的 markPoint（y/x 两轴）。
         for (int mxl = 0; mxl < series.Count; mxl = mxl + 1) {
             ChartSeries mxs = series[mxl];
-            if (!mxs.hidden && mxs.points.Count > 0) {
-                ChartView.DrawValueXMarkLines(app, f, mxs, i0, i1);
-                ChartView.DrawPointsMarkPoints(app, f, mxs, i0, i1);
+            if (!mxs.hidden) {
+                // 类目系列也走 x 轴标注通道：{xAxis:n} 竖线按类目
+                // 槽位落点（area-pieces）。points 系列另有其 markPoint。
+                ChartView.DrawValueXMarkLines(app, f, mxs, i0, i1, n);
+                if (mxs.points.Count > 0) {
+                    ChartView.DrawPointsMarkPoints(app, f, mxs, i0, i1);
+                }
             }
         }
         c.PopClip();
@@ -832,8 +1059,35 @@ partial class ChartView {
         List<string> winLabels = Chart.WindowLabels(labels, i0, i1);
         int n = winLabels.Count;
         // ECharts nice 量程：堆叠感知的组顶/绝对值最大取整到步长
-        // 倍数（如 0..1320 → 0..1400 每 200）。
-        ChartSpan sv = Chart.NiceRange(0, Chart.MaxStackGroupsW(series, n, i0));
+        // 倍数（如 0..1320 → 0..1400 每 200）。小数堆叠（confidence-
+        // band L/U 带）走 ×1000 定点——Value() 四舍五入会把
+        // 0.4..3.3 全折成 0..3，带体塌成细条、线成阶梯。
+        bool fracStack = Chart.SeriesFracAny(series, 0);
+        int vScale = fracStack ? 1000 : 1;
+        ChartSpan sv;
+        if (fracStack) {
+            int maxStackF = 0;
+            for (int jf = 0; jf < n; jf = jf + 1) {
+                int oif = i0 + jf;
+                int sumF = 0;
+                for (int ls = 0; ls < series.Count; ls = ls + 1) {
+                    ChartSeries lsc = series[ls];
+                    if (lsc.hidden
+                        || (lsc.stackName.Length == 0 && lsc.stack == 0)) {
+                        continue;
+                    }
+                    if (oif < lsc.Count()) {
+                        double dvf = lsc.Number(oif);
+                        sumF = sumF + (int)(dvf * vScale
+                            + (dvf >= 0 ? 0.5 : 0 - 0.5));
+                    }
+                }
+                if (sumF > maxStackF) { maxStackF = sumF; }
+            }
+            sv = Chart.NiceRange(0, maxStackF);
+        } else {
+            sv = Chart.NiceRange(0, Chart.MaxStackGroupsW(series, n, i0));
+        }
         int maxV = sv.hi;
         int plotTop = Chart.DrawPanelI(app, x, y, w, h, o.title, series, o.iwid, o.showLegend);
         // 走 BuildAxesR（旧 DrawFrameT 硬编码 band 模式，不吃
@@ -848,8 +1102,12 @@ partial class ChartView {
         ChartAxis y0a = o.YAxis0();
         int savedTicks = y0a.ticks;
         int savedMax = y0a.max;
-        if (sv.ticks > 0) { y0a.ticks = sv.ticks; }
-        y0a.max = maxV;
+        // 小数堆叠：域交给 BuildAxesR 的 frac 分支（FracAxisHiF 并
+        // StackExtentF 抬升到堆叠顶），钉 int max 会把定点域截断。
+        if (!fracStack) {
+            if (sv.ticks > 0) { y0a.ticks = sv.ticks; }
+            y0a.max = maxV;
+        }
         ChartFrame f = Chart.BuildAxesR(app, x, y, w, h - zoomH, plotTop,
             winLabels, o, series, maxV, 0 - 1);
         y0a.ticks = savedTicks;
@@ -893,7 +1151,9 @@ partial class ChartView {
                     for (int ls = 0; ls < series.Count; ls = ls + 1) {
                         ChartSeries lsc = series[ls];
                         if (!lsc.hidden && lsc.stackName == grp[lg] && oi < lsc.Count()) {
-                            sum = sum + lsc.Value(oi);
+                            double dvs = lsc.Number(oi);
+                            sum = sum + (int)(dvs * vScale
+                                + (dvs >= 0 ? 0.5 : 0 - 0.5));
                         }
                     }
                 }
@@ -929,22 +1189,42 @@ partial class ChartView {
                     int oi = i0 + j;
                     int prev = inCum[j];
                     int val = 0;
-                    if (oi < s.Count()) { val = s.Value(oi); }
+                    if (oi < s.Count()) {
+                        double dvv = s.Number(oi);
+                        val = (int)(dvv * vScale + (dvv >= 0 ? 0.5 : 0 - 0.5));
+                    }
                     if (stacked) {
-                        int cumG = (int)((long)(prev + val) * g / 1000L);
-                        int prevG = (int)((long)prev * g / 1000L);
-                        topY.Add(f.plotY + f.plotH
-                            - (int)((long)cumG * f.plotH / maxV));
-                        botY.Add(f.plotY + f.plotH
-                            - (int)((long)prevG * f.plotH / maxV));
-                        topYFx.Add(f.YOfFx(cumG, 0));
-                        botYFx.Add(f.YOfFx(prevG, 0));
+                        if (fracStack) {
+                            // 定点域直接走 YOfF：轴界即 BuildAxesR frac
+                            // 分支的 [0, hiF]，与刻度同一映射。
+                            int topPix = f.YOfF(prev + val, 0);
+                            int botPix = f.YOfF(prev, 0);
+                            topY.Add(topPix);
+                            botY.Add(botPix);
+                            topYFx.Add(topPix * 256);
+                            botYFx.Add(botPix * 256);
+                        } else {
+                            int cumG = (int)((long)(prev + val) * g / 1000L);
+                            int prevG = (int)((long)prev * g / 1000L);
+                            topY.Add(f.plotY + f.plotH
+                                - (int)((long)cumG * f.plotH / maxV));
+                            botY.Add(f.plotY + f.plotH
+                                - (int)((long)prevG * f.plotH / maxV));
+                            topYFx.Add(f.YOfFx(cumG, 0));
+                            botYFx.Add(f.YOfFx(prevG, 0));
+                        }
                     } else {
-                        int absG = (int)((long)val * g / 1000L);
-                        topY.Add(f.plotY + f.plotH
-                            - (int)((long)absG * f.plotH / maxV));
+                        if (fracStack) {
+                            int absPix = f.YOfF(val, 0);
+                            topY.Add(absPix);
+                            topYFx.Add(absPix * 256);
+                        } else {
+                            int absG = (int)((long)val * g / 1000L);
+                            topY.Add(f.plotY + f.plotH
+                                - (int)((long)absG * f.plotH / maxV));
+                            topYFx.Add(f.YOfFx(absG, 0));
+                        }
                         botY.Add(f.plotY + f.plotH);
-                        topYFx.Add(f.YOfFx(absG, 0));
                         botYFx.Add((f.plotY + f.plotH) * 256);
                     }
                 }
@@ -1006,16 +1286,22 @@ partial class ChartView {
                     ChartView.BuildPathFxEx(rxsFx, rtFx, smooth, true, topFx, topPath);
                     ChartView.BuildPathFxEx(rxsFx, rbFx, botSmooth, true, botFx, botPath);
                     if (s.areaStyle) {
-                        // ECharts2 line.js 堆积面积填充 = 系列色 alpha
-                        // 0.5（zrColor.alpha(defaultColor, 0.5)，约 128/
-                        // 256）；o.gradient（邮件营销式纵向渐变）保留
-                        // 半透明衰减。实色会互相遮盖成不透明的块。
-                        int fa = o.gradient ? 150 : 128;
-                        int fb = o.gradient ? 40 : 128;
+                        // ECharts 6.1 LineView.ts：面积多边形统一
+                        // opacity 0.7（fill=系列色或显式 areaStyle.color
+                        // 同权；areaStyle.opacity 声明则用声明值）。
+                        // 旧 0.5 不透明分级是 ECharts2 遗留，已清除。
+                        int bandCol = s.itemStyle.normal.areaStyle.color != 0
+                            ? s.itemStyle.normal.areaStyle.color : s.color;
+                        int ba = s.itemStyle.normal.areaStyle.alpha;
+                        if (ba == 0) { ba = 179; }
+                        int fa = o.gradient ? (ba * 150 / 255) : ba;
+                        int fb = o.gradient ? (ba * 40 / 255) : ba;
                         ChartView.FillBandFx(c, topFx, topPath, botFx, botPath,
-                            s.color, o.gradient, fa, fb, o.gradient ? 90 : 128);
+                            bandCol, o.gradient, fa, fb,
+                            o.gradient ? (ba * 90 / 255) : ba);
                     }
-                    if (rt.Count > 1) {
+                    if (rt.Count > 1
+                        && !s.itemStyle.normal.lineStyle.transparent) {
                         List<int> grad = s.itemStyle.normal.lineStyle.gradStops;
                         if (grad != null && grad.Count >= 2) {
                             // 横向渐变描边（zrColor.getLinearGradient 语义）：
@@ -1099,15 +1385,23 @@ partial class ChartView {
                 }
                 for (int u = 0; u < n; u = u + 1) {
                     int oi2 = i0 + u;
-                    if (oi2 < s.Count()) { inCum[u] = inCum[u] + s.Value(oi2); }
+                    if (oi2 < s.Count()) {
+                        double dva = s.Number(oi2);
+                        inCum[u] = inCum[u] + (int)(dva * vScale
+                            + (dva >= 0 ? 0.5 : 0 - 0.5));
+                    }
                 }
                 if (stacked) { boundarySmooth = smooth ? 1 : 0; }
             }
         }
         c.PopClip();
-        ChartView.OfferStackedAreaHits(app, f, winLabels, series, i0, g, maxV);
+        // 命中/提示仍按显示值域（frac 时 maxV 是 ×1000 定点，换算
+        // 回显示单位传入）。
+        int hoverMax = fracStack ? maxV / vScale : maxV;
+        ChartView.OfferStackedAreaHits(app, f, winLabels, series, i0, g, hoverMax);
         if (o.showTooltip) {
-            ChartView.CartesianTooltip(app, f, winLabels, series, maxV, step, half, i0);
+            ChartView.CartesianTooltip(app, f, winLabels, series, hoverMax,
+                step, half, i0);
         }
     }
 }

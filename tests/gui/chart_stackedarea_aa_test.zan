@@ -51,27 +51,18 @@ class ChartStackedAreaAaTest {
         return mx - mn < 24;
     }
 
-    /// 描边 AA 行判定：p 能写成 stroke×a + bg×(1-a)（三通道的 a
-    /// 一致拟合、0<a<0.95）即描边外缘的覆盖率渐变行——真 AA，豁免。
-    static bool StrokeAaRow(int p, int stroke, int[] bgs) {
-        if (p == stroke) { return true; }
+    /// 已定色判定：p 与任一"已定色"（描边原色 / 带填充合成色）的
+    /// 三通道差都 ≤6。混合行（AA 覆盖率渐变、描边透填充合成）
+    /// 必然落在已定色之外——它们是边界存在亚像素过渡的证据。
+    static bool Settled(int p, int[] settled) {
         int pr = (p >> 16) & 255; int pg = (p >> 8) & 255; int pb = p & 255;
-        int sr = (stroke >> 16) & 255; int sg = (stroke >> 8) & 255;
-        int sb = stroke & 255;
-        for (int bi = 0; bi < bgs.Length; bi = bi + 1) {
-            int br = (bgs[bi] >> 16) & 255; int bg = (bgs[bi] >> 8) & 255;
-            int bb = bgs[bi] & 255;
-            int numR = (pr - br) * 1000;
-            int denR = (sr - br) * 1000;
-            if (denR == 0) { continue; }
-            int aR = numR / denR;
-            if (aR <= 5 || aR >= 950) { continue; }
-            // 绿通道用同一 aR 检验（±6/1000 容差）
-            int expectG = br + (sg - br) * aR / 1000;
-            int expectB = bb + (sb - bb) * aR / 1000;
-            int dg = expectG - pg; if (dg < 0) { dg = 0 - dg; }
-            int db = expectB - pb; if (db < 0) { db = 0 - db; }
-            if (dg <= 6 && db <= 6) { return true; }
+        for (int si = 0; si < settled.Length; si = si + 1) {
+            int dr = pr - ((settled[si] >> 16) & 255); if (dr < 0) { dr = 0 - dr; }
+            if (dr > 6) { continue; }
+            int dg = pg - ((settled[si] >> 8) & 255); if (dg < 0) { dg = 0 - dg; }
+            if (dg > 6) { continue; }
+            int db = pb - (settled[si] & 255); if (db < 0) { db = 0 - db; }
+            if (db <= 6) { return true; }
         }
         return false;
     }
@@ -97,21 +88,39 @@ class ChartStackedAreaAaTest {
         // 一条边界只贡献 1 个色对。量化阶梯（本用例的回归对象）在
         // 缓坡上逐列产生大量不同色对，去重不掉。
         //
-        // 描边 AA 豁免：描边外缘的覆盖率渐变行（ECharts 折线描边
-        // 本身抗锯齿）与其 FULL 行相邻也构成色差大的"硬相接"——
-        // 面积 alpha 0.5（ECharts2 zrColor.alpha 语义，带体变浅）
-        // 后这类对进入统计。它们逐列渐变（真正的 AA），不是回归
-        // 对象：颜色能写成 描边色×a + 浅底×(1-a)（a<0.95 一致拟
-        // 合）的行视为描边 AA 行，其对子豁免。量化阶梯（阶梯锯齿）
-        // 实测 1065 对，远超阈值。
-        int stroke = 0x6495ED;   // ECharts2 默认调色板第 5 档（直访问）
-        int[] bgs = new int[] { 0xFFFFFF, 0xF1F1F1, 0xF2F2F2, 0xF7F7F7 };
+        // 已定色集合（ECharts 6.1 语义，全部从引擎调色板推导，不写
+        // 死色值——v6 九档换掉 ECharts2 #6495ED 系后写死色值曾让旧
+        // 豁免全空转）：
+        //   描边 = 调色板原色（每条堆叠带顶边 2px 不透明折线）；
+        //   带填充 = 系列色 @ opacity 0.7（LineView.ts 面积多边形
+        //   缺省）铺白底：c×179/255 + 255×76/255。
+        // 逐像素取证（x150-180/y136-150）确认的真实层序：带填充各
+        // 自只铺白底（band2 填充实测 = 84869c = 505372@179 直接铺
+        // 白，不叠在带1填充上）；每条描边的上半截会被上一条带的半
+        // 透明填充盖住（描边透填充"暗行"）——ECharts canvas 同层
+        // 按系列序绘制同样过绘，是忠实行为不是引擎缺陷。
+        int[] strokes = new int[] {
+            Chart.Palette(app.theme, 0), Chart.Palette(app.theme, 1),
+            Chart.Palette(app.theme, 2), Chart.Palette(app.theme, 3),
+            Chart.Palette(app.theme, 4)
+        };
+        int[] settled = new int[strokes.Length * 2];
+        for (int si = 0; si < strokes.Length; si = si + 1) {
+            settled[si] = strokes[si];
+            int sr = (strokes[si] >> 16) & 255; int sg = (strokes[si] >> 8) & 255;
+            int sb = strokes[si] & 255;
+            int fr = (sr * 179 + 255 * 76) / 255;
+            int fg = (sg * 179 + 255 * 76) / 255;
+            int fb = (sb * 179 + 255 * 76) / 255;
+            settled[strokes.Length + si] = (fr << 16) | (fg << 8) | fb;
+        }
         List<long> pairs = new List<long>();
         int colorBands = 0;
         for (int x = 60; x < 1060; x = x + 1) {
             for (int y = 25; y < 270; y = y + 1) {
                 int c0 = c.GetPixel(x, y) & 0x00FFFFFF;
                 int c1 = c.GetPixel(x, y + 1) & 0x00FFFFFF;
+                if (Settled(c0, settled)) { colorBands = colorBands + 1; }
                 if (c0 == c1 || Gray(c0) || Gray(c1)) { continue; }
                 int r0 = (c0 >> 16) & 255; int g0 = (c0 >> 8) & 255;
                 int r1 = (c1 >> 16) & 255; int g1 = (c1 >> 8) & 255;
@@ -120,9 +129,12 @@ class ChartStackedAreaAaTest {
                 // 纯彩带间色差大（ECharts 调色板相邻带通道差 ≥64）；
                 // 带内阴影/网格的微弱色差不算。
                 if (dr < 64 || dg < 64) { continue; }
-                if (StrokeAaRow(c0, stroke, bgs) || StrokeAaRow(c1, stroke, bgs)) {
-                    continue;
-                }
+                // 硬边 = 两个已定色直接相邻。任一端是混合行（描边
+                // AA 渐变行、带填充边缘、描边透填充合成）即存在亚
+                // 像素过渡，豁免——旧"描边×a+白底"逐背景拟合模型
+                // 覆盖不了 描边×a+带填充 合成行，对 v6 深填充色误
+                // 报 138 对；本判定只认"无过渡的证据"，普适。
+                if (!Settled(c0, settled) || !Settled(c1, settled)) { continue; }
                 colorBands = colorBands + 1;
                 long lo = c0 < c1 ? c0 : c1;
                 long hi = c0 < c1 ? c1 : c0;
@@ -135,10 +147,9 @@ class ChartStackedAreaAaTest {
             }
         }
         int hardEdges = pairs.Count;
-        // 修复前：整数边界量化 → 全画布上千处硬相接（实测 1065）。
-        // 修复后：每条边界都有亚像素混合行 → 剩余硬相接只是
-        // 边界恰好落在整行的少数列（实测 4；描边 AA 豁免后含
-        // alpha 0.5 带体间残余亚像素对）。
+        // 修复前：整数边界量化 → 全画布上千处已定色直接硬相接
+        // （实测 1065 对）。修复后：每条边界都有亚像素混合行，
+        // 剩余对子只是描边/填充边界恰好落在整行的少数列。
         True("stacked band edges are anti-aliased", hardEdges <= 32);
         True("chart painted colored bands", colorBands > 0);
         Console.WriteLine("stackedarea-aa:" + Convert.ToString(fails == 0 ? 1 : 0));

@@ -306,9 +306,14 @@ partial class ChartView {
     /// 悬停类别的跟随十字线，否则直接不画。
 
     /// 按指针所在列画十字线与提示框；语义详见上一段说明。
+    /// ECharts trigger:'item' 时整列提示框不画（item 命中走数据点
+    /// 悬停卡片），trigger 缺省/axis 保持整列语义。
     static void CartesianTooltip(App app, ChartFrame f, List<string> labels,
                                  List<ChartSeries> series, int maxV,
                                  int step, int half, int baseIdx) {
+        if (Chart.legendOpt != null && Chart.legendOpt.tooltipTrigger == "item") {
+            return;
+        }
         Canvas c = app.canvas;
         int mx = app.mouseX;
         int my = app.mouseY;
@@ -707,7 +712,7 @@ partial class ChartView {
     /// valueIndex:0）：对窗口内 points.x 取 max/min/average 画
     /// 竖线 + 顶部标签。线色默认 #1e90ff（ECharts 示例惯例）。
     static void DrawValueXMarkLines(App app, ChartFrame f, ChartSeries s,
-                                    int i0, int i1) {
+                                    int i0, int i1, int nCat) {
         if (s.markLines.Count < 1) { return; }
         Canvas c = app.canvas;
         for (int mi = 0; mi < s.markLines.Count; mi = mi + 1) {
@@ -725,7 +730,15 @@ partial class ChartView {
                 if (m.kind == "min" && xv < ext) { ext = xv; }
                 if (m.kind == "max" && xv > ext) { ext = xv; }
             }
-            if (cnt < 1) { continue; }
+            // 类目系列（data 路径）没有 points：{xAxis:n} 竖线落在
+            // 类目槽位上（area-pieces 的区间分隔线）；类目轴无
+            // max/min/average 语义。nCat = 窗口内类目数。
+            if (s.points.Count < 1) {
+                if (m.kind.Length > 0) { continue; }
+                if (nCat < 1) { continue; }
+                int ci = m.xValue - i0;
+                if (ci < 0 || ci >= nCat) { continue; }
+            } else if (cnt < 1) { continue; }
             int vx = m.kind.Length > 0 ? ext : m.xValue;
             // 均值可带小数（104/9=11.56），整数 sum/cnt 会把线打在
             // 11 上、与标签对不上。XOfValue 仿射：x(sum/cnt) = x(0)
@@ -733,7 +746,7 @@ partial class ChartView {
             // ×pointG 定点序列 sum 是定点和：x(sum/(cnt·g)) =
             // x(0) + (x(sum)−x(0))/(cnt·g)。
             int lx = 0;
-            if (m.kind == "average") {
+            if (s.points.Count > 0 && m.kind == "average") {
                 int x0v = f.XOfValue(0);
                 int xSv = f.XOfValue(sum);
                 int diff = xSv - x0v;
@@ -741,10 +754,14 @@ partial class ChartView {
                 int q = diff >= 0 ? (diff + den / 2) / den
                                   : 0 - ((0 - diff + den / 2) / den);
                 lx = x0v + q;
-            } else {
+            } else if (s.points.Count > 0) {
                 lx = f.XOfValue(Chart.PointV(vx, s.pointG));
+            } else {
+                lx = f.CatX(m.xValue - i0, nCat);
             }
-            int col = m.color != 0 ? m.color : Chart.Rgb(30, 144, 255);
+            // ECharts markLine 默认跟随系列色（#1e90ff 是旧参考站
+            // 特例，官方画廊一律系列色）。
+            int col = m.color != 0 ? m.color : s.color;
             string lt = m.lineType.Length > 0 ? m.lineType : "dashed";
             int dash = app.Scale(6);
             int gap = app.Scale(6);
@@ -756,27 +773,74 @@ partial class ChartView {
                 c.FillRect(lx, dy, 1, seg, col);
                 dy = dy + dash + gap;
             }
-            int fs = Style.FontFallback(app, "small");
-            // 标签默认是具体数值（ECharts markLine.label 默认 {c}），
-            // 不是 "max/min/avg" 字样；显式 label 可带 {value} 占位。
-            string lbl = m.label;
-            if (lbl.Length == 0) {
-                if (m.kind == "average") {
-                    int g = s.pointG > 1 ? s.pointG : 1;
-                    lbl = ChartView.Avg1000Text(
-                        (int)(((long)sum * 1000L) / ((long)cnt * (long)g)));
+            if (m.labelShow) {
+                int fs = Style.FontFallback(app, "small");
+                // 标签默认是具体数值（ECharts markLine.label 默认 {c}），
+                // 不是 "max/min/avg" 字样；显式 label 可带 {value} 占位。
+                string lbl = m.label;
+                if (lbl.Length == 0) {
+                    if (m.kind == "average") {
+                        int g = s.pointG > 1 ? s.pointG : 1;
+                        lbl = ChartView.Avg1000Text(
+                            (int)(((long)sum * 1000L) / ((long)cnt * (long)g)));
+                    } else {
+                        lbl = Chart.PointText(vx, s.pointG);
+                    }
                 } else {
-                    lbl = Chart.PointText(vx, s.pointG);
+                    lbl = lbl.Replace("{value}", Chart.PointText(vx, s.pointG));
                 }
-            } else {
-                lbl = lbl.Replace("{value}", Chart.PointText(vx, s.pointG));
+                int lw = Canvas.MeasureText(lbl, fs);
+                int tx = lx - lw / 2;
+                if (tx < f.plotX) { tx = f.plotX; }
+                if (tx + lw > f.plotX + f.plotW) { tx = f.plotX + f.plotW - lw; }
+                c.DrawText(tx, f.plotY + app.Scale(1), lbl, col, fs);
             }
-            int lw = Canvas.MeasureText(lbl, fs);
-            int tx = lx - lw / 2;
-            if (tx < f.plotX) { tx = f.plotX; }
-            if (tx + lw > f.plotX + f.plotW) { tx = f.plotX + f.plotW - lw; }
-            c.DrawText(tx, f.plotY + app.Scale(1), lbl, col, fs);
-            ChartView.DrawMarkArrow(app, c, lx, f.plotY + f.plotH, col, false);
+            if (m.endArrow) {
+                ChartView.DrawMarkArrow(app, c, lx, f.plotY + f.plotH, col, false);
+            }
+        }
+    }
+
+    /// ECharts series.markArea 区间带（o.markAreas）：x 类目竖带
+    /// 横跨整个绘图区（boundaryGap=false 时贴刻度），y 值横带；
+    /// 显式 itemStyle 色原样，缺省走主题 mark-area 低透明底。
+    /// name 非空时在带内顶部居中绘制标签（系列色，同 markLine）。
+    static void DrawMarkAreaBands(App app, ChartFrame f, ChartOption o,
+                                  int i0, int nCat, int seriesColor) {
+        if (o.markAreas.Count < 1) { return; }
+        Canvas c = app.canvas;
+        int fs = Style.FontFallback(app, "small");
+        for (int i = 0; i < o.markAreas.Count; i = i + 1) {
+            ChartMarkArea a = o.markAreas[i];
+            int col = a.color;
+            if (col == 0) {
+                col = Chart.WithAlpha(Style.Part(app, "chart", "mark-area",
+                    "", "", "", Style.SNormal()).BgOr(0), 28);
+            }
+            int x0; int x1; int y0; int y1;
+            if (a.xMode) {
+                if (nCat < 1) { continue; }
+                x0 = f.CatX(a.v0 - i0, nCat);
+                x1 = f.CatX(a.v1 - i0, nCat);
+                if (x1 < x0) { int tmp = x0; x0 = x1; x1 = tmp; }
+                if (x1 < f.plotX || x0 > f.plotX + f.plotW) { continue; }
+                y0 = f.plotY;
+                y1 = f.plotY + f.plotH;
+            } else {
+                y0 = f.YOf(a.v1, 0);
+                y1 = f.YOf(a.v0, 0);
+                if (y1 < y0) { int tmp = y0; y0 = y1; y1 = tmp; }
+                x0 = f.plotX;
+                x1 = f.plotX + f.plotW;
+            }
+            c.FillRect(x0, y0, x1 - x0, y1 - y0, col);
+            if (a.name.Length > 0) {
+                int lw = Canvas.MeasureText(a.name, fs);
+                int tx = (x0 + x1) / 2 - lw / 2;
+                if (tx < f.plotX) { tx = f.plotX; }
+                if (tx + lw > f.plotX + f.plotW) { tx = f.plotX + f.plotW - lw; }
+                c.DrawText(tx, f.plotY + app.Scale(2), a.name, seriesColor, fs);
+            }
         }
     }
 
@@ -955,6 +1019,27 @@ partial class ChartView {
         ChartView.TooltipCard(app, mx, my, 2147483647, rows);
     }
 
+    /// 该系列折线是否被 visualMap 逐点着色（连续渐变或分段）：
+    /// 窗口内任一数据点命中即开——描边切子段插值通道。
+    static bool VisualStrokeOn(ChartOption o, int seriesIndex, ChartSeries s) {
+        if (o.visualMaps.Count < 1) { return false; }
+        // ECharts：visualMap 不覆盖显式 lineStyle.color（area-pieces
+        // 的线保持 #5470C6 正是这条规则）。Materialize 会把未声明
+        // 的线色回填成调色板色，因此用解析期标记而非运行期颜色。
+        return s.visBlocked == false;
+    }
+
+    /// 系列是否落在 piecewise visualMap 作用域内：分段着色的段
+    /// 边界取起点 piece 色（硬切换），不做连续渐变。
+    static bool VisualPiecewiseOn(ChartOption o, int seriesIndex) {
+        for (int i = 0; i < o.visualMaps.Count; i = i + 1) {
+            ChartVisualMap vm = o.visualMaps[i];
+            if (vm.type == 1 && (vm.seriesIndex == 0 - 1
+                || vm.seriesIndex == seriesIndex)) { return true; }
+        }
+        return false;
+    }
+
     /// markLine 末端箭头（ECharts markLine 默认
     /// symbol:['none','arrow']）：horizontal 时在 (ex,ey) 画右向
     /// 箭镞，否则画下向箭镞。箭头属线色，尺寸随刻度；终点在
@@ -1020,25 +1105,29 @@ partial class ChartView {
             // {value} 占位。
             // 同 DrawSeriesMarkLines：默认具体数值，显式 label 支持
             // {value} 占位，无占位则 "name: value"。
-            string lbl = m.label;
-            if (lbl.Length == 0) {
-                if (isAvg) {
-                    lbl = ChartView.Avg1000Text(
-                        ChartView.SeriesAvg1000(s, i0, i1));
+            if (m.labelShow) {
+                string lbl = m.label;
+                if (lbl.Length == 0) {
+                    if (isAvg) {
+                        lbl = ChartView.Avg1000Text(
+                            ChartView.SeriesAvg1000(s, i0, i1));
+                    } else {
+                        lbl = Chart.PointText(val, s.pointG);
+                    }
+                } else if (lbl.IndexOf("{value}") >= 0) {
+                    lbl = lbl.Replace("{value}", Chart.PointText(val, s.pointG));
                 } else {
-                    lbl = Chart.PointText(val, s.pointG);
+                    lbl = lbl + ": " + Chart.PointText(val, s.pointG);
                 }
-            } else if (lbl.IndexOf("{value}") >= 0) {
-                lbl = lbl.Replace("{value}", Chart.PointText(val, s.pointG));
-            } else {
-                lbl = lbl + ": " + Chart.PointText(val, s.pointG);
+                int fs = Style.FontFallback(app, "small");
+                int lw = Canvas.MeasureText(lbl, fs);
+                int lx = f.plotX + f.plotW - lw;
+                if (lx < f.plotX) { lx = f.plotX; }
+                c.DrawText(lx, ly - Canvas.FontHeight(fs) - app.Scale(1), lbl, col, fs);
             }
-            int fs = Style.FontFallback(app, "small");
-            int lw = Canvas.MeasureText(lbl, fs);
-            int lx = f.plotX + f.plotW - lw;
-            if (lx < f.plotX) { lx = f.plotX; }
-            c.DrawText(lx, ly - Canvas.FontHeight(fs) - app.Scale(1), lbl, col, fs);
-            ChartView.DrawMarkArrow(app, c, f.plotX + f.plotW, ly, col, true);
+            if (m.endArrow) {
+                ChartView.DrawMarkArrow(app, c, f.plotX + f.plotW, ly, col, true);
+            }
         }
     }
 
@@ -1070,28 +1159,32 @@ partial class ChartView {
                     dy = dy + dash + gap;
                 }
             }
-            // 同 DrawSeriesMarkLines：默认具体数值，显式 label 支持
-            // {value} 占位，无占位则 "name: value"。
-            string lbl = m.label;
-            if (lbl.Length == 0) {
-                if (m.kind == "average") {
-                    lbl = ChartView.Avg1000Text(
-                        ChartView.SeriesAvg1000(s, i0, i1));
+            if (m.labelShow) {
+                // 同 DrawSeriesMarkLines：默认具体数值，显式 label 支持
+                // {value} 占位，无占位则 "name: value"。
+                string lbl = m.label;
+                if (lbl.Length == 0) {
+                    if (m.kind == "average") {
+                        lbl = ChartView.Avg1000Text(
+                            ChartView.SeriesAvg1000(s, i0, i1));
+                    } else {
+                        lbl = Convert.ToString(val);
+                    }
+                } else if (lbl.IndexOf("{value}") >= 0) {
+                    lbl = lbl.Replace("{value}", Convert.ToString(val));
                 } else {
-                    lbl = Convert.ToString(val);
+                    lbl = lbl + ": " + Convert.ToString(val);
                 }
-            } else if (lbl.IndexOf("{value}") >= 0) {
-                lbl = lbl.Replace("{value}", Convert.ToString(val));
-            } else {
-                lbl = lbl + ": " + Convert.ToString(val);
+                int fs = Style.FontFallback(app, "small");
+                int lw = Canvas.MeasureText(lbl, fs);
+                int tx = lx - lw / 2;
+                if (tx < plotX) { tx = plotX; }
+                if (tx + lw > plotX + plotW) { tx = plotX + plotW - lw; }
+                c.DrawText(tx, plotY - Canvas.FontHeight(fs) - app.Scale(1), lbl, col, fs);
             }
-            int fs = Style.FontFallback(app, "small");
-            int lw = Canvas.MeasureText(lbl, fs);
-            int tx = lx - lw / 2;
-            if (tx < plotX) { tx = plotX; }
-            if (tx + lw > plotX + plotW) { tx = plotX + plotW - lw; }
-            c.DrawText(tx, plotY - Canvas.FontHeight(fs) - app.Scale(1), lbl, col, fs);
-            ChartView.DrawMarkArrow(app, c, lx, plotY + plotH, col, false);
+            if (m.endArrow) {
+                ChartView.DrawMarkArrow(app, c, lx, plotY + plotH, col, false);
+            }
         }
     }
 
