@@ -958,19 +958,18 @@ class XqLoop : IGuiHostLoop {
     }
     public void Event(GuiHost host, int kind, int code) {
         int now = Window.GetTickMs();
-        App a = host.App();
-        // 鼠标是窗口客户区坐标，减 ContentTop 换回舞台坐标（标题栏
-        // 之上/之内的指针对游戏不可见）。
+        // 指针坐标经 host.MouseX/Y 反变换回舞台逻辑坐标（桌面视口
+        // letterbox / 手机驱动反变换都在宿主之下完成）。
         if (kind == 4) {
             this.g.OnKey(code, now);
         // 鼠标 kind:1=移动 2=按下 3=释放(Win32Shell 契约)。
         } else if (kind == 1) {
-            this.g.mouseX = a.mouseX;
-            this.g.mouseY = a.mouseY - host.ContentTop();
+            this.g.mouseX = host.MouseX();
+            this.g.mouseY = host.MouseY();
         } else if (kind == 2) {
             if (code == 0) {
-                this.g.mouseX = a.mouseX;
-                this.g.mouseY = a.mouseY - host.ContentTop();
+                this.g.mouseX = host.MouseX();
+                this.g.mouseY = host.MouseY();
                 this.g.OnDown(this.g.mouseX, this.g.mouseY, now);
             }
         }

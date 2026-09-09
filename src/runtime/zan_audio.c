@@ -901,7 +901,15 @@ EXPORT int64_t zan_audio_play(int64_t clip_handle, double gain, int32_t loop) {
     if (v->gen > 0x1FFFFF) v->gen = 1; /* keep the packed handle small */
     v->gain = gain < 0.0 ? 0.0f : (float)gain;
     v->cursor = 0.0;
+    /* zan_audio_dev_freq is set only by the Windows WASAPI open path; on
+     * other platforms the device never opens (zan_audio_ready stays 0 and
+     * play() returned 0 above), so the resample step is unreachable -- keep
+     * a benign value instead of referencing an undeclared variable. */
+#ifdef _WIN32
     v->step = (double)c->freq / (double)zan_audio_dev_freq;
+#else
+    v->step = 1.0;
+#endif
     if (!(v->step > 0.0)) v->step = 1.0;
     v->active = 1;
 #ifdef _WIN32

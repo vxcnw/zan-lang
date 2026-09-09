@@ -110,8 +110,9 @@ class World {
     public double clawLen = 110.0;       // 绳长(设计单位)
     public double clawV = 0.0;          // 伸出/收回速度
     public int hookedKind = -1;         // 钩住的物品,-1 无
-    public int hookX = 480;
-    public int hookY = 170;             // 绳锚点(矿车口)
+    // 绳锚点单一来源 = Data.HOOK_X/HOOK_Y（每帧随窗口延展更新）。
+    // 物理绝不能私存开局副本：此前 hookX/hookY 固定 480/170，绘制却
+    // 用新中心，"爪画在哪、判定在别处"——显示与抓取两套坐标。
 
     // FEVER 连击
     public int combo = 0;
@@ -322,10 +323,10 @@ class World {
         }
         if (this.state == World.ST_EXTEND) {
             this.clawLen = this.clawLen + this.clawV * dt;
-            // 与 DrawClaw 同一坐标约定:x = hookX + cos·len(y 同号 +sin),
+            // 与 DrawClaw 同一坐标约定:x = HOOK_X + cos·len(y 同号 +sin),
             // 此前写成 -cos,判定点相对摆绳镜像,"看到"与"抓到"错位。
-            double tx = this.hookX + Math.Cos(this.angle * Math.PI / 180.0) * this.clawLen;
-            double ty = this.hookY + Math.Sin(this.angle * Math.PI / 180.0) * this.clawLen;
+            double tx = Data.HOOK_X + Math.Cos(this.angle * Math.PI / 180.0) * this.clawLen;
+            double ty = Data.HOOK_Y + Math.Sin(this.angle * Math.PI / 180.0) * this.clawLen;
             // 抓取判定
             Item hit = this.HitTest((int)tx, (int)ty);
             if (hit != null) {
@@ -467,8 +468,8 @@ class World {
         }
         if (this.hookedKind < 0) { return false; }
         this.dynamites = this.dynamites - 1;
-        int cx = this.hookX + (int)(Math.Cos(this.angle * Math.PI / 180.0) * this.clawLen);
-        int cy = this.hookY + (int)(Math.Sin(this.angle * Math.PI / 180.0) * this.clawLen);
+        int cx = Data.HOOK_X + (int)(Math.Cos(this.angle * Math.PI / 180.0) * this.clawLen);
+        int cy = Data.HOOK_Y + (int)(Math.Sin(this.angle * Math.PI / 180.0) * this.clawLen);
         this.BoomFx(cx, cy, 120);
         this.boomSeq = this.boomSeq + 1;
         this.boomTnt = 0;
@@ -489,8 +490,8 @@ class World {
         this.state = World.ST_SWING;
         if (kind < 0) { return; }
         ItemDef d = Data.DEFS[kind];
-        int cx = this.hookX;
-        int cy = this.hookY + 30;
+        int cx = Data.HOOK_X;
+        int cy = Data.HOOK_Y + 30;
         // TNT(kind 8)不会走到这里:抓到即炸,见 Step 的 Extend 分支。
         if (kind == 9) {
             // 炸弹:进入拆弹 QTE
@@ -552,7 +553,7 @@ class World {
         this.gold = this.gold + delta;
         if (this.gold < 0) { this.gold = 0; }
         if (label != null) {
-            this.Float(label, this.hookX, this.hookY + 60, cr, cg, cb);
+            this.Float(label, Data.HOOK_X, Data.HOOK_Y + 60, cr, cg, cb);
         }
         // 达标即时过关(还有时间剩余):给"提前完成"奖励
         if (this.levelResult == 0 && this.gold >= this.Target()
@@ -617,15 +618,15 @@ class World {
     }
 
     // 爪尖位置(随摆角):与 DrawClaw/伸出判定同一坐标约定
-    // (x = hookX + cos·len,y = hookY + sin·len)。特效一律锚在这里,
+    // (x = HOOK_X + cos·len,y = HOOK_Y + sin·len)。特效一律锚在这里,
     // 不写死"钩点正下方"。
     public int TipX() {
-        return this.hookX + (int)(Math.Cos(this.angle * Math.PI / 180.0)
+        return Data.HOOK_X + (int)(Math.Cos(this.angle * Math.PI / 180.0)
                                   * this.clawLen);
     }
 
     public int TipY() {
-        return this.hookY + (int)(Math.Sin(this.angle * Math.PI / 180.0)
+        return Data.HOOK_Y + (int)(Math.Sin(this.angle * Math.PI / 180.0)
                                   * this.clawLen);
     }
 

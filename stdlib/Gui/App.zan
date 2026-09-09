@@ -952,6 +952,12 @@ class App {
         // 游戏默认禁用标题栏皮肤选择按钮（皮肤抽屉会盖住游戏画面，
         // 且游戏不换肤）；置顶/最小化/最大化/关闭照常。
         app.showThemeButton = false;
+        #if ANDROID || OHOS
+        // 手机是全屏表面，没有"窗口"家具：Gui 标题栏/主屏按钮不画，
+        // 舞台即整块画布（ContentTop()==0）；退出走系统返回键，
+        // 外壳已把它转成 Close。
+        app.SetChromeVisible(false);
+        #endif
         return app;
     }
 

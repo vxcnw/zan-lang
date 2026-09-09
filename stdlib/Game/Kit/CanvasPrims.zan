@@ -3,6 +3,7 @@
 // SDL 版烘焙纹理（SdlTexture.CreateTarget）的地方改成立即模式直绘，
 // 窗口/事件/呈现由 Gui 原生外壳承担，不依赖 SDL。
 using System;
+using System.IO;
 using Gui;
 
 namespace Game.Kit;
@@ -14,7 +15,8 @@ class CSprite {
     static void Glow(Canvas c, int cx, int cy, int rad,
                      int cr, int cg, int cb, int ca) {
         if (rad <= 0) { return; }
-        c.FillRadial(cx + CDraw.originX, cy + CDraw.originY, rad,
+        c.FillRadial(CDraw.MapX(cx + CDraw.originX),
+                     CDraw.MapY(cy + CDraw.originY), CDraw.MapW(rad),
                      CDraw.Argb(255, cr, cg, cb), ca);
     }
 
@@ -22,7 +24,8 @@ class CSprite {
     static void Ball(Canvas c, int cx, int cy, int rad,
                      int cr, int cg, int cb, int ca) {
         if (rad <= 0) { return; }
-        c.FillCircle(cx + CDraw.originX, cy + CDraw.originY, rad,
+        c.FillCircle(CDraw.MapX(cx + CDraw.originX),
+                     CDraw.MapY(cy + CDraw.originY), CDraw.MapW(rad),
                      CDraw.Argb(ca, cr, cg, cb));
     }
 }
@@ -41,28 +44,112 @@ class CDraw {
         CDraw.originY = y;
     }
 
+    // 桌面窗口跟随视口（StageViewport）：逻辑坐标 → 设备画布的等比
+    // 映射，单轴延伸——短轴贴设计尺寸、长轴按窗口比例延展逻辑空间
+    // （宽窗多看宽度、窄窗多看高度），任何窗口都满铺：零黑边、零变
+    // 形。vpS 是 16.16 缩放（65536 = 1:1），vpX/vpY 是逻辑 (0,0) 的设
+    // 备位置；stageW/stageH 是延展后的逻辑舞台尺寸（模板取它当绘制
+    // 范围）。未启用时恒 1:1、零偏移——映射退化为 x+origin，与历史
+    // 行为逐像素一致。
+    static int vpS = 65536;
+    static int vpX;
+    static int vpY;
+    static int stageW;
+    static int stageH;
+
+    // 逻辑 → 设备。坐标带偏移，尺寸至少 1px。
+    static int MapX(int v) { return CDraw.vpX + ((v * CDraw.vpS) >> 16); }
+    static int MapY(int v) { return CDraw.vpY + ((v * CDraw.vpS) >> 16); }
+    static int MapW(int v) {
+        int r = (v * CDraw.vpS) >> 16;
+        return r < 1 ? 1 : r;
+    }
+
+    // 设备 → 逻辑（指针坐标回舞台空间；GuiHost.MouseX/Y 用）。
+    static int UnmapX(int v) { return ((v - CDraw.vpX) << 16) / CDraw.vpS; }
+    static int UnmapY(int v) { return ((v - CDraw.vpY) << 16) / CDraw.vpS; }
+
+    /// 桌面窗口跟随：内容区 [contentTopPx, 画布底) 等比铺满逻辑
+    /// designW×designH——缩放取短轴，长轴延展成更大的逻辑空间（不
+    /// 缩放不裁剪），故无黑边。帧首整块铺 marginColor 打底（延展边、
+    /// 换面首帧不至于露垃圾），模板随后按 stageW/stageH 满画。指针
+    /// 坐标用 UnmapX/UnmapY 换回。GuiHost 每帧调用。
+    static void StageViewport(Canvas c, int contentTopPx, int designW,
+                              int designH, int marginColor) {
+        if (designW < 1) { designW = 1; }
+        if (designH < 1) { designH = 1; }
+        int cw = c.Width();
+        int chh = c.Height() - contentTopPx;
+        if (cw < 1 || chh < 1) {
+            CDraw.vpS = 65536;
+            CDraw.vpX = 0;
+            CDraw.vpY = contentTopPx;
+            CDraw.stageW = cw > 0 ? cw : designW;
+            CDraw.stageH = chh > 0 ? chh : designH;
+            return;
+        }
+        int sH = chh * 65536 / designH;   // 拟高：更矮（宽窗）时选它
+        int sW = cw * 65536 / designW;    // 拟宽：更窄（竖窗）时选它
+        int s = sH < sW ? sH : sW;
+        CDraw.vpS = s;
+        CDraw.vpX = 0;
+        CDraw.vpY = contentTopPx;
+        CDraw.stageW = cw * 65536 / s;
+        CDraw.stageH = chh * 65536 / s;
+        c.FillRect(0, contentTopPx, cw, chh, marginColor);
+    }
+
     // 画布颜色是 0xAARRGGBB。
     static int Argb(int a, int r, int g, int b) {
         return a * 16777216 + r * 65536 + g * 256 + b;
     }
 
     static void FillRect(Canvas c, int x, int y, int w, int h, int color) {
-        c.FillRect(x + originX, y + originY, w, h, color);
+        c.FillRect(MapX(x + originX), MapY(y + originY), MapW(w), MapW(h),
+                   color);
     }
 
     static void FillVGrad(Canvas c, int x, int y, int w, int h,
                           int colorTop, int colorBottom) {
-        c.FillVGrad(x + originX, y + originY, w, h, colorTop, colorBottom);
+        c.FillVGrad(MapX(x + originX), MapY(y + originY), MapW(w), MapW(h),
+                    colorTop, colorBottom);
     }
 
     // 清舞台矩形（清屏色只铺内容区，标题栏由 chrome 自绘）。
     static void Clear(Canvas c, int w, int h, int color) {
-        c.FillRect(originX, originY, w, h, color);
+        c.FillRect(MapX(originX), MapY(originY), MapW(w), MapW(h), color);
+    }
+
+    // 贴图源统一走内存键：File.ReadAllBytes 盘优先、内嵌兜底（Android
+    // 等无盘环境里发布镜像的贴图只存在于内嵌表，运行时按路径的解码
+    // 缓存读不到文件），ImageLoadMem 注册成 mem: 键再贴——桌面与手机
+    // 同一条代码路径。同路径的注册结果缓存，帧内重复贴不重读。
+    static List<string> blitSrcPaths;
+    static List<string> blitSrcKeys;
+
+    static string BlitSource(Canvas c, string path) {
+        if (path == null) { return null; }
+        if (CDraw.blitSrcPaths == null) {
+            CDraw.blitSrcPaths = new List<string>();
+            CDraw.blitSrcKeys = new List<string>();
+        }
+        for (int i = 0; i < CDraw.blitSrcPaths.Count; i = i + 1) {
+            if (CDraw.blitSrcPaths[i] == path) { return CDraw.blitSrcKeys[i]; }
+        }
+        byte[] b = File.ReadAllBytes(path);
+        string key = "mem:" + path;
+        Canvas.ImageLoadMem(key, b, b.Length);
+        CDraw.blitSrcPaths.Add(path);
+        CDraw.blitSrcKeys.Add(key);
+        return key;
     }
 
     // 按路径缩放绘制整幅图片（解码缓存由画布持有）。
     static void BlitImage(Canvas c, string path, int dx, int dy, int dw, int dh) {
-        c.BlitImage(path, dx + originX, dy + originY, dw, dh, 0, 0, 0, 0);
+        string src = CDraw.BlitSource(c, path);
+        if (src == null) { return; }
+        c.BlitImage(src, MapX(dx + originX), MapY(dy + originY),
+                    MapW(dw), MapW(dh), 0, 0, 0, 0);
     }
 
     static void RoundRectFill(Canvas c, int x, int y, int w, int h, int rad,
@@ -70,7 +157,8 @@ class CDraw {
         if (w <= 0 || h <= 0) { return; }
         if (rad * 2 > w) { rad = w / 2; }
         if (rad * 2 > h) { rad = h / 2; }
-        c.FillRoundRect(x + originX, y + originY, w, h, rad, Argb(ca, cr, cg, cb));
+        c.FillRoundRect(MapX(x + originX), MapY(y + originY), MapW(w), MapW(h),
+                        MapW(rad), Argb(ca, cr, cg, cb));
     }
 
     // 矩形描边环（厚度 t，画在矩形内侧）。
@@ -78,31 +166,39 @@ class CDraw {
                          int cr, int cg, int cb, int ca) {
         if (w <= 0 || h <= 0 || t <= 0) { return; }
         int col = Argb(ca, cr, cg, cb);
-        c.FillRect(x + originX, y + originY, w, t, col);
-        c.FillRect(x + originX, y + originY + h - t, w, t, col);
-        c.FillRect(x + originX, y + originY, t, h, col);
-        c.FillRect(x + originX + w - t, y + originY, t, h, col);
+        int dx = MapX(x + originX);
+        int dy = MapY(y + originY);
+        int dw = MapW(w);
+        int dh = MapW(h);
+        int dt = MapW(t);
+        c.FillRect(dx, dy, dw, dt, col);
+        c.FillRect(dx, dy + dh - dt, dw, dt, col);
+        c.FillRect(dx, dy, dt, dh, col);
+        c.FillRect(dx + dw - dt, dy, dt, dh, col);
     }
 
     static void FillCircle(Canvas c, int cx, int cy, int rad,
                            int cr, int cg, int cb, int ca) {
         if (rad <= 0) { return; }
-        c.FillCircle(cx + originX, cy + originY, rad, Argb(ca, cr, cg, cb));
+        c.FillCircle(MapX(cx + originX), MapY(cy + originY), MapW(rad),
+                     Argb(ca, cr, cg, cb));
     }
 
     // 直线段（抗锯齿、厚度 t，圆头）：绳线/描迹用。
     static void Line(Canvas c, int x0, int y0, int x1, int y1, int t,
                      int cr, int cg, int cb, int ca) {
         if (t <= 0) { return; }
-        c.DrawLine(x0 + originX, y0 + originY, x1 + originX, y1 + originY,
-                   Argb(ca, cr, cg, cb), t);
+        c.DrawLine(MapX(x0 + originX), MapY(y0 + originY),
+                   MapX(x1 + originX), MapY(y1 + originY),
+                   Argb(ca, cr, cg, cb), MapW(t));
     }
 
     // 圆环描边（厚度 t 画在半径上）：QTE 圈/瞄准环用。
     static void CircleStroke(Canvas c, int cx, int cy, int rad, int t,
                              int cr, int cg, int cb, int ca) {
         if (rad <= 0 || t <= 0) { return; }
-        c.DrawCircle(cx + originX, cy + originY, rad, Argb(ca, cr, cg, cb), t);
+        c.DrawCircle(MapX(cx + originX), MapY(cy + originY), MapW(rad),
+                     Argb(ca, cr, cg, cb), MapW(t));
     }
 
     static bool PointIn(int px, int py, int x, int y, int w, int h) {
@@ -114,16 +210,20 @@ class CDraw {
 // 字体，scale 沿用 Kit 的"字号档"语义：PxOf = scale*9 像素）。
 class CText {
     // Kit scale 档 → 画布字号（对齐 SysFont.PxOf，HUD 版式不用重调）。
+    // FontPx 保持逻辑单位（排版用它）；落笔时经视口缩放成设备字号，
+    // 系统字体按设备字号渲染——窗口放大字不失真。
     static int FontPx(int scale) {
         if (scale < 1) { scale = 1; }
         return scale * 9;
     }
     static int LineHeight(int scale) { return CText.FontPx(scale); }
+    static int DevPx(int scale) { return CDraw.MapW(CText.FontPx(scale)); }
 
-    // 量宽（右对齐/居中排版用；与 Draw 同一字号档）。
+    // 量宽（右对齐/居中排版用；与 Draw 同一字号档，返回逻辑宽度）。
     static int Width(string text, int scale) {
         if (text == null || text.Length == 0) { return 0; }
-        return Canvas.MeasureText(text, CText.FontPx(scale));
+        int dev = Canvas.MeasureText(text, CText.DevPx(scale));
+        return dev * 65536 / CDraw.vpS;
     }
 
     // 左上角锚定（y 是行盒顶，不是基线）——与 Text.Draw 契约一致。
@@ -131,14 +231,14 @@ class CText {
     static void Draw(Canvas c, string text, int x, int y, int scale,
                      int cr, int cg, int cb, int ca) {
         if (text == null || text.Length == 0) { return; }
-        c.DrawText(x + CDraw.originX, y + CDraw.originY, text,
-                   CDraw.Argb(ca, cr, cg, cb), CText.FontPx(scale));
+        c.DrawText(CDraw.MapX(x + CDraw.originX), CDraw.MapY(y + CDraw.originY),
+                   text, CDraw.Argb(ca, cr, cg, cb), CText.DevPx(scale));
     }
 
     static void DrawCentered(Canvas c, string text, int centerX, int y,
                              int scale, int cr, int cg, int cb, int ca) {
         if (text == null || text.Length == 0) { return; }
-        int w = Canvas.MeasureText(text, CText.FontPx(scale));
+        int w = CText.Width(text, scale);
         CText.Draw(c, text, centerX - w / 2, y, scale, cr, cg, cb, ca);
     }
 
@@ -154,7 +254,7 @@ class CText {
     static void DrawCenteredShadow(Canvas c, string text, int centerX, int y,
                                    int scale, int cr, int cg, int cb, int ca) {
         if (text == null || text.Length == 0) { return; }
-        int w = Canvas.MeasureText(text, CText.FontPx(scale));
+        int w = CText.Width(text, scale);
         CText.DrawShadow(c, text, centerX - w / 2, y, scale, cr, cg, cb, ca);
     }
 }
@@ -202,8 +302,10 @@ class CKitUi {
         // 深色外圈 + 平色主体 + 一道极细内亮边（无中线分缝）。
         CDraw.RoundRectFill(c, x - 2, y - 2, w + 4, h + 4, 14, 10, 12, 20, 240);
         CDraw.RoundRectFill(c, x, y, w, h, 12, mr, mg, mb, 255);
-        c.DrawRoundRect(x + 1 + CDraw.originX, y + 1 + CDraw.originY,
-                        w - 2, h - 2, 11, CDraw.Argb(28, 255, 255, 255), 1);
+        c.DrawRoundRect(CDraw.MapX(x + 1 + CDraw.originX),
+                        CDraw.MapY(y + 1 + CDraw.originY),
+                        CDraw.MapW(w - 2), CDraw.MapW(h - 2), CDraw.MapW(11),
+                        CDraw.Argb(28, 255, 255, 255), CDraw.MapW(1));
         CText.DrawCenteredShadow(c, label, x + w / 2, y + (h - CText.LineHeight(scale)) / 2,
                                  scale, tc, tc, tc, 255);
         return hov;

@@ -1,6 +1,7 @@
 using System;
 using Gui;
 using Game.Foundation;
+using Game.Kit;
 
 namespace Game.Foundation.Gui;
 
@@ -115,6 +116,14 @@ class GuiHost {
             loop.Update(this, delta);
 
             this.app.BeginFrame();
+            // 窗口跟随（全平台）：画布 = 客户区/表面（桌面标题栏原生
+            // 通栏固顶、缩放照常重铺），游戏逻辑分辨率经 CDraw 视口
+            // 等比铺满内容区——短轴贴设计、长轴延展，任何窗口满铺：
+            // 零黑边、零变形。模板每帧 Render 开头用 StageWidth/Height
+            // 取延展后的逻辑范围作画。
+            CDraw.StageViewport(this.app.canvas, this.app.ContentTop(),
+                                this.logicalWidth, this.logicalHeight,
+                                CDraw.Argb(255, 24, 24, 28));
             loop.Render(this, this.app.canvas, this.clock.Alpha());
             // 标准 Gui 标题栏画在游戏内容之上（内容区从
             // ContentTop() 之下开始）；全屏收起标题栏后自然消失。
@@ -157,7 +166,19 @@ class GuiHost {
     int Height() { return this.logicalHeight; }
     /// 宿主的 App（Start 之后有效；一般只在需要控件/皮肤时用）。
     App App() { return this.app; }
-    /// 内容区（游戏舞台）顶部在画布中的 y——标准标题栏占住其上的
-    /// 一条。模板把鼠标 y 减去它换回舞台坐标（X 不变）。
-    int ContentTop() { return this.app.ContentTop(); }
+    /// 内容区顶部。视口契约下舞台坐标 0 基即内容区顶（桌面标题栏的
+    /// 偏移已折进 CDraw.vpY；手机全屏无 chrome）——模板的
+    /// Origin(0, ContentTop()) 自然退化为 0。
+    int ContentTop() { return 0; }
+
+    /// 延展后的逻辑舞台尺寸：短轴贴设计值、长轴随窗口比例变大
+    /// （StageViewport 每帧帧首更新）。模板 Render 开头把它赋给自己
+    /// 的 W/H 静态量，布局全部锚定 W/H 即自适应任意窗口。
+    int StageWidth() { return CDraw.stageW; }
+    int StageHeight() { return CDraw.stageH; }
+
+    /// 指针的舞台（逻辑）坐标：桌面客户区像素经 CDraw 视口反变换；
+    /// 手机上驱动交还原表面坐标，由同一视口反变换。
+    int MouseX() { return CDraw.UnmapX(this.app.mouseX); }
+    int MouseY() { return CDraw.UnmapY(this.app.mouseY); }
 }
