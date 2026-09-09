@@ -410,7 +410,29 @@ static void emit_collection_slot_store(zan_irgen_t *g, zan_type_t *elem_type,
                 if (LLVMGetIntTypeWidth(LLVMTypeOf(stored)) < LLVMGetIntTypeWidth(slot_ty))
                     stored = extend_int_for_slot(g, stored, elem_type, slot_ty);
             } else if (value_kind == LLVMDoubleTypeKind) {
-                stored = LLVMBuildBitCast(g->builder, stored, slot_ty, "slot.fb");
+                if (elem_llvm && LLVMGetTypeKind(elem_llvm) == LLVMFloatTypeKind) {
+                    /* a const-folded float literal arrives as a double: a
+                     * float slot must hold the f32 bit pattern widened to the
+                     * 64-bit slot (see the float branch below and
+                     * load_collection_slot_value's reader), not double bits
+                     * the float reader would trunc into a denormal. */
+                    LLVMValueRef f32 = LLVMBuildFPTrunc(g->builder, stored,
+                        LLVMFloatTypeInContext(g->ctx), "slot.f32d");
+                    LLVMValueRef bits = LLVMBuildBitCast(g->builder, f32,
+                        LLVMInt32TypeInContext(g->ctx), "slot.f32b");
+                    stored = LLVMBuildZExt(g->builder, bits, slot_ty, "slot.f32w");
+                } else {
+                    stored = LLVMBuildBitCast(g->builder, stored, slot_ty, "slot.fb");
+                }
+            } else if (value_kind == LLVMFloatTypeKind) {
+                /* List<float> slots carry the f32 bit pattern widened to the
+                 * 64-bit slot; the load side (load_collection_slot_value)
+                 * truncs back to i32 and bitcasts to float. Without this the
+                 * raw float value was reinterpreted as an integer, so
+                 * `l.Add(1.5f); x = l[0]` read 4.6e18. */
+                LLVMValueRef bits = LLVMBuildBitCast(g->builder, stored,
+                    LLVMInt32TypeInContext(g->ctx), "slot.f32b");
+                stored = LLVMBuildZExt(g->builder, bits, slot_ty, "slot.f32w");
             }
         }
         LLVMBuildStore(g->builder, stored, slot_ptr);

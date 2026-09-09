@@ -4960,6 +4960,16 @@ static LLVMValueRef emit_expr_index(zan_irgen_t *g, zan_ast_node_t *expr,
                     out = LLVMBuildIntToPtr(g->builder, raw, em, "elp");
                 else if (mk == LLVMDoubleTypeKind)
                     out = LLVMBuildBitCast(g->builder, raw, em, "elf");
+                else if (mk == LLVMFloatTypeKind) {
+                    /* float slots carry the f32 bit pattern widened to the
+                     * 64-bit slot (see emit_collection_slot_store); trunc
+                     * back to i32 and bitcast to f32. Without this the raw
+                     * slot integer was returned as-is and `l.Add(1.5f);
+                     * x = l[0]` read 1069547520. */
+                    LLVMValueRef narrow = LLVMBuildTrunc(g->builder, raw,
+                        LLVMInt32TypeInContext(g->ctx), "elf32.t");
+                    out = LLVMBuildBitCast(g->builder, narrow, em, "elf32.f");
+                }
             }
             return finish_index_of_temp(g, expr, locals, arr_type, et,
                                         arr_ptr, out);
