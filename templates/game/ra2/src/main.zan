@@ -546,23 +546,34 @@ class Ra2App {
         int n = game.World().SelectionCount();
         if (n <= 0) { return; }
         if (n > 1) {
-            KitUi.Panel(r, 12, 96, 560, 40, 18, 22, 32, 200);
-            Text.Draw(r, "已选 " + Convert.ToString(n) + " 个单位",
-                      28, 108, 2, 236, 236, 236, 255);
+            Text.DrawShadow(r, "已选 " + Convert.ToString(n) + " 个单位",
+                            12, 44, 2, 236, 236, 236, 230);
             return;
         }
         string info = game.SelectedInfo();
         if (info == null || info.Length == 0) { return; }
-        KitUi.Panel(r, 12, 96, 560, 40, 18, 22, 32, 200);
-        Text.Draw(r, info, 28, 108, 2, 236, 236, 236, 255);
+        Text.DrawShadow(r, info, 12, 44, 2, 236, 236, 236, 230);
     }
 
-    /// <summary>A centred pause banner while the game clock is stopped.</summary>
+    /// <summary>A centred pause banner while the game clock is stopped.
+    /// The plate follows the original's message box: dark field, thin gold
+    /// frame, gold text.</summary>
     static void DrawPaused(SdlRenderer r, GameController game, int viewW,
                            int viewH) {
         if (!game.Paused()) { return; }
         Draw.RoundRectFill(r, 0, 0, viewW, viewH, 0, 4, 6, 12, 90);
-        Text.DrawCenteredShadow(r, "已暂停  (按 P 继续)", viewW / 2, viewH / 2 - 40, 6, 236, 208, 120, 255);
+        Ra2App.MessageBoxPlate(r, viewW / 2 - 210, viewH / 2 - 92, 420, 128);
+        Text.DrawCenteredShadow(r, "已暂停  (按 P 继续)", viewW / 2,
+                                viewH / 2 - 62, 4, 236, 208, 120, 255);
+    }
+
+    /// <summary>The original's message-box chrome: a dark plate with a thin
+    /// double gold frame, used by the pause and result overlays.</summary>
+    static void MessageBoxPlate(SdlRenderer r, int x, int y, int w, int h) {
+        Draw.RoundRectFill(r, x, y, w, h, 4, 20, 24, 34, 242);
+        r.SetColor(236, 208, 120, 255);
+        r.DrawRect(x + 3, y + 3, w - 6, h - 6);
+        r.DrawRect(x + 5, y + 5, w - 10, h - 10);
     }
 
     /// <summary>A small hint under the cursor when move-attack is armed, so the
@@ -713,7 +724,8 @@ class Ra2App {
         r.DrawRect(loX, loY, hiX - loX, hiY - loY);
     }
 
-    /// <summary>End-of-game overlay: who won, and a hint that Esc leaves.</summary>
+    /// <summary>End-of-game overlay: who won, and a hint that Esc leaves.
+    /// Styled as the original's message box -- dark plate, gold frame.</summary>
     static void DrawResult(SdlRenderer r, int result, int viewW, int viewH) {
         if (result == 0) { return; }
         Draw.RoundRectFill(r, 0, 0, viewW, viewH, 0, 4, 6, 12, 180);
@@ -725,7 +737,7 @@ class Ra2App {
         int ph = 220;
         int px = viewW / 2 - pw / 2;
         int py = viewH / 2 - ph / 2;
-        KitUi.Panel(r, px, py, pw, ph, 22, 26, 36, 240);
+        Ra2App.MessageBoxPlate(r, px, py, pw, ph);
         Text.DrawCenteredShadow(r, title, viewW / 2, py + 50, 6, tc, 236, 208, 255);
         Text.DrawCentered(r, "按 Esc 返回", viewW / 2, py + 150, 3,
                           170, 178, 192, 255);

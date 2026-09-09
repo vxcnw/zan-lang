@@ -680,17 +680,16 @@ class Screens {
     }
 
     /// <summary>The in-game overlay: which map is loaded and the controls.
-    /// The sidebar, minimap and build menu are not implemented yet, so this
-    /// deliberately shows only what exists.</summary>
+    /// The sidebar, minimap and build menu live in main.zan's sidebar pass;
+    /// the original keeps the map view itself clean, so the facts ride on a
+    /// single shadowed line instead of a panel.</summary>
     static void DrawHud(SdlRenderer r, string mapName, string sideName,
                         int cells, int drawn, int viewW, int viewH) {
-        KitUi.Panel(r, 12, 12, 520, 76, 18, 22, 32, 190);
-        Text.Draw(r, mapName + "   " + sideName, 28, 24, 2, 236, 208, 120, 255);
-        Text.Draw(r, "单元 " + Convert.ToString(cells)
-                  + "   本帧绘制 " + Convert.ToString(drawn),
-                  28, 54, 2, 170, 178, 192, 255);
-
-        Text.Draw(r, "方向键平移  +/- 缩放  Esc 返回",
-                  12, viewH - 34, 2, 150, 158, 172, 255);
+        Text.DrawShadow(r, mapName + " " + sideName
+                        + "  单元 " + Convert.ToString(cells)
+                        + "  绘制 " + Convert.ToString(drawn),
+                        12, 12, 2, 200, 206, 218, 220);
+        Text.DrawShadow(r, "方向键平移  +/- 缩放  Esc 返回",
+                        12, viewH - 34, 2, 150, 158, 172, 220);
     }
 }
