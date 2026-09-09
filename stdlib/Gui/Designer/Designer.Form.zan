@@ -2166,6 +2166,118 @@ partial class Designer {
             rs.RenderAt(app, x, y, w);
             return;
         }
+        if (ft == 73) {                      // 弹性容器：真实 Flex 排一行示例件
+            Flex fx = Flex.Row().Gap(PvS(app, 8));
+            fx.With(new Tag("Flex"));
+            fx.With(new Tag("Row"));
+            fx.With(new Badge(3));
+            fx.Disabled = preview;
+            fx.RenderInside(app, new Rect(x, y, w, avail - PvS(app, 6)));
+            return;
+        }
+        if (ft == 74) {                      // 等宽网格：两列各一格
+            Grid gg = Grid.Of(2);
+            gg.With(new Statistic(Designer.T("Column A", "列 A"), "128"));
+            gg.With(new Statistic(Designer.T("Column B", "列 B"), "256"));
+            gg.Disabled = preview;
+            gg.RenderInside(app, new Rect(x, y, w, avail - PvS(app, 6)));
+            return;
+        }
+        if (ft == 75) {                      // 图片：空源时控件自带占位
+            int ih = avail - PvS(app, 6);
+            if (ih > PvS(app, 120)) { ih = PvS(app, 120); }
+            new Image(f.bindPath, f.label).RenderInside(app,
+                new Rect(x, y, w, ih));
+            return;
+        }
+        if (ft == 76) {                      // 月历
+            Calendar cal = new Calendar();
+            cal.Disabled = preview;
+            cal.RenderInside(app, new Rect(x, y, w, avail - PvS(app, 6)));
+            return;
+        }
+        if (ft == 77) {                      // 倒计时
+            Countdown cd = new Countdown(90 * 1000);
+            cd.Disabled = preview;
+            cd.RenderInside(app, new Rect(x, y, w, PvS(app, 36)));
+            return;
+        }
+        if (ft == 78) {                      // 二维码：内容取标签，缺省给示例
+            string qr = f.label;
+            if (qr == "") { qr = "https://zan.design"; }
+            int qs = w < avail ? w : avail;
+            if (qs > PvS(app, 110)) { qs = PvS(app, 110); }
+            new QrCode(qr).RenderInside(app, new Rect(x, y, qs, qs));
+            return;
+        }
+        if (ft == 79) {                      // 平铺水印：内容取标签
+            string wm = f.label;
+            if (wm == "") { wm = Designer.T("CONFIDENTIAL", "内部资料"); }
+            new Watermark(wm).RenderInside(app,
+                new Rect(x, y, w, avail - PvS(app, 6)));
+            return;
+        }
+        if (ft == 80) {                      // 滚动公告：内容取标签
+            string mq = f.label;
+            if (mq == "") {
+                mq = Designer.T("Scrolling announcement text",
+                    "这是一条滚动的公告文本……");
+            }
+            Marquee mar = new Marquee(mq);
+            mar.Disabled = preview;
+            mar.RenderInside(app, new Rect(x, y, w, PvS(app, 34)));
+            return;
+        }
+        if (ft == 81) {                      // 动态标签：选项即可编辑的标签集
+            List<string> tags = new List<string>();
+            for (int i = 0; i < f.OptionCount(); i = i + 1) {
+                tags.Add(f.OptionAt(i));
+            }
+            if (tags.Count == 0) {
+                tags.Add(Designer.T("Tag A", "标签甲"));
+                tags.Add(Designer.T("Tag B", "标签乙"));
+                tags.Add(Designer.T("Tag C", "标签丙"));
+            }
+            DynamicTags dt = new DynamicTags(tags);
+            dt.Disabled = preview;
+            dt.RenderInside(app, new Rect(x, y, w, PvS(app, 34)));
+            return;
+        }
+        if (ft == 82) {                      // 数字滚动
+            NumberAnimation na = new NumberAnimation(0, 4096, 1600);
+            na.Disabled = preview;
+            na.RenderInside(app, new Rect(x, y, w, PvS(app, 42)));
+            return;
+        }
+        if (ft == 83) {                      // OTP 输入
+            InputOtp otp = new InputOtp(6);
+            otp.Disabled = preview;
+            otp.RenderInside(app, new Rect(x, y, w, PvS(app, 40)));
+            return;
+        }
+        if (ft == 84) {                      // 穿梭框：左右各放示例项
+            List<string> src = new List<string>();
+            src.Add(Designer.T("Left item 1", "左项一"));
+            src.Add(Designer.T("Left item 2", "左项二"));
+            src.Add(Designer.T("Left item 3", "左项三"));
+            List<string> tgt = new List<string>();
+            tgt.Add(Designer.T("Right item 1", "右项一"));
+            Transfer<string> tf = new Transfer<string>(src, tgt);
+            tf.Disabled = preview;
+            tf.RenderInside(app, new Rect(x, y, w, avail - PvS(app, 6)));
+            return;
+        }
+        if (ft == 85) {                      // 虚拟列表：塞几行示例数据
+            VirtualList vl = new VirtualList();
+            List<string> rows = new List<string>();
+            for (int i = 1; i <= 24; i = i + 1) {
+                rows.Add(Designer.T("Row ", "第 ") + Convert.ToString(i));
+            }
+            vl.SetItems(rows);
+            vl.Disabled = preview;
+            vl.RenderInside(app, new Rect(x, y, w, avail - PvS(app, 6)));
+            return;
+        }
         if (ft == 31) {                      // 骨架屏
             Skeleton.Line(app, w).RenderAt(app, x, y + PvS(app, 4));
             Skeleton.Line(app, w).RenderAt(app, x, y + PvS(app, 24));

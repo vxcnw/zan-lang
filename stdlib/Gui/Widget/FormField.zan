@@ -469,7 +469,7 @@ class FormField : Control {
 
     /// 最大的内置字段类型（自定义组件为哨兵 100）。面板范围、
     /// 序列化和编译期投影都以它为界。
-    static int MaxType() { return 72; }
+    static int MaxType() { return 85; }
 
     /// 供面板/检查器使用的可读类型名称。
     static string TypeName(int ft) {
@@ -543,6 +543,19 @@ class FormField : Control {
         if (ft == 70) { return "Device Card"; }
         if (ft == 71) { return "Equipment Panel"; }
         if (ft == 72) { return "Web View"; }
+        if (ft == 73) { return "Flex"; }
+        if (ft == 74) { return "Grid"; }
+        if (ft == 75) { return "Image"; }
+        if (ft == 76) { return "Calendar"; }
+        if (ft == 77) { return "Countdown"; }
+        if (ft == 78) { return "QR Code"; }
+        if (ft == 79) { return "Watermark"; }
+        if (ft == 80) { return "Marquee"; }
+        if (ft == 81) { return "Dynamic Tags"; }
+        if (ft == 82) { return "Number Anim"; }
+        if (ft == 83) { return "OTP Input"; }
+        if (ft == 84) { return "Transfer"; }
+        if (ft == 85) { return "Virtual List"; }
         return "Input";
     }
 
@@ -756,7 +769,8 @@ class FormField : Control {
             || ft == 23 || ft == 24 || ft == 25 || ft == 26
             || ft == 34 || ft == 35 || ft == 36 || ft == 38
             || ft == 40 || ft == 41 || ft == 42 || ft == 55
-            || ft == 58 || ft == 59 || ft == 60;
+            || ft == 58 || ft == 59 || ft == 60
+            || ft == 81;
     }
 
     /// 非可视化（行为）组件，WinForms 组件托盘风格：它们
@@ -794,6 +808,21 @@ class FormField : Control {
     /// 行高（未缩放），让较高的输入框（textarea/upload/richtext）和
     /// 多选项字段在画布上获得所需空间。
     int RowUnits() {
+        // 73-85: 新增组件的画布行高——日历/图片/水印/网格/穿梭框/
+        // 虚拟列表要高度，流式件（Flex/Tags/OTP/动效数字）矮行即可。
+        if (ftype == 73) { return 48; }
+        if (ftype == 74) { return 96; }
+        if (ftype == 75) { return 96; }
+        if (ftype == 76) { return 200; }
+        if (ftype == 77) { return 36; }
+        if (ftype == 78) { return 110; }
+        if (ftype == 79) { return 96; }
+        if (ftype == 80) { return 34; }
+        if (ftype == 81) { return 34; }
+        if (ftype == 82) { return 42; }
+        if (ftype == 83) { return 40; }
+        if (ftype == 84) { return 150; }
+        if (ftype == 85) { return 150; }
         if (ftype == 1) { return 62; }
         if (ftype == 12) { return 78; }
         if (ftype == 14) { return 84; }
@@ -980,6 +1009,23 @@ class FormField : Control {
         if (ft == 70) { return "DeviceCard"; }
         if (ft == 71) { return "EquipPanel"; }
         if (ft == 72) { return "WebViewBox"; }
+        // 73-85: 补齐后续新增的控件——布局容器（Flex/Grid）、媒体展示
+        // （Image/Watermark/Marquee）、数据件（Transfer/VirtualList/
+        // DynamicTags）、动效件（Countdown/NumberAnimation）与
+        // OTP 输入、月历。全部是 ControlFactory 可实例化的真控件。
+        if (ft == 73) { return "Flex"; }
+        if (ft == 74) { return "Grid"; }
+        if (ft == 75) { return "Image"; }
+        if (ft == 76) { return "Calendar"; }
+        if (ft == 77) { return "Countdown"; }
+        if (ft == 78) { return "QrCode"; }
+        if (ft == 79) { return "Watermark"; }
+        if (ft == 80) { return "Marquee"; }
+        if (ft == 81) { return "DynamicTags"; }
+        if (ft == 82) { return "NumberAnimation"; }
+        if (ft == 83) { return "InputOtp"; }
+        if (ft == 84) { return "Transfer"; }
+        if (ft == 85) { return "VirtualList"; }
         // 2 password, 3 number, 10 date, 11 time, 12 upload, 13 color are all
         // single-line entries, and the remaining types (alert, tooltip, menu,
         // popover, popconfirm, notification, contextmenu, icon, ellipsis,
