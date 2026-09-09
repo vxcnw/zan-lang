@@ -1,5 +1,7 @@
 using System;
 using System.Json;
+using System.Net.Http;
+using System.Net.External;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
@@ -108,27 +110,49 @@ class Secure {
     }
 }
 
-// 联机接入层：连接 → 加密握手 → 收发循环 → 世界状态缓存。
-// 线程模型：Gui 主线程不驱动 IO 反应器，因此所有套接字 IO 都跑在一条
-// 专用后台线程上（同 Gui.ImageHttp 的做法）；网络线程只搬字节并做
-// C2S 加密，收到的每一行经 App.Post 投回 UI 线程解密、解析、改状态，
-// UI 发出的 op 经互斥队列交给网络线程发送。所有 GameNet 状态字段仅由
-// UI 线程读写（带 secRx/gen 后缀的字段除外，各归各线程）。
-// 传输量约定：挂机战斗由服务端驱动，客户端每个回合不发任何上行，
-// 只被动收一条 ~百字节级 fight 推送；心跳 30 秒一次；帧 overhead 固定
-// 16 字节 tag + Base64 4/3，无额外包头。
+// 联机接入层：HTTP 操作 + TCP 推送通道 → 世界状态缓存。
+// 架构照「能 HTTP 的都 HTTP」：一问一答的 op（登录/背包/商店/BOSS 挑战…）
+// 全走 POST /api/game/<op>，应答即时配对回调——没有共享回复队列，不存在
+// 错位；TCP 长连接只做推送通道（登录拿到 token 后 attach），收聊天、
+// 公告、挂机结算这类即时通知。线程模型：Gui 主线程不驱动 IO 反应器，
+// 一条专用后台线程全包（同 Gui.ImageHttp 的做法）——HTTP POST 在 await
+// 期间让出、按队列串行发送（op 的应答顺序与发出顺序一致），套接字收发
+// 同循环轮询；收到的每一行经 App.Post 投回 UI 线程解密、解析、改状态。
+// 所有 GameNet 状态字段仅由 UI 线程读写（带 w 前缀/secTx/wrx 的字段除外，
+// 各归各线程）。会话保活：服务端按「最后一次 HTTP 操作」计心跳，网络
+// 线程每 25 秒补一条 state（顺带刷新 self），推送通道另发 TCP hb。
 class GameNet {
-    /* 网络线程持有（其余字段仅 UI 线程访问）。*/
+    /* 推送通道线程持有（其余字段仅 UI 线程访问）。*/
     nint wsock = -1;
     Secure secTx;
     bool wenc;
     string wrx = "";
-    List<string> queue = new List<string>();
-    Mutex qlock = Mutex.Create();
+    /* 推送通道关闭令牌：Drop 在 UI 线程置 1，网络线程每轮检查后
+       摘通道（原子量，替代旧的跨线程 "!close" 队列项）。 */
+    AtomicInt pushClose;
     string cHost = "";
-    int cPort;
-    /* 服务器连接密码：hello 随 cnonce 一并上送，由服务端校验。*/
+    /* HTTP 网关端口（地址栏 host:port 的 port）；推送通道端口由 login
+       应答下发（pushPort），与 HTTP 同主机。 */
+    int hPort = 8099;
+    int pushPort;
+    /* 服务器连接密码：推送通道 hello 随 cnonce 一并上送，由服务端校验。*/
     string cPass = "";
+
+    /* ---- HTTP 作业通道（静态；DataTable.HttpSource 定式）----
+     * rt_co.c 的协程 ready 队列是 M:1 无锁全局队列，await 只允许活在
+     * 一个线程上。早期版本在原生网络线程里 await HttpClient，与 UI 线
+     * 的帧循环并发排程，实测会静默丢子任务（characters 的 DoPost 帧
+     * 连续丢失，探针见 _scratch/uidrv2/ph45*~47c）。现在 HTTP 全部走
+     * 这条静态通道：UI 线程 Op() 入队，空闲即退的静态 worker 逐条
+     * await 取回（唯一 await 位），完成项回静态完成队列，UI 线程每帧
+     * PollHttp() 并入。推送通道线程因此不含任何 await。 */
+    static List<HttpReq> httpQ;
+    static List<HttpReq> httpDone;
+    static nint httpLock;
+    static bool httpUp;
+    /* worker 的目标地址（Connect 写、HttpFetchOne 读）。*/
+    static string wantHost = "";
+    static int wantPort;
 
     /* UI 侧状态。sec 只在 UI 线程使用（S2C 方向）。*/
     App app;
@@ -137,14 +161,20 @@ class GameNet {
     bool ready;
     int gen;
     Secure sec;
-    /* op 回复回调队列：协议一问一答且严格按序，每个 Op 各占一槽、回复
-       按发出顺序对号入座。单个槽位会让连发的两条 op（如 RefreshWorld
-       的 mobs+maps）互相覆盖，回复错位、数据丢进别的字段。 */
-    List<NetReply> replySinks = new List<NetReply>();
+    /* 登录令牌：HTTP op 全凭它；推送通道断线由网络线程每 10 秒重拨
+       （token 在就拨），Drop 清 token 即停。 */
+    string token = "";
+    bool pushUp;
+    bool threadUp;
 
-    /* 连接阶段：0 未连接，1 已连上待握手，2 加密就绪，3 已登录，4 已进区。*/
+    /* 连接阶段：0 未连接，1 服务器可达（探活 realms 成功），2 推送
+       通道已建立，3 已登录（HTTP），4 已进区。 */
     int stage;
     string error = "";
+    /* 调试：最近一条 HTTP 应答（UI 线程 Poll 时写），经探针 net-http
+       外显，远程定位传输层问题用。 */
+    string httpLog = "";
+    long lastPollAt;
     int uid;
     string user = "";
     int realmId = 1;
@@ -167,6 +197,20 @@ class GameNet {
     JsonValue lastFight;
     List<string> chat = new List<string>();
     List<string> feed = new List<string>();
+    /* 本地演示动画状态：挂机战况不再逐秒来自服务器（批量结算），
+       这条时间线由客户端按怪物图鉴和自身攻防自演，仅供观看；收益
+       以服务端 ev idlesum 结算为权威。autoMob 是当前挂机怪物 id。 */
+    int autoMob;
+    int demoHp;
+    int demoWait;
+    int demoTick;
+    /* 地图内页：当前打开的图 id、BOSS 面板（bossinfo 回复）、战报行
+       （bossfight 整场回合的 log 原样上屏）；bossAuto=「结束后自动
+       挑战BOSS」勾选态，回复回调里读它决定要不要接着磨。 */
+    JsonValue bossPage;
+    List<string> bossLog = new List<string>();
+    int bossMap;
+    bool bossAuto;
 
     static string[] JobNames = new string[] { "战士", "法师", "道士" };
 
@@ -177,6 +221,7 @@ class GameNet {
     bool InWorld() { return this.stage >= 4 && this.self != null; }
     JsonValue Self() { return this.self; }
     JsonValue LastFight() { return this.lastFight; }
+    int AutoMobId() { return this.autoMob; }
     int RealmCount() { return this.realms != null && this.realms.IsArray() ? this.realms.Count() : 0; }
     int MobCount() { return this.mobs != null && this.mobs.IsArray() ? this.mobs.Count() : 0; }
     int MapCount() { return this.maps != null && this.maps.IsArray() ? this.maps.Count() : 0; }
@@ -211,9 +256,10 @@ class GameNet {
         if (this.stage >= 4) {
             return this.realmName + " · " + this.SelfLine();
         }
-        if (this.stage >= 3) { return "已登录：" + this.user + "，准备进入世界…"; }
-        if (this.stage >= 2) { return "加密会话已建立（AES-256-GCM）。"; }
-        if (this.stage >= 1) { return "已连上服务器，握手中…"; }
+        if (this.stage >= 3) {
+            return "已登录：" + this.user + (this.pushUp ? "，推送已连接。" : "，推送连接中…");
+        }
+        if (this.stage >= 1) { return "服务器可达，请登录。"; }
         if (this.connecting) { return "正在连接 " + this.cHost + "…"; }
         if (this.error.Length > 0) { return "未连接（" + this.error + "）"; }
         return "未连接。点击服务器直接连接；离线玩法不受影响。";
@@ -279,42 +325,106 @@ class GameNet {
         if (this.feed.Count > 16) { this.feed.RemoveAt(0); }
     }
 
+    /* 本地演示动画（每秒由主循环驱动）：照原版，挂机的逐秒战况是
+       客户端自演的——按图鉴血量和自身攻防演一场，不产生任何收益、
+       不发任何网络包；真收益由服务端每 60 秒 ev idlesum 批量下发。
+       攻击行每 3 拍记一条，击杀/重生即时记，避免刷屏。 */
+    void DemoRound() {
+        if (!this.InWorld() || this.autoMob <= 0 || this.self == null) { return; }
+        JsonValue mob = null;
+        for (int i = 0; i < this.MobCount(); i = i + 1) {
+            JsonValue mo = this.MobAt(i);
+            if (mo.Int("tpl", 0) != this.autoMob) { continue; }
+            if (mob == null || mo.Int("alive", 0) == 1) {
+                mob = mo;
+                if (mo.Int("alive", 0) == 1) { break; }
+            }
+        }
+        if (mob == null) { return; }
+        if (this.demoWait > 0) { this.demoWait = this.demoWait - 1; return; }
+        if (mob.Int("alive", 0) != 1) {
+            this.AddFeed("[演示] " + mob.Str("name", "怪物") + " 还在重生（"
+                + Convert.ToString(mob.Int("respawnIn", 0)) + " 秒后）");
+            this.demoWait = 2;
+            return;
+        }
+        if (this.demoHp <= 0 || this.demoHp > mob.Int("maxhp", 100)) {
+            this.demoHp = mob.Int("maxhp", 100);
+        }
+        int dmg = this.self.Int("atk", 10) - mob.Int("level", 1);
+        if (dmg < 1) { dmg = 1; }
+        this.demoHp = this.demoHp - dmg;
+        this.demoTick = this.demoTick + 1;
+        string name = mob.Str("name", "怪物");
+        if (this.demoHp <= 0) {
+            this.AddFeed("[演示] 击杀 " + name + "（收益以服务端结算为准）");
+            this.demoHp = 0;
+            this.demoWait = 2;
+        } else if (this.demoTick % 3 == 1) {
+            this.AddFeed("[演示] 交战 " + name + "：你的伤害 " + Convert.ToString(dmg)
+                + "，余血 " + Convert.ToString(this.demoHp));
+        }
+    }
+
     /* ---- 连接生命周期 ---- */
 
     /* UI 线程启动时注入 App：网络线程靠它把行投回 UI。*/
     void Attach(App a) { this.app = a; }
 
-    /* UI 线程：发起连接。真正的拨号在后台线程做，主线程绝不阻塞。
-       gatePass 是服务器连接密码（门禁），不是账号密码。*/
+    /* UI 线程：发起连接。真正的工作（HTTP 探活/操作 + 推送通道）都在
+       后台线程做，主线程绝不阻塞。gatePass 是推送通道的服务器连接
+       密码（门禁），不是账号密码。*/
     void Connect(string host, int port, string gatePass) {
-        if (this.connected || this.connecting) { return; }
         this.cHost = host;
-        this.cPort = port;
+        this.hPort = port;
         this.cPass = gatePass;
         this.error = "";
         this.connecting = true;
         this.gen = this.gen + 1;
+        /* HTTP worker 的目标地址（静态槽位，worker 启动前写好）。*/
+        GameNet.wantHost = host;
+        GameNet.wantPort = port;
+        if (this.pushClose == null) { this.pushClose = new AtomicInt(0); }
+        this.pushClose.Store(0);
+        if (!this.threadUp) {
+            this.threadUp = true;
+            GameNet.worker = this;
+            Thread.Start(GameNet.ThreadEntry);
+        }
         this.AddChat("[系统]", "正在连接 " + host + ":" + Convert.ToString(port) + "…");
-        GameNet.worker = this;
-        Thread.Start(GameNet.ThreadEntry);
     }
 
-    /* 登录窗第一步的“连接服务器”：host:port 串（缺省端口 7100）+
-       连接密码。解析失败返回 false，弹窗提示，不发起连接。*/
+    /* 登录窗第一步的“连接服务器”：host:port 串（缺省端口 8099，HTTP
+       网关；推送通道端口随登录应答下发）+ 连接密码。解析后立刻 POST
+       realms 探活：可达即进入登录表单，顺带把区服列表备好。*/
     bool ConnectAddr(string addr, string gatePass) {
         string a = addr.Trim();
         int colon = a.IndexOf(":");
         string host = a;
-        int port = 7100;
+        int port = 8099;
         if (colon >= 0) {
             host = a.Substring(0, colon);
             port = Convert.ToInt32(a.Substring(colon + 1));
         }
         if (host.Length < 1 || port <= 0 || port > 65535) {
-            this.AddChat("[系统]", "服务器地址应为 host:端口，如 127.0.0.1:7100。");
+            this.AddChat("[系统]", "服务器地址应为 host:端口，如 127.0.0.1:8099。");
             return false;
         }
         this.Connect(host, port, gatePass);
+        this.Op("{\"op\":\"realms\"}", (JsonValue r) => {
+            this.connecting = false;
+            if (r.Int("ok", 0) == 1) {
+                this.connected = true;
+                if (this.stage < 1) { this.stage = 1; }
+                JsonValue rows = r.Get("realms");
+                if (rows != null && rows.IsArray() && rows.Count() > 0) { this.realms = rows; }
+                this.AddChat("[系统]", "服务器可达，请登录。");
+            } else {
+                this.error = r.Str("err", "服务器不可达");
+                this.AddChat("[系统]", "连接失败：" + this.error);
+            }
+            this.Bump();
+        });
         return true;
     }
 
@@ -328,105 +438,128 @@ class GameNet {
     static GameNet worker;
     static void ThreadEntry() { GameNet.worker.NetMain(); }
 
-    /* 网络线程主体：阻塞拨号 → 非阻塞收发轮询。只搬字节；
-     * C2S 加密（secTx）在本线程，收到的行原样投回 UI 线程。*/
+    /* 推送通道线程主体：纯阻塞套接字，不含任何 await（协程只活在
+     * UI 线程——见 HTTP 作业通道注释）。拨号、握手、心跳、收包、
+     * 看门狗；HTTP 操作由静态 HttpWorkerEntry 承担。只搬字节，
+     * 解密、解析、改状态都经 App.Post 投回 UI 线程。*/
     void NetMain() {
         Socket.Initialize();
-        nint sock = Socket.CreateTcp();
-        if (sock < 0) { this.PostFail("无法创建套接字"); return; }
-        int rc = Socket.Connect(sock, this.cHost, this.cPort);
-        if (rc != 0) {
-            Socket.Close(sock);
-            this.PostFail("连接失败，错误码 " + Convert.ToString(rc));
-            return;
-        }
-        Socket.SetNonBlocking(sock);
-        this.wsock = sock;
-        this.app.Post(() => { this.OnConnected(); });
         byte[] buf = new byte[16385];
-        string wrx = "";
+        this.wenc = false;
         long lastRecv = DateTime.UtcNow().epoch;
         long lastHb = lastRecv;
-        this.wenc = false;
+        long lastPushTry = 0;
         bool run = true;
         while (run) {
             long now = DateTime.UtcNow().epoch;
-            /* 发送：排队 op（握手完成前不出队发送）。*/
-            List<string> items = this.Drain();
-            if (items != null) {
-                for (int i = 0; i < items.Count; i = i + 1) {
-                    if (items[i] == "!close") { run = false; break; }
-                    if (!this.wenc) { continue; }
-                    if (!this.WSendText(this.secTx.Seal(items[i]) + "\n")) {
-                        this.PostLinkDown("发送失败，断开"); run = false; break;
-                    }
+            /* 关闭令牌：Drop（登出/401）要求摘掉推送通道。 */
+            if (this.pushClose != null && this.pushClose.Load() == 1) {
+                if (this.wsock >= 0) { Socket.Close(this.wsock); this.wsock = -1; }
+                this.wenc = false;
+                this.wrx = "";
+                this.pushClose.Store(0);
+            }
+            /* 推送通道：登录令牌在手、通道没连上，每 10 秒重拨一次。 */
+            if (this.token.Length > 0 && this.pushPort > 0 && this.wsock < 0
+                    && now - lastPushTry >= 10) {
+                lastPushTry = now;
+                this.PushDial();
+            }
+            /* 推送通道心跳：服务端按连接清僵尸（Gateway.SweepIdle）。 */
+            if (this.wsock >= 0 && this.wenc && now - lastHb >= 30) {
+                if (!this.WSendText(this.secTx.Seal("{\"op\":\"hb\"}") + "\n")) {
+                    this.PostLinkDown("推送通道发送失败");
+                } else {
                     lastHb = now;
                 }
             }
-            if (!run) { break; }
-            /* 心跳与看门狗（网络线程自行计时，不依赖 UI tick）。*/
-            if (this.wenc && now - lastHb >= 30) {
-                if (!this.WSendText(this.secTx.Seal("{\"op\":\"hb\"}") + "\n")) {
-                    this.PostLinkDown("发送失败，断开"); break;
-                }
-                lastHb = now;
-            }
-            if (now - lastRecv >= 150) { this.PostLinkDown("150 秒没有收到服务器数据，断开"); break; }
-            /* 接收：把就绪数据全部读走，按行投回 UI。*/
-            bool idle = true;
-            while (Socket.IsReadable(sock)) {
-                int n = Socket.Recv(sock, buf, 16384);
-                if (n <= 0) { this.PostLinkDown("与服务器的连接已断开"); run = false; break; }
-                lastRecv = DateTime.UtcNow().epoch;
-                idle = false;
-                wrx = wrx + buf.ToStr(0, n);
-                while (true) {
-                    int nl = wrx.IndexOf("\n");
-                    if (nl < 0) { break; }
-                    string line = wrx.Substring(0, nl);
-                    wrx = wrx.Substring(nl + 1);
-                    if (line.Length == 0) { continue; }
-                    if (!this.wenc) {
-                        string kind = this.OnWorkerLine(line);
-                        if (kind == "stop") { run = false; break; }
-                        if (kind == "swallow") { continue; }
+            /* 接收：把就绪数据全部读走，按行处理。*/
+            if (this.wsock >= 0) {
+                while (Socket.IsReadable(this.wsock)) {
+                    int n = Socket.Recv(this.wsock, buf, 16384);
+                    if (n <= 0) { this.PostLinkDown("与服务器的推送通道已断开"); break; }
+                    lastRecv = DateTime.UtcNow().epoch;
+                    this.wrx = this.wrx + buf.ToStr(0, n);
+                    while (true) {
+                        int nl = this.wrx.IndexOf("\n");
+                        if (nl < 0) { break; }
+                        string line = this.wrx.Substring(0, nl);
+                        this.wrx = this.wrx.Substring(nl + 1);
+                        if (line.Length == 0) { continue; }
+                        if (!this.wenc) {
+                            string kind = this.OnWorkerLine(line);
+                            if (kind == "stop") { break; }
+                            if (kind == "swallow") { continue; }
+                        }
+                        string lineF = line;
+                        this.app.Post(() => { this.OnLine(lineF); });
                     }
-                    string lineF = line;
-                    this.app.Post(() => { this.OnLine(lineF); });
+                    if (this.wsock < 0) { break; }
                 }
-                if (!run) { break; }
+            } else {
+                lastRecv = now;
             }
-            if (!run) { break; }
-            if (idle && items == null) { Thread.Sleep(30); }
+            if (this.wsock >= 0 && now - lastRecv >= 150) {
+                this.PostLinkDown("150 秒没有收到服务器数据");
+            }
+            Thread.Sleep(20);
         }
         if (this.wsock >= 0) { Socket.Close(this.wsock); this.wsock = -1; }
     }
 
+    /* 网络线程：拨推送通道（阻塞式一次连接）。握手与 attach 由收发泵
+     * 按行推进：服务器通告（snonce）→ OnWorkerLine 发 hello → enc 通告
+     * → attach。失败静默：外层每 10 秒重试。 */
+    void PushDial() {
+        if (this.wsock >= 0) { return; }
+        nint sock = Socket.CreateTcp();
+        if (sock < 0) { return; }
+        int rc = Socket.Connect(sock, this.cHost, this.pushPort);
+        if (rc != 0) { Socket.Close(sock); return; }
+        Socket.SetNonBlocking(sock);
+        this.wsock = sock;
+        this.wrx = "";
+        this.wenc = false;
+    }
+
     /* 网络线程：握手期的一行。返回 "swallow"（本行不投 UI）、
-     * "stop"（断开退出）或 "post"（继续投 UI）。服务端 hello 在此
-     * 消化：生成 cnonce、派生双向密钥、发出 hello；S2C 半边经
-     * Post 交给 UI，收发两半自此各归一个线程。*/
+     * "stop"（断开退出）或 "post"（继续投 UI）。服务端通告在此
+     * 消化：生成 cnonce、派生双向密钥、发出 hello；enc 通告一到
+     * 就把本连接认领为推送通道（attach）。S2C 半边经 Post 交给
+     * UI，收发两半自此各归一个线程。*/
     string OnWorkerLine(string line) {
-        if (line.IndexOf("\"snonce\"") < 0) {
-            if (line.IndexOf("\"enc\"") >= 0) { this.wenc = true; }
-            return "post";
+        if (line.IndexOf("\"snonce\"") >= 0) {
+            JsonValue m = null;
+            try { m = JsonValue.ParseLenient(line); } catch (Exception) { m = null; }
+            string snonce = m != null ? m.Str("snonce", "") : "";
+            string cnonce = Hex.Encode(RandomNumberGenerator.GetBytes(16), 16);
+            byte[] master = Secure.MasterOf(Secure.Secret, cnonce, snonce);
+            this.secTx = Secure.ForSend(master);
+            Secure rx = Secure.ForRecv(master);
+            if (this.secTx == null || rx == null) {
+                this.PostLinkDown("握手派生失败");
+                return "stop";
+            }
+            if (!this.WSendText("{\"op\":\"hello\",\"enc\":\"aes-gcm\",\"cnonce\":\""
+                    + cnonce + "\",\"pass\":\"" + GameNet.JStr(this.cPass) + "\"}\n")) {
+                this.PostLinkDown("发送失败");
+                return "stop";
+            }
+            this.app.Post(() => { this.OnHandshake(rx); });
+            return "swallow";
         }
-        JsonValue m = null;
-        try { m = JsonValue.ParseLenient(line); } catch (Exception) { m = null; }
-        string snonce = m != null ? m.Str("snonce", "") : "";
-        string cnonce = Hex.Encode(RandomNumberGenerator.GetBytes(16), 16);
-        byte[] master = Secure.MasterOf(Secure.Secret, cnonce, snonce);
-        this.secTx = Secure.ForSend(master);
-        Secure rx = Secure.ForRecv(master);
-        if (this.secTx == null || rx == null) {
-            this.PostLinkDown("握手派生失败"); return "stop";
+        if (line.IndexOf("\"enc\"") >= 0) {
+            /* 加密通告：切换发送加密，随即认领推送通道（应答带
+               push:1，走解密路径回 UI）。 */
+            this.wenc = true;
+            if (this.WSendText(this.secTx.Seal("{\"op\":\"attach\",\"token\":\""
+                    + this.token + "\"}") + "\n")) {
+                return "swallow";
+            }
+            this.PostLinkDown("推送通道发送失败");
+            return "stop";
         }
-        if (!this.WSendText("{\"op\":\"hello\",\"enc\":\"aes-gcm\",\"cnonce\":\""
-                + cnonce + "\",\"pass\":\"" + GameNet.JStr(this.cPass) + "\"}\n")) {
-            this.PostLinkDown("发送失败，断开"); return "stop";
-        }
-        this.app.Post(() => { this.OnHandshake(rx); });
-        return "swallow";
+        return "post";
     }
 
     /* 网络线程：同步发送一小段文本；套接字为非阻塞，小帧一次
@@ -441,72 +574,233 @@ class GameNet {
         return false;
     }
 
-    /* UI 线程：互斥队列交接 op 与控制行（"!close"）。*/
-    void Enqueue(string item) {
-        Mutex.Lock(this.qlock);
-        this.queue.Add(item);
-        Mutex.Unlock(this.qlock);
+    /* UI 线程：提交一条 HTTP op（入静态队列，必要时拉起 worker）。*/
+    void Op(string json, NetReply onReply) {
+        if (this.cHost.Length == 0) { this.AddChat("[系统]", "请先连接服务器。"); return; }
+        HttpReq req = new HttpReq();
+        req.json = this.Seal(json);
+        req.cb = onReply;
+        GameNet.HttpSubmit(req);
     }
 
-    List<string> Drain() {
-        List<string> rest = null;
-        Mutex.Lock(this.qlock);
-        if (this.queue.Count > 0) {
-            rest = this.queue;
-            this.queue = new List<string>();
+    static void HttpSubmit(HttpReq req) {
+        if (GameNet.httpLock == 0) {
+            GameNet.httpLock = Mutex.Create();
+            GameNet.httpQ = new List<HttpReq>();
+            GameNet.httpDone = new List<HttpReq>();
         }
-        Mutex.Unlock(this.qlock);
-        return rest;
+        bool need = false;
+        Mutex.Lock(GameNet.httpLock);
+        GameNet.httpQ.Add(req);
+        need = !GameNet.httpUp;
+        GameNet.httpUp = true;
+        Mutex.Unlock(GameNet.httpLock);
+        GameNet.Trace("S:" + GameNet.OpName(req.json));
+        if (need && !Thread.Start(GameNet.HttpWorkerEntry)) {
+            Mutex.Lock(GameNet.httpLock);
+            GameNet.httpUp = false;
+            Mutex.Unlock(GameNet.httpLock);
+            req.err = "网络线程启动失败";
+            Mutex.Lock(GameNet.httpLock);
+            GameNet.httpDone.Add(req);
+            Mutex.Unlock(GameNet.httpLock);
+        }
+    }
+
+    /* HTTP worker 入口：静态方法组（实例方法组/闭包喂 Thread.Start 会
+       编译通过、调用即崩）。队列空即退出，下一次提交重新拉起——与
+       DataTable.HttpSource/ImageHttp 同款；循环体里只有一处 await。 */
+    static void HttpWorkerEntry() {
+        Socket.Initialize();
+        while (true) {
+            HttpReq req = null;
+            Mutex.Lock(GameNet.httpLock);
+            if (GameNet.httpQ.Count > 0) {
+                req = GameNet.httpQ[0];
+                GameNet.httpQ.RemoveAt(0);
+            } else {
+                GameNet.httpUp = false;
+                Mutex.Unlock(GameNet.httpLock);
+                return;
+            }
+            Mutex.Unlock(GameNet.httpLock);
+            GameNet.Trace("K:" + GameNet.OpName(req.json));
+            await GameNet.HttpFetchOne(req);
+        }
+    }
+
+    /* 取回一条 op：传输层任何失败都变成应答里的 err——绝不静默吞掉
+       （回调不回来，UI 停在旧状态）。结果进完成队列，由 UI 线程的
+       PollHttp 并入；协程帧只经静态方法往返，不触碰实例状态。 */
+    static async int HttpFetchOne(HttpReq req) {
+        GameNet.Trace("F:" + GameNet.OpName(req.json));
+        string err = "";
+        string body = null;
+        int status = 0;
+        try {
+            /* 每请求新建连接：stdlib HttpSource/ImageHttp 同款。复用
+               keep-alive 在大应答（state）之后会串帧，实测 characters
+               应答体被污染。loopback 建连成本可忽略。 */
+            HttpClient nh = new HttpClient(GameNet.wantHost, GameNet.wantPort);
+            nh.SetHeader("Content-Type", "application/json");
+            /* 游戏服务器是自托管明文 HTTP：放行 loopback + 明文（远程
+               目标仍走 HTTPS 语义，不受影响）。 */
+            nh.SetCallPolicy(ExternalCallPolicy.Default()
+                .AllowLocalHttp()
+                .TotalTimeout(6000).ResponseLimit(1024 * 1024));
+            HttpResponse resp = await nh.SendBytesAsync("POST",
+                "/api/game/" + GameNet.OpName(req.json), req.json);
+            status = resp.statusCode;
+            body = resp.body;
+        } catch (Exception ex) {
+            err = ex.Message;
+        }
+        req.status = status;
+        req.respBody = body;
+        req.err = err;
+        Mutex.Lock(GameNet.httpLock);
+        GameNet.httpDone.Add(req);
+        Mutex.Unlock(GameNet.httpLock);
+        GameNet.Trace("D:" + GameNet.OpName(req.json));
+        return 0;
+    }
+
+    /* 调试探针：HTTP 通道各站日志（S 入队/K 取走/F 取数/D 完成/R 并入）。*/
+    static void Trace(string tag) {
+        Mutex.Lock(GameNet.httpLock);
+        GameNet.traceBuf = (tag + " | " + GameNet.traceBuf);
+        if (GameNet.traceBuf.Length > 260) { GameNet.traceBuf = GameNet.traceBuf.Substring(0, 260); }
+        Mutex.Unlock(GameNet.httpLock);
+    }
+    static string traceBuf = "";
+
+    /* UI 线程每帧：并入完成的 HTTP 应答（401/429/解析都在
+       OnHttpReply），并发起 25 秒会话保活轮询——服务端按「最后一次
+       HTTP 操作」计心跳，光挂着推送通道不算；顺带把 self 刷成服务端
+       权威值，金币/血量不因漏收推送停在旧值。 */
+    void PollHttp() {
+        try {
+            if (UiDriver.Active()) { UiDriver.SetProbe("net-http2", GameNet.traceBuf); }
+        } catch (Exception) { }
+        long now = DateTime.UtcNow().epoch;
+        if (this.token.Length > 0 && now - this.lastPollAt >= 25) {
+            this.lastPollAt = now;
+            GameNet.HttpSubmit(GameNet.StateReq(this));
+        }
+        if (GameNet.httpLock == 0 || GameNet.httpDone.Count == 0) { return; }
+        List<HttpReq> batch = null;
+        Mutex.Lock(GameNet.httpLock);
+        if (GameNet.httpDone.Count > 0) {
+            batch = GameNet.httpDone;
+            GameNet.httpDone = new List<HttpReq>();
+        }
+        Mutex.Unlock(GameNet.httpLock);
+        if (batch == null) { return; }
+        for (int i = 0; i < batch.Count; i = i + 1) {
+            HttpReq req = batch[i];
+            this.httpLog = ("R:" + GameNet.OpName(req.json)) + " | " + this.httpLog;
+            if (this.httpLog.Length > 220) { this.httpLog = this.httpLog.Substring(0, 220); }
+            this.OnHttpReply(req.cb, req.respBody, req.status, req.err);
+        }
+    }
+
+    /* 从 op 的 JSON 体里取 op 名（路由即 /api/game/<op>）。
+       "op":" 恒在串首，用户输入污染不到它。 */
+    static string OpName(string json) {
+        int k = json.IndexOf("\"op\":\"");
+        if (k < 0) { return "state"; }
+        int e = json.IndexOf("\"", k + 6);
+        if (e < 0) { return "state"; }
+        return json.Substring(k + 6, e - k - 6);
+    }
+
+    /* 25 秒保活轮询用的 state 请求：应答与 ev state 同一合入规则。 */
+    static HttpReq StateReq(GameNet net) {
+        HttpReq poll = new HttpReq();
+        poll.json = net.Seal("{\"op\":\"state\"}");
+        poll.cb = (JsonValue r) => {
+            JsonValue st = r.Get("self");
+            if (st != null && st.IsObject()) { net.self = st; net.Bump(); }
+        };
+        return poll;
+    }
+
+    /* UI 线程：把 HTTP 应答交给回调。401=会话失效（整体退回未连接），
+       429=限流，其余按 body 交回调；body 解析失败也合成错误。 */
+    void OnHttpReply(NetReply cb, string body, int status, string err) {
+        if (cb == null) { return; }
+        this.httpLog = ("op:" + Convert.ToString(status) + "/"
+            + Convert.ToString(body == null ? -1 : body.Length)
+            + (err.Length > 0 ? "!" + err : "")) + " | " + this.httpLog;
+        if (this.httpLog.Length > 220) { this.httpLog = this.httpLog.Substring(0, 220); }
+        try {
+            if (UiDriver.Active()) { UiDriver.SetProbe("net-http", this.httpLog); }
+        } catch (Exception) { }
+        if (err.Length > 0) { cb(GameNet.SyntheticErr("网络错误：" + err)); return; }
+        if (status == 401) {
+            this.Drop("登录已过期，请重新登录");
+            cb(GameNet.SyntheticErr("登录已过期，请重新登录"));
+            return;
+        }
+        if (status == 429) { cb(GameNet.SyntheticErr("操作过于频繁，请稍后再试")); return; }
+        if (status != 200) {
+            cb(GameNet.SyntheticErr("服务器错误 HTTP " + Convert.ToString(status)));
+            return;
+        }
+        JsonValue m = null;
+        try { m = JsonValue.ParseLenient(body); } catch (Exception) { m = null; }
+        if (m == null || !m.IsObject()) { cb(GameNet.SyntheticErr("应答不是合法 JSON")); return; }
+        cb(m);
+    }
+
+    static JsonValue SyntheticErr(string why) {
+        JsonValue r = JsonValue.NewObject();
+        r.Set("ok", JsonValue.NewNum("0"));
+        r.Set("err", JsonValue.NewStr(why));
+        return r;
     }
 
     /* 以下回调都经 App.Post 在 UI 线程执行。gen 保证旧会话的
      * 迟到回调不会污染新一轮连接。*/
-    void PostFail(string msg) {
-        string m = msg;
-        this.app.Post(() => { this.OnConnectFail(m); });
-    }
 
+    /* 推送通道链路问题（对端断开/看门狗）：只摘通道，会话还在
+       （HTTP 操作照常），网络线程稍后自动重拨。 */
     void PostLinkDown(string reason) {
         if (this.wsock >= 0) { Socket.Close(this.wsock); this.wsock = -1; }
+        this.wenc = false;
+        this.wrx = "";
         string r = reason;
-        this.app.Post(() => { this.OnLinkDown(r); });
-    }
-
-    void OnConnectFail(string msg) {
-        if (this.stage == 0 && !this.connecting) { return; }
-        this.connecting = false;
-        this.connected = false;
-        this.stage = 0;
-        this.error = msg;
-        this.AddChat("[系统]", msg + "。离线模式继续可用。");
-        this.Bump();
-    }
-
-    void OnConnected() {
-        this.connecting = false;
-        this.connected = true;
-        this.stage = 1;
-        this.error = "";
-        this.AddChat("[系统]", "已连接 " + this.cHost + ":" + Convert.ToString(this.cPort)
-            + "，等待加密握手…");
-        this.Bump();
+        this.app.Post(() => { this.OnPushDown(r); });
     }
 
     void OnHandshake(Secure rx) { this.sec = rx; }
 
-    void OnLinkDown(string reason) {
-        if (!this.connecting && !this.connected && this.stage == 0) { return; }
-        this.connecting = false;
-        this.Drop(reason);
+    void OnPushDown(string reason) {
+        if (!this.pushUp) { return; }
+        this.pushUp = false;
+        this.ready = false;
+        this.sec = null;
+        this.AddChat("[系统]", "推送通道断开：" + reason + "。操作不受影响，自动重连中。");
+        this.Bump();
     }
 
     void Drop(string reason) {
         this.connected = false;
         this.connecting = false;
         this.ready = false;
+        this.pushUp = false;
         this.stage = 0;
         this.sec = null;
-        this.replySinks.Clear();
+        this.token = "";
+        /* 未发出的 HTTP op 直接作废；在途/已完成的让它们自然走完
+           （回调只改 UI 状态，token 已清，不会再发起新请求）。 */
+        if (GameNet.httpLock != 0) {
+            Mutex.Lock(GameNet.httpLock);
+            GameNet.httpQ.Clear();
+            Mutex.Unlock(GameNet.httpLock);
+        }
+        /* 摘推送通道：网络线程看到关闭令牌自行收口。 */
+        if (this.pushClose != null) { this.pushClose.Store(1); }
         this.self = null;
         this.realms = null;
         this.mobs = null;
@@ -519,6 +813,11 @@ class GameNet {
         this.wboss = null;
         this.announces = null;
         this.lastFight = null;
+        this.bossPage = null;
+        this.bossLog.Clear();
+        this.bossMap = 0;
+        this.autoMob = 0;
+        this.demoHp = 0; this.demoWait = 0; this.demoTick = 0;
         this.uid = 0;
         /* realmId 不清零：断线重连分区窗仍默认选中上次玩过的区。 */
         this.realmName = "";
@@ -531,13 +830,18 @@ class GameNet {
 
     /* ---- 行解析与握手 ---- */
 
-    /* UI 线程：网络线程投来的原始行。加密期先解帧再解析；
-     * 解不开 = 被篡改/重放，立即断开。*/
+    /* UI 线程：网络线程投来的原始行。推送通道建立后先解帧再解析；
+     * 解不开 = 被篡改/重放，摘通道重连。*/
     void OnLine(string line) {
-        if (this.ready) {
-            if (this.sec == null) { this.Drop("加密状态丢失，断开"); return; }
+        if (this.sec != null) {
             string plain = this.sec.Open(line);
-            if (plain == null) { this.Drop("加密帧校验失败，断开"); return; }
+            if (plain == null) {
+                this.pushUp = false;
+                this.ready = false;
+                this.sec = null;
+                this.AddChat("[系统]", "加密帧校验失败，重连推送通道。");
+                return;
+            }
             line = plain;
         }
         this.HandleLine(line);
@@ -547,20 +851,16 @@ class GameNet {
         JsonValue m = null;
         try { m = JsonValue.ParseLenient(line); } catch (Exception) { m = null; }
         if (m == null || !m.IsObject()) { return; }
-        if (m.Int("enc", 0) == 1) {
+        if (m.Int("push", 0) == 1) {
+            /* attach 应答：推送通道就绪（聊天/公告/idlesum 恢复实时）。 */
+            this.pushUp = true;
             this.ready = true;
-            this.stage = 2;
-            this.AddChat("[系统]", "加密会话已建立（AES-256-GCM · HKDF-SHA256 · 序号防重放）。");
+            this.AddChat("[系统]", "推送通道已建立（AES-256-GCM · HKDF-SHA256 · 序号防重放）。");
             this.Bump();
             return;
         }
+        if (m.Int("enc", 0) == 1) { return; }
         if (m.Str("ev", "").Length > 0) { this.OnEvent(m); return; }
-        if (this.replySinks.Count > 0) {
-            NetReply cb = this.replySinks[0];
-            this.replySinks.RemoveAt(0);
-            cb(m);
-            return;
-        }
         if (m.Int("ok", 1) == 0) {
             this.error = m.Str("err", "未知错误");
             this.AddChat("[系统]", "服务器：" + this.error);
@@ -626,6 +926,17 @@ class GameNet {
             this.AddFeed(m.Str("text", "获得掉落")); return;
         }
         if (ev == "die") { this.AddFeed(m.Str("text", "你倒下了，挂机已停止。")); return; }
+        if (ev == "idlesum") {
+            /* 挂机批量结算（默认 60 秒一条）：整份 self+bag 以服务端
+               为准整体替换，逐秒的本地演示只管演出不记账。 */
+            JsonValue st = m.Get("self");
+            if (st != null && st.IsObject()) { this.self = st; }
+            JsonValue bg = m.Get("bag");
+            if (bg != null && bg.IsArray()) { this.bag = bg; }
+            this.AddFeed("[结算] " + m.Str("text", ""));
+            this.Bump();
+            return;
+        }
         if (ev == "chat") { this.AddChat("[" + m.Str("from", "玩家") + "]", m.Str("text", "")); return; }
         if (ev == "move" || ev == "walk") { this.AddChat("[系统]", m.Str("text", "")); return; }
         if (ev == "announce") { this.AddChat("[公告]", m.Str("title", "") + " " + m.Str("body", "")); return; }
@@ -634,18 +945,16 @@ class GameNet {
 
     /* ---- 发送 ---- */
 
-    /* 带回调的请求：回复按发出顺序逐条对号入座（协议一问一答且严格
-       按序，回调排成 FIFO，见 replySinks 注释）。*/
-    void Op(string json, NetReply onReply) {
-        if (!this.ready) { this.AddChat("[系统]", "尚未连接服务器。"); return; }
-        this.replySinks.Add(onReply);
-        this.Enqueue(json);
-    }
+    string Host() { return this.cHost; }
 
-    /* 无回复推送类 op（state/mobs/maps 的回复都带数据，用 Op；Fire 只用于不需要回执的行）。*/
-    void Fire(string json) {
-        if (!this.ready) { return; }
-        this.Enqueue(json);
+    /* HTTP 会话没有连接可认：每个 op 体都要带 token。调用点保持 TCP
+       时代的形状（{"op":...}），token 在这唯一出口统一注入。token 是
+       服务端签发的 32 位十六进制，不含引号，拼接安全。 */
+    string Seal(string json) {
+        if (this.token.Length > 0 && json.IndexOf("{\"") == 0) {
+            return "{\"token\":\"" + this.token + "\"," + json.Substring(1);
+        }
+        return json;
     }
 
     /* ---- UI 动作 ---- */
@@ -671,13 +980,16 @@ class GameNet {
         });
     }
 
-    /* 登录成功：拿区服列表（应答自带）后停在「分区」选择页——照原版
-       不自动进区，玩家选分区→区服才进；一个账号所有区通用。 */
+    /* 登录成功：token 入手（此后 HTTP op 全凭它；网络线程发现 token
+       就自动拨推送通道），拿区服列表（应答自带）后停在「分区」选择
+       页——照原版不自动进区，玩家选分区→区服才进。 */
     void Login(string user, string pass) {
         this.Op("{\"op\":\"login\",\"user\":\"" + user + "\",\"pass\":\"" + pass + "\"}", (JsonValue r) => {
             if (r.Int("ok", 0) != 1) { this.AddChat("[系统]", "登录失败：" + r.Str("err", "未知错误")); return; }
             this.uid = r.Int("uid", 0);
             this.user = user;
+            this.token = r.Str("token", "");
+            this.pushPort = r.Int("pushPort", 0);
             this.stage = 3;
             this.needCreate = false;
             JsonValue rows = r.Get("realms");
@@ -823,13 +1135,36 @@ class GameNet {
         });
     }
 
-    void TakeOff(string slot) {
-        this.Op("{\"op\":\"takeoff\",\"slot\":\"" + slot + "\"}", (JsonValue r) => {
+    /* 卸下：slot 为服务端穿戴位代码（0武器 1衣服 2头盔 3项链 4手镯
+       6戒指 8腰带 9靴子 10勋章 11宝石）。 */
+    void TakeOff(int slot) {
+        this.Op("{\"op\":\"takeoff\",\"slot\":" + Convert.ToString(slot) + "}", (JsonValue r) => {
             if (r.Int("ok", 0) != 1) { this.AddChat("[系统]", "卸下失败：" + r.Str("err", "未知错误")); return; }
             JsonValue st = r.Get("self");
             if (st != null && st.IsObject()) { this.self = st; }
+            this.AddFeed("已卸下。");
             this.RefreshBag();
         });
+    }
+
+    /* 穿戴明细（self.worn）：穿戴中的物品不在背包，属性由 self 就地带全。 */
+    int WornCount() {
+        JsonValue w = this.self != null ? this.self.Get("worn") : null;
+        return w != null && w.IsArray() ? w.Count() : 0;
+    }
+
+    JsonValue WornAt(int i) {
+        JsonValue w = this.self != null ? this.self.Get("worn") : null;
+        if (w == null || !w.IsArray()) { return null; }
+        return w.At(i);
+    }
+
+    JsonValue WornInSlot(int slot) {
+        for (int i = 0; i < this.WornCount(); i = i + 1) {
+            JsonValue w = this.WornAt(i);
+            if (w != null && w.Int("slot", -1) == slot) { return w; }
+        }
+        return null;
     }
 
     void UseItem(int itemId) {
@@ -966,8 +1301,89 @@ class GameNet {
             : "{\"op\":\"auto\",\"on\":0}";
         this.Op(json, (JsonValue r) => {
             if (r.Int("ok", 0) == 1) {
-                this.AddFeed(r.Int("auto", 0) > 0 ? "自动挂机开启，战况每秒推送。" : "自动挂机已停止。");
+                this.autoMob = on ? mobId : 0;
+                this.demoHp = 0; this.demoWait = 0; this.demoTick = 0;
+                this.AddFeed(on ? "自动挂机开启：战况是本地演示，收益由服务端每 60 秒批量结算。"
+                                : "自动挂机已停止。");
             } else { this.AddChat("[系统]", "挂机失败：" + r.Str("err", "未知错误")); }
+            this.Bump();
+        });
+    }
+
+    /* ---- 地图内页（进图后的页面）：BOSS 挑战/扫荡/战报 ---- */
+
+    JsonValue BossPage() { return this.bossPage; }
+    int BossMap() { return this.bossMap; }
+    int BossLogCount() { return this.bossLog.Count; }
+    string BossLogAt(int i) { return this.bossLog[i]; }
+    bool BossAuto() { return this.bossAuto; }
+
+    void SetBossAuto(bool on) {
+        this.bossAuto = on;
+        this.AddFeed(on ? "结束后自动挑战BOSS：开（败了自动接着磨）。"
+                        : "结束后自动挑战BOSS：关。");
+    }
+
+    /* bossfight/bossweep 回复的公共合入：面板与 self 整份替换，log
+       有则整屏替换（扫荡无 log，战报保留原内容）。 */
+    void TakeBossReply(JsonValue r) {
+        JsonValue p = r.Get("page");
+        if (p != null && p.IsObject()) { this.bossPage = p; }
+        JsonValue st = r.Get("self");
+        if (st != null && st.IsObject()) { this.self = st; }
+        JsonValue lg = r.Get("log");
+        if (lg != null && lg.IsArray()) {
+            this.bossLog.Clear();
+            for (int i = 0; i < lg.Count(); i = i + 1) {
+                JsonValue ln = lg.At(i);
+                string s = ln != null ? ln.AsString("") : "";
+                if (s.Length > 0) { this.bossLog.Add(s); }
+            }
+        }
+        this.Bump();
+    }
+
+    /* 打开地图内页：拉一次 BOSS 面板（挑战/扫荡回复自带新面板）。 */
+    void OpenMapPage(int mapId) {
+        this.bossMap = mapId;
+        this.Op("{\"op\":\"bossinfo\",\"map\":" + Convert.ToString(mapId) + "}",
+            (JsonValue r) => {
+                JsonValue p = r.Get("page");
+                if (r.Int("ok", 0) != 1) {
+                    this.AddFeed("BOSS面板拉取失败：" + r.Str("err", "未知错误"));
+                    return;
+                }
+                if (p != null && p.IsObject()) { this.bossPage = p; this.Bump(); }
+            });
+    }
+
+    /* 挑战一场：服务端整场打完，回复带逐轮战报。勾了自动挑战且打输
+       且还有次数就接着递归磨（BOSS 留血，玩家每场满血，磨得动）。 */
+    void BossFight(int mapId) {
+        this.Op("{\"op\":\"bossfight\",\"map\":" + Convert.ToString(mapId) + "}",
+            (JsonValue r) => {
+                if (r.Int("ok", 0) != 1) {
+                    this.AddFeed("挑战失败：" + r.Str("err", "未知错误"));
+                    return;
+                }
+                this.TakeBossReply(r);
+                if (this.bossAuto && r.Int("win", 0) != 1
+                        && this.self != null && this.self.Int("tries", 0) > 0) {
+                    this.BossFight(mapId);
+                }
+            });
+    }
+
+    void BossSweep(int mapId, int count) {
+        this.Op("{\"op\":\"bossweep\",\"map\":" + Convert.ToString(mapId)
+            + ",\"count\":" + Convert.ToString(count) + "}", (JsonValue r) => {
+            if (r.Int("ok", 0) != 1) {
+                this.AddFeed("扫荡失败：" + r.Str("err", "未知错误"));
+                return;
+            }
+            this.bossLog.Add("[扫荡] " + r.Str("text", "完成"));
+            if (this.bossLog.Count > 16) { this.bossLog.RemoveAt(0); }
+            this.TakeBossReply(r);
         });
     }
 
@@ -1013,12 +1429,25 @@ class GameNet {
 
     void Say(string text) {
         if (text.Length == 0) { return; }
-        this.Fire("{\"op\":\"say\",\"text\":\"" + text + "\"}");
+        this.Op("{\"op\":\"say\",\"text\":\"" + text + "\"}", (JsonValue r) => {
+            if (r.Int("ok", 0) != 1) { this.AddChat("[系统]", "发送失败：" + r.Str("err", "未知错误")); }
+        });
     }
 
     void Logout() {
-        if (this.stage >= 2) { this.Enqueue("{\"op\":\"logout\"}"); }
-        this.Enqueue("!close");
         this.Drop("主动断开");
     }
+}
+
+/* 一条待发的 HTTP op：json 即请求体（{"op":...,...}，Seal 已注入
+   token）。worker 填写应答三件套，UI 线程 PollHttp 并入；网络错误/
+   限流/401 也合成 {"ok":0,"err"} 回给 cb——回调必达，UI 不会停在
+   旧状态。*/
+class HttpReq {
+    string json;
+    NetReply cb;
+    /* worker 填写、UI 线程 PollHttp 读取的应答三件套。 */
+    int status;
+    string respBody;
+    string err;
 }

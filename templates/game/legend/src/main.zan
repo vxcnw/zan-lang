@@ -22,6 +22,8 @@ class LegendApp {
     int recycleCurrency; int recyclePage; List<Equipment> recycleTargets = new List<Equipment>();
     Label[] elementLabels = new Label[5]; Progress[] elementBars = new Progress[5]; Button elementToggle;
     int mapPage; int bossPage; int shopPage; string mapNotice = "";
+    /* 地图内页（页31）当前打开的图。 */
+    int netInnerMap = 1;
     int page = 2; int selected = -1; int forgeSlot; int forgeMode; int growthTab = 3; bool vault; bool inspectWorn;
     long lastTime; long lastSave; string saveState = "";
     DataTable equipmentArtData; DataTable navigationData; DataTable artData; DataTable monsterArtData; DataTable encounterArtData;
@@ -47,7 +49,7 @@ class LegendApp {
     string renderedFormPage = "";
     /* 发布内置服务器：data/server.txt 首行 host:port（可带 |连接密码），
        LEGEND_SERVER 环境变量可覆盖（本机联调）。没有服务器列表 UI。 */
-    string srvAddr = "127.0.0.1:7100"; string srvPass = "";
+    string srvAddr = "127.0.0.1:8099"; string srvPass = "";
     int netPhase = -1;
     Input dUser; Input dPass; Input dPass2; Input dEmail; Input dAnswer; Input dNewPass; Input dChar;
     Checkbox dRemember; Checkbox dAgree;
@@ -203,7 +205,12 @@ class LegendApp {
         netForm = Panel.Column(); netForm.Class = "page-surface"; netForm.Pad(24); netForm.Gap(10); netForm.DockFill(); root.Add(netForm);
         BuildPage(); DeclareUnits(root); Refresh();
         ConnectPublished(dataDir); RebuildNetForm();
-        form.Every(120, () => { PumpNetStage(); });
+        form.Every(120, () => {
+          /* HTTP 应答并入 + 25s 保活轮询：必须在表单泵之前，本帧就用
+             上新数据。不许抛——Every 里的动作一抛就永久停摆。 */
+          try { net.PollHttp(); } catch (Exception) { }
+          PumpNetStage();
+        });
         form.Every(1000, () => {
           /* 心跳任务不许死：Every 里的动作一抛就永久停摆（探针/存档
              全跟着停），所以整段兜底，异常记进探针便于定位。*/
@@ -212,6 +219,9 @@ class LegendApp {
             if (!net.InWorld()) {
                 // 联机挂机由服务端驱动（网络线程自行心跳/看门狗），本地只推进离线战斗。
                 long elapsed = t - lastTime; g.Advance((int)(elapsed > 86400 ? 86400 : elapsed), t);
+            } else {
+                // 挂机战况是本地演示（服务端 60 秒批量结算一次，见 ev idlesum）。
+                net.DemoRound();
             }
             lastTime = t;
             if (net.InWorld() && net.DataVersion() != lastNetKey) { lastNetKey = net.DataVersion(); BuildPage(); }
@@ -220,8 +230,8 @@ class LegendApp {
             bool inWorldNow = net.InWorld();
             if (wasInWorld && !inWorldNow) { BackToLoginForm(); }
             wasInWorld = inWorldNow;
-            if (UiDriver.Active()) {
-                // UI 自动化探针：让 ZAN_UI_SCRIPT 能断言联机状态，无需截屏比对。
+                if (UiDriver.Active()) {
+                    // UI 自动化探针：让 ZAN_UI_SCRIPT 能断言联机状态，无需截屏比对。
                 // 必须在 Refresh() 之前——无角色时 Refresh 提前返回，探针会一直停在旧值。
                 // 探针异常不允许打死这个心跳任务（离线推进与存档都在后面）。
                 try {
@@ -242,6 +252,7 @@ class LegendApp {
                         + "·防具:" + (net.Self() != null ? net.Self().Str("armorName", "") : "-"));
                     UiDriver.SetProbe("net-quest", net.Self() != null
                         ? Rules.N(net.Self().Int("kills", 0)) : "-");
+                    UiDriver.SetProbe("net-boss", BossProbeLine());
                 } catch (Exception e) { }
             }
             if (t - lastSave >= 15) { Save(); } Refresh();
@@ -313,6 +324,7 @@ class LegendApp {
             if (page == 28) { BuildNetHelp(); return; }
             if (page == 29) { BuildNetAnnounce(); return; }
             if (page == 30) { BuildNetSettings(); return; }
+            if (page == 31) { BuildNetMapInner(); return; }
             if (page == 2) { BuildNetOfflinePage(); return; }
             BuildNetStub(); return;
         }
@@ -802,27 +814,39 @@ class LegendApp {
         JsonValue st = net.Self();
         if (st == null) { return; }
         content.With(Text("背包", "yellow strong", 28));
-        string weapon = st.Str("weaponName", "");
-        string armor = st.Str("armorName", "");
         int myLv = st.Int("level", 1);
         Panel body = Panel.Row(); body.Gap(8); body.Grow(); content.With(body);
         Panel chr = Col("frame"); chr.Pad(10); chr.Gap(6); chr.Prefer(272, 0); body.With(chr);
         chr.With(Text("角色", "yellow", 28));
         chr.With(Text(st.Str("name", "旅人") + " · " + Rules.N(myLv) + "级"
             + (st.Str("title", "").Length > 0 ? " · " + st.Str("title", "") : ""), "cyan", 24));
-        chr.With(Text("武器：" + (weapon.Length > 0 ? weapon + " ★" + Rules.N(st.Int("weaponStar", 0)) : "（空）")
-            + "\n防具：" + (armor.Length > 0 ? armor + " ★" + Rules.N(st.Int("armorStar", 0)) : "（空）"), "yellow", 48));
+        /* 穿戴位照原版列全（0武器…11宝石，空位不占行）：穿戴中的物品
+           不在背包，名字/星级/属性由 self.worn 就地下发。 */
+        chr.With(Text("穿戴", "yellow", 28));
+        for (int i = 0; i < net.WornCount(); i = i + 1) {
+            JsonValue w = net.WornAt(i);
+            if (w == null) { continue; }
+            int sl = w.Int("slot", -1);
+            Panel wr = Panel.Row(); wr.Gap(4); wr.Prefer(0, 26);
+            string star = w.Int("star", 0) > 0 ? " ★" + Rules.N(w.Int("star", 0)) : "";
+            Label wl = Text(SlotName(sl, 2) + "：" + w.Str("name", "") + star, "cyan small", 0);
+            wl.Grow(); wr.With(wl);
+            int slCap = sl;
+            Button off = Btn("卸", "net-takeoff-" + Rules.N(sl), () => { net.TakeOff(slCap); });
+            off.Prefer(40, 24); wr.With(off);
+            chr.With(wr);
+        }
+        if (net.WornCount() == 0) { chr.With(Text("（未穿装备，从右侧背包穿）", "secondary", 24)); }
         chr.With(Text("战斗属性", "yellow", 28));
-        chr.With(Text("攻击 " + Rules.N(st.Int("atk", 0)) + "\n防御 " + Rules.N(st.Int("def", 0))
+        int aLo = st.Int("atkLo", 0); int aHi = st.Int("atk", 0);
+        int dLo = st.Int("defLo", 0); int dHi = st.Int("def", 0);
+        int mLo = st.Int("macLo", 0); int mHi = st.Int("mac", 0);
+        chr.With(Text("攻击 " + (aLo < aHi ? Rules.N(aLo) + "-" : "") + Rules.N(aHi)
+            + "\n防御 " + (dLo < dHi ? Rules.N(dLo) + "-" : "") + Rules.N(dHi)
+            + "\n魔御 " + (mLo < mHi ? Rules.N(mLo) + "-" : "") + Rules.N(mHi)
             + "\n生命 " + Rules.N(st.Int("hp", 0)) + "/" + Rules.N(st.Int("maxhp", 1))
             + "\n经验 " + Rules.N(st.Int("exp", 0)) + "/" + Rules.N(st.Int("expnext", 1))
-            + "\n击杀 " + Rules.N(st.Int("kills", 0)) + "\n金币 " + Rules.N(st.Int("gold", 0)), "green", 140));
-        Panel wornBtns = Panel.Row(); wornBtns.Gap(4); wornBtns.Prefer(0, 28);
-        Button offW = Btn("卸下武器", "net-takeoff-weapon", () => { net.TakeOff("weapon"); });
-        offW.Disabled = weapon.Length == 0; offW.Prefer(0, 28); wornBtns.With(offW);
-        Button offA = Btn("卸下防具", "net-takeoff-armor", () => { net.TakeOff("armor"); });
-        offA.Disabled = armor.Length == 0; offA.Prefer(0, 28); wornBtns.With(offA);
-        chr.With(wornBtns);
+            + "\n击杀 " + Rules.N(st.Int("kills", 0)) + "\n金币 " + Rules.N(st.Int("gold", 0)), "green", 176));
         Panel right = Panel.Column(); right.Gap(8); right.Grow(); body.With(right);
         /* 分类签页：全部 / 消耗材料 / 武器 / 衣服 / 头盔 / 项链 / 手镯 /
            戒指 / 其他穿戴（腰带/靴子/勋章/宝石）。空类不显示。 */
@@ -871,10 +895,8 @@ class LegendApp {
             if (bagTab >= 0 && slot != bagTab) { continue; }
             if (id == bagSel) { selItem = it; }
             string desc = SlotName(slot, kind);
-            if (it.Int("atk", 0) > 0) { desc = desc + "\n攻击+" + Rules.N(it.Int("atk", 0)); }
-            if (it.Int("def", 0) > 0) { desc = desc + "\n防御+" + Rules.N(it.Int("def", 0)); }
-            if (it.Int("heal", 0) > 0) { desc = desc + "\n回血 " + Rules.N(it.Int("heal", 0)); }
-            if (minLv > 1) { desc = desc + "\n需 " + Rules.N(minLv) + " 级"; }
+            string stats = StatLine(it);
+            if (stats.Length > 0) { desc = desc + "\n" + stats; }
             bool sel = id == bagSel;
             Button cell = Btn((sel ? "▶ " : "") + it.Str("name", "物品") + " ×" + Rules.N(it.Int("count", 1)) + "\n" + desc,
                 "net-sel-" + Rules.N(id), () => { bagSel = id; BuildPage(); });
@@ -897,23 +919,21 @@ class LegendApp {
                 + " · 卖出价 " + Rules.N(price / 2), "yellow strong", 28));
             Panel btns = Panel.Row(); btns.Gap(4); btns.Prefer(0, 28);
             if (kind == 1 || kind == 2) {
-                string worn = kind == 1 ? weapon : armor;
-                int curAtk = 0; int curDef = 0;
-                if (worn.Length > 0) {
-                    JsonValue cur = ItemTpl(worn);
-                    if (cur != null) { curAtk = cur.Int("atk", 0); curDef = cur.Int("def", 0); }
-                }
-                int myAtk = selItem.Int("atk", 0); int myDef = selItem.Int("def", 0);
-                int delta = (myAtk - curAtk) + (myDef - curDef);
+                JsonValue worn = net.WornInSlot(selItem.Int("slot", -1));
+                string wornName = worn != null ? worn.Str("name", "") : "";
+                int mySum = SelSum(selItem);
+                int curSum = worn != null ? SelSum(worn) : 0;
+                int delta = mySum - curSum;
                 string verdict; string vColor;
-                if (worn == sname) { verdict = "当前正穿戴这件"; vColor = "green"; }
-                else if (worn.Length == 0) { verdict = "当前该栏位为空，穿上即生效"; vColor = "green"; }
-                else if (delta > 0) { verdict = "比 " + worn + " 高 " + Rules.N(delta) + " 点属性"; vColor = "green"; }
-                else if (delta < 0) { verdict = "比 " + worn + " 低 " + Rules.N(-delta) + " 点属性"; vColor = "orange"; }
-                else { verdict = "与 " + worn + " 属性相当"; vColor = "secondary"; }
-                cmp.With(Text("该物品：攻击+" + Rules.N(myAtk) + " · 防御+" + Rules.N(myDef)
-                    + " · 需 " + Rules.N(selItem.Int("minLevel", 1)) + " 级\n当前穿戴："
-                    + (worn.Length > 0 ? worn + " 攻击+" + Rules.N(curAtk) + " · 防御+" + Rules.N(curDef) : "（空）")
+                string myStats = StatLine(selItem);
+                if (wornName == sname) { verdict = "当前正穿戴这件"; vColor = "green"; }
+                else if (worn == null) { verdict = "当前该栏位为空，穿上即生效"; vColor = "green"; }
+                else if (delta > 0) { verdict = "比 " + wornName + " 高 " + Rules.N(delta) + " 点属性"; vColor = "green"; }
+                else if (delta < 0) { verdict = "比 " + wornName + " 低 " + Rules.N(-delta) + " 点属性"; vColor = "orange"; }
+                else { verdict = "与 " + wornName + " 属性相当"; vColor = "secondary"; }
+                cmp.With(Text("该物品：" + (myStats.Length > 0 ? myStats : "无附加属性")
+                    + "\n当前" + SlotName(selItem.Int("slot", -1), kind) + "："
+                    + (worn != null ? wornName + " " + StatLine(worn) : "（空）")
                     + "\n" + verdict, vColor, 66));
                 Button eq = Btn("穿 戴", "net-equip-" + Rules.N(selItem.Int("id", 0)), () => { net.EquipItem(selItem.Int("id", 0)); });
                 eq.Disabled = myLv < selItem.Int("minLevel", 0);
@@ -933,9 +953,48 @@ class LegendApp {
         Note(content, "卖出价为商店半价；穿上更好的装备，攻防立刻生效。");
     }
 
+    /* 原版属性行：攻/魔/道/防/魔御 lo-hi 区间（lo>0 且 <hi 才带下限）
+       + 消耗品回血/装备血蓝加成 + 职业/等级门槛 + 重量；只列非零段，
+       空串=白板。背包/商店行加成键是 heal，worn 行键是 hp，都接。 */
+    string StatLine(JsonValue it) {
+        string s = "";
+        int lo = it.Int("atkMin", 0); int hi = it.Int("atk", 0);
+        if (hi > 0) { s = s + "攻" + (lo > 0 && lo < hi ? Rules.N(lo) + "-" : "") + Rules.N(hi) + " "; }
+        lo = it.Int("magicMin", 0); hi = it.Int("magic", 0);
+        if (hi > 0) { s = s + "魔" + (lo > 0 && lo < hi ? Rules.N(lo) + "-" : "") + Rules.N(hi) + " "; }
+        lo = it.Int("taoMin", 0); hi = it.Int("tao", 0);
+        if (hi > 0) { s = s + "道" + (lo > 0 && lo < hi ? Rules.N(lo) + "-" : "") + Rules.N(hi) + " "; }
+        lo = it.Int("defMin", 0); hi = it.Int("def", 0);
+        if (hi > 0) { s = s + "防" + (lo > 0 && lo < hi ? Rules.N(lo) + "-" : "") + Rules.N(hi) + " "; }
+        lo = it.Int("mdefMin", 0); hi = it.Int("mdef", 0);
+        if (hi > 0) { s = s + "魔御" + (lo > 0 && lo < hi ? Rules.N(lo) + "-" : "") + Rules.N(hi) + " "; }
+        int hp = it.Int("heal", 0);
+        if (hp == 0) { hp = it.Int("hp", 0); }
+        if (hp > 0) {
+            s = s + (it.Int("kind", 3) == 0 ? "回血" + Rules.N(hp) + " "
+                : "血+" + Rules.N(hp) + " ");
+        }
+        int mp = it.Int("mp", 0);
+        if (mp > 0) { s = s + "蓝+" + Rules.N(mp) + " "; }
+        int jn = it.Int("jobNeed", 0);
+        if (jn == 1) { s = s + "限战士 "; }
+        else if (jn == 2) { s = s + "限法师 "; }
+        else if (jn == 3) { s = s + "限道士 "; }
+        int lv = it.Int("minLevel", 0);
+        if (lv > 1) { s = s + "需" + Rules.N(lv) + "级 "; }
+        int wt = it.Int("weight", 0);
+        if (wt > 0) { s = s + "重" + Rules.N(wt); }
+        return s;
+    }
+
+    /* 穿戴价值粗比：攻/魔/道/防/魔御上限合计（背包对比行的 delta）。 */
+    int SelSum(JsonValue it) {
+        return it.Int("atk", 0) + it.Int("magic", 0) + it.Int("tao", 0)
+            + it.Int("def", 0) + it.Int("mdef", 0);
+    }
+
     /* 按名字查物品档：先翻背包，再翻商店缓存；都无则 null（只报名字）。 */
-    JsonValue ItemTpl(string name) {
-        for (int i = 0; i < net.BagCount(); i = i + 1) {
+    JsonValue ItemTpl(string name) {        for (int i = 0; i < net.BagCount(); i = i + 1) {
             JsonValue it = net.BagAt(i);
             if (it.Str("name", "") == name) { return it; }
         }
@@ -984,13 +1043,15 @@ class LegendApp {
         return File.Exists(path) ? path : PicturePath("map", id);
     }
 
-    /* 页 0 地图：照原版——整卡就是地图截图，图名叠在图上右上角；
-       只有当前所在保持彩色（金边），其余全部置灰；点卡片即进图。
+    /* 页 0 地图：照原版 BOSS 链——击败上一张图的 BOSS 才解锁下一张；
+       解锁的图全彩色（当前图金框常亮，其余蓝框、悬停变金框），锁定
+       的图置灰不可点；整卡就是地图截图，图名叠在图上右上角。
        底部 [1][2] 翻页（每页 20 张）。只动主体区域。 */
     void BuildNetTravel() {
         JsonValue st = net.Self();
         int curMap = st != null ? st.Int("map", 0) : 0;
-        int myLv = st != null ? st.Int("level", 1) : 1;
+        int unlocked = st != null && st.Int("mapUnlocked", 0) > 0
+            ? st.Int("mapUnlocked", 0) : 1;
         int total = net.MapCount();
         /* 卡宽随窗口推导：中央=窗宽-聊天栏252-侧栏248，四列去内边距
            与列距。1080 宽下 ≈140×64，与原版 146×64 同量级。 */
@@ -1004,19 +1065,40 @@ class LegendApp {
             JsonValue mp = net.MapAt(i);
             int id = mp.Int("id", 0);
             bool here = id == curMap;
-            bool enterable = !here && MapOpen(id) == 1 && myLv >= mp.Int("minLevel", 1);
+            bool open = id <= unlocked;
             string name = mp.Str("name", "地图");
-            Panel card = new Panel(); card.Class = here ? "map-tile map-tile-here" : "map-tile";
+            Panel card = new Panel();
+            card.Class = here ? "map-tile map-tile-here"
+                : open ? "map-tile map-tile-open" : "map-tile";
             card.Pad(1); card.Prefer(0, imgH + 2); card.Named("net-map-" + Rules.N(id));
-            Image thumb = new Image(MapThumbPath(id, !here), name, "cover");
+            Image thumb = new Image(MapThumbPath(id, !open), name, "cover");
             thumb.DockManual(); thumb.Prefer(imgW, imgH); thumb.Place(0, 0); card.With(thumb);
             int nx = imgW - 6 - name.Length * 13; if (nx < 0) { nx = 0; }
             Label nm = Text(name, "map-name", 18); nm.DockManual(); nm.Prefer(imgW - nx, 18);
             nm.Place(nx, 3); card.With(nm);
-            if (enterable) { int mid = id; card.OnClick(() => { net.MoveTo(mid); }); }
+            if (!here) {
+                int mid = id;
+                if (open) {
+                    /* 解锁图：照原版点卡即进图，落到这张图的内页。 */
+                    card.OnClick(() => {
+                        net.MoveTo(mid);
+                        net.OpenMapPage(mid);
+                        Navigate(31);
+                    });
+                } else {
+                    /* 锁定的图也接点击：服务端闸门会回报原因（尚未解锁：
+                       先在上一张图的内页挑战并击败 BOSS），不能点了没反应。 */
+                    card.OnClick(() => { net.MoveTo(mid); });
+                }
+            } else {
+                /* 当前图：直接看内页（重进不需要移动）。 */
+                int mid = id;
+                card.OnClick(() => { net.OpenMapPage(mid); Navigate(31); });
+            }
             cards.With(card);
         }
-        Panel pager = Panel.Row(); pager.Prefer(0, 26);
+        /* 分页照原版在卡片阵下方（左下 [1][2]），随内容滚动。 */
+        Panel pager = Panel.Row(); pager.Prefer(0, 34); pager.Pad(2);
         Label lp = Text("", "secondary", 0); lp.Grow(); pager.With(lp);
         int pages = (total + 19) / 20;
         for (int p = 0; p < pages; p = p + 1) {
@@ -1025,7 +1107,155 @@ class LegendApp {
             pg.Prefer(30, 22); pager.With(pg);
         }
         Label rp = Text("", "secondary", 0); rp.Grow(); pager.With(rp);
-        content.With(pager);
+        list.With(pager);
+    }
+
+    /* 页 31 地图内页（照原版进图后的页面）：左上战斗场景（我方对本图
+       BOSS，头顶血条），其下战报滚动，底部返回/离线挂机条；右侧 BOSS
+       面板——挑战(剩N)次、次数输入+扫荡、结束后自动挑战、属性栅格
+       （气血/法力/攻击/魔法/道术 | 等级/转生/防御/魔防/幸运）。 */
+    void BuildNetMapInner() {
+        JsonValue st = net.Self();
+        int mapId = netInnerMap;
+        JsonValue page = net.BossPage();
+        if (page == null) { net.OpenMapPage(mapId); }
+        string mapName = "";
+        for (int i = 0; i < net.MapCount(); i = i + 1) {
+            JsonValue mp = net.MapAt(i);
+            if (mp.Int("id", 0) == mapId) { mapName = mp.Str("name", ""); break; }
+        }
+        Panel split = Panel.Row(); split.Gap(8); split.Grow(); content.With(split);
+        Panel left = Panel.Column(); left.Grow(); left.Gap(8); split.With(left);
+
+        /* 战斗场景：我方（左）对本图 BOSS（右），头顶血量与血条。 */
+        Panel scene = Col("boss-scene"); scene.Pad(12); scene.Gap(6); scene.Prefer(0, 248); left.With(scene);
+        Panel duo = Panel.Row(); duo.Grow(); duo.Gap(0); scene.With(duo);
+        Panel pside = Panel.Column(); pside.Grow(); pside.Gap(4); duo.With(pside);
+        int php = st != null ? st.Int("hp", 0) : 0;
+        int pmax = st != null ? st.Int("maxhp", 1) : 1;
+        string pname = st != null ? st.Str("name", "旅人") : " ";
+        Label phpl = Text(pname + " " + Rules.N(php) + "/" + Rules.N(pmax), "red", 18);
+        phpl.Prefer(160, 18); pside.With(phpl);
+        Progress pbar = new Progress(100, 5); pbar.Class = "health-bar"; pbar.Prefer(160, 6); pbar.showIndicator = false;
+        pbar.percent = pmax > 0 ? (int)((long)php * 100 / pmax) : 0; pside.With(pbar);
+        pside.With(Art("portrait", 76, 76));
+        pside.With(Text(pname, "map-name", 18));
+        Panel bside = Panel.Column(); bside.Grow(); bside.Gap(4); duo.With(bside);
+        JsonValue bo = page != null ? page.Get("boss") : null;
+        bool hasBoss = bo != null && bo.IsObject();
+        int bhpLeft = hasBoss ? bo.Int("hpLeft", 0) : 0;
+        int bhpMax = hasBoss ? bo.Int("hp", 1) : 1;
+        Label bhpl = Text(Rules.N(bhpLeft) + "/" + Rules.N(bhpMax), "red", 18);
+        bhpl.Prefer(160, 18); bside.With(bhpl);
+        Progress bbar = new Progress(100, 5); bbar.Class = "health-bar"; bbar.Prefer(160, 6); bbar.showIndicator = false;
+        bbar.percent = bhpMax > 0 ? (int)((long)bhpLeft * 100 / bhpMax) : 0; bside.With(bbar);
+        if (hasBoss) {
+            Image bimg = new Image(PicturePath("boss", bo.Int("picture", 0)), bo.Str("name", "BOSS"), "contain");
+            bimg.Prefer(120, 108); bside.With(bimg);
+        } else {
+            bside.With(Text("本图无 BOSS", "secondary", 40));
+        }
+        bside.With(Text(hasBoss ? bo.Str("name", "BOSS") : " ", "map-name", 18));
+
+        /* 战报：[BOSS] 黄、[战报]/[扫荡] 青、胜利绿、失败红。行数少，
+           直接平铺 Label（嵌套 ScrollColumn 在列里会退化，不冒这个险）。 */
+        Panel logPanel = Col("feed"); logPanel.Pad(8); logPanel.Gap(4); logPanel.Grow(); left.With(logPanel);
+        int logN = net.BossLogCount();
+        if (logN == 0) {
+            logPanel.With(Text("尚未开战。点右侧「挑战BOSS」正面刚，胜利解锁下一张图；或底部「开始挂机」离线刷怪。", "secondary", 48));
+        }
+        for (int i = logN > 12 ? logN - 12 : 0; i < logN; i = i + 1) {
+            string ln = net.BossLogAt(i);
+            string cls = "secondary";
+            if (ln.IndexOf("[BOSS]") == 0) { cls = "yellow"; }
+            else if (ln.IndexOf("[战报]") == 0) { cls = "cyan"; }
+            else if (ln.IndexOf("[扫荡]") == 0) { cls = "cyan"; }
+            else if (ln.IndexOf("胜利") >= 0) { cls = "green"; }
+            else if (ln.IndexOf("失败") >= 0) { cls = "red"; }
+            logPanel.With(Text(ln, cls, 20));
+        }
+
+        /* 底部条：返回 | 离线挂机提示 | 开始挂机 | 说明。 */
+        Panel foot = Panel.Row(); foot.Pad(2); foot.Gap(8); foot.Prefer(0, 36); left.With(foot);
+        foot.With(Btn("返回", "inner-back", () => { Navigate(0); }));
+        Label hint = Text("开始挂机后，可以关闭客户端，离线挂机→", "secondary", 0); hint.Grow(); foot.With(hint);
+        foot.With(Btn("开始挂机", "inner-auto", () => {
+            if (net.MobCount() > 0) { net.AutoHunt(net.MobAt(0).Int("tpl", 0), true); }
+            else { net.AddFeed("本图怪物列表还没拉到，稍后再试。"); }
+        }));
+        foot.With(Btn("说明", "inner-help", () => {
+            net.AddFeed("挑战BOSS每天 20 次；打输 BOSS 留血，接着挑战继续磨；打赢解锁下一张图。");
+        }));
+
+        /* 右侧 BOSS 面板：固定宽度列要 DockRight()+Add（照 BuildCombat），
+           否则 Row 布局把固定列排到 Grow 列前面，左右颠倒。 */
+        Panel right = Panel.Column(); right.Prefer(320, 0); right.DockRight();
+        right.Gap(8); split.Add(right);
+        Panel bossCard = Col("frame"); bossCard.Pad(10); bossCard.Gap(8); bossCard.Grow(); right.With(bossCard);
+        bossCard.With(Text(mapName + (st != null && st.Int("map", 0) == mapId ? "（当前所在）" : ""), "yellow strong", 24));
+        if (!hasBoss) {
+            bossCard.With(Text("这张图没有配置 BOSS。", "secondary", 48));
+            return;
+        }
+        bossCard.With(Text(Rules.N(bhpLeft) + "/" + Rules.N(bhpMax), "red strong", 20));
+        Progress bhpBar = new Progress(100, 5); bhpBar.Class = "health-bar"; bhpBar.Prefer(0, 8); bhpBar.showIndicator = false;
+        bhpBar.percent = bhpMax > 0 ? (int)((long)bhpLeft * 100 / bhpMax) : 0; bossCard.With(bhpBar);
+        Image bpic = new Image(PicturePath("boss", bo.Int("picture", 0)), bo.Str("name", "BOSS"), "contain");
+        bpic.Prefer(120, 108); bossCard.With(bpic);
+        int tries = page != null ? page.Int("tries", 0) : 0;
+        Panel ops = Panel.Row(); ops.Gap(6); ops.Prefer(0, 34); bossCard.With(ops);
+        Button fightBtn = Btn("挑战BOSS(剩" + Rules.N(tries) + ")次", "boss-fight", () => { net.BossFight(mapId); });
+        fightBtn.Prefer(0, 34); fightBtn.Grow(); ops.With(fightBtn);
+        Input sweepIn = new Input("10"); sweepIn.Prefer(46, 34); ops.With(sweepIn);
+        ops.With(Btn("扫荡", "boss-sweep", () => {
+            string t = sweepIn.GetText().Trim();
+            bool digits = t.Length > 0;
+            for (int c = 0; c < t.Length; c = c + 1) {
+                if (t[c] < '0' || t[c] > '9') { digits = false; break; }
+            }
+            int n = digits ? Convert.ToInt(t) : 10;
+            if (n < 1) { n = 10; }
+            if (n > 20) { n = 20; }
+            net.BossSweep(mapId, n);
+        }));
+        Button autoBtn = Btn(net.BossAuto() ? "☑ 结束后自动挑战BOSS(勾选生效)" : "☐ 结束后自动挑战BOSS(勾选生效)",
+            "boss-auto", () => { net.SetBossAuto(!net.BossAuto()); });
+        autoBtn.Prefer(0, 28); bossCard.With(autoBtn);
+
+        /* 属性栅格：照原版两列（青=基础属性，绿=成长，紫=稀有）。 */
+        Grid stat = Grid.Of(2); stat.Gap(4); bossCard.With(stat);
+        stat.With(StatCell("气血", Rules.N(bhpMax), "cyan"));
+        stat.With(StatCell("等级", Rules.N(bo.Int("level", 1)), "green"));
+        stat.With(StatCell("法力", Rules.N(bo.Int("mp", 0)), "cyan"));
+        stat.With(StatCell("转生", "0", "magenta"));
+        stat.With(StatCell("攻击", Rules.N(bo.Int("atkMin", 0)) + " - " + Rules.N(bo.Int("atk", 0)), "cyan"));
+        stat.With(StatCell("防御", "0 - " + Rules.N(bo.Int("def", 0)), "green"));
+        stat.With(StatCell("魔法", "0 - 0", "cyan"));
+        stat.With(StatCell("魔防", "0 - " + Rules.N(bo.Int("mdef", 0)), "magenta"));
+        stat.With(StatCell("道术", "0 - 0", "cyan"));
+        stat.With(StatCell("幸运", "0", "magenta"));
+        bossCard.With(Text("击败 BOSS 掉好装备并解锁下一张图；扫荡需先击败过它。", "secondary", 20));
+    }
+
+    /* 内页属性栅格格：彩色标签 + 白值。 */
+    Panel StatCell(string label, string value, string cls) {
+        Panel cell = Panel.Row(); cell.Gap(4); cell.Prefer(0, 24);
+        cell.With(Text(label + "：", cls, 20));
+        Label v = Text(value, "", 20); v.Grow(); cell.With(v);
+        return cell;
+    }
+
+    /* UiDriver 探针：内页 BOSS 面板状态一行。 */
+    string BossProbeLine() {
+        JsonValue bp = net.BossPage();
+        if (bp == null) { return "page:N log:" + Rules.N(net.BossLogCount()); }
+        JsonValue bb = bp.Get("boss");
+        return "tries:" + Rules.N(bp.Int("tries", 0)) + " boss:"
+            + (bb != null && bb.IsObject()
+                ? bb.Str("name", "?") + "@" + Rules.N(bb.Int("hpLeft", 0))
+                    + "/" + Rules.N(bb.Int("hp", 0))
+                : "none")
+            + " log:" + Rules.N(net.BossLogCount());
     }
 
     /* 页 3 BOSS 之家：全场唯一刷怪点（教主类）清单，带在场/重生倒计时
@@ -1054,7 +1284,9 @@ class LegendApp {
                 + " · 经验 " + Rules.N(b.Int("exp", 0)) + " · 金 " + b.Str("gold", "0");
             Label name = Text(line, alive ? "yellow" : "secondary", 52); name.Grow(); row.With(name);
             Button go = Btn(here ? "就在本图" : "前往", "net-boss-go-" + Rules.N(b.Int("tpl", 0)), () => { net.MoveTo(mapId); });
-            go.Disabled = here || (st != null && st.Int("level", 1) < MapMinLevel(mapId));
+            int unlockedNow = st != null && st.Int("mapUnlocked", 0) > 0
+                ? st.Int("mapUnlocked", 0) : 1;
+            go.Disabled = here || mapId > unlockedNow;
             go.Prefer(84, 28); go.DockRight(); row.Add(go);
             list.With(row);
         }
@@ -1104,7 +1336,9 @@ class LegendApp {
                 + Rules.N(minLv) + " 级 · BOSS：" + SecretBossName(id), "yellow", 40);
             name.Grow(); row.With(name);
             Button go = Btn(here ? "就在这" : "前往", "net-secret-go-" + Rules.N(id), () => { net.MoveTo(id); });
-            go.Disabled = here || (st != null && st.Int("level", 1) < minLv);
+            int unlockedNow = st != null && st.Int("mapUnlocked", 0) > 0
+                ? st.Int("mapUnlocked", 0) : 1;
+            go.Disabled = here || id > unlockedNow;
             go.Prefer(72, 28); go.DockRight(); row.Add(go);
             list.With(row);
         }
@@ -1298,12 +1532,11 @@ class LegendApp {
             int id = it.Int("id", 0);
             int minLv = it.Int("minLevel", 1);
             int kind = it.Int("kind", 0);
-            string kindName = kind == 0 ? "消耗品" : kind == 1 ? "武器" : "防具";
+            string kindName = kind == 0 ? "消耗品"
+                : kind == 1 ? "武器" : SlotName(it.Int("slot", -1), 2);
             string desc = kindName;
-            if (it.Int("atk", 0) > 0) { desc = desc + " · 攻击+" + Rules.N(it.Int("atk", 0)); }
-            if (it.Int("def", 0) > 0) { desc = desc + " · 防御+" + Rules.N(it.Int("def", 0)); }
-            if (it.Int("heal", 0) > 0) { desc = desc + " · 回血 " + Rules.N(it.Int("heal", 0)); }
-            if (minLv > 1) { desc = desc + " · 需 " + Rules.N(minLv) + " 级"; }
+            string stats = StatLine(it);
+            if (stats.Length > 0) { desc = desc + " · " + stats; }
             Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 52);
             Label name = Text(it.Str("name", "商品") + " · " + Rules.N(it.Int("price", 0)) + " 金币\n" + desc, "yellow", 40);
             name.Grow(); row.With(name);
@@ -1321,7 +1554,7 @@ class LegendApp {
         ScrollColumn list = new ScrollColumn(); list.Named("net-help-list"); list.Grow(); content.With(list);
         string[] lines = new string[] {
             "① 进世界先穿装备：落在「背包」页，把木剑/布衣点「穿戴」。",
-            "② 挂机练级：去「沙巴克」（主线任务页）选一只怪点「挂机」，战况每秒推送，经验和金币自动入账。",
+            "② 挂机练级：去「沙巴克」（主线任务页）选一只怪点「挂机」。战况动画是本地演示，服务端每 60 秒批量结算一次，经验和金币自动入账。",
             "③ 换图进阶：「地图传送」按等级门槛去沃玛森林/僵尸洞窟/祖玛寺庙/赤月峡谷，怪更强、掉落更好。",
             "④ 打 BOSS：「BOSS 之家」看全服教主在不在场，一键前往；击杀掉神装并全服公告。",
             "⑤ 世界 BOSS：「世界 BOSS」页全服共斗一管血，最后一击拿 5000 金币大奖，伤害王上公告。",
@@ -1418,9 +1651,9 @@ class LegendApp {
 
     int NetPhase() {
         if (!net.Connected() && !net.connecting) { return 0; }
-        if (!net.Ready() || net.Stage() < 2) { return 1; }
-        if (net.Stage() == 3 && net.self == null) { return 3; }
-        return 2;
+        if (net.Stage() >= 3) { return 3; }
+        if (net.Stage() >= 1) { return 2; }
+        return 1;
     }
 
     /* 每 120ms 泵（form.Every）：阶段变了就重建表单；进入世界则收起
@@ -1658,6 +1891,11 @@ class LegendApp {
 
     /* 分区窗点区服：记下目标区，切「选择角色」页并拉角色列表。 */
     void OpenRealm(int rid, string name) {
+        try {
+            if (UiDriver.Active()) {
+                UiDriver.SetProbe("open-realm", "rid=" + Rules.N(rid) + " name=" + name);
+            }
+        } catch (Exception) { }
         charsRealmId = rid; charsRealmName = name; armDel = -1;
         formPage = "chars"; lastFormKey = "";
         net.RefreshChars(rid);
@@ -1814,7 +2052,7 @@ class LegendApp {
         srvAddr = KnownFolders.GetEnv("LEGEND_SERVER");
         srvPass = "";
         if (srvAddr.Length == 0) {
-            srvAddr = "127.0.0.1:7100";
+            srvAddr = "127.0.0.1:8099";
             string path = dataDir + "/server.txt";
             if (File.Exists(path)) {
                 try {
