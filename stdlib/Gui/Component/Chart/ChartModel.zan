@@ -25,6 +25,8 @@ class ChartKinds {
         if (s == "bar") { return ChartType.Bar; }
         if (s == "pie") { return ChartType.Pie; }
         if (s == "scatter") { return ChartType.Scatter; }
+        // effectScatter 涟漪强调散点：本引擎按普通散点渲染。
+        if (s == "effectScatter") { return ChartType.Scatter; }
         if (s == "k" || s == "candlestick") { return ChartType.K; }
         if (s == "radar") { return ChartType.Radar; }
         if (s == "chord") { return ChartType.Chord; }
@@ -44,10 +46,15 @@ class ChartKinds {
     }
 
     /// 非 ECharts 2.2.7 原生类型的扩展渲染器标签（"box"、"error"、
-    /// "sankey"、"waterfall"、"sunburst"、"radialBars"）；原生类型为 ""。
+    /// "sankey"、"waterfall"、"sunburst"、"radialBars"、"venn"、
+    /// "pictorialBar"、"themeRiver"、"parallel"、"lines"）；
+    /// ECharts boxplot 折算为 "box"（同一箱线渲染器）；原生类型为 ""。
     static string CustomOf(string s) {
+        if (s == "boxplot") { return "box"; }
         if (s == "box" || s == "error" || s == "sankey" || s == "waterfall"
             || s == "sunburst" || s == "radialBars" || s == "venn") { return s; }
+        if (s == "pictorialBar" || s == "themeRiver" || s == "parallel"
+            || s == "lines") { return s; }
         return "";
     }
 
@@ -150,6 +157,10 @@ class ChartData {
                       //   列之和，模板无法表达）
     int labelSide;    // ECharts label.position 逐项覆盖：0 = 继承系列，
                       //   1 = 左、2 = 右（bar8 正负交错标签）
+    bool labelHide;   // ECharts data[i].label.show=false：graph 节点标签
+                      //   逐点隐藏（les-miserables 仅 5 个枢纽节点显标）
+    bool hasCat;      // graph 节点声明了 category（下文 cat 生效）
+    int cat;          // graph 节点类别下标（颜色 = 类别调色板）
     ChartItemStyle itemStyle; // ECharts data 项逐根 itemStyle（bar-data-color
                               //   的逐柱颜色、bar-stack-borderRadius 的逐柱
                               //   圆角）；null = 跟随系列 itemStyle。渲染器
@@ -534,6 +545,46 @@ class ChartMapRegion {
             rings.Add(ChartMapRing.Of(points, sr.hole));
         }
         return ChartMapRegion.Colored(src.name, src.value, src.color, rings);
+    }
+}
+
+/// ECharts geo 组件：一张底图地图 + 按名区域覆盖。解析后由
+/// FromJsonValue 的合成块折算成 isGeoBase 的 type=Map 载体系列
+/// （几何经 ChartMaps.BindSeries 注入）。
+class ChartGeo {
+    string map;          // 注册表地图名
+    bool roam;           // 漫游（缩放/平移）
+    bool labelShow;      // label.show：区域名标签
+    string selectedMode; // ""/"single" | "multiple" | "false"
+    int areaColor;       // itemStyle.areaColor；0 = 不覆盖
+    int borderColor;     // itemStyle.borderColor；0 = 不覆盖
+    List<ChartMapRegion> regions; // regions[] 覆盖（stub 或带 ring）
+
+    static ChartGeo Of() {
+        ChartGeo g = new ChartGeo();
+        g.map = "";
+        g.roam = false;
+        g.labelShow = false;
+        g.selectedMode = "";
+        g.areaColor = 0;
+        g.borderColor = 0;
+        g.regions = new List<ChartMapRegion>();
+        return g;
+    }
+
+    static ChartGeo Clone(ChartGeo src) {
+        if (src == null) { return null; }
+        ChartGeo g = ChartGeo.Of();
+        g.map = src.map;
+        g.roam = src.roam;
+        g.labelShow = src.labelShow;
+        g.selectedMode = src.selectedMode;
+        g.areaColor = src.areaColor;
+        g.borderColor = src.borderColor;
+        for (int i = 0; i < src.regions.Count; i = i + 1) {
+            g.regions.Add(ChartMapRegion.Clone(src.regions[i]));
+        }
+        return g;
     }
 }
 
@@ -1250,6 +1301,10 @@ class ChartSeries {
     string custom;   // ChartType.Custom 的扩展渲染器："box" | "error" |
     string selectedMode; // ECharts map.selectedMode（Sanitized）：""/"single" | "multiple" | "false"
                      //   "sankey" | "waterfall" | "sunburst" | "radialBars" | "venn" | ""
+    string mapName;  // ECharts series.map：注册表地图名（"" = 未用）；
+                     //   渲染前由 ChartMaps.BindSeries 注入区域几何
+    int geoIndex;    // ECharts series.geoIndex：绑定的 geo 组件下标
+    bool isGeoBase;  // geo 组件合成的底图载体系列（非用户声明）
     // ---- 批 6：force / chord / funnel / wordCloud 参数化 ----
     int forceScaling;       // ECharts force.scaling（%）；100 = 现状
     int forceGravity;       // ECharts force.gravity（%）；100 = 现状
@@ -1305,6 +1360,7 @@ class ChartSeries {
     string graphLayout;   // ECharts graph.layout："" | "force" | "none" | "circular"
     List<int> nodeX;      // graph layout:'none' 的逐节点 x（数据坐标；-1 = 未给）
     List<int> nodeY;      // graph layout:'none' 的逐节点 y（数据坐标；-1 = 未给）
+    List<string> graphCats; // graph categories 名称表（图例 + 类别调色板）
 
     GaugeOption gauge;
 
@@ -1350,6 +1406,9 @@ class ChartSeries {
         s.piePerPoint = false;
         s.custom = "";
         s.selectedMode = "";
+        s.mapName = "";
+        s.geoIndex = 0;
+        s.isGeoBase = false;
         s.forceScaling = 100;
         s.forceGravity = 100;
         s.forceMinRadius = 0;
@@ -1396,6 +1455,7 @@ class ChartSeries {
         s.graphLayout = "";
         s.nodeX = new List<int>();
         s.nodeY = new List<int>();
+        s.graphCats = new List<string>();
         s.gauge = GaugeOption.Create();
         return s;
     }
@@ -1784,6 +1844,8 @@ class ChartSeries {
         s.treeLine = ChartLineStyle.Clone(src.treeLine);
         s.piePerPoint = src.piePerPoint;
         s.selectedMode = src.selectedMode; s.forceScaling = src.forceScaling;
+        s.mapName = src.mapName; s.geoIndex = src.geoIndex;
+        s.isGeoBase = src.isGeoBase;
         s.forceGravity = src.forceGravity; s.forceMinRadius = src.forceMinRadius;
         s.forceMaxRadius = src.forceMaxRadius; s.forceNodeColor = src.forceNodeColor;
         s.forceLinkColor = src.forceLinkColor;
@@ -1840,6 +1902,8 @@ class ChartSeries {
         for (int i = 0; i < src.nodeX.Count; i = i + 1) { s.nodeX.Add(src.nodeX[i]); }
         s.nodeY = new List<int>();
         for (int i = 0; i < src.nodeY.Count; i = i + 1) { s.nodeY.Add(src.nodeY[i]); }
+        s.graphCats = new List<string>();
+        for (int i = 0; i < src.graphCats.Count; i = i + 1) { s.graphCats.Add(src.graphCats[i]); }
         return s;
     }
 }
@@ -2002,6 +2066,7 @@ class ChartOption {
     List<ChartMarkArea> markAreas;   // markArea 区间带（x 类目竖带 / y 横带）
     List<ChartAxis> yAxes;
     List<ChartSeries> series;
+    List<ChartGeo> geos;   // ECharts geo 组件（底图地图，可多个）
 
     ChartType defaultType; // Add(name, values) / AddLabel 使用的类型
 
@@ -2168,6 +2233,10 @@ class ChartOption {
         for (int i = 0; i < src.yAxes.Count; i = i + 1) { o.yAxes.Add(ChartAxis.Clone(src.yAxes[i])); }
         o.series = new List<ChartSeries>();
         for (int i = 0; i < src.series.Count; i = i + 1) { o.series.Add(ChartSeries.Clone(src.series[i])); }
+        o.geos = new List<ChartGeo>();
+        for (int gci = 0; gci < src.geos.Count; gci = gci + 1) {
+            o.geos.Add(ChartGeo.Clone(src.geos[gci]));
+        }
         o.dataRangeList = new List<ChartRangeSplit>();
         for (int i = 0; i < src.dataRangeList.Count; i = i + 1) {
             o.dataRangeList.Add(ChartRangeSplit.Clone(src.dataRangeList[i]));
@@ -2188,6 +2257,7 @@ class ChartOption {
         o.markAreas = new List<ChartMarkArea>();
         o.yAxes = new List<ChartAxis>();
         o.series = new List<ChartSeries>();
+        o.geos = new List<ChartGeo>();
         o.defaultType = ChartType.Line;
         o.showLegend = true;
         o.showTooltip = true;
@@ -3200,13 +3270,52 @@ class ChartOption {
                     rings.Add(ChartMapRing.Of(pts, hole));
                 }
             }
-            if (rings.Count == 0) { continue; }
+            if (rings.Count == 0 && nm.Length == 0) { continue; }
+            // 无环项是注册表地图的按名覆盖 stub（值/显式色），由
+            // ChartMaps.BindSeries 并进克隆几何；直接消费方遇空环
+            // 自然跳过（不进布局/填充）。
             if (col == 0) {
                 into.Add(ChartMapRegion.Of(nm, val, rings));
             } else {
                 into.Add(ChartMapRegion.Colored(nm, val, col, rings));
             }
         }
+    }
+
+    /// ECharts geo 组件（对象或数组）。
+    static void ParseGeo(JsonValue v, ChartOption o) {
+        if (v == null) { return; }
+        if (v.IsArray()) {
+            for (int i = 0; i < v.Count(); i = i + 1) {
+                ChartOption.ParseGeoOne(v.At(i), o, i);
+            }
+        } else {
+            ChartOption.ParseGeoOne(v, o, 0);
+        }
+    }
+
+    static void ParseGeoOne(JsonValue g, ChartOption o, int index) {
+        if (g == null || !g.IsObject()) { return; }
+        ChartGeo geo = ChartGeo.Of();
+        geo.map = g.Str("map", "");
+        if (geo.map.Length == 0) { return; }
+        geo.roam = g.Bool("roam", false);
+        geo.labelShow = g.Bool("labelShow", false);
+        geo.selectedMode = ChartKinds.SelectedModeSanitize(
+            g.Str("selectedMode", ""));
+        JsonValue its = g.Get("itemStyle");
+        if (its != null && its.IsObject()) {
+            geo.areaColor = ChartOption.ParseColor(its.Get("areaColor"), 0);
+            geo.borderColor = ChartOption.ParseColor(its.Get("borderColor"), 0);
+        }
+        JsonValue lb = g.Get("label");
+        if (lb != null && lb.IsObject()) { geo.labelShow = lb.Bool("show", geo.labelShow); }
+        ChartOption.ParseRegions(g.Get("regions"), geo.regions);
+        while (o.geos.Count < index) {
+            o.geos.Add(ChartGeo.Of());
+        }
+        if (o.geos.Count == index) { o.geos.Add(geo); } else { o.geos[index] = geo; }
+        if (geo.roam) { o.roam = true; }
     }
 
     /// ECharts series.markLine：{data:[{type:'average'}|{yAxis:3}
@@ -3501,9 +3610,33 @@ class ChartOption {
     /// dataZoom、legend、dataRange、tooltip、connectGroup、markLine/
     /// markPoint/markArea、radar、xAxis/yAxis（对象或数组）与
     /// series 数组；未知字段忽略，缺省字段保持 Create() 默认。
+    /// 用户声明的 map 系列是否存在（geo 合成载体系列不算）。
+    static bool HasUserMapSeries(ChartOption o) {
+        for (int i = 0; i < o.series.Count; i = i + 1) {
+            if (o.series[i].type == ChartType.Map && !o.series[i].isGeoBase) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     static ChartOption FromJsonValue(JsonValue v) {
         ChartOption o = ChartOption.Create();
         if (v == null) { return o; }
+        // ECharts timeline/media 顶层形态：顶层没有 series 而
+        // baseOption + options[] 在。取 baseOption 骨架，并入
+        // options 首项的系列（时间轴第一帧）；media 查询忽略。
+        if (v.Get("series") == null && v.Get("baseOption") != null) {
+            ChartOption base0 = ChartOption.FromJsonValue(v.Get("baseOption"));
+            JsonValue opts = v.Get("options");
+            if (opts != null && opts.IsArray() && opts.Count() > 0) {
+                ChartOption step0 = ChartOption.FromJsonValue(opts.At(0));
+                for (int so = 0; so < step0.series.Count; so = so + 1) {
+                    base0.series.Add(ChartSeries.Clone(step0.series[so]));
+                }
+            }
+            return base0;
+        }
         JsonValue tj = v.Get("title");
         if (tj != null && tj.IsArray()) {
             // title 数组（line-gradient 双标题）：逐项位置/文本。
@@ -3744,6 +3877,9 @@ class ChartOption {
             }
         }
 
+        // ECharts geo 组件：底图地图（对象或数组），系列解析后
+        // 由合成块挂载。
+        ChartOption.ParseGeo(v.Get("geo"), o);
         JsonValue series = v.Get("series");
         // ECharts 单系列可以把 series 直接写成对象（line-aqi），
         // 与数组形态同一路解析，否则整图被当空数据画 "(no data)"。
@@ -3758,6 +3894,8 @@ class ChartOption {
                 cs.custom = ChartKinds.CustomOf(sty);
                 cs.selectedMode = ChartKinds.SelectedModeSanitize(
                     s.Str("selectedMode", ""));
+                cs.mapName = s.Str("map", "");
+                cs.geoIndex = s.Int("geoIndex", 0);
                 cs.color = s.Int("color", 0);
                 cs.axisIndex = s.Int("yAxisIndex", s.Int("axisIndex", 0));
                 cs.xIndex = s.Int("xAxisIndex", 0);
@@ -4057,6 +4195,9 @@ class ChartOption {
                         cs.data.Add(ChartData.Of(vals.At(j2).AsInt(0)));
                     }
                 }
+                // map 系列：注册表几何 + data 值 + regions 覆盖，
+                // 在 data/regions 都解析完后统一绑定。
+                ChartMaps.BindSeries(cs);
                 // ECharts graph 系列：layout 选布局（force/none/circular）；
                 // nodes 是 data 的别名（对象形这里解析 name/id/symbolSize/
                 // itemStyle/xy）；links 端点可能是名字、id 串（"1"）或序号
@@ -4094,6 +4235,19 @@ class ChartOption {
                                 if (nit.Has("symbolSize")) {
                                     gitem.size = nit.Int("symbolSize", 0);
                                     gitem.sizeSet = true;
+                                }
+                                if (nit.Has("category")) {
+                                    gitem.hasCat = true;
+                                    gitem.cat = nit.Int("category", 0);
+                                }
+                                JsonValue glbl = nit.Get("label");
+                                if (glbl != null && glbl.IsObject()) {
+                                    if (!glbl.Bool("show", true)) {
+                                        gitem.labelHide = true;
+                                    }
+                                    string gpos = glbl.Str("position", "");
+                                    if (gpos == "right") { gitem.labelSide = 2; }
+                                    else if (gpos == "left") { gitem.labelSide = 1; }
                                 }
                                 JsonValue gits = nit.Get("itemStyle");
                                 if (gits != null && gits.IsObject()) {
@@ -4143,6 +4297,18 @@ class ChartOption {
                         ChartOption.ParseGraphLinks(glinks, cs.links,
                             gnames);
                     }
+                    // 类别名表（图例按类别、节点色 = 类别调色板）。
+                    JsonValue gcats = s.Get("categories");
+                    if (gcats != null && gcats.IsArray()) {
+                        for (int ci2 = 0; ci2 < gcats.Count(); ci2 = ci2 + 1) {
+                            JsonValue ct = gcats.At(ci2);
+                            if (ct.IsObject()) {
+                                cs.graphCats.Add(ct.Str("name", ""));
+                            } else {
+                                cs.graphCats.Add(ct.AsString(""));
+                            }
+                        }
+                    }
                 }
                 // ECharts dataset 系列绑定：datasetId/datasetIndex +
                 // encode（列名或列序号）。x 列供类目/数值，y 列供值；
@@ -4182,6 +4348,46 @@ class ChartOption {
                     }
                 }
                 o.series.Add(cs);
+            }
+        }
+
+        // geo 组件合成底图系列：每个 geo 一个 type=Map 的载体系列
+        // （isGeoBase）。没有用户 map 系列时插到队首（lead=Map，分发
+        // "map"）；有则追加。geo 绑定的散点/路线叠加渲染在
+        // DrawGeoMap（后续批次）。
+        if (o.geos.Count > 0) {
+            for (int gi = 0; gi < o.geos.Count; gi = gi + 1) {
+                ChartGeo g = o.geos[gi];
+                bool owned = false;
+                for (int si = 0; si < o.series.Count; si = si + 1) {
+                    ChartSeries s6 = o.series[si];
+                    if (s6.type == ChartType.Map && s6.mapName == g.map
+                        && s6.geoIndex == gi) { owned = true; break; }
+                }
+                if (owned) { continue; }
+                ChartSeries gs = ChartSeries.Of("", ChartType.Map, new List<int>());
+                gs.mapName = g.map;
+                gs.geoIndex = gi;
+                gs.isGeoBase = true;
+                gs.selectedMode = g.selectedMode;
+                gs.labelShow = g.labelShow;
+                for (int ri = 0; ri < g.regions.Count; ri = ri + 1) {
+                    gs.regions.Add(ChartMapRegion.Clone(g.regions[ri]));
+                }
+                if (g.areaColor != 0) {
+                    // itemStyle.areaColor：覆盖前先记成区域显式色。
+                    for (int ri2 = 0; ri2 < gs.regions.Count; ri2 = ri2 + 1) {
+                        gs.regions[ri2].color = g.areaColor;
+                    }
+                }
+                ChartMaps.BindSeries(gs);
+                if (g.areaColor != 0) {
+                    for (int ri3 = 0; ri3 < gs.regions.Count; ri3 = ri3 + 1) {
+                        gs.regions[ri3].color = g.areaColor;
+                    }
+                }
+                if (!HasUserMapSeries(o)) { o.series.Insert(0, gs); }
+                else { o.series.Add(gs); }
             }
         }
 

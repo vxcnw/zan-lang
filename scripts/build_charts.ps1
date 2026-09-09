@@ -34,6 +34,10 @@ $zanArgs += @("-o", "build\charts_test.exe", "--subsystem", "windows")
 # 子目录）+ 官方注册表（菜单目录），Zan 侧只做装载与渲染。
 $zanArgs += @("--embed", "examples\gui_charts\options")
 $zanArgs += @("--embed", "examples\gui_charts\charts-registry.json=charts-registry")
+# 地图资产：GeoJSON（USA/world/HK/iceland/ch）+ SVG 地图（echarts
+# geo-svg 系列的 registerMap(name, {svg}) 素材），gui_charts 启动时
+# RegisterMaps() 按官方地图名注册进 ChartMaps。
+$zanArgs += @("--embed", "examples\gui_charts\maps")
 $zanArgs += @("--libpath", "build", "--link-lib", "zan_gui_charts_gnu")
 # Native Win32 backend needs only the system libs it imports directly (the
 # runtime's #pragma libs: dwmapi/user32/gdi32/imm32) plus the reactor deps.

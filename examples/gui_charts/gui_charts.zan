@@ -59,6 +59,7 @@ partial class Charts {
 
     static void Main() {
         Charts.BuildCatalog();
+        Charts.RegisterMaps();
         // --parsecheck：无头全量校验——每个注册表例的 option 资源
         // 逐个 FromJson，失败清单写 _scratch/parsecheck.txt。渲染
         // 缺口另有账本，这里只验证"全部能装载"。
@@ -456,12 +457,65 @@ partial class Charts {
         // 通用装载：id = 官方注册表 id，option 逐字来自内嵌资源
         // options/<id>.json（含 doc-example/ 子目录）。Zan 侧没有
         // 任何示例数据装配代码——渲染不对就是引擎缺口，进账本。
-        string src = Skin.EmbedRead("options/" + id + ".json");
-        if (src == "") {
+        ChartOption cached = Charts.OptionOf(id);
+        if (cached == null) {
             Charts.DrawEmpty(app, id, x, y, w, h);
             return;
         }
-        Charts.Show(app, ChartOption.FromJson(src), x, y, w, h);
+        Charts.Show(app, cached, x, y, w, h);
+    }
+
+    // ---- option 缓存 + 地图注册 ------------------------------------
+    // FromJson 不是免费的（world.json 解析 + BindSeries 几何克隆），
+    // 每帧重复会卡顿；ChartOption 交互态全部在 app.State（按 iwid），
+    // option 本体跨帧复用安全。
+    static List<string> optIds;
+    static List<ChartOption> optCache;
+
+    static ChartOption OptionOf(string id) {
+        if (Charts.optIds == null) {
+            Charts.optIds = new List<string>();
+            Charts.optCache = new List<ChartOption>();
+        }
+        for (int i = 0; i < Charts.optIds.Count; i = i + 1) {
+            if (Charts.optIds[i] == id) { return Charts.optCache[i]; }
+        }
+        string src = Skin.EmbedRead("options/" + id + ".json");
+        ChartOption o = src == "" ? null : ChartOption.FromJson(src);
+        Charts.optIds.Add(id);
+        Charts.optCache.Add(o);
+        return o;
+    }
+
+    /// 进程级一次性：把内嵌地图资产注册进 ChartMaps（echarts
+    /// registerMap 的对应物；名字与官方示例 option 里的 map/geo.map
+    /// 逐字一致）。SVG 几何惰性扫描，注册本身只存文本。
+    static int mapsRegistered = 0;
+
+    static void RegisterMaps() {
+        if (Charts.mapsRegistered == 1) { return; }
+        Charts.mapsRegistered = 1;
+        ChartMaps.RegisterRegions("china", MapChinaData.Regions());
+        ChartMaps.Register("USA", Skin.EmbedRead("maps/USA.json"));
+        ChartMaps.Register("world", Skin.EmbedRead("maps/world.json"));
+        ChartMaps.Register("HK", Skin.EmbedRead("maps/HK.json"));
+        ChartMaps.Register("iceland", Skin.EmbedRead("maps/iceland.json"));
+        ChartMaps.Register("ch", Skin.EmbedRead("maps/ch.json"));
+        ChartMaps.Register("target_map", Skin.EmbedRead("maps/ch.json"));
+        ChartMaps.RegisterSvg("sicily",
+            Skin.EmbedRead("maps/Sicily_prehellenic_topographic_map.svg"));
+        ChartMaps.RegisterSvg("flight-seats",
+            Skin.EmbedRead("maps/flight-seats.svg"));
+        ChartMaps.RegisterSvg("organ_diagram",
+            Skin.EmbedRead("maps/Veins_Medical_Diagram_clip_art.svg"));
+        ChartMaps.RegisterSvg("Beef_cuts_France",
+            Skin.EmbedRead("maps/Beef_cuts_France.svg"));
+        ChartMaps.RegisterSvg("MacOdrum-LV5-floorplan-web",
+            Skin.EmbedRead("maps/MacOdrum-LV5-floorplan-web.svg"));
+        ChartMaps.RegisterSvg("ksia-ext-plan",
+            Skin.EmbedRead("maps/ksia-ext-plan-min.svg"));
+        ChartMaps.RegisterSvg("iceland_svg",
+            Skin.EmbedRead("maps/Map_of_Iceland.svg"));
     }
 
     /// 注册表里未内置的例（ready=false）：运行时依赖桌面引擎
