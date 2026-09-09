@@ -1,0 +1,29 @@
+using System;
+using System.IO;
+
+namespace ExternBorrow;
+
+/* A bodyless [DllImport] declared to return `string` hands back a borrowed
+   C pointer, never an owned reference: the discarded-result path must not
+   release it. getcwd() into a byte[] returns a pointer INTO the caller's
+   array -- releasing the "string" freed the array while it was still being
+   read (SIGSEGV in Directory.GetCurrentDirectory on POSIX builds). */
+class Prog {
+    static void Main() {
+        for (int i = 0; i < 3; i = i + 1) {
+            string cwd = Directory.GetCurrentDirectory();
+            int n = cwd.Length;
+            /* read every byte of the result: a premature free of the
+               underlying buffer makes the read crash instead of a wrong 0.
+               Length > 0 and a full read through every index is the
+               platform-independent assertion (Windows answers with
+               backslashes, so the slash count is not stable). */
+            int acc = 0;
+            for (int j = 0; j < n; j = j + 1) {
+                acc = acc + (cwd[j] == '/' || cwd[j] == '\\' ? 1 : 0);
+            }
+            Console.WriteLine("cwd=" + Convert.ToString(n) + " ok=" + Convert.ToString(n > 0 && acc > 0));
+        }
+        Console.WriteLine("done");
+    }
+}

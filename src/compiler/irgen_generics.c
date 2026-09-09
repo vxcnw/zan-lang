@@ -10,6 +10,16 @@
  * recording each fully concrete instantiation of a user generic class. Types
  * mentioning a still-erased type parameter (e.g. List<T> inside a generic body)
  * resolve non-concrete and are ignored. */
+
+/* defined in later parts of this translation unit */
+static bool sym_declares_extern(zan_symbol_t *sym);
+static zan_symbol_t *extern_check_callee_sym(zan_irgen_t *g,
+                                             zan_ast_node_t *call);
+static zan_type_t *method_ret_type_at(zan_irgen_t *g, zan_symbol_t *msym,
+                                      zan_ast_node_t *call,
+                                      zan_ast_node_t *recv_expr,
+                                      local_scope_t *locals);
+
 static void collect_inst_type(zan_irgen_t *g, zan_type_t *t) {
     if (!t) return;
     /* Inside a generic class's body a type written with the class's own
@@ -423,8 +433,24 @@ static int expr_yields_owned_rc_value(zan_irgen_t *g, zan_ast_node_t *e,
                 return 1;
         }
     }
-    if (e->kind == AST_NEW_EXPR || e->kind == AST_CALL ||
-        e->kind == AST_QUERY_EXPR) return 1;
+    if (e->kind == AST_CALL) {
+        /* A bodyless [DllImport] declared to return `string` hands back a
+         * borrowed C pointer (extern memory, or a buffer the caller passed
+         * in) with no rc header behind it: releasing the discarded result
+         * freed live memory -- `getcwd` into a byte[] returned a pointer
+         * into the caller's array and the array release unmapped it while
+         * the caller was still reading it (segfault in
+         * Directory.GetCurrentDirectory on POSIX). Extern results are never
+         * owned. */
+        zan_symbol_t *cs = extern_check_callee_sym(g, e);
+        if (sym_declares_extern(cs)) {
+            zan_type_t *rt = method_ret_type_at(g, cs, e, NULL, locals);
+            if (!rt || rt->kind == TYPE_VOID || type_named(rt, "string", 6))
+                return 0;
+        }
+        return 1;
+    }
+    if (e->kind == AST_NEW_EXPR || e->kind == AST_QUERY_EXPR) return 1;
     /* A switch expression yields the owned (+1) value that its matching arm
      * stored into the hidden result local (emit_expr_switch_expr): the store
      * moves an owned arm or retains a borrowed one, leaving the slot with +1,
@@ -737,6 +763,10 @@ static void emit_leak_report_support(zan_irgen_t *g) {
 static void emit_eh_tmp_push_slot(zan_irgen_t *g, LLVMValueRef slot, int kind);
 static void emit_eh_tmp_pop(zan_irgen_t *g);
 static void emit_eh_tmp_drop(zan_irgen_t *g, LLVMValueRef obj);
+static zan_type_t *method_ret_type_at(zan_irgen_t *g, zan_symbol_t *msym,
+                                      zan_ast_node_t *call,
+                                      zan_ast_node_t *recv_expr,
+                                      local_scope_t *locals);
 
 /* True when a local's slot holds an owning class heap reference (excludes
  * borrowed params, stack-struct classes and non-class types), so assigning to
