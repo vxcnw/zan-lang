@@ -157,6 +157,10 @@ CSS 里非 token 的长度由 `Style.ScaleLayout` 补乘,`StyleBox.IsPrescaled`
 保证来自 `var(--token)` 的值不再乘第二次;Canvas 自绘是唯一例外——
 `Canvas.DrawText` 的 fontSize、手算的坐标间距都不经过任何自动缩放。
 
+从截图还原界面时的倍数判定是另一类坑:先按 `references/screenshot-restore.md`
+1.5 节"三票定倍数"判出原图 DPI 档,换算只在布局账本里发生一次;把截图
+物理像素直接抄进代码是双重缩放的头号来源。
+
 硬规则只有一条:**每个尺寸值必须明确属于下面两条路径之一,全项目不得第三种**:
 
 1. **样式路径(自动缩放,禁止再乘)**:CSS 声明、控件属性、`FontOr/Width`
