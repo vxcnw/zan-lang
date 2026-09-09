@@ -698,6 +698,148 @@ partial class ChartView {
                 }
             }
         }
+
+        // geo 坐标系叠加（ECharts series.coordinateSystem:'geo'）：
+        // lines 折线/迁徙 + 散点，坐标经 GeoProject 按底图同一仿射
+        // 换算（roam 缩放平移联动）。series.geoIndex 选中所属 geo，
+        // 缺省 0（单 geo 场景）。silent 系列不响应命中。
+        ChartView.DrawGeoOverlay(app, o, layout, plotX, plotY, plotW, plotH, g);
+    }
+
+    /// 地图布局 → geo 经纬度（0.01° 定点）的投影换算：lng/lat
+    /// 直接线性映射到像素（注册表 GeoJSON 与 geo 系列坐标同为
+    /// 未投影的线性度坐标，ECharts 默认投影同为线性）。
+    static int GeoProjectX(MapLayout l, int lngQ) {
+        return l.offX + (long)(lngQ - l.minX) * (long)l.scale / 1000;
+    }
+    static int GeoProjectY(MapLayout l, int latQ) {
+        return l.offY + (long)(latQ - l.minY) * (long)l.scale / 1000;
+    }
+
+    /// geo 坐标系叠加渲染（DrawMap 末段调用）：逐系列画 lines
+    /// 折线（curveness 弯曲 / dotted 虚线）与散点（带名标签）。
+    /// 命中经 OfferActiveHit 出 tooltip（silent 系列跳过）。
+    static void DrawGeoOverlay(App app, ChartOption o, MapLayout layout,
+                               int plotX, int plotY, int plotW, int plotH, int g) {
+        if (layout.scale <= 0) { return; }
+        Canvas c = app.canvas;
+        Theme t = app.theme;
+        int alpha = 255;
+        if (g < 1000) { alpha = 60 + 195 * g / 1000; }
+        if (alpha > 255) { alpha = 255; }
+        int fs = Style.FontFallback(app, "small");
+        int lblFg = Style.Part(app, "chart", "label", "", "", "",
+            Style.SNormal()).FgOr(0);
+        int mx = app.mouseX;
+        int my = app.mouseY;
+        for (int si = 0; si < o.series.Count; si = si + 1) {
+            ChartSeries s = o.series[si];
+            if (s.hidden || s.coordSys != "geo") { continue; }
+            if (s.isGeoBase) { continue; }
+            int col = s.color;
+            if (col == 0) { col = Chart.Palette(t, si); }
+            if (s.itemStyle.normal.lineStyle.color != 0) {
+                col = s.itemStyle.normal.lineStyle.color;
+            }
+            // lines 折线（迁徙/航线/polyline 路径）。
+            for (int li = 0; li < s.geoLines.Count; li = li + 1) {
+                List<ChartPoint> line = s.geoLines[li];
+                int cv = s.forceCurveness;
+                int lw = s.itemStyle.normal.lineStyle.width;
+                if (lw <= 0) { lw = 1; }
+                if (s.itemStyle.normal.lineStyle.transparent) { lw = 0; }
+                if (lw > 0) {
+                    if (cv > 0) {
+                        // 弯曲连线：控制点 = 弦中点垂直偏移
+                        // curveness×弦长（与 force 边同语义）。
+                        int x0 = ChartView.GeoProjectX(layout, line[0].x);
+                        int y0 = ChartView.GeoProjectY(layout, line[0].y);
+                        int x1 = ChartView.GeoProjectX(layout, line[line.Count - 1].x);
+                        int y1 = ChartView.GeoProjectY(layout, line[line.Count - 1].y);
+                        int dxg = x1 - x0;
+                        int dyg = y1 - y0;
+                        int cxq = (x0 + x1) / 2 + (0 - dyg) * cv / 1000;
+                        int cyq = (y0 + y1) / 2 + dxg * cv / 1000;
+                        ChartView.StrokeQuad(c, x0, y0, cxq, cyq, x1, y1,
+                            Chart.WithAlpha(col, alpha), lw);
+                    } else {
+                        List<int> fx = new List<int>();
+                        List<int> fy = new List<int>();
+                        for (int pi = 0; pi < line.Count; pi = pi + 1) {
+                            fx.Add(ChartView.GeoProjectX(layout, line[pi].x) * 256);
+                            fy.Add(ChartView.GeoProjectY(layout, line[pi].y) * 256);
+                        }
+                        string lt = s.itemStyle.normal.lineStyle.type;
+                        if (lt == "dotted" || lt == "dashed") {
+                            List<int> pxl = new List<int>();
+                            List<int> pyl = new List<int>();
+                            for (int pi2 = 0; pi2 < line.Count; pi2 = pi2 + 1) {
+                                pxl.Add(ChartView.GeoProjectX(layout, line[pi2].x));
+                                pyl.Add(ChartView.GeoProjectY(layout, line[pi2].y));
+                            }
+                            int dl = app.Scale(2);
+                            int gl = app.Scale(2);
+                            if (lt == "dashed") { dl = app.Scale(5); gl = app.Scale(3); }
+                            ChartView.DrawDashed(c, pxl, pyl,
+                                Chart.WithAlpha(col, alpha), lw, dl, gl);
+                        } else {
+                            c.DrawPolylineFx(fx, fy, Chart.WithAlpha(col, alpha), lw);
+                        }
+                    }
+                }
+                // 线命中：指针到各线段距离 < 6px。
+                if (!s.silent && line.Count >= 2) {
+                    for (int pi3 = 0; pi3 + 1 < line.Count; pi3 = pi3 + 1) {
+                        int ax = ChartView.GeoProjectX(layout, line[pi3].x);
+                        int ay = ChartView.GeoProjectY(layout, line[pi3].y);
+                        int bx = ChartView.GeoProjectX(layout, line[pi3 + 1].x);
+                        int by = ChartView.GeoProjectY(layout, line[pi3 + 1].y);
+                        int hitP = ChartView.DistToSeg(mx, my, ax, ay, bx, by);
+                        if (hitP < app.Scale(6)) {
+                            string nm = line[0].name.Length > 0 ? line[0].name
+                                : (line[line.Count - 1].name.Length > 0
+                                    ? line[line.Count - 1].name : s.name);
+                            ChartHit lh = ChartHit.Of(ChartElementType.LinePoint,
+                                si, s.name, li, nm, 0, mx, my);
+                            ChartView.OfferActiveHit(lh);
+                            break;
+                        }
+                    }
+                }
+            }
+            // 散点（含 effectScatter 折算）：按 z 值定半径（visualMap
+            // 语义近似），有名且有 label.show 的画名标签。
+            for (int pi4 = 0; pi4 < s.points.Count; pi4 = pi4 + 1) {
+                ChartPoint p = s.points[pi4];
+                int px2 = ChartView.GeoProjectX(layout, p.x);
+                int py2 = ChartView.GeoProjectY(layout, p.y);
+                if (px2 < plotX - app.Scale(20) || px2 >= plotX + plotW + app.Scale(20)
+                    || py2 < plotY - app.Scale(20) || py2 >= plotY + plotH + app.Scale(20)) {
+                    continue;
+                }
+                int pcol = p.color != 0 ? p.color : col;
+                int r = app.Scale(4);
+                if (p.sizeSet && p.size > 0) { r = app.Scale(p.size) / 2; }
+                if (p.z != 0) { r = app.Scale(3) + p.z * app.Scale(14) / 100; }
+                if (r < app.Scale(2)) { r = app.Scale(2); }
+                c.FillCircle(px2, py2, r, Chart.WithAlpha(pcol, alpha));
+                if (s.symbolSize > 0 && p.sizeSet) { r = app.Scale(p.size) / 2; }
+                if (!s.silent && mx >= px2 - r && mx < px2 + r
+                    && my >= py2 - r && my < py2 + r) {
+                    ChartHit ph = ChartHit.Of(ChartElementType.ScatterPoint,
+                        si, s.name, pi4, p.name, p.z, px2, py2);
+                    ph.numberValueSet = true;
+                    ph.numberValue = p.z;
+                    ChartView.OfferActiveHit(ph);
+                }
+                if (s.labelShow && p.name.Length > 0
+                    && (s.labelPos == "right" || s.labelPos.Length == 0)) {
+                    ChartView.DrawTextClamped(c, px2 + r + app.Scale(4),
+                        Canvas.CenterTextYAt(py2, fs), p.name, lblFg, fs,
+                        plotX, plotY, plotW, plotH);
+                }
+            }
+        }
     }
 
     /// 地图/弦图共用的 markPoint 图钉：引线 + 圆点 + 文本，

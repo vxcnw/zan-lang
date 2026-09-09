@@ -1410,6 +1410,11 @@ class ChartSeries {
     List<int> nodeX;      // graph layout:'none' 的逐节点 x（数据坐标；-1 = 未给）
     List<int> nodeY;      // graph layout:'none' 的逐节点 y（数据坐标；-1 = 未给）
     List<string> graphCats; // graph categories 名称表（图例 + 类别调色板）
+    string coordSys;      // ECharts series.coordinateSystem："geo" = 地理坐标
+                          //   （散点/lines/graph 系列叠加在地图底图上）；
+                          //   "" = 直角/默认坐标系
+    List<List<ChartPoint>> geoLines; // lines(coordSys=geo)：每项一条折线
+                                     //   （coords 0.01° 定点，y = -lat×100）
 
     GaugeOption gauge;
 
@@ -1519,6 +1524,8 @@ class ChartSeries {
         s.nodeX = new List<int>();
         s.nodeY = new List<int>();
         s.graphCats = new List<string>();
+        s.coordSys = "";
+        s.geoLines = new List<List<ChartPoint>>();
         s.gauge = GaugeOption.Create();
         return s;
     }
@@ -1986,6 +1993,15 @@ class ChartSeries {
         for (int i = 0; i < src.nodeY.Count; i = i + 1) { s.nodeY.Add(src.nodeY[i]); }
         s.graphCats = new List<string>();
         for (int i = 0; i < src.graphCats.Count; i = i + 1) { s.graphCats.Add(src.graphCats[i]); }
+        s.coordSys = src.coordSys;
+        s.geoLines = new List<List<ChartPoint>>();
+        for (int i = 0; i < src.geoLines.Count; i = i + 1) {
+            List<ChartPoint> line = new List<ChartPoint>();
+            for (int k = 0; k < src.geoLines[i].Count; k = k + 1) {
+                line.Add(ChartPoint.Clone(src.geoLines[i][k]));
+            }
+            s.geoLines.Add(line);
+        }
         return s;
     }
 }
@@ -3275,6 +3291,13 @@ class ChartOption {
         }
     }
 
+    /// 度 → 0.01° 定点整数（半值远离零，与 ChartGeoJson 量化
+    /// 一致）；geo 系列坐标（lines/scatter/graph）统一走这里。
+    static int GeoQ(double d) {
+        if (d >= 0.0) { return (int)(d * 100.0 + 0.5); }
+        return 0 - (int)((0.0 - d) * 100.0 + 0.5);
+    }
+
     /// 解析散点数据：[x,y] 数组或 {x,y,symbolSize?,color?} 对象。
     static void ParsePoints(JsonValue v, List<ChartPoint> into) {
         if (v == null || !v.IsArray()) { return; }
@@ -4012,6 +4035,9 @@ class ChartOption {
                     s.Str("selectedMode", ""));
                 cs.mapName = s.Str("map", "");
                 cs.geoIndex = s.Int("geoIndex", 0);
+                // coordinateSystem:"geo"（散点/lines/graph 叠加地图）。
+                string csys = s.Str("coordinateSystem", "");
+                if (csys == "geo") { cs.coordSys = "geo"; }
                 if (cs.custom == "pictorialBar") {
                     JsonValue psm = s.Get("symbol");
                     if (psm != null && psm.IsString()) {
@@ -4405,8 +4431,9 @@ class ChartOption {
                 // [[x,y],[x,y],...]——把相邻点对拆进 points（x0y0x1y1
                 // 交错），渲染端每两点画一线。嵌套 [[ [x,y],[x,y] ],...]
                 // 的多层形态由 ParsePoints 类似路径在下方 linesCustom
-                // 块里兜住。
-                if (cs.custom == "lines" && cs.points.Count == 0
+                // 块里兜住。coordSys=geo 的 lines 走下方 geoLines 块。
+                if (cs.custom == "lines" && cs.coordSys.Length == 0
+                    && cs.points.Count == 0
                     && da != null && da.IsArray()) {
                     for (int li = 0; li < da.Count(); li = li + 1) {
                         JsonValue pair = da.At(li);
@@ -4417,6 +4444,55 @@ class ChartOption {
                             cs.points.Add(ChartPoint.Of(pair.At(1).At(0).AsInt(0),
                                 pair.At(1).At(1).AsInt(0)));
                         }
+                    }
+                }
+                // lines 系列 coordinateSystem:"geo"：data 是
+                // [{coords:[[lng,lat],[lng,lat],...]}]（coords 可两点
+                // 也可 polyline 多点）——坐标按 0.01° 定点（×100，
+                // 半值远离零）收进 geoLines，y = -lat×100（北朝上，
+                // 与注册表地图几何同一数据系）；渲染端由地图底图
+                // 的布局仿射直接投影（DrawGeoOverlay）。
+                if (cs.custom == "lines" && cs.coordSys == "geo"
+                    && da != null && da.IsArray()) {
+                    for (int li2 = 0; li2 < da.Count(); li2 = li2 + 1) {
+                        JsonValue it2 = da.At(li2);
+                        if (it2 == null || !it2.IsObject()) { continue; }
+                        JsonValue cds = it2.Get("coords");
+                        if (cds == null || !cds.IsArray() || cds.Count() < 2) { continue; }
+                        List<ChartPoint> line = new List<ChartPoint>();
+                        for (int cp = 0; cp < cds.Count(); cp = cp + 1) {
+                            JsonValue cv = cds.At(cp);
+                            if (cv == null || !cv.IsArray() || cv.Count() < 2) { continue; }
+                            line.Add(ChartPoint.Of(
+                                ChartOption.GeoQ(cv.At(0).AsDouble(0.0)),
+                                ChartOption.GeoQ(0.0 - cv.At(1).AsDouble(0.0))));
+                        }
+                        if (line.Count >= 2) { cs.geoLines.Add(line); }
+                    }
+                }
+                // scatter（含 effectScatter）coordinateSystem:"geo"：
+                // data 是 [lng,lat,z?] 数组或 {name,value:[lng,lat,z?]}，
+                // 同样按 0.01° 定点进 points（z 作值/气泡权重）。
+                if (cs.type == ChartType.Scatter && cs.coordSys == "geo"
+                    && da != null && da.IsArray()) {
+                    for (int gi3 = 0; gi3 < da.Count(); gi3 = gi3 + 1) {
+                        JsonValue git = da.At(gi3);
+                        if (git == null) { continue; }
+                        JsonValue gv = git.IsObject() ? git.Get("value") : git;
+                        if (gv == null || !gv.IsArray() || gv.Count() < 2) { continue; }
+                        string gnm = git.IsObject() ? git.Str("name", "") : "";
+                        ChartPoint gp = ChartPoint.Of(
+                            ChartOption.GeoQ(gv.At(0).AsDouble(0.0)),
+                            ChartOption.GeoQ(0.0 - gv.At(1).AsDouble(0.0)));
+                        if (gv.Count() >= 3 && gv.At(2).IsNumber()) {
+                            gp.z = gv.At(2).AsInt(0);
+                        }
+                        if (gnm.Length > 0) { gp.name = gnm; }
+                        if (git.IsObject() && git.Has("symbolSize")) {
+                            gp.size = git.Int("symbolSize", 0);
+                            gp.sizeSet = true;
+                        }
+                        cs.points.Add(gp);
                     }
                 }
                 // map 系列：注册表几何 + data 值 + regions 覆盖，
@@ -4448,6 +4524,7 @@ class ChartOption {
                         }
                     }
                     JsonValue nds = s.Get("nodes");
+                    if (nds == null || !nds.IsArray()) { nds = s.Get("data"); }
                     if (nds != null && nds.IsArray()) {
                         for (int ni2 = 0; ni2 < nds.Count(); ni2 = ni2 + 1) {
                             JsonValue nit = nds.At(ni2);
@@ -4483,10 +4560,28 @@ class ChartOption {
                                 }
                                 JsonValue nxv = nit.Get("x");
                                 JsonValue nyv = nit.Get("y");
+                                if (nxv == null || !nxv.IsNumber()) {
+                                    // geo 坐标系：value 是 [lng,lat,...]，
+                                    // 折算 0.01° 定点作节点固定坐标
+                                    //（layout 缺省即 none 语义）。
+                                    JsonValue gvv = nit.Get("value");
+                                    if (cs.coordSys == "geo" && gvv != null
+                                        && gvv.IsArray() && gvv.Count() >= 2
+                                        && gvv.At(0).IsNumber()
+                                        && gvv.At(1).IsNumber()) {
+                                        nxv = gvv.At(0);
+                                        nyv = gvv.At(1);
+                                    }
+                                }
                                 if (nxv != null && nxv.IsNumber()
                                     && nyv != null && nyv.IsNumber()) {
-                                    cs.nodeX.Add(nxv.AsInt(0 - 1));
-                                    cs.nodeY.Add(nyv.AsInt(0 - 1));
+                                    if (cs.coordSys == "geo") {
+                                        cs.nodeX.Add(ChartOption.GeoQ(nxv.AsDouble(0.0)));
+                                        cs.nodeY.Add(ChartOption.GeoQ(0.0 - nyv.AsDouble(0.0)));
+                                    } else {
+                                        cs.nodeX.Add(nxv.AsInt(0 - 1));
+                                        cs.nodeY.Add(nyv.AsInt(0 - 1));
+                                    }
                                 } else {
                                     cs.nodeX.Add(0 - 1);
                                     cs.nodeY.Add(0 - 1);
@@ -4516,6 +4611,10 @@ class ChartOption {
                         gnames.Add(gn);
                     }
                     JsonValue glinks = s.Get("links");
+                    if (glinks == null || !glinks.IsArray()) {
+                        // links 的别名（geo-graph 用 edges）。
+                        glinks = s.Get("edges");
+                    }
                     if (glinks != null && glinks.IsArray()) {
                         cs.links = new List<ChartLink>();
                         ChartOption.ParseGraphLinks(glinks, cs.links,
