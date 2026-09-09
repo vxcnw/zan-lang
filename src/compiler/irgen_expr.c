@@ -3221,7 +3221,35 @@ binding_lowered:
                 /* any other array expression: `obj.Buffer()[i] = v`, and the
                  * like. Without this the store was dropped silently. */
                 zan_type_t *at = infer_expr_type(g, arr_expr, locals);
-                if (at && at->kind == TYPE_ARRAY) {
+                if (at && type_named(at, "List", 4)) {
+                    /* `expr[i][j] = v` and friends: the base expression reads
+                     * as a List-of-E value whose slot j must be written in
+                     * place — a value copy of the inner list would drop the
+                     * store. Mirrors the local List store (word slots). */
+                    LLVMTypeRef i64t = LLVMInt64TypeInContext(g->ctx);
+                    LLVMValueRef arr_ptr = emit_expr(g, arr_expr, locals);
+                    LLVMValueRef list_ptr = LLVMBuildBitCast(g->builder, arr_ptr,
+                        LLVMPointerType(g->list_struct_type, 0), "lptr");
+                    LLVMValueRef data = LLVMBuildLoad2(g->builder, LLVMPointerType(i64t, 0),
+                        LLVMBuildStructGEP2(g->builder, g->list_struct_type,
+                            list_ptr, 2, "df"), "data");
+                    LLVMValueRef count = LLVMBuildLoad2(g->builder, i64t,
+                        LLVMBuildStructGEP2(g->builder, g->list_struct_type,
+                            list_ptr, 0, "countf"), "count");
+                    LLVMValueRef idx = emit_expr(g, expr->binary.left->index.index, locals);
+                    emit_index_bounds_check(g, idx, count, expr->loc, "list");
+                    if (LLVMGetTypeKind(LLVMTypeOf(idx)) == LLVMIntegerTypeKind &&
+                        LLVMGetIntTypeWidth(LLVMTypeOf(idx)) < 64) {
+                        idx = LLVMBuildSExt(g->builder, idx, i64t, "idxext");
+                    }
+                    idx = emit_index_safe_bounds(g, idx, count, expr->loc, "list");
+                    idx = slot_word_index(g, idx,
+                        elem_slot_words(g, container_elem_type(at)));
+                    LLVMValueRef slot_ptr = LLVMBuildGEP2(g->builder, i64t, data, &idx, 1, "ep");
+                    emit_collection_slot_store(g, container_elem_type(at), i64t, slot_ptr,
+                        right, expr->binary.right, locals, 1);
+                    emit_release_owned_call_temp(g, arr_expr, arr_ptr, locals);
+                } else if (at && at->kind == TYPE_ARRAY) {
                     LLVMTypeRef elem_llvm = at->element_type
                         ? map_type(g, at->element_type)
                         : LLVMInt64TypeInContext(g->ctx);

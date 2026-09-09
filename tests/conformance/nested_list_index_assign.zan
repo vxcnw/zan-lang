@@ -1,0 +1,19 @@
+using System;
+
+class NestAssign {
+    static void Main() {
+        List<List<int>> grid = new List<List<int>>();
+        for (int r = 0; r < 3; r = r + 1) {
+            List<int> row = new List<int>();
+            for (int c = 0; c < 4; c = c + 1) { row.Add(0); }
+            grid.Add(row);
+        }
+        grid[1][2] = 17;
+        grid[1][2] = grid[1][2] + 5;
+        grid[0][0] = grid[1][2] - 20;
+        if (grid[1][2] != 22) { Console.WriteLine("FAIL incr " + grid[1][2]); return; }
+        if (grid[0][0] != 2) { Console.WriteLine("FAIL copy " + grid[0][0]); return; }
+        if (grid[2][3] != 0) { Console.WriteLine("FAIL untouched " + grid[2][3]); return; }
+        Console.WriteLine("NESTED_ASSIGN_OK");
+    }
+}
