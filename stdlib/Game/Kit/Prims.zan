@@ -189,49 +189,75 @@ class Draw {
         Draw.roundTex.SetOpacity(255);
     }
 
-    // Cached 1x-h vertical gradient strip, stretched per draw so a fullscreen
-    // gradient costs one textured quad instead of h scanline fills.
-    static SdlTexture gradTex;
-    static int gradR0 = -1;
-    static int gradG0 = -1;
-    static int gradB0 = -1;
-    static int gradR1 = -1;
-    static int gradG1 = -1;
-    static int gradB1 = -1;
-    static int gradH = -1;
+    // Cached 1x-h vertical gradient strips, stretched per draw so a
+    // fullscreen gradient costs one textured quad instead of h scanline
+    // fills. A Backdrop+Scrim stack issues three color-distinct gradients
+    // per frame; slots let the trio coexist instead of re-baking every call.
+    static SdlTexture[] gradTex;
+    static int[] gradR0 = new int[4];
+    static int[] gradG0 = new int[4];
+    static int[] gradB0 = new int[4];
+    static int[] gradR1 = new int[4];
+    static int[] gradG1 = new int[4];
+    static int[] gradB1 = new int[4];
+    static int[] gradH = new int[4];
+    static int[] gradTried = new int[4];
 
     // One-quad vertical gradient into rect (x,y,w,h). Bakes a 1x-h strip on
     // first use (or when colors/height change) and stretches it -- replaces
     // h FillRect scanlines per frame with a single textured quad.
     static void VGradient(SdlRenderer r, int x, int y, int w, int h,
                           int r0, int g0, int b0, int r1, int g1, int b1, int ca) {
+        Draw.VGradientAt(r, 0, x, y, w, h, r0, g0, b0, r1, g1, b1, ca);
+    }
+
+    static void VGradientAt(SdlRenderer r, int slot, int x, int y, int w, int h,
+                            int r0, int g0, int b0, int r1, int g1, int b1, int ca) {
         if (h <= 0) { return; }
-        if (Draw.gradTex == null || h != Draw.gradH
-            || r0 != Draw.gradR0 || g0 != Draw.gradG0 || b0 != Draw.gradB0
-            || r1 != Draw.gradR1 || g1 != Draw.gradG1 || b1 != Draw.gradB1) {
-            SdlTexture t = SdlTexture.CreateTarget(r, 1, h);
+        slot = slot % 4;
+        if (slot < 0) { slot = slot + 4; }
+        bool tried = Draw.gradTried[slot] != 0
+            && Draw.gradH[slot] >= h
+            && r0 == Draw.gradR0[slot] && g0 == Draw.gradG0[slot]
+            && b0 == Draw.gradB0[slot] && r1 == Draw.gradR1[slot]
+            && g1 == Draw.gradG1[slot] && b1 == Draw.gradB1[slot];
+        if (!tried) {
+            Draw.gradTried[slot] = 1;
+            int bakeH = h > 64 ? h : 64;   // overbake: covers taller reuse
+            SdlTexture t = SdlTexture.CreateTarget(r, 1, bakeH);
             if (t != null && t.IsValid()) {
                 r.SetTarget(t);
                 r.SetBlend(0);
-                for (int j = 0; j < h; j = j + 1) {
-                    r.SetColor(r0 + (r1 - r0) * j / h,
-                               g0 + (g1 - g0) * j / h,
-                               b0 + (b1 - b0) * j / h, 255);
+                for (int j = 0; j < bakeH; j = j + 1) {
+                    r.SetColor(r0 + (r1 - r0) * j / bakeH,
+                               g0 + (g1 - g0) * j / bakeH,
+                               b0 + (b1 - b0) * j / bakeH, 255);
                     r.FillRectRaw(0, j, 1, 1);
                 }
                 t.SetBlendMode(1);
                 r.SetBlend(1);
+                // ResetTarget lands on the window backbuffer, not on whatever
+                // target the frame was composing into -- rebind the host
+                // canvas or every later draw of this frame lands on a
+                // surface the frame-end clear wipes (black screen).
                 r.ResetTarget();
-                Draw.gradTex = t;
-                Draw.gradH = h;
-                Draw.gradR0 = r0; Draw.gradG0 = g0; Draw.gradB0 = b0;
-                Draw.gradR1 = r1; Draw.gradG1 = g1; Draw.gradB1 = b1;
+                SdlTexture scene = Host.SceneCanvas(r);
+                if (scene != null) { r.SetTarget(scene); }
+                if (Draw.gradTex == null) { Draw.gradTex = new SdlTexture[4]; }
+                if (Draw.gradTex[slot] != null) { Draw.gradTex[slot].Close(); }
+                Draw.gradTex[slot] = t;
+                Draw.gradH[slot] = bakeH;
+                Draw.gradR0[slot] = r0; Draw.gradG0[slot] = g0; Draw.gradB0[slot] = b0;
+                Draw.gradR1[slot] = r1; Draw.gradG1[slot] = g1; Draw.gradB1[slot] = b1;
             }
         }
-        if (Draw.gradTex != null && h == Draw.gradH) {
-            Draw.gradTex.SetOpacity(ca);
-            r.DrawTexture(Draw.gradTex, x, y, w, h);
-            Draw.gradTex.SetOpacity(255);
+        if (Draw.gradTex != null && Draw.gradTex[slot] != null
+            && Draw.gradH[slot] >= h) {
+            SdlTexture t = Draw.gradTex[slot];
+            t.SetOpacity(ca);
+            // Sub-rect of the overbaked strip so the ramp spans exactly h.
+            r.DrawTextureRegion(t, 0, 0, 1, Draw.gradH[slot], x, y, w, h);
+            t.SetOpacity(255);
             return;
         }
         // fallback: original scanline path
@@ -417,8 +443,8 @@ class Draw {
 
     // Bottom-weighted darkening scrim to keep foreground text legible over art.
     static void Scrim(SdlRenderer r, int w, int h) {
-        Draw.VGradient(r, 0, 0, w, h, 6, 8, 14, 6, 8, 14, 70);
-        Draw.VGradient(r, 0, h * 3 / 5, w, h * 2 / 5, 6, 8, 14, 8, 10, 16, 150);
+        Draw.VGradientAt(r, 1, 0, 0, w, h, 6, 8, 14, 6, 8, 14, 70);
+        Draw.VGradientAt(r, 2, 0, h * 3 / 5, w, h * 2 / 5, 6, 8, 14, 8, 10, 16, 150);
     }
 
     static bool PointInCircle(int px, int py, int cx, int cy, int rad) {

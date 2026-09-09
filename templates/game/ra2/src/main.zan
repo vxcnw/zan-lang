@@ -1087,22 +1087,23 @@ class Ra2App {
                     int aiN = aiHouses.Count;
                     int a = 0;
                     int fallback = 0;
+                    // Waypoints handed out so far; a later AI never reuses
+                    // one. Index 0 tracks the player's own spot.
+                    bool[] spotTaken = new bool[8];
+                    for (int w = 0; w < 8; w = w + 1) { spotTaken[w] = false; }
+                    spotTaken[spot] = true;
                     while (a < aiN) {
                         int aiSide = aiHouses[a];
                         List<int> eStart = new List<int>();
                         int eSpot = 0 - 1;
                         for (int w = 0; w < 8 && eSpot < 0; w = w + 1) {
-                            if (w == spot) { continue; }
-                            bool taken = false;
-                            for (int t = 0; t < a && !taken; t = t + 1) {
-                                taken = t == w;
-                            }
-                            if (taken) { continue; }
+                            if (spotTaken[w]) { continue; }
                             eStart = new List<int>();
                             if (map.StartCell(w, eStart) && eStart.Count >= 2) {
                                 eSpot = w;
                             }
                         }
+                        if (eSpot >= 0) { spotTaken[eSpot] = true; }
                         int aiYard = 0 - 1;
                         if (eSpot >= 0) {
                             aiYard = world.PlaceBase(aiSide, eStart[0],

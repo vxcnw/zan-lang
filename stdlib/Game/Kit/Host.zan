@@ -510,6 +510,20 @@ class Host {
         return b;
     }
 
+    // The offscreen canvas a Host.Begin/End frame is currently composing
+    // into, when r is the live host's renderer. Mid-frame texture bakes
+    // (gradient strips, etc.) must rebind this after their ResetTarget --
+    // ResetTarget always lands on the *window* backbuffer, and leaving the
+    // frame stranded there means every later draw lands on a surface the
+    // frame-end clear immediately wipes (the "screen goes black when a
+    // cache misses" bug).
+    static SdlTexture SceneCanvas(SdlRenderer r) {
+        if (liveHost == null || liveHost.canvas == null) { return null; }
+        if (r == null || r != liveHost.r) { return null; }
+        if (!liveHost.canvas.IsValid()) { return null; }
+        return liveHost.canvas;
+    }
+
     // The host-owned sprite batch (lazy). Null while the renderer is
     // missing, so every caller must tolerate a null return.
     SdlSpriteBatch SprBatch() {
