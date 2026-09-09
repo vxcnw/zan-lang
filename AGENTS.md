@@ -52,7 +52,16 @@ ZanIDE禁止任何自绘必须全部用标准库组件来完成
    one-off scripts, PR drafts, diffs, or patches in the root.
 2. **All throwaway files go in `_scratch/`** (git-ignored). This includes
    debug probes, benchmarks, ad-hoc scripts, screenshots, `*.log`, PR bodies,
-   commit-message drafts, `*.diff`/`*.patch`. Delete them when done.
+   commit-message drafts, `*.diff`/`*.patch`. **Cleanup is part of finishing
+   the task** — `_scratch` once hit 48G because it only ever grew: before
+   committing, delete what you created this session (bisect trees via
+   `git worktree add`/`git worktree remove`, A/B compiler snapshots, stdlib
+   copies — reuse fixed names like `_scratch/zanc-good` instead of minting
+   new ones). Keepers (SDKs, toolchains, anything expensive to re-acquire)
+   must carry a one-line `README.md` saying what it is and how to re-acquire
+   it; README-marked entries are skipped by `scripts/clean_scratch.ps1`,
+   which sweeps entries older than 7 days (`-Apply` to actually delete,
+   dry-run by default) — run it when `_scratch` grows past a few GB.
 3. **Build only out-of-source into `build/`** via `cmake -B build && cmake --build build`.
    Never copy build products into the source tree or root.
 4. **Tests go in `tests/`** and are committed. One-off memory/leak probes are

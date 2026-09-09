@@ -12,7 +12,13 @@
 - 一次性脚本（`mkpr*.py`、`updpr*.py`、`push.bat`、`_*.ps1`）
 
 ## 2. 所有临时文件放进被忽略的目录
-任何调试、探针、benchmark、草稿文件一律放进 `_scratch/`（已被 `.gitignore` 忽略）。用完即删。不要散落在源码树里。
+任何调试、探针、benchmark、草稿文件一律放进 `_scratch/`（已被 `.gitignore` 忽略）。不要散落在源码树里。
+
+**清理是任务收尾的一部分，不是可选项。**（2026-09 清理时 `_scratch` 已积到 48G：bisect 整树、A/B 快照、SDK 解压副本只进不出，没人认领。）规则：
+
+- 会话里造的树**当场造、当场收**：bisect 用 `git worktree add _scratch/xxx_wt <commit>` 开树，定位完 `git worktree remove --force` + `git worktree prune`（掉注册的 worktree 目录就是纯垃圾）；A/B 对照、stdlib 整树快照**复用固定目录名**（如 `_scratch/zanc-good`、`_scratch/zanc-mine`）覆盖使用，不新起名字，对照一结束当场删。
+- 确实要留的大件（SDK、工具链、会话库等再取成本高的）**必须带一页 `README.md`**，写明是什么、怎么再取；带 README 的条目会被 `scripts/clean_scratch.ps1` 跳过。
+- `_scratch` 涨过几个 GB 就跑 `scripts/clean_scratch.ps1`：默认 dry-run 只列清单，`-Apply` 才真删；默认清 7 天前的条目（按条目内最新文件时间算，别按目录自身时间），`-KeepDays N` 可调。
 
 ## 3. 构建产物只进 build/
 使用 CMake 的 out-of-source 构建：`cmake -B build && cmake --build build`。产物留在 `build/`（已忽略），绝不手动拷到根目录或提交。

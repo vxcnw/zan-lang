@@ -1,6 +1,6 @@
 ---
 name: zan-compiler-internals
-description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑——Dict 内建布局契约（插入序 keys/values + 惰性哈希索引 + Remove 整体失效）、LLVM select 两臂都求值导致的死臂分配泄漏（用 branch+phi）、looks_like_var_decl 的内建关键字分派契约（rank specifier 必须容忍逗号）、交叉工具链 .o 重出配方（zig cc + build/ 暂存副本不会自动刷新）、可空值类型在字符串位的解包形状。做或改 src/compiler/*、交叉运行时对象、conformance golden 时使用。
+description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑——Dict 内建布局契约（插入序 keys/values + 惰性哈希索引 + Remove 整体失效）、LLVM select 两臂都求值导致的死臂分配泄漏（用 branch+phi）、looks_like_var_decl 的内建关键字分派契约（rank specifier 必须容忍逗号）、交叉工具链 .o 重出配方（zig cc + build/ 暂存副本不会自动刷新）、可空值类型在字符串位的解包形状、编译器调试的 scratch 卫生（bisect 用 worktree 即用即删、A/B 对照复用固定目录名）。做或改 src/compiler/*、交叉运行时对象、conformance golden 时使用。
 ---
 
 # zanc 编译器内部定式与坑
@@ -127,3 +127,24 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
   （0x7ffff7xxxxxx 段）；崩溃地址落在 mallocng 元数据检查
   （__malloc_allzerop）且 RSS 平台化后不重现，优先怀疑高压竞争而非
   Zan 侧 UAF——先用低速率复跑分型。
+
+## 编译器调试的 scratch 卫生（bisect / A-B 对照）
+
+> 2026-09 清理时 `_scratch` 已积到 48G：bisect 整树、A/B 快照、stdlib
+> 副本、SDK 解压双份只进不出。清理是任务收尾的一部分，不是可选项。
+
+- **bisect 用 `git worktree add _scratch/xxx_wt <commit>` 开树**，定位完
+  当场 `git worktree remove --force` + `git worktree prune`。裸 `cp -r`
+  出来的树不带注册，事后没人记得它是谁的；曾清出 b3_wt~b22_src 二十来棵
+  整树（每棵 250M+），其中还有已掉注册的 worktree 残骸——目录在、
+  `git worktree list` 没有，就是纯垃圾。
+- **A/B 对照（新旧 zanc 行为对比）复用固定目录名** `_scratch/zanc-good` /
+  `_scratch/zanc-mine`，下次覆盖使用，不新起名字；对照一结束两个目录就
+  是垃圾，当场删。stdlib 整树快照同理——head-stdlib、pristine2、
+  stdlib-fixed 这类一次名快照只会越攒越多。
+- **下载的 SDK/源码包先解压验证、随即压缩包与解压副本二选一**（llvm-dl
+  与 ohos-probe 的双份并存一次占 10G）。要长期留的大件写一页 README
+  （是什么+怎么再取），`scripts/clean_scratch.ps1` 会跳过带 README 的
+  条目，其余按 7 天清。
+- **提交前自检**：本次会话在 `_scratch` 造的东西还在吗？在，删掉再提交。
+  会话验收只看"任务完成"，没人替你收尾。
