@@ -419,6 +419,21 @@ class Gateway {
             rC.Set("codex", Fight.CodexJson());
             return rC;
         }
+
+        /* ---- 玩法页（各有服务端权威状态；Play 模块实现） ---- */
+        if (op == "arena") { return Play.Arena(s, m, now); }
+        if (op == "escort") { return Play.Escort(s, m, now); }
+        if (op == "guild") { return await Play.Guild(s, m, now); }
+        if (op == "siege") { return Play.Siege(s, m, now); }
+        if (op == "tower") { return Play.Tower(s, m, now); }
+        if (op == "wuxing") { return Play.Wuxing(s, m); }
+        if (op == "mentor") { return await Play.Mentor(s, m, now); }
+        if (op == "altar") { return Play.Altar(s, m, now); }
+        if (op == "stars") { return Play.Stars(s, now); }
+        if (op == "redpack") { return Play.Redpack(s, m, now); }
+        if (op == "market") { return await Play.Market(s, m); }
+        if (op == "codexpage") { return Play.CodexPage(m); }
+        if (op == "title") { return Play.Title(s, m); }
         return Gateway.Err("未知 op: " + op);
     }
 
@@ -510,7 +525,17 @@ class Gateway {
             Session s = new Session();
             s.cid = http ? Gateway.NextHttpCid() : cid;
             s.httpOwned = http;
+            /* TCP 直连的会话连接即通道（设计文档：连接即推送出口）——
+               不挂上的话 AnnounceAll/聊天等 ev 推送会因 conn==null 被静默
+               丢弃；HTTP 会话则等 attach 再挂（OnPushClosed 各自收口）。 */
             s.conn = null;
+            s.pushCid = 0;
+            if (!http) {
+                Connection tc = null;
+                Gateway.conns.TryGetValue(cid, out tc);
+                s.conn = tc;
+                s.pushCid = cid;
+            }
             s.accountId = row.id;
             s.username = row.username;
             s.realmId = 0;
@@ -1156,6 +1181,14 @@ class Gateway {
         o.Set("wuxing", JsonValue.NewNum(Convert.ToString(s.row.wuxing)));
         o.Set("towerFloor", JsonValue.NewNum(Convert.ToString(s.row.towerFloor)));
         o.Set("title", JsonValue.NewStr(s.row.title != null ? s.row.title : ""));
+        /* 玩法页状态：竞技场/押镖/祭坛/五行/将星/塔（各页头部摘要）。 */
+        o.Set("arenaPts", JsonValue.NewNum(Convert.ToString(s.row.arenaPts)));
+        o.Set("arenaWins", JsonValue.NewNum(Convert.ToString(s.row.arenaWins)));
+        o.Set("guildId", JsonValue.NewNum(Convert.ToString(s.row.guildId)));
+        o.Set("stars", JsonValue.NewNum(Convert.ToString(s.row.stars)));
+        o.Set("wuxingPool", JsonValue.NewNum(Convert.ToString(s.row.wuxingPool)));
+        o.Set("masterName", JsonValue.NewStr(s.row.masterName != null
+            ? s.row.masterName : ""));
         o.Set("auto", JsonValue.NewNum(Convert.ToString(s.autoMobId)));
         return o;
     }

@@ -84,16 +84,60 @@ class Player {
     /* 所属行会（game_guild.id，0=无会）。 */
     int guildId;
 
-    /* 押镖：0=无任务；1=押送中（escortUntil 前交任务）。 */
+    /* 押镖：0=无任务；1=押送中（escortUntil 前结算，完成领金币）。
+       escortReward 预估奖励（出发时按等级算好）。 */
     int escortStage;
     long escortUntil;
+    long escortReward;
 
     /* 师父角色名（空=未拜师）。 */
     [Column(StringLength = 32)]
     string masterName;
 
-    /* 竞技场积分。 */
+    /* 竞技场积分（PK竞技场页展示与对手强度公式）。 */
     int arenaPts;
+    /* 竞技场累计胜场。 */
+    int arenaWins;
+    /* 竞技场每日次数（跨天回满，日期字符串同 bossTryDate 定式）。 */
+    int arenaTries;
+    [Column(StringLength = 10)]
+    string arenaTryDate;
+
+    /* 押镖每日次数（跨天回满）。 */
+    int escortTries;
+    [Column(StringLength = 10)]
+    string escortTryDate;
+
+    /* 称谓解锁列表（逗号分隔的称谓名；称谓页消耗战功解锁+佩戴）。 */
+    [Column(StringLength = 255)]
+    string titlesUnlocked;
+
+    /* 传说塔每日尝试次数（跨天回满）。 */
+    int towerTries;
+    [Column(StringLength = 10)]
+    string towerTryDate;
+
+    /* 祭坛增益到期时刻（秒）：有效期内打怪经验/金币 ×1.1（Fight.OnKill）。 */
+    long altarBuffUntil;
+
+    /* 将星图谱：已击败 BOSS 的地图位图（bit = mapId-1，BossFight 胜利点亮）。 */
+    int stars;
+
+    /* 五行修炼明细：金木水火土各行等级与当前经验（逗号分隔五元组）；
+       wuxingPool 是修炼经验池（打怪按秒累计，注入转行经验，突破耗金币/元宝）。
+       总层数=五行之和，随升级同步写回上行 wuxing。 */
+    [Column(StringLength = 64)]
+    string wuxingRanks;
+    [Column(StringLength = 128)]
+    string wuxingXp;
+    long wuxingPool;
+
+    /* 祭坛个人进度 / 今日捐献（跨天清零，altarDonationDate 同 bossTryDate）；
+       服务器权威，捐献走金币现结。 */
+    long altarPersonal;
+    int altarDonations;
+    [Column(StringLength = 10)]
+    string altarDonationDate;
 
     /* 当前所在地图（game_map.id）与坐标；移动合法性由网关校验。 */
     int mapId;

@@ -32,6 +32,11 @@ class LegendApp {
     Input chatInput; Button chatSend;
     int bagSel; /* 背包页选中的物品 id：数据推送重建页面后选中不丢。 */
     int bagTab = -2; /* 背包分类签页：-2=全部，-1=消耗/材料，其余=slot 值。 */
+    /* 玩法页（Play 模块）本地视图状态：图鉴签页与页码走 Net 缓存；
+       市场挂单选中的物品、押镖/红包页的轮询节拍记在这里。 */
+    string codexKindView = "items";
+    int marketSellId; string marketSellName = "";
+    int escortPoll; int redpackPoll;
     Label chatHistory; Label netStatus; Label netFight; Label netWorld; Label netQuest;
     /* 登录小窗：窗口本身即表单（不再套模态弹窗）。按联机阶段重建：
        ①连接（发布时内置唯一服务器，启动自动拨号） ②请登录/创建账号/
@@ -225,6 +230,13 @@ class LegendApp {
             }
             lastTime = t;
             if (net.InWorld() && net.DataVersion() != lastNetKey) { lastNetKey = net.DataVersion(); BuildPage(); }
+            /* 押镖倒计时与红包池是时限性数据：停在这两页时每 5 秒向
+               服务端重拉一次（动作回复本来就带新面板，平时不轮询）。 */
+            if (net.InWorld() && (page == 4 || page == 18)) {
+                if (page == 4) { escortPoll = escortPoll + 1; } else { redpackPoll = redpackPoll + 1; }
+                if (escortPoll >= 5) { escortPoll = 0; net.ReloadEscort(); }
+                if (redpackPoll >= 5) { redpackPoll = 0; net.RefreshRedpack(); }
+            } else { escortPoll = 0; redpackPoll = 0; }
             /* 掉线看门狗：进过世界后再断开，PumpNetStage 已随表单隐藏
                停泵，由这里把窗口缩回登录小窗，引导重新连接。 */
             bool inWorldNow = net.InWorld();
@@ -326,6 +338,19 @@ class LegendApp {
             if (page == 30) { BuildNetSettings(); return; }
             if (page == 31) { BuildNetMapInner(); return; }
             if (page == 2) { BuildNetOfflinePage(); return; }
+            if (page == 1) { BuildNetArena(); return; }
+            if (page == 4) { BuildNetEscort(); return; }
+            if (page == 5) { BuildNetGuild(); return; }
+            if (page == 7) { BuildNetSiege(); return; }
+            if (page == 8) { BuildNetTower(); return; }
+            if (page == 10) { BuildNetWuxing(); return; }
+            if (page == 11) { BuildNetMentor(); return; }
+            if (page == 14) { BuildNetAltar(); return; }
+            if (page == 16) { BuildNetStars(); return; }
+            if (page == 18) { BuildNetRedpack(); return; }
+            if (page == 22) { BuildNetMarket(); return; }
+            if (page == 23) { BuildNetCodexPage(); return; }
+            if (page == 25) { BuildNetTitle(); return; }
             BuildNetStub(); return;
         }
         if (g.job < 0) { BuildWelcome(); return; }
@@ -1631,6 +1656,473 @@ class LegendApp {
         go.With(Btn("去主线任务", "net-go-quest", () => { Navigate(6); }));
         go.With(Btn("去背包", "net-go-bag2", () => { Navigate(20); }));
         content.With(go);
+    }
+
+    /* ---- 玩法页（Play 模块的 13 个 op）：每页 = 进页拉一次缓存 +
+       按钮动作就地合入；数据形状对照服务端 Play.zan。页码即导航号：
+       1 竞技场 4 押镖 5 行会 7 攻城 8 传说塔 10 五行 11 师徒
+       14 祭坛 16 将星 18 红包 22 市场 23 图鉴 25 称谓。---- */
+
+    /* 页 1 PK竞技场：每日 5 场，三个对手按编号变强；胜得战功+金币。 */
+    void BuildNetArena() {
+        net.MaybeRefreshArena();
+        JsonValue st = net.Self();
+        content.With(Text("PK竞技场", "yellow strong", 28));
+        JsonValue a = net.PlayArena();
+        if (a == null) {
+            content.With(Text("正在拉取竞技场数据…", "secondary", 48));
+            Note(content, "每日 5 场；对手越靠后越强，赢越多对手也越强。");
+            return;
+        }
+        int tries = a.Int("tries", 0);
+        Panel card = Col("frame");
+        card.With(Text("战功 " + Rules.N(a.Int("pts", 0)) + " · 胜场 " + Rules.N(a.Int("wins", 0))
+            + " · 攻击 " + Rules.N(a.Int("power", 0)) + " · 今日剩余 " + Rules.N(tries) + " 场", "cyan", 30));
+        card.With(Text("胜：战功 +100、金币 +200；败也有战功 +20 保底。战功在「称谓」页换称号。", "secondary small", 24));
+        content.With(card);
+        Panel go = Panel.Row(); go.Gap(4); go.Prefer(0, 30);
+        string[] rivals = new string[] { "挑战对手一", "挑战对手二", "挑战对手三" };
+        for (int i = 0; i < 3; i = i + 1) {
+            int rival = i + 1;
+            Button b = Btn(rivals[i], "net-arena-fight-" + Rules.N(rival), () => { net.ArenaFight(rival); });
+            b.Disabled = tries <= 0;
+            go.With(b);
+        }
+        content.With(go);
+        Note(content, "对手战力随你的胜场增长——见好就收还是乘胜追击，自己掂量。");
+    }
+
+    /* 页 4 押镖：3 次/日；出发扣 100 押金，60 秒后交镖连本带利拿回。 */
+    void BuildNetEscort() {
+        net.MaybeRefreshEscort();
+        JsonValue st = net.Self();
+        content.With(Text("押镖", "yellow strong", 28));
+        JsonValue a = net.PlayEscort();
+        if (a == null) {
+            content.With(Text("正在拉取镖车信息…", "secondary", 48));
+            Note(content, "每日 3 次；出发扣 100 金币押金，60 秒后交镖连本带利拿回。");
+            return;
+        }
+        int tries = a.Int("tries", 0);
+        int stage = a.Int("stage", 0);
+        Panel card = Col("frame");
+        if (stage == 1) {
+            long left = a.Int("left", 0);
+            long reward = a.Int("reward", 0);
+            card.With(Text(left > 0
+                ? "镖车在路上，还剩 " + Rules.N(left) + " 秒到站。\n到站后交镖入账 " + Rules.N(reward) + " 金币。"
+                : "镖车已到站！点「交镖」结算 " + Rules.N(reward) + " 金币。", "green", 48));
+            Button collect = Btn(left > 0 ? "镖车未到站" : "交 镖", "net-escort-collect", () => { net.EscortCollect(); });
+            collect.Disabled = left > 0;
+            collect.Prefer(140, 32); card.With(collect);
+        } else {
+            card.With(Text("今日剩余 " + Rules.N(tries) + " 次 · 押金 100 金币 · 交镖收益 400 + 等级×20 + 押金", "cyan", 30));
+            Button go = Btn("接镖出发（100 金币）", "net-escort-go", () => { net.EscortGo(); });
+            go.Disabled = tries <= 0 || st == null || st.Int("gold", 0) < 100;
+            go.Prefer(190, 32); card.With(go);
+        }
+        content.With(card);
+        Note(content, "本页每 5 秒自动刷新倒计时；到站后记得点「交镖」，超时不扣钱但也不结账。");
+    }
+
+    /* 页 5 行会：建会（1000 金币）/入会/退会；会长退会=解散（仅当无他人）。 */
+    void BuildNetGuild() {
+        JsonValue st = net.Self();
+        if (net.PlayGuild() == null) { net.RefreshGuild(); }
+        content.With(Text("行会", "yellow strong", 28));
+        int myGuild = st != null ? st.Int("guildId", 0) : 0;
+        Panel create = Col("frame");
+        if (myGuild > 0) {
+            create.With(Text("你已在行会中。会长退会=解散（仅当再无其他成员），普通成员随时可退。", "cyan", 26));
+            Button quit = Btn("退出行会", "net-guild-quit", () => { net.GuildQuit(); });
+            quit.Prefer(120, 32); create.With(quit);
+        } else {
+            create.With(Text("没有行会？花 1000 金币自己建一个，或从下面的列表挑一个加入。", "cyan", 26));
+            Input nameIn = new Input("行会名（2-12 字）"); nameIn.Prefer(0, 30); create.With(nameIn);
+            Button mk = Btn("创建行会（1000 金币）", "net-guild-create",
+                () => { string n = nameIn.GetText().Trim(); if (n.Length > 0) { net.GuildCreate(n); } });
+            mk.Prefer(180, 32); create.With(mk);
+        }
+        content.With(create);
+        ScrollColumn list = new ScrollColumn(); list.Named("net-guild-list"); list.Grow(); content.With(list);
+        JsonValue rows = net.PlayGuild();
+        if (rows == null || rows.Count() == 0) { list.With(Text("正在拉取行会列表…（一个行会都没有时，建一个就是全服第一）", "secondary", 48)); }
+        for (int i = 0; rows != null && i < rows.Count(); i = i + 1) {
+            JsonValue g = rows.At(i);
+            int gid = g.Int("id", 0);
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 52);
+            Label name = Text((g.Int("mine", 0) == 1 ? "⭐ " : "") + g.Str("name", "???")
+                + "\n会长 " + g.Str("leader", "-") + " · 成员 " + Rules.N(g.Int("members", 0))
+                + " · 基金 " + Rules.N(g.Int("fund", 0)), "yellow", 40);
+            name.Grow(); row.With(name);
+            Button join = Btn(g.Int("mine", 0) == 1 ? "我的行会" : "加 入", "net-guild-join-" + Rules.N(gid),
+                () => { net.GuildJoin(gid); });
+            join.Disabled = myGuild > 0 || g.Int("mine", 0) == 1;
+            join.Prefer(84, 28); row.With(join);
+            list.With(row);
+        }
+        Note(content, "行会是攻城的门槛：只有行会成员能去「城池争夺」宣战攻打沙巴克。");
+    }
+
+    /* 页 7 城池争夺：行会成员花 2000 金币宣战，按战力掷骰易主。 */
+    void BuildNetSiege() {
+        JsonValue st = net.Self();
+        if (net.PlaySiege() == null) { net.RefreshSiege(); }
+        content.With(Text("城池争夺", "yellow strong", 28));
+        JsonValue a = net.PlaySiege();
+        if (a == null) {
+            content.With(Text("正在拉取城池状态…", "secondary", 48));
+            Note(content, "先入行会，再花 2000 金币宣战；战胜守军城池易主并全服公告。");
+            return;
+        }
+        string owner = a.Str("owner", "");
+        Panel card = Col("frame");
+        card.With(Text(owner.Length > 0
+            ? "现任城主：" + owner + "（" + a.Str("guild", "-") + "）\n已驻守 " + Rules.N(a.Int("holdSeconds", 0) / 60) + " 分钟"
+            : "沙巴克城目前无主——第一个攻下来的行会将名震全服！", "green", 52));
+        int myGuild = st != null ? st.Int("guildId", 0) : 0;
+        Button attack = Btn("宣战攻城（2000 金币）", "net-siege-attack", () => { net.SiegeAttack(); });
+        attack.Disabled = myGuild <= 0 || st == null || st.Int("gold", 0) < 2000;
+        attack.Prefer(190, 32); card.With(attack);
+        if (myGuild <= 0) { card.With(Text("你还没有行会——先去「行会」页加入或创建。", "secondary small", 24)); }
+        content.With(card);
+        Note(content, "宣战胜率 = 40% + 战力/10；败了金币不退，赢了全服公告、城头换旗。");
+    }
+
+    /* 页 8 传说塔：每日 20 次尝试；敌人随层变强，胜利楼层+1 并入账。 */
+    void BuildNetTower() {
+        net.MaybeRefreshTower();
+        content.With(Text("传说塔", "yellow strong", 28));
+        JsonValue a = net.PlayTower();
+        if (a == null) {
+            content.With(Text("正在拉取塔层信息…", "secondary", 48));
+            Note(content, "每日 20 次尝试；每攻克一层金币与经验入账，下一层更强。");
+            return;
+        }
+        int floor = a.Int("floor", 0);
+        int tries = a.Int("tries", 0);
+        Panel card = Col("frame");
+        card.With(Text("当前进度：第 " + Rules.N(floor) + " 层已攻克 · 下一层是第 " + Rules.N(floor + 1)
+            + " 层 · 今日剩余 " + Rules.N(tries) + "/" + Rules.N(a.Int("maxTries", 20)) + " 次", "cyan", 30));
+        Button climb = Btn("挑战第 " + Rules.N(floor + 1) + " 层", "net-tower-climb", () => { net.TowerClimb(); });
+        climb.Disabled = tries <= 0;
+        climb.Prefer(170, 32); card.With(climb);
+        content.With(card);
+        Note(content, "失败层位保留，明天免费再战；层数没有上限，塔里全是你自己的极限。");
+    }
+
+    /* 页 10 五行修炼：打怪入池；注入把池经验补进单行，突破花金币/元宝升级。 */
+    void BuildNetWuxing() {
+        JsonValue st = net.Self();
+        if (net.PlayWuxing() == null) { net.RefreshWuxing(); }
+        content.With(Text("五行修炼", "yellow strong", 28));
+        JsonValue a = net.PlayWuxing();
+        if (a == null) {
+            content.With(Text("正在拉取修炼进度…", "secondary", 48));
+            Note(content, "打怪经验自动入池；注入后花金币突破，每层攻+2、血+20。");
+            return;
+        }
+        int pool = a.Int("pool", 0);
+        Panel card = Col("frame");
+        card.With(Text("经验池 " + Rules.N(pool) + "/" + Rules.N(a.Int("poolCap", 600))
+            + "（挂机击杀自动累计）· 总层数 " + Rules.N(st != null ? st.Int("wuxing", 0) : 0), "cyan", 30));
+        content.With(card);
+        ScrollColumn list = new ScrollColumn(); list.Named("net-wuxing-list"); list.Grow(); content.With(list);
+        JsonValue rows = a.Get("rows");
+        for (int i = 0; rows != null && i < rows.Count(); i = i + 1) {
+            JsonValue e = rows.At(i);
+            int id = e.Int("id", 0);
+            int rank = e.Int("rank", 0);
+            int xp = e.Int("xp", 0);
+            int need = e.Int("need", 1);
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 56);
+            Label name = Text(e.Str("name", "?") + " · " + Rules.N(rank) + " 级\n经验 " + Rules.N(xp) + "/" + Rules.N(need)
+                + (rank >= 100 ? " · 已满级" : " · 突破需 " + Rules.N(800 + rank * 400) + " 金币+" + Rules.N(rank / 2) + " 元宝"), "yellow", 44);
+            name.Grow(); row.With(name);
+            Button inj = Btn("注入", "net-wx-inject-" + Rules.N(id), () => { net.WuxingAct("inject", id); });
+            inj.Disabled = xp >= need || rank >= 100 || pool <= 0;
+            inj.Prefer(56, 28); row.With(inj);
+            Button up = Btn("突破", "net-wx-up-" + Rules.N(id), () => { net.WuxingAct("up", id); });
+            up.Disabled = xp < need || rank >= 100;
+            up.Prefer(56, 28); row.With(up);
+            list.With(row);
+        }
+        Note(content, "注入是把池里的经验补进该行（注满为止），突破才升层——先注入再突破。");
+    }
+
+    /* 页 11 师徒：拜等级更高的玩家为师；30 级出师拿 2000 金币+3000 经验。 */
+    void BuildNetMentor() {
+        JsonValue st = net.Self();
+        if (net.PlayMentor() == null) { net.RefreshMentor(); }
+        content.With(Text("师徒", "yellow strong", 28));
+        JsonValue a = net.PlayMentor();
+        if (a == null) {
+            content.With(Text("正在拉取师徒信息…", "secondary", 48));
+            Note(content, "拜等级比你高的玩家为师；30 级出师拿 2000 金币+3000 经验。");
+            return;
+        }
+        string master = a.Str("master", "");
+        Panel card = Col("frame");
+        if (master.Length > 0) {
+            card.With(Text("师父：" + master + "（出师奖励自动发放）", "green", 30));
+            bool canTake = a.Int("canTake", 0) == 1;
+            Button take = Btn(canTake ? "出 师（30 级已到）" : "出 师（需 30 级）", "net-mentor-take", () => { net.MentorTake(); });
+            take.Disabled = !canTake;
+            take.Prefer(170, 32); card.With(take);
+        } else {
+            card.With(Text("还没有师父。输入本区玩家名拜师——对方等级必须比你高。", "cyan", 26));
+            Input nameIn = new Input("师父角色名"); nameIn.Prefer(0, 30); card.With(nameIn);
+            Button bow = Btn("拜 师", "net-mentor-bow",
+                () => { string n = nameIn.GetText().Trim(); if (n.Length > 0) { net.MentorBow(n); } });
+            bow.Prefer(100, 32); card.With(bow);
+        }
+        content.With(card);
+        Note(content, "收徒不用操作：徒弟拜你为师即可；出师奖励只发徒弟，师父赚个人情。");
+    }
+
+    /* 页 14 祭坛：捐献攒个人进度并开启 30 分钟打怪 ×1.1；满 1000 领大奖。 */
+    void BuildNetAltar() {
+        JsonValue st = net.Self();
+        if (net.PlayAltar() == null) { net.RefreshAltar(); }
+        content.With(Text("祭坛", "yellow strong", 28));
+        JsonValue a = net.PlayAltar();
+        if (a == null) {
+            content.With(Text("正在拉取祭坛进度…", "secondary", 48));
+            Note(content, "金币×1=+1、100元宝=+5、1000元宝=+50、黑铁500=+4；增益期间打怪收益 ×1.1。");
+            return;
+        }
+        int personal = a.Int("personal", 0);
+        int cap = a.Int("cap", 1000);
+        int buff = a.Int("buff", 0);
+        int ironHave = 0;
+        for (int i = 0; i < net.BagCount(); i = i + 1) {
+            JsonValue it = net.BagAt(i);
+            if (it.Str("name", "") == "黑铁矿石") { ironHave = ironHave + it.Int("count", 0); }
+        }
+        Panel card = Col("frame");
+        card.With(Text("个人进度 " + Rules.N(personal) + "/" + Rules.N(cap)
+            + " · 今日已捐 " + Rules.N(a.Int("donations", 0)) + " 次"
+            + (buff > 0 ? " · 增益剩余 " + Rules.N(buff / 60) + " 分钟" : " · 增益未开启"), "cyan", 30));
+        Panel acts = Panel.Row(); acts.Gap(4); acts.Prefer(0, 30);
+        Button g = Btn("捐100金币", "net-altar-gold", () => { net.AltarDonate("gold"); });
+        g.Disabled = st == null || st.Int("gold", 0) < 100;
+        Button y = Btn("捐100元宝", "net-altar-yuan", () => { net.AltarDonate("yuan"); });
+        y.Disabled = st == null || st.Int("gems", 0) < 100;
+        Button yl = Btn("捐1000元宝", "net-altar-large", () => { net.AltarDonate("large"); });
+        yl.Disabled = st == null || st.Int("gems", 0) < 1000;
+        Button ir = Btn("捐500黑铁", "net-altar-iron", () => { net.AltarDonate("iron"); });
+        ir.Disabled = ironHave < 500;
+        acts.With(g); acts.With(y); acts.With(yl); acts.With(ir);
+        card.With(acts);
+        Button claim = Btn(personal >= cap ? "领取个人奖励（1000金币+100元宝）" : "领取个人奖励（进度未满）",
+            "net-altar-claim", () => { net.AltarClaim(); });
+        claim.Disabled = personal < cap;
+        claim.Prefer(250, 32); card.With(claim);
+        content.With(card);
+        Note(content, "捐献即开启 30 分钟打怪收益 ×1.1；个人进度满 " + Rules.N(cap) + " 领大奖，超出的部分保留。");
+    }
+
+    /* 页 16 将星图谱：全 BOSS 清单；击败对应地图 BOSS 即点亮。 */
+    void BuildNetStars() {
+        net.RefreshStars();
+        content.With(Text("将星图谱", "yellow strong", 28));
+        ScrollColumn list = new ScrollColumn(); list.Named("net-stars-list"); list.Grow(); content.With(list);
+        JsonValue rows = net.PlayStars();
+        int lit = 0;
+        for (int i = 0; rows != null && i < rows.Count(); i = i + 1) {
+            if (rows.At(i).Int("lit", 0) == 1) { lit = lit + 1; }
+        }
+        if (rows == null || rows.Count() == 0) { list.With(Text("正在拉取星图…", "secondary", 48)); }
+        for (int i = 0; rows != null && i < rows.Count(); i = i + 1) {
+            JsonValue e = rows.At(i);
+            bool on = e.Int("lit", 0) == 1;
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 44);
+            Label name = Text((on ? "⭐ " : "☆ ") + e.Str("name", "???")
+                + "\n" + Rules.N(e.Int("level", 1)) + " 级 · 第 " + Rules.N(e.Int("map", 0)) + " 张地图", on ? "green" : "yellow", 40);
+            name.Grow(); row.With(name);
+            list.With(row);
+        }
+        if (rows != null && rows.Count() > 0) {
+            content.With(Text("已点亮 " + Rules.N(lit) + "/" + Rules.N(rows.Count()) + " 将星", "cyan", 26));
+        }
+        Note(content, "每个 BOSS 首杀即点亮一颗将星；「BOSS 之家」可一键前往未点亮的地图。");
+    }
+
+    /* 页 18 发红包：全服奖池——发一个（100-100000 金币）全服公告，每人限抢一次。 */
+    void BuildNetRedpack() {
+        JsonValue st = net.Self();
+        if (net.PlayRedpack() == null) { net.RefreshRedpack(); }
+        content.With(Text("发红包", "yellow strong", 28));
+        JsonValue a = net.PlayRedpack();
+        if (a == null) {
+            content.With(Text("正在拉取红包池…", "secondary", 48));
+            Note(content, "发 100-100000 金币红包全服公告；每人每轮限抢一次。");
+            return;
+        }
+        long pool = a.Int("pool", 0);
+        bool taken = a.Int("taken", 0) == 1;
+        Panel card = Col("frame");
+        card.With(Text(pool > 0
+            ? "红包雨进行中：" + a.Str("from", "???") + " 发的 " + Rules.N(pool) + " 金币还在池里！"
+            : "奖池空空如也——发一个让全服都记得你。", pool > 0 ? "green" : "cyan", 30));
+        if (pool > 0) {
+            Button grab = Btn(taken ? "本轮已抢过" : "抢 红 包", "net-redpack-grab", () => { net.RedpackGrab(); });
+            grab.Disabled = taken;
+            grab.Prefer(140, 32); card.With(grab);
+        }
+        Panel send = Panel.Row(); send.Gap(4); send.Prefer(0, 32);
+        Input amt = new Input("金额（100-100000）"); amt.Prefer(0, 30); send.With(amt);
+        Button doSend = Btn("发红包", "net-redpack-send", () => {
+            string t = amt.GetText().Trim();
+            bool digits = t.Length >= 3 && t.Length <= 6;
+            for (int c = 0; digits && c < t.Length; c = c + 1) {
+                if (t[c] < '0' || t[c] > '9') { digits = false; }
+            }
+            if (digits) { net.RedpackSend(Convert.ToInt(t)); }
+        });
+        doSend.Disabled = st == null || st.Int("gold", 0) < 100;
+        doSend.Prefer(100, 30); send.With(doSend);
+        card.With(send);
+        content.With(card);
+        Note(content, "红包池全服共享、本页每 5 秒刷新；服务器重启后奖池清零，手快有手慢无。");
+    }
+
+    /* 页 22 交易市场：上架（背包选品+定价）/购买（离线也到账）/下架退回。 */
+    void BuildNetMarket() {
+        JsonValue st = net.Self();
+        if (net.PlayMarket() == null) { net.RefreshMarket(); }
+        content.With(Text("交易市场", "yellow strong", 28));
+        Panel sell = Col("frame");
+        if (marketSellId > 0) {
+            sell.With(Text("上架商品：" + marketSellName, "cyan", 26));
+            Panel opts = Panel.Row(); opts.Gap(4); opts.Prefer(0, 32);
+            Input cnt = new Input("数量1"); cnt.Prefer(76, 30); opts.With(cnt);
+            Input price = new Input("单价金币"); price.Prefer(96, 30); opts.With(price);
+            Button list = Btn("挂 单", "net-market-sell", () => {
+                string tc = cnt.GetText().Trim(); string tp = price.GetText().Trim();
+                bool okc = tc.Length > 0; bool okp = tp.Length > 0;
+                for (int c = 0; okc && c < tc.Length; c = c + 1) { if (tc[c] < '0' || tc[c] > '9') { okc = false; } }
+                for (int c = 0; okp && c < tp.Length; c = c + 1) { if (tp[c] < '0' || tp[c] > '9') { okp = false; } }
+                if (okc && okp) { net.MarketSell(marketSellId, Convert.ToInt(tc), Convert.ToInt(tp)); }
+            });
+            list.Prefer(80, 30); opts.With(list);
+            sell.With(opts);
+        } else {
+            sell.With(Text("从下面的背包列表挑一件商品挂单（选品后再填数量与单价）。", "cyan", 26));
+        }
+        content.With(sell);
+        ScrollColumn bagList = new ScrollColumn(); bagList.Named("net-market-bag"); bagList.Prefer(0, 148); content.With(bagList);
+        bagList.With(Text("我的背包（点「选」上架）", "yellow small", 0));
+        for (int i = 0; i < net.BagCount(); i = i + 1) {
+            JsonValue it = net.BagAt(i);
+            int iid = it.Int("id", 0);
+            string iname = it.Str("name", "???");
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(6); row.Gap(8); row.Prefer(0, 38);
+            Label name = Text(iname + " ×" + Rules.N(it.Int("count", 1)), "yellow", 26);
+            name.Grow(); row.With(name);
+            Button pick = Btn("选", "net-market-pick-" + Rules.N(iid),
+                () => { marketSellId = iid; marketSellName = iname; BuildPage(); Refresh(); });
+            pick.Prefer(44, 26); row.With(pick);
+            bagList.With(row);
+        }
+        if (net.BagCount() == 0) { bagList.With(Text("背包是空的——先去挂机打点装备与材料。", "secondary", 40)); }
+        ScrollColumn list2 = new ScrollColumn(); list2.Named("net-market-list"); list2.Grow(); content.With(list2);
+        JsonValue rows = net.PlayMarket();
+        if (rows == null) { list2.With(Text("正在拉取市场…", "secondary", 40)); }
+        for (int i = 0; rows != null && i < rows.Count(); i = i + 1) {
+            JsonValue g = rows.At(i);
+            int rid = g.Int("id", 0);
+            bool mine = g.Int("mine", 0) == 1;
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 48);
+            Label name = Text(g.Str("name", "???") + " ×" + Rules.N(g.Int("count", 1)) + " · " + Rules.N(g.Int("price", 0)) + " 金币\n卖家：" + g.Str("seller", "-"), "yellow", 40);
+            name.Grow(); row.With(name);
+            Button act = Btn(mine ? "下 架" : "购 买", "net-market-act-" + Rules.N(rid),
+                () => { if (mine) { net.MarketCancel(rid); } else { net.MarketBuy(rid); } });
+            act.Prefer(64, 28); row.With(act);
+            list2.With(row);
+        }
+        if (rows != null && rows.Count() == 0) { list2.With(Text("市场空空——第一件挂单就是全服独一份。", "secondary", 40)); }
+        Note(content, "买家金币直付卖家（对方离线也到账）；不能买自己的挂单，下架原物退回背包。");
+    }
+
+    /* 页 23 图鉴明细：物品/怪物两张签页各 20 条，服务端切页。 */
+    void BuildNetCodexPage() {
+        if (net.CodexPage() == null) { net.RefreshCodexPage(codexKindView, 0); }
+        content.With(Text("图鉴", "yellow strong", 28));
+        Panel tabs = Panel.Row(); tabs.Gap(4); tabs.Prefer(0, 30);
+        Button ti = Btn(codexKindView == "items" ? "【物品图鉴】" : "物品图鉴", "net-codex-items",
+            () => { codexKindView = "items"; net.RefreshCodexPage("items", 0); });
+        Button tm = Btn(codexKindView == "mobs" ? "【怪物图鉴】" : "怪物图鉴", "net-codex-mobs",
+            () => { codexKindView = "mobs"; net.RefreshCodexPage("mobs", 0); });
+        tabs.With(ti); tabs.With(tm);
+        int total = net.CodexTotal();
+        int pageNo = net.CodexPageNo();
+        int last = (total + 19) / 20 - 1;
+        Label pg = Text("第 " + Rules.N(pageNo + 1) + "/" + Rules.N(last + 1) + " 页 · 共 " + Rules.N(total) + " 条", "cyan small", 0); pg.Grow(); tabs.With(pg);
+        Button prev = Btn("上一页", "net-codex-prev", () => { net.RefreshCodexPage(codexKindView, pageNo - 1); });
+        prev.Disabled = pageNo <= 0;
+        Button next = Btn("下一页", "net-codex-next", () => { net.RefreshCodexPage(codexKindView, pageNo + 1); });
+        next.Disabled = pageNo >= last;
+        tabs.With(prev); tabs.With(next);
+        content.With(tabs);
+        ScrollColumn list = new ScrollColumn(); list.Named("net-codex-list"); list.Grow(); content.With(list);
+        JsonValue rows = net.CodexPage();
+        if (rows == null || rows.Count() == 0) { list.With(Text("正在拉取图鉴…", "secondary", 48)); }
+        for (int i = 0; rows != null && i < rows.Count(); i = i + 1) {
+            JsonValue e = rows.At(i);
+            string desc;
+            if (codexKindView == "mobs") {
+                desc = Rules.N(e.Int("level", 1)) + " 级 · 血 " + Rules.N(e.Int("hp", 0)) + " · 攻 " + Rules.N(e.Int("atk", 0))
+                    + " · 防 " + Rules.N(e.Int("def", 0)) + " · 经验 " + Rules.N(e.Int("exp", 0))
+                    + " · 第 " + Rules.N(e.Int("map", 0)) + " 图" + (e.Int("boss", 0) == 1 ? " · BOSS" : "");
+            } else {
+                int kind = e.Int("kind", 0);
+                string kindName = kind == 0 ? "消耗品" : kind == 1 ? "武器" : kind == 2 ? "防具" : "材料";
+                string stats = StatLine(e);
+                desc = kindName + (stats.Length > 0 ? " · " + stats : "") + " · 售价 " + Rules.N(e.Int("price", 0))
+                    + " 金币 · 需 " + Rules.N(e.Int("minLevel", 1)) + " 级";
+            }
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 44);
+            Label name = Text(e.Str("name", "???") + "\n" + desc, "yellow", 40);
+            name.Grow(); row.With(name);
+            list.With(row);
+        }
+        Note(content, "图鉴与服务器物品/怪物库同源；掉落看运气，先把怪都认全再谈屠龙。");
+    }
+
+    /* 页 25 称谓：战功解锁（初出茅庐免费），佩戴后全服可见。 */
+    void BuildNetTitle() {
+        JsonValue st = net.Self();
+        if (net.PlayTitle() == null) { net.RefreshTitle(); }
+        content.With(Text("称谓", "yellow strong", 28));
+        content.With(Text("当前战功 " + Rules.N(st != null ? st.Int("arenaPts", 0) : 0)
+            + " · 佩戴：" + (st != null && st.Str("title", "").Length > 0 ? st.Str("title", "") : "无"), "cyan", 28));
+        ScrollColumn list = new ScrollColumn(); list.Named("net-title-list"); list.Grow(); content.With(list);
+        JsonValue rows = net.PlayTitle();
+        if (rows == null || rows.Count() == 0) { list.With(Text("正在拉取称谓…", "secondary", 48)); }
+        for (int i = 0; rows != null && i < rows.Count(); i = i + 1) {
+            JsonValue e = rows.At(i);
+            string name = e.Str("name", "???");
+            bool owned = e.Int("owned", 0) == 1;
+            bool worn = e.Int("worn", 0) == 1;
+            int cost = e.Int("cost", 0);
+            Panel row = Panel.Row(); row.Class = "frame"; row.Pad(8); row.Gap(8); row.Prefer(0, 44);
+            Label label = Text((worn ? "🎖 " : (owned ? "✅ " : "🔒 ")) + name
+                + "\n" + (owned ? "已解锁" : "解锁需战功 " + Rules.N(cost)), worn ? "green" : "yellow", 40);
+            label.Grow(); row.With(label);
+            if (!owned) {
+                Button unlock = Btn("解 锁", "net-title-unlock-" + Rules.N(i),
+                    () => { net.TitleUnlock(name); });
+                unlock.Disabled = st != null && st.Int("arenaPts", 0) < cost;
+                unlock.Prefer(56, 28); row.With(unlock);
+            } else {
+                Button wear = Btn(worn ? "摘 下" : "佩 戴", "net-title-wear-" + Rules.N(i),
+                    () => { net.TitleWear(worn ? "无" : name); });
+                wear.Prefer(56, 28); row.With(wear);
+            }
+            list.With(row);
+        }
+        Note(content, "战功来自 PK竞技场（胜 100/败 20）；佩戴的称谓在排行榜与聊天里都看得到。");
     }
 
     /* ---- 登录小窗：窗口本身即表单，不套模态弹窗。阶段：

@@ -29,6 +29,9 @@ class GameApi : ApiController {
                 || op == "sell" || op == "say") { return 10; }
         if (op == "bossfight" || op == "bossweep" || op == "auto") { return 5; }
         if (op == "draw" || op == "forge" || op == "wboss") { return 3; }
+        if (op == "arena" || op == "tower" || op == "escort"
+                || op == "redpack" || op == "grab") { return 3; }
+        if (op == "altar" || op == "wuxing" || op == "market") { return 5; }
         return 30;
     }
 
@@ -198,4 +201,45 @@ class GameApi : ApiController {
 
     [HttpPost] [Description("图鉴")]
     async void Codex() { JsonValue _r = await this.Run("codex"); }
+
+    /* ---- 玩法页（Play 模块） ---- */
+
+    [HttpPost] [Description("PK竞技场")]
+    async void Arena() { JsonValue _r = await this.Run("arena"); }
+
+    [HttpPost] [Description("押镖")]
+    async void Escort() { JsonValue _r = await this.Run("escort"); }
+
+    [HttpPost] [Description("行会")]
+    async void Guild() { JsonValue _r = await this.Run("guild"); }
+
+    [HttpPost] [Description("城池争夺")]
+    async void Siege() { JsonValue _r = await this.Run("siege"); }
+
+    [HttpPost] [Description("传说塔")]
+    async void Tower() { JsonValue _r = await this.Run("tower"); }
+
+    [HttpPost] [Description("五行修炼")]
+    async void Wuxing() { JsonValue _r = await this.Run("wuxing"); }
+
+    [HttpPost] [Description("师徒")]
+    async void Mentor() { JsonValue _r = await this.Run("mentor"); }
+
+    [HttpPost] [Description("祭坛")]
+    async void Altar() { JsonValue _r = await this.Run("altar"); }
+
+    [HttpPost] [Description("将星图谱")]
+    async void Stars() { JsonValue _r = await this.Run("stars"); }
+
+    [HttpPost] [Description("红包")]
+    async void Redpack() { JsonValue _r = await this.Run("redpack"); }
+
+    [HttpPost] [Description("交易市场")]
+    async void Market() { JsonValue _r = await this.Run("market"); }
+
+    [HttpPost] [Description("图鉴分页")]
+    async void Codexpage() { JsonValue _r = await this.Run("codexpage"); }
+
+    [HttpPost] [Description("称谓")]
+    async void Title() { JsonValue _r = await this.Run("title"); }
 }

@@ -527,11 +527,17 @@ class Fight {
        三项产出全按会话缓存的区服倍率缩放（万分比，活动服调倍率即改
        game_realm 三列）。 */
     static void OnKill(Session s, ZanWeb.Model.Game.Mob t, JsonValue f, bool quiet) {
-        s.row.exp = s.row.exp + (long)t.exp * s.expRate / 10000;
+        /* 祭坛增益（捐献获得，30 分钟）有效期内经验 ×1.1。 */
+        int expMul = Play.AltarBuffed(s) ? 11000 : 10000;
+        s.row.exp = s.row.exp + (long)t.exp * s.expRate / 10000 * expMul / 10000;
         s.row.kills = s.row.kills + 1;
+        /* 五行修炼经验池：每击 +1（封顶），修炼页注入转行经验。 */
+        Play.WxGain(s);
         f.Set("kills", JsonValue.NewNum(Convert.ToString(s.row.kills)));
         long gold = Fight.rng.Between((int)t.goldMin, (int)t.goldMax + 1);
-        gold = gold * s.goldRate / 10000;
+        /* 祭坛增益（捐献获得，30 分钟）有效期内经验金币 ×1.1。 */
+        long altarMul = Play.AltarBuffed(s) ? 11000 : 10000;
+        gold = gold * s.goldRate / 10000 * altarMul / 10000;
         s.row.gold = s.row.gold + gold;
         f.Set("gold", JsonValue.NewNum(Convert.ToString(gold)));
         if (s.row.kills == 5) {
@@ -911,6 +917,8 @@ class Fight {
         r.Set("log", log);
         r.Set("hpStart", JsonValue.NewNum(Convert.ToString(hpStart)));
         r.Set("page", Fight.BossPage(s, mapId, now));
+        /* 将星图谱点亮：该图 BOSS 首杀记位图（Play.Stars 展示）。 */
+        if (win) { Play.LightStar(s, mapId); }
         Gateway.SelfInto(r, s);
         s.dirty = true;
         return r;
