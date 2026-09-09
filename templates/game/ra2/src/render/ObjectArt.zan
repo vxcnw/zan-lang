@@ -369,7 +369,7 @@ class ObjectArt {
             if (this.cameoPal != null) {
                 ShpImage shp = ShpImage.Parse(raw, len[0]);
                 if (shp.FrameCount() > 0) {
-                    byte[] idx = shp.DecodeFrame(0);
+                    byte[] idx = shp.DecodeFrameCanvas(0);
                     tex = Texture.FromIndexedShp(idx, shp.Width(),
                                                  shp.Height(), this.cameoPal);
                 }
@@ -378,6 +378,75 @@ class ObjectArt {
         this.cameoNames.Add(name);
         this.cameoTex.Add(tex);
         return tex;
+    }
+
+    /// <summary>The build-menu portrait for a structure: the original draws
+    /// the art section's Cameo= image -- a dedicated 60x48 ICON.SHP decoded
+    /// under CAMEO.PAL -- not a scaled-down field sprite. The name comes
+    /// from the rules pipeline (BuildingDef.Cameo, the art Cameo= stem);
+    /// installs without the key fall back to the reg's own
+    /// <reg>ICON.SHP, with the generic CNSTICON for the two yards whose art
+    /// ships no cameo, and the world sprite as the last resort.</summary>
+    Texture StructureCameoTexture(StructureType t) {
+        if (t == null) { return null; }
+        string reg = t.Reg();
+        // The art Cameo= key carries the full shipped stem -- "POWRICON",
+        // "gwepicon" -- not a prefix to concatenate on, so it is used
+        // verbatim (uppercased for the VFS) unless it lacks the ICON tail.
+        string stem = t.Cameo() != null ? t.Cameo().ToUpper() : "";
+        string primary;
+        if (stem.Length > 0) {
+            bool endsIcon = stem.Length >= 4
+                && stem.Substring(stem.Length - 4) == "ICON";
+            primary = endsIcon ? stem + ".SHP" : stem + "ICON.SHP";
+        } else if (reg == "GACNST" || reg == "NACNST") {
+            primary = "CNSTICON.SHP";
+        } else {
+            primary = reg + "ICON.SHP";
+        }
+        // Same-name cache the unit cameos share: a miss is stored as null
+        // so a missing portrait costs one lookup and then falls back.
+        for (int i = 0; i < this.cameoNames.Count; i = i + 1) {
+            if (this.cameoNames[i] == primary) { return this.cameoTex[i]; }
+        }
+        string fallback;
+        if (reg == "GACNST" || reg == "NACNST") {
+            fallback = "CNSTICON.SHP";
+        } else {
+            fallback = reg + "ICON.SHP";
+        }
+        Texture tex = this.LoadCameoShp(primary);
+        if (tex == null && fallback != primary) {
+            tex = this.LoadCameoShp(fallback);
+        }
+        if (tex == null) {
+            tex = this.StructureTextureOf(t, 0, 1, 1, t.Hp(), t.Hp());
+        }
+        this.cameoNames.Add(primary);
+        this.cameoTex.Add(tex);
+        return tex;
+    }
+
+    /// <summary>One ICON.SHP decoded under CAMEO.PAL (the portrait palette
+    /// the originals ship in CAMEO.MIX), SIDEBAR.PAL as the stand-in when
+    /// the install carries only the sidebar palette. Null when absent.</summary>
+    Texture LoadCameoShp(string name) {
+        List<int> len = new List<int>();
+        len.Add(0);
+        byte[] raw = this.vfs.Read(name, len);
+        if (len[0] <= 0) { return null; }
+        if (this.cameoPal == null) {
+            this.cameoPal = this.db.PaletteNamed("CAMEO.PAL");
+            if (this.cameoPal == null) {
+                this.cameoPal = this.db.PaletteNamed("SIDEBAR.PAL");
+            }
+        }
+        if (this.cameoPal == null) { return null; }
+        ShpImage shp = ShpImage.Parse(raw, len[0]);
+        if (shp.FrameCount() <= 0) { return null; }
+        byte[] idx = shp.DecodeFrameCanvas(0);
+        return Texture.FromIndexedShp(idx, shp.Width(), shp.Height(),
+                                      this.cameoPal);
     }
 
     /// <summary>The unit palette for a side. Remappable art stores its

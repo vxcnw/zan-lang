@@ -271,6 +271,7 @@ class BuildingDef {
     List<string> prereq;
     string artKey;     // art ini section: the Image= override or the regkey
     bool newTheater;   // art ships one SHP per theater, second letter swaps
+    string cameo;      // art.ini Cameo= key: the sidebar portrait's SHP stem
 
     static BuildingDef Create(string reg, string label, string shp, int fw,
                               int fh, int hp, int cost, int power, int drain,
@@ -302,6 +303,8 @@ class BuildingDef {
     void SetShp(string shp) { this.shp = shp; }
     string ArtKey() { return this.artKey; }
     void SetArtKey(string key) { this.artKey = key; }
+    string Cameo() { return this.cameo; }
+    void SetCameo(string cameo) { this.cameo = cameo; }
     bool NewTheater() { return this.newTheater; }
     void SetNewTheater(bool on) { this.newTheater = on; }
     int FootprintW() { return this.fw; }
@@ -1481,6 +1484,10 @@ class Rules {
             if (section == null) { continue; }
             string nt = section.Get("NewTheater");
             if (nt.Length > 0 && Rules.YesNo(nt)) { d.SetNewTheater(true); }
+            // The sidebar portrait's art file, the way the reference engine
+            // resolves it: the art section's Cameo= stem + ICON.SHP.
+            string cameo = section.Get("Cameo");
+            if (cameo.Length > 0) { d.SetCameo(cameo.ToUpper()); }
         }
         for (int i = 0; i < this.units.Count; i = i + 1) {
             UnitDef d = this.units[i];

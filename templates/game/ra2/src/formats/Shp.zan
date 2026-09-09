@@ -95,10 +95,14 @@ class ShpImage {
     byte[] DecodeFrame(int index) {
         ShpFrame f = this.FrameAt(index);
         if (f == null) { return new byte[1]; }
+        // A frame carries its own sub-rect inside the file's canvas and the
+        // two regularly disagree, so this returns the frame's own buffer at
+        // the frame's size; DecodeFrameCanvas composes it onto the canvas
+        // for callers that read a Width() x Height() span.
         int w = f.Width();
         int h = f.Height();
-        byte[] outBuf = new byte[w * h + 1];
-        if (f.IsEmpty()) { return outBuf; }
+        byte[] buf = new byte[w * h + 1];
+        if (f.IsEmpty()) { return buf; }
 
         BinaryReader r = BinaryReader.FromBuffer(this.data, this.length);
         r.Seek(f.Offset());
@@ -125,28 +129,52 @@ class ShpImage {
                         if (count > w - x) { count = w - x; }
                         x = x + count;     // buffer starts zeroed = transparent
                     } else {
-                        outBuf[y * w + x] = (byte)b;
+                        buf[y * w + x] = (byte)b;
                         x = x + 1;
                     }
                 }
                 r.Seek(rowEnd);
             }
-            return outBuf;
+            return buf;
         }
 
         if (f.Format() == 0) {
             r.Skip(2);                 // frame lead bytes, not pixel data
-            int total = w * h;
-            for (int i = 0; i < total; i = i + 1) {
-                outBuf[i] = (byte)r.ReadU8();
-            }
-            return outBuf;
         }
-
         int total = w * h;
         for (int i = 0; i < total; i = i + 1) {
-            outBuf[i] = (byte)r.ReadU8();
+            buf[i] = (byte)r.ReadU8();
         }
-        return outBuf;
+        return buf;
+    }
+
+    /// <summary>Decodes a frame and composes it onto the file's canvas, so a
+    /// frame that ships a sub-rect lands where the file places it and the
+    /// returned indices always span Width() x Height().</summary>
+    byte[] DecodeFrameCanvas(int index) {
+        ShpFrame f = this.FrameAt(index);
+        if (f == null) { return new byte[1]; }
+        byte[] buf = this.DecodeFrame(index);
+        if (f.Width() == this.width && f.Height() == this.height
+            && f.X() == 0 && f.Y() == 0) {
+            return buf;
+        }
+        return this.PlaceFrame(buf, f, f.Width(), f.Height());
+    }
+
+    /// <summary>Blits a frame-sized decode onto the file-canvas-sized
+    /// buffer at the frame's offset.</summary>
+    byte[] PlaceFrame(byte[] buf, ShpFrame f, int fw, int fh) {
+        byte[] canvas = new byte[this.width * this.height + 1];
+        for (int y = 0; y < fh; y = y + 1) {
+            int dy = f.Y() + y;
+            if (dy < 0 || dy >= this.height) { continue; }
+            for (int x = 0; x < fw; x = x + 1) {
+                int dx = f.X() + x;
+                if (dx < 0 || dx >= this.width) { continue; }
+                canvas[dy * this.width + dx] = buf[y * fw + x];
+            }
+        }
+        return canvas;
     }
 }

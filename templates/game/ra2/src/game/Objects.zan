@@ -596,6 +596,7 @@ class StructureType {
     string reg;          // GACNST, NAPOWR, ...
     string shpName;      // image file, e.g. "GACNST.SHP"
     bool newTheater;     // art swaps the name's second letter per theater
+    string cameo;        // art.ini Cameo= stem: the sidebar portrait SHP
     int footprintW;      // footprint in cells
     int footprintH;
     int hp;              // full health
@@ -616,6 +617,7 @@ class StructureType {
         t.reg = d.Reg();
         t.shpName = d.Shp();
         t.newTheater = d.NewTheater();
+        t.cameo = d.Cameo();
         t.footprintW = d.FootprintW();
         t.footprintH = d.FootprintH();
         t.hp = d.Hp();
@@ -636,6 +638,7 @@ class StructureType {
     string Reg() { return this.reg; }
     string ShpName() { return this.shpName; }
     bool NewTheater() { return this.newTheater; }
+    string Cameo() { return this.cameo; }
     int FootprintW() { return this.footprintW; }
     int FootprintH() { return this.footprintH; }
     int Hp() { return this.hp; }
@@ -1760,6 +1763,18 @@ class World {
     /// drains. A negative balance means production and construction slow down
     /// -- the classic low-power state that punishes overbuilding.</summary>
     int PowerBalance(int side) {
+        List<int> flow = new List<int>();
+        flow.Add(0);
+        flow.Add(0);
+        this.PowerFlow(side, flow);
+        return flow[0] - flow[1];
+    }
+
+    /// <summary>The side's power supply and drain, written to flow[0] and
+    /// flow[1] -- the two numbers the sidebar's power pips plot against each
+    /// other, the way the original's bar splits red drain from green
+    /// surplus.</summary>
+    void PowerFlow(int side, List<int> flow) {
         int supply = 0;
         int drain = 0;
         for (int i = 0; i < this.objects.Count; i = i + 1) {
@@ -1774,7 +1789,9 @@ class World {
             supply = supply + t.Power();
             drain = drain + t.Drain();
         }
-        return supply - drain;
+        while (flow.Count < 2) { flow.Add(0); }
+        flow[0] = supply;
+        flow[1] = drain;
     }
 
     /// <summary>Writes a spot for a structure to outXy, preferring the ring
