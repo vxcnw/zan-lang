@@ -456,6 +456,30 @@ class GameController {
         this.dirty = true;
     }
 
+    /// <summary>Right click on the sidebar itself: drop an armed build or an
+    /// armed sell/repair, never a map order -- the click had no cell under
+    /// it.</summary>
+    void OnRightClickSidebar() {
+        if (this.building >= 0) { this.building = -1; }
+        else if (this.sellMode || this.repairMode) { this.ClearSellRepair(); }
+        this.dirty = true;
+    }
+
+    /// <summary>Right click on a production card: cancel one queued instance
+    /// and refund its cost, the original's dequeue.</summary>
+    void OnRightClickUnit(int unitId) {
+        WorldObject sel = this.world.Selected();
+        if (sel == null || sel.Kind() != ObjKind.Structure()) { return; }
+        if (sel.Side() != this.side) { return; }
+        UnitType u = this.world.Units().TypeFor(this.world, sel.Side(), unitId);
+        if (u == null) { return; }
+        if (!this.world.CancelQueuedUnit(this.world.SelectedIndex(), unitId)) {
+            return;
+        }
+        this.money = this.money + u.Cost();
+        this.dirty = true;
+    }
+
     /// <summary>Places the armed build at a cell. Deducts the cost, or clears
     /// the arm when the spot is taken or the credits are short.</summary>
     bool Place(int x, int y) {

@@ -228,6 +228,15 @@ class WorldObject {
         this.prodLeft.RemoveAt(0);
     }
 
+    /// <summary>Drops one queued entry, the right-click cancel's cut.</summary>
+    void CancelProdAt(int i) {
+        if (this.prodQueue == null || i < 0 || i >= this.prodQueue.Count) {
+            return;
+        }
+        this.prodQueue.RemoveAt(i);
+        this.prodLeft.RemoveAt(i);
+    }
+
     /// <summary>Clears the whole queue. A captured building must not finish
     /// its old owner's queue: the ids reference the captor's enemy roster, so
     /// a Soviet war factory's SHK would otherwise spawn as an Allied sniper.</summary>
@@ -1483,6 +1492,21 @@ class World {
         if (u == null) { return false; }
         o.QueueUnit(unitId, u.BuildTime());
         return true;
+    }
+
+    /// <summary>Cancels the newest queued instance of a unit on one
+    /// structure, the right-click dequeue. True when an entry went.</summary>
+    bool CancelQueuedUnit(int structIdx, int unitId) {
+        if (structIdx < 0 || structIdx >= this.objects.Count) { return false; }
+        WorldObject o = this.objects[structIdx];
+        if (o.Kind() != ObjKind.Structure()) { return false; }
+        for (int i = o.ProdCount() - 1; i >= 0; i = i - 1) {
+            if (o.ProdUnitAt(i) == unitId) {
+                o.CancelProdAt(i);
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>Writes the first free flat cell around a structure's footprint

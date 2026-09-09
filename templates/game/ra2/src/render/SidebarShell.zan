@@ -121,4 +121,26 @@ class SidebarShell {
         if (len[0] <= 0) { return null; }
         return Palette.Parse(raw, len[0]);
     }
+
+    /// <summary>Diagnostics: one decoded piece as a P6 PPM so a suspect
+    /// plate can be inspected without a running renderer.</summary>
+    void DumpPiece(Texture t, string path) {
+        if (t == null) { return; }
+        int w = t.Width();
+        int h = t.Height();
+        byte[] px = t.Pixels();
+        string hdr = "P6\n" + Convert.ToString(w) + " "
+            + Convert.ToString(h) + "\n255\n";
+        byte[] ppm = new byte[hdr.Length + w * h * 3];
+        for (int i = 0; i < hdr.Length; i = i + 1) {
+            ppm[i] = (byte)hdr[i];
+        }
+        int o = hdr.Length;
+        for (int p = 0; p < w * h; p = p + 1) {
+            ppm[o + p * 3] = px[p * 4];
+            ppm[o + p * 3 + 1] = px[p * 4 + 1];
+            ppm[o + p * 3 + 2] = px[p * 4 + 2];
+        }
+        File.WriteAllBytes(path, ppm);
+    }
 }

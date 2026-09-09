@@ -261,6 +261,19 @@ class Ra2App {
     // the item list shrinks past it.
     static int cardPage = 0;
 
+    // The structures card's page, the original's tab pair: 0 建筑物,
+    // 1 防御设施. The infantry and vehicle tabs light from the producer's
+    // trainees; they are not clickable until unit cards list base-wide.
+    static int buildTab = 0;
+
+    // The in-game game menu (Esc), the original's SIDEBTTN stack over the
+    // sidebar: screen 0 is home, 1 the 放弃任务 confirm. menuPressed is the
+    // button under a held left click -- its art's frame 1.
+    static bool gameMenu = false;
+    static int gameMenuScreen = 0;
+    static int menuPressed = -1;
+    static Strings menuUi;
+
     /// <summary>The shell's layout lines, straight from the retail
     /// composition: credits strip, top strip and radar bezel stack down the
     /// right edge, the side1 cap ends the fixed chrome, whole side2 bands
@@ -306,33 +319,54 @@ class Ra2App {
 
     /// <summary>The card lists only what can actually be built, and a
     /// construction yard is nobody's build item -- the original's structures
-    /// tab starts at the power plant.</summary>
-    static bool IsBuildItem(StructureType t) {
-        return t != null && t.Reg() != "GACNST" && t.Reg() != "NACNST"
-            && t.Reg() != "YACNST";
+    /// tab starts at the power plant. The tab pair splits the rest the way
+    /// the original's 建筑物/防御设施 tabs do: armed structures on the
+    /// defence page, the rest on buildings.</summary>
+    static bool IsBuildItem(StructureType t, int tab) {
+        if (t == null) { return false; }
+        string reg = t.Reg();
+        if (reg == "GACNST" || reg == "NACNST" || reg == "YACNST") {
+            return false;
+        }
+        return tab == 1 ? t.HasWeapon() : !t.HasWeapon();
     }
 
-    /// <summary>How many of the side's catalog entries are card items.</summary>
-    static int BuildItemCount(GameController game) {
+    /// <summary>How many of the side's catalog entries are card items on
+    /// this tab.</summary>
+    static int BuildItemCount(GameController game, int tab) {
         int n = game.World().Catalog().CountFor(game.World(), game.Side());
         int c = 0;
         for (int i = 0; i < n; i = i + 1) {
             if (Ra2App.IsBuildItem(game.World().Catalog().TypeFor(
-                    game.World(), game.Side(), i))) { c = c + 1; }
+                    game.World(), game.Side(), i), tab)) { c = c + 1; }
         }
         return c;
     }
 
-    /// <summary>The catalog index of the card's k-th build item, or -1.</summary>
-    static int BuildItemAt(GameController game, int k) {
+    /// <summary>The catalog index of the card's k-th build item on this tab,
+    /// or -1.</summary>
+    static int BuildItemAt(GameController game, int k, int tab) {
         int n = game.World().Catalog().CountFor(game.World(), game.Side());
         for (int i = 0; i < n; i = i + 1) {
             if (!Ra2App.IsBuildItem(game.World().Catalog().TypeFor(
-                    game.World(), game.Side(), i))) { continue; }
+                    game.World(), game.Side(), i), tab)) { continue; }
             if (k == 0) { return i; }
             k = k - 1;
         }
         return -1;
+    }
+
+    /// <summary>Which category tab sits under the cursor, 0..3, or -1. The
+    /// tabs close the side1 cap, one pressed pixel apart.</summary>
+    static int HitTab(SidebarShell shell, List<int> rc, int mx, int my) {
+        int tabW = shell.W("TAB00.SHP");
+        for (int t = 0; t < 4; t = t + 1) {
+            string tab = "TAB0" + Convert.ToString(t) + ".SHP";
+            int ty = rc[2] - shell.H(tab) - 3;
+            if (Draw.PointIn(mx, my, rc[0] + 26 + (tabW + 1) * t, ty,
+                             tabW, shell.H(tab))) { return t; }
+        }
+        return 0 - 1;
     }
 
     /// <summary>Which card slot sits under the cursor, counting from the top
@@ -425,6 +459,13 @@ class Ra2App {
         List<int> rc = new List<int>();
         Ra2App.ShellRects(shell, rc);
         int x0 = rc[0];
+        // The game menu replaces the sidebar's working parts with the
+        // SIDEBTTN stack, the way the original's menu screen hides radar,
+        // power and card and shows its buttons over the bare shell.
+        if (Ra2App.gameMenu) {
+            Ra2App.DrawGameMenu(r, game, shell, rc, mouseX, mouseY);
+            return;
+        }
         // The shell art is full of deliberate transparency -- the band
         // tiles' surroundings are holes -- and the retail game keeps the
         // map viewport short of the sidebar, so the backdrop behind the
@@ -464,12 +505,12 @@ class Ra2App {
                     x0 + 20 + rw, rc[1] + 8);
 
         // The category tabs closing the side1 cap, the active one pressed:
-        // structures normally, and while a producer is selected whichever of
-        // its lines the trainees belong to -- infantry on the infantry tab,
-        // everything else on vehicles.
+        // while a producer is selected whichever of its lines the trainees
+        // belong to -- infantry on the infantry tab, everything else on
+        // vehicles -- otherwise the structures page the tabs have picked.
         int unitMode = Ra2App.ProdCount(game);
         int tabW = shell.W("TAB00.SHP");
-        int activeTab = 0;
+        int activeTab = Ra2App.buildTab;
         if (unitMode > 0) {
             WorldObject sel = game.World().ObjectAt(game.World().SelectedIndex());
             UnitType first = game.World().Units().TypeFor(game.World(),
@@ -501,7 +542,7 @@ class Ra2App {
         int slots = Ra2App.CardSlots(shell, rc);
         bool unitModeOn = unitMode > 0;
         int items = unitModeOn ? unitMode
-            : Ra2App.BuildItemCount(game);
+            : Ra2App.BuildItemCount(game, Ra2App.buildTab);
         if (Ra2App.cardPage * slots >= items) { Ra2App.cardPage = 0; }
         WorldObject producer = unitModeOn
             ? game.World().ObjectAt(game.World().SelectedIndex()) : null;
@@ -534,7 +575,7 @@ class Ra2App {
                     }
                 }
             } else {
-                int bi = Ra2App.BuildItemAt(game, idx);
+                int bi = Ra2App.BuildItemAt(game, idx, Ra2App.buildTab);
                 if (bi < 0) { continue; }
                 unlocked = game.BuildUnlocked(bi);
                 armed = game.BuildingId() == bi;
@@ -576,6 +617,92 @@ class Ra2App {
             Text.DrawShadow(r, count, x0 + 22 + tw - 10
                             - Text.Width(r, count, 1),
                             rc[2] + 4, 1, 240, 240, 240, 255);
+        }
+    }
+
+    // ---- in-game game menu (Esc) ------------------------------------------
+
+    /// <summary>How many buttons the game menu shows: home runs 选项/全屏/
+    /// 放弃任务 with 返回任务 pinned last; the confirm screen swaps 退出
+    /// in for the middle three.</summary>
+    static int MenuButtonCount() {
+        return Ra2App.gameMenuScreen == 0 ? 4 : 2;
+    }
+
+    /// <summary>One button's y: the stack runs down from the card area's
+    /// top and the last button sits on its floor -- the original anchors
+    /// the bottom entry at repeaterHeight * repeaterCount - 2.</summary>
+    static int MenuButtonY(SidebarShell shell, List<int> rc, int i) {
+        int bh = shell.H("SIDEBTTN.SHP");
+        int top = rc[2] + 1;
+        int menuH = rc[4] * (Ra2App.CardTileH(shell) + 2) - 2;
+        if (i == Ra2App.MenuButtonCount() - 1) { return top + menuH - bh; }
+        return top + bh * i;
+    }
+
+    /// <summary>Which game-menu button sits under the cursor, or -1.</summary>
+    static int HitMenuButton(SidebarShell shell, List<int> rc, int mx, int my) {
+        int bw = shell.W("SIDEBTTN.SHP");
+        int bh = shell.H("SIDEBTTN.SHP");
+        for (int i = 0; i < Ra2App.MenuButtonCount(); i = i + 1) {
+            if (Draw.PointIn(mx, my, rc[0] + 22,
+                             Ra2App.MenuButtonY(shell, rc, i), bw, bh)) {
+                return i;
+            }
+        }
+        return 0 - 1;
+    }
+
+    /// <summary>The game menu over the bare sidebar shell: radar, power and
+    /// card give way to the SIDEBTTN stack the way the original's menu
+    /// screen hides them. Button press state rides menuPressed.</summary>
+    static void DrawGameMenu(SdlRenderer r, GameController game,
+                             SidebarShell shell, List<int> rc,
+                             int mouseX, int mouseY) {
+        int x0 = rc[0];
+        r.SetColor(0, 0, 0, 255);
+        r.FillRect(x0, 0, Ra2App.ViewW() - x0, Ra2App.ViewH());
+        Ra2App.Blit(r, shell, "CREDITS.SHP", 0, x0, 0);
+        Ra2App.Blit(r, shell, "SIDE3.SHP", 0, x0, rc[3]);
+        Ra2App.Blit(r, shell, "ADDON.SHP", 0, x0, rc[3] + shell.H("SIDE3.SHP"));
+        Text.Draw(r, Convert.ToString(game.Money()), x0 + 12, 3, 1,
+                  250, 226, 96, 255);
+
+        Strings ui = Ra2App.menuUi;
+        List<string> labels = new List<string>();
+        if (Ra2App.gameMenuScreen == 0) {
+            labels.Add(ui != null ? ui.Or("GUI:Options", "选项") : "选项");
+            labels.Add(ui != null ? ui.Or("GUI:Fullscreen", "全屏") : "全屏");
+            labels.Add(ui != null ? ui.Or("GUI:AbortMission", "放弃任务")
+                       : "放弃任务");
+        } else {
+            labels.Add(ui != null ? ui.Or("GUI:Quit", "退出") : "退出");
+        }
+        labels.Add(ui != null ? ui.Or("GUI:ResumeMission", "返回任务")
+                   : "返回任务");
+
+        int bw = shell.W("SIDEBTTN.SHP");
+        int bh = shell.H("SIDEBTTN.SHP");
+        int hover = Ra2App.HitMenuButton(shell, rc, mouseX, mouseY);
+        for (int i = 0; i < labels.Count; i = i + 1) {
+            int by = Ra2App.MenuButtonY(shell, rc, i);
+            // 选项 is the one dead entry: no options table to open yet, so
+            // it ships dimmed like the main menu's unimplemented rows. The
+            // plate's own frames carry the states: red at rest, crimson
+            // under the click, yellow under the cursor.
+            bool enabled = !(Ra2App.gameMenuScreen == 0 && i == 0);
+            int frame = 0;
+            if (Ra2App.menuPressed == i && enabled) { frame = 1; }
+            else if (hover == i && enabled) { frame = 2; }
+            Ra2App.Blit(r, shell, "SIDEBTTN.SHP", frame, x0 + 22, by);
+            if (!enabled) {
+                r.SetColor(0, 0, 0, 128);
+                r.FillRect(x0 + 22, by, bw, bh);
+            }
+            string label = labels[i];
+            Text.DrawShadow(r, label,
+                            x0 + 22 + (bw - Text.Width(r, label, 1)) / 2,
+                            by + (bh - 12) / 2 + 1, 1, 240, 240, 240, 255);
         }
     }
 
@@ -1161,6 +1288,7 @@ class Ra2App {
         // Revenge install, RA2.CSF otherwise), so the buttons carry the
         // original labels. Screens falls back to transcribed text without it.
         Strings ui = Strings.Load(vfs);
+        Ra2App.menuUi = ui;
 
         // Loaded lazily when a game starts, and torn down when it ends, so the
         // menu does not hold a map's worth of textures.
@@ -1239,21 +1367,66 @@ class Ra2App {
                     mouseX = host.MouseX();
                     mouseY = host.MouseY();
                     if (SdlEvent.MouseButton() == SdlMouseButton.Left()) {
-                        if (shell.CurrentScene() == 2 && game != null
+                        if (shell.CurrentScene() == 2 && Ra2App.gameMenu
+                         && game != null && game.Result() == 0
+                         && sideShell != null && sideShell.Ok()) {
+                            // The menu's button takes the press; its action
+                            // fires on the release, like the original's.
+                            List<int> mrc = new List<int>();
+                            Ra2App.ShellRects(sideShell, mrc);
+                            Ra2App.menuPressed = Ra2App.HitMenuButton(
+                                sideShell, mrc, mouseX, mouseY);
+                        } else if (shell.CurrentScene() == 2 && game != null
                          && !Ra2App.InSidebar(mouseX)) {
                             // Start a potential box drag; on release, if the
                             // mouse barely moved it is a click-select.
                             dragging = true;
                             dragStartX = mouseX;
                             dragStartY = mouseY;
+                        } else if (shell.CurrentScene() == 2
+                                && Ra2App.gameMenu) {
+                            // Menu up without shell art: nothing to press.
                         } else {
                             clicked = true;
                         }
                     }
                     if (SdlEvent.MouseButton() == SdlMouseButton.Right()) {
-                        rightClicked = true;
+                        if (!Ra2App.gameMenu) { rightClicked = true; }
                         dragging = false;
                     }
+                }
+                if (ty == SdlEventType.MouseButtonUp()
+                 && SdlEvent.MouseButton() == SdlMouseButton.Left()
+                 && Ra2App.gameMenu) {
+                    // The action fires when the button comes up over the
+                    // same entry it went down on, the original's click.
+                    if (Ra2App.menuPressed >= 0 && sideShell != null
+                     && sideShell.Ok() && game != null
+                     && game.Result() == 0) {
+                        List<int> mrc = new List<int>();
+                        Ra2App.ShellRects(sideShell, mrc);
+                        if (Ra2App.HitMenuButton(sideShell, mrc, mouseX,
+                                                 mouseY) == Ra2App.menuPressed) {
+                            if (Ra2App.gameMenuScreen == 0) {
+                                if (Ra2App.menuPressed == 1) {
+                                    host.ToggleFullscreen();
+                                } else if (Ra2App.menuPressed == 2) {
+                                    Ra2App.gameMenuScreen = 1;
+                                } else if (Ra2App.menuPressed == 3) {
+                                    Ra2App.gameMenu = false;
+                                }
+                            } else {
+                                if (Ra2App.menuPressed == 0) {
+                                    Ra2App.gameMenu = false;
+                                    Ra2App.gameMenuScreen = 0;
+                                    shell.Back();
+                                } else if (Ra2App.menuPressed == 1) {
+                                    Ra2App.gameMenuScreen = 0;
+                                }
+                            }
+                        }
+                    }
+                    Ra2App.menuPressed = -1;
                 }
                 if (ty == SdlEventType.MouseButtonUp()
                  && SdlEvent.MouseButton() == SdlMouseButton.Left()
@@ -1291,16 +1464,37 @@ class Ra2App {
                     if (sc == 68) { host.ToggleFullscreen(); }   // F11
                     if (sc == 41) {                              // Esc
                         if (shell.CurrentScene() == 0) { host.Quit(); }
-                        else { shell.Back(); }
+                        else if (shell.CurrentScene() == 2 && game != null
+                             && game.Result() == 0 && sideShell != null
+                             && sideShell.Ok()) {
+                            // The game menu: Esc opens it, Esc over the
+                            // confirm step steps back to its home first.
+                            if (Ra2App.gameMenu
+                             && Ra2App.gameMenuScreen == 1) {
+                                Ra2App.gameMenuScreen = 0;
+                            } else {
+                                Ra2App.gameMenu = !Ra2App.gameMenu;
+                                Ra2App.gameMenuScreen = 0;
+                            }
+                            Ra2App.menuPressed = -1;
+                        }
+                        else {
+                            Ra2App.gameMenu = false;
+                            Ra2App.gameMenuScreen = 0;
+                            shell.Back();
+                        }
                     }
                     if (shell.CurrentScene() == 1) {
                         if (sc == 82) { shell.SelectMap(-1); }   // up
                         if (sc == 81) { shell.SelectMap(1); }    // down
                         if (sc == 40 || sc == 88) {              // Enter
+                            Ra2App.gameMenu = false;
+                            Ra2App.gameMenuScreen = 0;
                             shell.StartGame();
                         }
                     }
-                    if (shell.CurrentScene() == 2 && cam != null) {
+                    if (shell.CurrentScene() == 2 && cam != null
+                     && !Ra2App.gameMenu) {
                         if (sc == 80) { cam.MoveBy(0 - panStep, 0); dirty = true; }
                         if (sc == 79) { cam.MoveBy(panStep, 0); dirty = true; }
                         if (sc == 82) { cam.MoveBy(0, 0 - panStep); dirty = true; }
@@ -1334,7 +1528,8 @@ class Ra2App {
             // a map corner before the first dump -- pan only after a real
             // mouse motion has been seen.
             if (shell.CurrentScene() == 2 && cam != null
-             && !Ra2App.InSidebar(mouseX) && mouseSeen) {
+             && !Ra2App.InSidebar(mouseX) && mouseSeen
+             && !Ra2App.gameMenu) {
                 int edge = 12;
                 if (mouseY < edge) { cam.MoveBy(0, 0 - panStep); dirty = true; }
                 if (mouseY > Ra2App.ViewH() - edge) { cam.MoveBy(0, panStep); dirty = true; }
@@ -1358,7 +1553,11 @@ class Ra2App {
                 int act = Screens.DrawSkirmish(host.Renderer(), art, shell,
                     maps, preview, ui, Ra2App.ViewW(), Ra2App.ViewH(),
                     mouseX, mouseY, clicked);
-                if (act == 1) { shell.StartGame(); }
+                if (act == 1) {
+                    Ra2App.gameMenu = false;
+                    Ra2App.gameMenuScreen = 0;
+                    shell.StartGame();
+                }
                 if (act == 2) { shell.Back(); }
             } else {
                 // Load on the first frame of a game, or when the player backed
@@ -1578,7 +1777,8 @@ class Ra2App {
                 // clock just re-anchors.
                 int nowMs = Sdl.Ticks();
                 int tickMs = 66 + (6 - shell.GameSpeed()) * 33;
-                if (game != null && !game.Paused() && game.Result() == 0) {
+                if (game != null && !game.Paused() && game.Result() == 0
+                 && !Ra2App.gameMenu) {
                     if (lastMs >= 0) { accMs = accMs + (nowMs - lastMs); }
                     lastMs = nowMs;
                     int steps = 0;
@@ -1598,15 +1798,34 @@ class Ra2App {
                 // frame is drawn, so the response is immediate. Once a side
                 // has won, input freezes -- only Esc remains.
                 if (clicked && game != null && game.Result() == 0) {
+                    // The game menu has the sidebar: its buttons act on
+                    // their own release, nothing else takes this click.
+                    if (Ra2App.gameMenu) {
+                        clicked = false;
                     // Build menu entries live on the right sidebar; clicks there
                     // arm a build (or, on the production panel, queue a unit).
                     // Everything else maps to a cell.
-                    if (Ra2App.InSidebar(mouseX)) {
+                    } else if (Ra2App.InSidebar(mouseX)) {
                         int sr = Ra2App.HitSellRepair(game, sideShell,
                                                       mouseX, mouseY);
+                        List<int> crc = new List<int>();
+                        if (sideShell != null && sideShell.Ok()) {
+                            Ra2App.ShellRects(sideShell, crc);
+                        }
                         if (sr == 0) { game.ToggleSell(); }
                         else if (sr == 1) { game.ToggleRepair(); }
                         else if (sideShell != null && sideShell.Ok()
+                             && Ra2App.HitTab(sideShell, crc, mouseX,
+                                              mouseY) >= 0) {
+                            // The tab pair picks the structures card's
+                            // page: plain buildings or armed defences.
+                            int tab = Ra2App.HitTab(sideShell, crc, mouseX,
+                                                    mouseY);
+                            if (tab < 2 && Ra2App.buildTab != tab) {
+                                Ra2App.buildTab = tab;
+                                Ra2App.cardPage = 0;
+                            }
+                        } else if (sideShell != null && sideShell.Ok()
                              && Ra2App.HitCardScroll(sideShell, mouseX,
                                                      mouseY) != 0) {
                             // The page pair beside the footer: up or down a
@@ -1622,7 +1841,8 @@ class Ra2App {
                             bool units = Ra2App.ProdCount(game) > 0;
                             int items = units
                                 ? Ra2App.ProdCount(game)
-                                : Ra2App.BuildItemCount(game);
+                                : Ra2App.BuildItemCount(game,
+                                                        Ra2App.buildTab);
                             int slot = Ra2App.HitCardSlot(game, sideShell,
                                                           mouseX, mouseY,
                                                           items);
@@ -1632,7 +1852,8 @@ class Ra2App {
                                         Ra2App.ProdUnitAt(game, slot));
                                 } else {
                                     game.OnClickBuild(
-                                        Ra2App.BuildItemAt(game, slot));
+                                        Ra2App.BuildItemAt(game, slot,
+                                                           Ra2App.buildTab));
                                 }
                             }
                         } else {
@@ -1672,13 +1893,36 @@ class Ra2App {
                 }
                 if (rightClicked && game != null && cam != null
                  && game.Result() == 0) {
-                    int wx = cam.X() + Ra2App.ScaleX(mouseX, cam.ZoomNum(), cam.ZoomDen());
-                    int wy = cam.Y() + Ra2App.ScaleY(mouseY, cam.ZoomNum(), cam.ZoomDen());
-                    List<int> xy = new List<int>();
-                    xy.Add(0);
-                    xy.Add(0);
-                    IsoProjection.CellAt(wx + terrain.OriginX(), wy + terrain.OriginY(), xy);
-                    game.OnRightClick(xy[0], xy[1]);
+                    if (Ra2App.InSidebar(mouseX)) {
+                        // The sidebar takes no map orders: a right click
+                        // drops an armed build or sell/repair, and over a
+                        // production card it cancels one queued instance --
+                        // the original's dequeue, refund included.
+                        game.OnRightClickSidebar();
+                        if (sideShell != null && sideShell.Ok()) {
+                            bool units = Ra2App.ProdCount(game) > 0;
+                            int items = units
+                                ? Ra2App.ProdCount(game)
+                                : Ra2App.BuildItemCount(game,
+                                                        Ra2App.buildTab);
+                            int slot = Ra2App.HitCardSlot(game, sideShell,
+                                                          mouseX, mouseY,
+                                                          items);
+                            if (slot >= 0 && units) {
+                                game.OnRightClickUnit(
+                                    Ra2App.ProdUnitAt(game, slot));
+                            }
+                        }
+                    } else {
+                        int wx = cam.X() + Ra2App.ScaleX(mouseX, cam.ZoomNum(), cam.ZoomDen());
+                        int wy = cam.Y() + Ra2App.ScaleY(mouseY, cam.ZoomNum(), cam.ZoomDen());
+                        List<int> xy = new List<int>();
+                        xy.Add(0);
+                        xy.Add(0);
+                        IsoProjection.CellAt(wx + terrain.OriginX(),
+                                             wy + terrain.OriginY(), xy);
+                        game.OnRightClick(xy[0], xy[1]);
+                    }
                     dirty = true;
                 }
                 if (game != null && game.NeedsRedraw()) { dirty = true; }
@@ -1721,9 +1965,16 @@ class Ra2App {
                         mmW = Ra2App.MiniW();
                         mmH = Ra2App.MiniH();
                     }
-                    Ra2App.DrawMinimap(host.Renderer(), minimap, world, game,
+                    // The game menu hides the radar, so its minimap goes
+                    // with it.
+                    if (Ra2App.gameMenu) {
+                        mmW = 0 - 1;
+                    }
+                    if (mmW > 0) {
+                        Ra2App.DrawMinimap(host.Renderer(), minimap, world, game,
                                        cam, terrain, mouseX, mouseY, clicked,
                                        mmX, mmY, mmW, mmH);
+                    }
                     if (dragging) {
                         Ra2App.DrawBox(host.Renderer(), dragStartX, dragStartY,
                                        mouseX, mouseY);
@@ -1991,12 +2242,95 @@ class Ra2App {
                         + " aiMoney=" + Convert.ToString(aiMoney)
                         + " sel=" + Convert.ToString(sel)
                         + " result=" + Convert.ToString(result));
-                    // The Soviet walk ends here; the Allied walk backs out to
-                    // the setup screen and runs a second, Soviet-side game so
-                    // one invocation dumps both faction UIs. The second run
-                    // lands here a second time with the side already Soviet,
-                    // so the flipped-side check is what actually stops it --
-                    // without it frames=4 restarts the walk forever.
+                    // The sidebar's newer interactions, proved on live state:
+                    // queue two of a unit on the selected producer, cancel
+                    // one with the right click (the refund must land), and
+                    // count the structures card's two tab pages.
+                    if (game != null && world != null) {
+                        WorldObject prod = world.Selected();
+                        if (prod != null && prod.Kind() == ObjKind.Structure()
+                         && prod.ProdCount() == 0) {
+                            StructureType st = world.Catalog().TypeFor(world,
+                                prod.Side(), prod.BuildId());
+                            List<int> lines = st != null ? st.Produces() : null;
+                            if (lines != null && lines.Count > 0) {
+                                int uid = 0 - 1;
+                                int m0 = game.Money();
+                                for (int pi = 0; pi < lines.Count && uid < 0;
+                                     pi = pi + 1) {
+                                    game.OnClickUnit(lines[pi]);
+                                    if (prod.ProdCount() > 0) { uid = lines[pi]; }
+                                }
+                                if (uid >= 0) {
+                                    game.OnClickUnit(uid);
+                                    int queued = prod.ProdCount();
+                                    game.OnRightClickUnit(uid);
+                                    Console.WriteLine("selftest queue uid="
+                                        + Convert.ToString(uid)
+                                        + " queued=" + Convert.ToString(queued)
+                                        + " afterCancel="
+                                        + Convert.ToString(prod.ProdCount())
+                                        + " netPaid="
+                                        + Convert.ToString(game.Money() - m0));
+                                } else {
+                                    Console.WriteLine("selftest queue none-unlocked");
+                                }
+                            }
+                        }
+                        Console.WriteLine("selftest tabs buildings="
+                            + Convert.ToString(Ra2App.BuildItemCount(game, 0))
+                            + " defence="
+                            + Convert.ToString(Ra2App.BuildItemCount(game, 1)));
+                    }
+                    // Leave the game menu open across the flip: the next
+                    // frame draws it over the sidebar for the capture.
+                    Ra2App.gameMenu = true;
+                    Ra2App.gameMenuScreen = 0;
+                    dirty = true;
+                }
+                if (frames == 14) {
+                    // Frame 14 drew the game menu (the Esc screen) over the
+                    // sidebar; capture it, then close the walk out. The
+                    // Soviet leg re-enters here a second time, so this is
+                    // also where the flipped-side check actually stops it.
+                    host.End();
+                    Ra2App.DumpScreen(shell.SideIndex() == 0
+                                      ? "build/ra2_shot_gamemenu.bmp"
+                                      : "build/ra2_shot_gamemenu_sov.bmp",
+                                      host.Renderer());
+                    host.Begin(16, 20, 16);
+                    Console.WriteLine("selftest gamemenu open="
+                        + Convert.ToString(Ra2App.gameMenu ? 1 : 0)
+                        + " screen=" + Convert.ToString(Ra2App.gameMenuScreen)
+                        + " buttons="
+                        + Convert.ToString(Ra2App.MenuButtonCount()));
+                    int sfc = sideShell != null
+                        ? sideShell.FrameCount("SIDEBTTN.SHP") : 0;
+                    Console.WriteLine("selftest sidebttn frames="
+                        + Convert.ToString(sfc) + " "
+                        + Convert.ToString(sideShell.W("SIDEBTTN.SHP")) + "x"
+                        + Convert.ToString(sideShell.H("SIDEBTTN.SHP")));
+                    for (int f = 0; f < sfc && f < 12; f = f + 1) {
+                        sideShell.DumpPiece(sideShell.Piece("SIDEBTTN.SHP", f),
+                                            "build/sidebttn_f"
+                                            + Convert.ToString(f) + ".ppm");
+                    }
+                    // Step to the 放弃任务 confirm: the next frame draws its
+                    // own button set for the second capture.
+                    Ra2App.gameMenuScreen = 1;
+                    dirty = true;
+                }
+                if (frames == 15) {
+                    host.End();
+                    Ra2App.DumpScreen(shell.SideIndex() == 0
+                                      ? "build/ra2_shot_quit.bmp"
+                                      : "build/ra2_shot_quit_sov.bmp",
+                                      host.Renderer());
+                    host.Begin(16, 20, 16);
+                    Console.WriteLine("selftest quitconfirm buttons="
+                        + Convert.ToString(Ra2App.MenuButtonCount()));
+                    Ra2App.gameMenu = false;
+                    Ra2App.gameMenuScreen = 0;
                     if (Ra2App.SelfTestSoviet()
                      || shell.SideIndex() != Side.Allied()) { host.Quit(); }
                     shell.SetSide(Side.Soviet());
