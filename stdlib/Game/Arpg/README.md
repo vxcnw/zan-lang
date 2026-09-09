@@ -13,7 +13,7 @@ using Game.Arpg;
 namespace MyGame;
 
 class Bootstrap {
-    static ArpgEngine Create() {
+    static ArpgProject Create() {
         ArpgConfig config = ArpgConfig.Create();
         config.SetTitle("My Legend");
         config.SetSize(1280, 720);
@@ -33,18 +33,15 @@ class Bootstrap {
         start.SetInitialPosition(10, 10, 0);
         project.AddMap(start);
 
-        ArpgEngine engine = ArpgEngine.Create(config);
-        if (!engine.LoadProject(project)) {
-            return null;
-        }
-        return engine;
+        return project;
     }
 }
 ```
 
-Call `project.Validate()` to collect every error and warning before creating a
-window. `ArpgEngine.Start()` also validates the App configuration and loaded
-project.
+Call `project.Validate()` to collect every error and warning before running.
+Hosting is app-side: open a `Foundation.Gui` `GuiHost` loop (the same pattern
+as the shipped game templates) and drive the world, scheduler and UI runtime
+from it — `Game.Arpg` itself owns no window or platform lifecycle.
 
 ## Manifest workflow
 
@@ -81,7 +78,7 @@ project source and `legend2.sources.txt`. Use `-Factory` to choose a custom
 fully qualified factory type and `-Force` to replace an existing component.
 
 The default output is `MyGame\Generated\ArpgProject.g.zan`. The generated
-class exposes `CreateConfig()`, `CreateProject()` and `CreateEngine()`.
+class exposes `CreateConfig()` and `CreateProject()`.
 
 Manifest shape:
 
@@ -239,12 +236,12 @@ Templates support nested `if`, `elseif`, `else` and `end` blocks.
 `ArpgRichText.Parse` evaluates templates first and then emits typed runs for
 color/font/background changes, images, animations, spacing, wrapping, items
 and `#@trigger@label@` links. Link activation is delivered to both the control
-handler and `engine.Events().OnRichTextLink(...)`.
+handler and the app's `ArpgEvents` hub (`OnRichTextLink(...)`).
 
 Pointer events are dispatched from the highest graphical window and control to
 the highest node under the cursor. A node can consume the event; otherwise it
-bubbles through its control to the window. `engine.Ui()` exposes live windows,
-controls, evaluated content and RichText documents.
+bubbles through its control to the window. The UI runtime exposes live windows,
+controls, evaluated content and RichText documents to the host app.
 
 ## Screen modes
 
@@ -252,11 +249,11 @@ controls, evaluated content and RichText documents.
 - `ArpgScreenMode.Scale()` (`1`): resizable window with scaled logical view.
 - `ArpgScreenMode.ResizeWorld()` (`2`): resizable native-size view.
 - `ArpgScreenMode.TransparentBorderless()` (`3`): borderless host prepared
-  for color-key presentation; platform transparency still requires SDL bridge
-  support.
+  for color-key presentation; platform transparency depends on the host
+  backend.
 
-## Native runtime
+## Hosting
 
-Importing `Game.Arpg` also imports the SDL3 host. On Windows, native
-executables need `zan_sdl3.dll` and `SDL3.dll` from
-`stdlib/SDL3/drivers/win-x64` available beside the executable or on `PATH`.
+`Game.Arpg` contains no windowing or platform I/O. Open a `Foundation.Gui`
+`GuiHost` (as the shipped game templates do) and drive the world, scheduler,
+events and UI runtime from the host loop; rendering adapts onto `Gui` Canvas.

@@ -19,15 +19,17 @@ model while exposing typed Zan APIs.
 6. `ArpgWorld` owns live actor instances, combat operations, Buff updates
    and current-map state.
 7. `ArpgScheduler` implements named one-shot and repeating events.
-8. `ArpgEngine` owns SDL3 lifecycle, input translation, fixed frame pacing
-   and the bridge between project data and live world state.
+8. Hosting and frame pacing live with the app: games open a
+   `Foundation.Gui` `GuiHost` loop (the same pattern as the shipped game
+   templates) and drive the world from it; this module owns no window or
+   platform lifecycle of its own.
 9. `DataBinding` evaluates nested data sources, `&path&` variables and nested
    `{if}`/`{elseif}`/`{else}` template blocks.
 10. `RichText` converts evaluated content into typed text, image, animation,
     item, spacing, wrapping and hyperlink runs.
 11. `UiRuntime` owns the DM-style graphical window/control/node tree,
-    hit-testing, focus, dragging and event bubbling; `UiRenderer` adapts it
-    to SDL rendering.
+    hit-testing, focus, dragging and event bubbling; it is pure logic and
+    draws nothing itself — the host app adapts it onto `Gui` Canvas.
 
 Definitions are intentionally independent from serialization. A project can be
 assembled in Zan, generated from `legend2.project.json`, or supplied by a future
@@ -48,7 +50,6 @@ Implemented:
 - typed RichText runs, inline resources, item fragments and hyperlink events;
 - graphical hit-testing, z-order, focus, capture, control/window dragging and
   node-to-control-to-window event bubbling;
-- SDL-rendered window/control/node backgrounds, borders and BMP resources;
 - named delayed and repeating events;
 - map grids, barriers, actor spawns, portals and default-map entry;
 - actor base/custom attributes, skills, starting buffs and live instances;
@@ -64,12 +65,15 @@ Implemented:
 Deferred to dedicated subsystems:
 
 - map-object rendering, animation playback, skins and font glyph shaping;
+- window/control/node presentation (backgrounds, borders, BMP resources) —
+  adapt `UiRuntime` onto `Gui` Canvas in the host app;
 - inventory/equipment UI and delayed or area-based skill effects;
 - rage, threat, custom formula evaluation and NPC combat decision making;
 - audio/music, tweening, networking and SQLite facades;
 - loading legacy Lua component files directly.
 
 The graphical control runtime belongs to `Game.Arpg`, not `Gui`: it uses game
-coordinates, z-order and SDL resources rather than desktop widget layout or
-native controls. The SDL3 layer owns platform I/O, and Arpg public APIs do not
-expose raw SDL handles.
+coordinates, z-order and hit-testing rather than desktop widget layout or
+native controls. The module is free of platform I/O — windows, input and
+rendering are owned by `Foundation.Gui` (GuiHost / Canvas), and Arpg public
+APIs expose no platform handles.

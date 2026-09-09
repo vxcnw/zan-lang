@@ -2,7 +2,7 @@ using System;
 
 namespace Game.Arpg;
 
-// 系统事件委托：Engine 的 SDL 事件泵在对应时机回调。
+// 系统事件委托：宿主（GuiHost 循环）在对应时机回调。
 /// 系统事件总线（ArpgEvents）的启动前回调签名。
 delegate bool ArpgStarting(string arguments);
 /// 系统事件总线的启动完成回调签名。
@@ -99,8 +99,8 @@ class ArpgEvents {
     }
     /// 窗口尺寸变化（单位为窗口像素，非逻辑坐标）。
     void OnSizeChanged(ArpgSizeChanged handler) { this.sizeChanged = handler; }
-    /// 按下回调；keycode 为 SDL 键码，修饰键为独立 bool。开启
-    /// RepeatKeys 时连发也触发，否则只触发首次按下。
+    /// 按下回调；keycode 为宿主键码（GuiHost 事件编码），修饰键为
+    /// 独立 bool。开启 RepeatKeys 时连发也触发，否则只触发首次按下。
     void OnKeyDown(ArpgKeyChanged handler) { this.keyDown = handler; }
     /// 抬起回调；参数同 OnKeyDown。
     void OnKeyUp(ArpgKeyChanged handler) { this.keyUp = handler; }
