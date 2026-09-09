@@ -102,3 +102,28 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
 先查 git 考古谁先谁后」）、「测试源不合法」（C# 也拒绝的写法改测试源，
 如无约束 T 的 string 拼接改 .ToString()）、「真回归」（git 考古最后
 通过点定位元凶提交修编译器）。混着处置就会把行为改错。
+
+## ARC 契约：DllImport 的 string 返回值是借用指针，永不释放
+
+- **expr_yields_owned_rc_value 对 extern 调用必须返回 0**（irgen_generics.c）：
+  声明返回 `string` 的 bodyless [DllImport] 返回的是裸 `char*`——extern 内存
+  或**调用方传入的缓冲**，没有 rc 头。通用丢弃路径（AST_EXPR_STMT）把所有
+  AST_CALL 结果当 owned(+1) 去 release，就会把别人的内存放掉：stdlib 的
+  `getcwd(b, 4096)` 返回指针落在调用方 `byte[]` 上，release 经
+  zan_rt_str_release 的数组转发臂把数组引用减到 0 → free → musl mallocng
+  把整组 16KB unmap → 随后 b[n] 扫描读已卸载页 SIGSEGV。Windows 分支不走
+  getcwd 所以模板只在 Linux 上崩（诊断时先看平台分支差异）。修法是给
+  expr_yields_owned_rc_value 的 AST_CALL 分支加 extern 判定
+  （extern_check_callee_sym + sym_declares_extern + method_ret_type_at），
+  void/string 返回一律借用。conformance 用例
+  tests/conformance/extern_borrowed_string_result（getcwd 三次全读）。
+- **platform-defining DllImport 会被 irgen 内建短路**：`Directory.\
+  GetCurrentDirectory`/`SetCurrentDirectory` 在 irgen_call.c 有内建降层
+  （!zan_type_defines 才生效）——探针里自己写 Directory 类会静默走 stdlib
+  版本，写别的名字才有效。
+- **musl 静态链内存布局速查**：cross 链接带 zanrt_mem.o + --wrap 时
+  ≤2048B 走 zan 槽位分配器（1MiB 对齐 slab，指针 & ~0xFFFFF 可判归属），
+  >2048B（如 4096 的 getcwd byte[]）落 musl mallocng 的 mmap 堆
+  （0x7ffff7xxxxxx 段）；崩溃地址落在 mallocng 元数据检查
+  （__malloc_allzerop）且 RSS 平台化后不重现，优先怀疑高压竞争而非
+  Zan 侧 UAF——先用低速率复跑分型。
