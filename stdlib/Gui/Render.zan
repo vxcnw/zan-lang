@@ -153,6 +153,9 @@ class Canvas {
     static extern void zan_gui_draw_polyline_fx(int surfaceId, nint pts, int n, int color, int thickness);
 
     [DllImport("zan_gui")]
+    static extern void zan_gui_draw_polybatch(int surfaceId, nint pts, nint counts, int nPaths, int color, int thickness);
+
+    [DllImport("zan_gui")]
     static extern void zan_gui_fill_sector(int surfaceId, int cx, int cy, int rInner, int rOuter, int a0Deg, int a1Deg, int color);
 
     [DllImport("zan_gui")]
@@ -589,6 +592,26 @@ class Canvas {
         }
         zan_gui_draw_polyline_fx(surfaceId, buf, n, color, thickness);
         NativeMemory.Free(buf);
+    }
+
+    /// <summary>一次覆盖缓冲周期绘制 N 条互不相连、同色的折线。
+    /// xs 为全体路径顶点的扁平交错数组，counts[i] 为第 i 条路径的
+    /// 顶点数。密集多行图（数千行的平行坐标）逐行调用 DrawPolyline
+    /// 会为每行付出一次完整的 GL 覆盖缓冲清除+合成；分桶后每帧
+    /// 每色仅一次，是大数据图表不卡的关键。</summary>
+    void DrawPolyBatch(List<int> xs, List<int> counts, int color, int thickness) {
+        int total = 0;
+        for (int i = 0; i < counts.Count; i = i + 1) { total = total + counts[i]; }
+        if (total < 2 || counts.Count < 1) { return; }
+        nint buf = NativeMemory.Alloc(total * 8);
+        nint cbuf = NativeMemory.Alloc(counts.Count * 4);
+        Span<int> sp = new Span<int>(buf, total * 2);
+        for (int i = 0; i < total * 2; i = i + 1) { sp[i] = xs[i]; }
+        Span<int> cp = new Span<int>(cbuf, counts.Count);
+        for (int i = 0; i < counts.Count; i = i + 1) { cp[i] = counts[i]; }
+        zan_gui_draw_polybatch(surfaceId, buf, cbuf, counts.Count, color, thickness);
+        NativeMemory.Free(buf);
+        NativeMemory.Free(cbuf);
     }
 
     /// <summary>填充环扇区（饼/甜甜圈切片）。角度为度，0 在

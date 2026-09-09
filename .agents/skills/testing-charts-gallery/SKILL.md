@@ -23,6 +23,11 @@ cp stdlib/Gui/Component/Chart/*.zan _scratch/stdlib_snap/Gui/Component/Chart/
   --link-lib rpcrt4 --link-lib ole32 -o _scratch/charts_pc.exe
 ```
 
+- 快照是**双刃**：它让构建绕开并发会话的在途编辑，也会把"修好"
+  静默吞掉——提交前必须 `diff stdlib/... _scratch/stdlib_snap/...`
+  核对工作区与快照逐字节一致（Render.zan 曾在快照里有
+  DrawPolyBatch 而工作区没有，`git status` 全绿、构建全过、改动丢了）。
+  修完 Zan 源码后立刻 `diff -q` 校验；提交范围以**工作区**为准。
 - `ole32` 是并发会话的 WASAPI 音频引入的；少它链接失败时先想依赖漂移。
 - GUI 子程序**没有 stdout**：`Console.WriteLine` 不可见。追踪一律
   `System.IO.File.AppendAllText("D:/project/zan-lang/_scratch/dbg_xxx.txt", ...)`，
@@ -37,6 +42,10 @@ powershell -File _scratch/recheck2.ps1 -OutDir D:/project/zan-lang/_scratch/shot
 
 - 参数是 **-Ids**（不是 -Demo）；bash 里 `powershell -File ... -Ids a,b,c`
   不会拆数组——逐个跑 for 循环。
+- zanc 的进度杂音（"compiling code generators..."）走 stderr，PowerShell
+  把它升级成 NativeCommandError，构建脚本会**假失败退出 1 且无真实诊断**。
+  判定成败用独立探针跑同款 zanc 参数并显式打印 `$LASTEXITCODE`
+  （如 `_scratch/zanc_charts_probe.ps1`），别信包装脚本的 throw。
 - demo id 用 **registry 全名**（`scatter-anscombe-quartet` 而非
   `anscombe-quartet`）；打错 id 应用会静默回落到首个 demo，截图对不上号。
 - recheck2 会杀旧进程→启动→最大化→截图；它把窗口临时 TOPMOST，
@@ -68,6 +77,25 @@ powershell -File _scratch/recheck2.ps1 -OutDir D:/project/zan-lang/_scratch/shot
    柱子全体消失。大值路径一律 long：`YOfFL(long vF, int axis)` +
    调用方 `(long)(d * 1000.0 + 0.5)`。横向柱的 `v×g/1000` 链（ChartViewBar
    1083/1216 一带）同坑未修——值 >2.1e6 的横向柱要接 YOfFL 化。
+4. **并行坐标 `layout:'vertical'`**：名字指**轴的排布方向**——vertical =
+   轴从上到下堆叠、每根轴横向（官方 nutrients 样子）；默认 horizontal =
+   轴从左到右、每根轴纵向（parallel-aqi）。不是"横着的轴叫 horizontal"。
+   `parallelAxis[].dim` 显式绑定数据列（无 dim 按数组槽位），
+   `visualMap` piecewise `categories` 模式按行在
+   `dimension`（缺省 1）列找类目名取 `inRange.color`（官方 25 色由
+   `echarts.color.modifyHSL('#5A94DF', hStep*i)`、hStep=round(300/(n-1))
+   彩虹生成，末色 #5ADF8A）。
+5. **密集折线图用 Canvas.DrawPolyBatch**：数千行平行坐标逐行
+   `DrawPolyline` 在 GL 后端每行付一次完整覆盖缓冲清除+合成（45ms/帧
+   主要来源）。`DrawPolyBatch(xs, counts, color, thickness)` 把 N 条
+   同色互连路径并进**一次**覆盖缓冲周期（runtime `polybatch` vtable
+   op，CPU 后端自动回落逐行）。行色互不相同的图先按色分桶再批量。
+   配套流式渲染：ECharts `progressive` 语义 = restore 首帧快照 +
+   每 24ms 预算增量画行 + 帧尾 SnapshotRect 累积。
+6. **option JSON 一律单行紧凑**：`examples/gui_charts/options/*.json`
+   全仓约定单行（separators=(',',':')）；pretty-print 过的 nutrients
+   曾到 14.5 万行 1.17MB。改 option 用 Python json 重新序列化紧凑输出，
+   diff 才能落在一行内可审。
 
 ## 已知刻意偏差（勿当 bug 修）
 

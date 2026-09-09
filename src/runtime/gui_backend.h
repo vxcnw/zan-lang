@@ -174,6 +174,15 @@ typedef struct zan_gui_backend_s {
      * pixels, 8 for 16.8 sub-pixel vertices. */
     void (*polyline)(struct zan_surface_s *s, const int32_t *pts, int n,
                      uint32_t color, int thickness, int fx);
+    /* N disconnected same-color paths in ONE coverage pass: `pts` is the flat
+     * interleaved vertex array of all paths, `counts[i]` the vertex count of
+     * path i. The GL backend shares a single coverage-buffer cycle across all
+     * paths -- the win for dense multi-line charts (thousands of rows would
+     * otherwise pay a full clear+composite each). Backends may leave this
+     * NULL; the export falls back to per-path polyline. */
+    void (*polybatch)(struct zan_surface_s *s, const int32_t *pts,
+                      const int32_t *counts, int n_paths,
+                      uint32_t color, int thickness, int fx);
 
     /* --- surface-sampling primitives ------------------------------------ */
     /* Frosted glass. slot >= 0 reuses a cached blur (dirty == 0 means the

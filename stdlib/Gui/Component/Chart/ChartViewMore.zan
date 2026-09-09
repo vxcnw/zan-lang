@@ -9,7 +9,10 @@ namespace Gui.Component.Chart;
 // ① parallel（平行坐标）：parallelAxis[dim] 垂直轴等距铺开，
 //    每行数据是一条跨轴折线；维值域由显式 min/max 或该维数据
 //    包络（NiceRange）定标，类目维按下标取值。行色逐行取调色板
-//    （visualMap dimension 命中时覆盖）。
+//    （visualMap dimension 命中时覆盖）；线宽/透明度按 6.1 语义
+//    消费 lineStyle.width/opacity——官方 nutrients 是发丝线低透明
+//    逐行叠加的密度图。行数 >1000 走 progressive 分帧：每帧画
+//    一批行，画过的经区域快照跨帧续画，画完即停（见 parProg*）。
 // ② themeRiver（主题河流）：singleAxis 时间轴上按名字分带的
 //    堆叠河：每名字一列值按时间对齐，累计出上下边界用
 //    FillBandFx 半透明填带（ECharts 默认带 opacity ≈ 0.7 观感）。
@@ -22,6 +25,25 @@ namespace Gui.Component.Chart;
 partial class ChartView {
 
     // ---- parallel 平行坐标 ----
+
+    // 大数据渐进渲染状态。行折线的原版语义（官方 nutrients：
+    // lineStyle.width 0.5 + opacity 0.05）是发丝线低透明密度叠加——
+    // 每行一次独立 src-over，CPU 光栅器上 ~0.85ms/行，7637 行一次
+    // 画完必然整窗未响应。按 ECharts progressive 语义分帧流出：
+    // 每帧在时间预算内画一批行，画过的行经区域快照跨帧持久
+    // （帧首恢复快照 = 接着上一帧的累积画），数据/几何/样式指纹
+    // 一变即重开。未画完时 RequestAnimationFrame 续帧，流完即停，
+    // 空闲回到零 CPU——大数据不阻塞 UI 线程的正解。
+    static int parProgFp;
+    static bool parProgHas;
+    static int parProgDone;
+    static int parProgSlot = -1;
+    static bool parProgFresh;
+
+    // FNV-1a 一轮（渐进指纹）。
+    static int ParHash(int h, int v) {
+        return h * 16777619 ^ v;
+    }
 
     static void DrawParallel(App app, int x, int y, int w, int h,
                              ChartOption o, int g) {
@@ -145,20 +167,108 @@ partial class ChartView {
             }
         }
 
-        // 行折线：一条行 = 跨 dims 根轴的 (ax, y) 折线。
-        int alpha = 255;
-        if (g < 1000) { alpha = 60 + 195 * g / 1000; }
-        if (alpha > 255) { alpha = 255; }
+        // 行折线：一条行 = 跨 dims 根轴的 (ax, y) 折线。行色/线宽/
+        // 透明度按 6.1 语义消费 lineStyle（官方 nutrients 是
+        // width 0.5 + opacity 0.05 的发丝线密度叠加，不是实线）。
         int slot = 0;
         int mX = app.mouseX;
         int mY = app.mouseY;
+
+        // 总行数：超过阈值走渐进分帧（阈值下的图一次画完，保留
+        // 生长动画）。
+        int totalRows = 0;
         for (int si = 0; si < series.Count; si = si + 1) {
+            ChartSeries s = series[si];
+            if (s.hidden || s.custom != "parallel") { continue; }
+            totalRows = totalRows + s.parRows.Count;
+        }
+        bool stream = totalRows > 1000;
+        int frameStart = Window.GetTickMs();
+
+        // 渐进指纹：数据/几何/样式任一变化即重开（快照续画只在
+        // 同一指纹下合法）。
+        int fp = 17;
+        if (stream) {
+            fp = ParHash(fp, dims);
+            fp = ParHash(fp, plotX); fp = ParHash(fp, plotY);
+            fp = ParHash(fp, plotW); fp = ParHash(fp, plotH);
+            fp = ParHash(fp, totalRows);
+            fp = ParHash(fp, axCol);
+            fp = ParHash(fp, sGrid.BgOr(0));
+            for (int d = 0; d < dims; d = d + 1) {
+                fp = ParHash(fp, lo[d]); fp = ParHash(fp, hi[d]);
+            }
+            for (int vi = 0; vi < o.visualMaps.Count; vi = vi + 1) {
+                ChartVisualMap vm = o.visualMaps[vi];
+                fp = ParHash(fp, vm.dimension);
+                fp = ParHash(fp, vm.minV); fp = ParHash(fp, vm.maxV);
+                for (int ci = 0; ci < vm.rangeColors.Count; ci = ci + 1) {
+                    fp = ParHash(fp, vm.rangeColors[ci]);
+                }
+            }
+            for (int si = 0; si < series.Count; si = si + 1) {
+                ChartSeries s = series[si];
+                if (s.hidden || s.custom != "parallel") { continue; }
+                fp = ParHash(fp, s.color);
+                fp = ParHash(fp, s.lineStyle != null ? s.lineStyle.width : 0);
+                fp = ParHash(fp, s.lineStyle != null ? s.lineStyle.alpha : 0);
+                fp = ParHash(fp, s.parRows.Count);
+                for (int ri = 0; ri < s.parRows.Count; ri = ri + 1) {
+                    List<int> row = s.parRows[ri];
+                    fp = ParHash(fp, row.Count);
+                    for (int di = 0; di < row.Count; di = di + 1) {
+                        fp = ParHash(fp, row[di]);
+                    }
+                }
+            }
+            if (!parProgHas || fp != parProgFp) {
+                parProgFp = fp;
+                parProgHas = true;
+                parProgDone = 0;
+                parProgFresh = true;
+                if (parProgSlot < 0) { parProgSlot = ChartView.AllocCacheSlot(); }
+            }
+            // 帧首恢复上一帧的行像素（区域 = 绘图区，含网格底）。
+            // 几何变了快照自己会拒绝，此时从头再流。
+            if (!parProgFresh) {
+                if (!c.RestoreRect(plotX, plotY, plotW, plotH, parProgSlot)) {
+                    parProgDone = 0;
+                    parProgFresh = true;
+                }
+            }
+        }
+
+        int newDone = stream ? parProgDone : totalRows;
+        bool budgetOut = false;
+        int rowBase = 0;
+        int th0dbg = 0;
+        for (int si = 0; si < series.Count && !budgetOut; si = si + 1) {
             ChartSeries s = series[si];
             if (s.hidden || s.custom != "parallel") { continue; }
             int baseCol = s.color;
             if (baseCol == 0) { baseCol = Chart.Palette(t, slot); }
-            int th = app.Scale(2);
+            int th = s.lineStyle != null && s.lineStyle.width > 0
+                ? app.Scale(s.lineStyle.width) : app.Scale(2);
+            if (th < 1) { th = 1; }
+            th0dbg = th;
+            int rowAlpha = s.lineStyle != null && s.lineStyle.alpha > 0
+                ? s.lineStyle.alpha : 255;
+            // 生长淡入只对非流式小图；流式按原版 progressive 语义
+            // 直接进终态密度，不叠加额外动画。
+            int alpha = rowAlpha;
+            if (!stream && g < 1000) {
+                alpha = rowAlpha * (60 + 195 * g / 1000) / 255;
+            }
             for (int ri = 0; ri < s.parRows.Count; ri = ri + 1) {
+                int gi = rowBase + ri;
+                if (stream) {
+                    if (gi < parProgDone) { continue; }   // 前帧已画（快照里）
+                    if (Window.GetTickMs() - frameStart >= 24) {
+                        budgetOut = true;
+                        break;
+                    }
+                }
+                newDone = gi + 1;
                 List<int> row = s.parRows[ri];
                 if (row.Count < 2) { continue; }
                 int col = baseCol;
@@ -194,22 +304,75 @@ partial class ChartView {
                     px.Add(ax);
                     py.Add(pyv);
                 }
+                // 每行一次独立 src-over：半透明行的逐行叠加累积
+                // 正是官方密度图的成因，不能合并成一次批量合成。
                 c.DrawPolyline(px, py, col, th);
-                // 命中：指针贴近任一轴上的该行顶点。
-                for (int d = 0; d < dims; d = d + 1) {
-                    if (d >= px.Count) { break; }
-                    int dx = mX - px[d];
-                    int dy = mY - py[d];
-                    if (dx * dx + dy * dy <= app.Scale(6) * app.Scale(6)) {
-                        ChartHit mh = ChartHit.Of(ChartElementType.LinePoint,
-                            ChartView.SeriesIndexOf(o, s), s.name, ri,
-                            "", 0, mX, mY);
-                        ChartView.OfferActiveHit(mh);
-                        break;
+                if (stream && Window.GetTickMs() - frameStart >= 24) {
+                    budgetOut = true;
+                    break;
+                }
+            }
+            rowBase = rowBase + s.parRows.Count;
+            slot = slot + 1;
+        }
+
+        if (stream) {
+            int prevDone = parProgDone;
+            parProgDone = newDone;
+            parProgFresh = false;
+            // 行像素变了才重拍累积快照；流完的帧只恢复不重拍。
+            if (parProgDone != prevDone || parProgDone == 0) {
+                c.SnapshotRect(plotX, plotY, plotW, plotH, parProgSlot);
+            }
+            if (parProgDone < totalRows) { app.RequestAnimationFrame(16); }
+        }
+        System.IO.File.AppendAllText("D:/project/zan-lang/_scratch/dbg_par.txt",
+            "par ms=" + Convert.ToString(Window.GetTickMs() - frameStart)
+            + " done=" + Convert.ToString(stream ? parProgDone : -1)
+            + "/" + Convert.ToString(totalRows)
+            + " th=" + Convert.ToString(th0dbg) + "\n");
+
+        // 命中：指针贴近某已画行在任一轴上的顶点。顶点重算代价
+        // O(已画行×维)，指针在图外时整段跳过。
+        int pad6 = app.Scale(6);
+        if (mX >= plotX - pad6 && mX <= plotX + plotW + pad6
+            && mY >= plotY - pad6 && mY <= plotY + plotH + pad6) {
+            int visRows = stream ? parProgDone : totalRows;
+            int hitR2 = pad6 * pad6;
+            int gi = 0;
+            bool hitDone = false;
+            for (int si = 0; si < series.Count && !hitDone; si = si + 1) {
+                ChartSeries s = series[si];
+                if (s.hidden || s.custom != "parallel") { continue; }
+                for (int ri = 0; ri < s.parRows.Count && !hitDone; ri = ri + 1) {
+                    if (gi >= visRows) { hitDone = true; break; }
+                    gi = gi + 1;
+                    List<int> row = s.parRows[ri];
+                    if (row.Count < 2) { continue; }
+                    for (int d = 0; d < dims; d = d + 1) {
+                        int ax = plotX + d * plotW / (dims - 1);
+                        int span = hi[d] - lo[d];
+                        if (span < 1) { span = 1; }
+                        int v = d < row.Count ? row[d] : lo[d];
+                        if (d < o.parAxes.Count && o.parAxes[d].inverse
+                            && !o.parAxes[d].minSet && !o.parAxes[d].maxSet) {
+                            v = hi[d] - (v - lo[d]);
+                        }
+                        int pyv = plotY + plotH - (v - lo[d]) * plotH / span;
+                        if (pyv < plotY) { pyv = plotY; }
+                        if (pyv > plotY + plotH) { pyv = plotY + plotH; }
+                        int dx = mX - ax;
+                        int dy = mY - pyv;
+                        if (dx * dx + dy * dy <= hitR2) {
+                            ChartHit mh = ChartHit.Of(ChartElementType.LinePoint,
+                                ChartView.SeriesIndexOf(o, s), s.name, ri,
+                                "", 0, mX, mY);
+                            ChartView.OfferActiveHit(mh);
+                            break;
+                        }
                     }
                 }
             }
-            slot = slot + 1;
         }
     }
 
