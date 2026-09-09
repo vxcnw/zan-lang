@@ -169,6 +169,13 @@ int intel_complete(intellisense_t *is, const char *prefix,
 int intel_complete_members(intellisense_t *is, const char *type_name,
                            const char *prefix);
 
+/* Namespace completions for a `using` directive: the stdlib namespace
+ * map plus every namespace declared in this file and in `project`
+ * (the shared project index; may be NULL). `ns_prefix` is the partial
+ * namespace typed after the keyword ("" = list all). */
+int intel_complete_usings(intellisense_t *is, intellisense_t *project,
+                          const char *ns_prefix);
+
 /* Get hover info for a symbol at the given name */
 hover_info_t intel_hover(intellisense_t *is, const char *word);
 

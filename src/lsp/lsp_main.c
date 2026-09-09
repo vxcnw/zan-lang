@@ -456,6 +456,56 @@ static void extract_chain_expr(const char *text, size_t offset,
 /* If the cursor is in `Something.<prefix>`, return "Something" in `out`.
  * For chain calls like `a.B().C().pre`, uses intel_resolve_chain to find
  * the resolved type after the chain. Falls back to simple one-dot lookup. */
+/* Detect a `using` directive context at the cursor: the line holding
+ * `off` either opens with the keyword (cursor before or inside it) or
+ * the cursor sits after "using" within the namespace word being typed.
+ * Outputs the namespace prefix typed so far ("" = none yet). */
+static bool using_ns_context(const char *text, size_t off,
+                             char *out, size_t cap) {
+    size_t ls = off;
+    while (ls > 0 && text[ls - 1] != '\n') ls--;
+    size_t le = off;
+    while (text[le] != '\0' && text[le] != '\n') le++;
+
+    size_t hlen = off - ls, tlen = le - off;
+    const char *head = text + ls, *tail = text + off;
+
+    size_t i = 0;
+    while (i < hlen && (head[i] == ' ' || head[i] == '\t' || head[i] == '\r')) i++;
+
+    if (i == hlen) {
+        /* Cursor before the keyword: the line must open with "using". */
+        size_t j = 0;
+        while (j < tlen && (tail[j] == ' ' || tail[j] == '\t')) j++;
+        if (tlen - j >= 5 && memcmp(tail + j, "using", 5) == 0 &&
+            (tlen - j == 5 || tail[j + 5] == ' ' || tail[j + 5] == '\t')) {
+            out[0] = '\0';
+            return true;
+        }
+        return false;
+    }
+
+    size_t rlen = hlen - i;
+    const char *rest = head + i;
+    size_t m = 0;
+    while (m < rlen && m < 5 &&
+           tolower((unsigned char)rest[m]) == "using"[m]) m++;
+    if (rlen < 5 || m < 5) return false;   /* partial word or not "using" */
+
+    size_t p = 5;
+    while (p < rlen && (rest[p] == ' ' || rest[p] == '\t')) p++;
+    if (p == rlen) { out[0] = '\0'; return true; }
+
+    size_t w0 = p, w1 = p;
+    while (w1 < rlen && (isalnum((unsigned char)rest[w1]) ||
+                         rest[w1] == '.' || rest[w1] == '_')) w1++;
+    if (w1 != rlen) return false;          /* trailing junk on the line */
+    size_t n = w1 - w0 < cap - 1 ? w1 - w0 : cap - 1;
+    memcpy(out, rest + w0, n);
+    out[n] = '\0';
+    return true;
+}
+
 static void member_context(const char *text, size_t offset, char *out, size_t cap) {
     out[0] = '\0';
     size_t start = offset;
@@ -1104,8 +1154,15 @@ static void handle_completion(lsp_server_t *s, json_value *id, json_value *param
     const char *effective = prefix[0] ? prefix : "";
     int count = 0;
 
+    /* `using` directive: offer namespaces instead of the symbol walk. */
+    char ns_prefix[128];
+    bool ns_mode = using_ns_context(doc->text, off, ns_prefix, sizeof(ns_prefix));
+    if (ns_mode) {
+        count = intel_complete_usings(is, g_project_intel, ns_prefix);
+    }
+
     /* If we have a context (member access), try member completion */
-    if (context[0]) {
+    if (!ns_mode && context[0]) {
         const char *resolve_type = context;
         char chain_prefix[128] = "";
 
@@ -1165,7 +1222,7 @@ static void handle_completion(lsp_server_t *s, json_value *id, json_value *param
                 is->completion_count = count;
             }
         }
-    } else if (effective[0]) {
+    } else if (!ns_mode && effective[0]) {
         count = intel_complete(is, effective, NULL);
         /* Supplement with project-wide symbols if we have few results */
         if (g_project_intel && count < 20) {

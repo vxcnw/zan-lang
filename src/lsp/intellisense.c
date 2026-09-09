@@ -1976,6 +1976,47 @@ static const char *find_namespace_for_type(const char *type_name) {
     return NULL;
 }
 
+static void intel_add_ns_completion(intellisense_t *is, const char *ns,
+                                    const char *ns_prefix) {
+    size_t plen = strlen(ns_prefix);
+    if (plen && _strnicmp(ns, ns_prefix, plen) != 0) return;
+    for (int j = 0; j < is->completion_count; j++) {
+        if (strcmp(is->completions[j].label, ns) == 0) return;
+    }
+    if (is->completion_count >= INTEL_MAX_COMPLETIONS) return;
+    completion_t *c = &is->completions[is->completion_count++];
+    strncpy(c->label, ns, sizeof(c->label) - 1);
+    strncpy(c->insert_text, ns, sizeof(c->insert_text) - 1);
+    snprintf(c->detail, sizeof(c->detail), "namespace");
+    c->doc[0] = '\0';
+    c->kind = ISYM_NAMESPACE;
+    c->sort_priority = 1;
+}
+
+int intel_complete_usings(intellisense_t *is, intellisense_t *project,
+                          const char *ns_prefix) {
+    is->completion_count = 0;
+    is->completion_selected = 0;
+    is->completion_active = true;
+    if (!ns_prefix) ns_prefix = "";
+
+    /* Namespaces declared in this file, then across the project index
+     * (Gui, Game, ... come from the indexed stdlib sources), then the
+     * built-in stdlib map which covers unopened System.* modules. */
+    for (int pass = 0; pass < 2; pass++) {
+        intellisense_t *src = pass == 0 ? is : project;
+        if (!src) continue;
+        for (int i = 0; i < src->symbol_count; i++) {
+            if (src->symbols[i].kind != ISYM_NAMESPACE) continue;
+            intel_add_ns_completion(is, src->symbols[i].name, ns_prefix);
+        }
+    }
+    for (int i = 0; stdlib_namespace_map[i].ns; i++) {
+        intel_add_ns_completion(is, stdlib_namespace_map[i].ns, ns_prefix);
+    }
+    return is->completion_count;
+}
+
 using_analysis_t intel_analyze_usings(intellisense_t *is, const char *content, size_t len) {
     using_analysis_t result;
     memset(&result, 0, sizeof(result));

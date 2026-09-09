@@ -58,6 +58,12 @@ description: Zan LSP（src/lsp/zan-lsp）与 intellisense 引擎的供数定式�
   （比如前面多包了 `string saved = `）offset 全作废——光标落在
   标识符中间发出去的是普通前缀补全（返回几百条），极易误诊成
   "某成员未入索引"。改查询先重数 offset。
+- **空前缀补全不是"列全部"**：intel_complete 对 plen==0 直接早退
+  返回 0——行首/语句首光标走通用补全路径永远是空结果，不是索引
+  缺失。语句级上下文（如 `using` 指令行）要自己检测（lsp_main.c
+  using_ns_context）并短路到专用供数（intel_complete_usings：本文档
+  + 项目索引的 ISYM_NAMESPACE 符号 + stdlib_namespace_map 内建表）。
+  四期1 探针"using 行首 0 结果"卡了一批就是这个机理。
 
 ## 验证仪式
 
