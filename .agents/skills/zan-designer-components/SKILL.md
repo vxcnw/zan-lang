@@ -98,6 +98,16 @@ description: Zan 窗口设计器用户组件（components/*.zcomp）的全链路
   都是这么写的且已过测试；**不要信「设计期常量走快照 Binding 写不回」
   的旧注释**（InputNumber 那条是过时顾虑，已订正）——担心写不回就写
   往返探针（SetProp→GetProp）实证，别凭注释下结论。
+- **枚举属性（PropSpec kind 3）SetProp 收选项名也收序号**：Write 先按
+  `options` 精确匹配选项文本、命中就把下标写进 num/snum 绑定（绑定文本
+  时存选项名本身），没命中才按整数解析。曾经只认数字序号，
+  `SetProp("orient","vertical")` 经 strtoll 静默得 0、无声落回第一项
+  （2026-09 Tabs 方向进设计器时探针实证后修复）。.zform 里枚举值存选项名
+  （如 "vertical"）可读性最好，旧数字写法仍被容忍。
+- .zform 建模键 "orient"（Tabs 标签条方向，已入 IsModeledKey）：
+  FieldJson 写 "horizontal"/"vertical"，GenForm 仅在 vertical 时发射
+  `SetProp("orient","vertical")`；画布 KidInsetX/Y 与 RenderTabStrip 按
+  `f.tabOrient` 换轴（纵排轨道宽 160 = 运行时 trackW 未缩放宽）。
 - **裸 `ps.Add(PropSpec.Text("class", "Classes"))` 是合法的**：读写
   走 Control.GetProp/SetProp 对 "class" 的基类特判，spec 只负责属性
   面板可见性。同理 "name"。

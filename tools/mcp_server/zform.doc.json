@@ -232,6 +232,12 @@
         "doc": "Slot index inside the parent container (tab page, split pane); children are added to parent.SlotHost(index) instead of the container itself. Without it, children of a multi-slot container all overlap."
       },
       {
+        "key": "orient",
+        "type": "string",
+        "default": "horizontal",
+        "doc": "Tabs only: where the tab header sits. \"horizontal\" stacks pages under a top strip, \"vertical\" reserves a 160px rail on the left (emitted as SetProp(\"orient\", \"vertical\")). Option names are accepted, legacy numeric 0/1 still loads."
+      },
+      {
         "key": "span",
         "type": "int",
         "default": 24,

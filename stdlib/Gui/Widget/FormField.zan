@@ -101,6 +101,11 @@ class FormField : Control {
     List<FormField> kids;
     int childTab;
     SignalInt uiState;
+    /// Tabs 容器的标签条方向（0 = 顶部横向，1 = 左侧纵向，
+    /// 对应运行时 Tabs 的 orient 属性）。序列化为
+    /// "orient": "horizontal"/"vertical"，纵向时画布与生成
+    /// 代码都让子级让出左侧轨道。
+    int tabOrient;
 
     /// 设计器未建模的字段键原样保留(DataGrid 的 "of"/"columns"、
     /// 控件的 "props" 直通表等):加载时收集,保存时原样写回,
@@ -137,6 +142,7 @@ class FormField : Control {
         options = new List<string>();
         kids = new List<FormField>();
         childTab = 0;
+        tabOrient = 0;
         uiState = new SignalInt(0);
         extra = null;
         SeedOptions(ft);
@@ -330,6 +336,7 @@ class FormField : Control {
         f.locked = locked;
         f.dockSide = dockSide;
         f.childTab = childTab;
+        f.tabOrient = tabOrient;
         f.options = new List<string>();
         for (int i = 0; i < options.Count; i = i + 1) { f.options.Add(options[i]); }
         f.kids = new List<FormField>();

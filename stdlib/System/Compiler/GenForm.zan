@@ -1043,6 +1043,11 @@ class GenForm {
                 body.Append("\");\n");
             }
         }
+        /* Tabs 标签条方向:设计器建模键 orient 存选项名,横排是
+         * 默认不发射,纵排落成 SetProp(PropSpec 收枚举选项名)。 */
+        if (kind == "Tabs" && GenForm.ObjStr(o, "orient") == "vertical") {
+            body.Append("        " + vn + ".SetProp(\"orient\", \"vertical\");\n");
+        }
         /* 双向绑定:bind 是状态实体里的路径,bindProp 是被写入的
          * 属性(缺省是控件的 value)。宿主在每帧前后同步两边。 */
         string dbind = GenForm.ObjStr(o, "bind");

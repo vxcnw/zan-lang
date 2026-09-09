@@ -429,22 +429,31 @@ partial class Designer {
 
     /// 容器内容框相对容器矩形的偏移（设计空间）。自由画布上
     /// 运行时给容器 Pad(0)、子级按自己的停靠边铺满整块，所以只有
-    /// Tabs 需要让出标签条；再多让 6/26 就是设计器比运行时矮一
-    /// 截、子级整体右下偏移的来源。流式布局仍是 6/26（与
-    /// LayoutFlowKids 一致）。
+    /// Tabs 需要让出标签条（横排让高 26，纵排让宽 TabRailW）；
+    /// 再多让 6 就是设计器比运行时缩一截、子级整体偏移的来源。
+    /// 流式布局一致。
     int KidInsetX(FormField f) {
-        if (f.kind == "Tabs") { return 6; }
+        if (f.kind == "Tabs") {
+            if (f.tabOrient == 1) { return Designer.TabRailW(); }
+            return 6;
+        }
         if (layoutMode == 1) { return 0; }
         return 6;
     }
 
-    /// KidInsetX 的纵向对应：Tabs 让出标签条（26），自由画布为 0，
-    /// 流式布局为 26。
+    /// KidInsetX 的纵向对应：Tabs 横排让出标签条（26），纵排只剩
+    /// 装饰边距（6），自由画布为 0。
     int KidInsetY(FormField f) {
-        if (f.kind == "Tabs") { return 26; }
+        if (f.kind == "Tabs") {
+            if (f.tabOrient == 1) { return 6; }
+            return 26;
+        }
         if (layoutMode == 1) { return 0; }
         return 26;
     }
+
+    /// 纵向 Tabs 左侧轨道宽（设计像素，运行时 trackW 的未缩放宽）。
+    static int TabRailW() { return 160; }
 
     /// 一个字段在流式布局里的高度（宽度须已确定）。容器
     /// 顺带排布自己的子级。
@@ -461,6 +470,7 @@ partial class Designer {
         int tab = 0 - 1;
         if (f.kind == "Tabs") { tab = Designer.TabActivePage(f); }
         int w0 = f.LayoutW() - 12;
+        if (f.kind == "Tabs" && f.tabOrient == 1) { w0 = f.LayoutW() - Designer.TabRailW() - 12; }
         if (w0 < 40) { w0 = 40; }
         int endY = this.LayoutFlowList(f.kids, 0, 8, w0, tab);
         int body = endY - 8 - 6 + 16;
@@ -712,7 +722,7 @@ partial class Designer {
                 // 哪个就翻到哪一页，页里的子级照常渲染、选中、拖动，
                 // 于是每一页都能单独设计。
                 tab = Designer.TabActivePage(f);
-                RenderTabStrip(app, c, t, f, ex, ey, ew, psMilli, tab);
+                RenderTabStrip(app, c, t, f, ex, ey, ew, eh, psMilli, tab);
             } else if (f.KidCount() == 0 || layoutMode != 1) {
                 // 容器标题是设计器 chrome，运行时并不画它：自由画布上
                 // 装了子级就不再压在子级上面，免得设计稿看着比运行
@@ -834,9 +844,11 @@ partial class Designer {
     }
 
     /// 画 Tabs 容器的标签条（跟随画布缩放），并把每个页签的屏幕
-    /// 矩形登记到 tabHits，供画布的指针处理切页。
+    /// 矩形登记到 tabHits，供画布的指针处理切页。纵向（tabOrient
+    /// == 1）画成左侧轨道：整列页签、活动项左缘高亮，与运行时
+    /// RenderVertical 同构。
     void RenderTabStrip(App app, Canvas c, Theme t, FormField f,
-            int ex, int ey, int ew, int psMilli, int active) {
+            int ex, int ey, int ew, int eh, int psMilli, int active) {
         pvScale = psMilli * 100 / app.dpiScale;
         if (pvScale < 1) { pvScale = 1; }
         int fs = PvFont(Style.FontFallback(app, "small"));
@@ -844,6 +856,30 @@ partial class Designer {
         int pad = PvS(app, 10);
         int und = PvS(app, 2);
         if (und < 1) { und = 1; }
+        if (f.tabOrient == 1) {
+            int rw = PvS(app, Designer.TabRailW());
+            if (rw > ew) { rw = ew; }
+            c.FillRect(ex + rw, ey, 1, eh, Style.Part(app, "designer", "grid", "", "", "", Style.SNormal()).BgOr(0));
+            int n = Designer.TabPageCount(f);
+            int rowY = ey;
+            for (int i = 0; i < n; i = i + 1) {
+                if (rowY + hh > ey + eh) { break; }
+                string title = Designer.TabPageTitle(f, i);
+                int col = Style.Part(app, "designer", "hint", "", "", "", Style.SNormal()).FgOr(0);
+                if (i == active) {
+                    c.FillRect(ex, rowY, rw, hh, Style.Full(app, "designer", "", "", Style.SNormal()).BgOr(0));
+                    int bar = PvS(app, 3);
+                    if (bar < 1) { bar = 1; }
+                    c.FillRect(ex, rowY, bar, hh, Style.Part(app, "designer", "accent", "", "", "", Style.SNormal()).BgOr(0));
+                    col = Style.Part(app, "designer", "accent", "", "", "", Style.SNormal()).BgOr(0);
+                }
+                c.DrawText(ex + pad, rowY + PvS(app, 5), Ellipsis.Fit(title, rw - pad * 2, fs), col, fs);
+                tabHits.Add(new TabHeaderHit(f, i, ex, rowY, rw, hh));
+                rowY = rowY + hh;
+            }
+            pvScale = 1000;
+            return;
+        }
         c.FillRect(ex, ey + hh, ew, 1, Style.Part(app, "designer", "grid", "", "", "", Style.SNormal()).BgOr(0));
         int gx = ex;
         int n = Designer.TabPageCount(f);

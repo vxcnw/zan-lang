@@ -165,6 +165,16 @@ partial class Designer {
                 "文本超出宽度时自动换行，而不是截断。");
             ps.Add(wr);
         }
+        if (f.kind == "Tabs") {
+            List<string> orbOpts = new List<string>{
+                Designer.T("Horizontal", "横向"), Designer.T("Vertical", "纵向") };
+            PropSpec orb = PropSpec.Enum("orient", Designer.T("Tab bar", "标签条"), orbOpts);
+            orb.num = f.tabOrient;
+            orb.tip = Designer.T(
+                "Place the tab header across the top or along the left side; the page area yields the rail accordingly.",
+                "标签条横排在顶部，或纵排在左侧；页面区相应让出轨道宽度。");
+            ps.Add(orb);
+        }
         if (layoutMode == 1) {
             // 停靠边：选了某一边，画布上就自动吸附到所在层
             // （窗口或父容器）的那条边并铺满，只有厚度还能拉；
@@ -1003,6 +1013,13 @@ partial class Designer {
         }
         o.Put("childTab", JsonValue.NewNum(Convert.ToString(f.childTab)));
         o.Put("activeTab", JsonValue.NewNum(Convert.ToString(f.uiState.Get())));
+        // Tabs 标签条方向：横排是默认，写选项名让设计稿可读
+        //（GenForm 原样发射为 SetProp("orient", ...)）。
+        if (f.kind == "Tabs") {
+            string orv = "horizontal";
+            if (f.tabOrient == 1) { orv = "vertical"; }
+            o.Put("orient", JsonValue.NewStr(orv));
+        }
         List<string> evs = f.Events();
         for (int e = 0; e < evs.Count; e = e + 1) {
             string h = f.GetHandler(evs[e]);
@@ -1341,6 +1358,10 @@ partial class Designer {
         f.defOn = o.Bool("defOn", f.defOn);
         f.dockSide = o.Int("dock", f.dockSide);
         f.childTab = o.Int("childTab", f.childTab);
+        // Tabs 标签条方向：文档里存选项名，容忍旧的数字写法。
+        string ors = o.Str("orient", "");
+        if (ors == "vertical" || ors == "1") { f.tabOrient = 1; }
+        else if (ors == "horizontal" || ors == "0") { f.tabOrient = 0; }
         f.uiState.Set(o.Int("activeTab", f.uiState.Get()));
         List<string> evs = f.Events();
         for (int e = 0; e < evs.Count; e = e + 1) {
@@ -1389,6 +1410,7 @@ partial class Designer {
             || k == "fw" || k == "fh" || k == "alt" || k == "locked"
             || k == "defOn" || k == "dock" || k == "childTab"
             || k == "activeTab" || k == "options" || k == "kids"
+            || k == "orient"
             || k == "change" || k == "ref" || k == "pvOff";
     }
 

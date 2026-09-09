@@ -135,7 +135,23 @@ class PropSpec {
 
     /// 按 `val` 字符串写回绑定：数字/布尔做解析（IsOn/ToInt32），
     /// 文本原样写入；未绑定任何字段/signal 时为空操作。
+    /// 枚举属性（kind 3）还收选项文本：`SetProp("orient",
+    /// "vertical")` 写入的是该选项的下标。只认数字序号的话，
+    /// strtoll 对非数字串静默返回 0，"vertical" 会无声落回第一项。
     void Write(string val) {
+        if (kind == 3 && options.Count > 0) {
+            int oi = 0 - 1;
+            for (int i = 0; i < options.Count; i = i + 1) {
+                if (options[i] == val) { oi = i; break; }
+            }
+            if (oi >= 0) {
+                if (num != null) { num.Set(oi); return; }
+                if (snum != null) { snum.Set(oi); return; }
+                if (str == null && sstr == null) { return; }
+                /* 绑定的是文本时存选项名本身，交给下面的文本写入。 */
+            }
+            /* 没命中选项名（含数字序号、垃圾值）时按整数走原路。 */
+        }
         if (str != null) { str.Set(val); return; }
         if (num != null) { num.Set(Convert.ToInt32(val)); return; }
         if (flag != null) { flag.Set(PropSpec.IsOn(val)); return; }
