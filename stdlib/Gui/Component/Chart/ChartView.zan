@@ -1378,6 +1378,21 @@ partial class ChartView {
     /// kind 回退为折线图；未知/空 kind 绘制明确空状态。
     void DispatchRender(App app, int x, int y, int w, int h, int g) {
         ChartOption option = this.option;
+        // 多 grid 布局（grid[] ≥ 2）全 kind 通用拆分：按 series.
+        // xAxisIndex 分组，每组在自己的 grid 矩形里重入分发链；
+        // 标题/图例只在全局面板坐标画一次。
+        if (option.grids.Count > 1 && !option.overlay) {
+            ChartView.DrawMultiGridPanels(app, x, y, w, h, option, g);
+            return;
+        }
+        ChartView.RenderOnce(app, x, y, w, h, option, g);
+    }
+
+    /// 分发链本体：DispatchRender 与多 grid 子面板共用（子 option
+    /// 的 kind 按组内系列重算，蜡烛+成交量、行/列布局混排各自
+    /// 落到正确的渲染器）。
+    static void RenderOnce(App app, int x, int y, int w, int h,
+                           ChartOption option, int g) {
         string kind = ChartView.DispatchKind(option);
         ChartSeries leadS = ChartView.LeadSeries(option);
         // 底部图例占位每图清零（不经 DrawPanelI 的视图不背上一图的值）。

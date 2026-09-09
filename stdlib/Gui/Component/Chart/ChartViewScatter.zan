@@ -70,7 +70,7 @@ partial class ChartView {
         if (o.zoom && o.iwid != 0 && fullN > 1) {
             i0 = Chart.ZoomI0(app, o, o.iwid, fullN);
             i1 = Chart.ZoomI1(app, o, o.iwid, fullN);
-            zoomH = app.Scale(24);
+            zoomH = Chart.zoomBarHidden ? 0 : app.Scale(24);
         }
 
         int minX = 0; int maxX = 0; int minY = 0; int maxY = 0;
@@ -218,7 +218,15 @@ partial class ChartView {
         c.FillRect(plotX, plotY + plotH, plotW, app.Scale(2), sAxis.BgOr(0));
         if (o.xAxes.Count > 0 && o.xAxes[0].title.Length > 0) {
             int txw = Canvas.MeasureText(o.xAxes[0].title, axisFs);
-            c.DrawText(plotX + plotW - txw,
+            // nameLocation：start=左端、middle=居中（散点矩阵类显式
+            // 声明）、end（ECharts value 轴缺省）=右端。
+            int tx = plotX + plotW - txw;
+            if (o.xAxes[0].nameLocation == "middle") {
+                tx = plotX + (plotW - txw) / 2;
+            } else if (o.xAxes[0].nameLocation == "start") {
+                tx = plotX;
+            }
+            c.DrawText(tx,
                 plotY + plotH + Canvas.FontHeight(axisFs) + app.Scale(6),
                 o.xAxes[0].title, sAxis.FgOr(0), axisFs);
         }
@@ -370,6 +378,10 @@ partial class ChartView {
             }
         }
         if (anyMarks) {
+            // markLine/标注裁进本面板绘图区：回归线端点常声明在
+            // 数据域之外（anscombe 的 x=0..20 起点在轴左端），不裁
+            // 会越界窜进相邻 grid 面板。
+            c.PushClip(plotX, plotY, plotW, plotH);
             ChartFrame f = new ChartFrame();
             f.plotX = plotX;
             f.plotY = plotY;
@@ -391,6 +403,7 @@ partial class ChartView {
                     ChartView.DrawValueXMarkLines(app, f, s2, i0, i1, 0);
                 }
             }
+            c.PopClip();
         }
     }
 
@@ -419,7 +432,7 @@ partial class ChartView {
         if (o.zoom && o.iwid != 0 && fullN > 1) {
             i0 = Chart.ZoomI0(app, o, o.iwid, fullN);
             i1 = Chart.ZoomI1(app, o, o.iwid, fullN);
-            zoomH = app.Scale(24);
+            zoomH = Chart.zoomBarHidden ? 0 : app.Scale(24);
         }
 
         int minX = 0; int maxX = 0; int minY = 0; int maxY = 0;

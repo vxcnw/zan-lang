@@ -46,7 +46,7 @@ partial class ChartView {
         if (o.zoom && o.iwid != 0 && fullN > 1) {
             i0 = Chart.ZoomI0(app, o, o.iwid, fullN);
             i1 = Chart.ZoomI1(app, o, o.iwid, fullN);
-            zoomH = app.Scale(24);
+            zoomH = Chart.zoomBarHidden ? 0 : app.Scale(24);
         }
         int n = i1 - i0 + 1;
         if (n < 1) { n = 1; }
@@ -65,6 +65,10 @@ partial class ChartView {
             ChartSeries s = o.series[ov0];
             if (!s.hidden && s.axisIndex == 0 && ChartView.IsLineFamily(s.type)) {
                 for (int k = i0; k <= i1 && k < s.Count(); k = k + 1) {
+                    // '-' 占位（Gap）不进极值：MA 前 N-1 项无值，当 0
+                    // 计会把包络拖到 0，scale:true 的紧致量程被撑爆
+                    // （candlestick-touch 蜡烛压成顶部细线的根因）。
+                    if (k < s.data.Count && s.data[k].gap) { continue; }
                     int v = s.Value(k);
                     if (v < lo) { lo = v; }
                     if (v > hi) { hi = v; }
@@ -94,7 +98,11 @@ partial class ChartView {
         // 底轴：与蜡烛同宽均布，n 与蜡烛数一致时逐根对齐。
         List<string> kLabs = new List<string>();
         if (o.xAxes.Count > 0) { kLabs = o.xAxes[0].categories; }
-        List<string> winLabs = Chart.WindowLabels(kLabs, i0, i1);
+        // 全窗口直接复用原类目表：WindowLabels 逐条复制 2.2 万条
+        // 字符串也是每帧的固定税（默认视图 i0=0/i1=full-1 时拷贝
+        // 结果与输入等价）。
+        List<string> winLabs = (i0 == 0 && i1 == fullN - 1)
+            ? kLabs : Chart.WindowLabels(kLabs, i0, i1);
         ChartFrame f = Chart.DrawFrameLoHiT(app, x, y, w, h - zoomH, plotTop,
             winLabs, plo, phi, yTicks);
         if (zoomH > 0) {
@@ -115,6 +123,7 @@ partial class ChartView {
             ChartSeries sa = o.series[oa];
             if (!sa.hidden && sa.axisIndex == 1 && ChartView.IsLineFamily(sa.type)) {
                 for (int ka = i0; ka <= i1 && ka < sa.Count(); ka = ka + 1) {
+                    if (ka < sa.data.Count && sa.data[ka].gap) { continue; }
                     int va = sa.Value(ka);
                     if (!hasY1) { lo1 = va; hi1 = va; hasY1 = true; }
                     if (va < lo1) { lo1 = va; }
@@ -283,6 +292,7 @@ partial class ChartView {
                     // 直接当作系列索引读取，否则会越界；无数据的桶
                     // 留空，后续有效点仍保持原窗口的像素映射。
                     if (oi2 < 0 || oi2 >= s.Count()) { continue; }
+                    if (oi2 < s.data.Count && s.data[oi2].gap) { continue; }
                     int v = s.Value(oi2);
                     lpx.Add(f.CatMid(k2, n));
                     lpy.Add(f.plotY + f.plotH - (v - vLo) * f.plotH / vSpan);
@@ -548,7 +558,7 @@ partial class ChartView {
         if (o.zoom && o.iwid != 0 && fullN > 1) {
             i0 = Chart.ZoomI0(app, o, o.iwid, fullN);
             i1 = Chart.ZoomI1(app, o, o.iwid, fullN);
-            zoomH = app.Scale(24);
+            zoomH = Chart.zoomBarHidden ? 0 : app.Scale(24);
         }
 
         int maxX = 0;
@@ -719,94 +729,285 @@ partial class ChartView {
 
     // ---- 箱线图 ----
 
-    /// 箱线图渲染入口：series[0].boxes 逐类别画上下须、须端横
-    /// 帽、Q1–Q3 半透明箱体与加粗中位线（值域上下各留 5% 边距）。
-    /// 颜色逐类别取调色板，series[0].color 非 0 时统一覆盖。
-    /// 命中为 BoxPlot 事件（value = 中位数）+ min/Q1/med/Q3/max
-    /// tooltip（空标签回落 "Service N"）。
+    /// 箱线图渲染入口：收集全部 custom=="box" 系列（dataset
+    /// boxplot 变换的绑定产物）。单系列逐类别取调色板，多系列
+    /// 逐系列取色在类目格内分槽；yAxis category 时横排（轴互换，
+    /// velocity2 / data-transform-aggregate）。dataset 绑定的散点
+    /// 系列（离群点/聚合明细）按点叠加圆点。yAxis/xAxis 显式
+    /// min/max 钉值域（boxplot-multi 的 -400..600）。命中为
+    /// BoxPlot 事件 + min/Q1/med/Q3/max tooltip。
     static void DrawBox(App app, int x, int y, int w, int h,
                         ChartOption o, int g) {
         Canvas c = app.canvas;
         Theme t = app.theme;
-        List<BoxItem> bx = o.series[0].boxes;
-        int n = bx.Count;
         int plotTop = ChartView.PanelHead(app, x, y, w, h, o.title);
-        if (n < 1) { return; }
-
-        int lo = bx[0].lo;
-        int hi = bx[0].hi;
-        for (int i = 0; i < n; i = i + 1) {
-            if (bx[i].lo < lo) { lo = bx[i].lo; }
-            if (bx[i].hi > hi) { hi = bx[i].hi; }
+        List<ChartSeries> bxs = new List<ChartSeries>();
+        int n = 0;
+        for (int si = 0; si < o.series.Count; si = si + 1) {
+            ChartSeries bs = o.series[si];
+            if (bs.hidden || bs.custom != "box" || bs.boxes.Count == 0) { continue; }
+            bxs.Add(bs);
+            if (bs.boxes.Count > n) { n = bs.boxes.Count; }
         }
-        int pad2 = (hi - lo) / 20;
+        if (n < 1) { return; }
+        int ns = bxs.Count;
+        // 值域：全部箱的 lo..hi 外扩 5%，再被显式轴 min/max 覆盖。
+        int dlo = bxs[0].boxes[0].lo;
+        int dhi = bxs[0].boxes[0].hi;
+        for (int s1 = 0; s1 < ns; s1 = s1 + 1) {
+            for (int b1 = 0; b1 < bxs[s1].boxes.Count; b1 = b1 + 1) {
+                if (bxs[s1].boxes[b1].lo < dlo) { dlo = bxs[s1].boxes[b1].lo; }
+                if (bxs[s1].boxes[b1].hi > dhi) { dhi = bxs[s1].boxes[b1].hi; }
+            }
+        }
+        int pad2 = (dhi - dlo) / 20;
         if (pad2 < 1) { pad2 = 1; }
-        lo = lo - pad2;
-        hi = hi + pad2;
-        ChartFrame f = Chart.DrawFrameLoHi(app, x, y, w, h, plotTop, ChartView.BoxLabels(bx), lo, hi);
-        int span = hi - lo;
-        if (span < 1) { span = 1; }
+        int lo = dlo - pad2;
+        int hi = dhi + pad2;
+        if (o.yAxes.Count > 0 && o.yAxes[0].min != ChartOption.Auto()) { lo = o.yAxes[0].min; }
+        if (o.yAxes.Count > 0 && o.yAxes[0].max != ChartOption.Auto()) { hi = o.yAxes[0].max; }
+        if (o.xAxes.Count > 0 && o.xAxes[0].min != ChartOption.Auto()) { lo = o.xAxes[0].min; }
+        if (o.xAxes.Count > 0 && o.xAxes[0].max != ChartOption.Auto()) { hi = o.xAxes[0].max; }
+        if (hi <= lo) { hi = lo + 1; }
+        bool horiz = o.yAxes.Count > 0 && o.yAxes[0].type == ChartAxisType.Category;
         int revealAlpha = ChartView.FinanceRevealAlpha(g);
+        int mx = app.mouseX;
+        int my = app.mouseY;
+        int hovK = 0 - 1;
+        int hovS = 0 - 1;
+        if (horiz) {
+            // ---- 横排：类目行在 Y，值在 X（HBarCore 的框架形态）----
+            Theme th = app.theme;
+            int pad = th.paddingMedium;
+            int axisFs = Style.FontFallback(app, "small");
+            List<string> labels = ChartView.BoxLabels(bxs[0].boxes);
+            int leftGut = app.Scale(20);
+            for (int li = 0; li < labels.Count; li = li + 1) {
+                int lw = Canvas.MeasureText(labels[li], axisFs);
+                if (lw + app.Scale(12) > leftGut) { leftGut = lw + app.Scale(12); }
+            }
+            int botGut = Canvas.FontHeight(axisFs) + app.Scale(8);
+            int pX = x + pad + leftGut;
+            int pW = (x + w - pad) - pX;
+            int pH = (y + h - pad - botGut) - plotTop;
+            if (pW < app.Scale(20)) { pW = app.Scale(20); }
+            if (pH < app.Scale(8)) { return; }
+            StyleBox sGrid = Style.Part(app, "chart", "grid", "", "", "",
+                                        Style.SNormal());
+            StyleBox sAxis = Style.Part(app, "chart", "axis", "", "", "",
+                                        Style.SNormal());
+            StyleBox sLabel = Style.Part(app, "chart", "label", "", "", "",
+                                         Style.SNormal());
+            int span = hi - lo;
+            for (int k = 0; k <= 4; k = k + 1) {
+                int tv = lo + span * k / 4;
+                int gx = Chart.ValueX(pX, pW, lo, hi, tv);
+                c.FillRect(gx, plotTop, 1, pH, sGrid.BgOr(0));
+                string vs = Convert.ToString(tv);
+                int tw = Canvas.MeasureText(vs, axisFs);
+                int lxT = gx - tw / 2;
+                if (lxT < pX - tw / 2) { lxT = pX - tw / 2; }
+                if (lxT + tw > x + w - pad) { lxT = x + w - pad - tw; }
+                c.DrawText(lxT, plotTop + pH + app.Scale(4), vs,
+                    sAxis.FgOr(0), axisFs);
+            }
+            int rowH = pH / n;
+            if (rowH < 1) { rowH = 1; }
+            for (int li2 = 0; li2 < labels.Count; li2 = li2 + 1) {
+                int rowY = plotTop + li2 * rowH;
+                c.DrawTextCentered(x + pad, rowY, leftGut - app.Scale(6),
+                    rowH, labels[li2], sLabel.FgOr(0), axisFs);
+            }
+            ChartView.PushPlotClip(app, pX, plotTop, pW, pH);
+            for (int k2 = 0; k2 < n; k2 = k2 + 1) {
+                int rowY = plotTop + k2 * rowH;
+                int yMid = rowY + rowH / 2;
+                for (int s3 = 0; s3 < ns; s3 = s3 + 1) {
+                    if (k2 >= bxs[s3].boxes.Count) { continue; }
+                    BoxItem b = bxs[s3].boxes[k2];
+                    int col = ns == 1 ? Chart.Palette(th, k2) : Chart.Palette(th, s3);
+                    if (bxs[s3].color != 0) { col = bxs[s3].color; }
+                    int slot = rowH * 8 / 10;
+                    int bh = ns == 1 ? slot * 5 / 10 : slot / ns * 7 / 10;
+                    if (bh < app.Scale(6)) { bh = app.Scale(6); }
+                    int cy = yMid;
+                    if (ns > 1) {
+                        cy = rowY + rowH / 10 + slot / ns * s3 + slot / ns / 2;
+                    }
+                    int xLo = Chart.ValueX(pX, pW, lo, hi, b.lo);
+                    int xQ1 = Chart.ValueX(pX, pW, lo, hi, b.q1);
+                    int xMed = Chart.ValueX(pX, pW, lo, hi, b.med);
+                    int xQ3 = Chart.ValueX(pX, pW, lo, hi, b.q3);
+                    int xHi = Chart.ValueX(pX, pW, lo, hi, b.hi);
+                    c.DrawLine(xQ1, cy, xLo, cy,
+                        Chart.WithAlpha(col, revealAlpha), app.Scale(1));
+                    c.DrawLine(xHi, cy, xQ3, cy,
+                        Chart.WithAlpha(col, revealAlpha), app.Scale(1));
+                    c.DrawLine(xLo, cy - bh / 4, xLo, cy + bh / 4,
+                        Chart.WithAlpha(col, revealAlpha), app.Scale(1));
+                    c.DrawLine(xHi, cy - bh / 4, xHi, cy + bh / 4,
+                        Chart.WithAlpha(col, revealAlpha), app.Scale(1));
+                    int boxW = xQ3 - xQ1;
+                    if (boxW < app.Scale(1)) { boxW = app.Scale(1); }
+                    c.SurfaceRoundRect(xQ1, cy - bh / 2, boxW, bh, app.Scale(2),
+                        Chart.WithAlpha(col, 70 * revealAlpha / 255),
+                        Chart.WithAlpha(col, revealAlpha), 1);
+                    c.DrawLine(xMed, cy - bh / 2, xMed, cy + bh / 2,
+                        Chart.WithAlpha(col, revealAlpha), app.Scale(2));
+                    if (mx >= pX && mx < pX + pW && my >= rowY
+                        && my < rowY + rowH && g > 0) {
+                        hovK = k2;
+                        hovS = s3;
+                    }
+                }
+            }
+            ChartView.DrawBoxOverlay(app, o, lo, hi, n, true,
+                pX, plotTop, pW, pH, rowH, revealAlpha);
+            c.PopClip();
+            // 命中 + tooltip（横排按行反解）。
+            if (hovK >= 0 && g > 0) {
+                BoxItem hb = bxs[hovS < 0 ? 0 : hovS].boxes[hovK];
+                if (ChartView.activeEventView != null) {
+                    ChartHit bxh = ChartHit.Of(ChartElementType.BoxPlot,
+                        0, bxs[0].name, hovK, hb.label, hb.med, mx, my);
+                    bxh.axisIndex = bxs[0].axisIndex;
+                    ChartView.OfferActiveHit(bxh);
+                }
+                if (o.showTooltip) {
+                    ChartView.BoxTooltip(app, o, bxs, hovK, hovS, mx, my);
+                }
+            }
+            return;
+        }
+        // ---- 竖排：类目在 X（既有形态）----
+        ChartFrame f = Chart.DrawFrameLoHi(app, x, y, w, h, plotTop,
+            ChartView.BoxLabels(bxs[0].boxes), lo, hi);
+        int spanV = hi - lo;
+        if (spanV < 1) { spanV = 1; }
         ChartView.PushPlotClip(app, f.plotX, f.plotY, f.plotW, f.plotH);
         for (int k = 0; k < n; k = k + 1) {
             int cellW = f.CatWidth(k, n);
-            int cx = f.CatMid(k, n);
-            int bw = cellW * 5 / 10;
-            if (bw < app.Scale(6)) { bw = app.Scale(6); }
-            int col = Chart.Palette(t, k);
-            if (o.series[0].color != 0) { col = o.series[0].color; }
-            int yLo = f.plotY + f.plotH - (bx[k].lo - lo) * f.plotH / span;
-            int yQ1 = f.plotY + f.plotH - (bx[k].q1 - lo) * f.plotH / span;
-            int yMed = f.plotY + f.plotH - (bx[k].med - lo) * f.plotH / span;
-            int yQ3 = f.plotY + f.plotH - (bx[k].q3 - lo) * f.plotH / span;
-            int yHi = f.plotY + f.plotH - (bx[k].hi - lo) * f.plotH / span;
-            c.DrawLine(cx, yHi, cx, yQ3,
-                Chart.WithAlpha(col, revealAlpha), app.Scale(1));
-            c.DrawLine(cx, yQ1, cx, yLo,
-                Chart.WithAlpha(col, revealAlpha), app.Scale(1));
-            c.DrawLine(cx - bw / 4, yHi, cx + bw / 4, yHi,
-                Chart.WithAlpha(col, revealAlpha), app.Scale(1));
-            c.DrawLine(cx - bw / 4, yLo, cx + bw / 4, yLo,
-                Chart.WithAlpha(col, revealAlpha), app.Scale(1));
-            int boxH = yQ1 - yQ3;
-            if (boxH < app.Scale(1)) { boxH = app.Scale(1); }
-            c.SurfaceRoundRect(cx - bw / 2, yQ3, bw, boxH, app.Scale(2),
-                Chart.WithAlpha(col, 70 * revealAlpha / 255),
-                Chart.WithAlpha(col, revealAlpha), 1);
-            c.DrawLine(cx - bw / 2, yMed, cx + bw / 2, yMed,
-                Chart.WithAlpha(col, revealAlpha), app.Scale(2));
+            for (int s4 = 0; s4 < ns; s4 = s4 + 1) {
+                if (k >= bxs[s4].boxes.Count) { continue; }
+                BoxItem b = bxs[s4].boxes[k];
+                int col = ns == 1 ? Chart.Palette(t, k) : Chart.Palette(t, s4);
+                if (bxs[s4].color != 0) { col = bxs[s4].color; }
+                int cx;
+                int bw;
+                if (ns == 1) {
+                    cx = f.CatMid(k, n);
+                    bw = cellW * 5 / 10;
+                } else {
+                    int slot = cellW * 8 / 10 / ns;
+                    cx = f.CatLeft(k, n) + cellW / 10 + slot * s4 + slot / 2;
+                    bw = slot * 7 / 10;
+                }
+                if (bw < app.Scale(6)) { bw = app.Scale(6); }
+                int yLo = f.plotY + f.plotH - (b.lo - lo) * f.plotH / spanV;
+                int yQ1 = f.plotY + f.plotH - (b.q1 - lo) * f.plotH / spanV;
+                int yMed = f.plotY + f.plotH - (b.med - lo) * f.plotH / spanV;
+                int yQ3 = f.plotY + f.plotH - (b.q3 - lo) * f.plotH / spanV;
+                int yHi = f.plotY + f.plotH - (b.hi - lo) * f.plotH / spanV;
+                c.DrawLine(cx, yHi, cx, yQ3,
+                    Chart.WithAlpha(col, revealAlpha), app.Scale(1));
+                c.DrawLine(cx, yQ1, cx, yLo,
+                    Chart.WithAlpha(col, revealAlpha), app.Scale(1));
+                c.DrawLine(cx - bw / 4, yHi, cx + bw / 4, yHi,
+                    Chart.WithAlpha(col, revealAlpha), app.Scale(1));
+                c.DrawLine(cx - bw / 4, yLo, cx + bw / 4, yLo,
+                    Chart.WithAlpha(col, revealAlpha), app.Scale(1));
+                int boxH = yQ1 - yQ3;
+                if (boxH < app.Scale(1)) { boxH = app.Scale(1); }
+                c.SurfaceRoundRect(cx - bw / 2, yQ3, bw, boxH, app.Scale(2),
+                    Chart.WithAlpha(col, 70 * revealAlpha / 255),
+                    Chart.WithAlpha(col, revealAlpha), 1);
+                c.DrawLine(cx - bw / 2, yMed, cx + bw / 2, yMed,
+                    Chart.WithAlpha(col, revealAlpha), app.Scale(2));
+                if (mx >= f.CatLeft(k, n) && mx < f.CatLeft(k, n) + cellW
+                    && my >= f.plotY && my < f.plotY + f.plotH && g > 0) {
+                    hovK = k;
+                    hovS = s4;
+                }
+            }
         }
+        ChartView.DrawBoxOverlay(app, o, lo, hi, n, false,
+            f.plotX, f.plotY, f.plotW, f.plotH, f.plotH / (n < 1 ? 1 : n),
+            revealAlpha);
         c.PopClip();
 
         // 命中几何与 tooltip 展示解耦：关闭 tooltip 不能关闭
         // 箱线单元的 Hover/MouseOut/Click 事件。
-        int mx = app.mouseX;
-        int my = app.mouseY;
-        if (mx >= f.plotX && mx < f.plotX + f.plotW
-            && my >= f.plotY && my < f.plotY + f.plotH && g > 0) {
-            int tIdx = f.CatIndexAt(mx, n);
-            if (tIdx < 0) { tIdx = 0; }
-            if (tIdx > n - 1) { tIdx = n - 1; }
+        if (hovK >= 0 && g > 0) {
+            BoxItem hb2 = bxs[hovS < 0 ? 0 : hovS].boxes[hovK];
             if (ChartView.activeEventView != null) {
-                ChartHit bxh = ChartHit.Of(ChartElementType.BoxPlot,
-                    0, o.series[0].name, tIdx,
-                    bx[tIdx].label, bx[tIdx].med, mx, my);
-                bxh.axisIndex = o.series[0].axisIndex;
-                ChartView.OfferActiveHit(bxh);
+                ChartHit bxh2 = ChartHit.Of(ChartElementType.BoxPlot,
+                    0, bxs[0].name, hovK, hb2.label, hb2.med, mx, my);
+                bxh2.axisIndex = bxs[0].axisIndex;
+                ChartView.OfferActiveHit(bxh2);
             }
             if (o.showTooltip) {
-                string hdr = bx[tIdx].label;
-                if (hdr.Length == 0) { hdr = "Service " + Convert.ToString(tIdx + 1); }
-                int col = Chart.Palette(t, tIdx);
-                if (o.series[0].color != 0) { col = o.series[0].color; }
-                List<TooltipRow> rows = new List<TooltipRow>{
-                    TooltipRow.Of(0, hdr),
-                    TooltipRow.Of(col, "min   " + Convert.ToString(bx[tIdx].lo)),
-                    TooltipRow.Of(col, "Q1    " + Convert.ToString(bx[tIdx].q1)),
-                    TooltipRow.Of(col, "med   " + Convert.ToString(bx[tIdx].med)),
-                    TooltipRow.Of(col, "Q3    " + Convert.ToString(bx[tIdx].q3)),
-                    TooltipRow.Of(col, "max   " + Convert.ToString(bx[tIdx].hi)) };
-                ChartView.TooltipCard(app, mx, my, f.plotX + f.plotW, rows);
+                ChartView.BoxTooltip(app, o, bxs, hovK, hovS, mx, my);
+            }
+        }
+    }
+
+    /// 箱线 tooltip：标题取类目标签（空回落 "Service N"），五行
+    /// min/Q1/med/Q3/max 取命中系列的箱。
+    static void BoxTooltip(App app, ChartOption o, List<ChartSeries> bxs,
+                           int k, int s, int mx, int my) {
+        Theme t = app.theme;
+        BoxItem b = bxs[s < 0 ? 0 : s].boxes[k];
+        string hdr = b.label;
+        if (hdr.Length == 0) { hdr = "Service " + Convert.ToString(k + 1); }
+        int col = bxs.Count == 1 ? Chart.Palette(t, k) : Chart.Palette(t, s < 0 ? 0 : s);
+        if (bxs[s < 0 ? 0 : s].color != 0) { col = bxs[s < 0 ? 0 : s].color; }
+        List<TooltipRow> rows = new List<TooltipRow>{
+            TooltipRow.Of(0, hdr),
+            TooltipRow.Of(col, "min   " + Convert.ToString(b.lo)),
+            TooltipRow.Of(col, "Q1    " + Convert.ToString(b.q1)),
+            TooltipRow.Of(col, "med   " + Convert.ToString(b.med)),
+            TooltipRow.Of(col, "Q3    " + Convert.ToString(b.q3)),
+            TooltipRow.Of(col, "max   " + Convert.ToString(b.hi)) };
+        ChartView.TooltipCard(app, mx, my, app.canvas.Width(), rows);
+    }
+
+    /// 箱线叠加散点（dataset 绑定的离群点/聚合明细系列）：类目侧
+    /// 序号定位行/列，数值侧定值；半径取 series.symbolSize 的一半
+    /// （缺省 2pt），色取系列色（缺省调色板顺位）。
+    static void DrawBoxOverlay(App app, ChartOption o, int lo, int hi, int n,
+                               bool horiz, int pX, int pY, int pW, int pH,
+                               int rowH, int revealAlpha) {
+        Canvas c = app.canvas;
+        Theme t = app.theme;
+        int span = hi - lo;
+        if (span < 1) { span = 1; }
+        for (int si = 0; si < o.series.Count; si = si + 1) {
+            ChartSeries s = o.series[si];
+            if (s.hidden || s.type != ChartType.Scatter || s.points.Count == 0) {
+                continue;
+            }
+            int col = s.color != 0 ? s.color : Chart.Palette(t, si);
+            int r = s.symbolSize > 0 ? app.Scale(s.symbolSize / 2) : app.Scale(2);
+            if (r < 1) { r = 1; }
+            for (int pi = 0; pi < s.points.Count; pi = pi + 1) {
+                int vx = Chart.PointV(s.points[pi].x, s.pointG);
+                int vy = Chart.PointV(s.points[pi].y, s.pointG);
+                int cx;
+                int cy;
+                if (horiz) {
+                    cx = Chart.ValueX(pX, pW, lo, hi, vx);
+                    int k = vy / 1000;
+                    if (k < 0) { k = 0; }
+                    if (k > n - 1) { k = n - 1; }
+                    cy = pY + k * rowH + rowH / 2;
+                } else {
+                    int k = vx / 1000;
+                    if (k < 0) { k = 0; }
+                    if (k > n - 1) { k = n - 1; }
+                    cx = pX + k * pW / n + (pW / n) / 2;
+                    cy = pY + pH - (vy - lo) * pH / span;
+                }
+                c.FillCircle(cx, cy, r, Chart.WithAlpha(col, revealAlpha));
             }
         }
     }

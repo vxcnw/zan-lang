@@ -378,15 +378,16 @@ partial class ChartView {
         }
     }
 
-    /// 多 grid 布局（line-gradient/grid-multiple）：按 series.
-    /// xAxisIndex 分组，每组用自己的轴组与 grid 矩形重入 DrawLines。
-    /// grid.top/bottom 百分比按面板高定位；标题数组（位置为面板
-    /// 百分比）统一在本层绘制，子调用不再画标题。
-    static void DrawMultiGridLines(App app, int x, int y, int w, int h,
-                                   ChartOption o, int g) {
+    /// 多 grid 布局（grid[] ≥ 2）全 kind 通用拆分，由 DispatchRender
+    /// 拦截进入：按 series.xAxisIndex 分组，每组在自己的 grid 矩形
+    /// 里重入分发链 RenderOnce（组内系列重算 kind——蜡烛+成交量、
+    /// 行/列布局混排各归各位）。grid.top/bottom 百分比按面板高定
+    /// 位，width/height 形态（scatter-matrix 宫格）同理；标题数组
+    /// （位置为面板百分比）与图例全图各画一次，子调用不再画。
+    static void DrawMultiGridPanels(App app, int x, int y, int w, int h,
+                                    ChartOption o, int g) {
         Canvas c = app.canvas;
         int nG = o.grids.Count;
-        if (nG > o.xAxes.Count && o.xAxes.Count > 0) { nG = o.xAxes.Count; }
         if (nG < 1) { return; }
         int headerH = app.Scale(o.titles.Count > 0 ? 52 : 30);
         for (int gi = 0; gi < nG; gi = gi + 1) {
@@ -403,28 +404,67 @@ partial class ChartView {
             int gy1 = y + h - Chart.legendBottomReserve;
             if (gs.bPct >= 0) { gy1 = y + h - h * gs.bPct / 100; }
             else if (gs.bPx >= 0) { gy1 = y + h - app.Scale(gs.bPx); }
+            // width/height 形态（scatter-matrix 宫格、candlestick-
+            // large 成交量格）：声明了 top/left 时向右下撑，只声明
+            // bottom/right 时从底/右锚反向推 top/left（ECharts 语义）。
+            if (gs.wPct >= 0 || gs.wPx >= 0) {
+                int wAbs = gs.wPct >= 0 ? w * gs.wPct / 100 : app.Scale(gs.wPx);
+                if (gs.lPct >= 0 || gs.lPx >= 0) { gx1 = gx0 + wAbs; }
+                else { gx0 = gx1 - wAbs; }
+            }
+            if (gs.hPct >= 0 || gs.hPx >= 0) {
+                int hAbs = gs.hPct >= 0 ? h * gs.hPct / 100 : app.Scale(gs.hPx);
+                if (gs.tPct >= 0 || gs.tPx >= 0) { gy1 = gy0 + hAbs; }
+                else { gy0 = gy1 - hAbs; }
+            }
             if (gy1 - gy0 < app.Scale(40) || gx1 - gx0 < app.Scale(40)) { continue; }
 
-            // 系列按 xAxisIndex 分组；visualMap.seriesIndex 重映射到
-            // 组内新下标（visualMap 是全局面板语义）。
+            // 系列按 xAxisIndex 分组（越界钳入最后一格，不声明轴的
+            // demo 靠它落位）；visualMap.seriesIndex 重映射到组内新
+            // 下标（visualMap 是全局面板语义）。
             List<ChartSeries> grp = new List<ChartSeries>();
             List<int> origIdx = new List<int>();
             for (int si3 = 0; si3 < o.series.Count; si3 = si3 + 1) {
-                if (o.series[si3].xIndex != gi) { continue; }
+                int giEff = o.series[si3].xIndex;
+                if (giEff > nG - 1) { giEff = nG - 1; }
+                if (giEff != gi) { continue; }
                 grp.Add(o.series[si3]);
                 origIdx.Add(si3);
             }
             if (grp.Count < 1) { continue; }
             ChartOption sub = ChartOption.Clone(o);
             if (sub == null) { continue; }
-            // dataZoom 滑条只随最后一个 grid 画一次（官方 grid-
-            // multiple 是全图一条滑块；每个子面板各画一条会叠两道）。
-            sub.zoom = o.zoom && gi == nG - 1;
-            sub.series = grp;
+            // dataZoom：窗口全格生效（官方 touch demo 的
+            // xAxisIndex:[0,1] 双 grid 同窗联动），滑条条带只随最后
+            // 一个 grid 画一次（每个子面板各画一条会叠两道）；
+            // zoomBarHidden 让非末格只应用窗口、不预留条带。
+            sub.zoom = o.zoom;
+            Chart.zoomBarHidden = gi != nG - 1;
+            // 图例全图一份，随第一格（官方多 grid 图例置顶）。
+            sub.showLegend = o.showLegend && gi == 0;
             sub.xAxes = new List<ChartAxis>();
             if (gi < o.xAxes.Count) { sub.xAxes.Add(o.xAxes[gi]); }
             sub.yAxes = new List<ChartAxis>();
             if (gi < o.yAxes.Count) { sub.yAxes.Add(o.yAxes[gi]); }
+            // 子系列取 Clone 已拷出的副本并把全局轴下标归一化到子
+            // 轴表（xAxisIndex/yAxisIndex gi → 0，越界回落 0）：
+            // ChartFrame.YOf 对 axisIndex=1 无条件走右轴域，不归一
+            // 的话单轴子面板的系列会画到未初始化的右轴刻度上。
+            // 原 ChartSeries 只读共享，绝不回写（下一帧还要按原始
+            // xIndex 分组）。
+            List<ChartSeries> subSeries = new List<ChartSeries>();
+            for (int si4 = 0; si4 < sub.series.Count; si4 = si4 + 1) {
+                ChartSeries cs4 = sub.series[si4];
+                int gx4 = cs4.xIndex;
+                if (gx4 > nG - 1) { gx4 = nG - 1; }
+                if (gx4 != gi) { continue; }
+                cs4.xIndex = 0;
+                if (cs4.axisIndex == gi || cs4.axisIndex >= sub.yAxes.Count) {
+                    cs4.axisIndex = 0;
+                }
+                subSeries.Add(cs4);
+            }
+            sub.series = subSeries;
             sub.grids = new List<ChartGridSpec>();
             sub.title = ""; sub.titleSub = "";
             sub.titles = new List<ChartTitleSpec>();
@@ -438,7 +478,10 @@ partial class ChartView {
                 }
                 vm3.seriesIndex = newsi;
             }
-            ChartView.DrawLines(app, gx0, gy0, gx1 - gx0, gy1 - gy0, sub, g);
+            Chart.gridPanelSub = true;
+            ChartView.RenderOnce(app, gx0, gy0, gx1 - gx0, gy1 - gy0, sub, g);
+            Chart.gridPanelSub = false;
+            Chart.zoomBarHidden = false;
         }
         // 标题数组：面板坐标绘制（top/left 百分比），子调用已抑制。
         for (int ti3 = 0; ti3 < o.titles.Count; ti3 = ti3 + 1) {
@@ -497,7 +540,7 @@ partial class ChartView {
                           ChartOption o, int g) {
         Canvas c = app.canvas;
         if (o.grids.Count > 1) {
-            ChartView.DrawMultiGridLines(app, x, y, w, h, o, g);
+            ChartView.DrawMultiGridPanels(app, x, y, w, h, o, g);
             return;
         }
         List<ChartSeries> series = o.series;
@@ -527,7 +570,7 @@ partial class ChartView {
         if (o.zoom && o.iwid != 0 && fullN > 1) {
             i0 = Chart.ZoomI0(app, o, o.iwid, fullN);
             i1 = Chart.ZoomI1(app, o, o.iwid, fullN);
-            zoomH = app.Scale(24);
+            zoomH = Chart.zoomBarHidden ? 0 : app.Scale(24);
         }
         List<string> winLabels = Chart.WindowLabels(labels, i0, i1);
 
@@ -1087,7 +1130,7 @@ partial class ChartView {
         if (o.zoom && o.iwid != 0 && fullN > 1) {
             i0 = Chart.ZoomI0(app, o, o.iwid, fullN);
             i1 = Chart.ZoomI1(app, o, o.iwid, fullN);
-            zoomH = app.Scale(24);
+            zoomH = Chart.zoomBarHidden ? 0 : app.Scale(24);
         }
         List<string> winLabels = Chart.WindowLabels(labels, i0, i1);
         int n = winLabels.Count;

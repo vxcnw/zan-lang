@@ -17,6 +17,11 @@ partial class ChartView {
         Theme t = app.theme;
         List<ChartSeries> series = o.series;
         List<string> labels = o.XCategories();
+        // 横排（yAxis category）：行标签取 y 轴类目（ECharts 行序
+        // = 类目序 = 数据序），XCategories 的系列名回填兜底。
+        if (horizontal && o.yAxes.Count > 0 && o.yAxes[0].categories.Count > 0) {
+            labels = o.yAxes[0].categories;
+        }
 
         if (horizontal) {
             // 水平布局委托给 HBar 渲染器。直接传原系列 + 动画因子 g
@@ -35,7 +40,7 @@ partial class ChartView {
             if (o.zoom && o.iwid != 0 && hFullN > 1) {
                 hi0 = Chart.ZoomI0(app, o, o.iwid, hFullN);
                 hi1 = Chart.ZoomI1(app, o, o.iwid, hFullN);
-                hzoomH = app.Scale(24);
+                hzoomH = Chart.zoomBarHidden ? 0 : app.Scale(24);
             }
             List<string> hWin = Chart.WindowLabels(labels, hi0, hi1);
             ChartFrame hf = ChartView.HBarCore(app, x, y, w, h - hzoomH, o,
@@ -69,7 +74,7 @@ partial class ChartView {
         if (o.zoom && o.iwid != 0 && fullN > 1) {
             i0 = Chart.ZoomI0(app, o, o.iwid, fullN);
             i1 = Chart.ZoomI1(app, o, o.iwid, fullN);
-            zoomH = app.Scale(24);
+            zoomH = Chart.zoomBarHidden ? 0 : app.Scale(24);
         }
         List<string> winLabels = Chart.WindowLabels(labels, i0, i1);
 
@@ -158,12 +163,14 @@ partial class ChartView {
             int barW = groupW / ng;
             if (barW < app.Scale(2)) { barW = app.Scale(2); }
             int groupX0 = (step - groupW) / 2;
-            List<int> accs = new List<int>();
+            // 累加器 long：亿级值 ×1000 定点后 8.6e10 超 int32，
+            // 堆叠累计随之升宽（candlestick-touch 成交量堆不上的根因）。
+            List<long> accs = new List<long>();
             for (int ai = 0; ai < ng; ai = ai + 1) { accs.Add(0); }
             // 负向堆积（ECharts 2.2.x bar.js）：正负各持独立累加器，
             // 负值段从零轴向反方向生长，不与正向累计相加（bar5：
             // 收入向右、支出向左互不重叠）。
-            List<int> negAccs = new List<int>();
+            List<long> negAccs = new List<long>();
             for (int ai = 0; ai < ng; ai = ai + 1) { negAccs.Add(0); }
             // 每组最后（最顶）一个序列：只有它带圆角顶，
             // 使堆叠色带以平整直角相接，与 ECharts 一致。
@@ -188,10 +195,10 @@ partial class ChartView {
                         // 值取 ×1000 定点：堆叠累计/映射全程定点，整数
                         // 数据映射结果与旧 int 路径逐像素一致，小数数据
                         //（normalization 0.06..0.57）不再被取整归零。
-                        int vF = 0;
+                        long vF = 0;
                         if (oi < sc.Count()) {
                             double dvK = sc.Number(oi);
-                            vF = (int)(dvK * 1000.0 + (dvK >= 0 ? 0.5 : 0 - 0.5));
+                            vF = (long)(dvK * 1000.0 + (dvK >= 0 ? 0.5 : 0 - 0.5));
                         }
                         int cellL = f.CatLeft(i, n);
                         int cellW = f.CatWidth(i, n);
@@ -200,11 +207,11 @@ partial class ChartView {
                         // 负向堆积：负值段挂在本组负累加器上，从零轴向
                         // 下方生长；正值段照旧从正累加器顶向上。
                         bool segNeg = vF < 0;
-                        int segBase = segNeg ? negAccs[gi] : accs[gi];
-                        // vF 是 ×1000 定点，堆叠和可达 2.9e6 量级，
-                        // ×g(0..1000) 必超 int32——乘法全程 long。
-                        int yTop = f.YOfF((int)((long)(segBase + vF) * (long)g / 1000L), 0);
-                        int yBot = f.YOfF((int)((long)segBase * (long)g / 1000L), 0);
+                        long segBase = segNeg ? negAccs[gi] : accs[gi];
+                        // vF 是 ×1000 定点，堆叠和×g(0..1000) 必超 int32，
+                        // 全程 long 走 YOfFL。
+                        int yTop = f.YOfFL((segBase + vF) * (long)g / 1000L, 0);
+                        int yBot = f.YOfFL(segBase * (long)g / 1000L, 0);
                         int segH = yBot - yTop;
                         int segY0 = yTop < yBot ? yTop : yBot;
                         int segY1 = yTop < yBot ? yBot : yTop;
@@ -319,8 +326,8 @@ partial class ChartView {
                         if (oi3 >= s.Count()) { continue; }
                         lpx.Add(f.CatMid(oi2, n));
                         double dvO = s.Number(oi3);
-                        int vFo = (int)(dvO * 1000.0 + (dvO >= 0 ? 0.5 : 0 - 0.5));
-                        lpy.Add(f.YOfF((int)((long)vFo * g / 1000L), s.axisIndex));
+                        long vFo = (long)(dvO * 1000.0 + (dvO >= 0 ? 0.5 : 0 - 0.5));
+                        lpy.Add(f.YOfFL(vFo * (long)g / 1000L, s.axisIndex));
                     }
                     bool smooth = o.smooth;
                     if (s.smooth == 1) { smooth = true; } else if (s.smooth == 0) { smooth = false; }
@@ -423,8 +430,8 @@ partial class ChartView {
                             if (oiL >= s.Count()) { continue; }
                             lpx.Add(f.CatMid(li, n));
                             double dvL = s.Number(oiL);
-                            int vFL = (int)(dvL * 1000.0 + (dvL >= 0 ? 0.5 : 0 - 0.5));
-                            lpy.Add(f.YOfF((int)((long)vFL * g / 1000L), ax));
+                            long vFL = (long)(dvL * 1000.0 + (dvL >= 0 ? 0.5 : 0 - 0.5));
+                            lpy.Add(f.YOfFL(vFL * (long)g / 1000L, ax));
                         }
                         bool smooth = o.smooth;
                         if (s.smooth == 1) { smooth = true; } else if (s.smooth == 0) { smooth = false; }
@@ -442,9 +449,9 @@ partial class ChartView {
                             int oiS = i0 + sp;
                             if (oiS >= s.Count()) { continue; }
                             double dvS2 = s.Number(oiS);
-                            int vFS = (int)(dvS2 * 1000.0 + (dvS2 >= 0 ? 0.5 : 0 - 0.5));
+                            long vFS = (long)(dvS2 * 1000.0 + (dvS2 >= 0 ? 0.5 : 0 - 0.5));
                             int px2 = f.CatMid(sp, n);
-                            int py2 = f.YOfF((int)((long)vFS * g / 1000L), ax);
+                            int py2 = f.YOfFL(vFS * (long)g / 1000L, ax);
                             int scol = s.color;
                             if (oiS < s.data.Count && s.data[oiS].color != 0) { scol = s.data[oiS].color; }
                             Chart.DrawSymbol(c, px2, py2,
@@ -463,16 +470,21 @@ partial class ChartView {
                         // 值取 ×1000 定点（bar1 的 4.9、mix-line-bar 的
                         // 2.6 这类小数柱值不再被 Value() 取整）；整数数据
                         // 映射结果与旧 int 路径逐像素一致。
-                        int vF = 0;
+                        // 值取 ×1000 定点（bar1 的 4.9、mix-line-bar 的
+                        // 2.6 这类小数柱值不再被 Value() 取整）；整数数据
+                        // 映射结果与旧 int 路径逐像素一致。long 承载：
+                        // 亿级整值（candlestick-touch 成交量）×1000 定点
+                        // 8.6e10 爆 int32，柱子全体消失的根因。
+                        long vF = 0;
                         if (oi < s.Count()) {
                             double dvB = s.Number(oi);
-                            vF = (int)(dvB * 1000.0 + (dvB >= 0 ? 0.5 : 0 - 0.5));
+                            vF = (long)(dvB * 1000.0 + (dvB >= 0 ? 0.5 : 0 - 0.5));
                         }
                         // 逐项颜色（ChartData.Colored）优先于
                         // 序列颜色 —— ECharts 的三级颜色控制。
                         int col = s.color;
                         if (oi < s.data.Count && s.data[oi].color != 0) { col = s.data[oi].color; }
-                        int by = f.YOfF((int)((long)vF * g / 1000L), ax);
+                        int by = f.YOfFL(vF * (long)g / 1000L, ax);
                             int cellL = f.CatLeft(i, n);
                             int cellW = f.CatWidth(i, n);
                             int g0 = (cellW - groupW) / 2;
@@ -1345,7 +1357,7 @@ partial class ChartView {
         if (o.zoom && o.iwid != 0 && fullN > 1) {
             i0 = Chart.ZoomI0(app, o, o.iwid, fullN);
             i1 = Chart.ZoomI1(app, o, o.iwid, fullN);
-            zoomH = app.Scale(24);
+            zoomH = Chart.zoomBarHidden ? 0 : app.Scale(24);
         }
         List<string> winLabels = Chart.WindowLabels(labels, i0, i1);
         int n = winLabels.Count;

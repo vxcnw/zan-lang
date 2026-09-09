@@ -1075,6 +1075,53 @@ partial class ChartView {
         if (nWin < 1) { nWin = 1; }
         for (int mi = 0; mi < s.markLines.Count; mi = mi + 1) {
             ChartMarkLine m = s.markLines[mi];
+            // 两点斜线（coord 对，回归/趋势线）：x 按数值域映射，
+            // 用 frame.xLo/xHi（散点等数值 x 视图填充；类目轴视图
+            // 不设，退回跳过）。
+            if (m.hasEnd && f.xHi > f.xLo) {
+                int px1 = Chart.ValueX(f.plotX, f.plotW, f.xLo, f.xHi, m.xValue);
+                int py1 = f.YOf(Chart.PointV(m.yValue, s.pointG), s.axisIndex);
+                int px2 = Chart.ValueX(f.plotX, f.plotW, f.xLo, f.xHi, m.x2Value);
+                int py2 = f.YOf(Chart.PointV(m.y2Value, s.pointG), s.axisIndex);
+                int col = m.color != 0 ? m.color : s.color;
+                string lt = m.lineType.Length > 0 ? m.lineType : "solid";
+                if (lt == "solid") {
+                    c.DrawLine(px1, py1, px2, py2, col, 1);
+                } else {
+                    int dash = app.Scale(6);
+                    int gap = lt == "dotted" ? app.Scale(2) : app.Scale(6);
+                    if (lt == "dotted") { dash = app.Scale(2); }
+                    int adx = px2 > px1 ? px2 - px1 : px1 - px2;
+                    int ady = py2 > py1 ? py2 - py1 : py1 - py2;
+                    int steps = adx > ady ? adx : ady;
+                    if (steps < 1) { steps = 1; }
+                    int cur = 0;
+                    bool on = true;
+                    while (cur < steps) {
+                        int end = cur + dash;
+                        if (end > steps) { end = steps; }
+                        if (on) {
+                            c.DrawLine(px1 + (px2 - px1) * cur / steps,
+                                py1 + (py2 - py1) * cur / steps,
+                                px1 + (px2 - px1) * end / steps,
+                                py1 + (py2 - py1) * end / steps, col, 1);
+                        }
+                        cur = end + gap;
+                        on = !on;
+                    }
+                }
+                if (m.labelShow && m.label.Length > 0) {
+                    int fs = Style.FontFallback(app, "small");
+                    int lw2 = Canvas.MeasureText(m.label, fs);
+                    int lx2 = px2 + app.Scale(4);
+                    if (lx2 + lw2 > f.plotX + f.plotW) {
+                        lx2 = px2 - lw2 - app.Scale(4);
+                    }
+                    c.DrawText(lx2, py2 - Canvas.FontHeight(fs) - app.Scale(2),
+                        m.label, col, fs);
+                }
+                continue;
+            }
             if (m.valueIndex == 0) { continue; }  // x 轴竖线另绘
             bool isAvg = m.kind == "average";
             int val = ChartView.MarkLineValue(m, s, i0, i1);
