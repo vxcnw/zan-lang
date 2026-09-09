@@ -645,10 +645,11 @@ class InputNumber : Control {
     /// 设计期常量键（min/max/step 等）经 GetExtra/SetExtra 应答。
     override List<PropSpec> Props() {
         List<PropSpec> ps = new List<PropSpec>();
-        // 只有真正活绑定的字段才挂 PropSpec（snum 直写 model、
-        // str 直写 Size/Prefix/Suffix/Placement）；min/max/step/hint/
-        // precision/group/loading 是设计期常量，经 GetExtra/SetExtra
-        // 应答文档键，避免快照 Binding 写不回。
+        // 值通道指向活的外部绑定（§6.1 单协议，snum 直写 model、
+        // str 直写 Size/Prefix/Suffix/Placement）。min/max/step/hint/
+        // precision/group 是设计期常量：普通字段直赋即实时绑定
+        // （PropSpec 合成访问器对，与 Progress.fillColor 同一惯用法），
+        // GetExtra 保留文档键应答以兼容旧文档。
         PropSpec val = PropSpec.Int("value", "Value");
         // 属性通道优先指向活的外部绑定（§6.1 单协议）。
         if (data != null) { val.num = data; } else { val.snum = model; }
@@ -668,6 +669,32 @@ class InputNumber : Control {
             new List<string>{ "both", "right" });
         plc.str = Placement;
         ps.Add(plc);
+        PropSpec mn = PropSpec.Int("min", "Min");
+        mn.num = minV;
+        ps.Add(mn);
+        PropSpec mx = PropSpec.Int("max", "Max");
+        mx.num = maxV;
+        ps.Add(mx);
+        PropSpec stp = PropSpec.Int("step", "Step");
+        stp.num = stepV;
+        stp.StepBy(1);
+        stp.WithTip("Increment of the +/- buttons, in display units "
+                    + "(scaled by precision).");
+        ps.Add(stp);
+        PropSpec hnt = PropSpec.Text("hint", "Placeholder");
+        hnt.str = hint;
+        hnt.Also("placeholder");
+        ps.Add(hnt);
+        PropSpec pre = PropSpec.Int("precision", "Precision");
+        pre.num = Precision;
+        pre.Step(1, 0, 6);
+        pre.WithTip("Decimal places (fixed-point model: value * 10^precision).");
+        ps.Add(pre);
+        PropSpec grp = PropSpec.Bool("group", "Group digits");
+        grp.flag = GroupDigits;
+        grp.Also("groupDigits");
+        grp.WithTip("Show thousands separators while displaying.");
+        ps.Add(grp);
         return ps;
     }
 

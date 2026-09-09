@@ -210,6 +210,13 @@ class TreeView : Control {
         PropSpec chk = PropSpec.Bool("checks", "Checkboxes");
         chk.flag = checks;
         ps.Add(chk);
+        PropSpec mul = PropSpec.Bool("multi", "Multi select");
+        mul.flag = multi;
+        ps.Add(mul);
+        PropSpec reo = PropSpec.Bool("reorder", "Drag reorder");
+        reo.flag = reorder;
+        reo.WithTip("Allow dragging nodes to move or re-parent them.");
+        ps.Add(reo);
         PropSpec empty = PropSpec.Text("empty", "Empty text");
         empty.str = Empty;
         ps.Add(empty);

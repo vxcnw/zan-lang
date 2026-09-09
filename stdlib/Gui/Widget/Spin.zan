@@ -191,6 +191,10 @@ class Spin : Control {
         PropSpec tip = PropSpec.Text("tip", "Tip");
         tip.str = Tip;
         ps.Add(tip);
+        PropSpec acc = PropSpec.Color("accent", "Accent");
+        acc.num = Accent;
+        acc.WithTip("Custom accent colour for the spinner dots. 0 = skin default.");
+        ps.Add(acc);
         ps.Add(PropSpec.Text("class", "Classes"));
         return ps;
     }

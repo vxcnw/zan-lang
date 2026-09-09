@@ -871,6 +871,13 @@ class TextArea : Control {
         PropSpec rd = PropSpec.Bool("round", "Round");
         rd.flag = Round;
         ps.Add(rd);
+        PropSpec ro = PropSpec.Bool("readOnly", "ReadOnly");
+        ro.flag = readOnly;
+        ps.Add(ro);
+        PropSpec ah = PropSpec.Bool("autoHeight", "AutoHeight");
+        ah.flag = autoHeight;
+        ah.WithTip("Grow the box with its content instead of scrolling inside a fixed height.");
+        ps.Add(ah);
         return ps;
     }
 

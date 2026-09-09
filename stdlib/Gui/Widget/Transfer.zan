@@ -985,6 +985,20 @@ class Transfer<T> : Control {
         PropSpec rh = PropSpec.Text("searchHintRight", "Right search hint");
         rh.str = rightHint;
         ps.Add(rh);
+        PropSpec sa = PropSpec.Text("selectAllText", "Select-all label");
+        sa.str = selectAllText;
+        sa.WithTip("Footer label; the factory default applies only when "
+                   + "never written (writing an empty string renders it blank).");
+        ps.Add(sa);
+        PropSpec tt = PropSpec.Text("totalText", "Total label");
+        tt.str = totalText;
+        ps.Add(tt);
+        PropSpec st = PropSpec.Text("selectedText", "Selected label");
+        st.str = selectedText;
+        ps.Add(st);
+        PropSpec ct = PropSpec.Text("clearText", "Clear label");
+        ct.str = clearText;
+        ps.Add(ct);
         return ps;
     }
 }

@@ -355,6 +355,15 @@ class Button : Control {
         PropSpec ip = PropSpec.Text("iconPlacement", "Icon placement");
         ip.str = IconPlacement;
         ps.Add(ip);
+        PropSpec col = PropSpec.Color("color", "Color");
+        col.num = Color;
+        col.WithTip("Custom background colour, injected as a custom-{hex} "
+                    + "class fragment. 0 = class-determined.");
+        ps.Add(col);
+        PropSpec tcol = PropSpec.Color("textColor", "Text color");
+        tcol.num = TextColor;
+        tcol.WithTip("Custom text colour. 0 = class-determined.");
+        ps.Add(tcol);
         PropSpec cls = PropSpec.Text("class", "Classes");
         cls.str = Class;
         ps.Add(cls);

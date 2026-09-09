@@ -268,6 +268,29 @@ class BandGrid : Control {
         app.window.Wake();
     }
 
+    /// 覆写：设计器属性（几何与强调色；数据经 Bind/Data 面在代码侧给）。
+    override List<PropSpec> Props() {
+        List<PropSpec> ps = new List<PropSpec>();
+        PropSpec bs = PropSpec.Int("bandSpan", "Band span");
+        bs.num = bandSpan;
+        bs.StepBy(1);
+        bs.WithTip("Rows per band (0 = auto from the band labels).");
+        ps.Add(bs);
+        PropSpec cw = PropSpec.Int("cellW", "Cell width");
+        cw.num = cellW;
+        cw.Step(1, 4, 96);
+        ps.Add(cw);
+        PropSpec ch = PropSpec.Int("cellH", "Cell height");
+        ch.num = cellH;
+        ch.Step(1, 4, 96);
+        ps.Add(ch);
+        PropSpec acc = PropSpec.Color("accent", "Accent");
+        acc.num = accent;
+        acc.WithTip("Band / selection accent colour. 0 = skin default.");
+        ps.Add(acc);
+        return ps;
+    }
+
     override void OnPaint(App app) {
         lastApp = app;
         if (rows <= 0 || cols <= 0 || texts.Count < rows * cols) {

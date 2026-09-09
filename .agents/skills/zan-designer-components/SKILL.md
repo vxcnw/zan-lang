@@ -50,6 +50,26 @@ description: Zan 窗口设计器用户组件（components/*.zcomp）的全链路
   时选有 PropSpec text 的控件（Label/Button）。Progress 有数值型
   `percent` prop，SetProp/GetProp 走字符串形式（"30"）。
 
+## 控件 Props() 补属性的定式（2026-09 审计实证）
+
+- **普通字段直赋即实时绑定**：`spec.num = someIntField`（编译器合成
+  访问器对，双向读写控件字段）。Progress.fillColor、ChoiceGroup.columns
+  都是这么写的且已过测试；**不要信「设计期常量走快照 Binding 写不回」
+  的旧注释**（InputNumber 那条是过时顾虑，已订正）——担心写不回就写
+  往返探针（SetProp→GetProp）实证，别凭注释下结论。
+- **裸 `ps.Add(PropSpec.Text("class", "Classes"))` 是合法的**：读写
+  走 Control.GetProp/SetProp 对 "class" 的基类特判，spec 只负责属性
+  面板可见性。同理 "name"。
+- Zan **没有 C# 式跨行相邻字符串隐式串接**，`"a"\n"b"` 直接报
+  expected ')', got STRING_LIT——换行拼接必须显式 `+`。
+- 颜色属性（PropSpec.Color，kind 4）的文档串形式就是 ARGB 整数十进制
+  （Read/Write 走 Convert.ToString/ToInt32），探针往返用 "-65536" 这类。
+- **Step(s, lo, hi) 一律置 hasRange**：hi=0 就是「上限钳到 0」，不是
+  「无上限」——只配步进不配范围必须用 `StepBy(s)`（实测：step 属性挂
+  Step(1,0,0) 会把步进值钳死成 0）。
+- 新增属性的最小验证：实例化→SetProp→GetProp 往返 +（有访问器时）
+  断言公开 getter，一处探针覆盖九组件 24 断言即可全绿提交。
+
 ## 生成器与构建链
 
 - **ZanGen 缓存按内容寻址，只有 zanc 跑设计管线才会重建**。

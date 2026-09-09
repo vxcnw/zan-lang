@@ -138,6 +138,10 @@ class Panel : Control {
         PropSpec cap = PropSpec.Text("title", "Title");
         cap.str = title;
         ps.Add(cap);
+        PropSpec sfc = PropSpec.Color("surfaceColor", "Surface color");
+        sfc.num = surfaceColor;
+        sfc.WithTip("Panel surface colour override. 0 = theme default.");
+        ps.Add(sfc);
         return ps;
     }
 

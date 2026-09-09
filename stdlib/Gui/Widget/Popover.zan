@@ -70,6 +70,30 @@ class Popover : Control {
         return trigId;
     }
 
+    /// 覆写：设计器属性（触发文本/标题/正文/面板宽/开合缺省）。
+    override List<PropSpec> Props() {
+        List<PropSpec> ps = new List<PropSpec>();
+        PropSpec trig = PropSpec.Text("text", "Trigger text");
+        trig.str = trigLabel;
+        trig.syncName = true;
+        ps.Add(trig);
+        PropSpec ti = PropSpec.Text("title", "Title");
+        ti.str = title;
+        ps.Add(ti);
+        PropSpec bo = PropSpec.Text("body", "Body");
+        bo.str = body;
+        ps.Add(bo);
+        PropSpec w = PropSpec.Int("panelW", "Panel width");
+        w.num = panelW;
+        w.StepBy(8);
+        ps.Add(w);
+        PropSpec op = PropSpec.Bool("open", "Open");
+        op.sflag = open;
+        op.WithTip("Design default; users toggle it by clicking the trigger.");
+        ps.Add(op);
+        return ps;
+    }
+
     /// 延迟面板：在所有内容之后由 App.RunOverlays 绘制并派发事件。
     override void OnPaintOverlay(App app) {
         if (!open.Get()) { return; }
