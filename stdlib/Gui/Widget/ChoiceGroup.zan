@@ -92,8 +92,9 @@ class ChoiceGroup : Panel {
         return null;
     }
 
-    /// 选项以 `a|b|c` 字符串表示（设计器 / .zform 属性往返）。
-    string OptionsText() {
+    /// 选项以 `a|b|c` 字符串表示（设计器 / .zform 属性往返）；
+    /// 子类可扩展语法（RadioGroup 的 `!` 后缀 = 禁用位）。
+    virtual string OptionsText() {
         string outp = "";
         for (int i = 0; i < this.labels.Count; i = i + 1) {
             if (i > 0) { outp = outp + "|"; }
@@ -120,8 +121,9 @@ class ChoiceGroup : Panel {
         return item;
     }
 
-    /// 按 "A|B|C" 追加选项（与 SelectBox.SetOptionsText 同一约定）。
-    void SetOptionsText(string text) {
+    /// 按 "A|B|C" 追加选项（与 SelectBox.SetOptionsText 同一约定）；
+    /// 子类可覆写以扩展逐项语法。
+    virtual void SetOptionsText(string text) {
         string current = "";
         for (int i = 0; i <= text.Length; i = i + 1) {
             string ch = "";
@@ -133,6 +135,31 @@ class ChoiceGroup : Panel {
                 current = current + ch;
             }
         }
+    }
+
+    /// 覆写：`options` 的应答走 OptionsText——选项是结构状态，
+    /// 文本只是它的视图，不能落 Props() 的快照；其余键交基类。
+    override string GetProp(string key) {
+        if (key == "options") { return this.OptionsText(); }
+        return base.GetProp(key);
+    }
+
+    /// 清空全部选项（设计器重复写入 `options` 前调用；子类要连
+    /// 平行的元数据列表一起清，否则下标错位）。
+    virtual void ClearOptions() {
+        this.children.Clear();
+        this.labels.Clear();
+    }
+
+    /// 覆写：写入 `options` 先清后建（面板可反复编辑，追加语义
+    /// 只属于构造期的 SetOptionsText 直调）；其余键交基类。
+    override void SetProp(string key, string val) {
+        if (key == "options") {
+            this.ClearOptions();
+            this.SetOptionsText(val);
+            return;
+        }
+        base.SetProp(key, val);
     }
 
     /// 设计器读取 `options`（"A|B|C" 文本）；其余键返回 ""。
@@ -162,6 +189,11 @@ class ChoiceGroup : Panel {
             .Step(2, 0, 200);
         rh.num = rowHeight;
         ps.Add(rh);
+        PropSpec opt = PropSpec.Text("options", "Options");
+        opt.str = this.OptionsText();
+        opt.WithTip("Pipe-separated options, e.g. \"A|B|C\". "
+                    + "RadioGroup items may carry a trailing \"!\" to disable.");
+        ps.Add(opt);
         return ps;
     }
 
@@ -604,8 +636,9 @@ class RadioGroup : ChoiceGroup {
         this.Add(buttonGroup);
     }
 
-    /// 清空全部选项（两种形态共用）：用于从文本/JSON 重建选项。
-    void ClearOptions() {
+    /// 清空全部选项（两种形态共用）：用于从文本/JSON 重建选项；
+    /// 覆写基类以连元数据与按钮组一起清。
+    override void ClearOptions() {
         this.children.Clear();
         this.labels.Clear();
         this.optionValues.Clear();
@@ -687,6 +720,41 @@ class RadioGroup : ChoiceGroup {
         }
         if (key == "size") { return this.Size.Get(); }
         return base.GetExtra(key);
+    }
+
+    /// 选项文本带禁用位：`A|B!|C` 的 `!` 后缀把 B 标成不可点
+    /// （与 optionDisabled 元数据一一对应）。
+    override string OptionsText() {
+        string outp = "";
+        for (int i = 0; i < this.labels.Count; i = i + 1) {
+            if (i > 0) { outp = outp + "|"; }
+            outp = outp + this.labels[i];
+            if (i < this.optionDisabled.Count && this.optionDisabled[i]) {
+                outp = outp + "!";
+            }
+        }
+        return outp;
+    }
+
+    /// 按 `A|B!|C` 重建：尾缀 `!` 的项以禁用位入列
+    /// （value = 下标，与文本路径的既定语义一致）。
+    override void SetOptionsText(string text) {
+        string current = "";
+        for (int i = 0; i <= text.Length; i = i + 1) {
+            string ch = "";
+            if (i < text.Length) { ch = text.Substring(i, 1); }
+            if (ch == "|" || i == text.Length) {
+                bool dis = false;
+                if (current.EndsWith("!")) {
+                    dis = true;
+                    current = current.Substring(0, current.Length - 1);
+                }
+                this.AddOption(current, this.children.Count, dis);
+                current = "";
+            } else {
+                current = current + ch;
+            }
+        }
     }
 
     /// 覆写：基类清单之外追加 buttons/size/value（value 优先指向

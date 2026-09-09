@@ -1160,6 +1160,12 @@ class Pagination : Control {
         sizes.str = this.PageSizesText();
         sizes.WithTip("Comma-separated selectable page sizes (10, 20, 50).");
         ps.Add(sizes);
+        PropSpec ord = PropSpec.Text("order", "Order");
+        ord.str = this.OrderText();
+        ord.WithTip("Comma-separated segment order (prefix, total, pager, "
+                    + "suffix, jumper, sizes), e.g. \"total, pager, jumper\". "
+                    + "Empty = default order.");
+        ps.Add(ord);
         PropSpec sh = PropSpec.Bool("showTotal", "Show total");
         sh.flag = showTotal;
         sh.WithTip("Show the '共 N 页' label.");
@@ -1168,6 +1174,12 @@ class Pagination : Control {
         jp.flag = jumper;
         jp.WithTip("Show the '跳至 [page]' quick-jump input.");
         ps.Add(jp);
+        PropSpec jl = PropSpec.Text("jumperLabel", "Jumper label");
+        jl.str = jumperLabel;
+        ps.Add(jl);
+        PropSpec jsf = PropSpec.Text("jumperSuffix", "Jumper suffix");
+        jsf.str = jumperSuffix;
+        ps.Add(jsf);
         PropSpec pre = PropSpec.Text("prefix", "Prefix");
         pre.str = prefixText;
         ps.Add(pre);
@@ -1210,9 +1222,21 @@ class Pagination : Control {
         return false;
     }
 
+    /// 覆写：列表/派生键（pageSizes/order）的应答走各自的序列化器，
+    /// 不落 Props() 的快照；其余键交基类。
+    override string GetProp(string key) {
+        if (key == "pageSizes") { return this.PageSizesText(); }
+        if (key == "order") { return this.OrderText(); }
+        return base.GetProp(key);
+    }
+
     /// 有副作用收口的属性（钳制 / 重算 / 重找选中项）在基类
     /// 写完后统一走 Normalize。
     override void SetProp(string key, string val) {
+        // 快照绑定接不住写（pageSizes 曾因此静默丢失），列表键
+        // 在基类之前截到各自的重建入口。
+        if (key == "pageSizes") { this.SetPageSizesText(val); return; }
+        if (key == "order") { this.SetOrderText(val); return; }
         base.SetProp(key, val);
         if (key == "total") { this.SetTotal(Convert.ToInt32(val)); }
         else if (key == "pageSize") { this.SetPageSize(Convert.ToInt32(val)); }

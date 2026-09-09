@@ -67,6 +67,19 @@ description: Zan 窗口设计器用户组件（components/*.zcomp）的全链路
 - **Step(s, lo, hi) 一律置 hasRange**：hi=0 就是「上限钳到 0」，不是
   「无上限」——只配步进不配范围必须用 `StepBy(s)`（实测：step 属性挂
   Step(1,0,0) 会把步进值钳死成 0）。
+- **派生键（文本是结构状态的视图：order/circles/options/fx）的三件套
+  定式**：① Props() 里 spec 绑**表达式快照**（`spec.str = this.XxxText()`）
+  供面板显示（PropertyGrid 每次 Bind 重建 specs，快照即新）；② SetProp
+  覆写把写路径截到重建入口（快照绑定 `p.Write` 写的是临时值，直写=
+  静默丢失——Pagination pageSizes 曾因此设计器写入全丢）；③ GetProp
+  覆写派生应答（spec 命中即短路 GetExtra，裸 spec 的 Read() 恒 ""）。
+  可重复写入的列表键 SetProp 里先 ClearOptions/重建（面板是反复编辑，
+  追加语义只属于构造期直调）。
+- **PropertyGrid 的写路径只走 `p.Write`（spec 绑定），不经控件的
+  SetProp**：字段绑定（含 live pair）面板直写即生效；快照绑定面板只
+  更新编辑器残值，正式应用靠宿主听 Change 后走 §6.1 SetProp——两种
+  绑定写测试时都要覆盖（SetProp→GetProp 往返 + 重取 Props() 快照
+  断言模型真变了）。
 - 新增属性的最小验证：实例化→SetProp→GetProp 往返 +（有访问器时）
   断言公开 getter，一处探针覆盖九组件 24 断言即可全绿提交。
 
