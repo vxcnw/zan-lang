@@ -122,6 +122,23 @@ description: Zan 上做 2D 游戏(templates/game/* 与 stdlib/Game)的帧循环�
 - 触屏：Gui 运行时把手指合成鼠标点击供**控件层**用；**场景层**要自己再
   接 FingerDown/FingerUp 直发动作，否则 SDL 的触摸鼠标镜像关闭时手机上
   根本没法玩。两层都接，手感与桌面一致。
+- **Android 没声音 = AAudio 后端 + 链接行 + 库存根三处都要落**（实测）：
+  原生混音若只有 WASAPI（Windows），Android 侧 open 直接不开。定式：
+  ①音频运行时增 AAudio 后端（`__ANDROID_API__ >= 26` 全机可用，
+  AAudioStreamBuilder 回调驱动混音线程，与 WASAPI 同一套 voice 状态）；
+  ②APK 链接行补 `libaaudio.so`（NDK sysroot 系统存根）；③确认
+  toolchain 与 build 的 android 子集目录都有该存根。验证：
+  `adb logcat -d | grep -E "AAudio.*openStream"` 出
+  `returns 0 = AAUDIO_OK` + `requestStart returned 0` 即流已起。
+- **竖屏棋类布局定式（GuiHost 逻辑宽高决定转向 + 绘制/命中同源）**：
+  ①转向由壳驱动——壳按 GuiHost 舞台逻辑宽高比定横竖屏，模板只要按
+  竖屏传逻辑尺寸（如 720x1280）系统即转竖屏，别在模板层调平台 API；
+  ②`static bool Portrait() { return VW() < VH(); }` + 全部几何 getter
+  （棋盘原点/格距/按钮行/手牌 Y）在 Portrait 分支给竖屏值，**Draw 与
+  OnDown 共用同一批 getter**，命中永不漂移；③菜单竖屏单列居中、对局
+  顶部对手条+底部按钮行，照手机棋牌惯例。验证：`screencap` 后 PIL
+  按色扫描（按钮色 bbox 横向居中、棋子色 bbox 中心≈屏宽/2），再
+  2.5x 增亮整页截图肉眼确认。
 - 出包：`--publish --target android-arm64 --emit-apk` 一条命令；assets
   自动内嵌，加载路径保持"磁盘优先、内嵌兜底"。窗口要可自适应（横竖屏/
   任意尺寸），布局别写死像素。
@@ -139,3 +156,10 @@ description: Zan 上做 2D 游戏(templates/game/* 与 stdlib/Game)的帧循环�
 - 真机跑一遍真实交互。三个通道（仿真/截图/真机）**必须是同一条代码
   路径**——截图路径单独直调而主循环漏调，就会出"截图里有、游玩看不到"
   的分叉，且被兜底渲染长期掩盖。每加一个功能，先问：三条通道都走到它吗？
+- **深色主题截图别信"黑屏"直觉——PIL 带状统计定生死**：深色背景
+  （如 (9,8,10)）的截图 Read 出来一片黑，6x 增亮/gamma 0.45 也没用
+  （JPEG 近黑还是黑），`r+g+b>24` 阈值又被背景本身 defeats
+  （9+8+10=27 过阈）。有效方法：按水平带统计 max 亮像素坐标+最常见
+  颜色，或定向色扫描（主题绿 `g>r+20 and g>b+20 and g>60`、
+  红子 `r>140 and g<70 and b<70`）出 bbox 判居中/判内容；最后
+  2.5x 增亮整页缩图肉眼复核。
