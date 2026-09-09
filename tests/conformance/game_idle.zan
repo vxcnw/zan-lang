@@ -1,0 +1,53 @@
+using System;
+using Game.Idle;
+
+namespace Tests.GameIdle;
+
+class IdleDemo {
+    static string FlagText(bool b) {
+        if (b) { return "1"; }
+        return "0";
+    }
+
+    static void Main() {
+        // 大数格式化
+        Console.WriteLine(BigNum.Short(999));
+        Console.WriteLine(BigNum.Short(1234));
+        Console.WriteLine(BigNum.Short(5678000000));
+        Console.WriteLine(BigNum.Grouped(1234567890123));
+
+        // 成本曲线：base=100、每件 ×1.15，第 0/1/2 件
+        Console.WriteLine(Convert.ToString((int)Curves.CostNext(100, 1150, 0)));
+        Console.WriteLine(Convert.ToString((int)Curves.CostNext(100, 1150, 1)));
+        Console.WriteLine(Convert.ToString((int)Curves.CostNext(100, 1150, 2)));
+
+        // 资源账本：入账→消费→透支拒绝→cap 吸收→存档往返
+        Wallet w = new Wallet();
+        w.Define("gold", 1000000);
+        w.Add("gold", 700);
+        w.Add("gold", 400);
+        Console.WriteLine(Convert.ToString((int)w.Amount("gold")));
+        Console.WriteLine(FlagText(w.TrySpend("gold", 1200)));
+        Console.WriteLine(FlagText(w.TrySpend("gold", 1000)));
+        Console.WriteLine(Convert.ToString((int)w.Amount("gold")));
+        w.Add("gold", 999999999);
+        Console.WriteLine(Convert.ToString((int)w.Amount("gold")));
+        string sv = w.ToSaveText();
+        Wallet w2 = new Wallet();
+        w2.Define("gold", 2000000);
+        w2.LoadSaveText(sv);
+        Console.WriteLine(Convert.ToString((int)w2.Amount("gold")));
+
+        // 离线结算：30s 静默 / 2h 计费 / 封顶 24h / 时钟回拨安全
+        OfflineResult r1 = Offline.Settle(1000, 1030);
+        Console.WriteLine(Convert.ToString(r1.seconds));
+        Console.WriteLine(FlagText(r1.reportable));
+        OfflineResult r2 = Offline.Settle(1000, 1000 + 7200);
+        Console.WriteLine(Convert.ToString(r2.seconds));
+        Console.WriteLine(FlagText(r2.reportable));
+        OfflineResult r3 = Offline.Settle(1000, 1000 + 90000);
+        Console.WriteLine(Convert.ToString(r3.seconds));
+        OfflineResult r4 = Offline.Settle(2000, 1000);
+        Console.WriteLine(Convert.ToString(r4.seconds));
+    }
+}
