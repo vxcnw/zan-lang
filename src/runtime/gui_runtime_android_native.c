@@ -438,6 +438,11 @@ static void ant_cmd(struct android_app *app, int32_t cmd) {
         pthread_mutex_lock(&g_aq_lock);
         g_anw.destroy_wait = 0;
         pthread_mutex_unlock(&g_aq_lock);
+        /* Re-assert full-bleed window layout on every surface arrival: the
+         * first INIT_WINDOW runs before create_window's call (the Zan app
+         * thread may not have reached App.Show yet), and relaunch/rotation
+         * rebuilds reset the decor fit. */
+        ant_set_immersive();
         anw_attach(app->window);
         break;
     case APP_CMD_TERM_WINDOW:
@@ -795,7 +800,16 @@ static void ant_set_orientation(int landscape) {
  * HIDE_NAVIGATION | LAYOUT_STABLE | LAYOUT_HIDE_NAVIGATION |
  * LAYOUT_FULLSCREEN, value 0x1806). Sticky is re-applied by the framework
  * after each transient reveal, so one call at window creation covers the
- * app lifetime. */
+ * app lifetime.
+ *
+ * On Android 11+ (API 30) the legacy flags alone no longer stop the decor
+ * from fitting system windows: the first frame lands with the window
+ * inset by the cutout (frame=[136,0][2400,1080] on a 2400x1080 phone --
+ * the "右边还要留一截" strip after rotation) or the nav bar. Two calls
+ * close both: Window.setDecorFitsSystemWindows(false) (decor ignores all
+ * insets) and WindowManager.LayoutParams.layoutInDisplayCutoutMode =
+ * LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS (render into the notch). The API-30
+ * entry point is resolved dynamically so the same .a still loads on 8.0. */
 static void ant_set_immersive(void) {
     struct android_app *app = g_anw.app;
     if (!app || !app->activity || !app->activity->vm) return;
@@ -813,6 +827,31 @@ static void ant_set_immersive(void) {
     jobject win = (*env)->CallObjectMethod(env, act, getwin);
     if (!win) { (*env)->DeleteLocalRef(env, cls); return; }
     jclass wcls = (*env)->GetObjectClass(env, win);
+    /* API 30+: opt the decor out of system-window fitting. Missing below
+     * 30 -- guard on the method handle, not the SDK int. */
+    jmethodID setfits = (*env)->GetMethodID(env, wcls,
+        "setDecorFitsSystemWindows", "(Z)V");
+    if (setfits) (*env)->CallVoidMethod(env, win, setfits, JNI_FALSE);
+    /* All API levels this runtime ships on: draw under the camera notch
+     * (default mode carves it out, shifting the whole stage sideways). */
+    jmethodID getattrs = (*env)->GetMethodID(env, wcls, "getAttributes",
+        "()Landroid/view/WindowManager$LayoutParams;");
+    if (getattrs) {
+        jobject lp = (*env)->CallObjectMethod(env, win, getattrs);
+        if (lp) {
+            jclass lcls = (*env)->GetObjectClass(env, lp);
+            jfieldID fmode = (*env)->GetStaticFieldID(env, lcls,
+                "LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS", "I");
+            if (fmode) {
+                jint mode = (*env)->GetStaticIntField(env, lcls, fmode);
+                jfieldID flp = (*env)->GetFieldID(env, lcls,
+                    "layoutInDisplayCutoutMode", "I");
+                if (flp) (*env)->SetIntField(env, lp, flp, mode);
+            }
+            (*env)->DeleteLocalRef(env, lcls);
+            (*env)->DeleteLocalRef(env, lp);
+        }
+    }
     jmethodID getdecor = (*env)->GetMethodID(env, wcls, "getDecorView",
                                              "()Landroid/view/View;");
     if (!getdecor) {

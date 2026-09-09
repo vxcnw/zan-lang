@@ -164,6 +164,25 @@ Post 调用核对编码，别信二手注释。
   而物理留在旧锚；修法=物理全部锚定每帧刷新的 Data.HOOK_X/HOOK_Y
   单源，Render 只读不写物理。桌面 1200x800 与安卓竖屏 1080x2400 双
   端数值扫描验证（绳像素跨伸→收变化、灯=44 恒定）。
+- **"右边留一截"两类根因（2400x1080 模拟器实测）**：①壳窗口几何——
+  只靠 decor `setSystemUiVisibility(0x1806)` 在 API 30+ 拦不住
+  decor fit system windows，窗口 frame=[136,0][2400,1080]（刘海
+  cutout 内缩）→ 左/右空条。修法=JNI 动态解析（Android 8 也能加载
+  同一个 .a）：`Window.setDecorFitsSystemWindows(false)` +
+  `layoutInDisplayCutoutMode=ALWAYS`，且**每次 APP_CMD_INIT_WINDOW
+  都重新断言**（首次 INIT_WINDOW 早于 create_window，转屏/后台往返
+  也会重建窗口）。②模板画死 1280×720——StageViewport 把逻辑舞台
+  延展到 1600×720，模板仍只画 1280 宽，剩余 320 逻辑宽（480 设备
+  px）落 marginColor 空条（(24,24,28) 带就是它）。修法=定式
+  `SyncStage`：VW()/VH() 静态属性返回帧首同步的 stage 尺寸
+  （`vw>0?vw:1280` 兜底设计值），IGuiHostLoop.Render 开头
+  `g.SyncStage(host)` 把 `host.StageWidth()/StageHeight()` 写入。
+  验证=装包后 `dumpsys window` 查 frame=[0,0][2400,1080] +
+  截图 PIL 左右 8px 边带颜色普查（出现 (0,0,0) 黑带=根因①、
+  (24,24,28) margin 带=根因②），menu+对局各截一张。
+- **注意 GUI 目录下有同名 SKILL.md 时以项目级为准**——
+  zan-lang 仓库内的 game-dev/app-migration/gui-design 会覆盖
+  用户目录版本，改前先确认动的是哪份。
 - **APK 启动即崩 `UnsatisfiedLinkError: cannot locate symbol
   "zan_audio_load_wav"`**：gui_runtime.c 单 TU 末尾 `#include
   "zan_audio.c"`，其 WASAPI 静态量（`zan_audio_dev_freq` 等）收在

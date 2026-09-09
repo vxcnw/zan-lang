@@ -109,8 +109,19 @@ class XqGame {
     static int Cell() { return 58; }
     static int BX() { return 130; }
     static int BY() { return 78; }
-    static int VW() { return 1280; }
-    static int VH() { return 720; }
+    // 视口按宿主舞台每帧延展（宽窗多看宽度）：VW/VH 是当前帧的舞台
+    // 逻辑尺寸，帧首在 SyncStage 更新——布局锚定它即可满铺任意窗口，
+    // 否则长轴超出的部分就是宿主 margin 底色的空条。
+    static int VW() { return vw > 0 ? vw : 1280; }
+    static int VH() { return vh > 0 ? vh : 720; }
+
+    // 帧首对齐宿主延展舞台（GuiHost.Render 回调开头调用）。
+    void SyncStage(GuiHost host) {
+        XqGame.vw = host.StageWidth();
+        XqGame.vh = host.StageHeight();
+    }
+    static int vw;
+    static int vh;
 
     static XqGame Create(GuiHost h) {
         XqGame g = new XqGame();
@@ -984,7 +995,9 @@ class XqLoop : IGuiHostLoop {
         // 旧表面,永不 present。每帧对齐到宿主传入的当前画布。
         this.g.c = c;
         // 舞台 0 基绘制：原点落到标准标题栏之下，chrome 由宿主在
-        // 内容之上叠画。
+        // 内容之上叠画。帧首先把宿主延展后的舞台尺寸同步进 VW/VH，
+        // 布局才能铺满整窗（宽窗多看宽度，不落 margin 空条）。
+        this.g.SyncStage(host);
         CDraw.Origin(0, host.ContentTop());
         this.g.Render(Window.GetTickMs());
     }

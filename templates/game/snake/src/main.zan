@@ -269,11 +269,22 @@ class SnGame {
     bool demo;
 
     // world (torus) and view sizes, px — a 5x5-screen arena so the endless
-    // canvas actually feels endless instead of wrapping within one screen
+    // canvas actually feels endless instead of wrapping within one screen.
+    // 视口按宿主舞台每帧延展（宽窗多看宽度）：VW/VH 是当前帧的舞台
+    // 逻辑尺寸，帧首在 SyncStage 更新——布局锚定它即可满铺任意窗口，
+    // 否则长轴超出的部分就是宿主 margin 底色的空条。
     static int WW() { return 6400; }
     static int WH() { return 3600; }
-    static int VW() { return 1280; }
-    static int VH() { return 720; }
+    static int VW() { return vw > 0 ? vw : 1280; }
+    static int VH() { return vh > 0 ? vh : 720; }
+
+    // 帧首对齐宿主延展舞台（GuiHost.Render 回调开头调用）。
+    void SyncStage(GuiHost host) {
+        SnGame.vw = host.StageWidth();
+        SnGame.vh = host.StageHeight();
+    }
+    static int vw;
+    static int vh;
 
     // shortest signed delta on the torus axis of period m
     static int WrapD(int d, int m) {
@@ -971,8 +982,8 @@ class SnGame {
 
     void DrawMenu(int now) {
         this.EnsureTex();
-        CKitUi.Backdrop(this.c, this.menuBgPath, 1280, 720);
-        CDraw.FillRect(this.c, 0, 0, 1280, 720, CDraw.Argb(130, 8, 10, 22));
+        CKitUi.Backdrop(this.c, this.menuBgPath, SnGame.VW(), SnGame.VH());
+        CDraw.FillRect(this.c, 0, 0, SnGame.VW(), SnGame.VH(), CDraw.Argb(130, 8, 10, 22));
         if (this.titlePath != null) {
             CDraw.BlitImage(this.c, this.titlePath, 640 - 300, 40, 600, 200);
         } else {
@@ -986,7 +997,7 @@ class SnGame {
 
     void DrawOver(int now) {
         this.DrawScene(now);
-        CDraw.FillRect(this.c, 0, 0, 1280, 720, CDraw.Argb(185, 6, 8, 18));
+        CDraw.FillRect(this.c, 0, 0, SnGame.VW(), SnGame.VH(), CDraw.Argb(185, 6, 8, 18));
         int by = 190;
         CDraw.RoundRectFill(this.c, 390, by, 500, 320, 20, 16, 20, 40, 240);
         CDraw.RingRect(this.c, 390, by, 500, 320, 2, 190, 120, 255, 120);
@@ -1089,7 +1100,9 @@ class SnLoop : IGuiHostLoop {
         // 旧表面,永不 present。每帧对齐到宿主传入的当前画布。
         this.g.c = c;
         // 舞台 0 基绘制：原点落到标准标题栏之下，chrome 由宿主在
-        // 内容之上叠画。
+        // 内容之上叠画。帧首先把宿主延展后的舞台尺寸同步进 VW/VH，
+        // 布局才能铺满整窗（宽窗多看宽度，不落 margin 空条）。
+        this.g.SyncStage(host);
         CDraw.Origin(0, host.ContentTop());
         CDraw.Clear(c, SnGame.VW(), SnGame.VH(), CDraw.Argb(255, 10, 13, 26));
         this.g.Render(Window.GetTickMs());

@@ -140,9 +140,20 @@ class BkGame {
     bool demo;
     int demoJitter;
 
-    static int W() { return 1280; }
-    static int H() { return 720; }
+    // 视口按宿主舞台每帧延展（宽窗多看宽度）：W/H 是当前帧的舞台逻辑
+    // 尺寸，帧首在 SyncStage 更新——布局锚定它即可满铺任意窗口，否则
+    // 长轴超出的部分就是宿主 margin 底色的空条。
+    static int W() { return bw > 0 ? bw : 1280; }
+    static int H() { return bh > 0 ? bh : 720; }
     static int PadY() { return 660; }
+
+    // 帧首对齐宿主延展舞台（GuiHost.Render 回调开头调用）。
+    void SyncStage(GuiHost host) {
+        BkGame.bw = host.StageWidth();
+        BkGame.bh = host.StageHeight();
+    }
+    static int bw;
+    static int bh;
 
     static int PalR(int i) { int m = i % 6; if (m == 0) { return 255; } if (m == 1) { return 255; } if (m == 2) { return 120; } if (m == 3) { return 90; } if (m == 4) { return 190; } return 255; }
     static int PalG(int i) { int m = i % 6; if (m == 0) { return 110; } if (m == 1) { return 205; } if (m == 2) { return 235; } if (m == 3) { return 160; } if (m == 4) { return 120; } return 235; }
@@ -875,7 +886,9 @@ class BkLoop : IGuiHostLoop {
         // 旧表面,永不 present。每帧对齐到宿主传入的当前画布。
         this.g.c = c;
         // 舞台 0 基绘制：原点落到标准标题栏之下，chrome 由宿主在
-        // 内容之上叠画。
+        // 内容之上叠画。帧首先把宿主延展后的舞台尺寸同步进 W/H，
+        // 布局才能铺满整窗（宽窗多看宽度，不落 margin 空条）。
+        this.g.SyncStage(host);
         CDraw.Origin(0, host.ContentTop());
         this.g.Render(Window.GetTickMs());
     }
