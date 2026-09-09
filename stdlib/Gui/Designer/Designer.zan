@@ -1042,6 +1042,8 @@ partial class Designer {
     }
 
     /// 撤销：当前设计压入重做栈，载入撤销栈顶；栈空时仅提示。
+    /// 恢复快照必须走 ApplyJson——LoadJson 会清空两个历史栈，
+    /// 一步撤销之后整个历史就没了。
     void Undo() {
         if (undoStack.Count == 0) {
             msg = Designer.T("nothing to undo", "没有可撤销的操作");
@@ -1050,7 +1052,8 @@ partial class Designer {
         redoStack.Add(this.SaveJson());
         string j = undoStack[undoStack.Count - 1];
         undoStack.RemoveAt(undoStack.Count - 1);
-        this.LoadJson(j);
+        this.ApplyJson(j);
+        this.SyncFreeSelBase();
         msg = Designer.T("undone", "已撤销");
     }
 
@@ -1063,7 +1066,8 @@ partial class Designer {
         undoStack.Add(this.SaveJson());
         string j = redoStack[redoStack.Count - 1];
         redoStack.RemoveAt(redoStack.Count - 1);
-        this.LoadJson(j);
+        this.ApplyJson(j);
+        this.SyncFreeSelBase();
         msg = Designer.T("redone", "已重做");
     }
 

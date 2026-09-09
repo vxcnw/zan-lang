@@ -55,6 +55,35 @@ description: Zan 窗口设计器用户组件（components/*.zcomp）的全链路
   `app.Field1`）；role:window 生成 **static** 字段，实例访问直接编译
   错（`'Job1' is a static field... qualify with the type name`）。
   无头测试一律用 role:control；入口文档必须是 window 才能用 window。
+
+## 画布交互（拖动/嵌套/撤销）的定式（2026-09-09 交互面修复实证）
+
+- **Undo/Redo 恢复快照必须走 `ApplyJson`，绝不能走 `LoadJson`**：
+  LoadJson 尾部会 `ResetHistoryLocked()` 清空两个历史栈（那是给
+  "打开新文档"用的）——Undo 里调它，Ctrl+Z 只能退一步、Ctrl+Y
+  永远落空（探针实证：三次 Add 后第二次 Undo 直接"没有可撤销的
+  操作"）。快照恢复和文档装入是两个语义，入口必须分开。
+- **自由画布子级 fx/fy 是「父内容框相对」坐标，不是画布绝对**：
+  渲染/命中都按 `父链原点 + KidInsetX/Y`（自由模式 0，Tabs 6/26，
+  流式 6/26）累加。任何"选中项变了"的路径（框选、撤销、换父、
+  代码置 sel）之后都必须 `SyncFreeSelBase()` 重算拖拽基
+  freeSelPX/PY——基过去只在 FreePick 直接命中时顺带写入，框选
+  一个嵌套子级再拖，组件按画布原点算位置直接"瞬移"出容器。
+- **FreePick 的副作用会写 freeSelPX/PY**：同帧里先做光标探测
+  （落点高亮 FreeDropContainer）再读基，读到的是被探测改写过的
+  值。拖拽/缩放移动块里必须每帧 `AbsOriginX/Y(sel)` 按父链现算，
+  不信字段。
+- **自由画布换父 = `FreeReparentSel(cont)`**：摘除→设 childTab
+  （Tabs/SplitPanel 进正在看的页）→挂入→fx/fy 按
+  `AbsOrigin(旧) - ContOrigin(新)` 换算保持视觉位置不动（换算
+  在函数内部自算，不依赖调用方先跑 FreeDropContainer）。
+  InSubtree(sel, cont) 拒绝拖进自己的子树。悬停高亮用
+  DrawFreeDropHi 画容器描边预告落点。
+- **多选（Ctrl）允许容器+子级同选**：移动时子级若其祖先也在
+  选区（sel 或 freeExtra）里必须跳过——两组各加一次增量会把
+  子级移两次。框选路径用 HasAncestorIn 预先去重，Ctrl 点选路径
+  只能在移动时兜底。
+
 - 引用展开后内部控件不生成具名声明（匿名），运行期只能
   `shell.Find("壳名_内部名")` 触达。Label 的 text 属性 syncName：
   SetDesignText 会把控件改名为标题，Find 要用 caption 而不是设计名。

@@ -912,6 +912,124 @@ partial class Designer {
         return null;
     }
 
+    /// `f` 的父内容框在设计空间的绝对原点：自由画布子级的 fx/fy
+    /// 是父相对坐标，拖拽基必须能按父链随时重算——框选、撤销、
+    /// 换父之后 freeSelPX/freeSelPY 里存的旧值都可能是错的。
+    int AbsOriginX(FormField f) {
+        int x = 0;
+        FormField cur = f;
+        FormField p = ParentContainerOf(cur);
+        while (p != null) {
+            x = x + p.LayoutX() + this.KidInsetX(p);
+            cur = p;
+            p = ParentContainerOf(cur);
+        }
+        return x;
+    }
+
+    int AbsOriginY(FormField f) {
+        int y = 0;
+        FormField cur = f;
+        FormField p = ParentContainerOf(cur);
+        while (p != null) {
+            y = y + p.LayoutY() + this.KidInsetY(p);
+            cur = p;
+            p = ParentContainerOf(cur);
+        }
+        return y;
+    }
+
+    /// 按当前 sel 重算拖拽基（父内容框原点）。基过去只在
+    /// FreePick 直接命中时顺带写入——框选、撤销或代码置选中之后
+    /// 基还是旧值，嵌套子级一拖就按画布原点算，组件“瞬移”出容器。
+    void SyncFreeSelBase() {
+        if (sel == null) { freeSelPX = 0; freeSelPY = 0; return; }
+        freeSelPX = this.AbsOriginX(sel);
+        freeSelPY = this.AbsOriginY(sel);
+    }
+
+    /// `anc` 是否是 `f` 的严格祖先容器。
+    bool IsAncestorOf(FormField anc, FormField f) {
+        FormField p = ParentContainerOf(f);
+        while (p != null) {
+            if (p == anc) { return true; }
+            p = ParentContainerOf(p);
+        }
+        return false;
+    }
+
+    /// `cont` 的内容框在设计空间的绝对原点——它的子级 fx/fy 的
+    /// 参考基（cont == null 不适用，调用方自取 0）。
+    int ContOriginX(FormField cont) {
+        int x = 0;
+        FormField cur = cont;
+        while (cur != null) {
+            x = x + cur.LayoutX() + this.KidInsetX(cur);
+            cur = ParentContainerOf(cur);
+        }
+        return x;
+    }
+
+    int ContOriginY(FormField cont) {
+        int y = 0;
+        FormField cur = cont;
+        while (cur != null) {
+            y = y + cur.LayoutY() + this.KidInsetY(cur);
+            cur = ParentContainerOf(cur);
+        }
+        return y;
+    }
+
+    /// 自由画布拖拽收尾：把选中组件换父到 `cont`（null = 顶层），
+    /// 拖进/拖出容器在松手这一刻生效。fx/fy 按新旧父内容框基
+    /// 换算，组件的视觉位置不动；落进 Tabs/SplitPanel 时进正在
+    /// 看的那页，与流式 DropField 同约定。
+    void FreeReparentSel(FormField cont) {
+        if (sel == null) { return; }
+        FormField pc = ParentContainerOf(sel);
+        if (cont == pc) { return; }
+        if (cont == sel || this.InSubtree(sel, cont)) { return; }
+        int absX = this.AbsOriginX(sel) + sel.fx;
+        int absY = this.AbsOriginY(sel) + sel.fy;
+        if (pc == null) { fields = ListRemove(fields, sel); }
+        else { pc.kids = ListRemove(pc.kids, sel); }
+        sel.childTab = 0;
+        int nbx = 0;
+        int nby = 0;
+        if (cont != null) {
+            if (cont.kind == "Tabs") { sel.childTab = Designer.TabActivePage(cont); }
+            else if (cont.kind == "SplitPanel") { sel.childTab = cont.uiState.Get(); }
+            cont.kids.Add(sel);
+            nbx = this.ContOriginX(cont);
+            nby = this.ContOriginY(cont);
+        } else {
+            fields.Add(sel);
+        }
+        sel.fx = absX - nbx;
+        sel.fy = absY - nby;
+        if (sel.fx < 0) { sel.fx = 0; }
+        if (sel.fy < 0) { sel.fy = 0; }
+        activeContainer = cont;
+        this.SyncFreeSelBase();
+        if (cont != null) {
+            msg = Designer.T("moved into ", "已移入 ") + FormField.TypeName(cont.ftype);
+        } else {
+            msg = Designer.T("moved to canvas", "已移回画布");
+        }
+    }
+
+    /// 自由画布拖拽落点预告：给容器 `hi`（FreeDropContainer 解析
+    /// 的结果，null = 无）画描边，提示松手会放进哪个容器。
+    void DrawFreeDropHi(App app, Canvas c, int ox, int oy, int psMilli,
+            FormField hi) {
+        if (hi == null) { return; }
+        int ax = this.AbsOriginX(hi) + hi.LayoutX();
+        int ay = this.AbsOriginY(hi) + hi.LayoutY();
+        c.DrawRect(ox + ax * psMilli / 1000 - 2, oy + ay * psMilli / 1000 - 2,
+            hi.LayoutW() * psMilli / 1000 + 4, hi.LayoutH() * psMilli / 1000 + 4,
+            Style.Part(app, "designer", "accent", "", "", "", Style.SNormal()).BgOr(0), 2);
+    }
+
     /// 框选收集：递归收集与设计空间矩形相交的可见组件（含容器
     /// 内的子组件）。px/py 为父链累计原点；Tabs 只看当前显示的
     /// 标签页——看不见的页里的组件也框不中，与点选一致。
@@ -1242,13 +1360,34 @@ partial class Designer {
         c.PopClip();
 
         // 放置目标：自由布局落在光标处；流式布局解析插入位置
-        // 或指针下的容器，并画出插入线。
+        // 或指针下的容器，并画出插入线。自由画布拖拽（面板拖入或
+        // 画布内拖动）给光标下的容器描边预告落点；画布内拖动松手
+        // 即换父——组件从此可以拖进/拖出容器，坐标自动换算。
         if (free) {
             if (dragging && dragFromPalette && ek == 3
                     && InRect(app.mouseX, app.mouseY, ox, oy, cw2, ch2)) {
                 int mDesX = (app.mouseX - ox) * 1000 / psMilli;
                 int mDesY = (app.mouseY - oy) * 1000 / psMilli;
                 DropFreePalette(mDesX, mDesY);
+            } else if (dragging && dragFromPalette) {
+                int mDesX = (app.mouseX - ox) * 1000 / psMilli;
+                int mDesY = (app.mouseY - oy) * 1000 / psMilli;
+                this.DrawFreeDropHi(app, c, ox, oy, psMilli,
+                    this.FreeDropContainer(mDesX, mDesY));
+            } else if (freeDragging && sel != null) {
+                int mDesX = (app.mouseX - ox) * 1000 / psMilli;
+                int mDesY = (app.mouseY - oy) * 1000 / psMilli;
+                FormField cont = this.FreeDropContainer(mDesX, mDesY);
+                if (cont == sel || this.InSubtree(sel, cont)) { cont = null; }
+                this.DrawFreeDropHi(app, c, ox, oy, psMilli, cont);
+                if (ek == 3) {
+                    // 只在画布内松手才换父：拖到画布外（工具条/检查器
+                    // 上）松手不算拖出，免得组件被意外拽成顶层。
+                    if (InRect(app.mouseX, app.mouseY, ox, oy, cw2, ch2)) {
+                        this.FreeReparentSel(cont);
+                    }
+                    app.RequestRedraw();
+                }
             }
         } else if (dragging && (dragFromPalette || dragMoved)
                 && InRect(app.mouseX, app.mouseY, inX, inY, inW, inH)) {
@@ -1275,6 +1414,9 @@ partial class Designer {
         if (!freeHand && !dragging && ek == 2 && app.window.EventButton() == 0
                 && InRect(app.mouseX, app.mouseY, inX, inY, inW, inH)) {
             bool started = false;
+            // 拖拽基先对齐当前选中项：框选/撤销/换父之后存的旧基
+            // 会让手柄命中测试与随后的拖拽全部错位。
+            if (free) { this.SyncFreeSelBase(); }
             TabHeaderHit th = this.PickTabHeader(app.mouseX, app.mouseY);
             if (th != null) {
                 // 点页签就是翻页：顺带把这个 Tabs 设为活动容器，
@@ -1387,6 +1529,10 @@ partial class Designer {
             int mDesY = (app.mouseY - oy) * 1000 / psMilli;
             int newLeft = mDesX - freeDragDx;
             int newTop = mDesY - freeDragDy;
+            // 拖拽基每帧按当前父链重算：上面同帧的落点高亮探测会
+            // 顺带改写 freeSelPX，不能直接信字段里的旧值。
+            int baseX = this.AbsOriginX(sel);
+            int baseY = this.AbsOriginY(sel);
             if (snapGrid && gridSize > 0) {
                 newLeft = (newLeft + gridSize / 2) / gridSize * gridSize;
                 newTop = (newTop + gridSize / 2) / gridSize * gridSize;
@@ -1399,14 +1545,10 @@ partial class Designer {
                 // 父框的边/中线——「贴父容器边」和「贴兄弟边」都成立。
                 FormField pc = ParentContainerOf(sel);
                 List<FormField> sibs = fields;
-                int baseX = 0;
-                int baseY = 0;
                 int spanW = dw;
                 int spanH = dh;
                 if (pc != null) {
                     sibs = pc.kids;
-                    baseX = freeSelPX;
-                    baseY = freeSelPY;
                     spanW = pc.LayoutW();
                     spanH = pc.LayoutH();
                 }
@@ -1422,15 +1564,22 @@ partial class Designer {
                 newTop = ry[0] + baseY;
                 if (ry[1] >= 0) { this.freeGuideY = ry[1] + baseY; }
             }
-            int mvdx = (newLeft - freeSelPX) - sel.LayoutX();
-            int mvdy = (newTop - freeSelPY) - sel.LayoutY();
-            sel.fx = newLeft - freeSelPX;
-            sel.fy = newTop - freeSelPY;
+            int mvdx = (newLeft - baseX) - sel.LayoutX();
+            int mvdy = (newTop - baseY) - sel.LayoutY();
+            // 祖先也在多选里时（Ctrl 允许容器+子级同选）子级只随
+            // 祖先走：两组各加一次增量会把子级移两次。
+            bool selRides = this.HasAncestorIn(sel, freeExtra);
+            if (!selRides) {
+                sel.fx = newLeft - baseX;
+                sel.fy = newTop - baseY;
+            }
             // 多选：其余成员按相同增量跟随。
             if (mvdx != 0 || mvdy != 0) {
                 for (int me = 0; me < freeExtra.Count; me = me + 1) {
                     FormField ef = freeExtra[me];
                     if (ef == null || ef.locked) { continue; }
+                    if (ef == sel || this.IsAncestorOf(sel, ef)
+                            || this.HasAncestorIn(ef, freeExtra)) { continue; }
                     ef.fx = ef.LayoutX() + mvdx;
                     ef.fy = ef.LayoutY() + mvdy;
                     if (ef.fx < 0) { ef.fx = 0; }
@@ -1444,12 +1593,15 @@ partial class Designer {
         if (freeResizing && free && ek == 1 && sel != null) {
             int mDesX = (app.mouseX - ox) * 1000 / psMilli;
             int mDesY = (app.mouseY - oy) * 1000 / psMilli;
+            // 基按当前父链重算（理由同拖拽：同帧的探测会改写它）。
+            int rsBaseX = this.AbsOriginX(sel);
+            int rsBaseY = this.AbsOriginY(sel);
             if (snapGrid && gridSize > 0) {
                 mDesX = (mDesX + gridSize / 2) / gridSize * gridSize;
                 mDesY = (mDesY + gridSize / 2) / gridSize * gridSize;
             }
-            int oldL = freeSelPX + sel.LayoutX();
-            int oldT = freeSelPY + sel.LayoutY();
+            int oldL = rsBaseX + sel.LayoutX();
+            int oldT = rsBaseY + sel.LayoutY();
             int oldR = oldL + sel.LayoutW();
             int oldB = oldT + sel.LayoutH();
             int newL = oldL;
@@ -1479,8 +1631,8 @@ partial class Designer {
                 int spanH = dh;
                 if (pc != null) {
                     sibs = pc.kids;
-                    baseX = freeSelPX;
-                    baseY = freeSelPY;
+                    baseX = rsBaseX;
+                    baseY = rsBaseY;
                     spanW = pc.LayoutW();
                     spanH = pc.LayoutH();
                 }
@@ -1514,8 +1666,8 @@ partial class Designer {
                     if (newB - newT < 8) { newB = newT + 8; }
                 }
             }
-            sel.fx = newL - freeSelPX;
-            sel.fy = newT - freeSelPY;
+            sel.fx = newL - rsBaseX;
+            sel.fy = newT - rsBaseY;
             sel.fw = newR - newL;
             sel.fh = newB - newT;
             app.RequestRedraw();
@@ -1546,6 +1698,9 @@ partial class Designer {
                     if (this.HasAncestorIn(got[gi], got)) { continue; }
                     if (sel == null) { sel = got[gi]; } else { freeExtra.Add(got[gi]); }
                 }
+                // 框选也改变选中项：基必须跟着重算，否则框选中的
+                // 嵌套子级一拖就按旧基（通常是画布原点）瞬移。
+                this.SyncFreeSelBase();
                 freeMarquee = false;
                 if (sel != null) {
                     msg = Designer.T("selected ", "已选中 ")
