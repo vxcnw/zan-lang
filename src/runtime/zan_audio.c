@@ -671,24 +671,24 @@ thread_fail:
  * Mixer (Android/AAudio). The AAudio callback thread is the mixer:
  * it holds zan_audio_mutex for the whole fill, so table edits from
  * the game thread (play/stop/free) serialize against it the same way
- * the WASAPI critical section did. Accumulator + clamp logic is the
- * shared zan_audio_mix_s16 core; AAudio wants float output, so
- * convert at the end.
+ * the WASAPI critical section did. The stream is opened as s16 (the
+ * one output format every OEM HAL takes; float paths on some devices
+ * come out as heavy noise), so the mix lands in the stream buffer
+ * directly with no conversion pass after it.
  * =================================================================== */
 
 #ifdef __ANDROID__
 
-static void zan_audio_mix_s16(unsigned char *dst, int frames) {
+static void zan_audio_mix_s16(unsigned char *dst, int frames, int devch) {
     /* 4096 frames * 8 channels * 4 bytes = 128 KiB static accumulator;
      * the audio callback thread is the only user. */
     static float acc[ZAN_AUDIO_MAX_FILL * ZAN_AUDIO_MAX_CHANNELS];
     int f, ch, i;
-    int devch = zan_audio_dev_channels;
     int total;
     short *d;
 
     if (frames > ZAN_AUDIO_MAX_FILL) frames = ZAN_AUDIO_MAX_FILL;
-    if (devch < 1) devch = 2;
+    if (devch < 1 || devch > ZAN_AUDIO_MAX_CHANNELS) devch = 2;
     total = (int)frames * devch;
     memset(acc, 0, sizeof(float) * (size_t)total);
 
@@ -734,45 +734,43 @@ static void zan_audio_mix_s16(unsigned char *dst, int frames) {
         if (!v->loop && cur >= (double)nf) zan_voice_reset(v);
     }
 
-    /* Accumulator -> s16 with a hard clamp at full scale. */
+    /* Accumulator -> s16. A soft knee (tanh over the top 6 dB) instead
+     * of a hard clamp: stacked one-shots that sum past full scale come
+     * out as loud-but-clean instead of square-wave clipping, which is
+     * the "heavy static" heard when several 0.5-0.8 gain voices
+     * overlap. */
     d = (short *)dst;
     for (i = 0; i < total; i++) {
         float s = acc[i];
-        if (s > 1.0f) s = 1.0f;
-        if (s < -1.0f) s = -1.0f;
+        if (s > 0.5f) {
+            s = 0.5f + 0.5f * tanhf((s - 0.5f) * 2.0f);
+        } else if (s < -0.5f) {
+            s = -0.5f - 0.5f * tanhf((-s - 0.5f) * 2.0f);
+        }
         d[i] = (short)(int)(s * 32767.0f);
     }
 }
 
-/* AAudio callback thread: convert to float output (the shared-mode
- * contract) and hand the frames over. */
+/* AAudio callback thread: the stream was opened as s16 (see open), so
+ * the mixed s16 frames go straight into the stream buffer. The device
+ * format is read under the mutex alongside the mix, so an open/close
+ * racing the callback can never hand it a half-updated format. */
 static aaudio_data_callback_result_t zan_audio_aa_callback(
         AAudioStream *stream, void *userData, void *audioData,
         int32_t numFrames) {
-    /* 4096 frames * 8 channels * 2 bytes = 64 KiB static scratch; the
-     * callback thread is the only user. */
-    static short s16buf[ZAN_AUDIO_MAX_FILL * ZAN_AUDIO_MAX_CHANNELS];
-    float *out = (float *)audioData;
-    short *in;
-    int total, i;
     (void)stream; (void)userData;
     if (numFrames <= 0) return AAUDIO_CALLBACK_RESULT_CONTINUE;
     if (numFrames > ZAN_AUDIO_MAX_FILL) numFrames = ZAN_AUDIO_MAX_FILL;
     pthread_mutex_lock(&zan_audio_mutex);
-    if (!zan_audio_ready) {
+    if (!zan_audio_ready || zan_audio_stream != stream) {
         pthread_mutex_unlock(&zan_audio_mutex);
-        memset(audioData, 0, (size_t)numFrames * zan_audio_dev_channels
-                              * sizeof(float));
+        memset(audioData, 0,
+               (size_t)numFrames * 2 * sizeof(short));
         return AAUDIO_CALLBACK_RESULT_CONTINUE;
     }
-    zan_audio_mix_s16((unsigned char *)s16buf, numFrames);
+    zan_audio_mix_s16((unsigned char *)audioData, numFrames,
+                      zan_audio_dev_channels);
     pthread_mutex_unlock(&zan_audio_mutex);
-    total = (int)numFrames * (zan_audio_dev_channels > 0
-                              ? zan_audio_dev_channels : 2);
-    in = s16buf;
-    for (i = 0; i < total; i++) {
-        out[i] = (float)in[i] / 32768.0f;
-    }
     return AAUDIO_CALLBACK_RESULT_CONTINUE;
 }
 
@@ -791,9 +789,16 @@ static AAudioStream *zan_audio_aa_open_stream(void) {
     }
     AAudioStreamBuilder_setDirection(b, AAUDIO_DIRECTION_OUTPUT);
     AAudioStreamBuilder_setSharingMode(b, AAUDIO_SHARING_MODE_SHARED);
-    AAudioStreamBuilder_setFormat(b, AAUDIO_FORMAT_PCM_FLOAT);
-    /* Leave rate/channels unset: the builder picks the platform
-     * defaults (48k stereo) and reports them on the opened stream. */
+    /* s16 output, rate and channel count pinned: s16 is the one format
+     * every OEM HAL accepts (the float path misrenders to heavy noise
+     * on several devices), and leaving rate/channels unset lets the
+     * builder hand back anything the platform fancies -- play() divides
+     * clip rates by the reported rate, so a surprise value resamples
+     * every clip to the wrong pitch. 48000 stereo is the universal
+     * Android output shape. */
+    AAudioStreamBuilder_setFormat(b, AAUDIO_FORMAT_PCM_I16);
+    AAudioStreamBuilder_setSampleRate(b, 48000);
+    AAudioStreamBuilder_setChannelCount(b, 2);
     AAudioStreamBuilder_setPerformanceMode(b,
                                            AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
     AAudioStreamBuilder_setDataCallback(b, zan_audio_aa_callback, NULL);
