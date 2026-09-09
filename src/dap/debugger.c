@@ -981,6 +981,10 @@ void dbg_refresh_callstack(debugger_t *dbg) {
 
 void dbg_refresh_locals(debugger_t *dbg) {
     dbg->local_count = 0;
+    /* varobjs from the previous stop point at a dead frame: recreate */
+    dbg->var_gen++;
+    memset(dbg->var_created, 0, sizeof(dbg->var_created));
+    dbg->var_ref_count = 0;
     if (!mi_active(dbg) || dbg->state != DBG_PAUSED) return;
 
     char sel[64], tmp[512];
@@ -1015,11 +1019,187 @@ void dbg_refresh_locals(debugger_t *dbg) {
         snprintf(v->type, sizeof(v->type), "%s", ty);
         snprintf(v->value, sizeof(v->value), "%s", val);
         v->scope = 0;
-        v->has_children = false;
+        v->has_children = dbg_type_expandable(ty);
         dbg->local_count++;
         if (dbg->local_count >= DBG_MAX_LOCALS) break;
         p = end;
     }
+}
+
+/* ---- variable expansion (五期: DWARF-backed field expansion) ----
+ *
+ * gdb only knows Zan object shapes since irgen started emitting DWARF
+ * structure types for class payloads, the intrinsic collections and
+ * arrays; locals of those types are expandable through gdb varobjs now. */
+
+/* A type is worth expanding when gdb reports a struct (or a pointer to one);
+ * plain byte/string pointers print their text already and have no fields. */
+bool dbg_type_expandable(const char *ty) {
+    if (!ty || !ty[0]) return false;
+    bool strct = strncmp(ty, "struct ", 7) == 0;
+    size_t n = strlen(ty);
+    bool ptr = n > 0 && ty[n - 1] == '*';
+    if (!strct && !ptr) return false;
+    if (strcmp(ty, "byte *") == 0 || strcmp(ty, "char *") == 0 ||
+        strcmp(ty, "unsigned char *") == 0)
+        return false;
+    if (strstr(ty, "char *") != NULL) return false;
+    return true;
+}
+
+/* Extract the next balanced `child={...}` record from an MI
+ * -var-list-children reply, honoring quotes so string values with braces
+ * survive. Returns the cursor for the next call, NULL at the end. */
+static const char *mi_next_child(const char *p, char *out, int cap) {
+    const char *c = p;
+    while ((c = strstr(c, "child={")) != NULL) {
+        const char *body = c + 6; /* at '{' */
+        int depth = 0;
+        bool in_str = false;
+        const char *q = body;
+        while (*q) {
+            if (in_str) {
+                if (*q == '\\') q++;
+                else if (*q == '"') in_str = false;
+            } else if (*q == '"') {
+                in_str = true;
+            } else if (*q == '{') {
+                depth++;
+            } else if (*q == '}') {
+                depth--;
+                if (depth == 0) break;
+            }
+            q++;
+        }
+        if (depth != 0) return NULL; /* truncated record */
+        int bl = (int)(q - body - 1);
+        if (bl > cap - 1) bl = cap - 1;
+        memcpy(out, body + 1, (size_t)bl);
+        out[bl] = '\0';
+        return q + 1;
+    }
+    return NULL;
+}
+
+static int dbg_fill_children(char *res, dbg_var_t *out, int cap) {
+    int count = 0;
+    char block[1024];
+    const char *p = res;
+    while (count < cap && (p = mi_next_child(p, block, sizeof(block))) != NULL) {
+        char nm[128] = "", exp[128] = "", val[256] = "", ty[128] = "";
+        mi_field(block, "name", nm, sizeof(nm));
+        mi_field(block, "exp", exp, sizeof(exp));
+        mi_field(block, "type", ty, sizeof(ty));
+        mi_field(block, "value", val, sizeof(val));
+        dbg_var_t *o = &out[count];
+        memset(o, 0, sizeof(*o));
+        snprintf(o->name, sizeof(o->name), "%s", exp[0] ? exp : nm);
+        snprintf(o->value, sizeof(o->value), "%s", val);
+        snprintf(o->type, sizeof(o->type), "%s", ty);
+        count++;
+    }
+    return count;
+}
+
+/* List gdb varobj children of `varobj_name`; descends through the pointer
+ * pseudo-child (a `struct X *` varobj lists exactly one `*expr` child) so a
+ * class-typed field expands straight to its fields. `first_name_out` yields
+ * the MI varobj name of the first listed record (for ref bookkeeping). */
+static int dbg_var_list_children(debugger_t *dbg, const char *varobj_name,
+                                 dbg_var_t *out, int cap, int depth,
+                                 char *first_name_out, int name_cap);
+
+static int dbg_var_list_children(debugger_t *dbg, const char *varobj_name,
+                                 dbg_var_t *out, int cap, int depth,
+                                 char *first_name_out, int name_cap) {
+    if (depth > 3 || !varobj_name[0]) return 0;
+    char cmd[256];
+    static char res[262144];
+    /* --all-values: the default reply omits value=..., which is the one
+     * thing the debugger UI is here for */
+    snprintf(cmd, sizeof(cmd), "-var-list-children --all-values \"%s\"",
+             varobj_name);
+    if (!mi_command(dbg, cmd, res, (int)sizeof(res))) return 0;
+    if (!strstr(res, "^done")) return 0;
+
+    char block[1024], cni[128] = "";
+    if (mi_next_child(res, block, sizeof(block)))
+        mi_field(block, "name", cni, sizeof(cni));
+    int n = dbg_fill_children(res, out, cap);
+
+    /* Pointer pseudo-child hop: `data` (long *) or `inner` (struct P *)
+     * lists as one `*expr` child; the real fields sit one level deeper. */
+    if (n == 1 && out[0].name[0] == '*' && cni[0] && depth < 3) {
+        dbg_var_t inner[64];
+        int inner_n = dbg_var_list_children(dbg, cni, inner, 64, depth + 1,
+                                            first_name_out, name_cap);
+        if (inner_n > 0) {
+            int m = inner_n < cap ? inner_n : cap;
+            for (int i = 0; i < m; i++) out[i] = inner[i];
+            return m;
+        }
+    }
+    if (first_name_out && cni[0])
+        snprintf(first_name_out, (size_t)name_cap, "%s", cni);
+    return n;
+}
+
+static bool dbg_local_varobj(debugger_t *dbg, int i, char *name_out, int cap) {
+    if (i < 0 || i >= dbg->local_count) return false;
+    if (!dbg->var_created[i]) {
+        char expr[160];
+        bool is_ptr = strchr(dbg->locals[i].type, '*') != NULL &&
+                      strcmp(dbg->locals[i].type, "string") != 0;
+        if (is_ptr)
+            snprintf(expr, sizeof(expr), "*%s", dbg->locals[i].name);
+        else
+            snprintf(expr, sizeof(expr), "%s", dbg->locals[i].name);
+        char cmd[256], res[1024];
+        snprintf(cmd, sizeof(cmd), "-var-create z%ld_%d * \"%s\"",
+                 dbg->var_gen, i, expr);
+        if (!mi_command(dbg, cmd, res, sizeof(res)) ||
+            !strstr(res, "^done")) {
+            return false;
+        }
+        dbg->var_created[i] = true;
+    }
+    snprintf(name_out, (size_t)cap, "z%ld_%d", dbg->var_gen, i);
+    return true;
+}
+
+int dbg_expand_variables(debugger_t *dbg, int ref, dbg_var_t *out, int cap) {
+    if (!mi_active(dbg) || dbg->state != DBG_PAUSED || cap <= 0) return 0;
+    char node[DBG_VAR_NAME_CAP] = "";
+
+    if (ref >= 3000 && ref < 3000 + DBG_MAX_LOCALS) {
+        if (!dbg_local_varobj(dbg, ref - 3000, node, (int)sizeof(node)))
+            return 0;
+    } else if (ref >= DBG_VARREF_DYN &&
+               ref < DBG_VARREF_DYN + dbg->var_ref_count) {
+        snprintf(node, sizeof(node), "%s",
+                 dbg->var_refs[ref - DBG_VARREF_DYN]);
+    } else {
+        return 0;
+    }
+
+    char first_name[128] = "";
+    int n = dbg_var_list_children(dbg, node, out, cap, 0,
+                                  first_name, (int)sizeof(first_name));
+
+    /* Hand out references for expandable children, remembering each child's
+     * MI varobj name (gdb names them `<parent>.<exp>`, in listed order). */
+    for (int i = 0; i < n; i++) {
+        out[i].expand_ref = 0;
+        if (!dbg_type_expandable(out[i].type)) continue;
+        if (dbg->var_ref_count >= DBG_MAX_VAR_REFS) continue;
+        char cni[160];
+        snprintf(cni, sizeof(cni), "%s.%s", node, out[i].name);
+        int idx = dbg->var_ref_count++;
+        snprintf(dbg->var_refs[idx], DBG_VAR_NAME_CAP, "%s", cni);
+        out[i].expand_ref = DBG_VARREF_DYN + idx;
+    }
+    (void)first_name;
+    return n;
 }
 
 void dbg_select_frame(debugger_t *dbg, int frame_index) {

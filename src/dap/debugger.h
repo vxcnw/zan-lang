@@ -75,6 +75,19 @@ typedef struct {
     bool      has_children;
 } dbg_local_t;
 
+/* An expanded child variable (五期: DWARF-backed field expansion). */
+typedef struct {
+    char      name[128];
+    char      value[256];
+    char      type[128];
+    int       expand_ref;       /* DAP variablesReference when expandable, 0 = leaf */
+} dbg_var_t;
+
+/* Variable-expansion refs above DBG_VARREF_DYN map to gdb varobj names. */
+#define DBG_VARREF_DYN      4000
+#define DBG_MAX_VAR_REFS    128
+#define DBG_VAR_NAME_CAP    64
+
 /* A thread of the debuggee, as reported by gdb's -thread-info */
 typedef struct {
     int       id;               /* gdb thread number, used as the DAP id */
@@ -113,6 +126,13 @@ typedef struct {
     /* current locals */
     dbg_local_t     locals[DBG_MAX_LOCALS];
     int             local_count;
+
+    /* variable expansion: one varobj per local (recreated per stop) plus a
+     * ref table for nested children handed out through DAP references */
+    bool            var_created[DBG_MAX_LOCALS];
+    long            var_gen;            /* bumped per stop: varobj name prefix */
+    char            var_refs[DBG_MAX_VAR_REFS][DBG_VAR_NAME_CAP];
+    int             var_ref_count;
 
     /* threads (refreshed on every stop) */
     dbg_thread_t    threads[DBG_MAX_THREADS];
@@ -269,6 +289,14 @@ bool dbg_evaluate(debugger_t *dbg, const char *expression, char *result, int res
 
 /* Refresh local variables for current frame */
 void dbg_refresh_locals(debugger_t *dbg);
+
+/* Does a gdb-reported type string describe something with fields? */
+bool dbg_type_expandable(const char *ty);
+
+/* Expand the children of local `ref - 3000` (the locals list references), or
+ * of a nested node handed out earlier as `ref >= DBG_VARREF_DYN`. Returns the
+ * child count (<= cap), 0 when the node has nothing to show. */
+int dbg_expand_variables(debugger_t *dbg, int ref, dbg_var_t *out, int cap);
 
 /* Refresh call stack */
 void dbg_refresh_callstack(debugger_t *dbg);

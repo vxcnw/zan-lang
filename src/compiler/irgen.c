@@ -358,7 +358,537 @@ static LLVMMetadataRef di_type_from_llvm(zan_irgen_t *g, LLVMTypeRef ty) {
  * the debugger can list and read it. `storage` must be an alloca (frame-resident
  * async locals and non-alloca slots are skipped). Called for every local scope
  * entry via local_add; g comes from the file-static emit context. */
-static void di_declare_var(zan_irgen_t *g, zan_istr_t name, LLVMValueRef storage) {
+static void di_declare_var(zan_irgen_t *g, zan_istr_t name, LLVMValueRef storage,
+                           zan_type_t *zt);
+
+/* ================== 五期: structured DWARF types for locals ==================
+ *
+ * di_type_from_llvm above only sees LLVM types, and under opaque pointers a
+ * class reference is a bare `ptr` — so class/List locals showed up as
+ * `byte *` with no fields in gdb/DAP. The builders below take the Zan type
+ * (available at every local_add) and emit named DWARF structures for class
+ * payloads, arrays and strings, so `ptype p` names the struct and `p *p`
+ * lists field name/value pairs.
+ *
+ * Cycles (class Node { Node next; }) go through a replaceable placeholder
+ * composite: recursion resolving to a type that is currently being built
+ * gets the placeholder, and LLVMMetadataReplaceAllUsesWith rewires every
+ * reference when the real composite replaces it. */
+
+/* DWARF tags/encodings used below */
+#define ZAN_DI_TAG_STRUCTURE 0x13u /* DW_TAG_structure_type */
+#define ZAN_DI_ATE_BOOLEAN   0x02u
+#define ZAN_DI_ATE_FLOAT     0x04u
+#define ZAN_DI_ATE_SIGNED    0x05u
+#define ZAN_DI_ATE_UNSIGNED  0x07u
+#define ZAN_DI_ATE_UCHAR     0x08u
+#define ZAN_DI_ATE_UTF       0x10u
+
+/* defined further down in this translation unit */
+static bool class_has_virtual_methods(zan_symbol_t *sym);
+static bool field_member_is_static(zan_symbol_t *m);
+static unsigned long abi_size_of(LLVMTypeRef t);
+static unsigned long abi_align_of(LLVMTypeRef t);
+
+typedef struct {
+    zan_type_t *type;        /* key: the Zan type pointer */
+    LLVMMetadataRef placeholder; /* replaceable composite while building */
+    LLVMMetadataRef composite;   /* completed composite (after RAUW) */
+    int building;
+} zan_di_type_rec_t;
+static zan_di_type_rec_t *g_di_types = NULL;
+static int g_di_type_count = 0, g_di_type_cap = 0;
+
+/* Clear the per-run type cache: the metadata belongs to the module of one
+ * zan_irgen_emit, so the next run must not reuse pointers into it. */
+static void di_debug_types_reset(void) {
+    g_di_types = NULL;
+    g_di_type_count = g_di_type_cap = 0;
+}
+
+static zan_di_type_rec_t *di_type_rec(zan_type_t *t) {
+    for (int i = 0; i < g_di_type_count; i++)
+        if (g_di_types[i].type == t) return &g_di_types[i];
+    if (g_di_type_count >= g_di_type_cap) {
+        int cap = g_di_type_cap > 0 ? g_di_type_cap * 2 : 64;
+        zan_di_type_rec_t *grown = (zan_di_type_rec_t *)realloc(g_di_types,
+            sizeof(zan_di_type_rec_t) * (size_t)cap);
+        if (!grown) return NULL;
+        g_di_types = grown;
+        g_di_type_cap = cap;
+    }
+    zan_di_type_rec_t *r = &g_di_types[g_di_type_count++];
+    r->type = t;
+    r->placeholder = NULL;
+    r->composite = NULL;
+    r->building = 0;
+    return r;
+}
+
+static LLVMMetadataRef di_type_for_zan(zan_irgen_t *g, zan_type_t *t,
+                                       zan_type_t *inst, int depth);
+
+static LLVMMetadataRef di_basic(zan_irgen_t *g, const char *nm, uint64_t bits,
+                                unsigned encoding) {
+    return LLVMDIBuilderCreateBasicType(g->di_builder, nm, strlen(nm), bits,
+                                        encoding, LLVMDIFlagZero);
+}
+
+/* The fallback reference type: what every opaque pointer shows today. */
+static LLVMMetadataRef di_byte_ptr(zan_irgen_t *g) {
+    LLVMMetadataRef byte = di_basic(g, "byte", 8, ZAN_DI_ATE_UCHAR);
+    return LLVMDIBuilderCreatePointerType(g->di_builder, byte, 64, 0, 0,
+                                          "", 0);
+}
+
+/* Display name of a Zan type ("Point", "List<int>", "int[]"). */
+static void di_type_name(zan_type_t *t, char *buf, size_t cap) {
+    if (cap == 0) return;
+    buf[0] = '\0';
+    if (!t) return;
+    if (t->kind == TYPE_ARRAY) {
+        di_type_name(t->element_type, buf, cap);
+        size_t n = strlen(buf);
+        snprintf(buf + n, cap - n, "[]");
+        return;
+    }
+    if (t->name.str && t->name.len) {
+        size_t n = t->name.len < cap - 1 ? t->name.len : cap - 1;
+        memcpy(buf, t->name.str, n);
+        buf[n] = '\0';
+    } else {
+        snprintf(buf, cap, "<anon>");
+    }
+    if (t->type_arg_count > 0) {
+        size_t n = strlen(buf);
+        snprintf(buf + n, cap - n, "<");
+        for (int i = 0; i < t->type_arg_count && n < cap; i++) {
+            n = strlen(buf);
+            char arg[64];
+            di_type_name(t->type_args[i], arg, sizeof(arg));
+            snprintf(buf + n, cap - n, "%s%s", i ? ", " : "", arg);
+        }
+        n = strlen(buf);
+        snprintf(buf + n, cap - n, ">");
+    }
+}
+
+/* Rewrite a type parameter to its concrete binding for the instantiation
+ * `inst` being described (List<int>'s `T[] items` field reads int[]). Type
+ * params match by NAME: the binder interns the parameter type separately
+ * from the class symbol's SYM_TYPE_PARAM entries, so identity never holds. */
+static zan_type_t *di_subst_param(zan_type_t *t, zan_type_t *inst) {
+    if (t->kind != TYPE_TYPE_PARAM || !inst || !inst->sym ||
+        inst->type_arg_count <= 0 || !t->name.str)
+        return NULL;
+    zan_symbol_t *cls = inst->sym;
+    int idx = 0;
+    for (int i = 0; i < cls->member_count; i++) {
+        zan_symbol_t *m = cls->members[i];
+        if (m->kind != SYM_TYPE_PARAM) continue;
+        if (m->name.len == t->name.len &&
+            memcmp(m->name.str, t->name.str, t->name.len) == 0)
+            return inst->type_args[idx];
+        idx++;
+    }
+    /* fall back to the declaration's parameter list (same order) */
+    if (cls->decl &&
+        cls->decl->type_decl.type_params.count == inst->type_arg_count) {
+        zan_ast_list_t *tps = &cls->decl->type_decl.type_params;
+        for (int i = 0; i < tps->count; i++) {
+            zan_ast_node_t *tp = tps->items[i];
+            if (tp->kind != AST_IDENTIFIER || !tp->ident.name.str) continue;
+            if (tp->ident.name.len == t->name.len &&
+                memcmp(tp->ident.name.str, t->name.str, t->name.len) == 0)
+                return inst->type_args[i];
+        }
+    }
+    return NULL;
+}
+
+/* The payload-struct registry entry for a class/struct symbol, if its LLVM
+ * body was materialized in this module. */
+static struct zan_struct_type_entry *di_struct_entry(zan_irgen_t *g,
+                                                     zan_symbol_t *sym) {
+    for (int i = 0; i < g->struct_type_count; i++)
+        if (g->struct_types[i].sym == sym) return &g->struct_types[i];
+    return NULL;
+}
+
+static unsigned long di_align_up(unsigned long v, unsigned long a) {
+    if (a == 0) return v;
+    unsigned long r = v % a;
+    return r ? v + (a - r) : v;
+}
+
+/* One member of a class payload: DWARF member at byte offset `off`. */
+static LLVMMetadataRef di_member(zan_irgen_t *g, LLVMMetadataRef scope,
+                                 LLVMMetadataRef file, const char *nm,
+                                 LLVMMetadataRef ty, unsigned long off,
+                                 unsigned long size_bytes, unsigned line) {
+    return LLVMDIBuilderCreateMemberType(
+        g->di_builder, scope, nm, strlen(nm), file, line,
+        size_bytes * 8, /*AlignInBits*/ 0, off * 8, LLVMDIFlagZero, ty);
+}
+
+/* The intrinsic collections and Span: TYPE_CLASS/struct values the binder
+ * synthesizes without a class declaration, so they never reach the payload
+ * registry. Their layouts are the compiler's own (list_struct_type etc.),
+ * mirrored here for the debugger. */
+static int di_type_named(zan_type_t *t, const char *n) {
+    return t && t->kind != TYPE_ARRAY && t->name.str &&
+           (int)t->name.len == (int)strlen(n) &&
+           memcmp(t->name.str, n, strlen(n)) == 0;
+}
+
+static LLVMMetadataRef di_builtin_composite(zan_irgen_t *g, zan_type_t *t,
+                                            int depth) {
+    char name[128];
+    di_type_name(t, name, sizeof(name));
+    LLVMMetadataRef file = di_file_for(g, g->di_cur_file);
+    LLVMMetadataRef i64 = di_basic(g, "long", 64, ZAN_DI_ATE_SIGNED);
+    LLVMMetadataRef bytep = di_byte_ptr(g);
+
+    /* { i64 count, i64 capacity, T* data } -- List<T> and StringBuilder.
+     * List elements live in 8-byte erased slots (generic_field_slot widens
+     * every T binding to a full word), so `data` is described as long*
+     * -- describing it as T* would index at half stride for int elements. */
+    if (di_type_named(t, "List") || di_type_named(t, "StringBuilder")) {
+        LLVMMetadataRef data = i64;
+        if (di_type_named(t, "StringBuilder")) data = bytep;
+        LLVMMetadataRef datap = LLVMDIBuilderCreatePointerType(
+            g->di_builder, data, 64, 0, 0, "", 0);
+        LLVMMetadataRef members[3] = {
+            di_member(g, file, file, "count", i64, 0, 8, 1),
+            di_member(g, file, file, "capacity", i64, 8, 8, 1),
+            di_member(g, file, file, "data", datap, 16, 8, 1),
+        };
+        LLVMMetadataRef composite = LLVMDIBuilderCreateStructType(
+            g->di_builder, file, name, strlen(name), file, 1, 24 * 8, 0,
+            LLVMDIFlagZero, NULL, members, 3, 0, NULL, NULL, 0);
+        return LLVMDIBuilderCreatePointerType(g->di_builder, composite, 64, 0,
+                                              0, "", 0);
+    }
+
+    /* { i64 count, i64 capacity, i8** keys, i64* values, ... } -- Dict; the
+     * four documented fields are described, the hash-index tail stays out. */
+    if (di_type_named(t, "Dict")) {
+        LLVMMetadataRef keys = LLVMDIBuilderCreatePointerType(
+            g->di_builder, bytep, 64, 0, 0, "", 0);
+        LLVMMetadataRef members[4] = {
+            di_member(g, file, file, "count", i64, 0, 8, 1),
+            di_member(g, file, file, "capacity", i64, 8, 8, 1),
+            di_member(g, file, file, "keys", keys, 16, 8, 1),
+            di_member(g, file, file, "values", keys, 24, 8, 1),
+        };
+        LLVMMetadataRef composite = LLVMDIBuilderCreateStructType(
+            g->di_builder, file, name, strlen(name), file, 1, 0, 0,
+            LLVMDIFlagZero, NULL, members, 4, 0, NULL, NULL, 0);
+        return LLVMDIBuilderCreatePointerType(g->di_builder, composite, 64, 0,
+                                              0, "", 0);
+    }
+
+    /* { i8* base, i64 length } -- Span<T>, a value, returned by value */
+    if (di_type_named(t, "Span")) {
+        LLVMMetadataRef members[2] = {
+            di_member(g, file, file, "base", bytep, 0, 8, 1),
+            di_member(g, file, file, "length", i64, 8, 8, 1),
+        };
+        return LLVMDIBuilderCreateStructType(
+            g->di_builder, file, name, strlen(name), file, 1, 16 * 8, 0,
+            LLVMDIFlagZero, NULL, members, 2, 0, NULL, NULL, 0);
+    }
+    return NULL;
+}
+
+/* Composite for a class/interface payload: named structure whose members sit
+ * at their payload offsets (the ARC header in front of the payload is runtime
+ * detail, same as a malloc header in C). Returns a pointer to it. */
+static LLVMMetadataRef di_class_composite(zan_irgen_t *g, zan_type_t *t,
+                                          int depth) {
+    zan_symbol_t *sym = t->sym;
+    if (!sym || !sym->decl) return NULL;
+    struct zan_struct_type_entry *e = di_struct_entry(g, sym);
+    if (!e) return NULL;
+
+    zan_di_type_rec_t *rec = di_type_rec(t);
+    if (!rec) return NULL;
+    if (rec->building) return rec->placeholder; /* cycle: hand out the fwd */
+    if (rec->composite) {
+        return LLVMDIBuilderCreatePointerType(g->di_builder, rec->composite,
+                                              64, 0, 0, "", 0);
+    }
+
+    char name[128];
+    di_type_name(t, name, sizeof(name));
+    uint32_t fid = sym->decl->loc.file_id ? sym->decl->loc.file_id
+                                          : g->di_cur_file;
+    LLVMMetadataRef file = di_file_for(g, fid);
+    unsigned line = sym->decl->loc.line ? sym->decl->loc.line : 1;
+
+    rec->placeholder = LLVMDIBuilderCreateReplaceableCompositeType(
+        g->di_builder, ZAN_DI_TAG_STRUCTURE, name, strlen(name),
+        /*Scope*/ file, file, line, /*RuntimeLang*/ 0,
+        /*SizeInBits*/ 0, /*AlignInBits*/ 0, LLVMDIFlagZero, NULL, 0);
+    rec->building = 1;
+
+    /* Member slots in LLVM body order (vptr first when present), with
+     * C-like offsets for sequential layout and [FieldOffset] for explicit. */
+    int nslots = e->field_count;
+    int vptr = class_has_virtual_methods(sym) ? 1 : 0;
+    LLVMMetadataRef *members =
+        (LLVMMetadataRef *)calloc((size_t)(nslots > 0 ? nslots : 1),
+                                  sizeof(LLVMMetadataRef));
+    if (!members) { rec->building = 0; return NULL; }
+
+    unsigned long cursor = 0, max_align = 1, size = 0;
+    int slot = 0;
+    for (int i = 0; i < sym->member_count && slot < nslots; i++) {
+        zan_symbol_t *m = sym->members[i];
+        if ((m->kind != SYM_FIELD && m->kind != SYM_PROPERTY) ||
+            field_member_is_static(m)) {
+            continue;
+        }
+        unsigned long off, fsize = abi_size_of(e->field_llvm[slot]);
+        if (e->explicit_layout) {
+            off = e->field_offsets[slot];
+        } else {
+            unsigned long fa = abi_align_of(e->field_llvm[slot]);
+            off = di_align_up(cursor, fa);
+            cursor = off + fsize;
+            if (fa > max_align) max_align = fa;
+            if (cursor > size) size = cursor;
+        }
+
+        LLVMMetadataRef mty = NULL;
+        zan_type_t *ft = di_subst_param(m->type, t);
+        if (!ft) ft = m->type;
+        if (vptr && slot == 0) {
+            mty = di_byte_ptr(g); /* hidden vtable pointer */
+        } else {
+            mty = di_type_for_zan(g, ft, t, depth + 1);
+            if (!mty) mty = di_byte_ptr(g);
+        }
+
+        char mname[128];
+        if (vptr && slot == 0) {
+            snprintf(mname, sizeof(mname), "$vptr");
+        } else {
+            snprintf(mname, sizeof(mname), "%.*s", (int)m->name.len,
+                     m->name.str);
+        }
+        members[slot] = di_member(g, rec->placeholder, file, mname, mty, off,
+                                  fsize, line);
+        slot++;
+    }
+
+    unsigned long total = e->explicit_layout
+                              ? 0
+                              : di_align_up(size, max_align);
+    LLVMMetadataRef composite = LLVMDIBuilderCreateStructType(
+        g->di_builder, /*Scope*/ file, name, strlen(name),
+        file, line, total * 8,
+        (uint32_t)(max_align > 1 ? di_align_up(max_align, 8) : 0) * 8,
+        LLVMDIFlagZero, /*DerivedFrom*/ NULL, members, (unsigned)slot,
+        /*RunTimeLang*/ 0, /*VTableHolder*/ NULL, /*UniqueId*/ NULL, 0);
+    free(members);
+    LLVMMetadataReplaceAllUsesWith(rec->placeholder, composite);
+    rec->composite = composite;
+    rec->building = 0;
+    return LLVMDIBuilderCreatePointerType(g->di_builder, composite, 64, 0, 0,
+                                          "", 0);
+}
+
+/* Composite for a T[] payload: the element count lives in the ARC header
+ * (at -16 relative to the payload the reference points at — DWARF member
+ * offsets are signed, so it is described in place), elements follow. */
+static LLVMMetadataRef di_array_composite(zan_irgen_t *g, zan_type_t *t,
+                                          zan_type_t *inst, int depth) {
+    zan_di_type_rec_t *rec = di_type_rec(t);
+    if (!rec) return NULL;
+    if (rec->building) return rec->placeholder;
+    if (rec->composite) {
+        return LLVMDIBuilderCreatePointerType(g->di_builder, rec->composite,
+                                              64, 0, 0, "", 0);
+    }
+
+    char name[128];
+    di_type_name(t, name, sizeof(name));
+    LLVMMetadataRef file = di_file_for(g, g->di_cur_file);
+
+    rec->placeholder = LLVMDIBuilderCreateReplaceableCompositeType(
+        g->di_builder, ZAN_DI_TAG_STRUCTURE, name, strlen(name),
+        /*Scope*/ file, file, /*Line*/ 1, /*RuntimeLang*/ 0,
+        /*SizeInBits*/ 0, /*AlignInBits*/ 0, LLVMDIFlagZero, NULL, 0);
+    rec->building = 1;
+
+    LLVMMetadataRef i64 = di_basic(g, "long", 64, ZAN_DI_ATE_SIGNED);
+    LLVMMetadataRef lenm = di_member(g, rec->placeholder, file, "len", i64,
+                                     (unsigned long)-16, 8, 1);
+
+    LLVMMetadataRef elem = di_type_for_zan(g, t->element_type, inst, depth + 1);
+    if (!elem) elem = di_byte_ptr(g);
+    LLVMMetadataRef subs[1] = {
+        LLVMDIBuilderGetOrCreateSubrange(g->di_builder, /*LowerBound*/ 0,
+                                         /*Count*/ 0)
+    };
+    LLVMMetadataRef arrty = LLVMDIBuilderCreateArrayType(
+        g->di_builder, /*SizeInBits*/ 0, /*AlignInBits*/ 0, elem, subs, 1);
+    LLVMMetadataRef elemsm = di_member(g, rec->placeholder, file, "elements",
+                                       arrty, 0, 0, 1);
+
+    LLVMMetadataRef members[2] = { lenm, elemsm };
+    LLVMMetadataRef composite = LLVMDIBuilderCreateStructType(
+        g->di_builder, /*Scope*/ file, name, strlen(name),
+        file, /*Line*/ 1, /*SizeInBits*/ 0, /*AlignInBits*/ 0,
+        LLVMDIFlagZero, /*DerivedFrom*/ NULL, members, 2,
+        /*RunTimeLang*/ 0, /*VTableHolder*/ NULL, /*UniqueId*/ NULL, 0);
+    LLVMMetadataReplaceAllUsesWith(rec->placeholder, composite);
+    rec->composite = composite;
+    rec->building = 0;
+    return LLVMDIBuilderCreatePointerType(g->di_builder, composite, 64, 0, 0,
+                                          "", 0);
+}
+
+/* Composite for a value struct (stored by value in the slot). */
+static LLVMMetadataRef di_struct_composite(zan_irgen_t *g, zan_type_t *t,
+                                           zan_type_t *inst, int depth) {
+    zan_symbol_t *sym = t->sym;
+    if (!sym || !sym->decl) return NULL;
+    struct zan_struct_type_entry *e = di_struct_entry(g, sym);
+    if (!e) return NULL;
+
+    char name[128];
+    di_type_name(t, name, sizeof(name));
+    uint32_t fid = sym->decl->loc.file_id ? sym->decl->loc.file_id
+                                          : g->di_cur_file;
+    LLVMMetadataRef file = di_file_for(g, fid);
+    unsigned line = sym->decl->loc.line ? sym->decl->loc.line : 1;
+
+    int nslots = e->field_count;
+    LLVMMetadataRef *members =
+        (LLVMMetadataRef *)calloc((size_t)(nslots > 0 ? nslots : 1),
+                                  sizeof(LLVMMetadataRef));
+    if (!members) return NULL;
+
+    unsigned long cursor = 0, max_align = 1, size = 0;
+    int slot = 0;
+    for (int i = 0; i < sym->member_count && slot < nslots; i++) {
+        zan_symbol_t *m = sym->members[i];
+        if ((m->kind != SYM_FIELD && m->kind != SYM_PROPERTY) ||
+            field_member_is_static(m)) {
+            continue;
+        }
+        unsigned long off, fsize = abi_size_of(e->field_llvm[slot]);
+        if (e->explicit_layout) {
+            off = e->field_offsets[slot];
+        } else {
+            unsigned long fa = abi_align_of(e->field_llvm[slot]);
+            off = di_align_up(cursor, fa);
+            cursor = off + fsize;
+            if (fa > max_align) max_align = fa;
+            if (cursor > size) size = cursor;
+        }
+        zan_type_t *ft = di_subst_param(m->type, inst);
+        if (!ft) ft = m->type;
+        LLVMMetadataRef mty = di_type_for_zan(g, ft, inst, depth + 1);
+        if (!mty) mty = di_byte_ptr(g);
+        char mname[128];
+        snprintf(mname, sizeof(mname), "%.*s", (int)m->name.len, m->name.str);
+        members[slot] = di_member(g, file, file, mname, mty, off, fsize, line);
+        slot++;
+    }
+    unsigned long total = e->explicit_layout ? 0
+                                             : di_align_up(size, max_align);
+    LLVMMetadataRef composite = LLVMDIBuilderCreateStructType(
+        g->di_builder, /*Scope*/ file, name, strlen(name),
+        file, line, total * 8,
+        (uint32_t)(max_align > 1 ? di_align_up(max_align, 8) : 0) * 8,
+        LLVMDIFlagZero, /*DerivedFrom*/ NULL, members, (unsigned)slot,
+        /*RunTimeLang*/ 0, /*VTableHolder*/ NULL, /*UniqueId*/ NULL, 0);
+    free(members);
+    return composite;
+}
+
+/* Master DI type builder for a Zan type. `inst` carries the instantiation
+ * whose bindings replace type parameters encountered in member positions
+ * (NULL outside class member construction). Returns NULL when the type has
+ * no useful description; the caller falls back to di_type_from_llvm. */
+static LLVMMetadataRef di_type_for_zan(zan_irgen_t *g, zan_type_t *t,
+                                       zan_type_t *inst, int depth) {
+    if (!g->emit_debug || !g->di_builder || !t || depth > 8) return NULL;
+    switch (t->kind) {
+    case TYPE_BOOL:
+        return di_basic(g, "bool", 8, ZAN_DI_ATE_BOOLEAN);
+    case TYPE_BYTE:
+        return di_basic(g, "byte", 8, ZAN_DI_ATE_UCHAR);
+    case TYPE_SBYTE:
+        return di_basic(g, "sbyte", 8, ZAN_DI_ATE_SIGNED);
+    case TYPE_SHORT:
+        return di_basic(g, "short", 16, ZAN_DI_ATE_SIGNED);
+    case TYPE_USHORT:
+        return di_basic(g, "ushort", 16, ZAN_DI_ATE_UNSIGNED);
+    case TYPE_INT:
+        return di_basic(g, "int", 32, ZAN_DI_ATE_SIGNED);
+    case TYPE_UINT:
+        return di_basic(g, "uint", 32, ZAN_DI_ATE_UNSIGNED);
+    case TYPE_LONG:
+    case TYPE_NINT:
+        return di_basic(g, "long", 64, ZAN_DI_ATE_SIGNED);
+    case TYPE_ULONG:
+        return di_basic(g, "ulong", 64, ZAN_DI_ATE_UNSIGNED);
+    case TYPE_FLOAT:
+        return di_basic(g, "float", 32, ZAN_DI_ATE_FLOAT);
+    case TYPE_DOUBLE:
+        return di_basic(g, "double", 64, ZAN_DI_ATE_FLOAT);
+    case TYPE_CHAR:
+        return di_basic(g, "char", 16, ZAN_DI_ATE_UTF);
+    case TYPE_STRING: {
+        /* The reference points at the char payload, so gdb already prints
+         * the text; give the type its source name. */
+        LLVMMetadataRef byte = di_basic(g, "byte", 8, ZAN_DI_ATE_UCHAR);
+        LLVMMetadataRef ptr = LLVMDIBuilderCreatePointerType(
+            g->di_builder, byte, 64, 0, 0, "", 0);
+        return LLVMDIBuilderCreateTypedef(g->di_builder, ptr, "string", 6,
+                                          di_file_for(g, g->di_cur_file),
+                                          1, /*Scope*/ NULL, 0);
+    }
+    case TYPE_ARRAY:
+        if (t->array_rank != 1) return di_byte_ptr(g);
+        return di_array_composite(g, t, inst, depth);
+    case TYPE_CLASS:
+    case TYPE_INTERFACE:
+        /* intrinsic collections/Dict/Span have no class declaration; they
+         * carry the compiler's own layout */
+        if (!t->sym) {
+            LLVMMetadataRef bi = di_builtin_composite(g, t, depth);
+            if (bi) return bi;
+            return di_byte_ptr(g);
+        }
+        return di_class_composite(g, t, depth);
+    case TYPE_STRUCT:
+        return di_struct_composite(g, t, inst, depth);
+    case TYPE_NULLABLE:
+        return di_type_for_zan(g, t->element_type, inst, depth + 1);
+    case TYPE_ENUM:
+        return di_basic(g, "int", 32, ZAN_DI_ATE_SIGNED);
+    case TYPE_TASK:
+    case TYPE_DELEGATE:
+    case TYPE_OBJECT:
+        return di_byte_ptr(g);
+    default:
+        return NULL;
+    }
+}
+
+/* Emit an llvm.dbg.declare tying a named source variable to its stack slot, so
+ * the debugger can list and read it. `storage` must be an alloca (frame-resident
+ * async locals and non-alloca slots are skipped). Called for every local scope
+ * entry via local_add; g comes from the file-static emit context. The Zan type
+ * `zt` drives the structured description above; LLVM-type heuristics are the
+ * fallback for types it cannot describe. */
+static void di_declare_var(zan_irgen_t *g, zan_istr_t name, LLVMValueRef storage,
+                           zan_type_t *zt) {
     if (!g || !g->emit_debug || !g->builder) return;
     if (!storage || !LLVMIsAAllocaInst(storage)) return;
     if (name.len == 0 || !name.str) return;
@@ -366,7 +896,9 @@ static void di_declare_var(zan_irgen_t *g, zan_istr_t name, LLVMValueRef storage
     if (!bb) return;
     LLVMMetadataRef sp = di_ensure_sp(g, g->di_cur_file, g->di_cur_line);
     if (!sp) return;
-    LLVMMetadataRef ty = di_type_from_llvm(g, LLVMGetAllocatedType(storage));
+    LLVMMetadataRef ty = NULL;
+    if (zt) ty = di_type_for_zan(g, zt, zt, 0);
+    if (!ty) ty = di_type_from_llvm(g, LLVMGetAllocatedType(storage));
     if (!ty) return; /* aggregate: not described yet */
     LLVMMetadataRef file = di_file_for(g, g->di_cur_file);
     unsigned line = g->di_cur_line ? g->di_cur_line : 1;
@@ -3293,8 +3825,9 @@ static void local_add(local_scope_t *scope, zan_istr_t name, LLVMValueRef alloca
     scope->vars[scope->count].obj_rc_flag = NULL;
     scope->count++;
     /* Record the variable for the debugger (no-op unless building with -g). The
-     * emit context supplies the compiler state; local_add itself is g-free. */
-    di_declare_var(g_di_emit_ctx, name, alloca);
+     * emit context supplies the compiler state; local_add itself is g-free.
+     * The Zan type drives the structured DWARF description. */
+    di_declare_var(g_di_emit_ctx, name, alloca, type);
 }
 
 static LLVMValueRef emit_entry_alloca(zan_irgen_t *g, LLVMTypeRef ty, const char *name) {

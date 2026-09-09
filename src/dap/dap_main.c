@@ -409,6 +409,32 @@ static void handle_variables(dap_t *d, json_value *request) {
                         json_new_num(v->has_children ? (i + 3000) : 0));
             json_arr_add(vars, var);
         }
+    } else if (ref >= 3000 && ref < 3000 + DBG_MAX_LOCALS) {
+        /* field expansion of a structured local (五期): the DWARF struct
+         * types irgen emits let gdb varobjs list real fields */
+        dbg_var_t kids[64];
+        int n = dbg_expand_variables(&d->dbg, ref, kids, 64);
+        for (int i = 0; i < n; i++) {
+            json_value *var = json_new_obj();
+            json_obj_set(var, "name", json_new_str(kids[i].name));
+            json_obj_set(var, "value", json_new_str(kids[i].value));
+            json_obj_set(var, "type", json_new_str(kids[i].type));
+            json_obj_set(var, "variablesReference",
+                        json_new_num(kids[i].expand_ref));
+            json_arr_add(vars, var);
+        }
+    } else if (ref >= DBG_VARREF_DYN) {
+        dbg_var_t kids[64];
+        int n = dbg_expand_variables(&d->dbg, ref, kids, 64);
+        for (int i = 0; i < n; i++) {
+            json_value *var = json_new_obj();
+            json_obj_set(var, "name", json_new_str(kids[i].name));
+            json_obj_set(var, "value", json_new_str(kids[i].value));
+            json_obj_set(var, "type", json_new_str(kids[i].type));
+            json_obj_set(var, "variablesReference",
+                        json_new_num(kids[i].expand_ref));
+            json_arr_add(vars, var);
+        }
     } else if (ref == VARREF_WATCHES) {
         /* Return watch expression values */
         dbg_evaluate_watches(&d->dbg);

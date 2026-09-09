@@ -2310,6 +2310,7 @@ static void emit_windows_dll_main(zan_irgen_t *g) {
 zan_status_t zan_irgen_emit(zan_irgen_t *g, zan_ast_node_t *unit) {
     if (!unit || unit->kind != AST_COMPILATION_UNIT) return ZAN_ERROR;
     g_di_emit_ctx = g; /* so local_add can forward variables to di_declare_var */
+    di_debug_types_reset(); /* DI metadata dies with the module */
 
     /* Instantiations first: a generic class's field slots are sized from the
      * concrete types bound to its type parameters, so they must be known
