@@ -135,6 +135,7 @@ $zanArgs += @("-o", "build\ZanIDE.exe", "--subsystem", "windows")
 # +offset still lands there, and ZAN_IDE_ZANC_ARGS="-g" brings the tables back
 # for a dedicated debug build when a crash needs triaging.
 $zanArgs += @("--publish")
+if ($env:IDE_NO_PUBLISH -eq "1") { $zanArgs = $zanArgs -ne "--publish" }
 # ...but not the debug ARC guards --publish omits either (they were the -g
 # defaults). --arc-guard never
 # returns a released object to the allocator (it quarantines it so a stale
@@ -146,9 +147,13 @@ $zanArgs += @("--no-arc-guard", "--no-check-leaks")
 $zanArgs += @("--libpath", "build", "--link-lib", "zan_gui_ide_gnu")
 $zanArgs += @("--link-input", (Join-Path (Get-Location) "build\embed_gen.o"))
 # Native Win32 backend system deps (dwmapi/user32/gdi32/imm32 + reactor).
+# ole32: zan_audio 的 WASAPI 设备枚举走 COM（CoInitializeEx/CoCreateInstance/
+# CoTaskMemFree），静态驱动归档 libzan_gui_ide_gnu.a 直接引用这些符号；
+# 缺 -lole32 整个链接失败、ZanIDE.exe 出不来（2026-09-09 实测）。
 $zanArgs += @("--link-lib", "ws2_32", "--link-lib", "mswsock")
 $zanArgs += @("--link-lib", "psapi", "--link-lib", "advapi32")
-$zanArgs += @("--link-lib", "dwmapi", "--link-lib", "gdi32", "--link-lib", "imm32")
+$zanArgs += @("--link-lib", "dwmapi", "--link-lib", "gdi32", "--link-lib", "imm32",
+    "--link-lib", "ole32")
 # (winpthread is not named here: zanc already links it as the static archive
 # libwinpthread.a. Naming it makes ld prefer libwinpthread.dll.a instead, and
 # the exe then needs libwinpthread_64-1.dll beside it -- a DLL the toolchain

@@ -99,6 +99,34 @@ Cannot be triggered from the outside: the 10-minute packaging watchdog
 (`> 打包超时，停在：<阶段>`) and `PubPack.Start()` returning -1 — both need an
 injected hang, i.e. a temporary code change.
 
+## Rebuilding ZanIDE (`scripts\build_ide.ps1`) — two traps that look like "designer broke"
+
+- **ole32 in the `--link-lib` list is mandatory.** `gui_runtime.c` pulls in
+  `zan_audio.c` (WASAPI device enumeration via COM), and the static driver
+  archive `libzan_gui_ide_gnu.a` references `__imp_CoInitializeEx`,
+  `CoCreateInstance`, `CoTaskMemFree`, `CoUninitialize`. Missing `-lole32`
+  fails the whole link and — because zanc renames the old exe away before
+  linking — **deletes the only working ZanIDE.exe** (2026-09-09: user reported
+  "窗口设计器无法工作了", root cause was exactly this). Keep ole32 next to
+  dwmapi/gdi32/imm32; the publish-side DLL list already had it, only the dev
+  build lacked it.
+- **`--publish` (= Os + obfuscate + gc-sections + static drivers) miscompiles
+  IDE-shaped code.** Evidence from the 2026-09-09 bisect: GUI smoke apps (static
+  and dynamic, same runtime incl. audio/3D) survive every config; only the IDE
+  build dies — `-Os` crashes at startup in the ARC release chain, `-O2` exits(1)
+  after ~6.5 s, O0 is stable. Until the optimizer bug is fixed, build with
+  `IDE_NO_PUBLISH=1 scripts\build_ide.ps1` (strips only `--publish`) and accept
+  the ~21 MB exe. Repro pair stays in `build\ZanIDE_A.exe` (`-Os`) and
+  `build\ZanIDE_B.exe` (`-O2`). Rule of thumb: if a fresh IDE build dies at
+  startup while smaller programs run fine, suspect the optimizer first, not the
+  runtime — try `IDE_NO_PUBLISH=1` before triaging further.
+- Startup crash triage inputs: `build\zan_crash.log` (module+offset only — the
+  publish build has no DWARF), and a full `llvm-objdump -d` piped to
+  `_scratch\` for IAT-slot resolution with `llvm-readobj --coff-imports`
+  (image base 0x140000000). First-chance `IsBadReadPtr` faults in the log are
+  benign SEH-caught ARC probes; the fatal record is the one with the real
+  backtrace.
+
 ## Devin Secrets Needed
 
 None. Access to the user's Windows workspace goes through the local file-bridge
