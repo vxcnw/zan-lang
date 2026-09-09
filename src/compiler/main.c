@@ -3402,8 +3402,16 @@ int main(int argc, char **argv) {
              * command line before the entry, so the entry alone is the
              * wrong anchor — with the resolved project root as a fallback
              * candidate so both "zanc dir/prog.zan" and "zanc prog.zan"
-             * inside a manifest project find their assets/. */
-            char assets_cands[3][1200];
+             * inside a manifest project find their assets/. The parent of
+             * an input source dir is a third candidate: the template and
+             * IDE layout keeps src/ and assets/ side by side under the
+             * project root, and a build launched from inside the project
+             * passes a bare "src/main.zan" — resolve_package_project_root
+             * then walks up from a relative "src" and lands on "." before
+             * it can see the sibling assets/ (apk builds baked no game
+             * assets and the shipped games rendered as flat color
+             * blocks). */
+            char assets_cands[4][1200];
             int assets_cand_count = 0;
             for (int fi = 0; fi < input_count && assets_cand_count < 2; fi++) {
                 char assets_dir[1400];
@@ -3418,6 +3426,19 @@ int main(int argc, char **argv) {
                          assets_dir);
                 if (zan_file_exists(assets_cands[assets_cand_count]))
                     assets_cand_count++;
+                else if (assets_cand_count < 3) {
+                    /* <proj>/src + <proj>/assets layout: try the parent */
+                    char *psep = strrchr(assets_dir, '/');
+                    char *pback = strrchr(assets_dir, '\\');
+                    if (!psep || (pback && pback > psep)) psep = pback;
+                    if (psep && psep != assets_dir) {
+                        *psep = 0;
+                        snprintf(assets_cands[assets_cand_count], 1200,
+                                 "%s/assets", assets_dir);
+                        if (zan_file_exists(assets_cands[assets_cand_count]))
+                            assets_cand_count++;
+                    }
+                }
             }
             if (assets_cand_count < 2 &&
                 strcmp(package_project_root, ".") != 0) {

@@ -3880,6 +3880,77 @@ static LLVMValueRef emit_expr_call(zan_irgen_t *g, zan_ast_node_t *expr,
             }
         }
 
+        /* List.ToArray() — snapshot into a packed T[]. The list stores each
+         * element in a full i64 slot (or several for wide structs); the array
+         * is the packed map_type width per element, so every copy re-coerces
+         * through emit_boundary_coerce exactly like the array-literal path.
+         * Reference-typed elements are retained once per slot: both the list
+         * and the snapshot now hold a strong reference. */
+        if (expr->call.callee && expr->call.callee->kind == AST_MEMBER_ACCESS) {
+            zan_ast_node_t *callee = expr->call.callee;
+            zan_istr_t method_name = callee->member.name;
+            if (method_name.len == 7 && memcmp(method_name.str, "ToArray", 7) == 0 &&
+                expr->call.args.count == 0) {
+                zan_ast_node_t *lobj = callee->member.object;
+                zan_type_t *ltype = infer_expr_type(g, lobj, locals);
+                if (ltype && type_named(ltype, "List", 4)) {
+                    LLVMTypeRef i64 = LLVMInt64TypeInContext(g->ctx);
+                    LLVMValueRef raw_ptr = emit_expr(g, lobj, locals);
+                    int recv_own = emit_intrinsic_own_recv(g, lobj, raw_ptr, locals);
+                    LLVMValueRef list_ptr = LLVMBuildBitCast(g->builder, raw_ptr,
+                        LLVMPointerType(g->list_struct_type, 0), "lptr");
+                    LLVMValueRef count = LLVMBuildLoad2(g->builder, i64,
+                        LLVMBuildStructGEP2(g->builder, g->list_struct_type,
+                            list_ptr, 0, "cntp"), "cnt");
+                    LLVMValueRef data = LLVMBuildLoad2(g->builder,
+                        LLVMPointerType(i64, 0),
+                        LLVMBuildStructGEP2(g->builder, g->list_struct_type,
+                            list_ptr, 2, "df"), "data");
+                    zan_type_t *elem_type = concretize(g,
+                        container_elem_type(ltype));
+                    LLVMTypeRef elem_llvm = elem_type ? map_type(g, elem_type) : i64;
+                    unsigned ta_words = elem_slot_words(g, elem_type);
+                    LLVMValueRef total = zan_mul(g->builder, count,
+                        LLVMSizeOf(elem_llvm), "ta.total");
+                    LLVMValueRef arr = zan_array_alloc(g, total, count);
+                    LLVMValueRef arrp = LLVMBuildBitCast(g->builder, arr,
+                        LLVMPointerType(elem_llvm, 0), "ta.ap");
+                    LLVMValueRef idx_a = emit_entry_alloca(g, i64, "ta.i");
+                    LLVMBuildStore(g->builder, LLVMConstInt(i64, 0, 0), idx_a);
+                    LLVMBasicBlockRef cond_bb = LLVMAppendBasicBlockInContext(
+                        g->ctx, g->current_fn, "ta.cond");
+                    LLVMBasicBlockRef body_bb = LLVMAppendBasicBlockInContext(
+                        g->ctx, g->current_fn, "ta.body");
+                    LLVMBasicBlockRef done_bb = LLVMAppendBasicBlockInContext(
+                        g->ctx, g->current_fn, "ta.done");
+                    LLVMBuildBr(g->builder, cond_bb);
+                    LLVMPositionBuilderAtEnd(g->builder, cond_bb);
+                    LLVMValueRef i = LLVMBuildLoad2(g->builder, i64, idx_a, "ta.iv");
+                    LLVMBuildCondBr(g->builder,
+                        zan_icmp(g->builder, LLVMIntULT, i, count, "ta.lt"),
+                        body_bb, done_bb);
+                    LLVMPositionBuilderAtEnd(g->builder, body_bb);
+                    LLVMValueRef i2 = LLVMBuildLoad2(g->builder, i64, idx_a, "ta.i2");
+                    LLVMValueRef wpos = slot_word_index(g, i2, ta_words);
+                    LLVMValueRef slot = LLVMBuildGEP2(g->builder, i64, data,
+                        &wpos, 1, "ta.slot");
+                    LLVMValueRef val = load_collection_slot_value(g, elem_type, slot);
+                    emit_collection_value_retain(g, elem_type, val, 0);
+                    LLVMValueRef aep = LLVMBuildGEP2(g->builder, elem_llvm, arrp,
+                        &i2, 1, "ta.aep");
+                    LLVMBuildStore(g->builder,
+                        emit_boundary_coerce(g, val, elem_llvm), aep);
+                    LLVMBuildStore(g->builder,
+                        zan_add(g->builder, i2, LLVMConstInt(i64, 1, 0), "ta.ni"),
+                        idx_a);
+                    LLVMBuildBr(g->builder, cond_bb);
+                    LLVMPositionBuilderAtEnd(g->builder, done_bb);
+                    emit_intrinsic_drop_recv(g, lobj, raw_ptr, locals, recv_own);
+                    return arr;
+                }
+            }
+        }
+
 
                 /* Dict method calls: Add, ContainsKey, Clear. The receiver is
                  * resolved by its static type, not by name, so it works for

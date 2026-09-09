@@ -40,6 +40,7 @@ static const zan_builtin_member_t members_list[] = {
     { "IndexOf",     'M', "int IndexOf(T item)" },
     { "LastIndexOf", 'M', "int LastIndexOf(T item)" },
     { "Reverse",     'M', "void Reverse()" },
+    { "ToArray",     'M', "T[] ToArray()" },
 };
 
 static const zan_builtin_member_t members_dict[] = {

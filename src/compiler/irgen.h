@@ -600,6 +600,7 @@ struct zan_irgen {
     bool         uses_sync_runtime; /* set by AtomicInt/SharedTable externs */
     bool         uses_file_runtime; /* set by zan_file_* (file IO) externs */
     bool         uses_embed_api;    /* set by zan_embed_* extern references */
+    bool         uses_inflate;      /* set by zan_embed_decode/rawlen (compressed payloads) */
     /* goto/label support: label blocks keyed by (function, name), created on
      * first reference from either the label statement or a goto */
     struct {
