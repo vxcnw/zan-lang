@@ -682,6 +682,10 @@ class GenForm {
     /// 多个实参用逗号分隔。非泛型控件就是 kind 本身。
     static string TypeOf(JsonValue o) {
         string kind = GenForm.KindOf(o);
+        // 旧设计稿把表格字段写成 "Table"/"DataTable"——两者都不是
+        // Control（Table 只是设计器画布的静态表头渲染器），统一
+        // 归到泛型 DataGrid<T>。
+        if (kind == "Table" || kind == "DataTable") { kind = "DataGrid"; }
         string of = GenForm.ObjStr(o, "of");
         if (of.Length == 0) { of = GenForm.DefaultTypeArgs(kind); }
         if (of.Length == 0) { return kind; }

@@ -440,6 +440,11 @@ class FormField : Control {
         // A Panel is the standalone container type, not the card it shares a
         // widget with.
         if (key == "Panel") { return 45; }
+        // 23 and 41 both resolve to the shared DataGrid<T> widget; the
+        // canonical grid field is 41, so "DataGrid" (and the legacy
+        // "DataTable") kind reads back as 41 instead of whichever type the
+        // scan hits first.
+        if (key == "DataGrid" || key == "DataTable") { return 41; }
         // The inverse of KindForType, so a document written by the designer
         // reads back as the same field type. Several types share a widget
         // (a date and a colour entry are both an Input); the first match wins,
@@ -919,7 +924,11 @@ class FormField : Control {
         if (ft == 20) { return "Badge"; }
         if (ft == 21) { return "Avatar"; }
         if (ft == 22) { return "Statistic"; }
-        if (ft == 23) { return "Table"; }
+        // 23 表格与 41 数据表格共用泛型 DataGrid<T>（Table 只是
+        // 画布预览的静态表头渲染器，不是 Control）：kind 必须是
+        // 可实例化的控件类，否则设计稿生成的 `new Table()` 编不过、
+        // kind "DataGrid" 也无法经 TypeForKey 往返回 23/41。
+        if (ft == 23 || ft == 41) { return "DataGrid"; }
         if (ft == 24) { return "Timeline"; }
         if (ft == 25) { return "TreeView"; }
         if (ft == 26) { return "Collapse"; }
