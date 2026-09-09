@@ -342,6 +342,8 @@ class LegendApp {
     void BuildChat(Panel p) {
         Panel header = Panel.Row(); header.Gap(4); header.Prefer(0, 48);
         Label channels = Text("世界 · 行会 · 系统", "secondary small", 40); channels.Grow(); header.With(channels);
+        /* 原版的设置钮是顶部导航行末的纯图标小块；这里保持在聊天栏头部，
+           主导航 30 格的顺序/文案与原版逐块对齐（navigation.csv 已实测核对）。 */
         Panel settings = Nav(30); settings.Prefer(84, 48); header.With(settings); settings.DockRight(); p.With(header);
         ScrollColumn chatScroll = new ScrollColumn(); chatScroll.Named("chat-scroll"); chatScroll.Grow(); p.With(chatScroll);
         chatHistory = Text("[系统] 欢迎进入传奇放置。\n[连接] 当前未连接游戏服务器。\n本栏只显示真实消息，不播放伪造玩家聊天。", "secondary", 0); chatHistory.Named("chat-content"); chatScroll.With(chatHistory);
