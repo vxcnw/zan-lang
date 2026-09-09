@@ -2,6 +2,7 @@
 
 #include "genrun.h"
 #include "genmeta.h"
+#include "nsresolve.h"
 #include "arena.h"
 #include "diag.h"
 #include "lexer.h"
@@ -1004,6 +1005,11 @@ static void zan_merge_sources(zan_ast_node_t *unit, json_value *sources,
         zan_parser_init(&gp, &lex, arena, diag);
         zan_ast_node_t *gu = zan_parser_parse(&gp);
         if (!gu) continue;
+        /* Generated decls bind like a late-added source file: stamp each with
+         * its own unit's namespace + usings, or the file's `using
+         * System.Data.Orm;` header never reaches the binder and every
+         * unqualified OrmMeta/DbValues reference fails to resolve. */
+        zan_nsresolve_stamp(gu, arena);
         for (int k = 0; k < gu->comp_unit.decls.count; k++)
             zan_ast_list_push(&unit->comp_unit.decls, gu->comp_unit.decls.items[k],
                               arena);

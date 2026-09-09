@@ -2441,13 +2441,6 @@ int main(int argc, char **argv) {
         zan_parser_desugar_events(ast, arena, diag);
         zan_compile_trace("nsresolve");
         zan_nsresolve_run(ast, arena, diag);
-        /* Drop stdlib declarations nothing references. A `using Gui.Widget;`
-         * globs 79 files into the parse even for one button; every phase
-         * after this one would otherwise chew through definitions that can
-         * never be called. Runs after nsresolve (references carry final,
-         * possibly mangled, names) and before the generators (their output
-         * only ever references types the program actually uses). */
-        zan_nsresolve_prune(ast, arena, diag);
 
         /* --gen-meta: dump the compilation-unit metadata the Zan-scripted
          * code generators consume (see genmeta.h) and exit. Must run before
@@ -2493,6 +2486,24 @@ int main(int argc, char **argv) {
             free(source);
             return 1;
         }
+        /* Generators merged their generated classes into the unit above; run
+         * nsresolve again so the new declarations' type references (Expr<T>,
+         * OrmMeta, DbValues, ... from the generated file's own usings) resolve
+         * to final names exactly like every parsed file's do. Re-running over
+         * user code is safe: references already carry final names and resolve
+         * to themselves. */
+        zan_compile_trace("nsresolve generated");
+        zan_nsresolve_run(ast, arena, diag);
+        /* Drop stdlib declarations nothing references. A `using Gui.Widget;`
+         * globs 79 files into the parse even for one button; every phase
+         * after this one would otherwise chew through definitions that can
+         * never be called. Runs after the generators: generated code is part
+         * of the reference graph now -- dbgen output references the whole
+         * System.Data.Orm subtree (OrmSelect/OrmMeta/OrmCol/...) that a
+         * typed-ORM program never names directly, so pruning before the
+         * merge deleted exactly the types the generated classes bind against. */
+        zan_compile_trace("prune");
+        zan_nsresolve_prune(ast, arena, diag);
         zan_compile_trace("resolve done");
     }
 
@@ -3519,6 +3530,7 @@ int main(int argc, char **argv) {
         char rt_sync_buf[1200];
         char rt_file_buf[1200];
         char rt_embed_buf[1200];
+        char rt_inflate_buf[1200];
         char rt_timer_buf[1200];
         char rt_mem_buf[1200];
 
@@ -3576,6 +3588,18 @@ int main(int argc, char **argv) {
             snprintf(rt_embed_buf, sizeof(rt_embed_buf), "%s/%s",
                      link_exe_dir, zan_path_basename(ZAN_EMBED_OBJ));
             rt_embed_obj = rt_embed_buf;
+        }
+#endif
+        /* Compressed-resource decoder (zan_embed_decode/rawlen): the inline
+         * embed API emits calls into it whenever a program embeds resources,
+         * so the object ships next to zanc like ZAN_EMBED_OBJ and rides the
+         * same rt_* slots through every link branch. */
+        const char *rt_inflate_obj = NULL;
+#ifdef ZAN_INFLATE_OBJ
+        if (irgen.uses_inflate) {
+            snprintf(rt_inflate_buf, sizeof(rt_inflate_buf), "%s/%s",
+                     link_exe_dir, zan_path_basename(ZAN_INFLATE_OBJ));
+            rt_inflate_obj = rt_inflate_buf;
         }
 #endif
         /* Unified timer runtime (zan_timer_*): irgen emits calls into it from
@@ -3971,6 +3995,13 @@ int main(int argc, char **argv) {
                         rt_embed_obj = rt_embed_buf;
                         if (!zan_file_exists(rt_embed_obj)) missing = rt_embed_obj;
                     }
+                    if (rt_inflate_obj) {
+                        snprintf(rt_inflate_buf, sizeof(rt_inflate_buf),
+                                 "%s/%s/zan_inflate.o", link_exe_dir,
+                                 target_rt_sub);
+                        rt_inflate_obj = rt_inflate_buf;
+                        if (!zan_file_exists(rt_inflate_obj)) missing = rt_inflate_obj;
+                    }
                     if (missing) {
                         fprintf(stderr,
                                 "error: bundled %s runtime object not found at "
@@ -4059,6 +4090,7 @@ int main(int argc, char **argv) {
                     if (rt_sync_obj) argv[a++] = rt_sync_obj;
                     if (rt_file_obj) argv[a++] = rt_file_obj;
                     if (rt_embed_obj) argv[a++] = rt_embed_obj;
+                    if (rt_inflate_obj) argv[a++] = rt_inflate_obj;
                     if (rt_timer_obj) argv[a++] = rt_timer_obj;
                     /* Also emit an import library (see implib naming note
                      * above) so a consumer can link with just `-L <dir>` +
@@ -4243,6 +4275,11 @@ int main(int argc, char **argv) {
                         snprintf(cmd + cur, sizeof(cmd) - cur, " \"%s\"",
                                  rt_embed_obj);
                     }
+                    if (rt_inflate_obj) {
+                        size_t cur = strlen(cmd);
+                        snprintf(cmd + cur, sizeof(cmd) - cur, " \"%s\"",
+                                 rt_inflate_obj);
+                    }
                     if (rt_timer_obj) {
                         size_t cur = strlen(cmd);
                         snprintf(cmd + cur, sizeof(cmd) - cur, " \"%s\"",
@@ -4292,6 +4329,11 @@ int main(int argc, char **argv) {
                         size_t cur = strlen(cmd);
                         snprintf(cmd + cur, sizeof(cmd) - cur, " \"%s\"",
                                  rt_embed_obj);
+                    }
+                    if (rt_inflate_obj) {
+                        size_t cur = strlen(cmd);
+                        snprintf(cmd + cur, sizeof(cmd) - cur, " \"%s\"",
+                                 rt_inflate_obj);
                     }
                     if (rt_timer_obj) {
                         size_t cur = strlen(cmd);
@@ -4365,6 +4407,11 @@ int main(int argc, char **argv) {
                         size_t cur = strlen(cmd);
                         snprintf(cmd + cur, sizeof(cmd) - cur, " \"%s\"",
                                  rt_embed_obj);
+                    }
+                    if (rt_inflate_obj) {
+                        size_t cur = strlen(cmd);
+                        snprintf(cmd + cur, sizeof(cmd) - cur, " \"%s\"",
+                                 rt_inflate_obj);
                     }
                     if (rt_timer_obj) {
                         size_t cur = strlen(cmd);
@@ -4487,6 +4534,11 @@ int main(int argc, char **argv) {
                         size_t cur = strlen(cmd);
                         snprintf(cmd + cur, sizeof(cmd) - cur,
                                  " \"%s/zan_embed_api.o\"", sys4);
+                    }
+                    if (irgen.uses_inflate) {
+                        size_t cur = strlen(cmd);
+                        snprintf(cmd + cur, sizeof(cmd) - cur,
+                                 " \"%s/zan_inflate.o\"", sys4);
                     }
                     if (getenv("ZAN_VERBOSE_LINK"))
                         fprintf(stderr, "[link] %s\n", cmd);
@@ -4612,6 +4664,11 @@ int main(int argc, char **argv) {
                 size_t cur = strlen(cmd);
                 snprintf(cmd + cur, sizeof(cmd) - cur, " \"%s/zan_embed_api.o\"", sys);
             }
+            if (irgen.uses_inflate) {
+                /* compressed-resource decoder (see zan_inflate.c) */
+                size_t cur = strlen(cmd);
+                snprintf(cmd + cur, sizeof(cmd) - cur, " \"%s/zan_inflate.o\"", sys);
+            }
             /* Small-object allocator in front of musl's mallocng: ARC programs
              * allocate one short-lived block per string/object/frame, which is
              * mallocng's worst case. Wrapping malloc/free also catches libc's
@@ -4715,6 +4772,11 @@ int main(int argc, char **argv) {
                 size_t cur = strlen(cmd);
                 snprintf(cmd + cur, sizeof(cmd) - cur,
                          " \"%s/zan_embed_api.o\"", sys);
+            }
+            if (irgen.uses_inflate) {
+                size_t cur = strlen(cmd);
+                snprintf(cmd + cur, sizeof(cmd) - cur,
+                         " \"%s/zan_inflate.o\"", sys);
             }
             { size_t cur = strlen(cmd);
               snprintf(cmd + cur, sizeof(cmd) - cur,
@@ -4837,6 +4899,11 @@ int main(int argc, char **argv) {
                 snprintf(cmd + cur, sizeof(cmd) - cur,
                          " \"%s/zan_embed_api.o\"", sys);
             }
+            if (irgen.uses_inflate) {
+                size_t cur = strlen(cmd);
+                snprintf(cmd + cur, sizeof(cmd) - cur,
+                         " \"%s/zan_inflate.o\"", sys);
+            }
             { size_t cur = strlen(cmd);
               if (drv_lib_count > 0) {
                   /* dynamic: resolve libc/libm/liblog/libdl from the stub
@@ -4927,10 +4994,15 @@ int main(int argc, char **argv) {
             if (rt_embed_obj)
                 snprintf(winrt_embed, sizeof(winrt_embed),
                          "%s/%s/zan_embed_api.o", exe_dir2, wsub);
+            char winrt_inflate[1400] = {0};
+            if (rt_inflate_obj)
+                snprintf(winrt_inflate, sizeof(winrt_inflate),
+                         "%s/%s/zan_inflate.o", exe_dir2, wsub);
             if ((winrt_io[0] && !zan_file_exists(winrt_io))
                 || (winrt_sync[0] && !zan_file_exists(winrt_sync))
                 || (winrt_file[0] && !zan_file_exists(winrt_file))
-                || (winrt_embed[0] && !zan_file_exists(winrt_embed))) {
+                || (winrt_embed[0] && !zan_file_exists(winrt_embed))
+                || (winrt_inflate[0] && !zan_file_exists(winrt_inflate))) {
                 fprintf(stderr,
                         "error: bundled %s runtime objects not found in "
                         "'%s/%s'; reinstall zan or rebuild with toolchain/%s "
@@ -4988,6 +5060,10 @@ int main(int argc, char **argv) {
             if (winrt_embed[0]) {
                 size_t cur = strlen(cmd);
                 snprintf(cmd + cur, sizeof(cmd) - cur, " \"%s\"", winrt_embed);
+            }
+            if (winrt_inflate[0]) {
+                size_t cur = strlen(cmd);
+                snprintf(cmd + cur, sizeof(cmd) - cur, " \"%s\"", winrt_inflate);
             }
             for (int ei = 0; ei < extra_link_input_count; ei++) {
                 size_t cur = strlen(cmd);
@@ -5161,10 +5237,16 @@ int main(int argc, char **argv) {
                 snprintf(macrt_embed, sizeof(macrt_embed),
                          "%s/zan_embed_api.o", macrt);
             }
+            char macrt_inflate[1400] = {0};
+            if (rt_inflate_obj) {
+                snprintf(macrt_inflate, sizeof(macrt_inflate),
+                         "%s/zan_inflate.o", macrt);
+            }
             if ((macrt_io[0] && !zan_file_exists(macrt_io))
                 || (macrt_sync[0] && !zan_file_exists(macrt_sync))
                 || (macrt_file[0] && !zan_file_exists(macrt_file))
-                || (macrt_embed[0] && !zan_file_exists(macrt_embed))) {
+                || (macrt_embed[0] && !zan_file_exists(macrt_embed))
+                || (macrt_inflate[0] && !zan_file_exists(macrt_inflate))) {
                 fprintf(stderr,
                         "error: bundled macOS runtime objects not found in "
                         "'%s'; reinstall zan or rebuild with toolchain/macos "
@@ -5200,6 +5282,10 @@ int main(int argc, char **argv) {
             if (macrt_embed[0]) {
                 size_t cur = strlen(cmd);
                 snprintf(cmd + cur, sizeof(cmd) - cur, " \"%s\"", macrt_embed);
+            }
+            if (macrt_inflate[0]) {
+                size_t cur = strlen(cmd);
+                snprintf(cmd + cur, sizeof(cmd) - cur, " \"%s\"", macrt_inflate);
             }
             for (int ei = 0; ei < extra_link_input_count; ei++) {
                 size_t cur = strlen(cmd);
@@ -5321,6 +5407,7 @@ int main(int argc, char **argv) {
             if (rt_sync_obj) argv[a++] = rt_sync_obj;
             if (rt_file_obj) argv[a++] = rt_file_obj;
             if (rt_embed_obj) argv[a++] = rt_embed_obj;
+            if (rt_inflate_obj) argv[a++] = rt_inflate_obj;
             if (rt_timer_obj) argv[a++] = rt_timer_obj;
             if (rt_mem_obj) {
                 argv[a++] = rt_mem_obj;
@@ -5396,6 +5483,10 @@ int main(int argc, char **argv) {
             if (rt_embed_obj) {
                 size_t cur = strlen(link_cmd);
                 snprintf(link_cmd + cur, sizeof(link_cmd) - cur, " \"%s\"", rt_embed_obj);
+            }
+            if (rt_inflate_obj) {
+                size_t cur = strlen(link_cmd);
+                snprintf(link_cmd + cur, sizeof(link_cmd) - cur, " \"%s\"", rt_inflate_obj);
             }
             if (rt_timer_obj) {
                 size_t cur = strlen(link_cmd);

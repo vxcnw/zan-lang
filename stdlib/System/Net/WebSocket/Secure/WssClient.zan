@@ -133,6 +133,12 @@ class WssClient {
                 total = this.reader.FrameSize();
             }
             WsFrame frame = this.reader.TakeFrame(total);
+            if (frame.opcode >= 3 && frame.opcode <= 7
+                || frame.opcode >= 11 && frame.opcode <= 15) {
+                // RFC 6455 §5.2：保留 opcode 直接断开（与明文客户端同一契约）。
+                this.CloseNow();
+                return "";
+            }
             if (frame.opcode == WsOpcode.Close) {
                 this.CloseNow();
                 return "";

@@ -1,0 +1,23 @@
+// Regression: `await E` had no checker case, so the expression typed as
+// error and every conversion check against it passed silently --
+// `TcpClient s = await l.AcceptAsync()` (AcceptAsync returns nint)
+// compiled clean and segfaulted at runtime treating the socket handle
+// as an object header. Await must surface the awaited call's declared
+// return type and conversions against it must be enforced.
+class Box {
+    public int v;
+}
+class App {
+    static async Box Num() {
+        return new Box();
+    }
+    static async int Run() {
+        Box b = await Num();      // fine: Box -> Box
+        nint h = await Long();    // fine: long -> nint
+        Box s = await Long();     // must be rejected: long is not Box
+        return b.v + (int)h + 1;
+    }
+    static async long Long() {
+        return 7;
+    }
+}

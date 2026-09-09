@@ -95,6 +95,13 @@ class WsSession {
 
             WsFrame frame = this.reader.TakeFrame(total);
 
+            if (frame.opcode >= 3 && frame.opcode <= 7
+                || frame.opcode >= 11 && frame.opcode <= 15) {
+                // RFC 6455 §5.2：保留 opcode 不能进数据/控制帧路径，
+                // 协议错误回 1002 断开（与 Worker/WSS 同一契约）。
+                await this.Close(1002);
+                return null;
+            }
             if (frame.opcode == WsOpcode.Ping) {
                 byte[] encoded = WsFrame.PongFrame().Encode();
                 this.writer.Append(encoded, 2);

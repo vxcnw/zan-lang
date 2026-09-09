@@ -2399,10 +2399,26 @@ class Worker {
 
             WsFrame frame = reader.TakeFrame(total);
 
+            // RFC 6455 入站帧门禁：§5.2 保留 opcode（3-7 数据、11-15
+            // 控制）、§5.5 控制帧载荷 ≤125、§5.1 客户端帧必须掩码。
+            // 此前非法 opcode 落进数据帧路径被原样回显给对端。
+            bool protoErr = frame.opcode >= 3 && frame.opcode <= 7
+                || frame.opcode >= 11 && frame.opcode <= 15
+                || frame.opcode >= 8 && frame.payloadLen > 125
+                || !frame.masked;
+            if (protoErr) {
+                byte[] enc = WsFrame.CloseFrameWithCode(1002).Encode();
+                writer.Append(enc, 4);
+                int _b = await writer.Flush(client);
+                active = false;
+                break;
+            }
             if (frame.opcode == WsOpcode.Ping) {
-                WsFrame pong = WsFrame.PongFrame();
+                // §5.5.3：Pong 必须原样带回 Ping 的应用数据——空 Pong
+                // 会让按载荷配对的心跳客户端断连。
+                WsFrame pong = WsFrame.RawFrame(WsOpcode.Pong, frame.payload, frame.payloadLen);
                 byte[] encoded = pong.Encode();
-                writer.Append(encoded, 2);
+                writer.Append(encoded, WsFrame.HeaderLen(frame.payloadLen) + frame.payloadLen);
                 continue;
             }
             if (frame.opcode == WsOpcode.Pong) { continue; }

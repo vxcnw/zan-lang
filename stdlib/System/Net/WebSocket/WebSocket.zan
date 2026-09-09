@@ -819,6 +819,13 @@ class WebSocketClient {
                 total = this.reader.FrameSize();
             }
             WsFrame frame = this.reader.TakeFrame(total);
+            if (frame.opcode >= 3 && frame.opcode <= 7
+                || frame.opcode >= 11 && frame.opcode <= 15) {
+                // RFC 6455 §5.2：保留 opcode 直接断开（服务器侧路径会
+                // 回 1002；客户端无回写通道，只关连接）。
+                this.CloseNow();
+                return "";
+            }
             if (frame.opcode == WsOpcode.Close) {
                 this.CloseNow();
                 return "";

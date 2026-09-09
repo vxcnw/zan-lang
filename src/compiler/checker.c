@@ -2754,6 +2754,24 @@ zan_type_t *zan_checker_check_expr(zan_checker_t *c, zan_ast_node_t *expr) {
         return dst;
     }
 
+    case AST_AWAIT_EXPR:
+        /* `await E` yields the awaited async call's *declared* return type
+         * (the same rule irgen's infer_expr_type applies). Without a case
+         * here the await fell to type_error, and every conversion check
+         * against an error-typed value passed silently: `TcpClient s =
+         * await l.AcceptAsync()` (nint) compiled clean and segfaulted at
+         * runtime treating the handle as an object header. */
+        {
+            zan_type_t *inner = zan_checker_check_expr(c, expr->await_expr.expr);
+            if (inner && inner->kind == TYPE_TASK) {
+                return inner->type_arg_count == 1 ? inner->type_args[0]
+                                                  : c->binder->type_void;
+            }
+            /* A call to an `async` method is authored without a Task wrapper:
+             * the declared return type IS the awaited result type. */
+            return inner ? inner : c->binder->type_error;
+        }
+
     case AST_BASE_EXPR:
         return c->binder->type_error; /* resolved in M2 */
 

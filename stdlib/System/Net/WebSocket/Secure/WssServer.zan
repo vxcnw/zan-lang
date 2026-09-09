@@ -220,10 +220,23 @@ class WssServer {
 
                 WsFrame frame = reader.TakeFrame(total);
 
+                // RFC 6455 入站帧门禁（与 Worker 同一契约）：保留
+                // opcode、控制帧载荷 >125、未掩码客户端帧 → 1002 断开。
+                bool protoErr = frame.opcode >= 3 && frame.opcode <= 7
+                    || frame.opcode >= 11 && frame.opcode <= 15
+                    || frame.opcode >= 8 && frame.payloadLen > 125
+                    || !frame.masked;
+                if (protoErr) {
+                    byte[] enc = WsFrame.CloseFrameWithCode(1002).Encode();
+                    int _v = await stream.SendAsync(enc, 4);
+                    connected = false;
+                    break;
+                }
                 if (frame.opcode == WsOpcode.Ping) {
-                    WsFrame pong = WsFrame.PongFrame();
+                    // §5.5.3：Pong 原样带回 Ping 的应用数据。
+                    WsFrame pong = WsFrame.RawFrame(WsOpcode.Pong, frame.payload, frame.payloadLen);
                     byte[] encoded = pong.Encode();
-                    int _p = await stream.SendAsync(encoded, 2);
+                    int _p = await stream.SendAsync(encoded, WsFrame.HeaderLen(frame.payloadLen) + frame.payloadLen);
                     continue;
                 }
                 if (frame.opcode == WsOpcode.Pong) { continue; }

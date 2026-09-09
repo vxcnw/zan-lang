@@ -1,0 +1,239 @@
+// WebSocket 协议门禁回归（loopback）：Worker("websocket") + 裸帧客户端。
+//
+// 入站帧在到达帧循环的 Pong/Close/数据分支之前必须先过协议门禁，
+// 三个历史缺陷各钉一条：
+// 1. 保留 opcode（3-7 保留数据帧、11-15 保留控制帧）：旧实现没有
+//    校验，opcode 3 落进数据帧路径被整帧回显给对端——未定义的帧
+//    形态走私回客户端。现在必须回 1002 关闭帧并断开。
+// 2. 控制帧载荷上限：RFC 6455 §5.5 规定 Close/Ping/Pong 载荷
+//    ≤125 字节，超限是协议错误（旧实现照单全收）。
+// 3. 客户端帧必须掩码：RFC 6455 §5.1（旧实现不校验）。
+// 4. Ping → Pong：Pong 必须原样带回 Ping 的应用数据（§5.5.3）——
+//    旧实现回空 Pong，按载荷配对的心跳客户端直接断连。
+using System;
+using System.Net;
+using System.Net.Sockets;
+using System.Net.WebSocket;
+using System.Threading;
+using System.Text;
+
+class Program {
+    static int PORT = 19733;
+
+    static async string Echo(Connection conn, string message) {
+        return message;
+    }
+
+    // 发一个掩码帧（测试用固定掩码；服务器不校验掩码内容）。
+    static void SendMasked(nint s, int opcode, bool fin, string payload, int len) {
+        byte[] f = new byte[2 + 4 + len + 1];
+        f[0] = (byte)((fin ? 128 : 0) | opcode);
+        f[1] = (byte)(128 | len);
+        f[2] = 1; f[3] = 2; f[4] = 3; f[5] = 4;
+        for (int i = 0; i < len; i = i + 1) {
+            f[6 + i] = (byte)((payload[i] & 255) ^ (byte)(i % 4 + 1));
+        }
+        int _n = Socket.Send(s, f, 6 + len);
+    }
+
+    // 读一帧服务端帧的原始字节：返回 ""（EOF）或"opcode:payload"摘要。
+    // 控制帧负载按字节展开（Close 状态码与 Pong 应用数据都要看得见）。
+    static string leftover = "";
+
+    static async string ReadRaw(nint s) {
+        string raw = leftover;
+        leftover = "";
+        int need = 2;
+        while (true) {
+            if (raw.Length >= 2) {
+                int l0 = raw[1] & 127;
+                int off = 2;
+                if (l0 == 126 && raw.Length >= 4) {
+                    l0 = ((raw[2] & 255) << 8) | (raw[3] & 255);
+                    off = 4;
+                } else if (l0 == 126) {
+                    off = -1;   // 扩展长度还没到齐
+                }
+                if (off >= 0) { need = off + l0; }
+            }
+            if (raw.Length >= need && need >= 2) { break; }
+            await Socket.ReadReady(s);
+            string part = Socket.Receive(s, 4096);
+            if (part.Length == 0) { return ""; }
+            raw = raw + part;
+        }
+        int plen = raw[1] & 127;
+        if (plen == 126 && raw.Length >= 4) {
+            plen = ((raw[2] & 255) << 8) | (raw[3] & 255);
+        }
+        while (raw.Length < 2 + plen) {
+            await Socket.ReadReady(s);
+            string part = Socket.Receive(s, 4096);
+            if (part.Length == 0) { break; }
+            raw = raw + part;
+        }
+        if (raw.Length > 2 + plen) {
+            leftover = raw.Substring(2 + plen, raw.Length - 2 - plen);
+        }
+        string outp = raw.Substring(2, raw.Length - 2 > plen ? plen : raw.Length - 2);
+        return (raw[0] & 15) + ":" + outp;
+    }
+
+    static async int Run() {
+        Socket.Initialize();
+        Worker ws = new Worker("websocket", "127.0.0.1", PORT);
+        ws.onMessage = Program.Echo;
+        nint listenSock = ws.BindSocket(false);
+        if (listenSock < 0) { Console.WriteLine("handshake=0"); return 0; }
+        List<nint> socks = new List<nint>();
+        socks.Add(listenSock);
+        Task.Spawn(Worker.RunAllLoopsOnSockets(socks));
+
+        nint s = 0;
+        bool ok = false;
+        for (int i = 0; i < 100; i = i + 1) {
+            TcpClient c = await TcpClient.ConnectAsync("127.0.0.1", PORT);
+            if (c != null) { s = c.Sock(); ok = true; break; }
+            Thread.Sleep(20);
+        }
+        if (!ok) { Console.WriteLine("handshake=0"); return 0; }
+        Socket.SetNonBlocking(s);
+
+        string req = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: WebSocket\r\n"
+            + "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+            + "Sec-WebSocket-Version: 13\r\n\r\n";
+        Socket.SendString(s, req);
+        string head = "";
+        while (Program.FindHead(head) < 0) {
+            await Socket.ReadReady(s);
+            head = head + Socket.Receive(s, 4096);
+        }
+        Console.WriteLine("handshake=" + (head.Substring(9, 3) == "101" ? "1" : "0"));
+
+        // 0. 基线回显仍要通（门禁不得误伤合法帧）。
+        SendMasked(s, 1, true, "ok", 2);
+        string baseEcho = await ReadRaw(s);
+        Console.WriteLine("baseline=" + (baseEcho == "1:ok" ? "1" : "0:" + baseEcho));
+
+        // 1. 保留数据帧 opcode 3 → 1002 关闭帧。
+        SendMasked(s, 3, true, "bad", 3);
+        string r1 = await ReadRaw(s);
+        Console.WriteLine("bad_opcode=" + CloseCode(r1));
+
+        Socket.Close(s);
+
+        // 2/3/4 用第二条连接：控制帧载荷上限、未掩码帧、Ping→Pong。
+        nint s2 = 0;
+        bool ok2 = false;
+        for (int i = 0; i < 100; i = i + 1) {
+            TcpClient c = await TcpClient.ConnectAsync("127.0.0.1", PORT);
+            if (c != null) { s2 = c.Sock(); ok2 = true; break; }
+            Thread.Sleep(20);
+        }
+        if (!ok2) { Console.WriteLine("handshake=0"); return 0; }
+        Socket.SetNonBlocking(s2);
+        Socket.SendString(s2, req);
+        string head2 = "";
+        while (Program.FindHead(head2) < 0) {
+            await Socket.ReadReady(s2);
+            head2 = head2 + Socket.Receive(s2, 4096);
+        }
+
+        // 2. Ping 载荷 126 字节（>125）→ 1002。服务器随后断开本连接，
+        //    所以 3/4 各用一条新连接。
+        byte[] longPing = new byte[2 + 2 + 4 + 126 + 1];
+        longPing[0] = (byte)(128 | 9);
+        longPing[1] = (byte)(128 | 126);
+        longPing[2] = 0; longPing[3] = 126;   // 126 字节
+        longPing[4] = 1; longPing[5] = 2; longPing[6] = 3; longPing[7] = 4;
+        int _p = Socket.Send(s2, longPing, 2 + 2 + 4 + 126);
+        string r2 = await ReadRaw(s2);
+        Console.WriteLine("long_ping=" + CloseCode(r2));
+        Socket.Close(s2);
+
+        // 3/4 用第三条连接：未掩码帧、Ping→Pong。
+        nint s3 = 0;
+        bool ok3 = false;
+        for (int i = 0; i < 100; i = i + 1) {
+            TcpClient c = await TcpClient.ConnectAsync("127.0.0.1", PORT);
+            if (c != null) { s3 = c.Sock(); ok3 = true; break; }
+            Thread.Sleep(20);
+        }
+        if (!ok3) { Console.WriteLine("handshake=0"); return 0; }
+        Socket.SetNonBlocking(s3);
+        Socket.SendString(s3, req);
+        string head3 = "";
+        while (Program.FindHead(head3) < 0) {
+            await Socket.ReadReady(s3);
+            head3 = head3 + Socket.Receive(s3, 4096);
+        }
+
+        // 3. 未掩码的合法 text 帧 → 1002（§5.1 客户端→服务端必须掩码）。
+        byte[] bare = new byte[2 + 3 + 1];
+        bare[0] = (byte)(128 | 1);
+        bare[1] = 2;
+        bare[2] = (byte)"h"[0];
+        bare[3] = (byte)"i"[0];
+        int _u = Socket.Send(s3, bare, 4);
+        string r3 = await ReadRaw(s3);
+        Console.WriteLine("unmasked=" + CloseCode(r3));
+        Socket.Close(s3);
+
+        // 4. Ping("hb") → Pong 必须带回 "hb"（本连接无协议错误）。
+        nint s4 = 0;
+        bool ok4 = false;
+        for (int i = 0; i < 100; i = i + 1) {
+            TcpClient c = await TcpClient.ConnectAsync("127.0.0.1", PORT);
+            if (c != null) { s4 = c.Sock(); ok4 = true; break; }
+            Thread.Sleep(20);
+        }
+        if (!ok4) { Console.WriteLine("handshake=0"); return 0; }
+        Socket.SetNonBlocking(s4);
+        Socket.SendString(s4, req);
+        string head4 = "";
+        while (Program.FindHead(head4) < 0) {
+            await Socket.ReadReady(s4);
+            head4 = head4 + Socket.Receive(s4, 4096);
+        }
+        SendMasked(s4, 9, true, "hb", 2);
+        string r4 = await ReadRaw(s4);
+        Console.WriteLine("ping_payload=" + (r4 == "10:hb" ? "1" : "0:" + r4));
+
+        Socket.Close(s4);
+        ws.Stop();
+        for (int i = 0; i < 20; i = i + 1) { await Task.Delay(10); }
+        return 0;
+    }
+
+    // 门禁响应判定：合法应答是带 1002 状态码的关闭帧（"8:..." 且状态
+    // 码两字节为 0x03 0xEA）；EOF 也算拒绝（服务器断开）。其它任何
+    // 数据帧回显都是门禁失守。
+    static string CloseCode(string raw) {
+        if (raw.Length == 0) { return "eof"; }
+        // 摘要形态是 "<opcode>:<payload>"，":" 固定在下标 1。
+        int colon = raw.IndexOf(":");
+        if (colon != 1 || raw.Length < 3) { return "leak:" + raw; }
+        int op = (int)raw[0] - 48;
+        if (op != 8) { return "leak:" + raw; }
+        // 摘要里状态码是两个原始字节；1002 = 0x03 0xEA。
+        byte b2 = (byte)(raw[2] & 255);
+        byte b3 = (byte)(raw[3] & 255);
+        if (b2 == 3 && b3 == 234) { return "1002"; }
+        return "close:" + raw;
+    }
+
+    static int FindHead(string s) {
+        int n = s.Length - 3;
+        for (int i = 0; i < n; i = i + 1) {
+            if ((s[i] & 255) == 13 && (s[i + 1] & 255) == 10
+                && (s[i + 2] & 255) == 13 && (s[i + 3] & 255) == 10) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    static void Main() {
+        int r = await Run();
+    }
+}
