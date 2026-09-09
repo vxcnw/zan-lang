@@ -56,7 +56,8 @@ def run(exe, name, commands, fresh=True):
         (save / 'hero-v2.json').write_text(json.dumps(fixture()), encoding='utf-8')
     script = OUT / f'{name}.ui'
     script.write_text('wait 700\n' + '\n'.join(commands) + '\nquit\n', encoding='utf-8')
-    env = dict(os.environ, LEGEND_SAVE_DIR=str(save), ZAN_UI_SCRIPT=str(script), ZAN_UI_OUT=str(OUT))
+    env = dict(os.environ, LEGEND_SAVE_DIR=str(save), ZAN_UI_SCRIPT=str(script), ZAN_UI_OUT=str(OUT),
+               LEGEND_OFFLINE='1')
     startup = subprocess.STARTUPINFO(); startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW; startup.wShowWindow = 0
     subprocess.run([str(exe)], cwd=exe.parent, env=env, startupinfo=startup, timeout=20, check=True)
     log = (OUT / 'results.log').read_text(encoding='utf-8-sig')

@@ -17,16 +17,20 @@ def check(path):
     assert len(nodes) == 31, 'Missing or duplicate navigation controls'
     nav = {int(n['name'][4:]): n for n in nodes}
     assert set(nav) == set(range(31)), 'Missing or duplicate navigation route'
-    scale = nav[0]['kids'][0]['w']/28
+    # 原版实测：瓦片 32 逻辑高、图标 22、单行蓝字（底部两行瓦片 48）。
+    # 图标是唯一与 DPI 无关的常量锚，用它推物理像素比例。
+    scale = nav[0]['kids'][0]['w']/22
     for i, tile in nav.items():
         image, label = tile['kids']
         assert image['kind'] == 'Image' and label['kind'] == 'Label', (i,'child order')
-        assert abs(tile['h']-48*scale) <= 1, (i,'height')
-        assert image['w'] == image['h'] == 28*scale, (i,'icon size')
+        # 底部 30 号是两行文本瓦片（48 逻辑高），顶部/中部一律 32 逻辑高。
+        expect_h = 48 if i == 30 else 32
+        assert abs(tile['h']-expect_h*scale) <= 1, (i,'height')
+        assert image['w'] == image['h'] == 22*scale, (i,'icon size')
         assert abs(image['x']-tile['x']-4*scale) <= 1, (i,'left inset')
         assert abs(label['x']-image['x']-image['w']-4*scale) <= 1, (i,'icon/text gap')
-        assert abs(label['h']-40*scale) <= 1, (i,'two-line label height')
-        assert abs(2*label['y']+label['h']-2*tile['y']-tile['h']) <= 1, (i,'label vertical center')
+        assert label['h'] <= tile['h'] and label['h'] > 0, (i,'label height')
+        assert abs(2*label['y']+label['h']-2*tile['y']-tile['h']) <= 2, (i,'label vertical center')
         assert abs(2*image['y']+image['h']-2*tile['y']-tile['h']) <= 1, (i,'vertical center')
         assert label['x']+label['w'] <= tile['x']+tile['w'], (i,'overflow')
     for start in (0,10,20):

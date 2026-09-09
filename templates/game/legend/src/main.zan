@@ -167,15 +167,58 @@ class LegendApp {
     }
     Panel Col(string cls) { Panel p = Panel.Column(); p.Class = cls; p.Pad(4); p.Gap(4); return p; }
     void Note(Panel p, string text) { p.With(Text(text, "secondary", 0)); }
+
+    /* ---- 全站子页统一骨架（照原版表格化）----
+       Panel.Row 是停靠式布局：With() 进去的固定宽子项靠左排、
+       Grow() 的子项永远填最后——行内「文本+按钮」天生左右颠倒，
+       这正是旧版按钮不靠右、列不齐的根因。表格行/卡片一律改用
+       Flex（display:flex，声明序 + flex-grow）：首列挂 grow 吃掉
+       余量，数据列固定宽，操作钮声明在最后贴右缘；底色挂皮肤
+       table-head/table-row/table-alt/frame。 */
+    void NetHead(string title, string sub) {
+        content.With(Text(title, "yellow strong", 30));
+        if (sub.Length > 0) { content.With(Text(sub, "secondary small", 0)); }
+    }
+    /* 摘要卡：左信息（grow）+ 右动作列（固定宽贴右）。 */
+    Flex NetCard() { Flex c = Flex.Row(); c.Class = "frame"; c.Pad(10); c.Gap(8); return c; }
+    Flex NetInfo() { Flex f = Flex.Column(); f.Class = "grow"; f.Gap(4); return f; }
+    Flex NetActs(int w) { Flex a = Flex.Column(); a.Gap(4); a.Prefer(w, 0); return a; }
+    /* 表头行：widths[i]<=0 的列挂 grow 吃余量（一般只有首列）。 */
+    Flex NetTHead(string[] headers, int[] widths) {
+        Flex h = Flex.Row(); h.Class = "table-head"; h.Pad(6); h.Gap(8); h.Prefer(0, 26);
+        for (int i = 0; i < headers.Length; i = i + 1) {
+            string st = widths[i] > 0 ? "secondary" : "secondary grow";
+            Label c = Text(headers[i], st, 0);
+            if (widths[i] > 0) { c.Prefer(widths[i], 0); }
+            h.With(c);
+        }
+        return h;
+    }
+    /* 数据行（条纹）：cells/widths 同表头同序；styles 为 null 时全部
+       默认白字；act 为 null 则无操作列，传入按钮（或装好按钮的
+       Flex）即贴行尾右缘。 */
+    Flex NetTRow(string[] cells, int[] widths, string[] styles, int h, bool alt, Control act) {
+        Flex r = Flex.Row(); r.Class = alt ? "table-alt" : "table-row";
+        r.Pad(6); r.Gap(8); r.Prefer(0, h);
+        for (int i = 0; i < cells.Length; i = i + 1) {
+            string st = styles != null && styles[i].Length > 0 ? styles[i] : "";
+            if (widths[i] <= 0) { st = st.Length > 0 ? st + " grow" : "grow"; }
+            Label c = Text(cells[i], st, 0);
+            if (widths[i] > 0) { c.Prefer(widths[i], 0); }
+            r.With(c);
+        }
+        if (act != null) { r.With(act); }
+        return r;
+    }
     void Save() { saveState = saves.Write(g, DateTime.UtcNow().epoch) ? "已保存" : saves.error; lastSave = DateTime.UtcNow().epoch; }
     void Changed() { Save(); Refresh(); }
     void Rebuild() { Save(); BuildPage(); Refresh(); }
     void Navigate(int n) { page = n; selected = -1; BuildPage(); Refresh(); }
     void PickJob(int n) { g.Choose(n); lastTime = DateTime.UtcNow().epoch; Rebuild(); }
     Panel Nav(int n) {
-        Panel b = Panel.Row(); b.Class = "navtile"; b.Pad(4); b.Gap(4); b.Prefer(0, 48); b.Named("nav-" + Rules.N(n));
-        Image icon = new Image(navigationData.At(n).Text("icon"), "", "contain"); icon.Class = "navicon"; icon.Prefer(28, 28); b.With(icon);
-        Label l = Text(navigationData.At(n).Text("label").Replace("\\n", "\n"), "navtext", 40); l.wrap = true; l.Grow(); b.With(l);
+        Panel b = Panel.Row(); b.Class = "navtile"; b.Pad(4); b.Gap(4); b.Prefer(0, 32); b.Named("nav-" + Rules.N(n));
+        Image icon = new Image(navigationData.At(n).Text("icon"), "", "contain"); icon.Class = "navicon"; icon.Prefer(22, 22); b.With(icon);
+        Label l = Text(navigationData.At(n).Text("label").Replace("\\n", "\n"), "navtext", 24); l.wrap = true; l.Grow(); b.With(l);
         b.OnClick(() => { Navigate(n); }); navTiles[n] = b; return b;
     }
     void Run() {
@@ -196,12 +239,12 @@ class LegendApp {
         // root 上不受影响；进入世界时才显现。
         shellChat = chat; shellMain = main;
         chat.SetShown(false); main.SetShown(false);
-        Grid navigation = Grid.Of(10); navigation.Class = "navigation-grid"; navigation.Pad(8); navigation.Gap(4); navigation.Prefer(0, 116); main.With(navigation);
+        Grid navigation = Grid.Of(10); navigation.Class = "navigation-grid"; navigation.Pad(8); navigation.Gap(4); navigation.Prefer(0, 84); main.With(navigation);
         for (int n = 0; n < 20; n = n + 1) { navigation.With(Nav(n)); }
         Panel body = Panel.Row(); body.Gap(0); body.Grow(); main.With(body);
         Panel sidebar = Panel.Column(); sidebar.Class = "sidebar"; sidebar.Prefer(248, 0); sidebar.Gap(0); body.With(sidebar); BuildProfile(sidebar);
         Panel center = Panel.Column(); center.Gap(4); center.Grow(); body.With(center);
-        Grid bottom = Grid.Of(10); bottom.Class = "bottom-nav navigation-grid"; bottom.Pad(8); bottom.Gap(4); bottom.Prefer(0, 64); bottom.DockBottom(); main.Add(bottom);
+        Grid bottom = Grid.Of(10); bottom.Class = "bottom-nav navigation-grid"; bottom.Pad(8); bottom.Gap(4); bottom.Prefer(0, 48); bottom.DockBottom(); main.Add(bottom);
         for (int i = 20; i < 30; i = i + 1) { bottom.With(Nav(i)); }
         content = Panel.Column(); content.Class = "page-surface"; content.Pad(4); content.Gap(4); content.Grow(); center.With(content);
         // 登录小窗即表单：主界面两块面板隐藏，netForm 排最后铺满全窗。
@@ -209,7 +252,13 @@ class LegendApp {
         // 未登录就关窗 = 不玩：整个程序直接退出。
         netForm = Panel.Column(); netForm.Class = "page-surface"; netForm.Pad(24); netForm.Gap(10); netForm.DockFill(); root.Add(netForm);
         BuildPage(); DeclareUnits(root); Refresh();
-        ConnectPublished(dataDir); RebuildNetForm();
+        if (KnownFolders.GetEnv("LEGEND_OFFLINE").Length > 0) {
+            /* 离线壳：LEGEND_OFFLINE=1 时不拨号，窗口直接长成主形态进
+               本地幻境玩法（UI 自动化回归与无服务器试玩走这条路）。 */
+            EnterOfflineShell();
+        } else {
+            ConnectPublished(dataDir); RebuildNetForm();
+        }
         form.Every(120, () => {
           /* HTTP 应答并入 + 25s 保活轮询：必须在表单泵之前，本帧就用
              上新数据。不许抛——Every 里的动作一抛就永久停摆。 */
@@ -2139,6 +2188,17 @@ class LegendApp {
         netPhase = -1;
         formPage = "login"; forgotUser = ""; charNameDraft = ""; lastFormKey = ""; armDel = -1;
         RebuildNetForm();
+    }
+
+    /* 离线壳（LEGEND_OFFLINE=1）：跳过登录联机流程，直接以主窗口形态
+       进本地幻境。只是不拨号——页面构建/心跳/存档全部走原路径，
+       BuildPageCore 因 !net.InWorld() 落到离线分支。 */
+    void EnterOfflineShell() {
+        app.SetClientSize(1080, 640);
+        app.SetWindowTitle("迷你传奇 · 离线");
+        netForm.SetShown(false);
+        shellChat.SetShown(true); shellMain.SetShown(true);
+        Rebuild();
     }
 
     int NetPhase() {
