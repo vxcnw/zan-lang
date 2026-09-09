@@ -350,16 +350,31 @@ class Directory {
     //   Linux (glibc): d_ino(8) d_off(8) d_reclen(2) d_type@18 d_name@19
     //   macOS (Darwin): d_ino(8) d_seekoff(8) d_reclen(2) d_namlen(2)
     //                   d_type@20 d_name@21
-    #if MACOS
+    //   WASI (wasi-libc): d_ino(8) d_type@8 d_name@9 —— wasi-libc 把 fd_readdir
+    //                   的原始条目（d_next/d_ino/d_namlen/d_type/name）转换成
+    //                   自己的紧凑 dirent：d_type 直接沿用 WASI filetype 值
+    //                   （3=目录、4=普通文件），不是 POSIX 的 DT_*。
+    #if WASI
+    /// struct dirent 的 d_type 字节偏移（wasi-libc 布局）。
+    static int direntTypeOffset() { return 8; }
+    /// struct dirent 的 d_name 字节偏移（wasi-libc 布局）。
+    static int direntNameOffset() { return 9; }
+    /// wasi-libc 的 d_type 字节沿用 WASI filetype：DT_DIR 判据改为 3。
+    static int direntDirType() { return 3; }
+    #elif MACOS
     /// struct dirent 的 d_type 字节偏移（Darwin 布局）。
     static int direntTypeOffset() { return 20; }
     /// struct dirent 的 d_name 字节偏移（Darwin 布局）。
     static int direntNameOffset() { return 21; }
+    /// POSIX DT_DIR。
+    static int direntDirType() { return 4; }
     #else
     /// struct dirent 的 d_type 字节偏移（glibc/Linux 布局）。
     static int direntTypeOffset() { return 18; }
     /// struct dirent 的 d_name 字节偏移（glibc/Linux 布局）。
     static int direntNameOffset() { return 19; }
+    /// POSIX DT_DIR。
+    static int direntDirType() { return 4; }
     #endif
 
     /// 从 struct dirent* 读取以 NUL 结尾的 d_name。
@@ -392,7 +407,7 @@ class Directory {
                 bool hidden = name.Substring(0, 1) == ".";
                 int dtype = ent[direntTypeOffset()] & 255;   // d_type
                 bool isDir = false;
-                if (dtype == 4) {            // DT_DIR
+                if (dtype == direntDirType()) {   // DT_DIR（WASI 下是 filetype 3）
                     isDir = true;
                 } else if (dtype == 0 || dtype == 10) {
                     // DT_UNKNOWN（文件系统不填 d_type）或 DT_LNK：探测该

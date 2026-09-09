@@ -1342,6 +1342,17 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/toolchain/wasm32/libc.a"
             -o ${CMAKE_BINARY_DIR}/conf_try_catch_wasm32.wasm
             ${CMAKE_SOURCE_DIR}/tests/conformance/try_catch.zan)
   set_tests_properties(conformance_try_catch_wasm32 PROPERTIES TIMEOUT 120)
+  # File IO inside try/catch: the extern calls lower to `invoke`, which the
+  # w32 signature-adaptation pass must rewrite like plain `call` (the invoke
+  # used to keep the 64-bit Zan signature and the module trapped at runtime).
+  # Lives in tests/wasm32/, not tests/conformance/: the conformance glob
+  # registers every .zan there as a native run case, which would collide with
+  # this same-name registration.
+  add_test(NAME conformance_wasm32_file_io_in_try
+    COMMAND $<TARGET_FILE:zanc> --auto-stdlib --target wasm32
+            -o ${CMAKE_BINARY_DIR}/conf_wasm32_file_io_in_try.wasm
+            ${CMAKE_SOURCE_DIR}/tests/wasm32/file_io_in_try.zan)
+  set_tests_properties(conformance_wasm32_file_io_in_try PROPERTIES TIMEOUT 120)
 endif()
 
 # ---- Android: cross-compile + static bionic link ---------------------------

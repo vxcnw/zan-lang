@@ -2948,7 +2948,13 @@ zan_status_t zan_irgen_write_obj(zan_irgen_t *g, const char *path) {
             while (use) {
                 LLVMUseRef next = LLVMGetNextUse(use);
                 LLVMValueRef user = LLVMGetUser(use);
-                if (LLVMIsACallInst(user) &&
+                /* try/catch bodies lower extern calls to invoke, not call:
+                 * an invoke left on the old signature makes the wasm backend
+                 * materialize an unreachable stub (read_probe: fread inside
+                 * try trapped). CallInst and InvokeInst share the operand
+                 * layout (callee is the last operand), so both rewrite the
+                 * same way. */
+                if ((LLVMIsACallInst(user) || LLVMIsAInvokeInst(user)) &&
                     LLVMGetCalledValue(user) == decl) {
                     LLVMTypeRef cft = LLVMGetCalledFunctionType(user);
                     if (cft == lft) {
