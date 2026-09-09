@@ -106,9 +106,18 @@ class XqGame {
     int demoAt;
     List<int> legal;    // cached legal moves for the side to move
 
-    static int Cell() { return 58; }
-    static int BX() { return 130; }
-    static int BY() { return 78; }
+    // 竖屏（舞台高>宽：手机竖屏或竖长窗口）参照手机棋类布局自适应——
+    // 棋盘水平居中放大（格距 74），顶部对手条 + 回合徽标，底部
+    // 菜单/重玩按钮行；横屏维持"左棋盘 + 右信息栏"原布局。绘制与
+    // 命中测试共用这几个函数，同一帧内自洽。
+    static bool Portrait() { return XqGame.VW() < XqGame.VH(); }
+    static int Cell() { return XqGame.Portrait() ? 74 : 58; }
+    static int BX() { return (XqGame.VW() - 8 * XqGame.Cell()) / 2; }
+    static int BY() {
+        if (!XqGame.Portrait()) { return 78; }
+        // 顶部条(0..140) + 徽标带(到 240)之下、底部按钮行(高 110)之上居中
+        return 240 + (XqGame.VH() - 240 - 150 - 9 * XqGame.Cell()) / 2;
+    }
     // 视口按宿主舞台每帧延展（宽窗多看宽度）：VW/VH 是当前帧的舞台
     // 逻辑尺寸，帧首在 SyncStage 更新——布局锚定它即可满铺任意窗口，
     // 否则长轴超出的部分就是宿主 margin 底色的空条。
@@ -656,16 +665,30 @@ class XqGame {
 
     void OnDown(int cx, int cy, int now) {
         if (this.scene == 0) {
+            if (XqGame.Portrait()) {
+                // 竖屏菜单：单列居中（与 DrawMenu 同矩形）
+                if (CDraw.PointIn(cx, cy, XqGame.VW() / 2 - 200, 300, 400, 74)) { this.StartGame(0, now); return; }
+                int d = 1;
+                while (d <= 10) {
+                    int row = d - 1;
+                    if (CDraw.PointIn(cx, cy, XqGame.VW() / 2 - 200, 396 + row * 62, 400, 52)) {
+                        this.StartGame(d, now);
+                        return;
+                    }
+                    d = d + 1;
+                }
+                return;
+            }
             if (CDraw.PointIn(cx, cy, 430, 268, 420, 64)) { this.StartGame(0, now); return; }
-            int d = 1;
-            while (d <= 10) {
-                int col = (d - 1) % 2;
-                int row = (d - 1) / 2;
+            int d2 = 1;
+            while (d2 <= 10) {
+                int col = (d2 - 1) % 2;
+                int row = (d2 - 1) / 2;
                 if (CDraw.PointIn(cx, cy, 330 + col * 330, 356 + row * 62, 290, 52)) {
-                    this.StartGame(d, now);
+                    this.StartGame(d2, now);
                     return;
                 }
-                d = d + 1;
+                d2 = d2 + 1;
             }
             return;
         }
@@ -675,6 +698,12 @@ class XqGame {
             return;
         }
         if (this.aiTurn || this.winner != 0) { return; }
+        // 竖屏底部按钮行：菜单（去场景 0）与重玩（重开当前局）
+        bool menu;
+        if (this.BottomRowHit(cx, cy, out menu)) {
+            if (menu) { this.scene = 0; } else { this.StartGame(this.mode, now); }
+            return;
+        }
         int gx = (cx - XqGame.BX() + XqGame.Cell() / 2) / XqGame.Cell();
         int gy = (cy - XqGame.BY() + XqGame.Cell() / 2) / XqGame.Cell();
         if (gx < 0 || gy < 0 || gx > 8 || gy > 9) { return; }
@@ -742,7 +771,7 @@ class XqGame {
             CKitUi.Backdrop(this.c, this.menuBg, XqGame.VW(), XqGame.VH());
             CDraw.FillRect(this.c, 0, 0, XqGame.VW(), XqGame.VH(), CDraw.Argb(190, 20, 12, 8));
         }
-        CDraw.FillCircle(this.c, 380, 320, 430, 255, 180, 100, 14);
+        CDraw.FillCircle(this.c, XqGame.VW() / 3, XqGame.VH() / 3, 430, 255, 180, 100, 14);
     }
 
     void DotLine(int ax, int ay, int bx, int by, int cr, int cg, int cb, int ca) {
@@ -843,6 +872,7 @@ class XqGame {
     }
 
     void DrawSide(int now) {
+        if (XqGame.Portrait()) { this.DrawTopBar(now); return; }
         int px = 700;
         CDraw.RoundRectFill(this.c, px, 66, 512, 588, 16, 44, 24, 16, 205);
         CDraw.RingRect(this.c, px, 66, 512, 588, 2, 226, 186, 128, 90);
@@ -861,6 +891,38 @@ class XqGame {
         CText.Draw(this.c, "残局通关 " + this.prof.drills, px + 36, 406, 2, 200, 190, 170, 255);
         CText.Draw(this.c, "第 " + (this.moveCount + 1) + " 手", px + 36, 446, 2, 200, 190, 170, 255);
         CText.Draw(this.c, "点选红子再点目标 · Esc 菜单", px + 36, 610, 2, 160, 150, 135, 255);
+    }
+
+    // 竖屏对局 HUD：顶部对手条（黑方段位 + 手数）与"黑方思考中/轮到
+    // 红方"徽标带（参考手机棋类布局），底部 菜单/重玩 按钮行。
+    void DrawTopBar(int now) {
+        int vw = XqGame.VW();
+        CDraw.RoundRectFill(this.c, 16, 24, vw - 32, 112, 16, 44, 24, 16, 205);
+        CDraw.RingRect(this.c, 16, 24, vw - 32, 112, 2, 226, 186, 128, 90);
+        CText.Draw(this.c, "对手 · 黑方", 40, 44, 3, 240, 222, 190, 255);
+        CText.Draw(this.c, "段位 " + this.prof.Title() + " · " + this.prof.pts + " 分", 40, 92, 2, 200, 190, 170, 255);
+        string turn = "轮到红方（你）";
+        int tr = 140; int tg = 220; int tb = 170;
+        if (this.aiTurn) { turn = "黑方思考中…"; tr = 255; tg = 214; tb = 150; }
+        if (this.inCheck && !this.aiTurn) { turn = "将军！速解"; tr = 255; tg = 120; tb = 110; }
+        CDraw.RoundRectFill(this.c, vw - 300, 48, 268, 64, 12, 26, 16, 10, 230);
+        CText.DrawCentered(this.c, turn, vw - 166, 66, 3, tr, tg, tb, 255);
+        CText.Draw(this.c, "第 " + (this.moveCount + 1) + " 手 · 残局通关 " + this.prof.drills, 40, 200, 2, 200, 190, 170, 255);
+        int by = XqGame.VH() - 110;
+        int bw = 200;
+        CKitUi.Button(this.c, this.mouseX, this.mouseY, vw / 2 - bw - 12, by, bw, 64, "菜单", 3, 0);
+        CKitUi.Button(this.c, this.mouseX, this.mouseY, vw / 2 + 12, by, bw, 64, "重玩", 3, 1);
+    }
+
+    // 竖屏底部按钮行命中区（绘制与 OnDown 共用矩形）。
+    bool BottomRowHit(int cx, int cy, out bool menu) {
+        menu = false;
+        if (!XqGame.Portrait()) { return false; }
+        int vw = XqGame.VW();
+        int by = XqGame.VH() - 110;
+        if (CDraw.PointIn(cx, cy, vw / 2 - 212, by, 200, 64)) { menu = true; return true; }
+        if (CDraw.PointIn(cx, cy, vw / 2 + 12, by, 200, 64)) { return true; }
+        return false;
     }
 
     void DrawFx(int now) {
@@ -885,7 +947,7 @@ class XqGame {
             i = i + 1;
         }
         if (now - this.toastAt < 2200) {
-            CText.DrawCenteredShadow(this.c, this.toastText, 360, 690, 2, 255, 224, 150, 255);
+            CText.DrawCenteredShadow(this.c, this.toastText, XqGame.VW() / 2, XqGame.VH() / 2 - 120, 2, 255, 224, 150, 255);
         }
     }
 
@@ -903,11 +965,28 @@ class XqGame {
         CKitUi.Backdrop(this.c, this.menuBg, XqGame.VW(), XqGame.VH());
         CDraw.FillRect(this.c, 0, 0, XqGame.VW(), XqGame.VH(), CDraw.Argb(120, 18, 10, 6));
         if (this.titlePath != null) {
-            CDraw.BlitImage(this.c, this.titlePath, 640 - 300, 30, 600, 200);
+            CDraw.BlitImage(this.c, this.titlePath, XqGame.VW() / 2 - 300, 30, 600, 200);
         } else {
-            CText.DrawCenteredShadow(this.c, "象棋", 640, 70, 9, 245, 230, 200, 255);
+            CText.DrawCenteredShadow(this.c, "象棋", XqGame.VW() / 2, 70, 9, 245, 230, 200, 255);
         }
-        CText.DrawCenteredShadow(this.c, "楚河汉界 · 经典残局 · 段位成长", 640, 232, 3, 255, 216, 155, 255);
+        CText.DrawCenteredShadow(this.c, "楚河汉界 · 经典残局 · 段位成长", XqGame.VW() / 2, 232, 3, 255, 216, 155, 255);
+        if (XqGame.Portrait()) {
+            // 竖屏菜单：单列居中，10 个残局竖排（命中区见 OnDown）
+            CKitUi.Button(this.c, this.mouseX, this.mouseY, XqGame.VW() / 2 - 200, 300, 400, 74, "经典对弈", 3, 1);
+            int d = 1;
+            while (d <= 10) {
+                int row = d - 1;
+                int kind = 0;
+                if (d % 2 == 1) { kind = 1; }
+                CKitUi.Button(this.c, this.mouseX, this.mouseY, XqGame.VW() / 2 - 200, 396 + row * 62, 400, 52,
+                    "残局 · " + XqGame.DrillName(d), 2, kind);
+                d = d + 1;
+            }
+            CText.DrawCenteredShadow(this.c, "段位 " + this.prof.Title() + " · " + this.prof.pts
+                + " 分 · 胜 " + this.prof.wins + " 负 " + this.prof.losses
+                + " · 残局通关 " + this.prof.drills, XqGame.VW() / 2, 1078, 2, 230, 210, 180, 255);
+            return;
+        }
         CKitUi.Button(this.c, this.mouseX, this.mouseY, 430, 268, 420, 64, "经典对弈", 3, 1);
         int d = 1;
         while (d <= 10) {
@@ -921,7 +1000,7 @@ class XqGame {
         }
         CText.DrawCenteredShadow(this.c, "段位 " + this.prof.Title() + " · " + this.prof.pts
             + " 分 · 胜 " + this.prof.wins + " 负 " + this.prof.losses
-            + " · 残局通关 " + this.prof.drills, 640, 688, 2, 230, 210, 180, 255);
+            + " · 残局通关 " + this.prof.drills, XqGame.VW() / 2, XqGame.VH() - 32, 2, 230, 210, 180, 255);
     }
 
     void DrawOver(int now) {
@@ -930,25 +1009,26 @@ class XqGame {
         this.DrawBoard(now);
         this.DrawSide(now);
         CDraw.FillRect(this.c, 0, 0, XqGame.VW(), XqGame.VH(), CDraw.Argb(165, 16, 10, 6));
-        int by = 190;
-        CDraw.RoundRectFill(this.c, 390, by, 500, 320, 20, 40, 24, 14, 245);
-        CDraw.RingRect(this.c, 390, by, 500, 320, 2, 226, 186, 128, 140);
+        int by = XqGame.Portrait() ? XqGame.VH() / 2 - 170 : 190;
+        int bx = XqGame.VW() / 2 - 250;
+        CDraw.RoundRectFill(this.c, bx, by, 500, 320, 20, 40, 24, 14, 245);
+        CDraw.RingRect(this.c, bx, by, 500, 320, 2, 226, 186, 128, 140);
         if (this.winner == 1) {
-            CText.DrawCenteredShadow(this.c, "绝杀！红方胜", 640, by + 34, 5, 255, 218, 110, 255);
+            CText.DrawCenteredShadow(this.c, "绝杀！红方胜", XqGame.VW() / 2, by + 34, 5, 255, 218, 110, 255);
             int gain = 15;
             if (this.mode > 0) { gain = 20; }
-            CText.DrawCentered(this.c, "+" + gain + " 段位分 · 现 " + this.prof.Title(), 640, by + 110, 3, 240, 225, 200, 255);
+            CText.DrawCentered(this.c, "+" + gain + " 段位分 · 现 " + this.prof.Title(), XqGame.VW() / 2, by + 110, 3, 240, 225, 200, 255);
             string cheer = "棋高一着，再战一盘！";
             if (this.prof.streak >= 3) { cheer = this.prof.streak + " 连胜！杀伐果断"; }
             if (this.mode > 0) { cheer = "残局功力见涨！"; }
-            CText.DrawCentered(this.c, cheer, 640, by + 166, 2, 150, 230, 190, 255);
+            CText.DrawCentered(this.c, cheer, XqGame.VW() / 2, by + 166, 2, 150, 230, 190, 255);
         } else {
-            CText.DrawCenteredShadow(this.c, "黑方得手", 640, by + 34, 5, 235, 160, 150, 255);
-            CText.DrawCentered(this.c, "第 " + this.moveCount + " 手告负", 640, by + 110, 3, 220, 205, 185, 255);
-            CText.DrawCentered(this.c, "复盘关键一手，卷土重来！", 640, by + 166, 2, 255, 214, 150, 255);
+            CText.DrawCenteredShadow(this.c, "黑方得手", XqGame.VW() / 2, by + 34, 5, 235, 160, 150, 255);
+            CText.DrawCentered(this.c, "第 " + this.moveCount + " 手告负", XqGame.VW() / 2, by + 110, 3, 220, 205, 185, 255);
+            CText.DrawCentered(this.c, "复盘关键一手，卷土重来！", XqGame.VW() / 2, by + 166, 2, 255, 214, 150, 255);
         }
-        CKitUi.Button(this.c, this.mouseX, this.mouseY, 420, by + 240, 210, 60, "再来一局", 3, 1);
-        CKitUi.Button(this.c, this.mouseX, this.mouseY, 650, by + 240, 210, 60, "回到菜单", 3, 0);
+        CKitUi.Button(this.c, this.mouseX, this.mouseY, bx + 30, by + 240, 210, 60, "再来一局", 3, 1);
+        CKitUi.Button(this.c, this.mouseX, this.mouseY, bx + 260, by + 240, 210, 60, "回到菜单", 3, 0);
         this.DrawFx(now);
     }
 
@@ -1006,7 +1086,10 @@ class XqLoop : IGuiHostLoop {
 
 class XqApp {
     static void Main() {
-        GuiHost host = new GuiHost("象棋", 1280, 720, 16);
+        // 手机竖屏：GuiHost 以逻辑宽高比定外壳方向（宽>高横屏，反之
+        // 竖屏）。竖长逻辑舞台在桌面宽窗里经 StageViewport 居中留灰，
+        // 手机上则满屏竖向铺满——两态共用一套 Portrait() 布局。
+        GuiHost host = new GuiHost("象棋", 720, 1280, 16);
         host.Run(new XqLoop());
     }
 }

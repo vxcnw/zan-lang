@@ -194,6 +194,36 @@ Post 调用核对编码，别信二手注释。
   LoadNativeLibrary`。修法=守卫外的引用收进 `#ifdef _WIN32`（非
   Windows 设备永不 open，play 早已 return 0，该行不可达）。坑出处：
   goldminer v3 APK 装上即退，桌面全绿毫无征兆。
+- **Android 没声音 = AAudio 后端 + 链接行 + 库存根三处都要落**（2026-09
+  实测）：zan_audio 原生混音此前只有 WASAPI（Windows），Android 侧
+  `zan_audio_open()` 直接不开。定式：①zan_audio.c 增 AAudio 后端
+  （`__ANDROID_API__ >= 26` 全机可用，AAudioStreamBuilder 回调驱动
+  混音线程，与 WASAPI 同一套 voice 状态）；②`src/compiler/main.c`
+  Android 链接行补 `libaaudio.so`（NDK sysroot 有系统存根，链接期
+  解析符号）；③确认 `toolchain/android-{arm64,x64}/` 与
+  `build/android-{arm64,x64}/` 都有该存根（发布子集从 toolchain
+  拷贝）。验证：`adb logcat -d | grep -E "AAudio.*openStream"` 出
+  `returns 0 = AAUDIO_OK` + `requestStart returned 0` 即流已起
+  （模拟器无声卡也能看流状态）。坑出处：用户报"安卓手机没声音"。
+- **竖屏棋类布局定式（ GuiHost 逻辑宽高决定转向 + 绘制/命中同源）**：
+  ①转向由壳驱动——`ant_set_orientation(width > height)` 按 GuiHost
+  舞台逻辑宽高比定横竖屏，模板只要按竖屏传逻辑尺寸（如 720x1280）
+  系统即转竖屏，别在模板层调 Android API；②`static bool Portrait()
+  { return VW() < VH(); }` + 全部几何 getter（棋盘原点/格距/按钮行/
+  手牌 Y）在 Portrait 分支给竖屏值，**Draw 与 OnDown 共用同一批
+  getter**，命中永不漂移；③菜单竖屏单列居中、对局顶部对手条+底部
+  按钮行（菜单/重玩），照手机棋牌惯例。验证：`screencap` 后 PIL
+  按色扫描（绿按钮 bbox 横向居中、棋子色 bbox 中心≈屏宽/2），
+  再 2.5x 增亮整页截图肉眼确认。坑出处：用户报"棋类应该可以竖屏
+  操作"+参考截图，此前全部锁横屏。
+- **深色主题截图别信"黑屏"直觉——PIL 带状统计定生死**：深色背景
+  （如 (9,8,10)）的截图 Read 出来一片黑，6x 增亮/gamma 0.45 也
+  没用（JPEG 近黑还是黑），`r+g+b>24` 阈值又被背景本身 defeats
+  （9+8+10=27 过阈）。有效方法：按水平带（0-150/150-600/…）
+  统计 max 亮像素坐标+最常见颜色，或定向色扫描（主题绿
+  `g>r+20 and g>b+20 and g>60`、红子 `r>140 and g<70 and b<70`）
+  出 bbox 判居中/判内容；最后 2.5x 增亮整页缩图肉眼复核。坑出处：
+  wq_menu.png 被疑"渲染坏/转屏失败"，实际是暗色主题正常渲染。
 - 出包：`--publish --target android-arm64 --emit-apk` 一条命令；assets
   自动内嵌，加载路径保持"磁盘优先、内嵌兜底"。窗口要可自适应（横竖屏/
   任意尺寸），布局别写死像素。

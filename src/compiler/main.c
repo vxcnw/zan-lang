@@ -4473,8 +4473,8 @@ int main(int argc, char **argv) {
                     { size_t cur = strlen(cmd);
                       snprintf(cmd + cur, sizeof(cmd) - cur,
                                " \"%s/libandroid.so\" \"%s/libEGL.so\""
-                               " \"%s/libGLESv2.so\"",
-                               sys3, sys3, sys3); }
+                               " \"%s/libGLESv2.so\" \"%s/libaaudio.so\"",
+                               sys3, sys3, sys3, sys3); }
                     { size_t cur = strlen(cmd);
                       snprintf(cmd + cur, sizeof(cmd) - cur,
                                " \"%s/libclang_rt.builtins.a\"",
@@ -5193,6 +5193,33 @@ int main(int argc, char **argv) {
               snprintf(cmd + cur, sizeof(cmd) - cur,
                        " \"%s/zanrt_timer.o\" \"%s/zanrt_wasm.o\"",
                        sys, sys); }
+            {   /* GUI programs pull the software-rasterizer runtime + the
+                 * browser window shell (gui_runtime_wasm.c) as one object.
+                 * Same declaration-level coarseness as the socket gate: any
+                 * zan_gui_* reference needs it, so check the emitted object's
+                 * undefined symbols instead of a compile-time flag -- and
+                 * zan_gui_wasm_feed is exported because the JS host's event
+                 * pump calls it to hand input to the C ring. */
+                static const char *const gui_pre[] = { "zan_gui_", NULL };
+                if (wasm_obj_refs_any(obj_tmp, gui_pre)) {
+                    char guiobj[1300];
+                    snprintf(guiobj, sizeof(guiobj), "%s/zanrt_gui.o", sys);
+                    if (!zan_file_exists(guiobj)) {
+                        fprintf(stderr,
+                                "error: GUI programs for wasm32 need the gui "
+                                "runtime object at '%s'; rebuild it with "
+                                "scripts\\build_cross_rt.cmd\n", guiobj);
+                        remove(obj_tmp);
+                        zan_irgen_destroy(&irgen);
+                        zan_arena_free(arena);
+                        free(source);
+                        return 1;
+                    }
+                    size_t cur = strlen(cmd);
+                    snprintf(cmd + cur, sizeof(cmd) - cur,
+                             " \"%s\" --export=zan_gui_wasm_feed", guiobj);
+                }
+            }
             if (irgen.wasm_eh_used) {
                 /* try/throw programs raise the C++ exception tag (throw 0):
                  * zanrt_ehtag.o defines that tag symbol, which the backend

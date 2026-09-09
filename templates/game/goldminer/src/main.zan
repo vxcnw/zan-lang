@@ -24,6 +24,17 @@ class Data {
     public const int HOOK_Y = 150;      // 绳锚点(矿车口下缘)
     public const int SKY_H = 190;       // 天空/表土分界
 
+    // 道具生成带的半宽：整体收在钩爪可达的中心区，宽屏（手机舞台
+    // 延展到 1600）不再把道具铺到摆钩扫不到的贴边死角。半宽上限
+    // 520 ≈ 爪在场地深处最大伸出量（25° 极角 × 556 绳长 ≈ ±503）
+    // 外加一点余量；窄舞台（W=960）取满 W/2-40，行为不变。
+    public static int HalfSpan() {
+        int half = W / 2 - 40;
+        if (half > 520) { half = 520; }
+        if (half < 200) { half = 200; }
+        return half;
+    }
+
     // 字面量数组:静态初始化不跨单元,消除初始化顺序依赖
     public static ItemDef[] DEFS = ItemDef.All();
     // 纹理名(assets/<name>.png) — 静态初始化,勿依赖运行期 Init
@@ -169,6 +180,12 @@ class MinerApp {
         MinerApp a = new MinerApp();
         a.host = h;
         a.c = h.App().canvas;
+        // 首帧前先按宿主真实舞台同步 W/HOOK_X：此前 NewRun 的 Populate
+        // 用的是 W=960 默认值，而手机舞台已延展到 ~1600，首关道具全铺
+        // 在实际场地左侧 960 内，看起来"道具都在左边"。
+        int sw = h.StageWidth();
+        if (sw > 0) { Data.W = sw; }
+        Data.HOOK_X = Data.W / 2;
         a.uiRng = Rng.Seed(20260904L);
         a.bgPath = MinerApp.FindAsset("assets/bg.jpg");
         a.minerPath = MinerApp.FindAsset("assets/miner.png");

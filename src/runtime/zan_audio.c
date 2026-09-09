@@ -13,8 +13,12 @@
  *   Windows   WASAPI shared mode, event-driven, Windows 7+ (COM
  *             activation only -- no mmdevapi.lib import, ole32 was
  *             already linked for the shell).
+ *   Android   AAudio (API 26+): the stream builder hands us the
+ *             platform's own callback thread, so there is no mixer
+ *             thread of ours to manage -- open()/close() just start
+ *             and stop the stream around the shared voice table.
  *   Others    stub until their backends land (CoreAudio / ALSA /
- *             AAudio / OH Audio); every entry returns 0 and
+ *             OH Audio); every entry returns 0 and
  *             zan_audio_last_error() says so, mirroring how the GL
  *             backend falls back instead of failing hard.
  *
@@ -51,6 +55,14 @@
 #include <mmreg.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
+#endif
+
+#ifdef __ANDROID__
+/* AAudio is API 26+; the driver targets android-28 so the header is
+ * always available. Mixing runs on the stream's own callback thread,
+ * serialized against the API thread by zan_audio_mutex. */
+#include <aaudio/AAudio.h>
+#include <pthread.h>
 #endif
 
 /* OGG Vorbis (background music): stb_vorbis single-file implementation,
@@ -111,6 +123,13 @@ static int zan_audio_dev_channels;
 static int zan_audio_dev_fmt;
 #endif
 
+#ifdef __ANDROID__
+static pthread_mutex_t zan_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
+static AAudioStream *zan_audio_stream;
+static int zan_audio_dev_freq;      /* device sample rate */
+static int zan_audio_dev_channels;  /* device channel count (1/2) */
+#endif
+
 static void zan_audio_set_err(const char *msg) {
     if (msg) {
         size_t n = strlen(msg);
@@ -151,9 +170,8 @@ static void zan_voice_reset(ZanVoice *v) {
     memset(v, 0, sizeof(*v));
 }
 
-/* Frees the slots of one-shot voices that have played out, so the pool
- * is never exhausted by sounds nobody stopped explicitly. Caller holds
- * the critical section on Windows. */
+/* Caller holds zan_audio_mutex (the AAudio callback thread already
+ * owns it while mixing; the API thread takes it for table edits). */
 static void zan_voice_reap_locked(void) {
     int i;
     for (i = 0; i < ZAN_VOICE_SLOTS; i++) {
@@ -650,13 +668,155 @@ thread_fail:
 #endif /* _WIN32 */
 
 /* ------------------------------------------------------------------
+ * Mixer (Android/AAudio). The AAudio callback thread is the mixer:
+ * it holds zan_audio_mutex for the whole fill, so table edits from
+ * the game thread (play/stop/free) serialize against it the same way
+ * the WASAPI critical section did. Accumulator + clamp logic is the
+ * shared zan_audio_mix_s16 core; AAudio wants float output, so
+ * convert at the end.
+ * =================================================================== */
+
+#ifdef __ANDROID__
+
+static void zan_audio_mix_s16(unsigned char *dst, int frames) {
+    /* 4096 frames * 8 channels * 4 bytes = 128 KiB static accumulator;
+     * the audio callback thread is the only user. */
+    static float acc[ZAN_AUDIO_MAX_FILL * ZAN_AUDIO_MAX_CHANNELS];
+    int f, ch, i;
+    int devch = zan_audio_dev_channels;
+    int total;
+    short *d;
+
+    if (frames > ZAN_AUDIO_MAX_FILL) frames = ZAN_AUDIO_MAX_FILL;
+    if (devch < 1) devch = 2;
+    total = (int)frames * devch;
+    memset(acc, 0, sizeof(float) * (size_t)total);
+
+    for (i = 0; i < ZAN_VOICE_SLOTS; i++) {
+        ZanVoice *v = &zan_voices[i];
+        ZanAudioClip *c;
+        double cur, step, g;
+        int nf, clipch;
+        const short *pcm;
+        if (!v->active || !v->clip) continue;
+        c = v->clip;
+        nf = c->frames;
+        if (nf <= 0) { zan_voice_reset(v); continue; }
+        clipch = c->channels;
+        pcm = c->pcm;
+        cur = v->cursor;
+        step = v->step;
+        if (!(step > 0.0)) step = 1.0;
+        g = (double)v->gain * (double)zan_audio_master;
+        if (g != 0.0) {
+            for (f = 0; f < frames; f++) {
+                int i0, i1;
+                double frac;
+                if (v->loop) {
+                    while (cur >= (double)nf) cur -= (double)nf;
+                } else if (cur >= (double)nf) {
+                    break; /* played out; the rest of the buffer stays silent */
+                }
+                i0 = (int)cur;
+                frac = cur - (double)i0;
+                i1 = i0 + 1;
+                if (i1 >= nf) i1 = nf - 1;
+                for (ch = 0; ch < devch; ch++) {
+                    int cc = ch % clipch;
+                    float s0 = (float)pcm[(size_t)i0 * clipch + cc];
+                    float s1 = (float)pcm[(size_t)i1 * clipch + cc];
+                    acc[(size_t)f * devch + ch] += (s0 + (s1 - s0) * (float)frac) * (float)g;
+                }
+                cur += step;
+            }
+        }
+        v->cursor = cur;
+        if (!v->loop && cur >= (double)nf) zan_voice_reset(v);
+    }
+
+    /* Accumulator -> s16 with a hard clamp at full scale. */
+    d = (short *)dst;
+    for (i = 0; i < total; i++) {
+        float s = acc[i];
+        if (s > 1.0f) s = 1.0f;
+        if (s < -1.0f) s = -1.0f;
+        d[i] = (short)(int)(s * 32767.0f);
+    }
+}
+
+/* AAudio callback thread: convert to float output (the shared-mode
+ * contract) and hand the frames over. */
+static aaudio_data_callback_result_t zan_audio_aa_callback(
+        AAudioStream *stream, void *userData, void *audioData,
+        int32_t numFrames) {
+    /* 4096 frames * 8 channels * 2 bytes = 64 KiB static scratch; the
+     * callback thread is the only user. */
+    static short s16buf[ZAN_AUDIO_MAX_FILL * ZAN_AUDIO_MAX_CHANNELS];
+    float *out = (float *)audioData;
+    short *in;
+    int total, i;
+    (void)stream; (void)userData;
+    if (numFrames <= 0) return AAUDIO_CALLBACK_RESULT_CONTINUE;
+    if (numFrames > ZAN_AUDIO_MAX_FILL) numFrames = ZAN_AUDIO_MAX_FILL;
+    pthread_mutex_lock(&zan_audio_mutex);
+    if (!zan_audio_ready) {
+        pthread_mutex_unlock(&zan_audio_mutex);
+        memset(audioData, 0, (size_t)numFrames * zan_audio_dev_channels
+                              * sizeof(float));
+        return AAUDIO_CALLBACK_RESULT_CONTINUE;
+    }
+    zan_audio_mix_s16((unsigned char *)s16buf, numFrames);
+    pthread_mutex_unlock(&zan_audio_mutex);
+    total = (int)numFrames * (zan_audio_dev_channels > 0
+                              ? zan_audio_dev_channels : 2);
+    in = s16buf;
+    for (i = 0; i < total; i++) {
+        out[i] = (float)in[i] / 32768.0f;
+    }
+    return AAUDIO_CALLBACK_RESULT_CONTINUE;
+}
+
+static void zan_audio_aa_error(AAudioStream *stream, void *userData,
+                               aaudio_result_t error) {
+    (void)stream; (void)userData;
+    zan_audio_set_err(AAudio_convertResultToText(error));
+}
+
+static AAudioStream *zan_audio_aa_open_stream(void) {
+    AAudioStreamBuilder *b = NULL;
+    AAudioStream *s = NULL;
+    if (AAudio_createStreamBuilder(&b) != AAUDIO_OK || !b) {
+        zan_audio_set_err("AAudio_createStreamBuilder failed");
+        return NULL;
+    }
+    AAudioStreamBuilder_setDirection(b, AAUDIO_DIRECTION_OUTPUT);
+    AAudioStreamBuilder_setSharingMode(b, AAUDIO_SHARING_MODE_SHARED);
+    AAudioStreamBuilder_setFormat(b, AAUDIO_FORMAT_PCM_FLOAT);
+    /* Leave rate/channels unset: the builder picks the platform
+     * defaults (48k stereo) and reports them on the opened stream. */
+    AAudioStreamBuilder_setPerformanceMode(b,
+                                           AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
+    AAudioStreamBuilder_setDataCallback(b, zan_audio_aa_callback, NULL);
+    AAudioStreamBuilder_setErrorCallback(b, zan_audio_aa_error, NULL);
+    if (AAudioStreamBuilder_openStream(b, &s) != AAUDIO_OK || !s) {
+        AAudioStreamBuilder_delete(b);
+        zan_audio_set_err("AAudio openStream failed");
+        return NULL;
+    }
+    AAudioStreamBuilder_delete(b);
+    return s;
+}
+
+#endif /* __ANDROID__ */
+
+/* ------------------------------------------------------------------
  * Exported API. Signatures are byte-identical to the SDL3 bridge's
  * audio entries so the Zan-side Audio module is a drop-in swap of the
  * DllImport target.
  * =================================================================== */
 
 EXPORT int32_t zan_audio_open(void) {
-#ifdef _WIN32
+#if defined(_WIN32)
     HANDLE th;
     if (zan_audio_ready) return 1;
     if (!zan_audio_cs_ok) {
@@ -701,15 +861,45 @@ open_fail:
     if (zan_audio_init_evt) { CloseHandle(zan_audio_init_evt); zan_audio_init_evt = NULL; }
     if (zan_audio_err[0] == 0) zan_audio_set_err("audio device open failed");
     return 0;
+#elif defined(__ANDROID__)
+    AAudioStream *s;
+    if (zan_audio_ready) return 1;
+    zan_audio_set_err(NULL);
+    s = zan_audio_aa_open_stream();
+    if (!s) {
+        if (zan_audio_err[0] == 0) zan_audio_set_err("audio device open failed");
+        return 0;
+    }
+    /* Reset voice state under the mutex: the callback may already run
+     * once the stream starts. */
+    pthread_mutex_lock(&zan_audio_mutex);
+    for (int i = 0; i < ZAN_VOICE_SLOTS; i++) zan_voice_reset(&zan_voices[i]);
+    zan_audio_dev_freq = AAudioStream_getSampleRate(s);
+    zan_audio_dev_channels = AAudioStream_getChannelCount(s);
+    if (zan_audio_dev_freq <= 0) zan_audio_dev_freq = 48000;
+    if (zan_audio_dev_channels <= 0) zan_audio_dev_channels = 2;
+    zan_audio_stream = s;
+    zan_audio_ready = 1; /* visible to the callback before Start */
+    pthread_mutex_unlock(&zan_audio_mutex);
+    if (AAudioStream_requestStart(s) != AAUDIO_OK) {
+        pthread_mutex_lock(&zan_audio_mutex);
+        zan_audio_ready = 0;
+        zan_audio_stream = NULL;
+        pthread_mutex_unlock(&zan_audio_mutex);
+        AAudioStream_close(s);
+        zan_audio_set_err("AAudio requestStart failed");
+        return 0;
+    }
+    return 1;
 #else
     zan_audio_set_err("audio backend not available on this platform yet"
-                      " (planned: CoreAudio/ALSA/AAudio/OH Audio)");
+                      " (planned: CoreAudio/ALSA/OH Audio)");
     return 0;
 #endif
 }
 
 EXPORT void zan_audio_close(void) {
-#ifdef _WIN32
+#if defined(_WIN32)
     int i;
     if (zan_audio_thread) {
         SetEvent(zan_audio_stop_evt);
@@ -726,6 +916,19 @@ EXPORT void zan_audio_close(void) {
     if (zan_audio_fill_evt) { CloseHandle(zan_audio_fill_evt); zan_audio_fill_evt = NULL; }
     if (zan_audio_init_evt) { CloseHandle(zan_audio_init_evt); zan_audio_init_evt = NULL; }
     zan_audio_ready = 0;
+#elif defined(__ANDROID__)
+    pthread_mutex_lock(&zan_audio_mutex);
+    zan_audio_ready = 0;
+    pthread_mutex_unlock(&zan_audio_mutex);
+    if (zan_audio_stream) {
+        /* close() blocks until the callback thread drains; the ready=0
+         * above already silenced it, so the drain is silent too. */
+        AAudioStream_close(zan_audio_stream);
+        zan_audio_stream = NULL;
+    }
+    pthread_mutex_lock(&zan_audio_mutex);
+    for (int i = 0; i < ZAN_VOICE_SLOTS; i++) zan_voice_reset(&zan_voices[i]);
+    pthread_mutex_unlock(&zan_audio_mutex);
 #else
     zan_audio_ready = 0;
 #endif
@@ -745,8 +948,10 @@ EXPORT double zan_audio_volume(void) {
 }
 
 EXPORT const char *zan_audio_driver_name(void) {
-#ifdef _WIN32
+#if defined(_WIN32)
     return zan_audio_ready ? "wasapi" : "";
+#elif defined(__ANDROID__)
+    return zan_audio_ready ? "aaudio" : "";
 #else
     return "";
 #endif
@@ -754,7 +959,7 @@ EXPORT const char *zan_audio_driver_name(void) {
 
 EXPORT int32_t zan_audio_active_voices(void) {
     int n = 0, i;
-#ifdef _WIN32
+#if defined(_WIN32)
     if (zan_audio_cs_ok) {
         EnterCriticalSection(&zan_audio_cs);
         zan_voice_reap_locked();
@@ -763,6 +968,13 @@ EXPORT int32_t zan_audio_active_voices(void) {
         LeaveCriticalSection(&zan_audio_cs);
         return n;
     }
+#elif defined(__ANDROID__)
+    pthread_mutex_lock(&zan_audio_mutex);
+    zan_voice_reap_locked();
+    for (i = 0; i < ZAN_VOICE_SLOTS; i++)
+        if (zan_voices[i].active && zan_voices[i].clip) n++;
+    pthread_mutex_unlock(&zan_audio_mutex);
+    return n;
 #endif
     for (i = 0; i < ZAN_VOICE_SLOTS; i++)
         if (zan_voices[i].active && zan_voices[i].clip) n++;
@@ -771,13 +983,18 @@ EXPORT int32_t zan_audio_active_voices(void) {
 
 EXPORT void zan_audio_stop_all(void) {
     int i;
-#ifdef _WIN32
+#if defined(_WIN32)
     if (zan_audio_cs_ok) {
         EnterCriticalSection(&zan_audio_cs);
         for (i = 0; i < ZAN_VOICE_SLOTS; i++) zan_voice_reset(&zan_voices[i]);
         LeaveCriticalSection(&zan_audio_cs);
         return;
     }
+#elif defined(__ANDROID__)
+    pthread_mutex_lock(&zan_audio_mutex);
+    for (i = 0; i < ZAN_VOICE_SLOTS; i++) zan_voice_reset(&zan_voices[i]);
+    pthread_mutex_unlock(&zan_audio_mutex);
+    return;
 #endif
     for (i = 0; i < ZAN_VOICE_SLOTS; i++) zan_voice_reset(&zan_voices[i]);
 }
@@ -840,14 +1057,18 @@ EXPORT void zan_audio_free_clip(int64_t clip_handle) {
     ZanAudioClip *c = (ZanAudioClip *)zan_ptr_of(clip_handle);
     int i;
     if (!c) return;
-#ifdef _WIN32
+#if defined(_WIN32)
     if (zan_audio_cs_ok) EnterCriticalSection(&zan_audio_cs);
+#elif defined(__ANDROID__)
+    pthread_mutex_lock(&zan_audio_mutex);
 #endif
     /* Voices reading this clip's samples have to go first. */
     for (i = 0; i < ZAN_VOICE_SLOTS; i++)
         if (zan_voices[i].clip == c) zan_voice_reset(&zan_voices[i]);
-#ifdef _WIN32
+#if defined(_WIN32)
     if (zan_audio_cs_ok) LeaveCriticalSection(&zan_audio_cs);
+#elif defined(__ANDROID__)
+    pthread_mutex_unlock(&zan_audio_mutex);
 #endif
     free(c->pcm);
     free(c);
@@ -879,17 +1100,22 @@ EXPORT int64_t zan_audio_play(int64_t clip_handle, double gain, int32_t loop) {
     int slot = -1, i;
     if (!c || !c->pcm || c->frames <= 0) return 0;
     if (!zan_audio_ready) return 0;
-#ifdef _WIN32
+#if defined(_WIN32)
     if (!zan_audio_cs_ok) return 0;
     EnterCriticalSection(&zan_audio_cs);
+    zan_voice_reap_locked();
+#elif defined(__ANDROID__)
+    pthread_mutex_lock(&zan_audio_mutex);
     zan_voice_reap_locked();
 #endif
     for (i = 0; i < ZAN_VOICE_SLOTS; i++) {
         if (!zan_voices[i].active && !zan_voices[i].clip) { slot = i; break; }
     }
     if (slot < 0) {
-#ifdef _WIN32
+#if defined(_WIN32)
         LeaveCriticalSection(&zan_audio_cs);
+#elif defined(__ANDROID__)
+        pthread_mutex_unlock(&zan_audio_mutex);
 #endif
         return 0;
     }
@@ -901,25 +1127,27 @@ EXPORT int64_t zan_audio_play(int64_t clip_handle, double gain, int32_t loop) {
     if (v->gen > 0x1FFFFF) v->gen = 1; /* keep the packed handle small */
     v->gain = gain < 0.0 ? 0.0f : (float)gain;
     v->cursor = 0.0;
-    /* zan_audio_dev_freq is set only by the Windows WASAPI open path; on
-     * other platforms the device never opens (zan_audio_ready stays 0 and
-     * play() returned 0 above), so the resample step is unreachable -- keep
-     * a benign value instead of referencing an undeclared variable. */
-#ifdef _WIN32
+    /* zan_audio_dev_freq is set by the open path that armed
+     * zan_audio_ready (WASAPI thread startup / AAudio stream open), so
+     * play() only reaches the resample step on a live device. The
+     * fallback keeps a benign value instead of dividing by zero. */
+#if defined(_WIN32) || defined(__ANDROID__)
     v->step = (double)c->freq / (double)zan_audio_dev_freq;
 #else
     v->step = 1.0;
 #endif
     if (!(v->step > 0.0)) v->step = 1.0;
     v->active = 1;
-#ifdef _WIN32
+#if defined(_WIN32)
     LeaveCriticalSection(&zan_audio_cs);
+#elif defined(__ANDROID__)
+    pthread_mutex_unlock(&zan_audio_mutex);
 #endif
     return zan_voice_pack(slot, v->gen);
 }
 
 EXPORT int32_t zan_audio_voice_playing(int64_t voice) {
-#ifdef _WIN32
+#if defined(_WIN32)
     int playing;
     if (zan_audio_cs_ok) {
         ZanVoice *v;
@@ -932,6 +1160,18 @@ EXPORT int32_t zan_audio_voice_playing(int64_t voice) {
         LeaveCriticalSection(&zan_audio_cs);
         return playing;
     }
+#elif defined(__ANDROID__)
+    int playing;
+    pthread_mutex_lock(&zan_audio_mutex);
+    {
+        ZanVoice *v = zan_voice_of(voice);
+        if (!v || !v->clip) playing = 0;
+        else if (v->loop) playing = 1;
+        else if (v->cursor < (double)v->clip->frames) playing = 1;
+        else { zan_voice_reset(v); playing = 0; }
+    }
+    pthread_mutex_unlock(&zan_audio_mutex);
+    return playing;
 #endif
     {
         ZanVoice *v = zan_voice_of(voice);
@@ -944,7 +1184,7 @@ EXPORT int32_t zan_audio_voice_playing(int64_t voice) {
 }
 
 EXPORT void zan_audio_voice_stop(int64_t voice) {
-#ifdef _WIN32
+#if defined(_WIN32)
     if (zan_audio_cs_ok) {
         ZanVoice *v;
         EnterCriticalSection(&zan_audio_cs);
@@ -953,6 +1193,14 @@ EXPORT void zan_audio_voice_stop(int64_t voice) {
         LeaveCriticalSection(&zan_audio_cs);
         return;
     }
+#elif defined(__ANDROID__)
+    pthread_mutex_lock(&zan_audio_mutex);
+    {
+        ZanVoice *v = zan_voice_of(voice);
+        if (v) zan_voice_reset(v);
+    }
+    pthread_mutex_unlock(&zan_audio_mutex);
+    return;
 #endif
     {
         ZanVoice *v = zan_voice_of(voice);
@@ -961,7 +1209,7 @@ EXPORT void zan_audio_voice_stop(int64_t voice) {
 }
 
 EXPORT void zan_audio_voice_set_gain(int64_t voice, double gain) {
-#ifdef _WIN32
+#if defined(_WIN32)
     if (zan_audio_cs_ok) {
         ZanVoice *v;
         EnterCriticalSection(&zan_audio_cs);
@@ -973,6 +1221,17 @@ EXPORT void zan_audio_voice_set_gain(int64_t voice, double gain) {
         LeaveCriticalSection(&zan_audio_cs);
         return;
     }
+#elif defined(__ANDROID__)
+    pthread_mutex_lock(&zan_audio_mutex);
+    {
+        ZanVoice *v = zan_voice_of(voice);
+        if (v) {
+            if (gain < 0.0) gain = 0.0;
+            v->gain = (float)gain; /* master is applied at mix time */
+        }
+    }
+    pthread_mutex_unlock(&zan_audio_mutex);
+    return;
 #endif
     {
         ZanVoice *v = zan_voice_of(voice);

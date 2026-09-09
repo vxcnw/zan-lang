@@ -67,10 +67,17 @@
 #endif
 
 /* Per-platform windowing shells (Win32 / X11 / Cocoa / OHOS / Android
- * NativeActivity). The software rasterizer and system-font text rendering
- * are unchanged; only the OS window, event pump and present differ. */
+ * NativeActivity / wasm32 browser). The software rasterizer and system-font
+ * text rendering are unchanged; only the OS window, event pump and present
+ * differ. */
 #include "../common/host_oom.h"
+/* wasm has no signals and no real fault guard: rt_crash.h's POSIX branch does
+ * not compile (sigaction/fcntl backtrace), so skip it entirely. The Windows
+ * and POSIX guards do not exist here; zan_gui_guard_call (below) already
+ * plain-calls the body on every non-WIN32 build. */
+#if !defined(__wasm__)
 #include "rt_crash.h"
+#endif
 #include "gui_backend.h"
 typedef int32_t i32;
 typedef int64_t i64;
@@ -496,7 +503,9 @@ EXPORT i32 zan_gui_guard_recovered(void) {
 /* ---- Exported rendering functions ---- */
 
 EXPORT i32 zan_gui_create_surface(i32 width, i32 height) {
+#if !defined(__wasm__)
     zan__crash_install(); /* idempotent; ensures GUI processes log hard crashes */
+#endif
     /* Reject non-positive or absurdly large dimensions before multiplying:
      * width*height in int overflows past ~46341^2, and no legitimate surface
      * exceeds 16384 on a side. 16384^2 pixels * 4 bytes = 1 GB, the ceiling a
@@ -4009,6 +4018,8 @@ static inline int zan_gui_in_hit_guard(iptr hwnd, int x, int y) {
 #include "gui_runtime_ohos.c"
 #elif defined(ZAN_GUI_ANDROID_NATIVE)
 #include "gui_runtime_android_native.c"
+#elif defined(__wasm__)
+#include "gui_runtime_wasm.c"
 #else
 #include "gui_runtime_x11.c"
 #endif
@@ -4152,7 +4163,7 @@ const zan_gui_backend zan_cpu_backend = {
 #include "gui_gl_backend.c"
 
 /* ---- native audio ------------------------------------------------------
- * WASAPI-based clip/voice mixer (see zan_audio.c): zero-dependency
+ * WASAPI/AAudio-based clip/voice mixer (see zan_audio.c): zero-dependency
  * native audio runtime (WASAPI/AAudio/...), exported from this same DLL so
  * the existing driver bundles carry it without new build machinery. */
 #include "zan_audio.c"
