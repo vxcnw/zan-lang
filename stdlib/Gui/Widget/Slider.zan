@@ -474,7 +474,18 @@ class Slider : Control {
         fmt.str = tipFormat;
         fmt.WithTip("Format-tooltip template; \"{v}\" becomes the value, e.g. \"{v}%\".");
         ps.Add(fmt);
+        PropSpec mk = PropSpec.Text("marks", "Marks");
+        mk.str = marksSpec;
+        mk.WithTip("Pipe-separated value=label pairs "
+                   + "(e.g. \"0=cold|50=warm|100=hot\").");
+        ps.Add(mk);
         return ps;
+    }
+
+    /// 面板直改 `marks` 必须走重建入口（直写字段不会重建标记）。
+    override void SetProp(string key, string val) {
+        if (key == "marks") { this.SetMarksText(val); return; }
+        base.SetProp(key, val);
     }
 
     /// 覆写："Change"/"DragEnd" 挂对应事件，其余按名称走通用路由。

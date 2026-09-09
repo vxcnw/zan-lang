@@ -236,7 +236,18 @@ class Tabs : Control {
         act.num = active;
         act.WithTip("Index of the selected tab.");
         ps.Add(act);
+        PropSpec its = PropSpec.Text("options", "Tabs");
+        its.str = itemsSpec;
+        its.WithTip("Pipe-separated tab labels; prefix x to make a tab "
+                    + "closable (e.g. \"A|xB|C\").");
+        ps.Add(its);
         return ps;
+    }
+
+    /// 面板直改 `options` 必须走重建入口（直写字段不会重建标签）。
+    override void SetProp(string key, string val) {
+        if (key == "options") { this.SetItemsText(val); return; }
+        base.SetProp(key, val);
     }
 
     /// 标签 i 的页容器，按需补齐（缺页的标签是空白页）。

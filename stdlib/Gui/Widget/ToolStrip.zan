@@ -83,10 +83,21 @@ class ToolStrip : Control {
         PropSpec tint = PropSpec.Color("tint", "Tint");
         tint.num = tintBg;
         ps.Add(tint);
+        PropSpec it = PropSpec.Text("options", "Items");
+        it.str = itemsSpec;
+        it.WithTip("Pipe-separated \"text:icon\" items; prefix > to "
+                   + "right-align, a bare - is a separator.");
+        ps.Add(it);
         PropSpec cls = PropSpec.Text("class", "Classes");
         cls.str = Class;
         ps.Add(cls);
         return ps;
+    }
+
+    /// 面板直改 `options` 必须走重建入口（直写字段不会重建按钮项）。
+    override void SetProp(string key, string val) {
+        if (key == "options") { this.SetItemsText(val); return; }
+        base.SetProp(key, val);
     }
 
     /// 项数（含分隔条）。
