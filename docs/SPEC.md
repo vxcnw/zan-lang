@@ -621,7 +621,6 @@ stdlib/
 ├── Gui/           # 自托管 IDE 使用的 UI 框架（纯 Zan，标准库组件）
 ├── Game/          # 游戏/图形库
 ├── Sdk/           # 平台 SDK 绑定（生成代码为主）
-├── SDL3/          # SDL3 绑定层
 └── Platform/      # 平台占位
 ```
 

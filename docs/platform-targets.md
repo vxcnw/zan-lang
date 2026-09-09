@@ -171,21 +171,18 @@ Difficulty is for **CLI/compute** first; GUI is a separate, larger effort on eac
   `/data/local/tmp`).
 - `--fast-alloc` is unavailable on Android: the wrapped-malloc allocator
   interposes bionic's own internals and crashes during their TLS bootstrap.
-- **GUI**: a program that imports `[DllImport("zan_gui")]` drivers gets a
-  *dynamic pie* link (`ld.lld -pie` + `crtbegin_dynamic.o`; the
-  `libc/libm/liblog/libdl.so` stubs at `toolchain/android-<arch>/` record
-  DT_NEEDED so driver libs resolve from `nativeLibraryDir` at install
-  time). Since `SDL_Init(SDL_INIT_VIDEO)` needs a JVM/Activity (it
-  segfaults from a plain console process), the supported shape is a
-  **shared-library link**: `zanc --emit-lib --target android-x64 -o
-  libmain.so` emits an `SDL_main`-exporting shared object (a tiny
-  `SDL_main.o` in the sysroot subset adapts `SDL_main(argc, argv)` to the
-  module's `main`), which an `org.libsdl.app.SDLActivity` APK shell dlopens
-  and runs. `stdlib/Gui/drivers/android-{x64,arm64}/` ship `libzan_gui.so`
-  (SDL3 back end) + `libSDL3.so` + `zan_gui.bundle` for `--publish`
-  staging. Verified on the emulator: the SDLActivity task dlopens
-  `libmain.so`, the window paints (clear + fill-rect surfaces matched by
-  pixel-diff on screencaps), and the program exits cleanly.
+- **GUI**: the window shell is a **NativeActivity** (`ZAN_GUI_ANDROID_NATIVE`,
+  `gui_runtime_android_native.c`): NDK `native_app_glue` runs `android_main`
+  in-process, translates the `ANativeActivity` lifecycle (INIT/TERM/PAUSE/
+  RESUME/FOCUS) into the event loop (kind 7 attach / kind 8 close / kind 12
+  pause-resume), translates `AInputQueue` touch into pointer events, and
+  presents the CPU surface through EGL (RGBA texture upload with dirty-rect
+  subimage, BGRA-swap shader, `eglSwapBuffers`). `stdlib/Gui/drivers/
+  android-{x64,arm64}/` ship the static `libzan_gui.a` (FreeType baked in)
+  that `zanc` links into the emitted `libmain.so`; the APK shell
+  (`toolchain/apk-shell/`, `android.app.NativeActivity` +
+  `android.app.lib_name=main` metadata) dlopens it. Verified on the
+  emulator: first-frame pixel match, touch -> Ui.Clicked, clean exit.
 - **Text**: the GUI driver statically links FreeType (no new DT_NEEDED) and
   resolves faces at runtime: `/system/etc/fonts.xml` is parsed for the
   ROM's default family (MiSans on MIUI, HarmonySans on Huawei — the
@@ -195,8 +192,8 @@ Difficulty is for **CLI/compute** first; GUI is a separate, larger effort on eac
   (Roboto → DroidSans → NotoSansCJK ttc face 2, then NotoSerifCJK /
   DroidSansFallback for CJK glyphs). Desktop builds keep fontconfig.
 - **One-shot APK**: `zanc --publish --target android-x64 --emit-apk app.apk`
-  compiles, links `libmain.so`, packs the SDLActivity shell and signs it in
-  one command — no Android SDK needed. Packaging lives in
+  compiles, links `libmain.so`, packs the NativeActivity shell and signs it
+  in one command — no Android SDK needed. Packaging lives in
   `src/compiler/apk.c`: the binary `AndroidManifest.xml` comes from a
   precompiled template (`toolchain/apk-shell/`, package + label patched in
   its string pool — no aapt2), `classes.dex`/`resources.arsc` are fixed
@@ -215,14 +212,13 @@ Difficulty is for **CLI/compute** first; GUI is a separate, larger effort on eac
   dialog lists `android-x64`/`android-arm64` and emits the same APKs.
   arm64 APKs run on device (verified on an x86_64 emulator via lib
   translation: gallery + form demos render with correct CJK text).
-- **Touch & back gesture** (phone): finger events are synthesized into
-  pointer/wheel input in `gui_runtime_sdl.c` — first-finger tracking with an
-  8 px slop (tap → synthesized click, drag → 1:1 synthesized wheel scaled by
-  `g_dpi`), `SDL_HINT_TOUCH_MOUSE_EVENTS=0` so SDL's own touch→mouse mirror
-  is off. `SDL_SCANCODE_AC_BACK` becomes the regular kind-8 window-close
-  event without touching `g_quit`: the app decides (e.g. the gallery's
-  phone-mode drawer closes first; a second BACK leaves `main`, which finishes
-  the SDLActivity task). Display fit never scales below the device's native
+- **Touch & back gesture** (phone): finger events are translated in
+  `gui_runtime_android_native.c` — first-finger tracking with an 8 px slop
+  (tap → synthesized click, drag → 1:1 synthesized wheel with fling inertia
+  scaled by `g_dpi`). The system BACK gesture/key becomes the regular kind-8
+  window-close event without touching `g_quit`: the app decides (e.g. the
+  gallery's phone-mode drawer closes first; a second BACK leaves `main`,
+  which finishes the NativeActivity task). Display fit never scales below the device's native
   density on Android (`App.Show()` `#if ANDROID` floor): UI renders at native
   density with in-page scrolling instead of shrinking.
 - **Permissions**: the APK-shell manifest template needs

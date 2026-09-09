@@ -8,9 +8,8 @@
   Zan 侧只有 `Canvas` 一个类持有 `surfaceId`（int 句柄），没有任何控件直接摸像素。
 - 运行时 `src/runtime/gui_runtime.c` 里这些导出直接对 `zan_surface_t{pixels,stride,clip}` 做 CPU 光栅。
 - 窗口/事件外壳：Windows = 原生 Win32；Linux = 原生 X11（`gui_runtime_x11.c`）；
-  macOS = 原生 Cocoa（`gui_runtime_mac.m`）；另有**可选**的 SDL3 统一外壳
-  （`gui_runtime_sdl.c`，CMake 选项 `ZAN_GUI_SDL`，默认 OFF）。
-  发布版 Windows IDE 不使用 SDL3。
+  macOS = 原生 Cocoa（`gui_runtime_mac.m`）；Android = NativeActivity 壳、
+  OHOS = 原生壳。（曾有的可选 SDL3 统一外壳已随 SDL3 退役删除。）
 
 **结论：后端抽象的接缝已经存在，就在这 45 个 C 导出上。** 不需要改 Canvas 的 Zan API，
 不需要改任何控件，不需要改 ABI —— 只需要在运行时内部按 surface 类型分派。
@@ -222,6 +221,7 @@ cmake -DROOT=<repo> -DBINARY_DIR=<build> -DZANIDE=<build>\ZanIDE.exe `
 
 ## 8. 顺带可做的依赖清理
 
-`ZAN_GUI_SDL`（可选的 SDL3 统一外壳）在原生 Win32/X11/Cocoa 外壳都齐全的前提下是重复实现。
-若确认产品不需要「IDE 窗口与游戏共用 SDL 外壳」，可删除 `gui_runtime_sdl.c` 与该 CMake 选项 ——
-这与 `stdlib/SDL3`（给用户游戏工程用的模块）是两件事，后者删除意味着放弃游戏目标支持。
+~~`ZAN_GUI_SDL`（可选的 SDL3 统一外壳）~~ 已删除（2026-09，SDL3 全仓退役）：
+`gui_runtime_sdl.c`、该 CMake 选项与 `stdlib/SDL3` 一并移除，窗口外壳只剩
+原生 Win32/X11/Cocoa/OHOS/Android NativeActivity，音频走 `zan_audio`（各系统
+原生气 API），游戏目标改由 Gui 原生外壳 + `stdlib/Game` 承载。

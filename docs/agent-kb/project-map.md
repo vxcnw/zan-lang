@@ -15,7 +15,7 @@
 | `src/fmt/`, `src/doc/` | C | `zanfmt` 格式化、`zandoc` 文档抽取 |
 | `src/selfhost/` | Zan | 自举相关 |
 | `src/ide_zan/` | **Zan** | 自举 IDE（编辑器、设计器、面板、AI 助手、市场客户端） |
-| `stdlib/` | **Zan** | 标准库：`System`（核心/IO/网络/DB/文本）、`Gui`、`Game`、`Platform`、`Sdk`、`SDL3` |
+| `stdlib/` | **Zan** | 标准库：`System`（核心/IO/网络/DB/文本）、`Gui`、`Game`、`Platform`、`Sdk` |
 | `templates/` | 混合 | IDE"新建项目"模板（`console/ gui/ library/ server/`） |
 | `tests/` | 混合 | 测试用例（见 [testing.md](testing.md)） |
 | `examples/` | Zan | 示例与真实项目（`templates/game/ra2` 等） |

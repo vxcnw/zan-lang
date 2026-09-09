@@ -103,7 +103,6 @@ zan-lang/
 │   │   ├── drivers/                    # driver.manifest + win-x64/... (zan_gui.dll)
 │   │   └── skins/                      # CSS theme skins (light, dark, ...)
 │   ├── Game/  Sdk/                     # Game framework, SDK integrations
-│   ├── SDL3/                           # SDL3 bindings (+ drivers/ with SDL3.dll)
 │   └── Platform/
 │       └── Runtime.zan
 │
@@ -296,8 +295,6 @@ need their own `using` (e.g. `using System.Net.Http;` includes
 External dependencies:
 ├── LLVM 17+                # System-installed (not vendored)
 │                           # Used by compiler for IR → machine code
-├── SDL3 (optional)         # stdlib/SDL3 bindings; SDL3.dll ships as a
-│                           # driver in stdlib/SDL3/drivers/ (zan_sdl3)
 └── OS APIs                 # primary GUI driver (no Skia, no Qt)
     ├── Win32: user32, gdi32, ole32, shlwapi (window + GDI text + SetDIBitsToDevice)
     ├── Linux: X11 / Wayland + fontconfig + freetype (window + text)

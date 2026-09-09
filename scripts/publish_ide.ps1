@@ -6,11 +6,11 @@
 # to run the IDE and compile/run Zan programs. Nothing else should be dropped
 # into dist -- treat it as the single, clean release output.
 #
-# ZanIDE.exe is the real IDE, shipped flat: SDL3 and the skin packs are
-# statically linked / embedded inside the exe, so it has no dll beside it.
+# ZanIDE.exe is the real IDE, shipped flat: the skin packs are embedded
+# inside the exe, so it has no dll beside it.
 #
 #   dist\win-x64\
-#     ZanIDE.exe           the IDE (SDL3 statically linked, skins embedded)
+#     ZanIDE.exe           the IDE (skins embedded)
 #     toolchain\          the Zan compiler + its self-contained linker bundle:
 #                           zanc.exe, ld.exe, mingw\, linux-musl\ ...
 #                         (the IDE finds zanc here; zanc finds its linker next
@@ -100,7 +100,7 @@ if ($stripped) {
     Write-Output 'PUBLISH_WARN: no llvm-strip/strip on PATH; ZanIDE.exe ships with debug info'
 }
 
-# SDL3 is statically linked into ZanIDE.exe (build_ide.ps1), so no SDL3.dll
+# The GUI runtime is statically linked into ZanIDE.exe (build_ide.ps1).
 # ships beside the IDE.
 Copy-Item $stdlib (Join-Path $dist 'stdlib') -Recurse
 
@@ -364,7 +364,8 @@ This folder is the SDK installation. It is not a workspace: create your Zan
 projects anywhere else and run the IDE from here.
 
 Contents
-  ZanIDE.exe     The Zan IDE. It runs from this folder; SDL3 is statically
+  ZanIDE.exe     The Zan IDE. It runs from this folder; the GUI runtime is
+                 statically
                  linked in, and stdlib/toolchain resolve from here.
   (skins, ide.css, help topics)
                  Baked into ZanIDE.exe as embedded resources and read from
@@ -478,7 +479,7 @@ Zan IDE 自包含发布包
 本目录是 SDK 安装目录，不是工作区：请把 Zan 项目建在别处，从这里运行 IDE。
 
 目录内容
-  ZanIDE.exe     Zan 集成开发环境。SDL3 已静态链接进 exe，皮肤/帮助主题为内嵌
+  ZanIDE.exe     Zan 集成开发环境。GUI 运行时已静态链接进 exe，皮肤/帮助主题为内嵌
                  资源从内存读取，旁边不需要任何 dll 或数据文件。在 exe 旁边放
                  同名文件（ide.css、skins\、docs\topics.json）仍会优先生效，
                  这就是不重新打包就替换它们的办法。
@@ -585,4 +586,4 @@ Remove-Item (Join-Path $distTc 'pack_single.ps1') -Force -ErrorAction SilentlyCo
 
 if (-not (Test-Path (Join-Path $dist 'ZanIDE.exe'))) { Write-Output "PUBLISH_FAILED: dist\ZanIDE.exe missing"; exit 1 }
 $sz = (Get-Item (Join-Path $dist 'ZanIDE.exe')).Length
-Write-Output "PUBLISH_OK v$version -> $dist\ZanIDE.exe (flat, real exe, $sz bytes; SDL3 statically linked)"
+Write-Output "PUBLISH_OK v$version -> $dist\ZanIDE.exe (flat, real exe, $sz bytes; GUI runtime statically linked)"

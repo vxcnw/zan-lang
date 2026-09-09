@@ -36,11 +36,10 @@ if ($clangExe -eq "") {
 $clangDir = Split-Path -Parent $clangExe
 
 # ---- 1) native GUI runtime (static, mingw ABI) ----------------------------
-# Win32 native backend (ZAN_GUI_STATIC, no SDL3): the IDE shell, editor and
+# Win32 native backend (ZAN_GUI_STATIC): the IDE shell, editor and
 # all retained widgets are pure Win32. Compiled for zanc's own
 # x86_64-w64-windows-gnu link ABI so it links straight through the compiler.
-# Rebuilt on every run (the compiler driver auto-links the async reactor), so
-# a stale SDL-backed archive from an older build cannot leak in.
+# Rebuilt on every run (the compiler driver auto-links the async reactor).
 $runtimeLib = Join-Path $root "build\libzan_gui_ide_gnu.a"
 & $clangExe --target=x86_64-w64-windows-gnu -O2 -DZAN_GUI_STATIC `
     -c src\runtime\gui_runtime.c -o build\zan_gui_ide_gnu.o

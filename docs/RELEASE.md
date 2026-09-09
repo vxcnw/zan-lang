@@ -43,16 +43,16 @@ Tag releases as `v<VERSION>`.
 
 | Platform      | Triple / arch            | IDE binary   | GUI runtime      | Status |
 |---------------|--------------------------|--------------|------------------|--------|
-| Windows x64   | `x86_64-pc-windows`      | `ZanIDE.exe` | SDL3 statically linked into `ZanIDE.exe` (no DLL shipped) | **Shipping** |
-| Linux x64     | `x86_64-linux-gnu`       | `ZanIDE`     | `libSDL3.so.0`   | Planned |
-| Linux arm64   | `aarch64-linux-gnu`      | `ZanIDE`     | `libSDL3.so.0`   | Planned |
-| macOS arm64   | `aarch64-apple-darwin`   | `ZanIDE`     | `libSDL3.dylib`  | Planned |
-| macOS x64     | `x86_64-apple-darwin`    | `ZanIDE`     | `libSDL3.dylib`  | Planned |
+| Windows x64   | `x86_64-pc-windows`      | `ZanIDE.exe` | native Win32 GUI runtime statically linked into `ZanIDE.exe` (no DLL shipped) | **Shipping** |
+| Linux x64     | `x86_64-linux-gnu`       | `ZanIDE`     | native X11 GUI runtime, statically linked | Planned |
+| Linux arm64   | `aarch64-linux-gnu`      | `ZanIDE`     | native X11 GUI runtime, statically linked | Planned |
+| macOS arm64   | `aarch64-apple-darwin`   | `ZanIDE`     | native Cocoa GUI runtime, statically linked | Planned |
+| macOS x64     | `x86_64-apple-darwin`    | `ZanIDE`     | native Cocoa GUI runtime, statically linked | Planned |
 
 Notes:
 - The **CLIs** (`zanc`, `zan-lsp`, `zan-dap`, `zanfmt`, `zandoc`) build
   natively on all three OSes today — `CMakeLists.txt` already has the non-Windows
-  link path (`stdc++ m pthread`). Only the **IDE build recipe** (SDL3 GUI runtime
+  link path (`stdc++ m pthread`). Only the **IDE build recipe** (native GUI runtime
   + linking `ZanIDE.zan`) is currently Windows-only and must be ported.
 - `zanc` cross-compiles **user programs** (distinct from IDE distribution above)
   from any host to Linux (`linux-x64`/`linux-musl`/`linux-arm64`/`linux-riscv64`,
@@ -78,7 +78,7 @@ Notes:
 ```
 zan-ide-<version>-<os>-<arch>/
   ZanIDE[.exe]              # IDE — the main entry point the user launches
-                            # (SDL3 statically linked in; no SDL3.dll beside it)
+                            # (GUI runtime statically linked in; no dll beside it)
   README.txt                # what's inside + how to run
   toolchain/                # everything the compiler needs, all siblings:
     zanc[.exe]              #   the compiler (the IDE resolves it here)
@@ -99,10 +99,10 @@ zan-ide-<version>-<os>-<arch>/
 Rules:
 - **No nested `toolchain/toolchain`.** `zanc` finds its linker/sysroot/runtime
   objects as its own siblings, exactly as in the build tree.
-- The IDE needs **no separate GUI runtime DLL**: SDL3 is statically linked into
+- The IDE needs **no separate GUI runtime DLL**: the native GUI runtime is
+  statically linked into
   `ZanIDE.exe` (`scripts/publish_ide.ps1`; `build_ide.ps1` uses the Win32
-  backend, `ZAN_GUI_STATIC`). SDL3 remains only as user-program drivers under
-  `stdlib/SDL3/drivers/`.
+  backend, `ZAN_GUI_STATIC`).
 - `stdlib/`, `templates/`, `examples/` are copied verbatim; they are
   platform-neutral sources. Native driver bundles under
   `stdlib/**/drivers/<os>-<arch>/` are already multi-platform.
@@ -133,26 +133,24 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
       -DCMAKE_LINKER=lld-link -DLLVM_DIR=<llvm>/lib/cmake/llvm `
       -DZAN_MINGW_ROOT=C:/TDM-GCC-64
 cmake --build build
-# 2. IDE (zanc compiles ZanIDE.zan; SDL3 statically linked in; also compiles the app icon)
+# 2. IDE (zanc compiles ZanIDE.zan; GUI runtime statically linked in; also compiles the app icon)
 powershell -ExecutionPolicy Bypass -File scripts\build_ide.ps1
 # 3. assemble the self-contained bundle into dist\win-x64 (bumps VERSION unless -NoBump)
 powershell -ExecutionPolicy Bypass -File scripts\publish_ide.ps1 -SkipBuild
 ```
 
 Prerequisites: LLVM (for `find_package(LLVM)`), `clang`/`llvm-*` on PATH, and
-TDM-GCC (bundled ld). A staged SDL3 mingw-devel package (see
-`scripts/stage_sdl3.ps1`) is only needed to build the **user-program** SDL3
-drivers (`stdlib/SDL3/drivers/`) — the IDE itself does not use it.
+TDM-GCC (bundled ld).
 
 ### 5.2 Linux / macOS (planned — recipe to implement)
 
 1. `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release` with system clang +
    LLVM → builds `zanc`, `zan-lsp`, `zan-dap`, `zanfmt`, `zandoc`.
-2. Build the native GUI runtime against the platform SDL3 (`libSDL3.so` /
-   `libSDL3.dylib`) → `zan_gui.a`.
-3. `zanc src/ide_zan/ZanIDE.zan -o build/ZanIDE` linking `zan_gui.a` + SDL3.
+2. Build the native GUI runtime for the platform shell (X11 / Cocoa) →
+   `zan_gui.a`.
+3. `zanc src/ide_zan/ZanIDE.zan -o build/ZanIDE` linking `zan_gui.a`.
 4. A `publish_ide.sh` mirroring `publish_ide.ps1` assembles `dist/` with the
-   POSIX file names from §3 (ship `libSDL3.*` beside `ZanIDE`).
+   POSIX file names from §3.
 
 These three shell steps are the only remaining work to make the bundle
 cross-platform; the compiler/stdlib/templates/examples are already portable.
@@ -177,7 +175,7 @@ cross-platform; the compiler/stdlib/templates/examples are already portable.
 ## 7. Current deliverable vs. gaps
 
 - **Deliverable now:** `zan-ide-<v>-win-x64` — reproducible clean build via §5.1,
-  self-contained (`ZanIDE.exe` with SDL3 statically linked + `toolchain/` +
+  self-contained (`ZanIDE.exe` with the GUI runtime statically linked + `toolchain/` +
   stdlib/templates/examples), no external toolchain needed to run the IDE or
   build user programs.
 - **Gaps to close for a multi-platform release:**

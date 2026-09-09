@@ -38,8 +38,7 @@ stdlib/Gui/drivers/           # GUI native driver (zan_gui)
 compile time (`zan_discover_drivers`, `src/compiler/main.c`); on `--publish`
 the listed libraries are copied next to the executable (default
 `--link-mode shared`; `--link-mode static` folds a driver into the exe where
-a static archive exists). `stdlib/SDL3/drivers/` works the same way
-(`zan_sdl3`).
+a static archive exists).
 
 Cross-platform code is written with conditional compilation. The predefined
 symbols are `WINDOWS`, `WIN32`, `LINUX`, `MACOS`, `APPLE`, `ARM64`, `X86_64`,
@@ -190,8 +189,6 @@ stdlib/
 ├── Game/                            # Arcade2D, Arpg, Board, Cards, Core,
 │   │                                # Foundation, Render, Scene
 ├── Sdk/                             # Jd, Wechat
-├── SDL3/                            # Core, Event, Gpu, Native, Renderer,
-│   │                                # Texture, Window + drivers/ + native/
 └── Platform/
     └── Runtime.zan                  # platform runtime hooks (#if WINDOWS, ...)
 ```

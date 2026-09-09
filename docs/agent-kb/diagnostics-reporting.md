@@ -22,7 +22,7 @@
 | 编译器 `zanc` | 诊断（文件/行/列/等级/消息）、退出码、命令行、耗时；`error: code generation failed` 这类无细节错误要连同上文诊断一起留 |
 | 运行/调试 | 程序退出码、stderr、未处理异常、崩溃点 |
 | IDE 自身 | 未处理异常（已有：`<exe>/cache/ide_error.log`，见 `ZanIDE.CacheDir()`）、面板操作失败、LSP/DAP 断连 |
-| 构建/发布 | 链接失败、缺失驱动 DLL（如"找不到 SDL3.dll"这类原生依赖问题） |
+| 构建/发布 | 链接失败、缺失驱动 DLL（如"找不到 xxx.dll"这类原生依赖问题） |
 | 环境 | IDE 版本 + commit（`IdeVersion.zan`）、编译器版本、OS/架构、显示缩放、皮肤 |
 
 **事件结构**（本地存 `<cache>/diagnostics/*.jsonl`，滚动上限）：

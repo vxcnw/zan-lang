@@ -230,6 +230,38 @@ add_custom_target(zan_embed_api ALL DEPENDS ${ZAN_EMBED_OBJ})
 add_dependencies(zanc zan_embed_api)
 target_compile_definitions(zanc PRIVATE ZAN_EMBED_OBJ="${ZAN_EMBED_OBJ}")
 
+# Compressed-resource decoder (src/runtime/zan_inflate.c + vendored miniz).
+# zanc's --embed bakes deflate-compressed payloads and the inline read API it
+# emits calls zan_embed_decode/rawlen here; the object is linked next to zanc
+# like ZAN_EMBED_OBJ and injected whenever a program embeds resources
+# (irgen.uses_inflate). Decompress-only: archive/zip/stdio APIs compiled out.
+set(ZAN_INFLATE_OBJ "${CMAKE_BINARY_DIR}/zan_inflate${CMAKE_C_OUTPUT_EXTENSION}")
+add_custom_command(
+    OUTPUT ${ZAN_INFLATE_OBJ}
+    COMMAND ${ZAN_RT_IO_CC} -O2
+            -DMINIZ_NO_ARCHIVE_APIS -DMINIZ_NO_ZIP_APIS -DMINIZ_NO_STDIO
+            -DMINIZ_NO_TIME -DMINIZ_NO_ARCHIVE_WRITERS
+            -I ${CMAKE_SOURCE_DIR}/src/common
+            -c ${CMAKE_SOURCE_DIR}/src/runtime/zan_inflate.c
+            -o ${ZAN_INFLATE_OBJ}
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/runtime/zan_inflate.c
+            ${CMAKE_SOURCE_DIR}/src/common/miniz.c
+            ${CMAKE_SOURCE_DIR}/src/common/miniz_tinfl.c
+            ${CMAKE_SOURCE_DIR}/src/common/miniz_tdef.c
+            ${CMAKE_SOURCE_DIR}/src/common/miniz.h
+    COMMENT "Building embedded-resource inflate object (zan_inflate)"
+    VERBATIM)
+add_custom_target(zan_inflate ALL DEPENDS ${ZAN_INFLATE_OBJ})
+add_dependencies(zanc zan_inflate)
+target_compile_definitions(zanc PRIVATE ZAN_INFLATE_OBJ="${ZAN_INFLATE_OBJ}")
+
+# zanc itself hosts the compressor side (embed_maybe_compress in embedres.c):
+# full miniz, still no zip (miniz_zip.c is not compiled).
+target_sources(zanc PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/common/miniz.c
+    ${CMAKE_SOURCE_DIR}/src/common/miniz_tinfl.c
+    ${CMAKE_SOURCE_DIR}/src/common/miniz_tdef.c)
+
 # Multi-worker variant of the reactor: same source compiled with -DZAN_CO_DRIVER
 # so it also supplies the thread-pool cooperative coroutine driver. zanc links
 # this object (instead of the single-thread zanrt_io) when a program is built
@@ -523,13 +555,6 @@ endif()
 # as a shared library so its platform system deps (X11 / user32+gdi32) are
 # self-contained and Zan programs only need `-lzan_gui`.
 option(ZAN_BUILD_GUI "Build the native zan_gui runtime library" ON)
-# Unified SDL3 windowing shell: when ON, Linux/macOS drive windowing, input and
-# present through SDL3 (the same stack as zan_sdl3 / Game.*) instead of the
-# native X11/Cocoa shells, so the IDE and games share one window/render path.
-# The software rasterizer and text rendering are unchanged. Default OFF keeps
-# the native X11/Cocoa backends (and their conformance tests) as the tested
-# path; Windows enables it separately via scripts/build_ide.ps1.
-option(ZAN_GUI_SDL "Use the unified SDL3 windowing backend for zan_gui (Linux/macOS)" OFF)
 set(ZAN_GUI_AVAILABLE FALSE)
 if(ZAN_BUILD_GUI)
     if(WIN32)
@@ -566,32 +591,6 @@ if(ZAN_BUILD_GUI)
         # bundle) at run time, so a machine without the WebView2 runtime still
         # runs GUI apps -- the widget falls back to its placeholder.
         set(ZAN_GUI_AVAILABLE TRUE)
-    elseif(ZAN_GUI_SDL)
-        # SDL owns the window/event pump/present; the shared software rasterizer
-        # draws every widget into one CPU surface shown as a streaming texture.
-        find_package(PkgConfig QUIET)
-        if(PkgConfig_FOUND)
-            pkg_check_modules(SDL3 QUIET sdl3)
-        endif()
-        if(SDL3_FOUND)
-            add_library(zan_gui SHARED src/runtime/gui_runtime.c)
-            target_compile_definitions(zan_gui PRIVATE ZAN_GUI_SDL)
-            target_include_directories(zan_gui PRIVATE ${SDL3_INCLUDE_DIRS})
-            target_link_directories(zan_gui PRIVATE ${SDL3_LIBRARY_DIRS})
-            target_link_libraries(zan_gui PRIVATE ${SDL3_LIBRARIES} m)
-            # Text still uses the shared FreeType path where available (Linux);
-            # elsewhere it falls back to the built-in software bitmap font.
-            find_package(Freetype QUIET)
-            find_package(Fontconfig QUIET)
-            if(Freetype_FOUND AND Fontconfig_FOUND)
-                target_compile_definitions(zan_gui PRIVATE ZAN_GUI_FREETYPE)
-                target_link_libraries(zan_gui PRIVATE
-                    Freetype::Freetype Fontconfig::Fontconfig)
-            endif()
-            set(ZAN_GUI_AVAILABLE TRUE)
-        else()
-            message(WARNING "ZAN_GUI_SDL requested but SDL3 (sdl3.pc) not found; skipping zan_gui")
-        endif()
     elseif(APPLE)
         # Real Cocoa backend (Objective-C) + shared software renderer. The C file
         # is compiled with ZAN_GUI_COCOA so its macOS stub branch is disabled and
@@ -618,28 +617,6 @@ if(ZAN_BUILD_GUI)
         else()
             message(WARNING "libX11 not found; skipping zan_gui (Gui conformance tests will be disabled)")
         endif()
-    endif()
-endif()
-
-# Native SDL3 runtime used by the SDL3 + Game.* stdlib via
-# [DllImport("zan_sdl3")]: windowing, 2D renderer, input, timing and the
-# SDL_GPU sprite pipeline (Metal/Vulkan/D3D12). Requires SDL3 (>= 3.2) located
-# through pkg-config. On Windows use scripts/stage_sdl3.ps1 (MinGW) instead.
-option(ZAN_BUILD_SDL3 "Build the native zan_sdl3 runtime library" ON)
-set(ZAN_SDL3_AVAILABLE FALSE)
-if(ZAN_BUILD_SDL3 AND NOT WIN32)
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(SDL3 QUIET sdl3)
-    endif()
-    if(SDL3_FOUND)
-        add_library(zan_sdl3 SHARED stdlib/SDL3/native/zan_sdl3.c)
-        target_include_directories(zan_sdl3 PRIVATE ${SDL3_INCLUDE_DIRS})
-        target_link_directories(zan_sdl3 PRIVATE ${SDL3_LIBRARY_DIRS})
-        target_link_libraries(zan_sdl3 PRIVATE ${SDL3_LIBRARIES} m)
-        set(ZAN_SDL3_AVAILABLE TRUE)
-    else()
-        message(WARNING "SDL3 (sdl3.pc) not found; skipping zan_sdl3 runtime")
     endif()
 endif()
 
@@ -1745,7 +1722,7 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
   add_test(NAME runtime_gui_surface_round COMMAND zan_gui_surface_round_test)
 
   # Real GL context, not a CPU substitute. Headless/unsupported hosts skip.
-  if(WIN32 OR (UNIX AND NOT APPLE AND NOT ZAN_GUI_SDL))
+  if(WIN32 OR (UNIX AND NOT APPLE))
     add_executable(zan_gui_gl_aa_test tests/runtime/gui_gl_aa_test.c)
     target_link_libraries(zan_gui_gl_aa_test PRIVATE ${CMAKE_DL_LIBS})
     add_dependencies(zan_gui_gl_aa_test zan_gui)
@@ -1758,7 +1735,7 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
   target_link_libraries(zan_gui_surface_dims_test PRIVATE zan_gui)
   add_test(NAME runtime_gui_surface_dims COMMAND zan_gui_surface_dims_test)
 
-  if(UNIX AND NOT APPLE AND NOT ZAN_GUI_SDL)
+  if(UNIX AND NOT APPLE)
     find_program(XVFB_RUN_EXECUTABLE xvfb-run)
     if(XVFB_RUN_EXECUTABLE)
       add_executable(zan_gui_x11_test tests/runtime/gui_x11_test.c)
@@ -2737,23 +2714,7 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
       -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_colorinject${_exe_ext}
       -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
 
-  # SdlSpriteBatch renders the same scene twice through the SDL3 stdlib --
-  # once immediate-mode, once through the geometry batch -- and diffs the
-  # offscreen targets pixel by pixel. The software renderer fallback makes
-  # this runnable headlessly (hidden window); a box without any renderer
-  # skips cleanly. Also pins the batch's per-frame statistics contract
-  # (queued counts drawable sprites, the clip-state boundary splits runs,
-  # fully-clipped quads land in dropped).
-  add_test(NAME conformance_gui_spritebatch
-    COMMAND ${CMAKE_COMMAND}
-      -DZANC=$<TARGET_FILE:zanc>
-      -DSRC=${CMAKE_SOURCE_DIR}/tests/gui/spritebatch_test.zan
-      "-DZANC_ARGS=--auto-stdlib${_gui_driver_tail}"
-      -DEXPECTED=${CMAKE_SOURCE_DIR}/tests/conformance/gui_spritebatch.out
-      -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_spritebatch${_exe_ext}
-      -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
-
-  set_tests_properties(runtime_gui conformance_gui_stack conformance_gui_flex conformance_gui_carousel conformance_gui_text conformance_gui_codeeditor conformance_gui_datatable conformance_gui_css conformance_gui_props conformance_gui_tree conformance_gui_menu conformance_gui_webview_interop conformance_gui_colorinject conformance_gui_spritebatch conformance_gui_calendar conformance_gui_rate PROPERTIES
+  set_tests_properties(runtime_gui conformance_gui_stack conformance_gui_flex conformance_gui_carousel conformance_gui_text conformance_gui_codeeditor conformance_gui_datatable conformance_gui_css conformance_gui_props conformance_gui_tree conformance_gui_menu conformance_gui_webview_interop conformance_gui_colorinject conformance_gui_calendar conformance_gui_rate PROPERTIES
     ENVIRONMENT "ZAN_LIB_PATH=$<TARGET_FILE_DIR:zan_gui>;LD_LIBRARY_PATH=$<TARGET_FILE_DIR:zan_gui>;DYLD_LIBRARY_PATH=$<TARGET_FILE_DIR:zan_gui>")
 endif()
 
@@ -3156,7 +3117,8 @@ set(_new_diag_cases
   scalar_argument_to_reference
   call_not_callable
   expression_nesting_depth
-  return_call_type_mismatch)
+  return_call_type_mismatch
+  await_type_conversion)
 foreach(_case ${_new_diag_cases})
   if(_case STREQUAL cyclic_inheritance)
     set(_diag_regex "cyclic inheritance")
@@ -3170,6 +3132,10 @@ foreach(_case ${_new_diag_cases})
     set(_diag_regex "cannot convert 'string' to 'int' in assignment")
   elseif(_case STREQUAL return_call_type_mismatch)
     set(_diag_regex "cannot convert 'string' to 'int' in return statement")
+  elseif(_case STREQUAL await_type_conversion)
+    # `await E` once fell to type_error and the initializer conversion
+    # check passed silently -- see tests/diag/await_type_conversion.zan.
+    set(_diag_regex "cannot convert 'long' to 'Box' in initializer")
   elseif(_case STREQUAL unrelated_argument_type)
     set(_diag_regex "in argument 1 of 'Paint'")
   elseif(_case STREQUAL scalar_argument_to_reference)

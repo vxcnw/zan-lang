@@ -11,7 +11,7 @@ hardware clicks.
 The framework already routes every real mouse/keyboard event through one path:
 
 ```
-WM_* / SDL event → App.ProcessEvent → hitTester.HitTest(x,y) → widget handler
+WM_* / XEvent / lifecycle event → App.ProcessEvent → hitTester.HitTest(x,y) → widget handler
 ```
 
 and every clickable widget registers a flat `HitRegion { id, x, y, w, h, widgetType }`
@@ -193,7 +193,7 @@ regions register with the highest `z`.
 ## Limitations
 
 - **Real GUI stack required.** The driver exercises the actual `ZanIDE.exe` with
-  the SDL3/native runtime and self-hosted toolchain. It cannot run in a
+  the native runtime and self-hosted toolchain. It cannot run in a
   display-less environment; run it on the Windows workspace.
 - `type` injects ASCII bytes 32–126 only; use `char <code>` for control keys.
 - Timing is wall-clock (`wait`); slow machines may need larger waits before a

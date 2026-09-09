@@ -1,4 +1,9 @@
 #!/bin/bash
+# OBSOLETE: superseded by _scratch/anw/entry.sh -- the Android driver is the
+# NativeActivity shell (ZAN_GUI_ANDROID_NATIVE, static libzan_gui.a), not the
+# SDL3 shared library this script built. Kept only until the next tools sweep.
+
+#!/bin/bash
 # Rebuild libzan_gui.so for both Android ABIs and stage it into the driver
 # directories zanc bundles for --target android-* (--emit-apk).
 #
