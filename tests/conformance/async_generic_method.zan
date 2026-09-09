@@ -39,7 +39,7 @@ class Svc {
     public async string Caught<U>(U x) {
         try {
             await Task.Delay(1);
-            throw new Exception("bad " + x);
+            throw new Exception("bad " + x.ToString());
         } catch (Exception e) {
             return "caught " + e.Message;
         }
@@ -48,7 +48,7 @@ class Svc {
     // exception that leaves the frame and re-throws in the awaiter
     public async int Thrown<U>(U x) {
         await Task.Delay(1);
-        throw new Exception("from " + x);
+        throw new Exception("from " + x.ToString());
     }
 }
 

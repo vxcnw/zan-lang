@@ -14,8 +14,8 @@ class Pool<T> {
 
     public U Echo<U>(U x) { return x; }
     public U Forward<U>(U x) { return this.Echo<U>(x); }
-    public string Pair<U>(U x) { return item + "/" + x; }
-    public string PairThis<U>(U x) { return this.item + "/" + x; }
+    public string Pair<U>(U x) { return item.ToString() + "/" + x.ToString(); }
+    public string PairThis<U>(U x) { return this.item.ToString() + "/" + x.ToString(); }
     public int CountOf<U>(U[] xs) { return xs.Length; }
     public string Describe<U>(U x) { return this.item.ToString() + ":" + x.ToString(); }
 }

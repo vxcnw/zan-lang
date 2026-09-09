@@ -4097,31 +4097,47 @@ static LLVMValueRef emit_expr_call(zan_irgen_t *g, zan_ast_node_t *expr,
                             &removed_word, 1, "rvslot");
                         LLVMValueRef rv = load_collection_slot_value(g, value_type, rvslot);
                         emit_collection_release_raw_slot(g, value_type, rv, i64);
-                        /* move the last entry into the hole (when it is not
-                         * already the last), then clear the vacated tail */
+                        /* shift the entries above the hole down one slot
+                         * (keys one word each, values value_words each) so
+                         * the parallel buffers keep insertion order — C#
+                         * observable enumeration semantics, and the layout
+                         * contract documented at dict_struct_type. The
+                         * helper drops the hash index wholesale (indexed_
+                         * count = 0; find rebuilds lazily), so a plain data
+                         * move needs no incremental index repair. */
+                        LLVMTypeRef move_type = LLVMFunctionType(i8ptr,
+                            (LLVMTypeRef[]){ i8ptr, i8ptr, i64 }, 3, 0);
+                        LLVMValueRef move_fn = get_libc_fn(g, "memmove", move_type);
                         LLVMValueRef is_last = zan_icmp(g->builder, LLVMIntEQ, fi, last, "dr.islast");
                         LLVMBasicBlockRef move_bb = LLVMAppendBasicBlockInContext(g->ctx, g->current_fn, "dr.move");
                         LLVMBasicBlockRef tail_bb = LLVMAppendBasicBlockInContext(g->ctx, g->current_fn, "dr.tail");
                         LLVMBuildCondBr(g->builder, is_last, tail_bb, move_bb);
                         LLVMPositionBuilderAtEnd(g->builder, move_bb);
-                        /* key: ks[fi] = ks[last] */
-                        LLVMValueRef lkey = LLVMBuildGEP2(g->builder, i8ptr, ks0, &last, 1, "lkey");
-                        LLVMValueRef lkv = LLVMBuildLoad2(g->builder, i8ptr, lkey, "lkv");
-                        LLVMBuildStore(g->builder, lkv, rkey);
-                        /* value: memmove(vs + fi*w, vs + last*w, w words) */
-                        LLVMValueRef last_word = zan_mul(g->builder, last,
-                            value_words, "dr.lword");
-                        LLVMValueRef lvslot = LLVMBuildGEP2(g->builder, i64, vs0,
-                            &last_word, 1, "lvslot");
-                        LLVMTypeRef move_type = LLVMFunctionType(i8ptr,
-                            (LLVMTypeRef[]){ i8ptr, i8ptr, i64 }, 3, 0);
-                        LLVMValueRef move_fn = get_libc_fn(g, "memmove", move_type);
-                        LLVMValueRef move_bytes = zan_mul(g->builder, value_words,
-                            LLVMConstInt(i64, 8, 0), "move.bytes");
+                        LLVMValueRef shift_entries = zan_sub(g->builder, last, fi, "dr.shent");
+                        /* keys: memmove(ks + fi, ks + fi + 1, (last-fi)*8) */
+                        LLVMValueRef ksrc_i = zan_add(g->builder, fi,
+                            LLVMConstInt(i64, 1, 0), "dr.ksi");
+                        LLVMValueRef ksrc = LLVMBuildGEP2(g->builder, i8ptr, ks0,
+                            &ksrc_i, 1, "dr.ksrc");
+                        LLVMValueRef kbytes = zan_mul(g->builder, shift_entries,
+                            LLVMConstInt(i64, 8, 0), "dr.kbytes");
                         zan_call2(g->builder, move_type, move_fn,
-                            (LLVMValueRef[]){ LLVMBuildBitCast(g->builder, rvslot, i8ptr, "move.dst8"),
-                                              LLVMBuildBitCast(g->builder, lvslot, i8ptr, "move.src8"),
-                                              move_bytes }, 3, "");
+                            (LLVMValueRef[]){ LLVMBuildBitCast(g->builder, rkey, i8ptr, "kdst8"),
+                                              LLVMBuildBitCast(g->builder, ksrc, i8ptr, "ksrc8"),
+                                              kbytes }, 3, "");
+                        /* values: memmove(vs + fi*w, vs + (fi+1)*w,
+                         *                (last-fi)*w words) */
+                        LLVMValueRef next_word = zan_add(g->builder, removed_word,
+                            value_words, "dr.vnw");
+                        LLVMValueRef vsrc = LLVMBuildGEP2(g->builder, i64, vs0,
+                            &next_word, 1, "dr.vsrc");
+                        LLVMValueRef vbytes = zan_mul(g->builder, shift_entries,
+                            zan_mul(g->builder, value_words,
+                                LLVMConstInt(i64, 8, 0), "dr.vw8"), "dr.vbytes");
+                        zan_call2(g->builder, move_type, move_fn,
+                            (LLVMValueRef[]){ LLVMBuildBitCast(g->builder, rvslot, i8ptr, "vdst8"),
+                                              LLVMBuildBitCast(g->builder, vsrc, i8ptr, "vsrc8"),
+                                              vbytes }, 3, "");
                         LLVMBuildBr(g->builder, tail_bb);
                         LLVMPositionBuilderAtEnd(g->builder, tail_bb);
                         /* clear the tail slot (ARC must not see a stale ref)。

@@ -2297,7 +2297,10 @@ static bool looks_like_var_decl(zan_parser_t *p) {
         while (q < n && ZAN_TKW_WS(s[q])) q++;
         while (q < n && s[q] == '[') {
             size_t r = q + 1;
-            while (r < n && ZAN_TKW_WS(s[r])) r++;
+            /* Array-rank specifier: only whitespace and commas may sit
+             * between the brackets. int[]/int[,] all declare; anything else
+             * (a dot like int.Parse, or junk) goes to the expression path. */
+            while (r < n && (ZAN_TKW_WS(s[r]) || s[r] == ',')) r++;
             if (r >= n || s[r] != ']') return false;
             q = r + 1;
             while (q < n && ZAN_TKW_WS(s[q])) q++;

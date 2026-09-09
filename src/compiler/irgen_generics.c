@@ -2646,6 +2646,49 @@ static LLVMValueRef emit_char_to_cstr(zan_irgen_t *g, LLVMValueRef val) {
  * character, every other type keeps the numeric/string formatting. */
 static LLVMValueRef emit_to_cstr_of(zan_irgen_t *g, LLVMValueRef val,
                                     zan_ast_node_t *ast, local_scope_t *locals) {
+    /* `int?`/`double?` in string position: C# concatenates the wrapped value
+     * and a null as the empty string. Unwrap has ? payload : NULL —
+     * emit_str_concat turns a NULL side into "". Without this the nullable
+     * struct by value reached the itoa formatter and the LLVM verifier
+     * rejected the call ("Call parameter type does not match"). */
+    if (ast && val) {
+        LLVMTypeRef vt = LLVMTypeOf(val);
+        if (LLVMGetTypeKind(vt) == LLVMStructTypeKind) {
+            const char *sn = LLVMGetStructName(vt);
+            if (sn && strncmp(sn, "zan.nullable.", 13) == 0) {
+                LLVMTypeRef payty = LLVMStructGetTypeAtIndex(vt, 0);
+                LLVMTypeKind pk = LLVMGetTypeKind(payty);
+                if (pk == LLVMIntegerTypeKind || pk == LLVMFloatTypeKind ||
+                    pk == LLVMDoubleTypeKind) {
+                    zan_type_t *st = infer_expr_type(g, ast, locals);
+                    bool uns = st && st->element_type &&
+                               (st->element_type->kind == TYPE_UINT ||
+                                st->element_type->kind == TYPE_ULONG);
+                    LLVMValueRef pay = LLVMBuildExtractValue(g->builder, val, 0, "nl.pay");
+                    LLVMValueRef has = LLVMBuildExtractValue(g->builder, val, 1, "nl.has");
+                    LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
+                    /* branch, not select: select evaluates both arms and the
+                     * digits buffer allocated on the dead arm leaked (caught
+                     * by leakcheck_nullable_value_types). */
+                    LLVMBasicBlockRef has_bb = LLVMAppendBasicBlockInContext(g->ctx, g->current_fn, "nl.has");
+                    LLVMBasicBlockRef no_bb  = LLVMAppendBasicBlockInContext(g->ctx, g->current_fn, "nl.no");
+                    LLVMBasicBlockRef end_bb = LLVMAppendBasicBlockInContext(g->ctx, g->current_fn, "nl.end");
+                    LLVMBuildCondBr(g->builder, has, has_bb, no_bb);
+                    LLVMPositionBuilderAtEnd(g->builder, has_bb);
+                    LLVMValueRef ps = emit_to_cstr_u(g, pay, uns);
+                    LLVMBuildBr(g->builder, end_bb);
+                    LLVMPositionBuilderAtEnd(g->builder, no_bb);
+                    LLVMBuildBr(g->builder, end_bb);
+                    LLVMPositionBuilderAtEnd(g->builder, end_bb);
+                    LLVMValueRef phi = LLVMBuildPhi(g->builder, i8ptr, "nl.str");
+                    LLVMValueRef vals[2] = { ps, LLVMConstNull(i8ptr) };
+                    LLVMBasicBlockRef bbs[2] = { has_bb, no_bb };
+                    LLVMAddIncoming(phi, vals, bbs, 2);
+                    return phi;
+                }
+            }
+        }
+    }
     /* A `T` value read out of a generic instance arrives in the erased pointer
      * slot, so `item + "x"` with T bound to a value type would otherwise run
      * strlen over the bit pattern. Recover the concrete representation first. */

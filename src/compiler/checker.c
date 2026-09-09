@@ -1524,6 +1524,11 @@ static void check_call_arg_type(zan_checker_t *c, zan_symbol_t *sig, int index,
  * else -- a class/struct/array/delegate reference -- used to be handed to
  * strlen over the object's raw bytes and rendered as mojibake; reject it. */
 static bool type_is_concatable(zan_type_t *t) {
+    /* int?/double?/bool? concatenate like their element: Nullable<T> is a
+     * value type in C# ("a=" + a is legal, null concatenates as "") and the
+     * irgen unwrap in emit_to_cstr_of lowers exactly that shape. */
+    if (t->kind == TYPE_NULLABLE)
+        return t->element_type && type_is_concatable(t->element_type);
     return t->kind == TYPE_STRING || t->kind == TYPE_CHAR ||
            t->kind == TYPE_ENUM ||
            t->kind == TYPE_BOOL || t->kind == TYPE_ERROR ||

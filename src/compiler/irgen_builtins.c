@@ -775,49 +775,24 @@ static LLVMValueRef get_dict_remove_fn(zan_irgen_t *g) {
     LLVMContextRef c = g->ctx;
     LLVMBuilderRef b = g->builder;
     LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(c), 0);
-    LLVMTypeRef i8pp = LLVMPointerType(i8ptr, 0);
     LLVMTypeRef i64 = LLVMInt64TypeInContext(c);
-    LLVMTypeRef i64ptr = LLVMPointerType(i64, 0);
     LLVMTypeRef dty = g->dict_struct_type;
     LLVMTypeRef fnty = LLVMFunctionType(i64, (LLVMTypeRef[]){ i8ptr, i8ptr, i64 }, 3, 0);
     fn = LLVMAddFunction(g->mod, "__zan_dict_remove", fnty);
     LLVMSetLinkage(fn, LLVMInternalLinkage);
-    LLVMValueRef hashf = get_dict_hash_fn(g);
-    LLVMTypeRef hash_ty = LLVMGlobalGetValueType(hashf);
     LLVMValueRef findf = get_dict_find_fn(g);
     LLVMTypeRef find_ty = LLVMGlobalGetValueType(findf);
 
     LLVMBasicBlockRef saved = LLVMGetInsertBlock(b);
-    LLVMBasicBlockRef entry  = LLVMAppendBasicBlockInContext(c, fn, "entry");
-    LLVMBasicBlockRef miss   = LLVMAppendBasicBlockInContext(c, fn, "miss");
-    LLVMBasicBlockRef prep   = LLVMAppendBasicBlockInContext(c, fn, "prep");
-    LLVMBasicBlockRef s0cond = LLVMAppendBasicBlockInContext(c, fn, "s0.cond");
-    LLVMBasicBlockRef s0init = LLVMAppendBasicBlockInContext(c, fn, "s0.init");
-    LLVMBasicBlockRef s0hit  = LLVMAppendBasicBlockInContext(c, fn, "s0.hit");
-    LLVMBasicBlockRef s0next = LLVMAppendBasicBlockInContext(c, fn, "s0.next");
-    LLVMBasicBlockRef s1cond = LLVMAppendBasicBlockInContext(c, fn, "s1.cond");
-    LLVMBasicBlockRef s1hit  = LLVMAppendBasicBlockInContext(c, fn, "s1.hit");
-    LLVMBasicBlockRef s1next = LLVMAppendBasicBlockInContext(c, fn, "s1.next");
-    LLVMBasicBlockRef s1skip = LLVMAppendBasicBlockInContext(c, fn, "s1.skip");
-    LLVMBasicBlockRef bscond = LLVMAppendBasicBlockInContext(c, fn, "bs.cond");
-    LLVMBasicBlockRef bsbody = LLVMAppendBasicBlockInContext(c, fn, "bs.body");
-    LLVMBasicBlockRef bsstay = LLVMAppendBasicBlockInContext(c, fn, "bs.stay");
-    LLVMBasicBlockRef bsmove = LLVMAppendBasicBlockInContext(c, fn, "bs.move");
-    LLVMBasicBlockRef done   = LLVMAppendBasicBlockInContext(c, fn, "done");
+    LLVMBasicBlockRef entry = LLVMAppendBasicBlockInContext(c, fn, "entry");
+    LLVMBasicBlockRef miss  = LLVMAppendBasicBlockInContext(c, fn, "miss");
+    LLVMBasicBlockRef prep  = LLVMAppendBasicBlockInContext(c, fn, "prep");
+    LLVMBasicBlockRef hit   = LLVMAppendBasicBlockInContext(c, fn, "hit");
 
     LLVMPositionBuilderAtEnd(b, entry);
     LLVMValueRef draw = LLVMGetParam(fn, 0);
     LLVMValueRef key = LLVMGetParam(fn, 1);
     LLVMValueRef is_str = LLVMGetParam(fn, 2);
-    LLVMValueRef mask_a = LLVMBuildAlloca(b, i64, "rm.mask");
-    LLVMValueRef h_a    = LLVMBuildAlloca(b, i64, "rm.h");
-    LLVMValueRef fi_a   = LLVMBuildAlloca(b, i64, "rm.fi");
-    LLVMValueRef last_a = LLVMBuildAlloca(b, i64, "rm.last");
-    LLVMValueRef s0_a   = LLVMBuildAlloca(b, i64, "rm.s0");
-    LLVMValueRef i_a    = LLVMBuildAlloca(b, i64, "rm.i");
-    LLVMValueRef j_a    = LLVMBuildAlloca(b, i64, "rm.j");
-    LLVMValueRef zero64 = LLVMConstInt(i64, 0, 0);
-    LLVMValueRef one64 = LLVMConstInt(i64, 1, 0);
     LLVMValueRef dnull = zan_icmp(b, LLVMIntEQ, draw, LLVMConstNull(i8ptr), "dnull");
     LLVMBuildCondBr(b, dnull, miss, prep);
 
@@ -827,158 +802,28 @@ static LLVMValueRef get_dict_remove_fn(zan_irgen_t *g) {
     LLVMPositionBuilderAtEnd(b, prep);
     LLVMValueRef dp = LLVMBuildBitCast(b, draw, LLVMPointerType(dty, 0), "dp");
     LLVMValueRef cntp = LLVMBuildStructGEP2(b, dty, dp, 0, "cntp");
-    LLVMValueRef kp = LLVMBuildStructGEP2(b, dty, dp, 2, "kp");
-    LLVMValueRef ixp = LLVMBuildStructGEP2(b, dty, dp, 4, "ixp");
-    LLVMValueRef icapp = LLVMBuildStructGEP2(b, dty, dp, 5, "icapp");
     LLVMValueRef icntp = LLVMBuildStructGEP2(b, dty, dp, 6, "icntp");
-    /* entry to remove: the same lookup find performs. find may REBUILD the
-     * index in place (icapp grows 32->64), so the probe mask must be read
-     * from icapp only AFTER the call: reading it first left mask=31 probing
-     * a fresh 64-slot table, and step 1 (which searches for fi+1 with no
-     * empty-slot exit) span the wrong slots forever -- the 9-key drain hung
-     * on its first Remove because the 9th Add made the next find rebuild. */
+    /* entry to remove: the same lookup find performs. */
     LLVMValueRef fi = zan_call2(b, find_ty, findf,
         (LLVMValueRef[]){ draw, key, is_str }, 3, "rm.find");
-    LLVMBuildStore(b, fi, fi_a);
-    LLVMValueRef icap = LLVMBuildLoad2(b, i64, icapp, "icap");
-    LLVMValueRef mask = zan_sub(b, icap, one64, "rm.maskv");
-    LLVMBuildStore(b, mask, mask_a);
-    LLVMValueRef nokey = zan_icmp(b, LLVMIntSLT, fi, zero64, "nokey");
-    LLVMBuildCondBr(b, nokey, miss, s0init);
+    LLVMValueRef nokey = zan_icmp(b, LLVMIntSLT, fi, LLVMConstInt(i64, 0, 0), "nokey");
+    LLVMBuildCondBr(b, nokey, miss, hit);
 
-    /* step 1: locate the index slot holding fi+1 by probing hash(key).
-     * The hash is computed ONCE in this preheader: the loop head only
-     * LOADS h_a. Recomputing the hash in the loop head (as the first
-     * version did) reset the probe slot every iteration -- h never got
-     * past the home slot, so the probe spun forever whenever fi+1 was
-     * not already sitting at its home (first Remove on a 10-entry dict
-     * hung; gdb showed probe1..probeN all at h=14). */
-    LLVMPositionBuilderAtEnd(b, s0init);
-    LLVMValueRef h0 = zan_call2(b, hash_ty, hashf, (LLVMValueRef[]){ key, is_str }, 2, "h0");
-    LLVMValueRef h0m = zan_and(b, h0, LLVMBuildLoad2(b, i64, mask_a, "m0"), "h0.m");
-    LLVMBuildStore(b, h0m, h_a);
-    LLVMBuildBr(b, s0cond);
-
-    LLVMPositionBuilderAtEnd(b, s0cond);
-    LLVMValueRef ix0 = LLVMBuildLoad2(b, i64ptr, ixp, "ix0");
-    LLVMValueRef h0v = LLVMBuildLoad2(b, i64, h_a, "h0v");
-    LLVMValueRef slot0 = LLVMBuildLoad2(b, i64, LLVMBuildGEP2(b, i64, ix0, &h0v, 1, "s0p"), "slot0");
-    LLVMValueRef fiv = LLVMBuildLoad2(b, i64, fi_a, "fiv");
-    LLVMValueRef isf = zan_icmp(b, LLVMIntEQ, slot0, zan_add(b, fiv, one64, "fip1"), "isf");
-    LLVMBuildCondBr(b, isf, s0hit, s0next);
-    LLVMPositionBuilderAtEnd(b, s0next);
-    LLVMValueRef h0n = zan_and(b, zan_add(b, LLVMBuildLoad2(b, i64, h_a, "h0n.v"),
-        one64, "h0.inc"), LLVMBuildLoad2(b, i64, mask_a, "m0n"), "h0.wrap");
-    LLVMBuildStore(b, h0n, h_a);
-    LLVMBuildBr(b, s0cond);
-
-    LLVMPositionBuilderAtEnd(b, s0hit);
-    LLVMValueRef s0 = LLVMBuildLoad2(b, i64, h_a, "s0v");
-    LLVMBuildStore(b, s0, s0_a);
-    LLVMValueRef last = zan_sub(b, LLVMBuildLoad2(b, i64, cntp, "cnt2"),
-        one64, "lastv");
-    LLVMBuildStore(b, last, last_a);
-    /* step 2 (fi != last): point the moved entry's slot at its new index.
-     * Same preheader discipline as step 1: hash(ks[last]) once, loop head
-     * loads h_a. */
-    LLVMValueRef islast = zan_icmp(b, LLVMIntEQ, fiv, last, "islast");
-    LLVMBasicBlockRef s1init = LLVMAppendBasicBlockInContext(c, fn, "s1.init");
-    LLVMBuildCondBr(b, islast, s1skip, s1init);
-    LLVMPositionBuilderAtEnd(b, s1init);
-    LLVMValueRef ks1 = LLVMBuildLoad2(b, i8pp, kp, "ks1");
-    LLVMValueRef lastv = LLVMBuildLoad2(b, i64, last_a, "last1");
-    LLVMValueRef mkey = LLVMBuildLoad2(b, i8ptr,
-        LLVMBuildGEP2(b, i8ptr, ks1, &lastv, 1, "mkp"), "mkey");
-    LLVMValueRef h1 = zan_call2(b, hash_ty, hashf, (LLVMValueRef[]){ mkey, is_str }, 2, "h1");
-    LLVMValueRef h1m = zan_and(b, h1, LLVMBuildLoad2(b, i64, mask_a, "m1"), "h1.m");
-    LLVMBuildStore(b, h1m, h_a);
-    LLVMBuildBr(b, s1cond);
-    LLVMPositionBuilderAtEnd(b, s1cond);
-    LLVMValueRef h1v = LLVMBuildLoad2(b, i64, h_a, "h1v");
-    LLVMValueRef ix1 = LLVMBuildLoad2(b, i64ptr, ixp, "ix1");
-    LLVMValueRef slot1 = LLVMBuildLoad2(b, i64, LLVMBuildGEP2(b, i64, ix1, &h1v, 1, "s1p"), "slot1");
-    LLVMValueRef ism = zan_icmp(b, LLVMIntEQ, slot1,
-        zan_add(b, lastv, one64, "lastp1"), "ism");
-    LLVMBuildCondBr(b, ism, s1hit, s1next);
-    LLVMPositionBuilderAtEnd(b, s1next);
-    LLVMValueRef h1n = zan_and(b, zan_add(b, LLVMBuildLoad2(b, i64, h_a, "h1n.v"),
-        one64, "h1.inc"), LLVMBuildLoad2(b, i64, mask_a, "m1n"), "h1.wrap");
-    LLVMBuildStore(b, h1n, h_a);
-    LLVMBuildBr(b, s1cond);
-    LLVMPositionBuilderAtEnd(b, s1hit);
-    LLVMValueRef ix1h = LLVMBuildLoad2(b, i64ptr, ixp, "ix1h");
-    LLVMValueRef h1s = LLVMBuildLoad2(b, i64, h_a, "h1s");
-    LLVMValueRef fiv1 = LLVMBuildLoad2(b, i64, fi_a, "fi1");
-    LLVMBuildStore(b, zan_add(b, fiv1, one64, "fip1b"),
-        LLVMBuildGEP2(b, i64, ix1h, &h1s, 1, "s1w"));
-    LLVMBuildBr(b, s1skip);
-
-    /* step 3: clear the removed slot, then backward-shift its cluster */
-    LLVMPositionBuilderAtEnd(b, s1skip);
-    LLVMValueRef ix2 = LLVMBuildLoad2(b, i64ptr, ixp, "ix2");
-    LLVMValueRef s0v = LLVMBuildLoad2(b, i64, s0_a, "s0c");
-    LLVMBuildStore(b, zero64, LLVMBuildGEP2(b, i64, ix2, &s0v, 1, "s0w"));
-    LLVMBuildStore(b, s0v, i_a);
-    LLVMValueRef j0 = zan_and(b, zan_add(b, s0v, one64, "j0"),
-        LLVMBuildLoad2(b, i64, mask_a, "m2"), "j0.w");
-    LLVMBuildStore(b, j0, j_a);
-    LLVMBuildBr(b, bscond);
-    /* backward shift: while slot j is occupied, re-seat it into the hole i when
-     * its home does NOT lie cyclically within (i, j] */
-    LLVMPositionBuilderAtEnd(b, bscond);
-    LLVMValueRef ix3 = LLVMBuildLoad2(b, i64ptr, ixp, "ix3");
-    LLVMValueRef jv = LLVMBuildLoad2(b, i64, j_a, "jv");
-    LLVMValueRef sj = LLVMBuildLoad2(b, i64, LLVMBuildGEP2(b, i64, ix3, &jv, 1, "sjp"), "sj");
-    LLVMValueRef send = zan_icmp(b, LLVMIntEQ, sj, zero64, "send");
-    LLVMBuildCondBr(b, send, done, bsbody);
-    LLVMPositionBuilderAtEnd(b, bsbody);
-    LLVMValueRef ks3 = LLVMBuildLoad2(b, i8pp, kp, "ks3");
-    LLVMValueRef ej = zan_sub(b, sj, LLVMConstInt(i64, 1, 0), "ej");
-    LLVMValueRef ekey = LLVMBuildLoad2(b, i8ptr, LLVMBuildGEP2(b, i8ptr, ks3, &ej, 1, "ekp"), "ekey");
-    /* 槽里是 fi+1 时（step 2 已把搬家槽改指新下标），ks[fi] 此刻仍是「被
-     * 删的旧 key」——调用方要等本函数返回后才把 ks[last] 挪进 fi。home
-     * 必须按 ks[last] 算，否则搬错/漏搬，索引里留下查不到的活动项
-     * （Python 仿真 2 万轮全量删除复现：key 582 find -1）。 */
-    LLVMValueRef isfi = zan_icmp(b, LLVMIntEQ, ej,
-        LLVMBuildLoad2(b, i64, fi_a, "fi2"), "ej.eq.fi");
-    LLVMValueRef lastv2 = LLVMBuildLoad2(b, i64, last_a, "last2");
-    LLVMValueRef lastkey = LLVMBuildLoad2(b, i8ptr,
-        LLVMBuildGEP2(b, i8ptr, ks3, &lastv2, 1, "lkp"), "lkey");
-    LLVMValueRef ekey2 = LLVMBuildSelect(b, isfi, lastkey, ekey, "ekey2");
-    LLVMValueRef eh = zan_call2(b, hash_ty, hashf, (LLVMValueRef[]){ ekey2, is_str }, 2, "eh");
-    LLVMValueRef k = zan_and(b, eh, LLVMBuildLoad2(b, i64, mask_a, "m3"), "k");
-    LLVMValueRef iv = LLVMBuildLoad2(b, i64, i_a, "iv");
-    LLVMValueRef jv2 = LLVMBuildLoad2(b, i64, j_a, "jv2");
-    /* in-order (home lies in (i, j] cyclically): leave the entry in place */
-    LLVMValueRef i_lt_j = zan_icmp(b, LLVMIntULT, iv, jv2, "iltj");
-    LLVMValueRef in_ord1 = zan_and(b, zan_icmp(b, LLVMIntUGT, k, iv, "k.gt.i"),
-        zan_icmp(b, LLVMIntULE, k, jv2, "k.le.j"), "ord1");
-    LLVMValueRef in_ord2 = zan_or(b, zan_icmp(b, LLVMIntUGT, k, iv, "k.gt.i2"),
-        zan_icmp(b, LLVMIntULE, k, jv2, "k.le.j2"), "ord2");
-    LLVMValueRef in_order = LLVMBuildSelect(b, i_lt_j, in_ord1, in_ord2, "inord");
-    LLVMBuildCondBr(b, in_order, bsstay, bsmove);
-    LLVMPositionBuilderAtEnd(b, bsmove);
-    LLVMValueRef ix4 = LLVMBuildLoad2(b, i64ptr, ixp, "ix4");
-    LLVMValueRef iv2 = LLVMBuildLoad2(b, i64, i_a, "iv2");
-    LLVMBuildStore(b, sj, LLVMBuildGEP2(b, i64, ix4, &iv2, 1, "iw"));
-    LLVMBuildStore(b, zero64, LLVMBuildGEP2(b, i64, ix4, &jv2, 1, "jw"));
-    LLVMValueRef iv3 = LLVMBuildLoad2(b, i64, j_a, "jv3");
-    LLVMBuildStore(b, iv3, i_a);
-    LLVMBuildBr(b, bsstay);
-    LLVMPositionBuilderAtEnd(b, bsstay);
-    LLVMValueRef jn = zan_and(b, zan_add(b, LLVMBuildLoad2(b, i64, j_a, "jn.v"),
-        one64, "jn.inc"), LLVMBuildLoad2(b, i64, mask_a, "m4"), "jn.w");
-    LLVMBuildStore(b, jn, j_a);
-    LLVMBuildBr(b, bscond);
-
-    LLVMPositionBuilderAtEnd(b, done);
-    /* cnt-- and indexed_count-- together: the index stays fresh */
-    LLVMValueRef cnt3 = LLVMBuildLoad2(b, i64, cntp, "cnt3");
-    LLVMBuildStore(b, zan_sub(b, cnt3, one64, "cnt.d"), cntp);
-    LLVMValueRef icnt3 = LLVMBuildLoad2(b, i64, icntp, "icnt3");
-    LLVMBuildStore(b, zan_sub(b, icnt3, one64, "icnt.d"), icntp);
-    LLVMValueRef fi3 = LLVMBuildLoad2(b, i64, fi_a, "fi3");
-    LLVMBuildRet(b, fi3);
+    LLVMPositionBuilderAtEnd(b, hit);
+    /* cnt--; the hash index is dropped wholesale (indexed_count = 0). The
+     * caller shifts every entry above the hole down one slot so the parallel
+     * buffers keep insertion order (C# observable enumeration semantics; the
+     * layout contract documented at dict_struct_type). With every entry above
+     * fi renumbered, an in-place index repair is impossible — find rebuilds
+     * the index from scratch on the next lookup (its icnt != cnt stale check
+     * fires; the rebuild is the same O(n) class as the data shift itself).
+     * The previous design swap-removed the LAST entry into the hole and
+     * repaired the index incrementally — that is why Remove used to reorder
+     * Keys/Values away from insertion order. */
+    LLVMValueRef cnt = LLVMBuildLoad2(b, i64, cntp, "cnt");
+    LLVMBuildStore(b, zan_sub(b, cnt, LLVMConstInt(i64, 1, 0), "cnt.d"), cntp);
+    LLVMBuildStore(b, LLVMConstInt(i64, 0, 0), icntp);
+    LLVMBuildRet(b, fi);
     if (saved) LLVMPositionBuilderAtEnd(b, saved);
     return fn;
 }

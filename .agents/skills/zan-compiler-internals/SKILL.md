@@ -1,0 +1,78 @@
+---
+name: zan-compiler-internals
+description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑——Dict 内建布局契约（插入序 keys/values + 惰性哈希索引 + Remove 整体失效）、LLVM select 两臂都求值导致的死臂分配泄漏（用 branch+phi）、looks_like_var_decl 的内建关键字分派契约（rank specifier 必须容忍逗号）、交叉工具链 .o 重出配方（zig cc + build/ 暂存副本不会自动刷新）、可空值类型在字符串位的解包形状。做或改 src/compiler/*、交叉运行时对象、conformance golden 时使用。
+---
+
+# zanc 编译器内部定式与坑
+
+> 提炼自 standard 层存量挂账清零批（2026-09-09：int[,] 回归、Dict.Remove
+> 保序、string+可空拼接、交叉 rt 对象重出）。每条都实测踩过。
+
+## Dict 内建（irgen.c 布局注释 = 契约）
+
+- 布局 8 字段：`{i64 count, i64 capacity, i8** keys, i64* values, i64* index,
+  i64 index_capacity, i64 indexed_count, ...}`。**keys/values 并行缓冲保持
+  插入序**（枚举序与 ARC 释放序都依赖它），`index` 是开地址哈希索引（存
+  entry+1，0=空），由 `__zan_dict_find` 惰性重建——重建判据
+  `indexed_count != count` 或 `index_capacity==0`。
+- **Remove 必须保插入序**：swap-remove（末项搬进洞）曾让 Keys/Values 离开
+  插入序，违反布局契约、偏离 C# 可观察行为。正确形状 = memmove 下移洞上
+  方全部条目（键 1 词、值 value_words 词）+ **索引整体失效
+  （indexed_count=0）**——洞上方条目全部重编号后任何增量索引修复都不可能，
+  find 的 stale 判据天然触发全量重建。Remove 变 O(n) 与 shift 同阶，可接受。
+- find 的 append 快路径（只索引新追加的键）有 `kept = icnt > 0` 守卫，
+  icnt=0 不会误入快路径——整体失效与增量追加逻辑兼容。
+- tail 槽清零不能省（ARC 不得见脏引用）；memset 按 libc 真身
+  `(ptr,i32,i64)->ptr` 调（get_libc_fn 按名字取先到声明，签名不一致
+  verifier 直接拒）。
+
+## LLVM 陷阱
+
+- **`LLVMBuildSelect` 两臂都求值**。字符串化之类会分配的辅助（itoa64 的
+  数字缓冲）放进 select 死臂就是泄漏——leakcheck 孪生测试当场抓。要用
+  branch+phi：两块各算各的，merge 处 phi 合流。
+- 返回 NULL 字符串是合法的空串形状：emit_str_concat 有 NULL→""、
+  zan_rt_str_release 有 NULL 守卫，全链路安全。
+
+## parser：looks_like_var_decl 的分派契约
+
+- 内建类型关键字开头的语句要在「声明」（`int x = 3`、`int[] a`）与
+  「表达式语句」（`int.Parse(s)`）之间分派，实现是裸源码扫描找 `.`。
+  **扫 `[` 档位时必须容忍空白+逗号**——`int[,]`/`int[,,]`/`int[][,]` 的
+  rank specifier 里是逗号，只认 `]` 就把整个语句误判成表达式
+  （cs_b08_arrays 回归的根因）。混合档 `int[][,]` 也要过。
+- 单行多声明符 `int a = 0, b = 2;` 走 pending_stmts 队列 + 三个语句收集点
+  splice；comma 循环只吃 `IDENT [= expr]`。
+
+## 字符串位的可空值类型
+
+- C# 语义：`"a=" + int?` 合法，null 拼空串。checker
+  type_is_concatable 对 TYPE_NULLABLE 递归放行元素可拼的；
+  irgen emit_to_cstr_of 对 `zan.nullable.<payload>` 命名结构解包——
+  has ? cstr(payload) : NULL（branch+phi，见上）。无符号元素
+  （uint?/ulong?）要传 emit_to_cstr_u 的 unsigned 旗标。
+- `Convert.ToString(int?)` 与 `.ToString()` 直接调至今会炸 verifier
+  （nullable 结构按值进了 itoa64 形参）——拼接路径能走是因为有解包；
+  直接调用是另一个待修缺口。
+
+## 交叉运行时对象（toolchain/*/*.o）重出配方
+
+- 源头 scripts/build_cross_rt.cmd 用 zig cc（本机无安装时：
+  C:/Users/QQ/Downloads/zig-x86_64-windows-0.15.1.zip 解包即用；
+  NDK 块要 ANDROID_NDK，OHOS 块要 OHOS_NDK）。
+- **build/ 里的暂存副本不会自动刷新**：zanc 链接后处理的「自包含工具链
+  打包」对已存在的 build/macos/ 等目录直接 skip——重出 toolchain/*.o 后
+  必须手动 cp 进 build/<target>/，否则链接（--emit-lib、交叉 exe）用的
+  还是旧对象，测试照样挂。
+- ELF so 链接容忍未定义符号（运行期才炸），Mach-O dylib 链接期即拒——
+  运行时新符号没进交叉对象时，只有 macos dylib 测试会报警，别被
+  「只有 mac 挂」误导成 mac 特有问题。
+- toolchain/** 的 *.o 命中 gitignore，提交要 `git add -f`。
+
+## conformance 处置四分法
+
+挂的测试先归因再动手：「stale golden」（重生成，逐行核对 C# 拼写）、
+「实现违约」（修实现——布局注释/文档注释就是契约，「注释与实现打架时
+先查 git 考古谁先谁后」）、「测试源不合法」（C# 也拒绝的写法改测试源，
+如无约束 T 的 string 拼接改 .ToString()）、「真回归」（git 考古最后
+通过点定位元凶提交修编译器）。混着处置就会把行为改错。

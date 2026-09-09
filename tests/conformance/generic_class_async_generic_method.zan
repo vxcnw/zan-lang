@@ -22,7 +22,7 @@ class Pool<T> {
         T keep = item;
         U tail = x;
         await Task.Delay(1);
-        return keep + "/" + tail;
+        return keep.ToString() + "/" + tail.ToString();
     }
 
     // a T-typed local held across an await, then handed back
@@ -38,9 +38,9 @@ class Pool<T> {
     public async string Caught<U>(U x) {
         try {
             await Task.Delay(1);
-            throw new Exception("bad " + x);
+            throw new Exception("bad " + x.ToString());
         } catch (Exception e) {
-            return "caught " + e.Message + " over " + item;
+            return "caught " + e.Message + " over " + item.ToString();
         }
     }
 }
