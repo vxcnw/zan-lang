@@ -247,23 +247,77 @@ class Schema {
             if (!await Schema.SeedSkillsFromSnap(db)) { GameSnapshot.Close(); return false; }
             GameSnapshot.Close();
         } else {
-            /* 旧库补 slot 列：种子期未写 slot 的库按快照 bclass 原表推导
-               回填。ALTER 加列后旧行 slot 是 NULL（=0 匹配不到），逐条
-               update 不带 slot 条件、只按名称命中，空值与非空都写一遍。 */
+            /* 旧库补全：种子期只有 slot/攻/防的库，按快照逐条覆写为
+               原值（槽位 + 攻/魔/道/防/魔御区间 + 职业/重量/门槛/
+               售价）。按名称命中，空值与非空都写一遍，幂等。 */
             if (itemsN > 0) {
                 await GameSnapshot.Open("data/M2.DB");
                 DbResult snap = await GameSnapshot.Table("gameitem");
                 for (int i = 0; i < snap.RowCount(); i = i + 1) {
                     string nm = GameSnapshot.Str(snap, i, "name");
                     if (nm.Length == 0) { continue; }
+                    Item f = Schema.ItemFromSnap(snap, i);
                     await db.Update<Item>()
-                        .Set(a => a.slot, Schema.SlotOfBclass(
-                            GameSnapshot.Str(snap, i, "bclass")))
+                        .Set(a => a.slot, f.slot)
+                        .Set(a => a.kind, f.kind)
+                        .Set(a => a.atk, f.atk)
+                        .Set(a => a.atkMin, f.atkMin)
+                        .Set(a => a.magic, f.magic)
+                        .Set(a => a.magicMin, f.magicMin)
+                        .Set(a => a.tao, f.tao)
+                        .Set(a => a.taoMin, f.taoMin)
+                        .Set(a => a.def, f.def)
+                        .Set(a => a.defMin, f.defMin)
+                        .Set(a => a.mdef, f.mdef)
+                        .Set(a => a.mdefMin, f.mdefMin)
+                        .Set(a => a.hp, f.hp)
+                        .Set(a => a.mp, f.mp)
+                        .Set(a => a.jobNeed, f.jobNeed)
+                        .Set(a => a.weight, f.weight)
+                        .Set(a => a.minLevel, f.minLevel)
+                        .Set(a => a.price, f.price)
+                        .Set(a => a.picture, f.picture)
+                        .Where(a => a.name == nm)
+                        .ExecuteAffrowsAsync();
+                }
+                /* 老库补 game_map.boss：按图名对上快照 gamemap 的
+                   BOSS 怪名，BOSS 链解锁用。幂等。 */
+                DbResult gm = await GameSnapshot.Table("gamemap");
+                DbResult gmMons = await GameSnapshot.Table("gamemonster");
+                List<GameMap> rtMaps = await db.Select<GameMap>().ToListAsync();
+                for (int i = 0; i < gm.RowCount(); i = i + 1) {
+                    int bossId = GameSnapshot.Int(gm, i, "boss");
+                    int brow = Schema.MonsterRow(gmMons, "", bossId);
+                    if (brow < 0) { continue; }
+                    string snapMap = GameSnapshot.Str(gm, i, "name");
+                    string bossName = GameSnapshot.Str(gmMons, brow, "name");
+                    for (int k = 0; k < rtMaps.Count; k = k + 1) {
+                        if (rtMaps[k].name != snapMap) { continue; }
+                        await db.Update<GameMap>()
+                            .Set(a => a.boss, bossName)
+                            .Where(a => a.id == rtMaps[k].id)
+                            .ExecuteAffrowsAsync();
+                        break;
+                    }
+                }
+                /* 老库补 game_mob 攻下限/法力/魔防（内页 BOSS 面板展示
+                   列）：按名称对快照 gamemonster 原值覆写，幂等。 */
+                DbResult gmMons2 = await GameSnapshot.Table("gamemonster");
+                for (int i = 0; i < gmMons2.RowCount(); i = i + 1) {
+                    string nm = GameSnapshot.Str(gmMons2, i, "name");
+                    if (nm.Length == 0) { continue; }
+                    await db.Update<Mob>()
+                        .Set(a => a.atkMin, GameSnapshot.Int(gmMons2, i, "za1"))
+                        .Set(a => a.mp, GameSnapshot.Int(gmMons2, i, "zmp"))
+                        .Set(a => a.mdef, GameSnapshot.Int(gmMons2, i, "ze2"))
                         .Where(a => a.name == nm)
                         .ExecuteAffrowsAsync();
                 }
                 GameSnapshot.Close();
             }
+            /* 老库补 BOSS 挑战次数：新列旧行是 NULL/0，归一到每天 20 次。 */
+            await db.ExecuteAsync("update game_player set bossTries=20"
+                + " where bossTries is null or bossTries=0");
             if (!await Schema.SeedSkills(db)) { return false; }
         }
         int ann = await db.Select<Announce>().CountAsync();
@@ -333,12 +387,19 @@ class Schema {
         int n = await db.Select<GameMap>().CountAsync();
         if (n > 0) { return true; }
         DbResult snap = await GameSnapshot.Table("gamemap");
+        DbResult mons = await GameSnapshot.Table("gamemonster");
         for (int i = 0; i < snap.RowCount(); i = i + 1) {
             GameMap m = new GameMap();
             m.name = GameSnapshot.Str(snap, i, "name");
             m.minLevel = GameSnapshot.Int(snap, i, "lvl");
             m.sortOrder = GameSnapshot.Int(snap, i, "id");
             m.picture = GameSnapshot.Str(snap, i, "picture");
+            /* BOSS 链：快照 boss 存 gamemonster 行 id，落库存怪名，
+               Fight.LoadCatalog 按图+名圈 BOSS 怪。 */
+            int bossId = GameSnapshot.Int(snap, i, "boss");
+            int brow = Schema.MonsterRow(mons, "", bossId);
+            m.boss = brow >= 0
+                ? GameSnapshot.Str(mons, brow, "name") : "";
             m.status = 1;
             int _id = await db.Insert<GameMap>(m).ExecuteIdentityAsync();
             if (_id <= 0) { return false; }
@@ -367,36 +428,49 @@ class Schema {
         return -1;
     }
 
+    /* 快照一行 → 物品模板（全字段）。属性区间攻(a)/魔(b)/道(c)/
+       防(d)/魔御(e) 原值全量导入——首饰勋章同样带攻（荣耀戒指
+       攻10-35），战斗聚合对全部穿戴位求和。job 列 1战/2法/3道，
+       换成与玩家一致的 0战/1法/2道（0=不限）。种子与老库补全共用。 */
+    static ZanWeb.Model.Game.Item ItemFromSnap(DbResult snap, int i) {
+        string name = GameSnapshot.Str(snap, i, "name");
+        string aclass = GameSnapshot.Str(snap, i, "aclass");
+        string bclass = GameSnapshot.Str(snap, i, "bclass");
+        Item row = new Item();
+        row.name = name;
+        row.slot = Schema.SlotOfBclass(bclass);
+        if (aclass == "消耗") { row.kind = 0; }
+        else if (aclass == "装备") { row.kind = bclass == "武器" ? 1 : 2; }
+        else { row.kind = 3; }
+        row.atk = GameSnapshot.Int(snap, i, "a2");
+        row.atkMin = GameSnapshot.Int(snap, i, "a1");
+        row.magic = GameSnapshot.Int(snap, i, "b2");
+        row.magicMin = GameSnapshot.Int(snap, i, "b1");
+        row.tao = GameSnapshot.Int(snap, i, "c2");
+        row.taoMin = GameSnapshot.Int(snap, i, "c1");
+        row.def = GameSnapshot.Int(snap, i, "d2");
+        row.defMin = GameSnapshot.Int(snap, i, "d1");
+        row.mdef = GameSnapshot.Int(snap, i, "e2");
+        row.mdefMin = GameSnapshot.Int(snap, i, "e1");
+        row.hp = GameSnapshot.Int(snap, i, "hp");
+        row.mp = GameSnapshot.Int(snap, i, "mp");
+        int job = GameSnapshot.Int(snap, i, "job");
+        row.jobNeed = job > 0 && job <= 3 ? job - 1 : 0;
+        row.weight = GameSnapshot.Int(snap, i, "weight");
+        row.price = GameSnapshot.Long(snap, i, "pirce");
+        row.minLevel = GameSnapshot.Int(snap, i, "lvl");
+        row.picture = GameSnapshot.Str(snap, i, "picture");
+        row.status = 1;
+        return row;
+    }
+
     static async bool SeedItems(IDbConnection db) {
         int n = await db.Select<Item>().CountAsync();
         if (n > 0) { return true; }
         DbResult snap = await GameSnapshot.Table("gameitem");
         for (int i = 0; i < snap.RowCount(); i = i + 1) {
-            string name = GameSnapshot.Str(snap, i, "name");
-            if (name.Length == 0) { continue; }
-            string aclass = GameSnapshot.Str(snap, i, "aclass");
-            string bclass = GameSnapshot.Str(snap, i, "bclass");
-            Item row = new Item();
-            row.name = name;
-            row.slot = Schema.SlotOfBclass(bclass);
-            if (aclass == "消耗") {
-                row.kind = 0;
-                row.hp = GameSnapshot.Int(snap, i, "hp");
-            } else if (aclass == "装备") {
-                if (bclass == "武器") {
-                    row.kind = 1;
-                    row.atk = GameSnapshot.Int(snap, i, "a2");
-                } else {
-                    row.kind = 2;
-                    row.def = GameSnapshot.Int(snap, i, "d2");
-                }
-            } else {
-                row.kind = 3;
-            }
-            row.price = GameSnapshot.Long(snap, i, "pirce");
-            row.minLevel = GameSnapshot.Int(snap, i, "lvl");
-            row.picture = GameSnapshot.Str(snap, i, "picture");
-            row.status = 1;
+            if (GameSnapshot.Str(snap, i, "name").Length == 0) { continue; }
+            Item row = Schema.ItemFromSnap(snap, i);
             int _id = await db.Insert<Item>(row).ExecuteIdentityAsync();
             if (_id <= 0) { return false; }
         }
@@ -468,13 +542,19 @@ class Schema {
         int hp = 0;
         int atk = 0;
         int def = 0;
+        int atkMin = 0;
+        int mp = 0;
+        int mdef = 0;
         string picture = "";
         string drops = "";
         if (row >= 0 && GameSnapshot.Int(mons, row, "zhp") > 0) {
             lvl = GameSnapshot.Int(mons, row, "lvl");
             hp = GameSnapshot.Int(mons, row, "zhp");
             atk = Schema.AttrOf(mons, row, "za2", "za1");
+            atkMin = GameSnapshot.Int(mons, row, "za1");
             def = Schema.AttrOf(mons, row, "zd2", "zd1");
+            mp = GameSnapshot.Int(mons, row, "zmp");
+            mdef = GameSnapshot.Int(mons, row, "ze2");
             picture = GameSnapshot.Str(mons, row, "picture");
             drops = GameSnapshot.Str(mons, row, "item");
         }
@@ -489,6 +569,9 @@ class Schema {
                 atk = 8 + 9 * mapLvl / 5;
                 def = 2 + 9 * mapLvl / 10;
             }
+            atkMin = atk * 2 / 5;
+            mp = 20 + 5 * lvl;
+            mdef = def * 3 / 5;
         }
         if (drops.Length == 0) { drops = mapDrop; }
         Mob m = new Mob();
@@ -497,7 +580,10 @@ class Schema {
         m.level = lvl;
         m.hp = hp;
         m.atk = atk;
+        m.atkMin = atkMin;
         m.def = def;
+        m.mdef = mdef;
+        m.mp = mp;
         m.exp = boss ? exp * 5 : exp;
         m.goldMin = money;
         m.goldMax = money * 3;

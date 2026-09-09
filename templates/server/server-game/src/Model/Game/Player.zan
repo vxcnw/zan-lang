@@ -44,6 +44,17 @@ class Player {
     long exp;
     int weaponId;
     int armorId;
+    /* 其余穿戴位（原版原值槽位，单手镯/单戒指；天书原版即无槽）：
+       2头盔 3项链 4手镯 6戒指 8腰带 9靴子 10勋章 11宝石。
+       game_item.id，0=空位；穿戴中的物品不在背包。 */
+    int helmetId;
+    int necklaceId;
+    int braceletId;
+    int ringId;
+    int beltId;
+    int bootsId;
+    int medalId;
+    int gemId;
 
     long gold;
     long gems;
@@ -88,6 +99,20 @@ class Player {
     int mapId;
     int x;
     int y;
+
+    /* 地图解锁进度（照原版 BOSS 链）：已解锁的最大 game_map.id，
+       在地图内页挑战 BOSS 胜利解锁 N+1；建角=1。0 按旧角色视为 1。 */
+    int mapUnlocked;
+
+    /* 地图内页 BOSS 挑战（照原版「挑战BOSS(剩N)次」）：每天 20 次，
+       bossTryDate 记上次重置日（yyyy-MM-dd，跨天自动回满）；
+       bossHpLeft/bossHpMap 记挑战失败的 BOSS 余血（下挑战接着打，
+       换图重置满血）。 */
+    int bossTries;
+    [Column(StringLength = 10)]
+    string bossTryDate;
+    int bossHpLeft;
+    int bossHpMap;
 
     /* 1=正常；0=屏蔽。 */
     int status;

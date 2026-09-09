@@ -20,8 +20,13 @@ class Mob {
     int level;
 
     int hp;
+    /* 原版怪表只有上限列（za2 攻/zd2 防/ze2 魔防），atkMin 存 za1
+       供地图内页 BOSS 面板「攻击 a-b」展示；mp 存 zmp。 */
     int atk;
+    int atkMin;
     int def;
+    int mdef;
+    int mp;
 
     /* 击杀奖励：固定经验；金币在 [goldMin, goldMax] 内随机。 */
     int exp;

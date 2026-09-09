@@ -276,7 +276,11 @@ class Gateway {
         s.conn = conn;
         s.pushCid = conn.GetId();
         s.lastSeen = now;
-        Gateway.Send(conn, Gateway.Ok());
+        /* push:1 是通道就绪标记：客户端收到才认为推送链路建立，
+           停掉重拨循环。 */
+        JsonValue ack = Gateway.Ok();
+        ack.Set("push", JsonValue.NewNum("1"));
+        Gateway.Send(conn, ack);
     }
 
     /* ---- op 分发（传输无关）----
@@ -519,6 +523,9 @@ class Gateway {
 
             JsonValue r = Gateway.Ok();
             r.Set("uid", JsonValue.NewNum(Convert.ToString(row.id)));
+            /* 推送通道端口随登录下发：客户端地址栏填的是 HTTP 端口，
+               attach 长连接拨这里（网关与 HTTP 同进程，端口各自配置）。 */
+            r.Set("pushPort", JsonValue.NewNum(Convert.ToString(Cfg.Game.port)));
             await Gateway.RealmsInto(r, db);
             if (http) {
                 r.Set("token", JsonValue.NewStr(TokenBox.Issue(row.id, now)));

@@ -366,6 +366,13 @@ class World {
             .Set(a => a.mapId, row.mapId)
             .Set(a => a.x, row.x)
             .Set(a => a.y, row.y)
+            /* BOSS 链进度随行落库：解锁图、当日剩余次数与日期、失败余血
+               及其所在图——漏了的话挑战胜利在重启后全部回退。 */
+            .Set(a => a.mapUnlocked, row.mapUnlocked)
+            .Set(a => a.bossTries, row.bossTries)
+            .Set(a => a.bossTryDate, row.bossTryDate)
+            .Set(a => a.bossHpLeft, row.bossHpLeft)
+            .Set(a => a.bossHpMap, row.bossHpMap)
             .Set(a => a.updatedAt, now)
             .Where(a => a.id == row.id)
             .ExecuteAffrowsAsync();
