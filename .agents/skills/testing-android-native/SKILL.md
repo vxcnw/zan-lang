@@ -23,6 +23,20 @@ description: Zan GUI 的 Android NativeActivity 实机验证仪式——probe AP
 - 驱动重建：`_scratch/anw/entry.sh`（两个 ABI，gui_runtime.c +
   freetype 合并成 libzan_gui.a）。改了 `src/runtime/gui_runtime*.c`
   后必须重跑，再同步 scratch，再重打 APK。
+- **gui_runtime 新增 DllImport 后 APK 全体秒退的定式**（踩坑：
+  gui 3D 落地 zan_gui_mesh_create 后，7 个已装游戏全部
+  `dlopen failed: cannot locate symbol` 秒退，Splash 一闪即回桌面）：
+  libmain 把 stdlib/Gui 编进去，运行时 DLLImport 按符号从
+  libzan_gui.a 解析；提交了 gui_runtime.c 新导出但没重跑 entry.sh
+  时，drivers/android-<arch>/static/libzan_gui.a 还是旧符号表，
+  zanc 照常出包（静态链接时缺符号只在 dlopen 才爆）。
+  诊断一击必杀：`adb logcat -d | grep -E "LoadNativeLibrary|dlopen"`
+  看 "cannot locate symbol X"，`nm -D libmain.so | grep "UND X"`
+  确认引用，`nm libzan_gui.a | grep "T X"` 确认驱动缺定义；
+  重跑 entry.sh 后用 `strings|grep`/`nm -D` 复核新 so 再装机。
+  build/zanc 不重编 stdlib 的 Gui（Zan 源），但驱动 .a 是外部产物，
+  任何 gui_runtime.c 改动都等于驱动改动——与 classes.dex 双处同步
+  同级别的纪律。
 
 ## 游戏素材烘焙：APK 里 assets 从哪来（踩坑：7 个 APK 全部烘空成纯色块）
 
