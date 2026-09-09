@@ -1313,6 +1313,7 @@ class Control {
         if (ch < 0) { ch = 0; }
         if (this.StyleDisplay() == 1) {
             this.ArrangeFlex(cx, cy, cw, ch, innerGap);
+            this.CheckKidsLayout();
             return;
         }
         for (int i = 0; i < children.Count; i = i + 1) {
@@ -1369,7 +1370,7 @@ class Control {
                 c.Arrange(cx, cy, cw, ch);
             }
         }
-        this.CheckOverlapKids();
+        this.CheckKidsLayout();
     }
 
     // --- 排版重叠自检（默认关）----------------------------------
@@ -1459,6 +1460,119 @@ class Control {
             + Convert.ToString(b.by) + " " + Convert.ToString(b.bw)
             + "x" + Convert.ToString(b.bh) + "] by "
             + Convert.ToString(ix) + "x" + Convert.ToString(iy) + "px";
+        string log = Interop.EnvVar("ZAN_GUI_OVERLAP_LOG");
+        if (log.Length > 0) {
+            File.AppendAllText(log, line + "\n");
+        } else {
+            Console.WriteLine(line);
+        }
+    }
+
+    // --- 控件尺寸自检（默认关，与重叠自检共用挂点）----------------
+    //
+    // 重叠检测照不到的另一类手打布局事故：给文字控件手写尺寸。
+    // 按钮的宽高有唯一正解——文字加皮肤内边距（OnMeasure 自算）；
+    // 作者一旦用 Prefer()/文档 width/height 钉死，改文案就裁字、
+    // 换皮肤就变形，自动生成界面的代码“一个按钮调来调去”反复
+    // 微调的正是这两个数。三条规则，命中按「父 + 规则 + 矩形」
+    // 签名去重：
+    //   固定尺寸  交互叶子控件带 prefSet——直接报（最强的手打信号）；
+    //   拉高      分到的高度超过自然高度 1.4 倍且多出 12px——巨块按钮；
+    //   裁剪      分到的矩形装不下自然尺寸——文字会被切。
+    // 宽度不查“拉宽”：表单列里通栏按钮是正经排版。
+    // 开关：ZAN_GUI_LAYOUTLINT=1（或 DebugLayoutLint），日志落
+    // ZAN_GUI_OVERLAP_LOG（与重叠自检共用），否则打控制台；
+    // 刻意定尺寸的场景（图标按钮、画布图元、分隔条）挂
+    // FreeLayout() 免检。
+
+    /// 环境变量只读一次，避免每帧碰内核。
+    static bool lintEnvRead;
+    static bool lintEnvOn;
+    /// 编程开关：测试/宿主不经环境变量直接开。
+    static bool DebugLayoutLint;
+    /// 本进程去重后命中的尺寸问题数；测试据此断言。
+    static int lintHits;
+    static Dict<string, bool> lintSeen;
+
+    static bool LintActive() {
+        if (!lintEnvRead) {
+            lintEnvRead = true;
+            lintEnvOn = Interop.EnvVar("ZAN_GUI_LAYOUTLINT") == "1";
+        }
+        return DebugLayoutLint || lintEnvOn;
+    }
+
+    /// 免检牌：同一张牌同时豁免重叠与尺寸两条自检。
+    Control FreeLayout() {
+        overlapExempt = true;
+        return this;
+    }
+
+    /// 谁参与尺寸自检：只有“宽高有正解”的文字叶子控件
+    /// （Button/Checkbox 覆写为真；Panel/Input 这类通栏合理的
+    /// 控件不参与，免得表单里满屏误报）。
+    virtual bool LintLeafSize() { return false; }
+
+    /// Arrange 的两条出口（停靠尾、flex 尾）共用的子树自检入口。
+    void CheckKidsLayout() {
+        this.CheckOverlapKids();
+        this.CheckKidsSizes();
+    }
+
+    /// 测试读取：本进程去重后命中的尺寸问题数。
+    static int LintHits() { return lintHits; }
+
+    /// 测试复位：清零计数与去重表。
+    static void ResetLintHits() {
+        lintHits = 0;
+        lintSeen = null;
+    }
+
+    void CheckKidsSizes() {
+        if (!LintActive()) { return; }
+        for (int i = 0; i < children.Count; i = i + 1) {
+            Control c = children[i];
+            if (!c.StyleVisible() || c.overlapExempt
+                || !c.LintLeafSize()) { continue; }
+            if (c.prefSet) {
+                this.ReportLint(c, "固定尺寸",
+                    "宽高被 Prefer()/文档钉死成 "
+                    + Convert.ToString(c.prefW) + "x"
+                    + Convert.ToString(c.prefH)
+                    + ",应让文字+皮肤内边距自算");
+                continue;
+            }
+            if (c.prefW <= 0 || c.prefH <= 0) { continue; }
+            if (c.bh > c.prefH + 12 && c.bh * 10 > c.prefH * 14) {
+                this.ReportLint(c, "拉高",
+                    "分到 " + Convert.ToString(c.bh) + " 高,内容只要 "
+                    + Convert.ToString(c.prefH) + ",巨块按钮");
+                continue;
+            }
+            if (c.bw < c.prefW - 2 || c.bh < c.prefH - 2) {
+                this.ReportLint(c, "裁剪",
+                    "矩形 " + Convert.ToString(c.bw) + "x"
+                    + Convert.ToString(c.bh) + " 装不下内容 "
+                    + Convert.ToString(c.prefW) + "x"
+                    + Convert.ToString(c.prefH) + ",文字会被切");
+            }
+        }
+    }
+
+    void ReportLint(Control c, string rule, string detail) {
+        string sig = this.Kind() + "|" + rule + "|" + c.Kind()
+            + "@" + Convert.ToString(c.bx) + ","
+            + Convert.ToString(c.by) + "+" + Convert.ToString(c.bw)
+            + "x" + Convert.ToString(c.bh);
+        if (lintSeen == null) { lintSeen = new Dict<string, bool>(); }
+        if (lintSeen.ContainsKey(sig)) { return; }
+        if (lintSeen.Count < 400) { lintSeen.Add(sig, true); }
+        lintHits = lintHits + 1;
+        string line = "gui-lint #" + Convert.ToString(lintHits)
+            + " in " + this.Kind() + ": " + c.Kind()
+            + "[" + Convert.ToString(c.bx) + ","
+            + Convert.ToString(c.by) + " " + Convert.ToString(c.bw)
+            + "x" + Convert.ToString(c.bh) + "] " + rule + ": " + detail;
         string log = Interop.EnvVar("ZAN_GUI_OVERLAP_LOG");
         if (log.Length > 0) {
             File.AppendAllText(log, line + "\n");

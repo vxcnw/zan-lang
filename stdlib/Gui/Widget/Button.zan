@@ -394,6 +394,10 @@ class Button : Control {
         prefW = s.WidthOr(this.AutoWidth(app));
     }
 
+    /// 尺寸自检的自愿者：按钮的宽高有唯一正解（文字+皮肤内边距），
+    /// 手写尺寸或被拉成巨块都值得报给作者。
+    override bool LintLeafSize() { return true; }
+
     /// 覆写：保留模式绘制 = 在自身矩形上 RenderIn。
     override void OnPaint(App app) {
         this.RenderIn(app, bx, by, bw, bh);

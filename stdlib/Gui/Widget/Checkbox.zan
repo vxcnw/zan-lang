@@ -306,6 +306,9 @@ class Checkbox : Control {
                         lineW, lineH, lineH / 2, check.FgOr(0));
     }
 
+    /// 尺寸自检的自愿者：勾选框的宽高同样由方框+标签自算。
+    override bool LintLeafSize() { return true; }
+
     /// 覆写：按选中态解析样式，宽 = 方框 + 间距 + 标签宽，高取样式行高。
     override void OnMeasure(App app) {
         Theme t = app.theme;

@@ -155,6 +155,7 @@ class ToolStrip : Control {
     int AddSeparator() {
         Button b = new Button { Text = "", Class = "text small disabled" };
         b.Prefer(1, 0);
+        b.FreeLayout();
         items.Add(b);
         Add(b);
         b.DockLeft();
