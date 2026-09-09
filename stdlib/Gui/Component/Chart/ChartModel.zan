@@ -29,6 +29,9 @@ class ChartKinds {
         if (s == "radar") { return ChartType.Radar; }
         if (s == "chord") { return ChartType.Chord; }
         if (s == "force") { return ChartType.Force; }
+        // ECharts v5/v6 关系图：layout 字段选 force/none/circular，
+        // 复用力导向渲染器（DrawForce 按布局分支）。
+        if (s == "graph") { return ChartType.Force; }
         if (s == "map") { return ChartType.Map; }
         if (s == "gauge") { return ChartType.Gauge; }
         if (s == "funnel") { return ChartType.Funnel; }
@@ -1299,6 +1302,10 @@ class ChartSeries {
     List<ChartMarkPoint> marks;    // markPoint.data（线/柱系列）
     List<ChartMarkLine> markLines; // markLine.data（阈值/平均线，线/柱系列）
 
+    string graphLayout;   // ECharts graph.layout："" | "force" | "none" | "circular"
+    List<int> nodeX;      // graph layout:'none' 的逐节点 x（数据坐标；-1 = 未给）
+    List<int> nodeY;      // graph layout:'none' 的逐节点 y（数据坐标；-1 = 未给）
+
     GaugeOption gauge;
 
     /// 从纯 int 值构建系列（每个值变为 ChartData.Of(v)）。
@@ -1386,6 +1393,9 @@ class ChartSeries {
         s.events = new List<ChartEvent>();
         s.marks = new List<ChartMarkPoint>();
         s.markLines = new List<ChartMarkLine>();
+        s.graphLayout = "";
+        s.nodeX = new List<int>();
+        s.nodeY = new List<int>();
         s.gauge = GaugeOption.Create();
         return s;
     }
@@ -1825,6 +1835,11 @@ class ChartSeries {
         for (int i = 0; i < src.marks.Count; i = i + 1) { s.marks.Add(ChartMarkPoint.Clone(src.marks[i])); }
         s.markLines = new List<ChartMarkLine>();
         for (int i = 0; i < src.markLines.Count; i = i + 1) { s.markLines.Add(ChartMarkLine.Clone(src.markLines[i])); }
+        s.graphLayout = src.graphLayout;
+        s.nodeX = new List<int>();
+        for (int i = 0; i < src.nodeX.Count; i = i + 1) { s.nodeX.Add(src.nodeX[i]); }
+        s.nodeY = new List<int>();
+        for (int i = 0; i < src.nodeY.Count; i = i + 1) { s.nodeY.Add(src.nodeY[i]); }
         return s;
     }
 }
@@ -2990,6 +3005,55 @@ class ChartOption {
         }
     }
 
+    /// graph 系列的 links 解析：端点可以是节点名、id 字符串
+    ///（les-miserables 的 "1"）或数字序号（graph-grid source:0）。
+    /// 名字精确命中优先；否则按 gnames 序号解析；解析失败跳过。
+    static void ParseGraphLinks(JsonValue v, List<ChartLink> into,
+                                List<string> gnames) {
+        if (v == null || !v.IsArray()) { return; }
+        for (int i = 0; i < v.Count(); i = i + 1) {
+            JsonValue lk = v.At(i);
+            if (!lk.IsObject()) { continue; }
+            string from = ChartOption.GraphNodeName(lk.Get("source"),
+                lk.Get("from"), gnames);
+            string to = ChartOption.GraphNodeName(lk.Get("target"),
+                lk.Get("to"), gnames);
+            if (from.Length == 0 || to.Length == 0) { continue; }
+            int val = lk.Int("value", lk.Int("val", 1));
+            if (val < 0) { val = 0; }
+            into.Add(ChartLink.Of(from, to, val));
+        }
+    }
+
+    /// graph link 端点解析（见 ParseGraphLinks）：JsonValue 取
+    /// source/from 与 target/to 中第一个存在的；名字精确命中优先，
+    /// 其次全数字串/数字按序号落到 gnames。
+    static string GraphNodeName(JsonValue a, JsonValue b,
+                                List<string> gnames) {
+        JsonValue ep = a != null ? a : b;
+        if (ep == null) { return ""; }
+        if (ep.IsNumber()) {
+            int idx = ep.AsInt(0 - 1);
+            if (idx >= 0 && idx < gnames.Count) { return gnames[idx]; }
+            return "";
+        }
+        string nm = ep.AsString("");
+        if (nm.Length == 0) { return ""; }
+        for (int i = 0; i < gnames.Count; i = i + 1) {
+            if (gnames[i] == nm) { return nm; }
+        }
+        // id/序号字符串（"1"）：数字且在范围内按序号落。
+        bool digits = nm.Length > 0;
+        for (int ci = 0; ci < nm.Length; ci = ci + 1) {
+            if (nm[ci] < '0' || nm[ci] > '9') { digits = false; break; }
+        }
+        if (digits) {
+            int idx = Convert.ToInt(nm);
+            if (idx >= 0 && idx < gnames.Count) { return gnames[idx]; }
+        }
+        return "";
+    }
+
     /// 解析蜡烛数据：[open,high,low,close] 数组或同名键对象。
     static void ParseCandles(JsonValue v, List<Candle> into) {
         if (v == null || !v.IsArray()) { return; }
@@ -3991,6 +4055,93 @@ class ChartOption {
                 if (vals != null && vals.IsArray() && cs.data.Count == 0) {
                     for (int j2 = 0; j2 < vals.Count(); j2 = j2 + 1) {
                         cs.data.Add(ChartData.Of(vals.At(j2).AsInt(0)));
+                    }
+                }
+                // ECharts graph 系列：layout 选布局（force/none/circular）；
+                // nodes 是 data 的别名（对象形这里解析 name/id/symbolSize/
+                // itemStyle/xy）；links 端点可能是名字、id 串（"1"）或序号
+                // ——统一按节点名表解析；lineStyle.curveness 即边弯曲。
+                if (cs.type == ChartType.Force) {
+                    string gly = s.Str("layout", "");
+                    if (gly == "force" || gly == "none" || gly == "circular") {
+                        cs.graphLayout = gly;
+                    }
+                    JsonValue esy = s.Get("edgeSymbol");
+                    if (esy != null && esy.IsArray()) {
+                        for (int ei2 = 0; ei2 < esy.Count(); ei2 = ei2 + 1) {
+                            if (esy.At(ei2).AsString("") == "arrow") {
+                                cs.forceLinkSymbol = "arrow";
+                            }
+                        }
+                    }
+                    JsonValue gls = s.Get("lineStyle");
+                    if (gls != null && gls.IsObject()) {
+                        JsonValue gcv = gls.Get("curveness");
+                        if (gcv != null && gcv.IsNumber()) {
+                            cs.forceCurveness =
+                                (int)(gcv.AsDouble(0.0) * 1000 + 0.5);
+                        }
+                    }
+                    JsonValue nds = s.Get("nodes");
+                    if (nds != null && nds.IsArray()) {
+                        for (int ni2 = 0; ni2 < nds.Count(); ni2 = ni2 + 1) {
+                            JsonValue nit = nds.At(ni2);
+                            ChartData gitem;
+                            if (nit.IsObject()) {
+                                gitem = ChartData.NamedNumber(
+                                    nit.Double("value", 0.0),
+                                    nit.Str("name", nit.Str("id", "")));
+                                if (nit.Has("symbolSize")) {
+                                    gitem.size = nit.Int("symbolSize", 0);
+                                    gitem.sizeSet = true;
+                                }
+                                JsonValue gits = nit.Get("itemStyle");
+                                if (gits != null && gits.IsObject()) {
+                                    gitem.itemStyle = ChartItemStyle.Create();
+                                    ChartOption.ParseItemStyle(gits, gitem.itemStyle);
+                                    if (gitem.itemStyle.normal.color != 0) {
+                                        gitem.color = gitem.itemStyle.normal.color;
+                                    }
+                                }
+                                JsonValue nxv = nit.Get("x");
+                                JsonValue nyv = nit.Get("y");
+                                if (nxv != null && nxv.IsNumber()
+                                    && nyv != null && nyv.IsNumber()) {
+                                    cs.nodeX.Add(nxv.AsInt(0 - 1));
+                                    cs.nodeY.Add(nyv.AsInt(0 - 1));
+                                } else {
+                                    cs.nodeX.Add(0 - 1);
+                                    cs.nodeY.Add(0 - 1);
+                                }
+                            } else {
+                                gitem = ChartData.Of(nit.AsInt(0));
+                                gitem.name = Convert.ToString(nit.AsInt(0));
+                                cs.nodeX.Add(0 - 1);
+                                cs.nodeY.Add(0 - 1);
+                            }
+                            if (gitem.name.Length < 1) {
+                                gitem.name = "node-" + Convert.ToString(ni2);
+                            }
+                            cs.data.Add(gitem);
+                        }
+                    }
+                    // 节点名表：data 项 name（空 = 值串，再空 = node-i）。
+                    List<string> gnames = new List<string>();
+                    for (int gi = 0; gi < cs.data.Count; gi = gi + 1) {
+                        string gn = cs.data[gi].name;
+                        if (gn.Length < 1) {
+                            gn = Convert.ToString(cs.data[gi].val);
+                        }
+                        if (gn.Length < 1) {
+                            gn = "node-" + Convert.ToString(gi);
+                        }
+                        gnames.Add(gn);
+                    }
+                    JsonValue glinks = s.Get("links");
+                    if (glinks != null && glinks.IsArray()) {
+                        cs.links = new List<ChartLink>();
+                        ChartOption.ParseGraphLinks(glinks, cs.links,
+                            gnames);
                     }
                 }
                 // ECharts dataset 系列绑定：datasetId/datasetIndex +

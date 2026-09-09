@@ -508,10 +508,12 @@ partial class ChartView {
         int pad = t.paddingMedium;
         int top = ChartView.PanelHead(app, x, y, w, h, o.title);
         ChartSeries lead = ChartView.LeadSeries(o);
-        if (lead == null || lead.links.Count < 1) { return; }
+        // graph 系列可以只有孤立节点（无任何 link）：节点照画。
+        if (lead == null
+            || (lead.links.Count < 1 && lead.data.Count < 1)) { return; }
 
         int legendW = 0;
-        if (o.showLegend) { legendW = app.Scale(120); }
+        if (o.showLegend && lead.data.Count <= 16) { legendW = app.Scale(120); }
         int areaW = w - pad * 2 - legendW;
         int areaH = (y + h - pad) - top;
         int r = areaW * 2 / 5;
@@ -522,8 +524,33 @@ partial class ChartView {
         int ox = x + pad;
         int oy = top;
 
-        ForceLayout layout = ChartView.CachedForceLayout(lead.links,
-            r, areaW, areaH, lead.forceScaling, lead.forceGravity);
+        // 布局分支（ECharts graph.layout）：circular 落圆周、
+        // none 用节点数据坐标（缺坐标的节点回落圆周）、其余
+        // （force / 缺省 / ECharts2 type:'force'）走弹簧模拟。
+        List<string> nodeNames = new List<string>();
+        for (int i = 0; i < lead.data.Count; i = i + 1) {
+            nodeNames.Add(lead.data[i].name);
+        }
+        bool fixedOk = lead.graphLayout == "none"
+            && lead.nodeX.Count == lead.data.Count
+            && lead.nodeY.Count == lead.data.Count
+            && lead.data.Count > 0;
+        if (fixedOk) {
+            for (int i = 0; i < lead.nodeX.Count; i = i + 1) {
+                if (lead.nodeX[i] < 0 || lead.nodeY[i] < 0) { fixedOk = false; break; }
+            }
+        }
+        ForceLayout layout;
+        if (lead.graphLayout == "circular" || lead.links.Count < 1) {
+            layout = ForceLayout.CircularOf(lead.links, nodeNames,
+                areaW, areaH);
+        } else if (fixedOk) {
+            layout = ForceLayout.FixedOf(lead.links, nodeNames,
+                lead.nodeX, lead.nodeY, areaW, areaH);
+        } else {
+            layout = ChartView.CachedForceLayout(lead.links,
+                r, areaW, areaH, lead.forceScaling, lead.forceGravity);
+        }
         // 入场补间：g<1000 时节点位 = 圆周初值 → 终态的线性插值
         // （ECharts force 的节点收敛入场；同一 ForceLayout 缓存对
         // 只读插值，幂等安全）。g>=1000 或无初值快照时直接终态。
@@ -592,7 +619,9 @@ partial class ChartView {
         int nodeCol0 = lead.forceNodeColor;
         // 悬停节点（若有）：相邻边高亮。命中半径与实际节点
         // symbol 半径一致，并保留少量边缘容差；不依赖 tooltip 开关。
+        // 系列级 symbolSize（graph-simple 的 50）= 默认节点直径。
         int nodeR = app.Scale(5);
+        if (lead.symbolSize > 0) { nodeR = app.Scale(lead.symbolSize) / 2; }
         int hoverNode = 0 - 1;
         int mx = app.mouseX;
         int my = app.mouseY;
@@ -699,8 +728,11 @@ partial class ChartView {
                 fs, ox, oy, areaW, areaH);
         }
 
-        // 图例：节点名 + 对应颜色（每节点一行）。
-        if (o.showLegend) {
+        // 图例：节点名 + 对应颜色（每节点一行）。graph 动辄几十
+        // 上百节点（les-miserables 77），一节点一行放不下——超
+        // 过 16 个节点就不画节点图例（官方此类 demo 的图例是
+        // 类别图例，非节点图例）。
+        if (o.showLegend && nn <= 16) {
             int lx2 = x + w - pad - legendW;
             int ly2 = Chart.LegendStartY(app, y, top);
             int lh2 = Canvas.FontHeight(Style.FontFallback(app, "small")) + app.Scale(6);
