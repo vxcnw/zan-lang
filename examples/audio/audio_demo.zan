@@ -1,9 +1,11 @@
 using System;
 using System.IO;
-using SDL3;
+using System.Threading;
 
-/// 播放一段自己合成的 WAV：写出文件 → 加载为 clip → 同时播放多个声音。
-/// 例子不带音频素材，波形在运行时生成，因此仓库里不需要二进制资产。
+/// 播放一段自己合成的 WAV：内存字节直接加载为 clip（也写一份文件演示
+/// 文件路径加载），同时播放多个声音。例子不带音频素材，波形在运行时
+/// 生成，因此仓库里不需要二进制资产。音频走原生 zan_audio（WASAPI），
+/// 零外部依赖。
 class Program {
     static int SampleRate() { return 44100; }
 
@@ -27,7 +29,7 @@ class Program {
     }
 
     /// 单声道 16 位 PCM 正弦音，带首尾淡入淡出（避免爆音）。
-    static void WriteBeep(string path, double frequency, int milliseconds) {
+    static byte[] BuildBeep(double frequency, int milliseconds) {
         int rate = Program.SampleRate();
         int frames = rate * milliseconds / 1000;
         int dataBytes = frames * 2;
@@ -58,55 +60,56 @@ class Program {
             int pcm = (int)(sample * 12000.0);
             Program.PutU16(wav, 44 + i * 2, pcm & 65535);
         }
-
-        File.WriteAllBytes(path, wav);
+        return wav;
     }
 
     static void Main() {
-        string path = "beep.wav";
-        Program.WriteBeep(path, 440.0, 700);
+        byte[] wav = Program.BuildBeep(440.0, 700);
+        File.WriteAllBytes("beep.wav", wav);
 
-        if (!SdlAudio.Open()) {
-            Console.WriteLine("打开音频设备失败: " + Sdl.Error());
+        if (!Audio.Open()) {
+            Console.WriteLine("打开音频设备失败: " + Audio.LastError());
             return;
         }
-        SdlAudio.SetVolume(0.8);
-        Console.WriteLine("driver: " + SdlAudio.DriverName());
+        Audio.SetVolume(0.8);
+        Console.WriteLine("driver: " + Audio.DriverName());
 
-        SdlAudioClip clip = SdlAudioClip.LoadWav(path);
+        // 同一段字节两条加载路：内存（加密资源包场景）与文件。
+        AudioClip clip = AudioClip.LoadWavFromMem(wav.ToStr(0, wav.Length), wav.Length);
         if (!clip.IsValid()) {
-            Console.WriteLine("加载 WAV 失败: " + Sdl.Error());
-            SdlAudio.Close();
+            Console.WriteLine("从内存加载 WAV 失败: " + Audio.LastError());
+            Audio.Close();
             return;
         }
+        AudioClip fromFile = AudioClip.LoadWav("beep.wav");
         Console.WriteLine("clip: " + clip.Frequency().ToString() + " Hz, "
             + clip.Channels().ToString() + " ch, "
-            + clip.DurationMs().ToString() + " ms");
+            + clip.DurationMs().ToString() + " ms (from file: "
+            + (fromFile.IsValid() ? "ok" : Audio.LastError()) + ")");
 
         // 一次性音效：播完后声音自动回收，IsPlaying 转 false。
-        int t0 = Sdl.Ticks();
-        SdlVoice beep = clip.Play();
-        while (beep.IsPlaying()) { Sdl.Delay(20); }
-        Console.WriteLine("played in " + (Sdl.Ticks() - t0).ToString() + " ms");
+        AudioVoice beep = clip.Play();
+        while (beep.IsPlaying()) { Thread.Sleep(20); }
+        Console.WriteLine("played through");
 
         // 同一个 clip 可以叠加播放：三个声音不同音量同时在响。
         clip.Play(0.9, 0);
-        Sdl.Delay(120);
+        Thread.Sleep(120);
         clip.Play(0.5, 0);
-        Sdl.Delay(120);
-        SdlVoice third = clip.Play(0.3, 0);
-        Console.WriteLine("voices: " + SdlAudio.ActiveVoices().ToString());
-        while (third.IsPlaying()) { Sdl.Delay(20); }
+        Thread.Sleep(120);
+        AudioVoice third = clip.Play(0.3, 0);
+        Console.WriteLine("voices: " + Audio.ActiveVoices().ToString());
+        while (third.IsPlaying()) { Thread.Sleep(20); }
 
         // 循环播放（背景音乐用法）：放两遍后提前停掉。
-        SdlVoice music = clip.PlayLooping(0.4);
-        Sdl.Delay(1500);
+        AudioVoice music = clip.PlayLooping(0.4);
+        Thread.Sleep(1500);
         music.Stop();
 
-        Console.WriteLine("voices after stop: " + SdlAudio.ActiveVoices().ToString());
+        Console.WriteLine("voices after stop: " + Audio.ActiveVoices().ToString());
 
+        fromFile.Close();
         clip.Close();
-        SdlAudio.Close();
-        Sdl.Quit();
+        Audio.Close();
     }
 }

@@ -1,19 +1,23 @@
 # 音频示例
 
-`audio_demo.zan` 演示 `SDL3` 模块的音频播放：
+`audio_demo.zan` 演示 `System.Audio` 的原生音频播放（zan_audio 运行时，
+零外部依赖，Windows 上走 WASAPI）：
 
-- `SdlAudio.Open()` / `SetVolume()` / `Close()`：打开默认播放设备与主音量，
-  `DriverName()` 看 SDL 实际选中的后端；
-- `SdlAudioClip.LoadWav(path)`：把 WAV 解码进内存，`Frequency()` /
-  `Channels()` / `DurationMs()` 读取格式；
-- `clip.Play()`、`clip.Play(volume, loops)`、`clip.PlayLooping(volume)`：
-  同一个 clip 可以叠加播放，每次返回一个 `SdlVoice`；
-- `voice.IsPlaying()` / `Stop()` / `SetPaused()` / `SetVolume()` /
-  `SetLoops()`：单个声音的控制，`SetLoops(0)` 让循环中的背景音乐在本遍
-  结束时自然收尾。
+- `Audio.Open()` / `SetVolume()` / `Close()`：打开默认播放设备与主音量，
+  `DriverName()` 看原生后端名（Windows 上是 `wasapi`）；
+- `AudioClip.LoadWav(path)` / `LoadWavFromMem(data, len)`：把 WAV 解码进
+  内存（支持 PCM 8/16/24/32 位与 32 位浮点、WAVE_FORMAT_EXTENSIBLE），
+  `Frequency()` / `Channels()` / `DurationMs()` 读取格式；内存路径用于
+  加密资源包（解密字节直接加载，全程不落盘）；
+- `AudioClip.LoadOgg(path)` / `LoadOggFromMem(data, len)`：OGG Vorbis
+  背景音乐；
+- `clip.Play()`、`clip.Play(gain, loop)`、`clip.PlayLooping(gain)`：
+  同一个 clip 可以叠加播放，每次返回一个 `AudioVoice`；
+- `voice.IsPlaying()` / `Stop()` / `SetGain()`：单个声音的控制；
+  播完的一次性声音自动回收（`Audio.ActiveVoices()` 顺带触发回收）。
 
-例子不带音频素材：它先合成一段 440 Hz 正弦音写成 `beep.wav`，再加载播放，
-所以顺带也是一份最小的 WAV 写出代码。
+例子不带音频素材：它先合成一段 440 Hz 正弦音（内存里构造 WAV 字节），
+再从内存与文件两条路加载播放，所以顺带也是一份最小的 WAV 写出代码。
 
 在仓库根目录编译运行：
 
@@ -26,16 +30,17 @@ build\audio_demo.exe
 
 ```text
 driver: wasapi
-clip: 44100 Hz, 1 ch, 700 ms
-played in 715 ms
+clip: 44100 Hz, 1 ch, 700 ms (from file: ok)
+played through
 voices: 3
 voices after stop: 0
 ```
 
-混音由 SDL 完成：每个声音是一条绑定到共享播放设备的 `SDL_AudioStream`，
-循环续播在音频线程的回调里完成，因此主线程阻塞时播放也不会断。同时播放的
-声音上限是 64 个，播完的声音会自动回收（`SdlAudio.ActiveVoices()` 会顺带
-触发回收）。
+混音由运行时的后台音频线程完成：采样线性重采样到设备混音格式后叠加，
+循环 voice 到达采样末尾回卷，因此主线程阻塞时播放也不会断。同时播放的
+声音上限是 64 个。voice 句柄带世代号：句柄存活比声音长也不会碰到被
+回收的槽位，`IsPlaying()` 老实返回 false。
 
-没有可用音频设备时 `SdlAudio.Open()` 返回 false，原因见 `Sdl.Error()`；
-可以设 `SDL_AUDIO_DRIVER=dummy` 在无声卡的机器上跑通流程。
+没有可用音频设备时 `Audio.Open()` 返回 false，原因见 `Audio.LastError()`；
+其他平台的原生音频后端（CoreAudio/ALSA/AAudio/OH Audio）落地前，
+`Open()` 会返回 false 并在 `LastError()` 说明。

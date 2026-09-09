@@ -4,7 +4,6 @@
 // tools/packtool + scripts/pack_game.ps1。
 using System;
 using System.IO;
-using SDL3;
 using System.Resources;
 using System.Security;
 using System.Security.Cryptography;
@@ -121,22 +120,13 @@ class PackedAssets {
         return data;
     }
 
-    /// <summary>Decode a PNG/JPEG entry straight from the decrypted bytes to
-    /// a texture -- nothing touches the disk. Invalid handle (check
-    /// IsValid()) when the bytes aren't a decodable image.</summary>
-    public SdlTexture LoadImage(SdlRenderer renderer, string name) {
-        byte[] data = this.Read(name);
-        // ToStr 拷出为调用实参（native 侧只在本调用内同步读 buffer）。
-        return SdlTexture.LoadImageFromMem(renderer, data.ToStr(0, data.Length), data.Length);
-    }
-
     /// <summary>Parse a WAV entry straight from the decrypted bytes -- the
     /// PCM is copied out inside the call, nothing touches the disk. Invalid
     /// handle when the bytes aren't a WAV.</summary>
-    public SdlAudioClip LoadWav(string name) {
+    public AudioClip LoadWav(string name) {
         byte[] data = this.Read(name);
         // ToStr 拷出为调用实参（PCM 在调用内被拷出，见 Audio.zan 契约）。
-        return SdlAudioClip.LoadWavFromMem(data.ToStr(0, data.Length), data.Length);
+        return AudioClip.LoadWavFromMem(data.ToStr(0, data.Length), data.Length);
     }
 
     /// <summary>Entry existence probe (no decryption).</summary>

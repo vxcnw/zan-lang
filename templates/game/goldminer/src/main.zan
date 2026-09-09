@@ -3,12 +3,11 @@
 // 全部经 Canvas 直绘(Game.Kit CDraw/CText,自带 SDL 版曾用的
 // 超采样离屏一概不需要);顶栏/结算/拆弹走场景层自绘(原 Gui 控件
 // 树 HUD 依赖 GameHud 的 SDL 合成链路,画布版统一收敛到兜底 HUD,
-// 信息两档:厘秒倒计时 + 结算后续提示)。SDL3 仅剩音频
-// (SdlAudio/SdlAudioClip;待 P2 原生音频落地后切换,与 wuwei
+// 信息两档:厘秒倒计时 + 结算后续提示)。音频走原生 zan_audio
+// (System.Audio/AudioClip,P2 原生音频已落地,与 wuwei
 // AudioService 同一先例),Snd.Open 失败自动哑火不碍运行。
 using System;
 using System.IO;
-using SDL3;
 using Gui;
 using Game.Kit;
 using Game.Foundation.Gui;
@@ -17,9 +16,11 @@ namespace GoldMiner;
 
 // 静态数据与工具
 class Data {
-    public const int W = 960;
+    // 逻辑舞台尺寸：W 由宿主每帧按窗口比例延展（GuiHost.StageWidth，
+    // 宽窗多看宽度、零黑边零变形），布局一律锚定 W；H 贴设计值。
+    public static int W = 960;
     public const int H = 720;
-    public const int HOOK_X = 480;
+    public static int HOOK_X = 480;     // 绳锚点横坐标（恒 W/2，帧首随 W 更新）
     public const int HOOK_Y = 150;      // 绳锚点(矿车口下缘)
     public const int SKY_H = 190;       // 天空/表土分界
 
@@ -49,13 +50,13 @@ class Data {
     }
 
     // 音效加载:磁盘优先,内嵌直接内存加载(全程不落盘)
-    public static SdlAudioClip LoadWav2(string rel) {
+    public static AudioClip LoadWav2(string rel) {
         string p = Assets.Find(rel);
-        SdlAudioClip c = SdlAudioClip.LoadWav(p);
+        AudioClip c = AudioClip.LoadWav(p);
         if (c != null && c.IsValid()) { return c; }
         if (File.EmbedExists(rel)) {
             byte[] b = File.ReadAllBytes(rel);
-            c = SdlAudioClip.LoadWavFromMem(b.ToStr(0, b.Length), b.Length);
+            c = AudioClip.LoadWavFromMem(b.ToStr(0, b.Length), b.Length);
         }
         return c;
     }
@@ -95,24 +96,24 @@ class Env {
 
 // 音效包
 class Snd {
-    public SdlAudioClip swing;
-    public SdlAudioClip grab;
-    public SdlAudioClip reel;
-    public SdlAudioClip gold;
-    public SdlAudioClip coinS;
-    public SdlAudioClip boom;
-    public SdlAudioClip tntboom;
-    public SdlAudioClip tick;
-    public SdlAudioClip hurry;
-    public SdlAudioClip win;
-    public SdlAudioClip fail;
-    public SdlAudioClip bombtick;
-    public SdlAudioClip levelup;
+    public AudioClip swing;
+    public AudioClip grab;
+    public AudioClip reel;
+    public AudioClip gold;
+    public AudioClip coinS;
+    public AudioClip boom;
+    public AudioClip tntboom;
+    public AudioClip tick;
+    public AudioClip hurry;
+    public AudioClip win;
+    public AudioClip fail;
+    public AudioClip bombtick;
+    public AudioClip levelup;
     public bool on = true;
 
     public static Snd Create() {
         Snd s = new Snd();
-        if (!SdlAudio.Open()) { return s; }
+        if (!Audio.Open()) { return s; }
         s.swing = Data.LoadWav2("assets/swing.wav");
         s.grab = Data.LoadWav2("assets/grab.wav");
         s.reel = Data.LoadWav2("assets/reel.wav");
@@ -134,7 +135,7 @@ class Snd {
         return s;
     }
 
-    public void Play(SdlAudioClip c, double gain) {
+    public void Play(AudioClip c, double gain) {
         if (!this.on || c == null || !c.IsValid()) { return; }
         c.Play(gain, 0);
     }
@@ -785,8 +786,14 @@ class MnLoop : IGuiHostLoop {
         // 换新画布对象(App.SwapCanvas);Start 时抓的引用画进已销毁的
         // 旧表面,永不 present。每帧对齐到宿主传入的当前画布。
         this.a.c = c;
-        // 舞台 0 基绘制：原点落到标准标题栏之下，chrome 由宿主在
-        // 内容之上叠画。
+        // 窗口跟随：宿主视口已按窗口比例延展逻辑舞台（宽窗多看宽度，
+        // 零黑边），取当帧值并让锚点跟随，布局锚定 Data.W 即自适应。
+        Data.W = host.StageWidth();
+        Data.HOOK_X = Data.W / 2;
+        // 注意：这里绝不归位/钳制任何物理状态（摆角、爪长……）。
+        // Render 每帧跑在 FixedUpdate 之后，帧内推进的摆角会被拍回、
+        // 摆钩冻死在 90°；物理坐标已全部锚定活的 Data.HOOK_X/HOOK_Y，
+        // 摆动圆心自动跟随新窗口，无需任何重置。
         CDraw.Origin(0, host.ContentTop());
         CDraw.Clear(c, Data.W, Data.H, CDraw.Argb(255, 12, 10, 8));
         this.a.DrawAll();
