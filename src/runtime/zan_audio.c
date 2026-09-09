@@ -1,0 +1,979 @@
+/* ===================================================================
+ * zan_audio — native zero-dependency audio runtime, part of zan_gui.
+ *
+ * Replaces the SDL3 audio bridge (zan_sdl3.c) as part of the "remove
+ * SDL3 entirely" plan: one physical playback device opened by
+ * zan_audio_open, every voice mixed by our own background thread, so
+ * a clip can sound several times at once. Clips are fully decoded
+ * into s16 PCM up front (WAV parsed here, OGG Vorbis via the vendored
+ * stb_vorbis); the mixer resamples with linear interpolation and
+ * converts to the device mix format.
+ *
+ * Platforms:
+ *   Windows   WASAPI shared mode, event-driven, Windows 7+ (COM
+ *             activation only -- no mmdevapi.lib import, ole32 was
+ *             already linked for the shell).
+ *   Others    stub until their backends land (CoreAudio / ALSA /
+ *             AAudio / OH Audio); every entry returns 0 and
+ *             zan_audio_last_error() says so, mirroring how the GL
+ *             backend falls back instead of failing hard.
+ *
+ * Voice handles carry a generation number like the SDL bridge did:
+ * a Zan AudioVoice outliving its sound answers "not playing" instead
+ * of dereferencing a recycled slot.
+ *
+ * This file is #included at the end of gui_runtime.c (single-TU
+ * convention -- see gui_gl_backend.c / gui_runtime_android.c), so it
+ * relies on the host for windows.h and EXPORT, and re-includes the
+ * standard headers idempotently anyway to stay readable standalone.
+ * =================================================================== */
+
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600 /* WASAPI is Vista+; runtime-checked path is Win7+ */
+#endif
+/* COBJMACROS/CINTERFACE: use WASAPI through the C macro wrappers
+ * (IAudioClient_Initialize etc.) -- the runtime is plain C. */
+#ifndef COBJMACROS
+#define COBJMACROS
+#endif
+#ifndef CINTERFACE
+#define CINTERFACE
+#endif
+#include <mmreg.h>
+#include <mmdeviceapi.h>
+#include <audioclient.h>
+#endif
+
+/* OGG Vorbis (background music): stb_vorbis single-file implementation,
+ * whole clip decoded to memory PCM; the looping voice and WAV share the
+ * same mixing path. pushdata streaming API and stdio file access are
+ * unused -- off to keep size (files are read through zan_audio_read_file
+ * so UTF-8 paths work on Windows). */
+#define STB_VORBIS_NO_PUSHDATA_API
+#define STB_VORBIS_NO_STDIO
+#include "stb_vorbis.c"
+
+#ifndef ZAN_VOICE_SLOTS
+#define ZAN_VOICE_SLOTS 64
+#endif
+/* Upper bound of one mixer fill in device frames; larger availabilities
+ * are filled in chunks of at most this. */
+#define ZAN_AUDIO_MAX_FILL 4096
+#define ZAN_AUDIO_MAX_CHANNELS 8
+#define ZAN_AUDIO_MAX_FILE (256 * 1024 * 1024)
+
+typedef struct ZanAudioClip {
+    short *pcm;   /* s16 interleaved */
+    int frames;   /* per-channel frame count */
+    int freq;
+    int channels;
+} ZanAudioClip;
+
+typedef struct ZanVoice {
+    ZanAudioClip *clip;
+    double cursor; /* read position in clip frames (fractional) */
+    double step;   /* clip frames per device frame = clip->freq / dev_freq */
+    float gain;
+    int loop;
+    int gen;       /* generation; bumped when the slot is handed out again */
+    int active;
+} ZanVoice;
+
+static ZanVoice zan_voices[ZAN_VOICE_SLOTS];
+static int zan_voice_gen = 1;
+static float zan_audio_master = 1.0f;
+static int zan_audio_ready;
+static char zan_audio_err[192];
+
+#ifdef _WIN32
+static CRITICAL_SECTION zan_audio_cs;
+static int zan_audio_cs_ok;
+static HANDLE zan_audio_thread;
+static HANDLE zan_audio_stop_evt;   /* manual reset: mixer must exit */
+static HANDLE zan_audio_fill_evt;   /* auto reset: WASAPI period event */
+static HANDLE zan_audio_init_evt;   /* manual reset: thread startup report */
+static IAudioClient *zan_audio_client;
+static IAudioRenderClient *zan_audio_render;
+static UINT32 zan_audio_buf_frames;
+static int zan_audio_dev_freq;
+static int zan_audio_dev_channels;
+/* Output sample encoding of the mix format: 0 = float32, 1 = s16,
+ * 2 = s32, 3 = s24 (packed, 3 bytes per sample). */
+static int zan_audio_dev_fmt;
+#endif
+
+static void zan_audio_set_err(const char *msg) {
+    if (msg) {
+        size_t n = strlen(msg);
+        if (n >= sizeof(zan_audio_err)) n = sizeof(zan_audio_err) - 1;
+        memcpy(zan_audio_err, msg, n);
+        zan_audio_err[n] = 0;
+    } else {
+        zan_audio_err[0] = 0;
+    }
+}
+
+static void *zan_ptr_of(int64_t handle) {
+    return (void *)(intptr_t)handle;
+}
+
+static int64_t zan_handle_of(const void *ptr) {
+    return (int64_t)(intptr_t)ptr;
+}
+
+static int64_t zan_voice_pack(int slot, int gen) {
+    return ((int64_t)gen << 8) | (int64_t)(slot + 1);
+}
+
+/* The live voice a handle names, or NULL once its sound ended (or the
+ * slot was handed to a newer voice). */
+static ZanVoice *zan_voice_of(int64_t handle) {
+    int slot = (int)((handle & 255) - 1);
+    int gen = (int)(handle >> 8);
+    if (slot < 0 || slot >= ZAN_VOICE_SLOTS) return NULL;
+    {
+        ZanVoice *v = &zan_voices[slot];
+        if (!v->active || v->gen != gen) return NULL;
+        return v;
+    }
+}
+
+static void zan_voice_reset(ZanVoice *v) {
+    memset(v, 0, sizeof(*v));
+}
+
+/* Frees the slots of one-shot voices that have played out, so the pool
+ * is never exhausted by sounds nobody stopped explicitly. Caller holds
+ * the critical section on Windows. */
+static void zan_voice_reap_locked(void) {
+    int i;
+    for (i = 0; i < ZAN_VOICE_SLOTS; i++) {
+        ZanVoice *v = &zan_voices[i];
+        if (!v->active || v->loop || !v->clip) continue;
+        if (v->cursor >= (double)v->clip->frames) zan_voice_reset(v);
+    }
+}
+
+/* ------------------------------------------------------------------
+ * Whole-file reader with UTF-8 paths (same convention as the image
+ * loader in gui_runtime.c: Windows fopen is ANSI-codepage and mangles
+ * non-ASCII paths, so read through the wide API there).
+ * =================================================================== */
+
+static unsigned char *zan_audio_read_file(const char *path, int *out_len) {
+    unsigned char *bytes = NULL;
+    *out_len = 0;
+    if (!path || !path[0]) { zan_audio_set_err("path is empty"); return NULL; }
+#ifdef _WIN32
+    {
+        int wn = MultiByteToWideChar(CP_UTF8, 0, path, -1, NULL, 0);
+        wchar_t *wp;
+        HANDLE fh;
+        LARGE_INTEGER fsz;
+        DWORD got = 0;
+        if (wn <= 0) { zan_audio_set_err("bad path encoding"); return NULL; }
+        wp = (wchar_t *)malloc((size_t)wn * sizeof(wchar_t));
+        if (!wp) { zan_audio_set_err("out of memory"); return NULL; }
+        MultiByteToWideChar(CP_UTF8, 0, path, -1, wp, wn);
+        fh = CreateFileW(wp, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                         FILE_ATTRIBUTE_NORMAL, NULL);
+        free(wp);
+        if (fh == INVALID_HANDLE_VALUE) { zan_audio_set_err("file not found"); return NULL; }
+        if (!GetFileSizeEx(fh, &fsz) || fsz.QuadPart <= 0
+            || fsz.QuadPart > ZAN_AUDIO_MAX_FILE) {
+            CloseHandle(fh);
+            zan_audio_set_err("file too large or unreadable");
+            return NULL;
+        }
+        bytes = (unsigned char *)malloc((size_t)fsz.QuadPart);
+        if (!bytes) { CloseHandle(fh); zan_audio_set_err("out of memory"); return NULL; }
+        if (!ReadFile(fh, bytes, (DWORD)fsz.QuadPart, &got, NULL)
+            || got != (DWORD)fsz.QuadPart) {
+            free(bytes);
+            CloseHandle(fh);
+            zan_audio_set_err("file read failed");
+            return NULL;
+        }
+        CloseHandle(fh);
+        *out_len = (int)got;
+        return bytes;
+    }
+#else
+    {
+        FILE *f = fopen(path, "rb");
+        long sz;
+        if (!f) { zan_audio_set_err("file not found"); return NULL; }
+        if (fseek(f, 0, SEEK_END) != 0 || (sz = ftell(f)) < 0
+            || fseek(f, 0, SEEK_SET) != 0 || sz > ZAN_AUDIO_MAX_FILE) {
+            fclose(f);
+            zan_audio_set_err("file too large or unreadable");
+            return NULL;
+        }
+        bytes = (unsigned char *)malloc(sz > 0 ? (size_t)sz : 1);
+        if (!bytes) { fclose(f); zan_audio_set_err("out of memory"); return NULL; }
+        if (sz > 0 && fread(bytes, 1, (size_t)sz, f) != (size_t)sz) {
+            free(bytes);
+            fclose(f);
+            zan_audio_set_err("file read failed");
+            return NULL;
+        }
+        fclose(f);
+        *out_len = (int)sz;
+        return bytes;
+    }
+#endif
+}
+
+/* ------------------------------------------------------------------
+ * WAV parsing (RIFF/WAVE -> s16). Accepts PCM 8/16/24/32-bit, IEEE
+ * float 32-bit, and WAVE_FORMAT_EXTENSIBLE carrying either subtype.
+ * =================================================================== */
+
+static unsigned int zan_wav_u16(const unsigned char *p) {
+    return (unsigned int)p[0] | ((unsigned int)p[1] << 8);
+}
+
+static unsigned int zan_wav_u32(const unsigned char *p) {
+    return (unsigned int)p[0] | ((unsigned int)p[1] << 8)
+         | ((unsigned int)p[2] << 16) | ((unsigned int)p[3] << 24);
+}
+
+static short zan_wav_int_to_s16(int bits, const unsigned char *p) {
+    if (bits == 8) return (short)(((int)p[0] - 128) * 257);
+    if (bits == 16) return (short)(unsigned short)zan_wav_u16(p);
+    if (bits == 24) { /* sign-extend, drop the low byte */
+        int v = (int)p[0] | ((int)p[1] << 8) | ((int)p[2] << 16);
+        if (v & 0x800000) v -= 0x1000000;
+        return (short)(v >> 8);
+    }
+    /* bits == 32: int32 */
+    return (short)(int)zan_wav_u32(p) >> 16;
+}
+
+static short zan_wav_f32_to_s16(const unsigned char *p) {
+    union { unsigned int u; float f; } cvt;
+    double d;
+    cvt.u = zan_wav_u32(p);
+    d = (double)cvt.f;
+    if (d > 1.0) d = 1.0;
+    if (d < -1.0) d = -1.0;
+    return (short)(int)(d * 32767.0);
+}
+
+/* Parses a whole WAV file image into `c` (allocating c->pcm). Returns 1
+ * on success, 0 with a reason in zan_audio_err otherwise. */
+static int zan_wav_parse(const unsigned char *b, int n, ZanAudioClip *c) {
+    const unsigned char *fmt = NULL;
+    const unsigned char *data = NULL;
+    int fmt_len = 0, data_len = 0;
+    int fmt_tag = 0, fmt_bits = 0, fmt_ch = 0, fmt_freq = 0;
+    int pos;
+
+    if (n < 12 || memcmp(b, "RIFF", 4) != 0 || memcmp(b + 8, "WAVE", 4) != 0) {
+        zan_audio_set_err("not a RIFF/WAVE file");
+        return 0;
+    }
+    pos = 12;
+    while (pos + 8 <= n) {
+        unsigned int len = zan_wav_u32(b + pos + 4);
+        if (memcmp(b + pos, "fmt ", 4) == 0 && !fmt && len >= 16
+            && pos + 8 + (int)len <= n) {
+            fmt = b + pos + 8;
+            fmt_len = (int)len;
+        } else if (memcmp(b + pos, "data", 4) == 0 && !data) {
+            data_len = (int)len;
+            if (pos + 8 + data_len > n) data_len = n - pos - 8; /* tolerate lying headers */
+            data = b + pos + 8;
+        }
+        if (fmt && data) break;
+        pos += 8 + (int)((len + 1) & ~1u); /* chunks are word-aligned */
+    }
+    if (!fmt || !data || data_len <= 0) {
+        zan_audio_set_err("wav fmt/data chunk missing or empty");
+        return 0;
+    }
+    fmt_tag = (int)zan_wav_u16(fmt);
+    fmt_ch = (int)zan_wav_u16(fmt + 2);
+    fmt_freq = (int)zan_wav_u32(fmt + 4);
+    fmt_bits = (int)zan_wav_u16(fmt + 14);
+    if (fmt_tag == 0xFFFE) {
+        /* WAVE_FORMAT_EXTENSIBLE: the real format tag is the first two
+         * bytes of the SubFormat GUID at offset 24. */
+        unsigned int sub;
+        if (fmt_len < 40) {
+            zan_audio_set_err("wav extensible fmt chunk too small");
+            return 0;
+        }
+        sub = zan_wav_u32(fmt + 24);
+        if (sub == 1) fmt_tag = 1;
+        else if (sub == 3) fmt_tag = 3;
+        else {
+            zan_audio_set_err("wav extensible subtype unsupported");
+            return 0;
+        }
+    }
+    if (fmt_tag == 3 && fmt_bits != 32) {
+        zan_audio_set_err("wav float must be 32-bit");
+        return 0;
+    }
+    if (fmt_tag == 1 && fmt_bits != 8 && fmt_bits != 16 && fmt_bits != 24 && fmt_bits != 32) {
+        zan_audio_set_err("wav pcm bit depth unsupported");
+        return 0;
+    }
+    if (fmt_ch < 1 || fmt_ch > ZAN_AUDIO_MAX_CHANNELS) {
+        zan_audio_set_err("wav channel count unsupported");
+        return 0;
+    }
+    if (fmt_freq < 1 || fmt_freq > 384000) {
+        zan_audio_set_err("wav sample rate out of range");
+        return 0;
+    }
+    {
+        int frame_bytes = (fmt_bits / 8) * fmt_ch;
+        int frames, i;
+        short *pcm;
+        if (frame_bytes <= 0 || data_len % frame_bytes != 0) {
+            zan_audio_set_err("wav data size not frame aligned");
+            return 0;
+        }
+        frames = data_len / frame_bytes;
+        if (frames <= 0) {
+            zan_audio_set_err("wav has no samples");
+            return 0;
+        }
+        pcm = (short *)malloc((size_t)frames * (size_t)fmt_ch * sizeof(short));
+        if (!pcm) { zan_audio_set_err("out of memory"); return 0; }
+        for (i = 0; i < frames * fmt_ch; i++) {
+            const unsigned char *s = data + (size_t)i * (fmt_bits / 8);
+            pcm[i] = (fmt_tag == 3) ? zan_wav_f32_to_s16(s)
+                                    : zan_wav_int_to_s16(fmt_bits, s);
+        }
+        c->pcm = pcm;
+        c->frames = frames;
+        c->freq = fmt_freq;
+        c->channels = fmt_ch;
+        return 1;
+    }
+}
+
+/* Decodes a whole OGG Vorbis image to s16 PCM. stb_vorbis allocates on
+ * the CRT heap and the clip is freed with free(), so the decoded buffer
+ * is handed over directly -- no copy needed. Returns 1 on success. */
+static int zan_ogg_decode(const unsigned char *b, int n, ZanAudioClip *c) {
+    int channels = 0, freq = 0;
+    short *decoded = NULL;
+    int total = stb_vorbis_decode_memory(b, n, &channels, &freq, &decoded);
+    if (total <= 0 || !decoded || channels <= 0 || freq <= 0) {
+        if (decoded) free(decoded);
+        zan_audio_set_err("ogg decode failed");
+        return 0;
+    }
+    c->pcm = decoded;
+    c->frames = total / channels;
+    c->freq = freq;
+    c->channels = channels;
+    return 1;
+}
+
+/* ------------------------------------------------------------------
+ * Mixer (Windows). Runs on the audio thread; the critical section
+ * covers the voice table and clip lifetimes. Mixing up to 64 voices at
+ * a 10ms period is tens of microseconds, so holding the section
+ * through the fill is fine and keeps lifetime reasoning trivial.
+ * =================================================================== */
+
+#ifdef _WIN32
+
+static void zan_audio_mix(unsigned char *dst, UINT32 frames) {
+    /* 4096 frames * 8 channels * 4 bytes = 128 KiB static accumulator;
+     * the audio thread is the only user. */
+    static float acc[ZAN_AUDIO_MAX_FILL * ZAN_AUDIO_MAX_CHANNELS];
+    int f, ch, i;
+    int devch = zan_audio_dev_channels;
+    int total;
+
+    if (frames > ZAN_AUDIO_MAX_FILL) frames = ZAN_AUDIO_MAX_FILL;
+    if (devch < 1) devch = 2;
+    total = (int)frames * devch;
+    memset(acc, 0, sizeof(float) * (size_t)total);
+
+    EnterCriticalSection(&zan_audio_cs);
+    zan_voice_reap_locked();
+    for (i = 0; i < ZAN_VOICE_SLOTS; i++) {
+        ZanVoice *v = &zan_voices[i];
+        ZanAudioClip *c;
+        double cur, step, g;
+        int nf, clipch;
+        const short *pcm;
+        if (!v->active || !v->clip) continue;
+        c = v->clip;
+        nf = c->frames;
+        if (nf <= 0) { zan_voice_reset(v); continue; }
+        clipch = c->channels;
+        pcm = c->pcm;
+        cur = v->cursor;
+        step = v->step;
+        if (!(step > 0.0)) step = 1.0;
+        g = (double)v->gain * (double)zan_audio_master;
+        if (g != 0.0) {
+            for (f = 0; f < (int)frames; f++) {
+                int i0, i1;
+                double frac;
+                if (v->loop) {
+                    while (cur >= (double)nf) cur -= (double)nf;
+                } else if (cur >= (double)nf) {
+                    break; /* played out; the rest of the buffer stays silent */
+                }
+                i0 = (int)cur;
+                frac = cur - (double)i0;
+                i1 = i0 + 1;
+                if (i1 >= nf) i1 = nf - 1;
+                for (ch = 0; ch < devch; ch++) {
+                    int cc = ch % clipch;
+                    float s0 = (float)pcm[(size_t)i0 * clipch + cc];
+                    float s1 = (float)pcm[(size_t)i1 * clipch + cc];
+                    acc[(size_t)f * devch + ch] += (s0 + (s1 - s0) * (float)frac) * (float)g;
+                }
+                cur += step;
+            }
+        }
+        v->cursor = cur;
+        if (!v->loop && cur >= (double)nf) zan_voice_reset(v);
+    }
+    LeaveCriticalSection(&zan_audio_cs);
+
+    /* Accumulator -> device encoding, with a hard clamp at full scale. */
+    switch (zan_audio_dev_fmt) {
+    case 0: { /* float32 */
+        float *d = (float *)dst;
+        for (i = 0; i < total; i++) {
+            float s = acc[i];
+            if (s > 1.0f) s = 1.0f;
+            if (s < -1.0f) s = -1.0f;
+            d[i] = s;
+        }
+        break;
+    }
+    case 1: { /* s16 */
+        short *d = (short *)dst;
+        for (i = 0; i < total; i++) {
+            float s = acc[i];
+            if (s > 1.0f) s = 1.0f;
+            if (s < -1.0f) s = -1.0f;
+            d[i] = (short)(int)(s * 32767.0f);
+        }
+        break;
+    }
+    case 2: { /* s32 */
+        int *d = (int *)dst;
+        for (i = 0; i < total; i++) {
+            float s = acc[i];
+            if (s > 1.0f) s = 1.0f;
+            if (s < -1.0f) s = -1.0f;
+            d[i] = (int)((double)s * 2147483647.0);
+        }
+        break;
+    }
+    case 3: { /* s24 packed, little-endian */
+        size_t k = 0;
+        for (i = 0; i < total; i++) {
+            float s = acc[i];
+            int sv;
+            if (s > 1.0f) s = 1.0f;
+            if (s < -1.0f) s = -1.0f;
+            sv = (int)((double)s * 8388607.0);
+            dst[k++] = (unsigned char)(sv & 255);
+            dst[k++] = (unsigned char)((sv >> 8) & 255);
+            dst[k++] = (unsigned char)((sv >> 16) & 255);
+        }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+static DWORD WINAPI zan_audio_thread_proc(LPVOID param) {
+    /* GUIDs use explicit initializers so no uuid.lib import is needed
+     * (keeps the GNU import-lib driver workflow unchanged). */
+    static const CLSID clsid_mmdevice = {0xBCDE0395,0xE52F,0x467C,
+        {0x8E,0x3D,0xC4,0x57,0x92,0x91,0x69,0x2E}};
+    static const IID iid_immdevice_enum = {0xA95664D2,0x9614,0x4F35,
+        {0xA7,0x46,0xDE,0x8D,0xB6,0x36,0x17,0xE6}};
+    static const IID iid_iaudioclient = {0x1CB9AD4C,0xDBFA,0x4C32,
+        {0xB1,0x78,0xC2,0xF5,0x68,0xA7,0x03,0xB2}};
+    static const IID iid_irenderclient = {0xF294ACFC,0x3146,0x4483,
+        {0xA7,0xBF,0xAD,0xDC,0xA7,0xC2,0x60,0xE2}};
+    IMMDeviceEnumerator *enumr = NULL;
+    IMMDevice *dev = NULL;
+    WAVEFORMATEX *wf = NULL;
+    HANDLE evs[2];
+    (void)param;
+
+    evs[0] = zan_audio_stop_evt;
+    evs[1] = zan_audio_fill_evt;
+
+    if (FAILED(CoInitializeEx(NULL, COINIT_MULTITHREADED))) {
+        zan_audio_set_err("CoInitializeEx failed");
+        SetEvent(zan_audio_init_evt);
+        return 0;
+    }
+    if (FAILED(CoCreateInstance(&clsid_mmdevice, NULL, CLSCTX_ALL,
+                                &iid_immdevice_enum, (void **)&enumr))
+        || !enumr) {
+        zan_audio_set_err("MMDeviceEnumerator unavailable");
+        CoUninitialize();
+        SetEvent(zan_audio_init_evt);
+        return 0;
+    }
+    if (FAILED(IMMDeviceEnumerator_GetDefaultAudioEndpoint(
+                enumr, eRender, eConsole, &dev)) || !dev) {
+        zan_audio_set_err("no default audio output device");
+        IMMDeviceEnumerator_Release(enumr);
+        CoUninitialize();
+        SetEvent(zan_audio_init_evt);
+        return 0;
+    }
+    if (FAILED(IMMDevice_Activate(dev, &iid_iaudioclient, CLSCTX_ALL,
+                                  NULL, (void **)&zan_audio_client))
+        || !zan_audio_client) {
+        zan_audio_set_err("IAudioClient activate failed");
+        goto thread_fail;
+    }
+    if (FAILED(IAudioClient_GetMixFormat(zan_audio_client, &wf)) || !wf) {
+        zan_audio_set_err("GetMixFormat failed");
+        goto thread_fail;
+    }
+    /* Classify the mix format; shared mode on Vista+ is float32 in
+     * practice, but accept the s16/s32/s24 encodings too. */
+    {
+        int tag = wf->wFormatTag;
+        int bits = wf->wBitsPerSample;
+        if (tag == WAVE_FORMAT_EXTENSIBLE
+            && wf->cbSize >= sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)) {
+            unsigned int sub = ((WAVEFORMATEXTENSIBLE *)wf)->SubFormat.Data1;
+            if (sub == 3) tag = 3;
+            else if (sub == 1) tag = 1;
+        }
+        if (tag == 3 && bits == 32) zan_audio_dev_fmt = 0;
+        else if (tag == 1 && bits == 16) zan_audio_dev_fmt = 1;
+        else if (tag == 1 && bits == 32) zan_audio_dev_fmt = 2;
+        else if (tag == 1 && bits == 24) zan_audio_dev_fmt = 3;
+        else {
+            zan_audio_set_err("unsupported device mix format");
+            goto thread_fail;
+        }
+        zan_audio_dev_freq = (int)wf->nSamplesPerSec;
+        zan_audio_dev_channels = (int)wf->nChannels;
+    }
+    /* 100ms buffer, event-driven: the event fires every device period and
+     * the wait timeout below doubles as a poll fallback for quirky
+     * drivers that never fire it. */
+    if (FAILED(IAudioClient_Initialize(zan_audio_client,
+                AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                1000000 /* 100ms in 100ns units */, 0, wf, NULL))) {
+        zan_audio_set_err("IAudioClient Initialize failed");
+        goto thread_fail;
+    }
+    if (FAILED(IAudioClient_SetEventHandle(zan_audio_client, zan_audio_fill_evt))) {
+        zan_audio_set_err("SetEventHandle failed");
+        goto thread_fail;
+    }
+    if (FAILED(IAudioClient_GetBufferSize(zan_audio_client, &zan_audio_buf_frames))
+        || zan_audio_buf_frames == 0) {
+        zan_audio_set_err("GetBufferSize failed");
+        goto thread_fail;
+    }
+    if (FAILED(IAudioClient_GetService(zan_audio_client, &iid_irenderclient,
+                                       (void **)&zan_audio_render))
+        || !zan_audio_render) {
+        zan_audio_set_err("IAudioRenderClient unavailable");
+        goto thread_fail;
+    }
+    if (FAILED(IAudioClient_Start(zan_audio_client))) {
+        zan_audio_set_err("IAudioClient Start failed");
+        goto thread_fail;
+    }
+    CoTaskMemFree(wf);
+    wf = NULL;
+
+    SetEvent(zan_audio_init_evt); /* open() may proceed */
+    for (;;) {
+        DWORD w = WaitForMultipleObjects(2, evs, FALSE, 2000);
+        UINT32 padding = 0, avail;
+        BYTE *dst = NULL;
+        if (w == WAIT_OBJECT_0) break;                 /* stop event */
+        if (w != WAIT_OBJECT_0 + 1 && w != WAIT_TIMEOUT) break;
+        if (!zan_audio_ready) break;                   /* torn down while waiting */
+        if (FAILED(IAudioClient_GetCurrentPadding(zan_audio_client, &padding)))
+            continue;
+        if (padding >= zan_audio_buf_frames) continue;
+        avail = zan_audio_buf_frames - padding;
+        while (avail > 0) {
+            UINT32 chunk = avail > ZAN_AUDIO_MAX_FILL ? ZAN_AUDIO_MAX_FILL : avail;
+            if (FAILED(IAudioRenderClient_GetBuffer(zan_audio_render, chunk, &dst)))
+                break;
+            zan_audio_mix(dst, chunk);
+            IAudioRenderClient_ReleaseBuffer(zan_audio_render, chunk, 0);
+            avail -= chunk;
+        }
+    }
+    IAudioClient_Stop(zan_audio_client);
+    if (wf) CoTaskMemFree(wf);
+    if (zan_audio_render) { IAudioRenderClient_Release(zan_audio_render); zan_audio_render = NULL; }
+    if (zan_audio_client) { IAudioClient_Release(zan_audio_client); zan_audio_client = NULL; }
+    IMMDevice_Release(dev);
+    IMMDeviceEnumerator_Release(enumr);
+    CoUninitialize();
+    return 0;
+
+thread_fail:
+    if (wf) CoTaskMemFree(wf);
+    zan_audio_client = NULL;
+    zan_audio_render = NULL;
+    IMMDevice_Release(dev);
+    IMMDeviceEnumerator_Release(enumr);
+    CoUninitialize();
+    SetEvent(zan_audio_init_evt); /* open() will see the failure */
+    return 0;
+}
+
+#endif /* _WIN32 */
+
+/* ------------------------------------------------------------------
+ * Exported API. Signatures are byte-identical to the SDL3 bridge's
+ * audio entries so the Zan-side Audio module is a drop-in swap of the
+ * DllImport target.
+ * =================================================================== */
+
+EXPORT int32_t zan_audio_open(void) {
+#ifdef _WIN32
+    HANDLE th;
+    if (zan_audio_ready) return 1;
+    if (!zan_audio_cs_ok) {
+        InitializeCriticalSection(&zan_audio_cs);
+        zan_audio_cs_ok = 1;
+    }
+    zan_audio_set_err(NULL);
+    zan_audio_stop_evt = CreateEventW(NULL, TRUE, FALSE, NULL);
+    zan_audio_fill_evt = CreateEventW(NULL, FALSE, FALSE, NULL);
+    zan_audio_init_evt = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (!zan_audio_stop_evt || !zan_audio_fill_evt || !zan_audio_init_evt) {
+        zan_audio_set_err("CreateEvent failed");
+        goto open_fail;
+    }
+    /* Fresh device session: drop any stale voice state. */
+    {
+        int i;
+        for (i = 0; i < ZAN_VOICE_SLOTS; i++) zan_voice_reset(&zan_voices[i]);
+    }
+    th = CreateThread(NULL, 0, zan_audio_thread_proc, NULL, 0, NULL);
+    if (!th) {
+        zan_audio_set_err("CreateThread failed");
+        goto open_fail;
+    }
+    zan_audio_thread = th;
+    /* Wait for the thread to report startup (success sets
+     * zan_audio_client, failure sets the error string). */
+    if (WaitForSingleObject(zan_audio_init_evt, 10000) != WAIT_OBJECT_0
+        || !zan_audio_client) {
+        SetEvent(zan_audio_stop_evt);
+        WaitForSingleObject(th, 3000);
+        CloseHandle(th);
+        zan_audio_thread = NULL;
+        goto open_fail;
+    }
+    zan_audio_ready = 1;
+    return 1;
+
+open_fail:
+    if (zan_audio_stop_evt) { CloseHandle(zan_audio_stop_evt); zan_audio_stop_evt = NULL; }
+    if (zan_audio_fill_evt) { CloseHandle(zan_audio_fill_evt); zan_audio_fill_evt = NULL; }
+    if (zan_audio_init_evt) { CloseHandle(zan_audio_init_evt); zan_audio_init_evt = NULL; }
+    if (zan_audio_err[0] == 0) zan_audio_set_err("audio device open failed");
+    return 0;
+#else
+    zan_audio_set_err("audio backend not available on this platform yet"
+                      " (planned: CoreAudio/ALSA/AAudio/OH Audio)");
+    return 0;
+#endif
+}
+
+EXPORT void zan_audio_close(void) {
+#ifdef _WIN32
+    int i;
+    if (zan_audio_thread) {
+        SetEvent(zan_audio_stop_evt);
+        WaitForSingleObject(zan_audio_thread, 5000);
+        CloseHandle(zan_audio_thread);
+        zan_audio_thread = NULL;
+    }
+    if (zan_audio_cs_ok) {
+        EnterCriticalSection(&zan_audio_cs);
+        for (i = 0; i < ZAN_VOICE_SLOTS; i++) zan_voice_reset(&zan_voices[i]);
+        LeaveCriticalSection(&zan_audio_cs);
+    }
+    if (zan_audio_stop_evt) { CloseHandle(zan_audio_stop_evt); zan_audio_stop_evt = NULL; }
+    if (zan_audio_fill_evt) { CloseHandle(zan_audio_fill_evt); zan_audio_fill_evt = NULL; }
+    if (zan_audio_init_evt) { CloseHandle(zan_audio_init_evt); zan_audio_init_evt = NULL; }
+    zan_audio_ready = 0;
+#else
+    zan_audio_ready = 0;
+#endif
+}
+
+EXPORT int32_t zan_audio_is_open(void) {
+    return zan_audio_ready ? 1 : 0;
+}
+
+EXPORT void zan_audio_set_volume(double volume) {
+    if (volume < 0.0) volume = 0.0;
+    zan_audio_master = (float)volume;
+}
+
+EXPORT double zan_audio_volume(void) {
+    return (double)zan_audio_master;
+}
+
+EXPORT const char *zan_audio_driver_name(void) {
+#ifdef _WIN32
+    return zan_audio_ready ? "wasapi" : "";
+#else
+    return "";
+#endif
+}
+
+EXPORT int32_t zan_audio_active_voices(void) {
+    int n = 0, i;
+#ifdef _WIN32
+    if (zan_audio_cs_ok) {
+        EnterCriticalSection(&zan_audio_cs);
+        zan_voice_reap_locked();
+        for (i = 0; i < ZAN_VOICE_SLOTS; i++)
+            if (zan_voices[i].active && zan_voices[i].clip) n++;
+        LeaveCriticalSection(&zan_audio_cs);
+        return n;
+    }
+#endif
+    for (i = 0; i < ZAN_VOICE_SLOTS; i++)
+        if (zan_voices[i].active && zan_voices[i].clip) n++;
+    return n;
+}
+
+EXPORT void zan_audio_stop_all(void) {
+    int i;
+#ifdef _WIN32
+    if (zan_audio_cs_ok) {
+        EnterCriticalSection(&zan_audio_cs);
+        for (i = 0; i < ZAN_VOICE_SLOTS; i++) zan_voice_reset(&zan_voices[i]);
+        LeaveCriticalSection(&zan_audio_cs);
+        return;
+    }
+#endif
+    for (i = 0; i < ZAN_VOICE_SLOTS; i++) zan_voice_reset(&zan_voices[i]);
+}
+
+EXPORT int64_t zan_audio_load_wav(const char *path) {
+    ZanAudioClip *c;
+    unsigned char *bytes;
+    int n, ok;
+    zan_audio_set_err(NULL);
+    bytes = zan_audio_read_file(path, &n);
+    if (!bytes) return 0;
+    c = (ZanAudioClip *)calloc(1, sizeof(ZanAudioClip));
+    if (!c) { free(bytes); zan_audio_set_err("out of memory"); return 0; }
+    ok = zan_wav_parse(bytes, n, c);
+    free(bytes);
+    if (!ok) { free(c); return 0; }
+    return zan_handle_of(c);
+}
+
+EXPORT int64_t zan_audio_load_wav_mem(const void *data, int32_t len) {
+    ZanAudioClip *c;
+    int ok;
+    zan_audio_set_err(NULL);
+    if (!data || len <= 0) { zan_audio_set_err("no data"); return 0; }
+    c = (ZanAudioClip *)calloc(1, sizeof(ZanAudioClip));
+    if (!c) { zan_audio_set_err("out of memory"); return 0; }
+    ok = zan_wav_parse((const unsigned char *)data, len, c);
+    if (!ok) { free(c); return 0; }
+    return zan_handle_of(c);
+}
+
+EXPORT int64_t zan_audio_load_ogg(const char *path) {
+    ZanAudioClip *c;
+    unsigned char *bytes;
+    int n, ok;
+    zan_audio_set_err(NULL);
+    bytes = zan_audio_read_file(path, &n);
+    if (!bytes) return 0;
+    c = (ZanAudioClip *)calloc(1, sizeof(ZanAudioClip));
+    if (!c) { free(bytes); zan_audio_set_err("out of memory"); return 0; }
+    ok = zan_ogg_decode(bytes, n, c);
+    free(bytes);
+    if (!ok) { free(c); return 0; }
+    return zan_handle_of(c);
+}
+
+EXPORT int64_t zan_audio_load_ogg_mem(const void *data, int32_t len) {
+    ZanAudioClip *c;
+    int ok;
+    zan_audio_set_err(NULL);
+    if (!data || len <= 0) { zan_audio_set_err("no data"); return 0; }
+    c = (ZanAudioClip *)calloc(1, sizeof(ZanAudioClip));
+    if (!c) { zan_audio_set_err("out of memory"); return 0; }
+    ok = zan_ogg_decode((const unsigned char *)data, len, c);
+    if (!ok) { free(c); return 0; }
+    return zan_handle_of(c);
+}
+
+EXPORT void zan_audio_free_clip(int64_t clip_handle) {
+    ZanAudioClip *c = (ZanAudioClip *)zan_ptr_of(clip_handle);
+    int i;
+    if (!c) return;
+#ifdef _WIN32
+    if (zan_audio_cs_ok) EnterCriticalSection(&zan_audio_cs);
+#endif
+    /* Voices reading this clip's samples have to go first. */
+    for (i = 0; i < ZAN_VOICE_SLOTS; i++)
+        if (zan_voices[i].clip == c) zan_voice_reset(&zan_voices[i]);
+#ifdef _WIN32
+    if (zan_audio_cs_ok) LeaveCriticalSection(&zan_audio_cs);
+#endif
+    free(c->pcm);
+    free(c);
+}
+
+EXPORT int32_t zan_audio_clip_frequency(int64_t clip_handle) {
+    ZanAudioClip *c = (ZanAudioClip *)zan_ptr_of(clip_handle);
+    return c ? c->freq : 0;
+}
+
+EXPORT int32_t zan_audio_clip_channels(int64_t clip_handle) {
+    ZanAudioClip *c = (ZanAudioClip *)zan_ptr_of(clip_handle);
+    return c ? c->channels : 0;
+}
+
+EXPORT int32_t zan_audio_clip_duration_ms(int64_t clip_handle) {
+    ZanAudioClip *c = (ZanAudioClip *)zan_ptr_of(clip_handle);
+    if (!c || c->freq <= 0 || c->frames <= 0) return 0;
+    return (int32_t)(((int64_t)c->frames * 1000) / (int64_t)c->freq);
+}
+
+/* Starts one voice for `clip`. `loop` re-queues the clip forever
+ * (background music); a one-shot voice is reaped once it has played
+ * out. Returns 0 when the device is closed, the pool is full or the
+ * clip is invalid. */
+EXPORT int64_t zan_audio_play(int64_t clip_handle, double gain, int32_t loop) {
+    ZanAudioClip *c = (ZanAudioClip *)zan_ptr_of(clip_handle);
+    ZanVoice *v;
+    int slot = -1, i;
+    if (!c || !c->pcm || c->frames <= 0) return 0;
+    if (!zan_audio_ready) return 0;
+#ifdef _WIN32
+    if (!zan_audio_cs_ok) return 0;
+    EnterCriticalSection(&zan_audio_cs);
+    zan_voice_reap_locked();
+#endif
+    for (i = 0; i < ZAN_VOICE_SLOTS; i++) {
+        if (!zan_voices[i].active && !zan_voices[i].clip) { slot = i; break; }
+    }
+    if (slot < 0) {
+#ifdef _WIN32
+        LeaveCriticalSection(&zan_audio_cs);
+#endif
+        return 0;
+    }
+    v = &zan_voices[slot];
+    zan_voice_reset(v);
+    v->clip = c;
+    v->loop = loop != 0 ? 1 : 0;
+    v->gen = zan_voice_gen++;
+    if (v->gen > 0x1FFFFF) v->gen = 1; /* keep the packed handle small */
+    v->gain = gain < 0.0 ? 0.0f : (float)gain;
+    v->cursor = 0.0;
+    v->step = (double)c->freq / (double)zan_audio_dev_freq;
+    if (!(v->step > 0.0)) v->step = 1.0;
+    v->active = 1;
+#ifdef _WIN32
+    LeaveCriticalSection(&zan_audio_cs);
+#endif
+    return zan_voice_pack(slot, v->gen);
+}
+
+EXPORT int32_t zan_audio_voice_playing(int64_t voice) {
+#ifdef _WIN32
+    int playing;
+    if (zan_audio_cs_ok) {
+        ZanVoice *v;
+        EnterCriticalSection(&zan_audio_cs);
+        v = zan_voice_of(voice);
+        if (!v || !v->clip) playing = 0;
+        else if (v->loop) playing = 1;
+        else if (v->cursor < (double)v->clip->frames) playing = 1;
+        else { zan_voice_reset(v); playing = 0; }
+        LeaveCriticalSection(&zan_audio_cs);
+        return playing;
+    }
+#endif
+    {
+        ZanVoice *v = zan_voice_of(voice);
+        if (!v || !v->clip) return 0;
+        if (v->loop) return 1;
+        if (v->cursor < (double)v->clip->frames) return 1;
+        zan_voice_reset(v);
+        return 0;
+    }
+}
+
+EXPORT void zan_audio_voice_stop(int64_t voice) {
+#ifdef _WIN32
+    if (zan_audio_cs_ok) {
+        ZanVoice *v;
+        EnterCriticalSection(&zan_audio_cs);
+        v = zan_voice_of(voice);
+        if (v) zan_voice_reset(v);
+        LeaveCriticalSection(&zan_audio_cs);
+        return;
+    }
+#endif
+    {
+        ZanVoice *v = zan_voice_of(voice);
+        if (v) zan_voice_reset(v);
+    }
+}
+
+EXPORT void zan_audio_voice_set_gain(int64_t voice, double gain) {
+#ifdef _WIN32
+    if (zan_audio_cs_ok) {
+        ZanVoice *v;
+        EnterCriticalSection(&zan_audio_cs);
+        v = zan_voice_of(voice);
+        if (v) {
+            if (gain < 0.0) gain = 0.0;
+            v->gain = (float)gain; /* master is applied at mix time */
+        }
+        LeaveCriticalSection(&zan_audio_cs);
+        return;
+    }
+#endif
+    {
+        ZanVoice *v = zan_voice_of(voice);
+        if (!v) return;
+        if (gain < 0.0) gain = 0.0;
+        v->gain = (float)gain; /* master is applied at mix time */
+    }
+}
+
+EXPORT const char *zan_audio_last_error(void) {
+    return zan_audio_err;
+}

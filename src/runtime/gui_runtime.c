@@ -4125,6 +4125,12 @@ const zan_gui_backend zan_cpu_backend = {
  * runs on the CPU with the frame synced across), so it has to see them. */
 #include "gui_gl_backend.c"
 
+/* ---- native audio ------------------------------------------------------
+ * WASAPI-based clip/voice mixer (see zan_audio.c): zero-dependency
+ * replacement for the SDL3 audio bridge, exported from this same DLL so
+ * the existing driver bundles carry it without new build machinery. */
+#include "zan_audio.c"
+
 /* Which rasterizer this *application* draws with: 0 = software, 1 = GPU,
  * 2 = GPU when this machine can provide it (Auto). Returns what is actually
  * installed (0 or 1), so a caller that asked for the GPU and got 0 knows the
