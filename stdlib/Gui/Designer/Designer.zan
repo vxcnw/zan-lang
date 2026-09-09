@@ -755,14 +755,14 @@ partial class Designer {
     /// 引用节点实例值读/写：存 f.extra 的 "props" 直通对象
     /// （"props" 不在 IsModeledKey 里，SaveJson/LoadJson 原样
     /// 透传，GenForm 展开时落给目标内部控件）。
-    string CompPropValue(FormField f, string key, string def) {
+    static string CompPropValue(FormField f, string key, string def) {
         if (f.extra == null) { return def; }
         JsonValue props = f.extra.Get("props");
         if (props == null || !props.IsObject()) { return def; }
         return props.Str(key, def);
     }
 
-    void SetCompPropValue(FormField f, string key, string val) {
+    static void SetCompPropValue(FormField f, string key, string val) {
         if (f.extra == null) { f.extra = JsonValue.NewObject(); }
         JsonValue props = f.extra.Get("props");
         if (props == null || !props.IsObject()) {
@@ -770,6 +770,60 @@ partial class Designer {
             f.extra.Put("props", props);
         }
         props.Set(key, JsonValue.NewStr(val));
+    }
+
+    /// 内置组件的直通属性行：kind → "键|双语标签" 列表。值存
+    /// f.extra["props"]——与引用节点实例值同一张直通表，GenForm
+    /// 泛化发射 SetProp、画布预览经 ApplyFieldProps 落到真控件。
+    /// 只列设计期有意义的形态/展示属性；运行态开关（如 Countdown
+    /// 的 active）不进来。没有行的 kind 返回 null。
+    static List<string> BuiltinPropRows(string kind) {
+        if (kind == "Image") {
+            List<string> r = new List<string>();
+            r.Add("src|" + Designer.T("Src", "图片地址"));
+            r.Add("alt|" + Designer.T("Alt text", "替代文本"));
+            r.Add("fit|" + Designer.T("Fit (contain/cover/fill/none)",
+                "适配 (contain/cover/fill/none)"));
+            return r;
+        }
+        if (kind == "Countdown") {
+            List<string> r = new List<string>();
+            r.Add("duration|" + Designer.T("Duration (ms)", "时长 (毫秒)"));
+            r.Add("format|" + Designer.T("Format", "格式"));
+            return r;
+        }
+        if (kind == "NumberAnimation") {
+            List<string> r = new List<string>();
+            r.Add("from|" + Designer.T("From (scaled)", "起点 (放大值)"));
+            r.Add("to|" + Designer.T("To (scaled)", "终点 (放大值)"));
+            r.Add("duration|" + Designer.T("Duration (ms)", "时长 (毫秒)"));
+            r.Add("precision|" + Designer.T("Precision", "小数位"));
+            r.Add("separator|" + Designer.T("Separator", "千分位符"));
+            return r;
+        }
+        if (kind == "InputOtp") {
+            List<string> r = new List<string>();
+            r.Add("length|" + Designer.T("Length", "字符数"));
+            r.Add("size|" + Designer.T("Size (tiny/small/medium/large)",
+                "尺寸 (tiny/small/medium/large)"));
+            r.Add("mask|" + Designer.T("Mask (true/false)", "掩码 (true/false)"));
+            r.Add("readonly|" + Designer.T("ReadOnly (true/false)",
+                "只读 (true/false)"));
+            return r;
+        }
+        return null;
+    }
+
+    /// 把字段 extra["props"] 直通表落到真控件上（画布预览用）：
+    /// 预览件每帧新建，逐键 SetProp；控件不认的键走基类 fallback
+    /// 退化为样式类，无副作用。
+    static void ApplyFieldProps(Control ctl, FormField f) {
+        if (ctl == null || f.extra == null) { return; }
+        JsonValue props = f.extra.Get("props");
+        if (props == null || !props.IsObject()) { return; }
+        for (int i = 0; i < props.Count(); i = i + 1) {
+            ctl.SetProp(props.KeyAt(i), props.ValAt(i).AsString(""));
+        }
     }
 
     /// 预览树上应用组件属性：与运行期注册表（UserComponentRegistry.

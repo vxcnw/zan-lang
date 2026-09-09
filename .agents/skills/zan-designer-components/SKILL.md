@@ -104,6 +104,17 @@ description: Zan 窗口设计器用户组件（components/*.zcomp）的全链路
   `SetProp("orient","vertical")` 经 strtoll 静默得 0、无声落回第一项
   （2026-09 Tabs 方向进设计器时探针实证后修复）。.zform 里枚举值存选项名
   （如 "vertical"）可读性最好，旧数字写法仍被容忍。
+- **SetProp 管线是 PropOf 先于 SetExtra，快照 spec 会挡死真写入**：
+  Image 曾同时有 Props() 里 `fit.num = FitIndex()`（方法返回值=游离
+  快照）和 SetExtra("fit") 真写入——PropOf 命中快照 spec 即 return，
+  SetExtra 永不可达，SetProp("fit",…) 静默无效。正解是 spec 直接绑
+  字段（`fit.str = Fit`，枚举选项文本即取值），别给同一键开两条写入
+  通路（2026-09 内置组件 props 直通时探针实证）。
+- **内置组件的直通属性行**（Image/Countdown/NumberAnimation/InputOtp
+  已接）：键值存 f.extra["props"]（与引用节点实例值同一张直通表，
+  "props" 不在 IsModeledKey），GenForm 泛化发射 SetProp、画布预览经
+  ApplyFieldProps 逐键落真控件；运行态开关（Countdown.active 等）不进
+  设计器行。枚举键直接填选项名（PropSpec.Write 认名字）。
 - .zform 建模键 "orient"（Tabs 标签条方向，已入 IsModeledKey）：
   FieldJson 写 "horizontal"/"vertical"，GenForm 仅在 vertical 时发射
   `SetProp("orient","vertical")`；画布 KidInsetX/Y 与 RenderTabStrip 按

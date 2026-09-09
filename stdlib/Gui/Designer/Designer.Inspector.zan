@@ -258,6 +258,52 @@ partial class Designer {
         if (f.span < 1) { f.span = 1; }
         if (f.span > 24) { f.span = 24; }
 
+        // 内置组件的直通属性行：值存 extra["props"]（不在
+        // IsModeledKey 里，SaveJson/LoadJson 原样透传），生成代码
+        // 由 GenForm 泛化发射 SetProp，画布预览经 ApplyFieldProps
+        // 同步。引用节点走下面的 COMPONENT PROPS（声明的 target
+        // 是组件内部控件），内置件的键就是控件 SetProp 认的名字。
+        if (!f.compRef) {
+            List<string> brows = Designer.BuiltinPropRows(f.kind);
+            if (brows != null) {
+                string browId = "builtin|" + f.fname + "|" + f.kind
+                    + "|" + Convert.ToString(pvCompGen);
+                if (compPropEditFor != browId) {
+                    compPropEditFor = browId;
+                    compPropInputs = new List<Input>();
+                    compPropShadow = new List<string>();
+                    for (int bi = 0; bi < brows.Count; bi = bi + 1) {
+                        int bar = brows[bi].IndexOf("|");
+                        Input pin = new Input("");
+                        pin.SetText(CompPropValue(f,
+                            brows[bi].Substring(0, bar), ""));
+                        compPropInputs.Add(pin);
+                        compPropShadow.Add(pin.GetText());
+                    }
+                }
+                Label blb = new Label(Designer.T("WIDGET PROPS", "组件属性"));
+                blb.Class = "tertiary small";
+                blb.RenderInside(app, new Rect(ix, iy, iw, app.Scale(18)));
+                iy = iy + app.Scale(20);
+                for (int bi = 0; bi < brows.Count; bi = bi + 1) {
+                    int bar = brows[bi].IndexOf("|");
+                    Label brl = new Label(brows[bi].Substring(bar + 1));
+                    brl.Class = "secondary small";
+                    brl.RenderInside(app, new Rect(ix, iy, app.Scale(84), app.Scale(28)));
+                    compPropInputs[bi].Render(app, ix + app.Scale(84), iy,
+                        iw - app.Scale(84), app.Scale(28));
+                    string bcur = compPropInputs[bi].GetText();
+                    if (bcur != compPropShadow[bi]) {
+                        SetCompPropValue(f, brows[bi].Substring(0, bar), bcur);
+                        compPropShadow[bi] = bcur;
+                        app.RequestRedraw();
+                    }
+                    iy = iy + app.Scale(32);
+                }
+                iy = iy + app.Scale(6);
+            }
+        }
+
         // 引用节点的逃生门：解包成内联副本后即可就地改内部
         // （代价是与组件脱钩，组件进化不再跟随）。
         if (f.compRef) {
@@ -283,7 +329,7 @@ partial class Designer {
                     compPropShadow = new List<string>();
                     for (int pi = 0; pi < compPropKeys.Count; pi = pi + 1) {
                         Input pin = new Input("");
-                        pin.SetText(this.CompPropValue(f, compPropKeys[pi],
+                        pin.SetText(CompPropValue(f, compPropKeys[pi],
                             compPropDefs[pi]));
                         compPropInputs.Add(pin);
                         compPropShadow.Add(pin.GetText());
@@ -301,7 +347,7 @@ partial class Designer {
                         iw - app.Scale(84), app.Scale(28));
                     string cur = compPropInputs[pi].GetText();
                     if (cur != compPropShadow[pi]) {
-                        this.SetCompPropValue(f, compPropKeys[pi], cur);
+                        SetCompPropValue(f, compPropKeys[pi], cur);
                         compPropShadow[pi] = cur;
                         app.RequestRedraw();
                     }

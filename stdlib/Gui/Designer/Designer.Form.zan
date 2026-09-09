@@ -2222,8 +2222,9 @@ partial class Designer {
         if (ft == 75) {                      // 图片：空源时控件自带占位
             int ih = avail - PvS(app, 6);
             if (ih > PvS(app, 120)) { ih = PvS(app, 120); }
-            new Image(f.bindPath, f.label).RenderInside(app,
-                new Rect(x, y, w, ih));
+            Image im = new Image(f.bindPath, f.label);
+            this.ApplyFieldProps(im, f);
+            im.RenderInside(app, new Rect(x, y, w, ih));
             return;
         }
         if (ft == 76) {                      // 月历
@@ -2234,6 +2235,7 @@ partial class Designer {
         }
         if (ft == 77) {                      // 倒计时
             Countdown cd = new Countdown(90 * 1000);
+            this.ApplyFieldProps(cd, f);
             cd.Disabled = preview;
             cd.RenderInside(app, new Rect(x, y, w, PvS(app, 36)));
             return;
@@ -2281,12 +2283,14 @@ partial class Designer {
         }
         if (ft == 82) {                      // 数字滚动
             NumberAnimation na = new NumberAnimation(0, 4096, 1600);
+            this.ApplyFieldProps(na, f);
             na.Disabled = preview;
             na.RenderInside(app, new Rect(x, y, w, PvS(app, 42)));
             return;
         }
         if (ft == 83) {                      // OTP 输入
             InputOtp otp = new InputOtp(6);
+            this.ApplyFieldProps(otp, f);
             otp.Disabled = preview;
             otp.RenderInside(app, new Rect(x, y, w, PvS(app, 40)));
             return;

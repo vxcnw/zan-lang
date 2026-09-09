@@ -422,7 +422,11 @@ class Image : Control {
         ps.Add(alt);
         PropSpec fit = PropSpec.Enum("fit", "Fit",
             new List<string>{ "contain", "cover", "fill", "none" });
-        fit.num = this.FitIndex();
+        // 实时绑定 Fit 字段本身（选项文本即取值）。此前绑的是
+        // FitIndex() 方法返回值的快照——SetProp 经 PropOf 命中这张
+        // 游离 spec，写入永远落不到控件（SetExtra 的活路被
+        // PropOf-first 管线挡住）。
+        fit.str = Fit;
         ps.Add(fit);
         ps.Add(PropSpec.Text("class", "Classes"));
         return ps;
