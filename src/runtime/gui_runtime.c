@@ -37,10 +37,8 @@
 #define EXPORT __declspec(dllexport)
 #endif
 #elif defined(__linux__)
-/* X11 headers back the native Linux window shell; the unified SDL backend
- * (ZAN_GUI_SDL) owns windowing instead, so they are not needed (and the build
- * need not depend on libX11-dev) in that configuration. */
-#if !defined(ZAN_GUI_SDL) && !defined(ZAN_GUI_OHOS) && !defined(__ANDROID__)
+/* X11 headers back the native Linux window shell. */
+#if !defined(ZAN_GUI_OHOS) && !defined(__ANDROID__)
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
@@ -68,18 +66,9 @@
 #define EXPORT __attribute__((visibility("default")))
 #endif
 
-/* Unified cross-platform windowing backend. When ZAN_GUI_SDL is defined the
- * per-platform window shells (Win32/X11/Cocoa) are compiled out and a single
- * SDL3-based shell drives windowing, input and present — the same SDL3 stack
- * the Game.* stdlib uses, so the IDE and games share one window/render path.
- * The software rasterizer and system-font text rendering are unchanged; only
- * the OS window, event pump and present go through SDL. */
-#ifdef ZAN_GUI_SDL
-#define SDL_MAIN_HANDLED
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_main.h>
-#endif
-
+/* Per-platform windowing shells (Win32 / X11 / Cocoa / OHOS / Android
+ * NativeActivity). The software rasterizer and system-font text rendering
+ * are unchanged; only the OS window, event pump and present differ. */
 #include "../common/host_oom.h"
 #include "rt_crash.h"
 #include "gui_backend.h"
@@ -2181,7 +2170,7 @@ EXPORT i32 zan_gui_gdi_present(void *hwnd, i32 surface_id, i32 *rects,
 /* GDI SetDIBitsToDevice streams rows into the window's redirection surface:
  * however the upload is split, DWM can composite a half-updated frame and the
  * user sees bands of old and new content (花屏). The other backends never have
- * this problem because their present is an atomic swap (SDL_Renderer flip on
+ * this problem because their present is an atomic swap (flip-style EGL/GL
  * Linux/macOS, the GL backend's SwapBuffers here). Windows has an atomic swap
  * too: a layered window hands DWM a whole new surface via UpdateLayeredWindow,
  * which either shows entirely or not at all. This path costs a full-frame
@@ -3456,13 +3445,13 @@ EXPORT void zan_gui_release_window(void *native_window) {
  * what we want anyway. */
 #define STBI_NO_THREAD_LOCALS
 /* Only 8-bit-per-channel decoding is used (zan_gui_load_image, the tray icon,
- * the SDL texture loader). Dropping the float/HDR paths also drops stb's only
+ * the texture loader). Dropping the float/HDR paths also drops stb's only
  * call to pow(), so the driver archives link without libm on targets whose
  * link line does not carry it. */
 #define STBI_NO_LINEAR
 #define STBI_NO_HDR
 #define STB_IMAGE_IMPLEMENTATION
-#include "../../stdlib/SDL3/native/stb_image.h"
+#include "stb_image.h"
 /* WebP and SVG: stb_image does not decode either, so the vendored libwebp
  * decode-only subset (src/runtime/libwebp, scalar + baseline SSE2, no
  * threads) and the nanosvg raster TU are compiled in below, unity-build
@@ -3977,9 +3966,7 @@ static inline int zan_gui_in_hit_guard(iptr hwnd, int x, int y) {
  */
 #include "gui_runtime_glyph.c"
 #include "gui_runtime_text.c"
-#if defined(ZAN_GUI_SDL)
-#include "gui_runtime_sdl.c"
-#elif defined(ZAN_GUI_OHOS)
+#if defined(ZAN_GUI_OHOS)
 #include "gui_runtime_ohos.c"
 #elif defined(ZAN_GUI_ANDROID_NATIVE)
 #include "gui_runtime_android_native.c"
@@ -4127,7 +4114,7 @@ const zan_gui_backend zan_cpu_backend = {
 
 /* ---- native audio ------------------------------------------------------
  * WASAPI-based clip/voice mixer (see zan_audio.c): zero-dependency
- * replacement for the SDL3 audio bridge, exported from this same DLL so
+ * native audio runtime (WASAPI/AAudio/...), exported from this same DLL so
  * the existing driver bundles carry it without new build machinery. */
 #include "zan_audio.c"
 
@@ -4171,15 +4158,23 @@ EXPORT const char *zan_gui_render_backend(void) {
 /* ---- memory report -------------------------------------------------------
  * One call returns what the rasterizer's caches hold, as one compact line a
  * profiling HUD can show verbatim: glyph atlas, coverage pool, decoded image
- * caches, surfaces, snapshot/blur slots, SDL textures. Values are megabytes
+ * caches, surfaces, snapshot/blur slots, upload textures. Values are megabytes
  * (raw pixel bytes; malloc overhead is not in) with live slot counts. The
  * returned buffer is retained until the next call, like the clipboard read.
  * This exists because the process RSS mixes shared code pages and driver
  * buffers in -- it cannot tell you which cache ate the memory. */
+/* Last-present upload metering for the memory/profiling HUD: the active
+ * window shell updates these on every present (EGL shells count their
+ * texture upload, GDI shells their PutImage). Weak defaults return zero
+ * when the compiled-in shell does not meter; a strong definition in the
+ * shell TU overrides these. */
+static inline size_t zan_gui_upload_last_bytes(void) { return 0; }
+static inline int zan_gui_upload_last_full(void) { return 0; }
+
 EXPORT const char *zan_gui_mem_report(void) {
     static char *rep = NULL;
     size_t img_bytes = 0, imgmem_bytes = 0, surf_bytes = 0;
-    size_t blur_bytes = 0, snap_bytes = 0, sdl_bytes = 0;
+    size_t blur_bytes = 0, snap_bytes = 0;
     int i, img_cnt = 0, blur_cnt = 0, snap_cnt = 0, atlas_live = 0;
     for (i = 0; i < g_img_n; i++) {
         img_bytes += (size_t)g_imgs[i].w * (size_t)g_imgs[i].h * sizeof(u32);
@@ -4207,26 +4202,19 @@ EXPORT const char *zan_gui_mem_report(void) {
             snap_cnt++;
         }
     }
-#ifdef ZAN_GUI_SDL
-    for (i = 0; i < g_win_count; i++) {
-        if (g_wins[i].tex)
-            sdl_bytes += (size_t)g_wins[i].tw * (size_t)g_wins[i].th
-                         * sizeof(u32);
-    }
-    if (g_scene.tex)
-        sdl_bytes += (size_t)g_scene.tw * (size_t)g_scene.th * sizeof(u32);
-#endif
     char buf[384];
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(ZAN_GUI_OHOS)
+    /* bionic/musl mallinfo: the process-wide malloc view. Subtracting the
+     * caches above attributes the rest to the Zan object heap (ARC
+     * collections, strings, parsed data) vs allocator slack (free). Fields
+     * are ints -- fine below 2GB. */
     struct mallinfo mi = mallinfo();
 #endif
-#ifdef ZAN_GUI_SDL
+#ifdef __ANDROID__
     snprintf(buf, sizeof(buf),
              "atl %.1fM/%d cov %.2fM img %d/%.1fM mimg %.1fM "
-             "surf %.1fM blur %d/%.1fM snap %d/%.1fM tex %.1fM "
-#ifdef __ANDROID__
+             "surf %.1fM blur %d/%.1fM snap %d/%.1fM "
              "heap %.1f/%.1fM "
-#endif
              "up %.1fM%s",
              (double)g_atlas_bytes / 1048576.0, atlas_live,
              (double)g_cov_pool_bytes / 1048576.0,
@@ -4235,23 +4223,11 @@ EXPORT const char *zan_gui_mem_report(void) {
              (double)surf_bytes / 1048576.0,
              blur_cnt, (double)blur_bytes / 1048576.0,
              snap_cnt, (double)snap_bytes / 1048576.0,
-             (double)sdl_bytes / 1048576.0,
-#ifdef __ANDROID__
-             /* bionic mallinfo: the process-wide malloc view. Subtracting
-              * the caches above attributes the rest to the Zan object heap
-             * (ARC collections, strings, parsed data) vs allocator slack
-             * (free). Fields are ints -- fine below 2GB. */
              (double)mi.uordblks / 1048576.0,
              (double)mi.fordblks / 1048576.0,
-#endif
-             (double)g_upload_last_bytes / 1048576.0,
-             g_upload_last_full ? " full" : " dirty");
-#else
-    /* OHOS musl provides mallinfo like bionic: attribute the process-wide
-     * malloc view the same way the Android line does (heap used/free, the
-     * Zan object heap minus the caches above). */
-#if defined(__ANDROID__) || defined(ZAN_GUI_OHOS)
-    struct mallinfo mi2 = mallinfo();
+             (double)zan_gui_upload_last_bytes() / 1048576.0,
+             zan_gui_upload_last_full() ? " full" : " dirty");
+#elif defined(ZAN_GUI_OHOS)
     snprintf(buf, sizeof(buf),
              "atl %.1fM/%d cov %.2fM img %d/%.1fM mimg %.1fM "
              "surf %.1fM blur %d/%.1fM snap %d/%.1fM "
@@ -4263,8 +4239,8 @@ EXPORT const char *zan_gui_mem_report(void) {
              (double)surf_bytes / 1048576.0,
              blur_cnt, (double)blur_bytes / 1048576.0,
              snap_cnt, (double)snap_bytes / 1048576.0,
-             (double)mi2.uordblks / 1048576.0,
-             (double)mi2.fordblks / 1048576.0);
+             (double)mi.uordblks / 1048576.0,
+             (double)mi.fordblks / 1048576.0);
 #else
     snprintf(buf, sizeof(buf),
              "atl %.1fM/%d cov %.2fM img %d/%.1fM mimg %.1fM "
@@ -4276,7 +4252,6 @@ EXPORT const char *zan_gui_mem_report(void) {
              (double)surf_bytes / 1048576.0,
              blur_cnt, (double)blur_bytes / 1048576.0,
              snap_cnt, (double)snap_bytes / 1048576.0);
-#endif
 #endif
     size_t n = strlen(buf);
     char *nb = (char *)malloc(n + 1);

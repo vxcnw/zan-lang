@@ -1981,7 +1981,7 @@ int main(int argc, char **argv) {
             emit_lib = true;
         } else if (strcmp(argv[i], "--emit-apk") == 0 && i + 1 < argc) {
             /* Android one-shot: compile + link libmain.so, then package and
-             * sign an SDLActivity APK (implies --emit-lib with a .so). */
+             * sign a NativeActivity APK (implies --emit-lib with a .so). */
             emit_lib = true;
             apk_path = argv[++i];
         } else if (strcmp(argv[i], "--apk-package") == 0 && i + 1 < argc) {
@@ -4465,8 +4465,8 @@ int main(int argc, char **argv) {
                     /* HarmonyOS shared library: the HAP's XComponent shell
                      * dlopens the app's "main" shared library and calls
                      * zan_hap_main(); zap_main.o (in the sysroot subset)
-                     * adapts that to the module's main(i32, i8**), exactly
-                     * like SDL_main.o does for the APK shell. libEGL/libGLESv3
+                     * adapts that to the module's main(i32, i8**), like the
+                     * APK shell's native glue does. libEGL/libGLESv3
                      * (the GUI driver's present path) go on the line as sysroot
                      * stubs, same policy as the android branch's libc/libm
                      * stubs: a dlopened library relocates against its own
@@ -5825,8 +5825,8 @@ int main(int argc, char **argv) {
 
         /* ---- APK packaging (Android GUI one-shot) -----------------------
          * The shared libmain.so is linked above and the bundled driver .so
-         * files sit next to it in the output directory; pack both into an
-         * SDLActivity-shell APK and sign it. No Android SDK needed: the
+         * files sit next to it in the output directory; pack both into a
+         * NativeActivity-shell APK and sign it. No Android SDK needed: the
          * manifest template/dex/arsc/apksigner.jar ship beside zanc. */
         if (apk_path) {
             const char *abi = (target.arch == ZAN_ARCH_AARCH64)

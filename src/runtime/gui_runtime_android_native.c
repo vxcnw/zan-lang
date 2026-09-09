@@ -3,8 +3,8 @@
  *
  * Part of the gui_runtime translation unit: #include'd by gui_runtime.c in
  * a fixed order; not compiled standalone. Plays the role gui_runtime_sdl.c
- * plays for SDL builds and gui_runtime_ohos.c plays for HAP builds: owns
- * the zan_gui_* window/event/present exports, SDL-free.
+ * owns the zan_gui_* window/event/present exports for Android (gui_runtime_ohos.c
+ * plays the same role for HAP builds).
  *
  * The APK shell is android.app.NativeActivity (a framework class -- zero
  * Java activity code). NDK's android_native_app_glue hosts the app thread:
@@ -12,7 +12,7 @@
  * (linked into libmain.so alongside the module), which spawns the thread
  * that runs android_main(); that thread pumps ALooper for lifecycle
  * commands and the AInputQueue, translates them into the same flat event
- * ring the SDL/OHOS shells use, and blocks in android_main until the Zan
+ * ring the OHOS shell uses, and blocks in android_main until the Zan
  * program's main() returns. All GL/EGL work happens on this app thread
  * (present) -- input events arrive on the same thread via the looper, so
  * there is no cross-thread GL hazard and no need for SDL's event-watch
@@ -160,6 +160,8 @@ static int aq_pop(void) {
 
 /* ---- lifecycle feed (glue app thread) ---------------------------------- */
 
+static void ant_gl_reset(void);
+
 static void anw_attach(ANativeWindow *nw) {
     int w = ANativeWindow_getWidth(nw);
     int h = ANativeWindow_getHeight(nw);
@@ -175,6 +177,10 @@ static void anw_attach(ANativeWindow *nw) {
      * WaitEvent would keep sleeping (the OHOS shell's kind-14 contract). */
     aq_push_locked(14, 0, 0, 0, 0, 0);
     pthread_mutex_unlock(&g_aq_lock);
+    /* Fresh ANativeWindow: whatever GL state and dirty rects described the
+     * previous one must not leak into the next frame (rotation rebuilds the
+     * window; stale rects against the new geometry smear = 花屏). */
+    ant_gl_reset();
 }
 
 static void anw_detach(void) {
@@ -424,6 +430,8 @@ static void fling_cancel_public(void);
 
 static void ant_pump_looper(void);
 
+static void ant_set_immersive(void);
+
 static void ant_cmd(struct android_app *app, int32_t cmd) {
     switch (cmd) {
     case APP_CMD_INIT_WINDOW:
@@ -451,6 +459,9 @@ static void ant_cmd(struct android_app *app, int32_t cmd) {
         }
         break;
     case APP_CMD_GAINED_FOCUS:
+        /* Bars reappear over a resumed activity until the flag is set
+         * again (the framework does not preserve systemUiVisibility). */
+        ant_set_immersive();
         pthread_mutex_lock(&g_aq_lock);
         aq_push_locked(14, 0, 0, 0, 0, 0);
         pthread_mutex_unlock(&g_aq_lock);
@@ -513,6 +524,11 @@ void android_main(struct android_app *app) {
             AWINDOW_FLAG_KEEP_SCREEN_ON, 0);
     }
 
+    /* Fold the system bars as early as the JVM thread allows (also re-sent
+     * from create_window and every GAINED_FOCUS -- immersive-sticky keeps
+     * them hidden afterwards). */
+    ant_set_immersive();
+
     /* If the surface already exists (fast startup), attach now instead of
      * waiting for a queued INIT_WINDOW replay. */
     if (app->window) anw_attach(app->window);
@@ -536,6 +552,10 @@ void android_main(struct android_app *app) {
 }
 
 /* ---- present (EGL) ------------------------------------------------------ */
+
+static void ant_gl_reset(void);
+
+static void ant_dirty_reset(void);
 
 static const char *k_ant_vs =
     "attribute vec2 a_pos;\n"
@@ -591,6 +611,12 @@ static int ant_gl_surface(zan_anw_t *w) {
                                              (EGLNativeWindowType)w->nw, NULL);
         if (w->egl_surf == EGL_NO_SURFACE) return 1;
         w->surf_nw = w->nw;
+        /* Rotation may hand back a *different* EGLDisplay/config: the GL
+         * objects below belong to the old context, and a context that
+         * survives the swap can still hold textures sized for the old
+         * window. Drop everything GL-owned; ant_gl_program/ant_texture
+         * rebuild from scratch on the next present. */
+        ant_gl_reset();
     }
     if (!w->egl_ctx) {
         const EGLint ctx_attrs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
@@ -600,6 +626,20 @@ static int ant_gl_surface(zan_anw_t *w) {
     if (!eglMakeCurrent(w->egl_dpy, w->egl_surf, w->egl_surf, w->egl_ctx))
         return 1;
     return 0;
+}
+
+/* Discard every GL resource tied to the previous window/context so the next
+ * present recreates them against the current one. Called with the mutex
+ * unlocked (present path) or during attach (glue cmd); all callers run on
+ * the app thread. */
+static void ant_gl_reset(void) {
+    zan_anw_t *w = &g_anw;
+    w->gl_prog = 0;
+    w->gl_tex = 0;
+    w->gl_vbo = 0;
+    w->tex_w = 0;
+    w->tex_h = 0;
+    ant_dirty_reset();
 }
 
 static int ant_gl_program(zan_anw_t *w) {
@@ -630,11 +670,16 @@ static int ant_gl_program(zan_anw_t *w) {
 }
 
 /* Dirty rects: partial-band frames upload only the changed subrects; the
- * texture persists across frames (contract as the OHOS EGL path). */
+ * texture persists across frames (contract as the OHOS EGL path).
+ * A resize/rotation swaps the surface: App paints a full first frame into
+ * the new canvas but (like Win32Shell.forceFullUpload) the shell is told
+ * separately -- without the full-frame flag the new geometry would reuse
+ * the old frame's rects and leave most of the texture stale (花屏). */
 #define ZAN_ANT_DIRTY_MAX 512
 static i32 g_dirty[ZAN_ANT_DIRTY_MAX * 4];
 static int g_dirty_count;
 static int g_dirty_overflow;
+static int g_dirty_full;
 
 EXPORT i32 zan_gui_present_dirty_add(i32 x, i32 y, i32 w, i32 h) {
     if (w <= 0 || h <= 0) return 0;
@@ -647,7 +692,18 @@ EXPORT i32 zan_gui_present_dirty_add(i32 x, i32 y, i32 w, i32 h) {
     return 0;
 }
 
-static void ant_dirty_reset(void) { g_dirty_count = 0; g_dirty_overflow = 0; }
+/* Whole-window frame declaration (Win32Shell.PresentFull's counterpart).
+ * Non-Windows hosts never had a signal for it; games always paint whole
+ * frames, so apps calling PresentFull here mean exactly "ignore rects". */
+EXPORT void zan_gui_present_full(void) {
+    g_dirty_full = 1;
+}
+
+static void ant_dirty_reset(void) {
+    g_dirty_count = 0;
+    g_dirty_overflow = 0;
+    g_dirty_full = 0;
+}
 
 static void ant_texture(zan_anw_t *w, const zan_surface_t *s) {
     glActiveTexture(GL_TEXTURE0);
@@ -661,7 +717,12 @@ static void ant_texture(zan_anw_t *w, const zan_surface_t *s) {
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, s->width, s->height,
                         GL_RGBA, GL_UNSIGNED_BYTE, s->pixels);
         glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    } else if (g_dirty_count > 0 && !g_dirty_overflow) {
+    } else if (g_dirty_full || g_dirty_overflow) {
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, s->stride);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, s->width, s->height,
+                        GL_RGBA, GL_UNSIGNED_BYTE, s->pixels);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    } else if (g_dirty_count > 0) {
         glPixelStorei(GL_UNPACK_ROW_LENGTH, s->stride);
         for (int i = 0; i < g_dirty_count; i++) {
             i32 x = g_dirty[i * 4 + 0], y = g_dirty[i * 4 + 1];
@@ -676,11 +737,6 @@ static void ant_texture(zan_anw_t *w, const zan_surface_t *s) {
                             (const uint8_t *)s->pixels
                                 + ((size_t)y * (size_t)s->stride + (size_t)x) * 4);
         }
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    } else {
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, s->stride);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, s->width, s->height,
-                        GL_RGBA, GL_UNSIGNED_BYTE, s->pixels);
         glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     }
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -732,6 +788,53 @@ static void ant_set_orientation(int landscape) {
     (*env)->DeleteLocalRef(env, cls);
 }
 
+/* JNI: Window.getDecorView().setSystemUiVisibility(...) — the games run
+ * without window chrome, so the status bar / nav bar must fold away too
+ * ("不能自动全屏"): immersive-sticky keeps them hidden across swipes and
+ * focus regains (SYSTEM_UI_FLAG_IMMERSIVE_STICKY | FULLSCREEN |
+ * HIDE_NAVIGATION | LAYOUT_STABLE | LAYOUT_HIDE_NAVIGATION |
+ * LAYOUT_FULLSCREEN, value 0x1806). Sticky is re-applied by the framework
+ * after each transient reveal, so one call at window creation covers the
+ * app lifetime. */
+static void ant_set_immersive(void) {
+    struct android_app *app = g_anw.app;
+    if (!app || !app->activity || !app->activity->vm) return;
+    JavaVM *vm = app->activity->vm;
+    JNIEnv *env = NULL;
+    if ((*vm)->GetEnv(vm, (void **)&env, JNI_VERSION_1_6) != JNI_OK &&
+        (*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return;
+    jobject act = (jobject)app->activity->clazz;
+    if (!env || !act) return;
+    jclass cls = (*env)->GetObjectClass(env, act);
+    if (!cls) return;
+    jmethodID getwin = (*env)->GetMethodID(env, cls, "getWindow",
+                                           "()Landroid/view/Window;");
+    if (!getwin) { (*env)->DeleteLocalRef(env, cls); return; }
+    jobject win = (*env)->CallObjectMethod(env, act, getwin);
+    if (!win) { (*env)->DeleteLocalRef(env, cls); return; }
+    jclass wcls = (*env)->GetObjectClass(env, win);
+    jmethodID getdecor = (*env)->GetMethodID(env, wcls, "getDecorView",
+                                             "()Landroid/view/View;");
+    if (!getdecor) {
+        (*env)->DeleteLocalRef(env, wcls);
+        (*env)->DeleteLocalRef(env, win);
+        (*env)->DeleteLocalRef(env, cls);
+        return;
+    }
+    jobject decor = (*env)->CallObjectMethod(env, win, getdecor);
+    if (decor) {
+        jclass vcls = (*env)->GetObjectClass(env, decor);
+        jmethodID setui = (*env)->GetMethodID(env, vcls,
+            "setSystemUiVisibility", "(I)V");
+        if (setui) (*env)->CallVoidMethod(env, decor, setui, 0x1806);
+        (*env)->DeleteLocalRef(env, vcls);
+        (*env)->DeleteLocalRef(env, decor);
+    }
+    (*env)->DeleteLocalRef(env, wcls);
+    (*env)->DeleteLocalRef(env, win);
+    (*env)->DeleteLocalRef(env, cls);
+}
+
 EXPORT iptr zan_gui_create_window(const char *title, i32 width, i32 height) {
     (void)title; /* the NativeActivity owns the surface; the canvas
                   * follows it (the CDraw stage viewport scales the game
@@ -742,6 +845,9 @@ EXPORT iptr zan_gui_create_window(const char *title, i32 width, i32 height) {
          * fight a fixed-aspect design). */
         ant_set_orientation(width > height);
     }
+    /* Fold the system bars: the app window already fills the screen, the
+     * status/nav bar just overlays it (see ant_set_immersive). */
+    ant_set_immersive();
     return ZAN_ANW_HWND;
 }
 EXPORT i32 zan_gui_show_window(iptr hwnd_val)         { (void)hwnd_val; return 1; }

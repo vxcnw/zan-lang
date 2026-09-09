@@ -1062,7 +1062,7 @@ EXPORT i32 zan_gui_font_height(i32 font_size) {
 /* Icon glyphs are drawn in Zan, as vector primitives on top of the Canvas
  * line/rect/circle/sector calls: stdlib/Gui/IconVector.zan. */
 
-#if defined(__linux__) && !defined(ZAN_GUI_SDL) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__)
 /* ---- window management (EWMH / Xlib) ---- */
 
 EXPORT i32 zan_gui_minimize(iptr hwnd_val) {
@@ -1372,4 +1372,4 @@ EXPORT const char *zan_gui_get_clipboard(void) {
     g_clip_read_linux = text;
     return g_clip_read_linux;
 }
-#endif /* __linux__ && !ZAN_GUI_SDL (X11 window management) */
+#endif /* __linux__ && !__ANDROID__ (X11 window management) */

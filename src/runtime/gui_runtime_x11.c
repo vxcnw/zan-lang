@@ -9,9 +9,9 @@
  * Linux X11 Window Shell
  * ======================================================================== */
 
-/* Compiled out when the unified SDL backend owns windowing (ZAN_GUI_SDL); the
- * shared software rasterizer and FreeType/software text above still build. */
-#if defined(__linux__) && !defined(ZAN_GUI_SDL)
+/* Linux/X11 window shell. The shared software rasterizer and
+ * FreeType/software text above still build regardless. */
+#if defined(__linux__)
 
 static Display *g_display = NULL;
 static Window g_x11_window = 0;
@@ -692,6 +692,15 @@ EXPORT i32 zan_gui_present_dirty_add(i32 x, i32 y, i32 w, i32 h) {
     return 0;
 }
 
+/* Whole-window frame declaration (Win32Shell.PresentFull's counterpart):
+ * a frame that repainted every pixel must not reuse earlier subrects.
+ * The X11 backbuf shares the surface's exact size, so honoring the flag
+ * is just "ignore the rects this frame" -- the next present uploads all. */
+EXPORT void zan_gui_present_full(void) {
+    g_dirty_count = 0;
+    g_dirty_overflow = 0;
+}
+
 EXPORT i32 zan_gui_present(iptr hwnd_val, i32 surface_id) {
     if (!g_display) return 1;
     zan_lwin_t *w = lwin_find((Window)(intptr_t)hwnd_val);
@@ -847,4 +856,4 @@ __attribute__((weak)) int issetugid(void) {
     return (getuid() != geteuid() || getgid() != getegid()) ? 1 : 0;
 }
 #endif
-#endif /* __linux__ && !ZAN_GUI_SDL (X11 window shell) */
+#endif /* __linux__ (X11 window shell) */

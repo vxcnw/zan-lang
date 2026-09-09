@@ -337,7 +337,7 @@ static void zan_gl_ctx_present_end(void *host) {
     zan_gl_ctx_make_current();
 }
 
-#elif defined(__linux__) && !defined(ZAN_GUI_SDL) && !defined(__ANDROID__)
+#elif defined(__linux__) && !defined(__ANDROID__)
 /* ------------------------------------------------------------------- X11/GLX */
 #include <dlfcn.h>
 #include <X11/Xlib.h>
