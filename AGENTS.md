@@ -166,6 +166,15 @@ ZanIDE禁止任何自绘必须全部用标准库组件来完成
       僵尸规则，宁缺毋滥。
     - 每条规则带"为什么"（踩过的坑）；没有坑出处的新增不予合入。
     - 动手前先查 skill：同类的坑别人踩过就不要再踩一遍。
+    - skills 有**三份副本**，更新必须同一提交走完全程，只改工作区 =
+      用户项目永远收不到教训：① 工作区 `.agents/skills/`（活源，LF）→
+      ② `tools/ai_pack/skills/`（发布变体：剥离"在 zan-lang 仓库内工作"
+      节、仓库内路径改写成通用说法、description 尾保留"仓库内有同名
+      项目级版本，会自动优先"提示）→ ③ `C:\Users\<user>\.agents\skills\`
+      （②的字节副本，zcode 在仓库外使用）。`scripts\sync_skills.ps1`
+      报告 ①↔② 漂移（VARIANT 条目 = 人工维护的变体，需人工比对），
+      `-SyncGlobal` 把 ② 字节复制到 ③；② 再由 `publish_ide.ps1` 随
+      SDK 进 `dist\ai\skills\`。
 
 ## Build / dev quickstart
 
