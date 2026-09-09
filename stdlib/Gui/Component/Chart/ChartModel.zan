@@ -2061,6 +2061,8 @@ class ChartOption {
     bool containLabel;
     int zoomStart;    // dataZoom 初始窗口，百分比 0..100
     int zoomEnd;      // dataZoom 初始窗口，百分比 0..100
+    string zoomStartValue; // dataZoom startValue：按类目名定位窗口起点
+    string zoomEndValue;   // dataZoom endValue：按类目名定位窗口终点
     int windowStart;  // 渲染器实际使用的窗口（类别索引，含端点）
     int windowEnd;    // 由 ResolvedChart 从 app 状态解析；-1 = 未窗口化
     int backgroundColor; // 0 = 跟随主题，不主动填充背景
@@ -2121,6 +2123,7 @@ class ChartOption {
         o.gridTopPct = src.gridTopPct; o.gridBottomPct = src.gridBottomPct;
         o.containLabel = src.containLabel;
         o.zoomStart = src.zoomStart; o.zoomEnd = src.zoomEnd;
+        o.zoomStartValue = src.zoomStartValue; o.zoomEndValue = src.zoomEndValue;
         o.windowStart = src.windowStart; o.windowEnd = src.windowEnd;
         o.backgroundColor = src.backgroundColor; o.iwid = src.iwid;
         o.connectGroup = src.connectGroup; o.rampLo = src.rampLo; o.rampHi = src.rampHi;
@@ -2428,6 +2431,66 @@ class ChartOption {
     /// 旧的紧凑结构（labels + series[].values）仍然接受。
     static ChartOption FromJson(string src) {
         return ChartOption.FromJsonValue(JsonValue.ParseLenient(src));
+    }
+
+    /// ECharts 时间值归一为 epoch 秒：数值 ≥1e11 视为毫秒（官方
+    /// 面积时间轴数据形态），其余为秒；字符串取其中的数字段按
+    /// "YYYY-MM-DD"、"YYYY/M/D" 或 "M/D/YYYY"（可带 HH:MM(:SS)）
+    /// 解析（dynamic-data2 的 ["1997/10/4", 730] 形态）。不可解析
+    /// 返回 dflt。
+    static long TimeValueSec(JsonValue v, long dflt) {
+        if (v == null) { return dflt; }
+        if (v.IsNumber()) {
+            double d = v.AsDouble((double)dflt);
+            if (d >= 1e11) { d = d / 1000.0; }
+            return (long)d;
+        }
+        if (v.IsString()) { return ChartOption.TimeStringSec(v.AsString("")); }
+        return dflt;
+    }
+
+    /// 时间轴 x 域归一：epoch 毫秒/秒/日期串 → epoch 天。引擎的
+    /// 时间域是天（TimeLabel/XOfTime/旧整数天数路径同域）。秒直接
+    /// 装 int32 会在 2038 后回绕成负值，TimeTicks 的 span 随之整型
+    /// 溢出、步长卡在 1 → 43 亿次刻度循环把内存撑爆（area-time-
+    /// axis 20k 天数据挂死的根因）。天域 int32 安全到 ±580 万年。
+    static int TimeDayOf(JsonValue v) {
+        long tv = ChartOption.TimeValueSec(v, 0 - 1);
+        if (tv < 0) { return 0 - 1; }
+        return (int)(tv / 86400);
+    }
+
+    /// 提取字符串中的数字段（至多 6 段：年 月 日 时 分 秒），
+    /// 按日历转 epoch 秒；段数 <3 或字段非法返回 -1。
+    static long TimeStringSec(string s) {
+        int[] p = new int[6];
+        int n = 0;
+        int i = 0;
+        while (i < s.Length && n < 6) {
+            int d = DateTime.Digit(s.Substring(i, 1));
+            if (d < 0) { i = i + 1; continue; }
+            int v = 0;
+            while (i < s.Length) {
+                d = DateTime.Digit(s.Substring(i, 1));
+                if (d < 0) { break; }
+                v = v * 10 + d;
+                i = i + 1;
+            }
+            p[n] = v;
+            n = n + 1;
+        }
+        if (n < 3) { return 0 - 1; }
+        int y; int mo; int da;
+        if (p[0] >= 1000) { y = p[0]; mo = p[1]; da = p[2]; }
+        else if (p[0] >= 1 && p[0] <= 12 && p[2] >= 1000) {
+            mo = p[0]; da = p[1]; y = p[2];
+        } else { return 0 - 1; }
+        if (mo < 1 || mo > 12 || da < 1 || da > 31 || y > 2200) { return 0 - 1; }
+        int hh = n > 3 ? p[3] : 0;
+        int mi = n > 4 ? p[4] : 0;
+        int ss = n > 5 ? p[5] : 0;
+        return (long)DateTime.DaysFromCivil(y, mo, da) * 86400
+            + hh * 3600 + mi * 60 + ss;
     }
 
     /// 解析标量：数字按像素；字符串带 "%" 按百分比，否则按像素。
@@ -2786,7 +2849,8 @@ class ChartOption {
     }
 
     /// 解析 dataZoom（对象或数组取首项）：show/start/end 百分比，
-    /// 钳制到 0..100 且 end < start 时交换。
+    /// startValue/endValue 按类目名定位窗口（line-aqi），钳制到
+    /// 0..100 且 end < start 时交换。
     static void ParseDataZoom(JsonValue v, ChartOption o) {
         if (v == null) { return; }
         JsonValue z = v;
@@ -2798,6 +2862,8 @@ class ChartOption {
         o.zoom = z.Bool("show", true);
         o.zoomStart = z.Int("start", o.zoomStart);
         o.zoomEnd = z.Int("end", o.zoomEnd);
+        o.zoomStartValue = z.Str("startValue", o.zoomStartValue);
+        o.zoomEndValue = z.Str("endValue", o.zoomEndValue);
         if (o.zoomStart < 0) { o.zoomStart = 0; }
         if (o.zoomStart > 100) { o.zoomStart = 100; }
         if (o.zoomEnd < 0) { o.zoomEnd = 0; }
@@ -3615,9 +3681,13 @@ class ChartOption {
         }
 
         JsonValue series = v.Get("series");
-        if (series != null && series.IsArray()) {
-            for (int i = 0; i < series.Count(); i = i + 1) {
-                JsonValue s = series.At(i);
+        // ECharts 单系列可以把 series 直接写成对象（line-aqi），
+        // 与数组形态同一路解析，否则整图被当空数据画 "(no data)"。
+        bool seriesObj = series != null && series.IsObject();
+        if (seriesObj || (series != null && series.IsArray())) {
+            int ns = seriesObj ? 1 : series.Count();
+            for (int i = 0; i < ns; i = i + 1) {
+                JsonValue s = seriesObj ? series : series.At(i);
                 string sty = s.Str("type", "line");
                 ChartSeries cs = ChartSeries.Of(s.Str("name", ""),
                     ChartKinds.TypeOf(sty), new List<int>());
@@ -3829,13 +3899,15 @@ class ChartOption {
                 if (da != null && da.IsArray()) {
                     for (int j = 0; j < da.Count(); j = j + 1) {
                         JsonValue it = da.At(j);
+                        int xai = cs.axisIndex < o.xAxes.Count
+                            ? cs.axisIndex : 0;
+                        bool timePair = o.xAxes.Count > 0
+                            && o.xAxes[xai].type == ChartAxisType.Time;
                         if (it.IsArray() && it.Count() >= 2) {
                             // ECharts 数值对 [[x,y],...]：数值轴上是点
                             // 数据；类目轴折线上是 [类目名, 值] 对
                             // （area-pieces 的时间串首列），空类目轴从
                             // 首个系列回填。蜡烛图等多维数组不走这。
-                            int xai = cs.axisIndex < o.xAxes.Count
-                                ? cs.axisIndex : 0;
                             bool catPair = cs.type == ChartType.Line
                                 && (o.xAxes.Count == 0
                                     || o.xAxes[xai].type == ChartAxisType.Category);
@@ -3843,11 +3915,36 @@ class ChartOption {
                                 string cn = it.At(0).AsString("");
                                 cs.data.Add(ChartData.NamedNumber(
                                     it.At(1).AsDouble(0.0), cn));
+                            } else if (timePair) {
+                                // 时间轴值对 [[epoch毫秒|日期串, 值],...]：
+                                // 首元归一成 epoch 天存 points.x（XOfTime
+                                // 域；毫秒/秒直接装 int 会溢出塌到左缘——
+                                // area-time-axis 竖线的根因），次元为 y。
+                                int td = ChartOption.TimeDayOf(it.At(0));
+                                if (td >= 0) {
+                                    double dv2 = it.At(1).AsDouble(0.0);
+                                    cs.points.Add(ChartPoint.Of(td,
+                                        (int)(dv2 >= 0 ? dv2 + 0.5 : dv2 - 0.5)));
+                                }
                             } else {
                                 cs.points.Add(ChartPoint.Of(
                                     it.At(0).AsInt(0), it.At(1).AsInt(0)));
                             }
                         } else if (it.IsObject()) {
+                            // 时间轴的对象项 {name, value:[日期串, 值]}
+                            // （dynamic-data2）：value 是数组而非标量，
+                            // 按时间值对进 points，否则 Double("value")
+                            // 取不到数、全序列塌成 0。
+                            JsonValue vv = it.Get("value");
+                            if (timePair && vv != null && vv.IsArray()
+                                && vv.Count() >= 2) {
+                                int td = ChartOption.TimeDayOf(vv.At(0));
+                                if (td >= 0) {
+                                    double dv2 = vv.At(1).AsDouble(0.0);
+                                    cs.points.Add(ChartPoint.Of(td,
+                                        (int)(dv2 >= 0 ? dv2 + 0.5 : dv2 - 0.5)));
+                                }
+                            }
                             ChartData item = ChartData.NamedNumber(it.Double("value", 0.0), it.Str("name", ""));
                             item.color = it.Int("color", 0);
                             item.hidden = it.Bool("hidden", item.hidden);
@@ -4012,6 +4109,14 @@ class ChartOption {
             a.type = ty;
             if (v.Has("min")) { a.min = v.Int("min", ChartOption.Auto()); }
             if (v.Has("max")) { a.max = v.Int("max", ChartOption.Auto()); }
+        }
+        // yAxis.interval：数值轴刻度步长（bump-chart 的 1）。显式
+        // min/max 存在时换算成刻度区间数，轴标签按整数步长落。
+        JsonValue ivv = v.Get("interval");
+        if (ivv != null && ivv.IsNumber() && a.min != ChartOption.Auto()
+            && a.max != ChartOption.Auto() && a.max > a.min) {
+            int step = ivv.AsInt(1);
+            if (step >= 1) { a.ticks = (a.max - a.min) / step; }
         }
         a.title = v.Str("name", "");
         a.reversed = v.Bool("inverse", false);

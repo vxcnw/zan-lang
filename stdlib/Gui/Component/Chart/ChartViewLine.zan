@@ -417,6 +417,9 @@ partial class ChartView {
             if (grp.Count < 1) { continue; }
             ChartOption sub = ChartOption.Clone(o);
             if (sub == null) { continue; }
+            // dataZoom 滑条只随最后一个 grid 画一次（官方 grid-
+            // multiple 是全图一条滑块；每个子面板各画一条会叠两道）。
+            sub.zoom = o.zoom && gi == nG - 1;
             sub.series = grp;
             sub.xAxes = new List<ChartAxis>();
             if (gi < o.xAxes.Count) { sub.xAxes.Add(o.xAxes[gi]); }
@@ -500,10 +503,13 @@ partial class ChartView {
         List<ChartSeries> series = o.series;
         List<string> labels = o.XCategories();
 
-        // 无类目 X 轴（轴互换 yAxis=category 或 xAxis=value 的值对
-        // 折线）时没有类目标签，数据窗口改取最长序列长度。
+        // 无类目 X 轴（轴互换 yAxis=category、xAxis=value，或时间轴
+        // 且类目为空的时间值对系列）时没有类目标签，数据窗口改取
+        // 最长序列长度。
         bool noCatX = o.YAxis0().type == ChartAxisType.Category
-            || o.XAxis0().type == ChartAxisType.Value;
+            || o.XAxis0().type == ChartAxisType.Value
+            || (o.XAxis0().type == ChartAxisType.Time
+                && o.XCategories().Count == 0);
         int axisN = 0;
         if (noCatX) {
             for (int ani = 0; ani < series.Count; ani = ani + 1) {
@@ -656,7 +662,11 @@ partial class ChartView {
                         int oi = i0 + j;
                         if (geoMode == 1) {
                             if (oi >= s.points.Count) { continue; }
-                            pxs.Add(f.XOfValue(s.points[oi].x));
+                            // 时间轴点按 epoch 秒落 XOfTime（域 =
+                            // BuildAxesR 的数据 min/max）；数值轴仍走
+                            // XOfValue。
+                            pxs.Add(f.isTime ? f.XOfTime(s.points[oi].x)
+                                : f.XOfValue(s.points[oi].x));
                             pys.Add(f.YOf(s.points[oi].y, ax));
                             gaps.Add(false);
                             continue;
@@ -760,18 +770,41 @@ partial class ChartView {
                                     o.gradient, areaA, areaA);
                             }
                             // visualMap piecewise（area-pieces）：piece
-                            // 是类目域上的 x 区间，与子段 [k,k+1] 有交集
-                            // 即以 piece 色覆盖该子段——同一多边形
-                            // opacity（v6 0.7）整体生效。
+                            // 是类目域上的 x 区间，覆盖该区间内的密集
+                            // 平滑路径子段——直线插值会在 smooth 峰顶
+                            // 与主线岔出月牙缝；同一多边形 opacity
+                            //（v6 0.7）整体生效。
+                            int dpi = 0;
                             for (int vk = r0; vk < r1; vk = vk + 1) {
                                 int absK = i0 + vk;
                                 int colK = ChartOption.VisualSegmentColorAt(o, si,
                                     absK, absK + 1);
-                                if (colK == 0) { continue; }
+                                int xLo = pxs[vk];
+                                int xHi2 = pxs[vk + 1];
+                                while (dpi < pathX.Count && pathX[dpi] < xLo) {
+                                    dpi = dpi + 1;
+                                }
+                                if (colK == 0) {
+                                    while (dpi < pathX.Count
+                                           && pathX[dpi] <= xHi2) {
+                                        dpi = dpi + 1;
+                                    }
+                                    continue;
+                                }
                                 List<int> gx = new List<int>();
                                 List<int> gy = new List<int>();
-                                gx.Add(pxs[vk]); gx.Add(pxs[vk + 1]);
-                                gy.Add(pys[vk]); gy.Add(pys[vk + 1]);
+                                gx.Add(xLo); gy.Add(pys[vk]);
+                                while (dpi < pathX.Count
+                                       && pathX[dpi] <= xHi2) {
+                                    if (pathX[dpi] > xLo
+                                        && pathX[dpi] < xHi2) {
+                                        gx.Add(pathX[dpi]);
+                                        gy.Add(pathY[dpi]);
+                                    }
+                                    dpi = dpi + 1;
+                                }
+                                gx.Add(xHi2); gy.Add(pys[vk + 1]);
+                                if (gx.Count < 2) { continue; }
                                 ChartView.FillUnder(c, gx, gy, fillBase,
                                     colK, false, areaA, areaA);
                             }

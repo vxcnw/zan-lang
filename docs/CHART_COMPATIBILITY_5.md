@@ -20,16 +20,15 @@ id = 官方注册表 id，标题取注册表中英文原文，option 与数据**
 - 引擎**默认值**随官方当前版本走（6.x），旧版默认在引擎层翻转，不逐例覆盖。
 - 只收官方注册表里的示例：不掺旧版画廊演示，不创造官方没有的示例。
 
-## 进度（按官方顺序逐批补位）
+## 进度
 
-| 段 | 已移植 | 说明 |
-|----|--------|------|
-| line (40) | 13 | line-simple / line-smooth / area-basic / line-stack / area-stack / line-marker / area-simple / area-rainfall / area-time-axis / line-style / line-in-cartesian-coordinate-system / line-step / line-y-category |
-| bar (46) | 16 | bar-simple / bar-tick-align / bar-background / bar-data-color / bar-waterfall / bar-negative2 / bar-y-category / bar-label-rotation / bar-stack / bar-stack-borderRadius / bar-stack-normalization / bar-waterfall2 / bar-y-category-stack / bar-negative / bar1 / mix-line-bar（bar-markline 两点式、堆叠组内逐系列 barWidth 像素、legend.data 子集/排序仍在缺口账本） |
-| 其余段 | 0 | pie → scatter → candlestick → gauge → funnel → radar → … 按注册表顺序 |
-
-每批闭环：移植 → 构建 → 截图对照官方 → 提交。目录里只放已移植条目，
-未移植的随批按官方位置插入。
+官方注册表 377 例（line 36 / bar 40 / scatter 33 / map 23 / matrix 14 /
+custom 20 / …）已全部内嵌为 `examples/gui_charts/options/*.json` +
+`charts-registry.json`（`zanc --embed`），demo 层只加载渲染，不掺自造
+数据。渲染正确性由引擎子系统覆盖度决定：缺口见上表，按菜单顺序
+"发现一个修一个"；map/geo、custom、pictorialBar、matrix、parallel、
+themeRiver、graphic、dataset transform 等子系统仍缺。map/geo、custom、pictorialBar、matrix、parallel、
+themeRiver、graphic、dataset transform 等子系统仍缺。每批闭环：移植 → 构建 → 截图对照官方 → 提交。
 
 ## 引擎缺口账本（示例侧已记录，未修引擎）
 
@@ -37,7 +36,6 @@ id = 官方注册表 id，标题取注册表中英文原文，option 与数据**
 |------|----------------|------|
 | 值对坐标定点管线（ChartPoint 小数 x/y + X 定点域 + YOfF 整域定点） | line-function、scatter 回归类 | 引擎 ChartPoint 目前仅 int 坐标 |
 | dataZoom 滑杆拖拽 + inside 滚轮缩放 | 全部 [dataZoom] 例 | 当前只渲染初始窗口 |
-| 5.x 默认配色主题（palette） | 全部 | 引擎仍是 2.2 色板 |
 | smooth 默认值应为 false | 全部 line | 现由每例显式设置兜底 |
 | markPoint pin 符号 + 标签内置 | line-marker 等 | 引擎画圆 + 值在点上方 |
 | markPoint 小数坐标 / markLine label.position、端点符号 | line-marker | 周最低 @(-1.5) |
@@ -51,11 +49,11 @@ id = 官方注册表 id，标题取注册表中英文原文，option 与数据**
 | 双 y 轴 inside 缩放（y 向 zoom） | line-function | x 向用索引百分比近似 |
 | emphasis.focus 系列高亮 | line-stack、area-rainfall 等 | |
 | axisLine.onZero | area-rainfall | 值域非负时视觉一致 |
-| 多 x 轴 / 多 grid | multiple-x-axis、grid-multiple | |
+| 多 x 轴 | multiple-x-axis | 多 grid 已支持（grid-multiple 对齐：多面板渲染 + 单 dataZoom 滑杆挂末面板，2026-09-09） |
 | axis.breaks | intraday-breaks-* | |
 | dataset / dataTransform | dataset-* 例 | |
-| visualMap | area-pieces、line-gradient 等 | |
-| 动态数据流（定时追加） | dynamic-data2 | |
+| visualMap continuous（连续色域） | line-gradient 等 | piecewise 分段已于 2026-09-09 落地（分段描边 + 面积分色 + dimension:0 类目域） |
+| 动态数据流（定时追加） | dynamic-data2 | 静态首帧渲染已对齐（2026-09-09） |
 | 时间轴组件 timeline | — | |
 
 ## 引擎默认值已随官方当前版本（6.x）翻转
@@ -94,6 +92,31 @@ id = 官方注册表 id，标题取注册表中英文原文，option 与数据**
 - `YOfF` 整数轴回落路径定点化：vF(×1000) 对 [lo×1000, hi×1000] 比例映射，
   整数数据与旧 int 路径逐像素一致；堆叠感知的 frac 轴界
   （HasStackedBarsF/StackExtentF 折入 FracAxisLo/Hi）。
+- 时间轴域改 epoch 天 + TimeTicks long 化（2026-09-09）。引擎时间域全程
+  int32 epoch **天**；此前数据解析把 epoch 秒直接塞 int（2038 后溢出为负，
+  epoch ms 恒溢出），area-time-axis 18100 点（跨度跨 2038）解析成负域，
+  TimeTicks 里 `int span = t1 - t0` 变负 → 步进阶梯立即断档按步长 1 逐天
+  建刻度 → 43 亿次 List.Add、17–33GB 内存挂死。修复：TimeDayOf 解析
+  （秒/ms/日期字符串 → 天），TimeTicks span/step/循环全部 long。教训：
+  大跨度时间数据挂死/空白先查 int32 纪元溢出，用点数二分定位
+  （18000 过 / 18100 挂 = 2147011200 秒边界）。
+- series 单对象形式（2026-09-09）。ECharts 单系列 options 常写
+  `series: {...}`（line-aqi），解析器此前只收数组 → "(no data)"。解析
+  入口按 IsObject/IsArray 双形态展开。
+- symbolSize 语义 = 直径（2026-09-09）。ECharts symbolSize 是直径，
+  SymbolRadius 此前原值当半径 → bump-chart 空心大半圆。现返回
+  symbolSize/2；数据级 item symbolSize 仍按半径（遗留，随需要翻转）。
+- dataZoom startValue/endValue（2026-09-09）。ECharts 允许用类目文本
+  定窗口（line-aqi '2014-06-01'）；ZoomI0/ZoomI1 渲染期先 CategoryIndexOf
+  解析成索引再算 permille 窗口。
+- 分段 visualMap 面积叠加走稠密平滑路径（2026-09-09）。area-pieces 的
+  分色填充此前按数据点分段直连，平滑曲线下出现月牙缝；现沿 pathX/pathY
+  稠密路径切窗填充。分段描边（起点段颜色硬切）此前已有。
+- yAxis.interval 显式（2026-09-09）。min/max 与 interval 同时给时
+  ticks = (max-min)/interval（bump-chart interval:1 → 9 档反序轴）。
+- 时间域窗口化（2026-09-09）。BuildAxesR 有 dataZoom 时按 ZoomI0/ZoomI1
+  扫可见窗口定时间域（area-time-axis 0–20% 窗口拉满绘图区），不再全量
+  定域；ECharts filterMode 的 y 向窗口域仍未做（见待办）。
 
 ## 待办
 
@@ -101,5 +124,7 @@ id = 官方注册表 id，标题取注册表中英文原文，option 与数据**
   目录（func(x)=sin(x/10)·cos(2x/10+1)·sin(3x/10+2)·50，x∈[-200,200]
   步长 0.1，y 固定 ±100，x 向 inside 缩放初始 [-20,20]；Math.Sin/Cos
   内置已就绪，conformance `builtin_math_trig` 覆盖）。
-- line-markline 标签位、confidence-band 置信带、bump-chart endLabel、
+- line-markline 标签位、confidence-band 置信带、
   line-log 对数轴小数：随引擎能力补齐逐例回补。
+- dataZoom filterMode 的 y 向窗口域：窗口内数据重定 y 轴范围
+  （area-time-axis 当前 y 仍按全量 -2000..2000，官方窗口内约 -900..1000）。

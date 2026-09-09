@@ -559,7 +559,11 @@ class Chart {
     /// （半径）参数」（config.js markPoint 注释：总宽度为
     /// symbolSize * 2），传入值本身就是半径，不再折半。
     static int SymbolRadius(int symbolSize, int defaultR) {
-        if (symbolSize > 0) { return symbolSize; }
+        if (symbolSize > 0) {
+            // ECharts symbolSize 是符号直径（bump-chart 20 → 半径
+            // 10）。此前当半径用，全部符号放大一倍。
+            return symbolSize / 2;
+        }
         return defaultR;
     }
 
@@ -1525,46 +1529,38 @@ class Chart {
         return ts;
     }
 
-    /// 从整数天数生成确定性短日期 "YYYY-MM-DD"（非闰年，纯表驱动，
-    /// 无系统时间依赖）。t = 0 是 1970-01-01。
-    /// 注意：2022 年之后的日期与真实日历有偏差（365 天近似），
-    /// 仅供图表演示与 conformance 断言。
+    /// 从 epoch 天生成确定性短日期 "YYYY-MM-DD"（真实公历，经
+    /// DateTime 的 civil-from-days；t = 0 是 1970-01-01）。纯表
+    /// 驱动、无系统时间依赖，供图表演示与 conformance 断言。
     static string TimeLabel(int t) {
         if (t < 0) { t = 0; }
-        int year = 1970 + t / 365;
-        int doy = t % 365;
-        List<int> md = new List<int>{31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-        int month = 0;
-        while (month < 11 && doy >= md[month]) {
-            doy = doy - md[month];
-            month = month + 1;
-        }
-        string mm = Convert.ToString(month + 1);
+        DateTime d = DateTime.FromUnixSeconds((long)t * 86400);
+        string mm = Convert.ToString(d.Month());
         if (mm.Length < 2) { mm = "0" + mm; }
-        string dd = Convert.ToString(doy + 1);
+        string dd = Convert.ToString(d.Day());
         if (dd.Length < 2) { dd = "0" + dd; }
-        return Convert.ToString(year) + "-" + mm + "-" + dd;
+        return Convert.ToString(d.Year()) + "-" + mm + "-" + dd;
     }
 
     /// 时间轴刻度：从 {1,2,5}×10^n 阶梯选步长，使
     /// (t1-t0)/step ≤ maxTicks-1；生成 t0 起等距点，
-    /// 末点不落在网格上则补 t1。
+    /// 末点不落在网格上则补 t1。跨度全程 64 位——int32 域
+    /// 相减回绕成负会让步长卡在 1、循环 43 亿次撑爆内存。
     static List<int> TimeTicks(int t0, int t1, int maxTicks) {
         if (t1 < t0) { int tmp = t0; t0 = t1; t1 = tmp; }
         if (maxTicks < 2) { maxTicks = 2; }
-        int span = t1 - t0;
-        int step = 1;
-        while (true) {
-            if (span / step + 1 <= maxTicks) { break; }
-            int mag = 1;
+        long span = (long)t1 - (long)t0;
+        long step = 1;
+        while (span / step + 1 > maxTicks) {
+            long mag = 1;
             while (step >= mag * 10) { mag = mag * 10; }
-            int unit = step / mag;
+            long unit = step / mag;
             if (unit == 1) { step = 2 * mag; }
             else if (unit == 2) { step = 5 * mag; }
             else { step = 10 * mag; }
         }
         List<int> ts = new List<int>();
-        for (int t = t0; t <= t1; t = t + step) { ts.Add(t); }
+        for (long t = t0; t <= t1; t = t + step) { ts.Add((int)t); }
         if (ts[ts.Count - 1] != t1) { ts.Add(t1); }
         return ts;
     }
@@ -1848,6 +1844,13 @@ class Chart {
         int lo = app.StateGet(Chart.ZoomLoKey(wid), 0 - 1);
         if (lo < 0) {
             lo = o.zoomStart * 10;
+            // startValue 按类目名定位窗口起点（line-aqi 的
+            // "2014-06-01"）；未声明或找不到类目回落百分比域。
+            if (o.zoomStartValue.Length > 0 && n > 1) {
+                int zi = Chart.CategoryIndexOf(o.XCategories(),
+                    o.zoomStartValue);
+                if (zi >= 0) { lo = zi * 1000 / (n - 1); }
+            }
             app.StateSet(Chart.ZoomLoKey(wid), lo);
         }
         int i0 = lo * (n - 1) / 1000;
@@ -1860,6 +1863,11 @@ class Chart {
         int hi = app.StateGet(Chart.ZoomHiKey(wid), 0 - 1);
         if (hi < 0) {
             hi = o.zoomEnd * 10;
+            if (o.zoomEndValue.Length > 0 && n > 1) {
+                int zi = Chart.CategoryIndexOf(o.XCategories(),
+                    o.zoomEndValue);
+                if (zi >= 0) { hi = zi * 1000 / (n - 1); }
+            }
             app.StateSet(Chart.ZoomHiKey(wid), hi);
         }
         int i1 = hi * (n - 1) / 1000;
@@ -1876,6 +1884,15 @@ class Chart {
         int i = i0;
         while (i <= i1 && i < labels.Count) { outp.Add(labels[i]); i = i + 1; }
         return outp;
+    }
+
+    /// 类目名精确匹配的首个下标；未命中 -1（dataZoom
+    /// startValue/endValue 的类目定位用）。
+    static int CategoryIndexOf(List<string> cats, string name) {
+        for (int i = 0; i < cats.Count; i = i + 1) {
+            if (cats[i] == name) { return i; }
+        }
+        return 0 - 1;
     }
 
     /// 绘制 dataZoom 范围滑块并处理手柄拖拽。两个手柄设定
@@ -2931,10 +2948,49 @@ class Chart {
             rightHi = rs.hi;
             rt = rs.ticks;
         }
-        // 时间 X 轴：整数天数范围（Auto → 0..n-1）。
+        // 时间 X 轴：显式 min/max 优先；否则时间域取全部可见系列
+        // 时间点（points.x，epoch 天）在 dataZoom 窗口内的 min/max
+        // ——窗口化与渲染器的 [i0,i1] 同一语义（官方 area-time-axis
+        // start/end 20% 即放大到首段）。此前一律 0..labels-1 整数
+        // 天数域，epoch/日期串数据没有落点路径。无时间点的旧整数
+        // 天数形态保持原域。
         bool isTime = x0.type == ChartAxisType.Time;
         int tMin = x0.min;
         int tMax = x0.max;
+        if (isTime) {
+            int fullN = 0;
+            for (int fni = 0; fni < series.Count; fni = fni + 1) {
+                if (!series[fni].hidden && series[fni].points.Count > fullN) {
+                    fullN = series[fni].points.Count;
+                }
+            }
+            int w0 = 0;
+            int w1 = fullN - 1;
+            if (o.zoom && o.iwid != 0 && fullN > 1) {
+                w0 = Chart.ZoomI0(app, o, o.iwid, fullN);
+                w1 = Chart.ZoomI1(app, o, o.iwid, fullN);
+            }
+            int dMin = 0;
+            int dMax = 0;
+            bool have = false;
+            for (int tsi = 0; tsi < series.Count; tsi = tsi + 1) {
+                ChartSeries tss = series[tsi];
+                if (tss.hidden) { continue; }
+                int pcnt = tss.points.Count;
+                if (pcnt > w1 + 1) { pcnt = w1 + 1; }
+                for (int tpi = w0; tpi < pcnt; tpi = tpi + 1) {
+                    int tx = tss.points[tpi].x;
+                    if (!have || tx < dMin) { dMin = tx; }
+                    if (!have || tx > dMax) { dMax = tx; }
+                    have = true;
+                }
+            }
+            if (have) {
+                if (tMin == ChartOption.Auto()) { tMin = dMin; }
+                if (tMax == ChartOption.Auto()) { tMax = dMax; }
+                if (tMax <= tMin) { tMax = tMin + 1; }
+            }
+        }
         if (tMin == ChartOption.Auto()) { tMin = 0; }
         if (tMax == ChartOption.Auto()) {
             tMax = labels.Count - 1;
@@ -3295,7 +3351,7 @@ class Chart {
                 if (lx + lw > plotX + plotW) { lx = plotX + plotW - lw; }
                 c.DrawText(lx, plotBot + app.Scale(4), xs2, sAxis.FgOr(0), fs);
             }
-        } else if (x0.show && n > 0) {
+        } else if (x0.show && (n > 0 || isTime)) {
             if (isTime) {
                 List<int> tts = Chart.TimeTicks(tMin, tMax, 6);
                 for (int ti = 0; ti < tts.Count; ti = ti + 1) {

@@ -72,6 +72,9 @@ partial class Charts {
                 if (src == "") { bad.Add(d.id + ": resource missing"); continue; }
                 ChartOption o = ChartOption.FromJson(src);
                 if (o == null) { bad.Add(d.id + ": parse failed"); continue; }
+                // series 解析成空（如单对象形态被漏收）也是装载失败：
+                // 渲染出来只会是 "(no data)" 空板。
+                if (o.series.Count < 1) { bad.Add(d.id + ": no series parsed"); continue; }
                 n = n + 1;
             }
             string report = "parsed " + n + " / " + Charts.demos.Count + " ready";
