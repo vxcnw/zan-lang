@@ -29,6 +29,11 @@
  * done by a vectored handler, which runs before any frame-based handler and
  * therefore also survives another component replacing the filter (an embedded
  * browser does), the case where a crash used to leave nothing at all behind.
+ *
+ * The recovery jump itself is x64-only: it needs __builtin_setjmp/longjmp and
+ * a synthesized CONTEXT, which the other shipped Windows backend (arm64) does
+ * not provide. There the callback runs unguarded -- a fault still gets its
+ * first-chance record, then ends the process the ordinary way.
  */
 #ifndef ZAN_RT_CRASH_H
 #define ZAN_RT_CRASH_H
@@ -361,6 +366,20 @@ static void zan__crash_write_record(EXCEPTION_POINTERS *ep, const char *reason,
 #define ZAN_CRASH_SHARED
 #endif
 
+/* CONTEXT register names differ by architecture; the record writer and the
+ * recovery redirect read them through these so the file compiles for both
+ * shipped Windows targets (x64 and arm64). */
+#if defined(_M_ARM64) || defined(__aarch64__)
+#define ZAN_CTX_SP(c) ((c)->Sp)
+#define ZAN_CTX_PC(c) ((c)->Pc)
+#elif defined(_M_X64) || defined(__x86_64__)
+#define ZAN_CTX_SP(c) ((c)->Rsp)
+#define ZAN_CTX_PC(c) ((c)->Rip)
+#else
+#define ZAN_CTX_SP(c) (0)
+#define ZAN_CTX_PC(c) (0)
+#endif
+
 /* Address range of the loaded main image, from its own PE headers. */
 static void zan__crash_image_range(uintptr_t base, uintptr_t *lo,
                                   uintptr_t *hi) {
@@ -641,6 +660,16 @@ static void zan__crash_write_record(EXCEPTION_POINTERS *ep,
                     (void *)c->Rax, (void *)c->Rbx, (void *)c->Rcx,
                     (void *)c->Rdx, (void *)c->Rsi, (void *)c->Rdi);
         }
+#elif defined(_M_ARM64) || defined(__aarch64__)
+        if (ep->ContextRecord) {
+            CONTEXT *c = ep->ContextRecord;
+            fprintf(f, "pc=%p sp=%p lr=%p fp=%p\n",
+                    (void *)c->Pc, (void *)c->Sp, (void *)c->Lr,
+                    (void *)c->Fp);
+            fprintf(f, "x0=%p x1=%p x2=%p x3=%p x4=%p x5=%p\n",
+                    (void *)c->X0, (void *)c->X1, (void *)c->X2,
+                    (void *)c->X3, (void *)c->X4, (void *)c->X5);
+        }
 #endif
 
         if (bt) {
@@ -652,7 +681,7 @@ static void zan__crash_write_record(EXCEPTION_POINTERS *ep,
             fn = RtlCaptureStackBackTrace(0, 62, frames, NULL);
         }
         if (fn == 0 && ep->ContextRecord)
-            zan__crash_stack_scan(f, ep->ContextRecord->Rsp, exe_base);
+            zan__crash_stack_scan(f, ZAN_CTX_SP(ep->ContextRecord), exe_base);
         fprintf(f, "backtrace (%u frames):\n", (unsigned)fn);
         for (USHORT i = 0; i < fn; i++) {
             char tag[16];
@@ -734,6 +763,11 @@ struct zan__guard {
 #define ZAN_GUARD_LOG_FULL 20
 #define ZAN_GUARD_LOG_EVERY 100
 
+/* Recovery is x64-only: it needs __builtin_setjmp/longjmp (no arm64 backend
+ * in the shipped cross toolchains) and a synthesized CONTEXT, whose rewrite
+ * below names Rsp/Rip. On other arches the guard degrades to record-only and
+ * these two never run, so they compile only where they are used. */
+#if defined(_M_X64) || defined(__x86_64__)
 /* Codes it makes sense to abandon the current callback for. Deliberately
  * excludes EXCEPTION_STACK_OVERFLOW (there is no stack left to run on),
  * 0xC0000374 (heap corruption) and the fail-fast codes: continuing after those
@@ -777,7 +811,7 @@ static int zan__guard_recoverable(DWORD code) {
  * so this check cannot see it. Guard recovery remains what it always was for
  * that case -- a deliberate bet that the abandoned frames held no OS lock. */
 static int zan__guard_rip_recoverable(EXCEPTION_POINTERS *ep) {
-    ULONG_PTR rip = ep->ContextRecord ? ep->ContextRecord->Rip : 0;
+    ULONG_PTR rip = ep->ContextRecord ? ZAN_CTX_PC(ep->ContextRecord) : 0;
     HMODULE m = NULL;
     if (!rip ||
         !GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -786,6 +820,7 @@ static int zan__guard_rip_recoverable(EXCEPTION_POINTERS *ep) {
         return 0;
     return (uintptr_t)m == (uintptr_t)GetModuleHandleA(NULL);
 }
+#endif /* x64 recovery helpers */
 
 /* Hard faults worth a record even when something else might still handle them:
  * the filter is the reliable place to log, but any component in the process
@@ -814,6 +849,7 @@ static int zan__guard_hard_fault(DWORD code) {
     }
 }
 
+#if defined(_M_X64) || defined(__x86_64__)
 /* Entered with a synthesized context (see the handler): a private stack and
  * this address in Rip, so the jump back runs on a frame the fault cannot have
  * damaged. __builtin_longjmp restores frame/stack/pc directly, without the
@@ -824,9 +860,11 @@ static void zan__guard_resume(void) {
     if (!g) ExitProcess(0xE0A2C0FFu);
     __builtin_longjmp(g->jb, 1);
 }
+#endif
 
 static void zan__crash_install(void);
 
+#if defined(_M_X64) || defined(__x86_64__)
 /* Write the record for the fault this thread just recovered from. Runs on the
  * restored stack, where a few kilobytes of buffers and a symbolizer are
  * affordable again. */
@@ -849,6 +887,7 @@ static void zan__guard_log_deferred(zan__thread_slot *s, zan__fault_t *flt) {
     zan__crash_busy_set(s, 0);
     InterlockedIncrement((LONG volatile *)&zan__guard_logged);
 }
+#endif /* x64 recovery */
 
 /* Run fn(arg) with a recovery point for this thread. Returns 1 when it
  * returned normally, 0 when a fault inside it was recovered from. */
@@ -870,6 +909,7 @@ static int zan__guard_call(void (*fn)(void *), void *arg) {
         SetThreadStackGuarantee(&guarantee);
     }
 
+#if defined(_M_X64) || defined(__x86_64__)
     zan__guard_t g;
     volatile char frame_probe = 0;
     g.prev = s->top;
@@ -888,6 +928,15 @@ static int zan__guard_call(void (*fn)(void *), void *arg) {
     s->top = g.prev;
     (void)frame_probe;
     return ok;
+#else
+    /* Other arches (win-arm64): __builtin_setjmp/longjmp has no backend there
+     * and the handler's recovery redirect is x64-only, so there is nothing to
+     * recover into. Run the callback unguarded; a fault still gets its
+     * first-chance record from the vectored handler and dies through the
+     * normal path. */
+    fn(arg);
+    return 1;
+#endif
 }
 
 static LONG CALLBACK zan__crash_veh(EXCEPTION_POINTERS *ep) {

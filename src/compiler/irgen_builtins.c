@@ -1878,6 +1878,14 @@ static void add_enum_attr(zan_irgen_t *g, LLVMValueRef fn, LLVMValueRef call,
                                  attr);
 }
 
+/* True for the Windows-on-ARM64 target, whose setjmp needs the mingw-w64
+ * static pair rather than an msvcrt export (see emit_eh_setjmp). */
+static bool target_is_windows_arm64(zan_irgen_t *g) {
+    return g->target_is_windows &&
+           (strstr(g->target_triple, "aarch64") != NULL ||
+            strstr(g->target_triple, "arm64") != NULL);
+}
+
 /* i32 setjmp on the current target: `_setjmp(buf, NULL)` on Windows, `_setjmp(buf)`
  * elsewhere (no sigmask save). The Windows form is load-bearing, not a
  * redundant argument: on the bundled toolchain the generated program links
@@ -1889,10 +1897,25 @@ static void add_enum_attr(zan_irgen_t *g, LLVMValueRef fn, LLVMValueRef call,
  * carries `returns_twice`: without it the backend is free to keep values in
  * registers across the setjmp, and whatever the longjmp'd-to catch block reads
  * afterwards is garbage (it showed up as corrupted exception messages and
- * access violations in unoptimized builds). */
+ * access violations in unoptimized builds).
+ *
+ * Windows-arm64 lowers onto mingw-w64's own static pair instead: msvcrt.dll
+ * on ARM64 has no `_setjmp` to link against (mingw's setjmp.h spells it out:
+ * "ARM64 msvcrt.dll lacks _setjmp, only has _setjmpex"), and the rdx-preamble
+ * trick is x64-only. `__mingw_setjmp` saves the return address straight from
+ * Lr at entry -- nothing to arrange -- and `__mingw_longjmp` restores the
+ * same buffer; both are in libmingwex.a of every mingw-ABI arm64 toolchain,
+ * with no OS export involved. */
 static LLVMValueRef emit_eh_setjmp(zan_irgen_t *g, LLVMValueRef bufp) {
     LLVMTypeRef i32t = LLVMInt32TypeInContext(g->ctx);
     LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
+    if (target_is_windows_arm64(g)) {
+        LLVMTypeRef ty = LLVMFunctionType(i32t, (LLVMTypeRef[]){ i8ptr }, 1, 0);
+        LLVMValueRef fn = get_libc_fn(g, "__mingw_setjmp", ty);
+        LLVMValueRef call = zan_call2(g->builder, ty, fn, &bufp, 1, "sj");
+        add_enum_attr(g, fn, call, "returns_twice");
+        return call;
+    }
     if (g->target_is_windows) {
         LLVMTypeRef ty = LLVMFunctionType(i32t, (LLVMTypeRef[]){ i8ptr, i8ptr }, 2, 0);
         LLVMValueRef fn = get_libc_fn(g, "_setjmp", ty);
@@ -1918,7 +1941,10 @@ static void emit_eh_longjmp(zan_irgen_t *g, LLVMValueRef bufp) {
     LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
     LLVMTypeRef ty = LLVMFunctionType(LLVMVoidTypeInContext(g->ctx),
         (LLVMTypeRef[]){ i8ptr, i32t }, 2, 0);
-    LLVMValueRef fn = get_libc_fn(g, "longjmp", ty);
+    /* Pair with the setjmp side (see emit_eh_setjmp): __mingw_longjmp reads
+     * the exact buffer __mingw_setjmp wrote. */
+    const char *name = target_is_windows_arm64(g) ? "__mingw_longjmp" : "longjmp";
+    LLVMValueRef fn = get_libc_fn(g, name, ty);
     LLVMValueRef call = zan_call2(g->builder, ty, fn,
         (LLVMValueRef[]){ bufp, LLVMConstInt(i32t, 1, 0) }, 2, "");
     add_enum_attr(g, fn, call, "noreturn");

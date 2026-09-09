@@ -90,6 +90,7 @@ for %%P in (android-x64:x86_64 android-arm64:aarch64) do (
     "%NDKBIN%\clang.exe" --sysroot="%ANDROID_NDK%\toolchains\llvm\prebuilt\windows-x86_64\sysroot" -target %%B-linux-android28 -g0 -std=c11 -fPIC -I %RT% -O2 -c %RT%\rt_file.c  -o toolchain\%%A\zanrt_file.o  || exit /b 1
     "%NDKBIN%\clang.exe" --sysroot="%ANDROID_NDK%\toolchains\llvm\prebuilt\windows-x86_64\sysroot" -target %%B-linux-android28 -g0 -std=c11 -fPIC -I %RT% -O2 -c %RT%\rt_timer.c -o toolchain\%%A\zanrt_timer.o || exit /b 1
     "%NDKBIN%\clang.exe" --sysroot="%ANDROID_NDK%\toolchains\llvm\prebuilt\windows-x86_64\sysroot" -target %%B-linux-android28 -g0 -std=c11 -fPIC -I %RT% -I src\common -O2 -c %RT%\zan_embed_api.c -o toolchain\%%A\zan_embed_api.o || exit /b 1
+    "%NDKBIN%\clang.exe" --sysroot="%ANDROID_NDK%\toolchains\llvm\prebuilt\windows-x86_64\sysroot" -target %%B-linux-android28 -g0 -std=c11 -fPIC -DMINIZ_NO_ARCHIVE_APIS -DMINIZ_NO_ZIP_APIS -DMINIZ_NO_STDIO -DMINIZ_NO_TIME -I %RT% -I src\common -O2 -c %RT%\zan_inflate.c -o toolchain\%%A\zan_inflate.o || exit /b 1
     echo built toolchain\%%A
   )
 )
@@ -107,7 +108,10 @@ rem clang_rt.crtbegin.o clang_rt.crtend.o libclang_rt.builtins.a from
 rem llvm\lib\clang\<ver>\lib\<triple>\, libunwind.a from
 rem llvm\lib\<triple>\) is copied into toolchain\ohos-<arch>\; libm.a and
 rem libdl.a in the OHOS sysroot are empty 8-byte archives (math/dl symbols
-rem live in libc.a), so they are not committed.
+rem live in libc.a), so they are not committed. zap_main.o, zan_inflate.o
+rem and the libEGL/libGLESv3 stub .so are built here but also stay
+rem uncommitted (zanc needs them in toolchain\ohos-<arch> at cross-link
+rem time; rerun this script on a fresh checkout).
 if "%OHOS_NDK%"=="" set OHOS_NDK=%ZAN_OHOS_SDK%
 if not exist "%OHOS_NDK%\native\llvm\bin\clang.exe" (
   echo OHOS NDK not found: set OHOS_NDK to the OHOS SDK directory containing native
@@ -123,6 +127,16 @@ for %%P in (ohos-x64:x86_64-unknown-linux-ohos ohos-arm64:aarch64-unknown-linux-
     "%OHOSBIN%\clang.exe" --sysroot="%OHOSSYS%" -target %%B -g0 -std=c11 -fPIC -I %RT% -O2 -c %RT%\rt_file.c  -o toolchain\%%A\zanrt_file.o  || exit /b 1
     "%OHOSBIN%\clang.exe" --sysroot="%OHOSSYS%" -target %%B -g0 -std=c11 -fPIC -I %RT% -O2 -c %RT%\rt_timer.c -o toolchain\%%A\zanrt_timer.o || exit /b 1
     "%OHOSBIN%\clang.exe" --sysroot="%OHOSSYS%" -target %%B -g0 -std=c11 -fPIC -I %RT% -I src\common -O2 -c %RT%\zan_embed_api.c -o toolchain\%%A\zan_embed_api.o || exit /b 1
+    "%OHOSBIN%\clang.exe" --sysroot="%OHOSSYS%" -target %%B -g0 -std=c11 -fPIC -DMINIZ_NO_ARCHIVE_APIS -DMINIZ_NO_ZIP_APIS -DMINIZ_NO_STDIO -DMINIZ_NO_TIME -I %RT% -I src\common -O2 -c %RT%\zan_inflate.c -o toolchain\%%A\zan_inflate.o || exit /b 1
+    rem zap_main.o is the HAP XComponent shell adapter zanc puts at the head
+    rem of every ohos -shared link; the source is arch-independent and lives
+    rem next to the x64 subset (the first arch that shipped it).
+    "%OHOSBIN%\clang.exe" --sysroot="%OHOSSYS%" -target %%B -g0 -std=c11 -fPIC -O2 -c toolchain\ohos-x64\zap_main.c -o toolchain\%%A\zap_main.o || exit /b 1
+    rem Empty stub .so for the GUI driver's EGL present path: they exist so
+    rem the link records the DT_NEEDED dependency; the app process supplies
+    rem the real libraries at run time. See scripts\ohos_stub.c.
+    "%OHOSBIN%\clang.exe" --sysroot="%OHOSSYS%" -target %%B -g0 -std=c11 -fPIC -shared -Wl,-soname,libEGL.so -O2 -o toolchain\%%A\libEGL.so scripts\ohos_stub.c || exit /b 1
+    "%OHOSBIN%\clang.exe" --sysroot="%OHOSSYS%" -target %%B -g0 -std=c11 -fPIC -shared -Wl,-soname,libGLESv3.so -O2 -o toolchain\%%A\libGLESv3.so scripts\ohos_stub.c || exit /b 1
     echo built toolchain\%%A
   )
 )

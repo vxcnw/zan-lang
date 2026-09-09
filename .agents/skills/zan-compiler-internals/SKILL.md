@@ -69,6 +69,32 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
   「只有 mac 挂」误导成 mac 特有问题。
 - toolchain/** 的 *.o 命中 gitignore，提交要 `git add -f`。
 
+## win-arm64 交叉 rt：setjmp 降层与 rt_crash 架构门（实测踩坑 2026-09）
+
+- **生成的 `_setjmp` 在 aarch64-windows 链不上**：ARM64 的 msvcrt.dll 根本
+  没有 `_setjmp` 导出（mingw setjmp.h 原话 "ARM64 msvcrt.dll lacks _setjmp,
+  only has _setjmpex"），x64 那套「两参调用形状逼 LLVM 生成 rdx=返回地址
+  前导」也是 x64 专属。irgen_builtins.c `emit_eh_setjmp/emit_eh_longjmp`
+  已按目标降层：aarch64-windows 发静态对 `__mingw_setjmp(buf)`（入口 Lr
+  即返回地址，无需前导）+ `__mingw_longjmp`，两端布局一致，libmingwex.a
+  里就有；x64 路径一字未动。
+- **rt_crash.h 的 guard 恢复是 x64 专属**：`__builtin_setjmp/longjmp` 在
+  aarch64-windows 没有后端，CONTEXT 字段名也分架构（x64 Rsp/Rip，ARM64
+  Sp/Pc，用 ZAN_CTX_SP/PC 宏）。恢复机（guard_recoverable/rip_recoverable/
+  guard_resume/guard_log_deferred + setjmp 帧）整体收进 `#if x64` 门；
+  非 x64 的 `zan__guard_call` 保留一次性崩溃记录器安装后直通执行——崩溃
+  照常有 first-chance 记录，只是不做恢复续跑。头注释里写明这个降级。
+- **ohos 交叉链接的两个暗坑**：(1) 链接行强制要求 toolchain\ohos-<arch>\
+  zap_main.o（XComponent 壳适配），缺了报「sysroot subset not found」，
+  但源 zap_main.c 只在 ohos-x64 目录里跟踪、.o 两架构都不跟踪也没脚本造
+  ——build_cross_rt.cmd ohos 块现已补 zap_main.o + libEGL/libGLESv3 空占位
+  so（scripts/ohos_stub.c）的构建配方；(2) `-shared` 默认容忍未定义符号，
+  ohos 链接成功≠符号齐——要 `llvm-nm -D` 看未定义表再去 OHOS libc.a 里
+  对（musl 有 `_setjmp`/`_longjmp`/`longjmp`，加载期可解析）。
+- 重出对象名是 `zanrt_*.o` 前缀（build_win_rt.sh 协议），别把裸 `rt_*.o`
+  拷进 toolchain/。OHOS NDK clang 15.0.4 在 DevEco Studio 安装目录的
+  native/ 下。
+
 ## conformance 处置四分法
 
 挂的测试先归因再动手：「stale golden」（重生成，逐行核对 C# 拼写）、
