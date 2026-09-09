@@ -2039,7 +2039,14 @@ int64_t zan_monotonic_us(void) {
     if (!frequency.QuadPart) QueryPerformanceFrequency(&frequency);
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
-    return (int64_t)((now.QuadPart * 1000000) / frequency.QuadPart);
+    /* Divide BEFORE scaling: QPC ticks since boot reach 9.5e12 after ~11
+     * days, and ticks*1000000 overflows int64 then -- the product wraps
+     * negative and every duration derived from a difference between a
+     * wrapped and an unwrapped reading becomes garbage (observed as
+     * ServerMetrics series slots indexing ~-2.3 modulo 300). Stopwatch
+     * documents the same trap in MonoScaled (divide first, then scale). */
+    return (int64_t)((now.QuadPart / frequency.QuadPart) * 1000000
+        + ((now.QuadPart % frequency.QuadPart) * 1000000) / frequency.QuadPart);
 #else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -2057,7 +2064,11 @@ int64_t zan_monotonic_ns(void) {
     if (!frequency.QuadPart) QueryPerformanceFrequency(&frequency);
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
-    return (int64_t)((now.QuadPart * 1000000000) / frequency.QuadPart);
+    /* Same overflow as the us path above, only sooner: ticks*1e9 overflows
+     * after ~9.2 hours of uptime. Divide first (quotient to ns in the
+     * 64-bit remainder-scaled form keeps full resolution). */
+    return (int64_t)((now.QuadPart / frequency.QuadPart) * 1000000000
+        + ((now.QuadPart % frequency.QuadPart) * 1000000000) / frequency.QuadPart);
 #else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);

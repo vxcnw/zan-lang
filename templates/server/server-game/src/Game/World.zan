@@ -339,14 +339,16 @@ class World {
         IDbConnection db = await World.dbctx.Acquire();
         if (db == null) { return false; }
         try {
-            int n = await World.WriteRow(db, row);
+            /* WriteRow 声明 async bool（内部已折算受影响行数），此前
+               await 无 checker 类型，bool 装进 int 静默通过。 */
+            bool n = await World.WriteRow(db, row);
             if (logout) {
                 int _t = await db.Update<ZanWeb.Model.Game.Player>()
                     .Set(a => a.lastLogoutAt, row.lastLogoutAt)
                     .Where(a => a.id == row.id)
                     .ExecuteAffrowsAsync();
             }
-            return n > 0;
+            return n;
         } finally {
             World.dbctx.Release(db);
         }
