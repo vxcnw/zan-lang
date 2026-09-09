@@ -39,6 +39,18 @@ description: Zan 窗口设计器用户组件（components/*.zcomp）的全链路
 
 ## .zform / 生成代码的尖锐边
 
+- **KindForType 是三头共用的唯一真相，改它必须三处对账**（2026-09-09
+  "两个 datagrid" 实证）：FormField.TypeName（调色板显示名）、
+  KindForType（ftype→控件类，决定 .zform 的 `kind` 写什么、GenForm 生成
+  `new <kind>()` 声明什么类型）、TypeForKey（kind→ftype 逆映射）。
+  23 表格/41 数据表格曾错位——23 返 `"Table"`（只是画布静态渲染器，
+  不是 Control）、41 缺席回落 `"Input"`：数据表格放下保存再生成变成
+  输入框；手写 `kind:"DataGrid"` 反查不到被当自定义组件；旧文档
+  `new Table()` 编不过。铁律：**KindForType 每个返回值必须是真实可
+  实例化的 Control 类**；两者共用一个控件类时（23/41→DataGrid），
+  TypeForKey 给显式别名（`DataGrid/DataTable→41`）避免逆映射撞扫出
+  另一头。GenForm.TypeOf 里对旧 kind 别名归一（`Table/DataTable→
+  DataGrid`）保护存量文档。
 - **role 决定字段形态**：role:control 生成实例字段（`new X()` 后
   `app.Field1`）；role:window 生成 **static** 字段，实例访问直接编译
   错（`'Job1' is a static field... qualify with the type name`）。
