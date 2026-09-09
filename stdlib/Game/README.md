@@ -3,7 +3,7 @@
 The game modules are intentionally layered:
 
 ```text
-Game.Arpg -----+--> SDL3 --> zan_sdl3 --> SDL3
+Game.Arpg
 Game.Zgm
 
 Game.Board ----+
@@ -11,9 +11,12 @@ Game.Cards ----+--> Game.Foundation
 Game.Arcade2D -+
 ```
 
+All game modules are platform-neutral: windowing, input and rendering live in
+`Gui` (GuiHost / Canvas), and game code adapts onto them from its host loop —
+the same pattern the shipped `templates/game/*` use.
+
 `Game.Foundation` owns renderer-neutral fixed-step timing, deterministic random
-state, semantic input and scene lifecycle. `Game.Foundation.Sdl` provides the
-optional SDL application host.
+state, semantic input and scene lifecycle.
 
 `Game.Board` provides cloneable grids, pathfinding, turns, validated commands,
 snapshots and replay logs for board games, tactics and puzzle games.
@@ -32,10 +35,5 @@ buffs, windows, widgets, tweens, save snapshots, networking and SQLite. Its
 public API and branding are entirely ZGM-owned.
 
 `Game.Arpg` is a separate typed RPG runtime with validated project data, a live
-world, combat, scheduling, graphical controls, data binding and SDL rendering.
-
-`SDL3` owns platform windows, rendering, input and timing. Game modules own
-domain concepts and do not expose raw SDL handles through gameplay APIs.
-
-The RA2/Yuri clean-room demo lives in `examples/game/ra2`; it is not part of the
-standard library.
+world, combat, scheduling, graphical controls and data binding. It owns no
+windowing or rendering of its own.

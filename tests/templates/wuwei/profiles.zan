@@ -1,7 +1,6 @@
 using System;
 using System.IO;
 using Wuwei;
-using SDL3;
 class ProfilesTest {
     static void Check(bool ok,string message) { if (!ok) { throw new Exception(message); } }
     static void Main() {
@@ -57,7 +56,7 @@ class ProfilesTest {
             audio.SetMuted(false); Check(audio.Volume()==35 && !audio.Muted(),"unmute restores volume");
             Check(!audio.Start(dir+"/missing.ogg") && audio.IsPlaying(),"failed replacement keeps loop");
             audio.Dispose(); audio.Dispose(); Check(!audio.IsPlaying() && other.IsPlaying(),"isolated idempotent disposal");
-            other.Dispose(); Check(SdlAudio.ActiveVoices()==0,"all owned voices released"); SdlAudio.Close();
+            other.Dispose(); Check(Audio.ActiveVoices()==0,"all owned voices released"); Audio.Close();
         }
         Console.WriteLine("Wuwei profiles and audio tests passed");
     }

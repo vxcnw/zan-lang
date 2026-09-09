@@ -4,22 +4,19 @@
 // results, documentSymbol, didChange->diagnostics (quiet-coalesced) and
 // completion-after-change latency.
 // Baseline numbers + findings: TASKS.md 四期1/四期2 entries.
-// Usage:  node scripts/lsp_baseline_probe.mjs            # monorepo root
-//         LSP_PROBE_MODE=gallery node scripts/...        # mid-size root
-//         LSP_PROBE_MODE=ra2 node scripts/...            # small project root
+// Usage:  node scripts/lsp_baseline_probe.mjs            # mid-size root
+//         LSP_PROBE_MODE=repo node scripts/...           # monorepo root
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
 // MODE=repo (whole zan-lang monorepo, worst case)
-// MODE=ra2  (templates/game/ra2 as a realistic user project root)
 // MODE=gallery (examples/gui_gallery, mid-size root)
-// default 'ra2': fast and representative. 'repo' exercises the
+// default 'gallery': fast and representative. 'repo' exercises the
 // full monorepo workspace (17s first-open converge, see TASKS.md).
-const MODE = process.env.LSP_PROBE_MODE || 'ra2';
+const MODE = process.env.LSP_PROBE_MODE || 'gallery';
 const ROOTS = {
   repo: 'D:/project/zan-lang',
-  ra2: 'D:/project/zan-lang/templates/game/ra2',
   gallery: 'D:/project/zan-lang/examples/gui_gallery',
 };
 const ROOT = ROOTS[MODE];
