@@ -24,6 +24,47 @@ description: Zan GUI 的 Android NativeActivity 实机验证仪式——probe AP
   freetype 合并成 libzan_gui.a）。改了 `src/runtime/gui_runtime*.c`
   后必须重跑，再同步 scratch，再重打 APK。
 
+## 游戏素材烘焙：APK 里 assets 从哪来（踩坑：7 个 APK 全部烘空成纯色块）
+
+- `--publish`/`--emit-apk` 只在 **irgen.uses_embed_api**（代码里出现
+  `zan_embed_*` DllImport）且 assets 候选存在时才自动嵌入
+  `<proj>/assets/`；素材打进 `lib/arm64-v8a/libmain.so` 的嵌入表
+  （zlib 压缩），验证：`unzip -p dist/<g>-arm64.apk
+  lib/arm64-v8a/libmain.so | strings | grep -c "^assets/"`，
+  计数应与模板 assets 目录文件数一一相符。
+- **路径候选坑**：assets 候选含「输入源目录的父目录」
+  （`<proj>/src` 的父 = `<proj>`，即 src/ 与 assets/ 并排布局）。
+  为什么：从项目内以裸相对路径 `src/main.zan` 起编时
+  resolve_package_project_root 会落到 `.`，看不见兄弟 assets/——
+  不报错、不警告，APK 照常产出但素材为空，只有上机看到纯色块才
+  暴露。所以构建必须从仓库根以路径前缀形式调用
+  （`build/zanc.exe templates/game/<g>/src/main.zan --auto-stdlib
+  --publish ...`），不要 cd 进模板目录再编。
+- 运行期解码走 `zan_embed_rawlen`/`zan_embed_decode`
+  （src/runtime/zan_inflate.c + vendored miniz，CMakeLists zan_inflate
+  配方）；uses_inflate 由 `zan_embed_decode/rawlen` 引用触发链接。
+- **新素材 git status 看不见的陷阱**：.gitignore 有全局 `*.png`
+  （截图防误提交），模板素材 PNG 必须逐个显式 `git add <path>` 或
+  在 .gitignore 加 `!templates/game/<g>/assets/**/*.png` 白名单——
+  否则本地 APK 烘得好好的，仓库里素材缺失，别人重建即烘空。
+- 素材回填配方：从原版 exe 的嵌入表逐字节提取（_scratch/dump_embed.py
+  模式：定位嵌入表 → 解 zlib → 按 (名,数据) 落盘），比外部找图可靠
+  （网上原图是未处理的 1024px 色键版，尺寸/抠图都与发行版不符）。
+
+## 逐游戏截图验证纪律（踩坑：相邻两次 screencap 字节级相同，误判成渲染缺陷）
+
+- **每次截图必须 md5 存档比对**。模拟器慢帧下 sleep 太短时，
+  screencap 会拍到同一帧旧画面：曾出现 breakout/weiqi/xiangqi 三张
+  截图 md5 完全相同、gomoku==snake（各自换了游戏拍的！），加长间隔
+  重拍后 md5 全部互异——是截图竞速不是渲染 bug。
+- 可靠节奏：`am force-stop <pkg>` → `am start -n <pkg>/
+  android.app.NativeActivity` → `sleep 10` → `screencap` → 
+  `force-stop`，一个游戏一轮，绝不批量连拍。md5 相同先怀疑竞速，
+  换更长间隔重拍再下结论。
+- 判定画面是否真的在贴图（而非纯色块兜底）：PIL 按画面横带切条算
+  ImageStat stddev——有纹理的带 35-100+，纯色兜底块 stddev≈0；
+  中带裁剪（`im.crop((0, h*0.20, w, h*0.80))`）缩放后人工复核。
+
 ## 事件契约：绕过事件环的状态变化必须推 kind-14（踩坑：屏幕永不刷新）
 
 - App.RunLoop 空闲时阻塞在 WaitEvent；IME 组合期间按键全被输入法
