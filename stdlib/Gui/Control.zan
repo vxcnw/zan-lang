@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 
 namespace Gui;
 
@@ -1367,6 +1368,102 @@ class Control {
             if (c.StyleVisible() && c.dock == 5) {
                 c.Arrange(cx, cy, cw, ch);
             }
+        }
+        this.CheckOverlapKids();
+    }
+
+    // --- 排版重叠自检（默认关）----------------------------------
+    //
+    // 停靠 / flex / grid 布局在构造上互不重叠；兄弟矩形压在一起
+    // 只可能来自绕开布局原语的手摆 mx/my + 手工宽高——这正是自动
+    // 生成界面的代码最常犯的排版事故（大按钮盖住旁边的钮、指标卡
+    // 宽窄不齐、内容漂出容器）。检测挂在 Arrange 尾部（每帧跑，
+    // 关闭时只多一次布尔判断），命中按「父控件 + 两个子矩形」签
+    // 名去重，只报新面孔。
+
+    /// 环境变量只读一次，避免每帧碰内核。
+    static bool overlapEnvRead;
+    static bool overlapEnvOn;
+    /// 编程开关：测试/宿主不经环境变量直接开。
+    static bool DebugOverlap;
+    /// 本进程去重后命中的重叠对数；测试据此断言。
+    static int overlapHits;
+    static Dict<string, bool> overlapSeen;
+
+    static bool OverlapActive() {
+        if (!overlapEnvRead) {
+            overlapEnvRead = true;
+            overlapEnvOn = Interop.EnvVar("ZAN_GUI_OVERLAP") == "1";
+        }
+        return DebugOverlap || overlapEnvOn;
+    }
+
+    /// 允许刻意叠放的场景（角标、悬浮装饰）在子控件上挂免检牌。
+    bool overlapExempt;
+
+    /// 不参与重叠自检（本控件作为兄弟被跳过）。
+    Control NoOverlapCheck() {
+        overlapExempt = true;
+        return this;
+    }
+
+    /// 测试读取：本进程去重后命中的重叠对数。
+    static int OverlapHits() { return overlapHits; }
+
+    /// 测试复位：清零计数与去重表。
+    static void ResetOverlapHits() {
+        overlapHits = 0;
+        overlapSeen = null;
+    }
+
+    void CheckOverlapKids() {
+        if (!OverlapActive()) { return; }
+        int n = children.Count;
+        for (int i = 0; i < n; i = i + 1) {
+            Control a = children[i];
+            if (!a.StyleVisible() || a.overlapExempt) { continue; }
+            int ar = a.bx + a.bw;
+            int ab = a.by + a.bh;
+            for (int j = i + 1; j < n; j = j + 1) {
+                Control b = children[j];
+                if (!b.StyleVisible() || b.overlapExempt) { continue; }
+                int ix = (ar < b.bx + b.bw ? ar : b.bx + b.bw)
+                    - (a.bx > b.bx ? a.bx : b.bx);
+                int iy = (ab < b.by + b.bh ? ab : b.by + b.bh)
+                    - (a.by > b.by ? a.by : b.by);
+                if (ix > 1 && iy > 1) {
+                    this.ReportOverlap(a, b, ix, iy);
+                }
+            }
+        }
+    }
+
+    void ReportOverlap(Control a, Control b, int ix, int iy) {
+        string sig = this.Kind()
+            + "|" + a.Kind() + "@" + Convert.ToString(a.bx) + ","
+            + Convert.ToString(a.by) + "+" + Convert.ToString(a.bw)
+            + "x" + Convert.ToString(a.bh)
+            + "|" + b.Kind() + "@" + Convert.ToString(b.bx) + ","
+            + Convert.ToString(b.by) + "+" + Convert.ToString(b.bw)
+            + "x" + Convert.ToString(b.bh);
+        if (overlapSeen == null) { overlapSeen = new Dict<string, bool>(); }
+        if (overlapSeen.ContainsKey(sig)) { return; }
+        if (overlapSeen.Count < 400) { overlapSeen.Add(sig, true); }
+        overlapHits = overlapHits + 1;
+        string line = "gui-overlap #" + Convert.ToString(overlapHits)
+            + " in " + this.Kind()
+            + ": " + a.Kind() + "[" + Convert.ToString(a.bx) + ","
+            + Convert.ToString(a.by) + " " + Convert.ToString(a.bw)
+            + "x" + Convert.ToString(a.bh) + "] overlaps "
+            + b.Kind() + "[" + Convert.ToString(b.bx) + ","
+            + Convert.ToString(b.by) + " " + Convert.ToString(b.bw)
+            + "x" + Convert.ToString(b.bh) + "] by "
+            + Convert.ToString(ix) + "x" + Convert.ToString(iy) + "px";
+        string log = Interop.EnvVar("ZAN_GUI_OVERLAP_LOG");
+        if (log.Length > 0) {
+            File.AppendAllText(log, line + "\n");
+        } else {
+            Console.WriteLine(line);
         }
     }
 
