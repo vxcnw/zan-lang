@@ -588,6 +588,39 @@ class ChartGeo {
     }
 }
 
+/// 平行坐标的一根轴（ECharts parallelAxis[dim]）：轴名、显式
+/// min/max、类目维的类目表。渲染时 min/max 缺省由该维数据推导。
+class ChartParAxis {
+    string name;
+    int min;    // 显式下界；minSet=false 时取数据维最小
+    int max;    // 显式上界；maxSet=false 时取数据维最大
+    bool minSet;
+    bool maxSet;
+    bool inverse;      // parallelAxis.inverse：反向刻度
+    List<string> cats; // type:"category" 的类目表（值取下标）
+
+    static ChartParAxis Of() {
+        ChartParAxis a = new ChartParAxis();
+        a.name = "";
+        a.min = 0; a.max = 0;
+        a.minSet = false; a.maxSet = false;
+        a.inverse = false;
+        a.cats = new List<string>();
+        return a;
+    }
+
+    static ChartParAxis Clone(ChartParAxis src) {
+        if (src == null) { return null; }
+        ChartParAxis a = ChartParAxis.Of();
+        a.name = src.name;
+        a.min = src.min; a.max = src.max;
+        a.minSet = src.minSet; a.maxSet = src.maxSet;
+        a.inverse = src.inverse;
+        for (int i = 0; i < src.cats.Count; i = i + 1) { a.cats.Add(src.cats[i]); }
+        return a;
+    }
+}
+
 /// Event River 的一个事件：名称、时间区间 [start, end]、值
 /// （驱动带宽）、可选颜色。普通标量 data 兼容转换为等距事件。
 class ChartEvent {
@@ -1305,6 +1338,22 @@ class ChartSeries {
                      //   渲染前由 ChartMaps.BindSeries 注入区域几何
     int geoIndex;    // ECharts series.geoIndex：绑定的 geo 组件下标
     bool isGeoBase;  // geo 组件合成的底图载体系列（非用户声明）
+    // ---- pictorialBar（custom == "pictorialBar"）----
+    string picSymbol; // 原始 symbol 串：内置形状名 / path:// / image://
+    string picRepeat; // symbolRepeat："true" | "fixed" | ""
+    bool picClip;     // symbolClip：符号裁到值高
+    string picPos;    // symbolPosition："start"（默认）| "end"
+    int picBound;     // symbolBoundingData 标量（0 = 用轴最大值）
+    int picW;         // symbolSize 宽（像素形态）
+    int picH;         // symbolSize 高（像素形态）
+    int picWPct;      // symbolSize 宽（% 相对类目槽宽）
+    int picHPct;      // symbolSize 高（% 相对绘图区高）
+    // ---- parallel / themeRiver ----
+    List<List<int>> parRows;   // parallel：每行一个维值数组（平行坐标）
+    List<string> riverTimes;   // themeRiver：逐点时间标签
+    List<int> riverVals;       // themeRiver：逐点值
+    List<int> riverCat;        // themeRiver：逐点名字下标（ riverNames ）
+    List<string> riverNames;   // themeRiver：名字表（图例 + 调色板）
     // ---- 批 6：force / chord / funnel / wordCloud 参数化 ----
     int forceScaling;       // ECharts force.scaling（%）；100 = 现状
     int forceGravity;       // ECharts force.gravity（%）；100 = 现状
@@ -1409,6 +1458,20 @@ class ChartSeries {
         s.mapName = "";
         s.geoIndex = 0;
         s.isGeoBase = false;
+        s.picSymbol = "";
+        s.picRepeat = "";
+        s.picClip = false;
+        s.picPos = "";
+        s.picBound = 0;
+        s.picW = 0;
+        s.picH = 0;
+        s.picWPct = 0;
+        s.picHPct = 0;
+        s.parRows = new List<List<int>>();
+        s.riverTimes = new List<string>();
+        s.riverVals = new List<int>();
+        s.riverCat = new List<int>();
+        s.riverNames = new List<string>();
         s.forceScaling = 100;
         s.forceGravity = 100;
         s.forceMinRadius = 0;
@@ -1846,6 +1909,25 @@ class ChartSeries {
         s.selectedMode = src.selectedMode; s.forceScaling = src.forceScaling;
         s.mapName = src.mapName; s.geoIndex = src.geoIndex;
         s.isGeoBase = src.isGeoBase;
+        s.picSymbol = src.picSymbol; s.picRepeat = src.picRepeat;
+        s.picClip = src.picClip; s.picPos = src.picPos;
+        s.picBound = src.picBound; s.picW = src.picW; s.picH = src.picH;
+        s.picWPct = src.picWPct; s.picHPct = src.picHPct;
+        s.parRows = new List<List<int>>();
+        for (int pr = 0; pr < src.parRows.Count; pr = pr + 1) {
+            List<int> row = src.parRows[pr];
+            List<int> cp = new List<int>();
+            for (int pc = 0; pc < row.Count; pc = pc + 1) { cp.Add(row[pc]); }
+            s.parRows.Add(cp);
+        }
+        s.riverTimes = new List<string>();
+        for (int rt = 0; rt < src.riverTimes.Count; rt = rt + 1) { s.riverTimes.Add(src.riverTimes[rt]); }
+        s.riverVals = new List<int>();
+        for (int rv = 0; rv < src.riverVals.Count; rv = rv + 1) { s.riverVals.Add(src.riverVals[rv]); }
+        s.riverCat = new List<int>();
+        for (int rc = 0; rc < src.riverCat.Count; rc = rc + 1) { s.riverCat.Add(src.riverCat[rc]); }
+        s.riverNames = new List<string>();
+        for (int rn = 0; rn < src.riverNames.Count; rn = rn + 1) { s.riverNames.Add(src.riverNames[rn]); }
         s.forceGravity = src.forceGravity; s.forceMinRadius = src.forceMinRadius;
         s.forceMaxRadius = src.forceMaxRadius; s.forceNodeColor = src.forceNodeColor;
         s.forceLinkColor = src.forceLinkColor;
@@ -2067,6 +2149,7 @@ class ChartOption {
     List<ChartAxis> yAxes;
     List<ChartSeries> series;
     List<ChartGeo> geos;   // ECharts geo 组件（底图地图，可多个）
+    List<ChartParAxis> parAxes; // ECharts parallelAxis[]（平行坐标维）
 
     ChartType defaultType; // Add(name, values) / AddLabel 使用的类型
 
@@ -2237,6 +2320,10 @@ class ChartOption {
         for (int gci = 0; gci < src.geos.Count; gci = gci + 1) {
             o.geos.Add(ChartGeo.Clone(src.geos[gci]));
         }
+        o.parAxes = new List<ChartParAxis>();
+        for (int pai = 0; pai < src.parAxes.Count; pai = pai + 1) {
+            o.parAxes.Add(ChartParAxis.Clone(src.parAxes[pai]));
+        }
         o.dataRangeList = new List<ChartRangeSplit>();
         for (int i = 0; i < src.dataRangeList.Count; i = i + 1) {
             o.dataRangeList.Add(ChartRangeSplit.Clone(src.dataRangeList[i]));
@@ -2258,6 +2345,7 @@ class ChartOption {
         o.yAxes = new List<ChartAxis>();
         o.series = new List<ChartSeries>();
         o.geos = new List<ChartGeo>();
+        o.parAxes = new List<ChartParAxis>();
         o.defaultType = ChartType.Line;
         o.showLegend = true;
         o.showTooltip = true;
@@ -3294,6 +3382,33 @@ class ChartOption {
         }
     }
 
+    /// ECharts parallelAxis：数组按 dim 下标落位（dim 缺省用数组序）。
+    static void ParseParAxes(JsonValue v, ChartOption o) {
+        if (v == null || !v.IsArray()) { return; }
+        for (int i = 0; i < v.Count(); i = i + 1) {
+            JsonValue a = v.At(i);
+            if (a == null || !a.IsObject()) { continue; }
+            int dim = a.Int("dim", i);
+            ChartParAxis ax = ChartParAxis.Of();
+            ax.name = a.Str("name", "");
+            ax.inverse = a.Bool("inverse", false);
+            if (a.Has("min")) { ax.min = a.Int("min", 0); ax.minSet = true; }
+            if (a.Has("max")) { ax.max = a.Int("max", 0); ax.maxSet = true; }
+            JsonValue tyj = a.Get("type");
+            if (tyj != null && tyj.IsString()
+                && tyj.AsString("") == "category") {
+                JsonValue cd = a.Get("data");
+                if (cd != null && cd.IsArray()) {
+                    for (int ci = 0; ci < cd.Count(); ci = ci + 1) {
+                        ax.cats.Add(cd.At(ci).AsString(""));
+                    }
+                }
+            }
+            while (o.parAxes.Count < dim) { o.parAxes.Add(ChartParAxis.Of()); }
+            if (o.parAxes.Count == dim) { o.parAxes.Add(ax); } else { o.parAxes[dim] = ax; }
+        }
+    }
+
     static void ParseGeoOne(JsonValue g, ChartOption o, int index) {
         if (g == null || !g.IsObject()) { return; }
         ChartGeo geo = ChartGeo.Of();
@@ -3880,6 +3995,7 @@ class ChartOption {
         // ECharts geo 组件：底图地图（对象或数组），系列解析后
         // 由合成块挂载。
         ChartOption.ParseGeo(v.Get("geo"), o);
+        ChartOption.ParseParAxes(v.Get("parallelAxis"), o);
         JsonValue series = v.Get("series");
         // ECharts 单系列可以把 series 直接写成对象（line-aqi），
         // 与数组形态同一路解析，否则整图被当空数据画 "(no data)"。
@@ -3896,6 +4012,96 @@ class ChartOption {
                     s.Str("selectedMode", ""));
                 cs.mapName = s.Str("map", "");
                 cs.geoIndex = s.Int("geoIndex", 0);
+                if (cs.custom == "pictorialBar") {
+                    JsonValue psm = s.Get("symbol");
+                    if (psm != null && psm.IsString()) {
+                        cs.picSymbol = psm.AsString("");
+                    }
+                    JsonValue prp = s.Get("symbolRepeat");
+                    if (prp != null) {
+                        cs.picRepeat = prp.IsString()
+                            ? prp.AsString("") : (prp.AsBool(false) ? "true" : "");
+                    }
+                    cs.picClip = s.Bool("symbolClip", false);
+                    cs.picPos = s.Str("symbolPosition", "");
+                    JsonValue pbd = s.Get("symbolBoundingData");
+                    if (pbd != null && pbd.IsNumber()) { cs.picBound = pbd.AsInt(0); }
+                    JsonValue psz = s.Get("symbolSize");
+                    if (psz != null && psz.IsArray() && psz.Count() >= 2) {
+                        JsonValue w0 = psz.At(0);
+                        JsonValue h0 = psz.At(1);
+                        if (w0.IsNumber()) { cs.picW = w0.AsInt(0); }
+                        else if (w0.IsString() && w0.AsString("").EndsWith("%")) {
+                            cs.picWPct = Convert.ToInt(
+                                w0.AsString("").Substring(0, w0.AsString("").Length - 1));
+                        }
+                        if (h0.IsNumber()) { cs.picH = h0.AsInt(0); }
+                        else if (h0.IsString() && h0.AsString("").EndsWith("%")) {
+                            cs.picHPct = Convert.ToInt(
+                                h0.AsString("").Substring(0, h0.AsString("").Length - 1));
+                        }
+                    } else if (psz != null && psz.IsNumber()) {
+                        cs.picW = psz.AsInt(0);
+                        cs.picH = cs.picW;
+                    }
+                }
+                if (cs.custom == "parallel") {
+                    JsonValue pd = s.Get("data");
+                    if (pd != null && pd.IsArray()) {
+                        for (int ri = 0; ri < pd.Count(); ri = ri + 1) {
+                            JsonValue row = pd.At(ri);
+                            List<int> nums = new List<int>();
+                            if (row != null && row.IsArray()) {
+                                for (int ci = 0; ci < row.Count(); ci = ci + 1) {
+                                    JsonValue cell = row.At(ci);
+                                    // 类目维：值是类目下标；数值维：AsInt 取整。
+                                    if (cell != null && cell.IsNumber()) {
+                                        nums.Add(cell.AsInt(0));
+                                    } else {
+                                        nums.Add(Convert.ToInt(cell.AsString("")));
+                                    }
+                                }
+                            } else if (row != null && row.IsObject()) {
+                                // {value:[...]} 形态
+                                JsonValue vv = row.Get("value");
+                                if (vv != null && vv.IsArray()) {
+                                    for (int ci = 0; ci < vv.Count(); ci = ci + 1) {
+                                        nums.Add(vv.At(ci).AsInt(0));
+                                    }
+                                }
+                            }
+                            if (nums.Count > 0) { cs.parRows.Add(nums); }
+                        }
+                    }
+                }
+                if (cs.custom == "themeRiver") {
+                    JsonValue rd = s.Get("data");
+                    if (rd != null && rd.IsArray()) {
+                        for (int ri = 0; ri < rd.Count(); ri = ri + 1) {
+                            JsonValue row = rd.At(ri);
+                            if (row == null || !row.IsArray() || row.Count() < 3) { continue; }
+                            // [时间, 值, 名字] 三元组；时间支持 "2015/11/08"
+                            // 字符串与数值（lastfm 用下标）。
+                            JsonValue tj = row.At(0);
+                            JsonValue vj = row.At(1);
+                            JsonValue nj = row.At(2);
+                            string time = tj.IsString()
+                                ? tj.AsString("") : tj.AsInt(0) + "";
+                            int val = vj.IsNumber() ? vj.AsInt(0)
+                                : Convert.ToInt(vj.AsString(""));
+                            string nm = nj.AsString("");
+                            if (time.Length == 0 || nm.Length == 0) { continue; }
+                            int cat = -1;
+                            for (int ci = 0; ci < cs.riverNames.Count; ci = ci + 1) {
+                                if (cs.riverNames[ci] == nm) { cat = ci; break; }
+                            }
+                            if (cat < 0) { cs.riverNames.Add(nm); cat = cs.riverNames.Count - 1; }
+                            cs.riverTimes.Add(time);
+                            cs.riverVals.Add(val);
+                            cs.riverCat.Add(cat);
+                        }
+                    }
+                }
                 cs.color = s.Int("color", 0);
                 cs.axisIndex = s.Int("yAxisIndex", s.Int("axisIndex", 0));
                 cs.xIndex = s.Int("xAxisIndex", 0);
@@ -4193,6 +4399,24 @@ class ChartOption {
                 if (vals != null && vals.IsArray() && cs.data.Count == 0) {
                     for (int j2 = 0; j2 < vals.Count(); j2 = j2 + 1) {
                         cs.data.Add(ChartData.Of(vals.At(j2).AsInt(0)));
+                    }
+                }
+                // lines 系列（非 geo 坐标兜底）：data 是点对数组
+                // [[x,y],[x,y],...]——把相邻点对拆进 points（x0y0x1y1
+                // 交错），渲染端每两点画一线。嵌套 [[ [x,y],[x,y] ],...]
+                // 的多层形态由 ParsePoints 类似路径在下方 linesCustom
+                // 块里兜住。
+                if (cs.custom == "lines" && cs.points.Count == 0
+                    && da != null && da.IsArray()) {
+                    for (int li = 0; li < da.Count(); li = li + 1) {
+                        JsonValue pair = da.At(li);
+                        if (pair != null && pair.IsArray() && pair.Count() >= 2
+                            && pair.At(0).IsArray() && pair.At(1).IsArray()) {
+                            cs.points.Add(ChartPoint.Of(pair.At(0).At(0).AsInt(0),
+                                pair.At(0).At(1).AsInt(0)));
+                            cs.points.Add(ChartPoint.Of(pair.At(1).At(0).AsInt(0),
+                                pair.At(1).At(1).AsInt(0)));
+                        }
                     }
                 }
                 // map 系列：注册表几何 + data 值 + regions 覆盖，

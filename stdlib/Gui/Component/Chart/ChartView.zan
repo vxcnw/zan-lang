@@ -1079,6 +1079,10 @@ partial class ChartView {
             if (ck == "sunburst") { return "sunburst"; }
             if (ck == "radialBars") { return "radialBars"; }
             if (ck == "venn") { return "venn"; }
+            if (ck == "pictorialBar") { return "pictorialBar"; }
+            if (ck == "parallel") { return "parallel"; }
+            if (ck == "themeRiver") { return "themeRiver"; }
+            if (ck == "lines") { return "linesCustom"; }
             return "empty";
         }
         if (t == ChartType.Bar) {
@@ -1425,6 +1429,14 @@ partial class ChartView {
             ChartView.DrawRadialBars(app, x, y, w, h, option, g);
         } else if (kind == "venn") {
             ChartView.DrawVenn(app, x, y, w, h, option, g);
+        } else if (kind == "pictorialBar") {
+            ChartView.DrawPictorialBar(app, x, y, w, h, option, g);
+        } else if (kind == "parallel") {
+            ChartView.DrawParallel(app, x, y, w, h, option, g);
+        } else if (kind == "themeRiver") {
+            ChartView.DrawThemeRiver(app, x, y, w, h, option, g);
+        } else if (kind == "linesCustom") {
+            ChartView.DrawLinesCustom(app, x, y, w, h, option, g);
         } else if (kind == "bar" || kind == "hbar"
                    || kind == "barStacked" || kind == "barStackedHbar") {
             bool stacked = kind == "barStacked" || kind == "barStackedHbar";

@@ -1,0 +1,385 @@
+using System;
+using System.Json;
+using Gui;
+
+namespace Gui.Component.Chart;
+
+// ---- 扩展渲染器第三批（ECharts 直译） ----
+//
+// ① parallel（平行坐标）：parallelAxis[dim] 垂直轴等距铺开，
+//    每行数据是一条跨轴折线；维值域由显式 min/max 或该维数据
+//    包络（NiceRange）定标，类目维按下标取值。行色逐行取调色板
+//    （visualMap dimension 命中时覆盖）。
+// ② themeRiver（主题河流）：singleAxis 时间轴上按名字分带的
+//    堆叠河：每名字一列值按时间对齐，累计出上下边界用
+//    FillBandFx 半透明填带（ECharts 默认带 opacity ≈ 0.7 观感）。
+//    时间标签全等距（解析成下标的数值时间直接当类目序）。
+// ③ linesCustom（type:'lines' 非 geo 坐标兜底）：逐条 data 点对
+//    直线 + 端点符号；geo 坐标系的 lines 由地图渲染器消费
+//    （后续批次），这里只兜住纯直角坐标/无坐标系形态，保证
+//    "type:lines" 永不落 "(no data)" 空板。
+
+partial class ChartView {
+
+    // ---- parallel 平行坐标 ----
+
+    static void DrawParallel(App app, int x, int y, int w, int h,
+                             ChartOption o, int g) {
+        Canvas c = app.canvas;
+        Theme t = app.theme;
+        List<ChartSeries> series = o.series;
+
+        // 维数：优先 parallelAxis 声明；缺省按数据最长行推断。
+        int dims = o.parAxes.Count;
+        for (int si = 0; si < series.Count; si = si + 1) {
+            ChartSeries s = series[si];
+            if (s.hidden || s.custom != "parallel") { continue; }
+            for (int ri = 0; ri < s.parRows.Count; ri = ri + 1) {
+                if (s.parRows[ri].Count > dims) { dims = s.parRows[ri].Count; }
+            }
+        }
+        if (dims < 2) { return; }
+
+        int plotTop = Chart.DrawPanelI(app, x, y, w, h, o.title, series,
+            o.iwid, o.showLegend);
+
+        // 每维值域：显式 min/max 优先，否则数据包络走 NiceRange。
+        List<int> lo = new List<int>();
+        List<int> hi = new List<int>();
+        for (int d = 0; d < dims; d = d + 1) {
+            int dLo = 0;
+            int dHi = 0;
+            bool hasRng = false;
+            if (d < o.parAxes.Count) {
+                if (o.parAxes[d].minSet) { dLo = o.parAxes[d].min; hasRng = true; }
+                if (o.parAxes[d].maxSet) { dHi = o.parAxes[d].max; hasRng = true; }
+                if (o.parAxes[d].cats.Count > 0) {
+                    // 类目维：域 = [0, 类目数-1]（值存下标）。
+                    dLo = 0;
+                    dHi = o.parAxes[d].cats.Count - 1;
+                    hasRng = true;
+                }
+            }
+            if (!hasRng) {
+                dLo = int.MaxValue;
+                dHi = int.MinValue;
+                for (int si = 0; si < series.Count; si = si + 1) {
+                    ChartSeries s = series[si];
+                    if (s.hidden || s.custom != "parallel") { continue; }
+                    for (int ri = 0; ri < s.parRows.Count; ri = ri + 1) {
+                        List<int> row = s.parRows[ri];
+                        if (d >= row.Count) { continue; }
+                        if (row[d] < dLo) { dLo = row[d]; }
+                        if (row[d] > dHi) { dHi = row[d]; }
+                    }
+                }
+                if (dLo == int.MaxValue) { dLo = 0; dHi = 1; }
+                ChartSpan sp = Chart.NiceRange(dLo, dHi);
+                dLo = sp.lo;
+                dHi = sp.hi;
+            }
+            if (dHi <= dLo) { dHi = dLo + 1; }
+            lo.Add(dLo);
+            hi.Add(dHi);
+        }
+
+        // 布局：标题/图例下方一块绘图区，轴间留端点标签。
+        int pad = t.paddingMedium;
+        int axisFs = Style.FontFallback(app, "small");
+        int nameH = Canvas.FontHeight(axisFs);
+        int plotX = x + pad + app.Scale(8);
+        int plotY = plotTop + nameH + app.Scale(6);
+        int plotW = (x + w - pad - app.Scale(8)) - plotX;
+        int plotH = (y + h - pad - nameH - app.Scale(4)) - plotY;
+        if (plotW < 10 || plotH < 10) { return; }
+
+        StyleBox sAxis = Style.Part(app, "chart", "axis", "", "", "",
+                                    Style.SNormal());
+        StyleBox sGrid = Style.Part(app, "chart", "grid", "", "", "",
+                                    Style.SNormal());
+        int axCol = sAxis.FgOr(0);
+
+        // N 根垂直轴等距：轴 0 贴左缘、轴 N-1 贴右缘。
+        for (int d = 0; d < dims; d = d + 1) {
+            int ax = plotX + (dims == 1 ? 0 : d * plotW / (dims - 1));
+            c.FillRect(ax, plotY, app.Scale(2), plotH, axCol);
+            // 每轴 4 格横向网格线 + 刻度值。
+            int span = hi[d] - lo[d];
+            for (int k = 0; k <= 4; k = k + 1) {
+                int gy = plotY + plotH - k * plotH / 4;
+                if (k > 0) {
+                    c.FillRect(plotX, gy, plotW, 1, sGrid.BgOr(0));
+                }
+                int val = lo[d] + span * k / 4;
+                string vs;
+                if (d < o.parAxes.Count && o.parAxes[d].cats.Count > 0) {
+                    int ci = val;
+                    if (ci < 0) { ci = 0; }
+                    if (ci >= o.parAxes[d].cats.Count) {
+                        ci = o.parAxes[d].cats.Count - 1;
+                    }
+                    vs = o.parAxes[d].cats[ci];
+                } else {
+                    vs = Chart.Commas(val);
+                }
+                int vw = Canvas.MeasureText(vs, axisFs);
+                int lx = ax + app.Scale(5);
+                bool rightSide = d == dims - 1 && dims > 1;
+                if (rightSide) { lx = ax - app.Scale(5) - vw; }
+                c.DrawText(lx, Canvas.CenterTextYAt(gy, axisFs), vs, axCol, axisFs);
+            }
+            // 轴名：首轴上方、末轴上方（inverse 时对调，aqi demo）。
+            if (d < o.parAxes.Count && o.parAxes[d].name.Length > 0) {
+                bool inv = o.parAxes[d].inverse;
+                bool topName = d == 0 ? !inv : inv;
+                int nw = Canvas.MeasureText(o.parAxes[d].name, axisFs);
+                int nx = ax - nw / 2;
+                if (nx < plotX) { nx = plotX; }
+                if (nx + nw > plotX + plotW) { nx = plotX + plotW - nw; }
+                if (topName) {
+                    c.DrawText(nx, plotTop, o.parAxes[d].name, axCol, axisFs);
+                } else {
+                    c.DrawText(nx, plotY + plotH + app.Scale(4),
+                        o.parAxes[d].name, axCol, axisFs);
+                }
+            }
+        }
+
+        // 行折线：一条行 = 跨 dims 根轴的 (ax, y) 折线。
+        int alpha = 255;
+        if (g < 1000) { alpha = 60 + 195 * g / 1000; }
+        if (alpha > 255) { alpha = 255; }
+        int slot = 0;
+        int mX = app.mouseX;
+        int mY = app.mouseY;
+        for (int si = 0; si < series.Count; si = si + 1) {
+            ChartSeries s = series[si];
+            if (s.hidden || s.custom != "parallel") { continue; }
+            int baseCol = s.color;
+            if (baseCol == 0) { baseCol = Chart.Palette(t, slot); }
+            int th = app.Scale(2);
+            for (int ri = 0; ri < s.parRows.Count; ri = ri + 1) {
+                List<int> row = s.parRows[ri];
+                if (row.Count < 2) { continue; }
+                int col = baseCol;
+                // visualMap.dimension 命中：按该维值渐变取色（aqi）。
+                for (int vi = 0; vi < o.visualMaps.Count; vi = vi + 1) {
+                    ChartVisualMap vm = o.visualMaps[vi];
+                    if (vm.rangeColors.Count < 2 || !vm.hasMin || !vm.hasMax
+                        || vm.maxV <= vm.minV) { continue; }
+                    int vd = vm.dimension >= 0 ? vm.dimension : 0;
+                    if (vd >= row.Count) { continue; }
+                    int tF = (int)(((long)row[vd] * 1000 - (long)vm.minV) * 1000L
+                        / (long)(vm.maxV - vm.minV));
+                    if (tF < 0) { tF = 0; }
+                    if (tF > 1000) { tF = 1000; }
+                    col = ChartVisualMap.Lerp(vm.rangeColors, tF);
+                    break;
+                }
+                col = Chart.WithAlpha(col, alpha);
+                List<int> px = new List<int>();
+                List<int> py = new List<int>();
+                for (int d = 0; d < dims; d = di2(d, row, dims)) {
+                    int ax = plotX + d * plotW / (dims - 1);
+                    int span = hi[d] - lo[d];
+                    if (span < 1) { span = 1; }
+                    int v = d < row.Count ? row[d] : lo[d];
+                    if (d < o.parAxes.Count && o.parAxes[d].inverse
+                        && !o.parAxes[d].minSet && !o.parAxes[d].maxSet) {
+                        v = hi[d] - (v - lo[d]);
+                    }
+                    int pyv = plotY + plotH - (v - lo[d]) * plotH / span;
+                    if (pyv < plotY) { pyv = plotY; }
+                    if (pyv > plotY + plotH) { pyv = plotY + plotH; }
+                    px.Add(ax);
+                    py.Add(pyv);
+                }
+                c.DrawPolyline(px, py, col, th);
+                // 命中：指针贴近任一轴上的该行顶点。
+                for (int d = 0; d < dims; d = d + 1) {
+                    if (d >= px.Count) { break; }
+                    int dx = mX - px[d];
+                    int dy = mY - py[d];
+                    if (dx * dx + dy * dy <= app.Scale(6) * app.Scale(6)) {
+                        ChartHit mh = ChartHit.Of(ChartElementType.LinePoint,
+                            ChartView.SeriesIndexOf(o, s), s.name, ri,
+                            "", 0, mX, mY);
+                        ChartView.OfferActiveHit(mh);
+                        break;
+                    }
+                }
+            }
+            slot = slot + 1;
+        }
+    }
+
+    // 行循环的维步进辅助（保持 for 头简洁）。
+    static int di2(int d, List<int> row, int dims) {
+        return d + 1;
+    }
+
+    // ---- themeRiver 主题河流 ----
+
+    static void DrawThemeRiver(App app, int x, int y, int w, int h,
+                               ChartOption o, int g) {
+        Canvas c = app.canvas;
+        Theme t = app.theme;
+        List<ChartSeries> series = o.series;
+
+        // 收集全体时间标签（保序去重）与名字表（跨系列合并）。
+        List<string> times = new List<string>();
+        List<string> names = new List<string>();
+        for (int si = 0; si < series.Count; si = si + 1) {
+            ChartSeries s = series[si];
+            if (s.custom != "themeRiver") { continue; }
+            for (int ti = 0; ti < s.riverTimes.Count; ti = ti + 1) {
+                string tm = s.riverTimes[ti];
+                bool seen = false;
+                for (int k = 0; k < times.Count; k = k + 1) {
+                    if (times[k] == tm) { seen = true; break; }
+                }
+                if (!seen) { times.Add(tm); }
+            }
+            for (int ni = 0; ni < s.riverNames.Count; ni = ni + 1) {
+                string nm = s.riverNames[ni];
+                bool seen2 = false;
+                for (int k = 0; k < names.Count; k = k + 1) {
+                    if (names[k] == nm) { seen2 = true; break; }
+                }
+                if (!seen2) { names.Add(nm); }
+            }
+        }
+        int nT = times.Count;
+        int nN = names.Count;
+        if (nT < 2 || nN < 1) { return; }
+
+        // 值矩阵 [name][time]（缺项 = 0）。
+        List<List<int>> grid = new List<List<int>>();
+        for (int ni = 0; ni < nN; ni = ni + 1) {
+            List<int> row = new List<int>();
+            for (int ti = 0; ti < nT; ti = ti + 1) { row.Add(0); }
+            grid.Add(row);
+        }
+        for (int si = 0; si < series.Count; si = si + 1) {
+            ChartSeries s = series[si];
+            if (s.hidden || s.custom != "themeRiver") { continue; }
+            for (int pi = 0; pi < s.riverTimes.Count; pi = pi + 1) {
+                int ti = -1;
+                for (int k = 0; k < nT; k = k + 1) {
+                    if (times[k] == s.riverTimes[pi]) { ti = k; break; }
+                }
+                if (ti < 0 || s.riverCat[pi] >= nN) { continue; }
+                grid[s.riverCat[pi]][ti] = grid[s.riverCat[pi]][ti]
+                    + s.riverVals[pi];
+            }
+        }
+
+        int plotTop = Chart.DrawPanelI(app, x, y, w, h, o.title, series,
+            o.iwid, o.showLegend);
+        // 时间轴类目：等距带状（boundaryGap 语义）。
+        ChartFrame f = Chart.BuildAxesR(app, x, y, w, h, plotTop, times,
+            o, series, 0 - 1, 0 - 1);
+
+        int totalMax = 0;
+        for (int ti = 0; ti < nT; ti = ti + 1) {
+            int sum = 0;
+            for (int ni = 0; ni < nN; ni = ni + 1) { sum = sum + grid[ni][ti]; }
+            if (sum > totalMax) { totalMax = sum; }
+        }
+        if (totalMax < 1) { totalMax = 1; }
+
+        int alpha = 255;
+        if (g < 1000) { alpha = 60 + 195 * g / 1000; }
+        if (alpha > 255) { alpha = 255; }
+
+        List<int> xs = new List<int>();
+        for (int ti = 0; ti < nT; ti = ti + 1) {
+            xs.Add(f.CatMid(ti, nT) * 256);
+        }
+
+        int mX = app.mouseX;
+        int mY = app.mouseY;
+        // 每列累计基线：上一带的顶 = 下一带的底。
+        List<int> baseRow = new List<int>();
+        for (int ti = 0; ti < nT; ti = ti + 1) { baseRow.Add(0); }
+        for (int ni = 0; ni < nN; ni = ni + 1) {
+            int baseCol = Chart.Palette(t, ni);
+            int colA = Chart.WithAlpha(baseCol, alpha * 7 / 10);
+            List<int> topFx = new List<int>();
+            List<int> topPath = new List<int>();
+            List<int> botFx = new List<int>();
+            List<int> botPath = new List<int>();
+            for (int ti = 0; ti < nT; ti = ti + 1) {
+                int lo = baseRow[ti];
+                int hiCum = lo + grid[ni][ti];
+                int botPix = f.plotY + f.plotH - lo * f.plotH / totalMax;
+                int topPix = f.plotY + f.plotH - hiCum * f.plotH / totalMax;
+                topFx.Add(xs[ti]);
+                topPath.Add(topPix * 256);
+                botFx.Add(xs[ti]);
+                botPath.Add(botPix * 256);
+            }
+            ChartView.FillBandFx(c, topFx, topPath, botFx, botPath,
+                colA, false, 255, 255, 179);
+            // 累计推进：下一带的底 = 本带的顶（按列累计）。
+            for (int ti2 = 0; ti2 < nT; ti2 = ti2 + 1) {
+                baseRow[ti2] = baseRow[ti2] + grid[ni][ti2];
+            }
+            // 命中：指针在带内（该列的本带上下界之间）。
+            for (int ti3 = 0; ti3 < nT; ti3 = ti3 + 1) {
+                if (mX < f.CatLeft(ti3, nT) || mX >= f.CatLeft(ti3, nT) + f.CatWidth(ti3, nT)) { continue; }
+                int lo2 = baseRow[ti3] - grid[ni][ti3];
+                int hi2 = baseRow[ti3];
+                int botPix = f.plotY + f.plotH - lo2 * f.plotH / totalMax;
+                int topPix = f.plotY + f.plotH - hi2 * f.plotH / totalMax;
+                if (mY >= topPix && mY <= botPix) {
+                    List<TooltipRow> rows = new List<TooltipRow>();
+                    rows.Add(TooltipRow.Of(baseCol, names[ni]));
+                    rows.Add(TooltipRow.Of(0, times[ti3] + "  "
+                        + Chart.Commas(grid[ni][ti3])));
+                    ChartView.TooltipCard(app, mX, mY,
+                        f.plotX + f.plotW, rows);
+                    break;
+                }
+            }
+        }
+    }
+
+    // ---- lines 非 geo 兜底 ----
+
+    static void DrawLinesCustom(App app, int x, int y, int w, int h,
+                                ChartOption o, int g) {
+        Canvas c = app.canvas;
+        Theme t = app.theme;
+        List<ChartSeries> series = o.series;
+        int plotTop = Chart.DrawPanelI(app, x, y, w, h, o.title, series,
+            o.iwid, o.showLegend);
+        // 点对数据：收集全部端点定标。
+        int mX = app.mouseX;
+        int mY = app.mouseY;
+        int alpha = 255;
+        if (g < 1000) { alpha = 60 + 195 * g / 1000; }
+        if (alpha > 255) { alpha = 255; }
+        int slot = 0;
+        for (int si = 0; si < series.Count; si = si + 1) {
+            ChartSeries s = series[si];
+            if (s.hidden || s.custom != "lines") { continue; }
+            int col = s.color;
+            if (col == 0) { col = Chart.Palette(t, slot); }
+            int colA = Chart.WithAlpha(col, alpha);
+            // data 里每项 points 对 [ [x,y],[x,y],... ]；
+            // 引擎把坐标对的序列挂在 series.points。
+            if (s.points.Count >= 2) {
+                int nPts = s.points.Count / 2;
+                for (int li = 0; li < nPts; li = li + 1) {
+                    int x0 = s.points[li * 2].x;
+                    int y0 = s.points[li * 2].y;
+                    int x1 = s.points[li * 2 + 1].x;
+                    int y1 = s.points[li * 2 + 1].y;
+                    c.DrawLine(x0, y0, x1, y1, colA, app.Scale(1));
+                }
+            }
+            slot = slot + 1;
+        }
+    }
+}
