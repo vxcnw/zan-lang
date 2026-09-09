@@ -1728,6 +1728,12 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
     add_dependencies(zan_gui_gl_aa_test zan_gui)
     add_test(NAME runtime_gui_gl_aa COMMAND zan_gui_gl_aa_test $<TARGET_FILE:zan_gui>)
     set_tests_properties(runtime_gui_gl_aa PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(zan_gui_gl_3d_test tests/runtime/gui_gl_3d_test.c)
+    target_link_libraries(zan_gui_gl_3d_test PRIVATE ${CMAKE_DL_LIBS})
+    add_dependencies(zan_gui_gl_3d_test zan_gui)
+    add_test(NAME runtime_gui_gl_3d COMMAND zan_gui_gl_3d_test $<TARGET_FILE:zan_gui>)
+    set_tests_properties(runtime_gui_gl_3d PROPERTIES SKIP_RETURN_CODE 77)
   endif()
 
   # A4: surface dimension validation -- rejects non-positive / oversize dims.

@@ -3911,6 +3911,45 @@ EXPORT void zan_gui_blit_image(
                                         (int)sh);
 }
 
+/* ---- 3D: meshes and depth-tested draws ---------------------------------
+ * Thin exports over the backend seam (gui_backend.h's mesh_create / draw3d).
+ * A mesh id is only valid on the backend that produced it, and mesh ids are
+ * handed out per backend switch: switching the rasterizer invalidates every
+ * id the caller holds (the Zan side re-uploads after RenderBackend changes,
+ * the same way it re-created blur slots). draw3d returns 1 when the triangles
+ * are in the surface's frame, 0 when the current backend cannot draw 3D --
+ * the caller then paints a 2D fallback instead of a hole. */
+EXPORT i32 zan_gui_mesh_create(
+    i32 surf_id, const float *verts, i32 count,
+    const unsigned short *indices, i32 index_count)
+{
+    if (surf_id < 0 || surf_id >= g_surface_count || !g_surfaces[surf_id])
+        return 0;
+    zan_surface_t *s = g_surfaces[surf_id];
+    if (!s->be || !s->be->mesh_create || !verts || count <= 0 ||
+        index_count <= 0 || !indices) return 0;
+    zan_mesh_data m;
+    m.verts = verts;
+    m.count = (int)count;
+    m.indices = indices;
+    m.index_count = (int)index_count;
+    return s->be->mesh_create(s, &m);
+}
+
+EXPORT i32 zan_gui_draw3d(
+    i32 surf_id, i32 mesh, const float *mvp, i32 color, const char *texture)
+{
+    if (surf_id < 0 || surf_id >= g_surface_count || !g_surfaces[surf_id])
+        return 0;
+    zan_surface_t *s = g_surfaces[surf_id];
+    if (!s->be || !s->be->draw3d || !mvp || mesh <= 0) return 0;
+    zan_draw3d d;
+    for (int i = 0; i < 16; i++) d.mvp[i] = mvp[i];
+    d.color = (u32)color;
+    d.texture = texture;
+    return s->be->draw3d(s, (int)mesh, &d);
+}
+
 /* ---- client-priority hit guards ----------------------------------------
  * The app draws controls flush with the window edge -- a scrollbar sits in
  * the last few pixels -- and the borderless frame's resize border on top of

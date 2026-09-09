@@ -612,6 +612,240 @@ static void gl_sync_to_cpu(zan_surface_t *s) {
     t->cpu_ahead = 1;   /* whatever runs next writes into s->pixels */
 }
 
+/* ------------------------------------------------------------- 3D pipeline
+ *
+ * Depth-tested, texture-mapped triangles drawn into the surface's FBO. The
+ * 2D batch above owns state (blending, scissor-off, no depth), so every 3D
+ * draw is a self-contained pass: flush the 2D batch first, attach the lazy
+ * depth renderbuffer, set its own program/VAO, draw, and restore 2D state.
+ * Y is flipped inside the shader (surface space is top-down, like the 2D
+ * path), so an app composes one matrix chain and both backends agree. */
+
+#define ZGL_MESH_VCAP 24
+typedef struct {
+    zgl_uint vbo, ebo, vao;
+    int index_count;
+    int used;
+} zgl_mesh;
+
+static zgl_mesh g_zgl_meshes[ZGL_MESH_VCAP];
+
+/* Lazily created per-target depth attachment (kept across frames; grown with
+ * the surface resize in zgl_target_of by the drop-recreate there). */
+static zgl_uint zgl_depth_of(zgl_target *t) {
+    static zgl_uint rb[64];
+    static int rw[64], rh[64];
+    if (t - g_zgl_targets < 0 || t - g_zgl_targets >= 64) return 0;
+    int slot = (int)(t - g_zgl_targets);
+    if (rb[slot] && rw[slot] == t->w && rh[slot] == t->h) return rb[slot];
+    if (rb[slot]) gl.DeleteRenderbuffers(1, &rb[slot]);
+    rb[slot] = 0;
+    gl.GenRenderbuffers(1, &rb[slot]);
+    gl.BindRenderbuffer(ZGL_RENDERBUFFER, rb[slot]);
+    gl.RenderbufferStorage(ZGL_RENDERBUFFER, ZGL_DEPTH_COMPONENT16,
+                           t->w, t->h);
+    gl.FramebufferRenderbuffer(ZGL_FRAMEBUFFER, ZGL_DEPTH_ATTACHMENT,
+                               ZGL_RENDERBUFFER, rb[slot]);
+    rw[slot] = t->w;
+    rh[slot] = t->h;
+    return rb[slot];
+}
+
+/* Texture for a draw: the runtime's image cache ("file path" or "mem:" key),
+ * uploaded linearly sampled; a 1x1 white stand-in when there is none, so a
+ * plain-coloured mesh needs no null branch in the shader. */
+static zgl_uint zgl_3d_texture(const char *path, int *out_w, int *out_h) {
+    static zgl_uint white = 0;
+    struct { const char *key; zgl_uint tex; int w, h; } cache[8];
+    static int cache_n = 0;
+    *out_w = *out_h = 1;
+    if (!white) {
+        gl.GenTextures(1, &white);
+        gl.BindTexture(ZGL_TEXTURE_2D, white);
+        gl.TexParameteri(ZGL_TEXTURE_2D, ZGL_TEXTURE_MIN_FILTER, ZGL_LINEAR);
+        gl.TexParameteri(ZGL_TEXTURE_2D, ZGL_TEXTURE_MAG_FILTER, ZGL_LINEAR);
+        gl.TexParameteri(ZGL_TEXTURE_2D, ZGL_TEXTURE_WRAP_S, ZGL_CLAMP_TO_EDGE);
+        gl.TexParameteri(ZGL_TEXTURE_2D, ZGL_TEXTURE_WRAP_T, ZGL_CLAMP_TO_EDGE);
+        unsigned int px = 0xFFFFFFFFu;
+        gl.TexImage2D(ZGL_TEXTURE_2D, 0, ZGL_RGBA8, 1, 1, 0, ZGL_RGBA,
+                      ZGL_UNSIGNED_BYTE, &px);
+    }
+    if (!path || !path[0]) return white;
+    zan_img_t *e = zan_img_find(path);
+    if (!e && strncmp(path, "mem:", 4) == 0) e = zan_img_mem_find(path);
+    if (!e) return white;
+    for (int i = 0; i < cache_n; i++)
+        if (strcmp(cache[i].key, path) == 0) {
+            *out_w = cache[i].w; *out_h = cache[i].h;
+            return cache[i].tex;
+        }
+    zgl_uint tex = 0;
+    gl.GenTextures(1, &tex);
+    gl.BindTexture(ZGL_TEXTURE_2D, tex);
+    gl.TexParameteri(ZGL_TEXTURE_2D, ZGL_TEXTURE_MIN_FILTER, ZGL_LINEAR);
+    gl.TexParameteri(ZGL_TEXTURE_2D, ZGL_TEXTURE_MAG_FILTER, ZGL_LINEAR);
+    gl.TexParameteri(ZGL_TEXTURE_2D, ZGL_TEXTURE_WRAP_S, ZGL_CLAMP_TO_EDGE);
+    gl.TexParameteri(ZGL_TEXTURE_2D, ZGL_TEXTURE_WRAP_T, ZGL_CLAMP_TO_EDGE);
+    gl.PixelStorei(ZGL_UNPACK_ROW_LENGTH, 0);
+    /* zan_img_t holds ARGB32 (a<<24|r<<16|g<<8|b, memory B,G,R,A); GL wants
+     * bytes in sampling order -- BGRA reads the same memory straight across. */
+    gl.TexImage2D(ZGL_TEXTURE_2D, 0, ZGL_RGBA8, e->w, e->h, 0, ZGL_BGRA,
+                  ZGL_UNSIGNED_BYTE, e->pix);
+    if (gl.GetError() != ZGL_NO_ERROR) { gl.DeleteTextures(1, &tex); return white; }
+    if (cache_n < 8) {
+        cache[cache_n].key = strdup(path);
+        cache[cache_n].tex = tex;
+        cache[cache_n].w = e->w;
+        cache[cache_n].h = e->h;
+        cache_n++;
+    } else {
+        /* Cache full: keep the texture alive for this frame only. */
+        return tex;
+    }
+    *out_w = e->w;
+    *out_h = e->h;
+    return tex;
+}
+
+static const char *ZGL_3D_VS =
+"#version 330 core\n"
+"uniform mat4 uMVP;\n"
+"uniform vec2 uViewport;\n"
+"in vec3 a_pos;\n"
+"in vec3 a_normal;\n"
+"in vec2 a_uv;\n"
+"out vec2 v_uv;\n"
+"out vec3 v_normal;\n"
+"void main() {\n"
+"    v_uv = a_uv;\n"
+"    v_normal = a_normal;\n"
+"    vec4 clip = uMVP * vec4(a_pos, 1.0);\n"
+/* Surface space is top-down: flip Y after projection so a Zan-composed matrix
+ * (Math3D.zan, +y up, -z forward) lands the way the 2D path reads pixels. */
+"    gl_Position = vec4(clip.x, -clip.y, clip.z, clip.w);\n"
+"}\n";
+
+static const char *ZGL_3D_FS =
+"#version 330 core\n"
+"uniform sampler2D uTex;\n"
+"uniform vec4 uColor;\n"
+"in vec2 v_uv;\n"
+"in vec3 v_normal;\n"
+"out vec4 frag;\n"
+"void main() {\n"
+/* Half-Lambert wrap keeps back faces readable without a second light. */
+"    float lam = clamp(dot(normalize(v_normal), normalize(vec3(0.4, 0.8, 0.6))) * 0.5 + 0.5, 0.0, 1.0);\n"
+"    float shade = 0.55 + 0.45 * lam;\n"
+"    vec4 tex = texture(uTex, v_uv);\n"
+"    frag = vec4(tex.rgb * uColor.rgb * shade, tex.a * uColor.a);\n"
+"}\n";
+
+static zgl_uint g_zgl_prog3d;
+static zgl_int g_zgl_u3d_mvp, g_zgl_u3d_tex, g_zgl_u3d_color;
+
+static int gl_mesh_create(zan_surface_t *s, const zan_mesh_data *m) {
+    (void)s;
+    if (g_gl_state <= 0 || !m || !m->verts || m->count <= 0 ||
+        m->count > 65536 || m->index_count <= 0 || !m->indices) return 0;
+    int slot = -1;
+    for (int i = 0; i < ZGL_MESH_VCAP; i++)
+        if (!g_zgl_meshes[i].used) { slot = i; break; }
+    if (slot < 0) return 0;
+    zgl_mesh *ms = &g_zgl_meshes[slot];
+    if (!g_zgl_prog3d) {
+        g_zgl_prog3d = zgl_link(ZGL_3D_VS, ZGL_3D_FS);
+        if (!g_zgl_prog3d) return 0;
+        g_zgl_u3d_mvp = gl.GetUniformLocation(g_zgl_prog3d, "uMVP");
+        g_zgl_u3d_tex = gl.GetUniformLocation(g_zgl_prog3d, "uTex");
+        g_zgl_u3d_color = gl.GetUniformLocation(g_zgl_prog3d, "uColor");
+    }
+    zan_gl_ctx_make_current();
+    gl.GenVertexArrays(1, &ms->vao);
+    gl.BindVertexArray(ms->vao);
+    gl.GenBuffers(1, &ms->vbo);
+    gl.BindBuffer(ZGL_ARRAY_BUFFER, ms->vbo);
+    gl.BufferData(ZGL_ARRAY_BUFFER,
+                  (zgl_sizeiptr)(size_t)m->count * 8 * sizeof(float),
+                  m->verts, ZGL_STATIC_DRAW);
+    gl.GenBuffers(1, &ms->ebo);
+    gl.BindBuffer(ZGL_ELEMENT_ARRAY_BUFFER, ms->ebo);
+    gl.BufferData(ZGL_ELEMENT_ARRAY_BUFFER,
+                  (zgl_sizeiptr)(size_t)m->index_count * sizeof(unsigned short),
+                  m->indices, ZGL_STATIC_DRAW);
+    struct { const char *name; int size; size_t off; } a[] = {
+        { "a_pos", 3, 0 }, { "a_normal", 3, 3 * sizeof(float) },
+        { "a_uv", 2, 6 * sizeof(float) },
+    };
+    for (size_t i = 0; i < 3; i++) {
+        zgl_int loc = gl.GetAttribLocation(g_zgl_prog3d, a[i].name);
+        if (loc >= 0) {
+            gl.EnableVertexAttribArray((zgl_uint)loc);
+            gl.VertexAttribPointer((zgl_uint)loc, a[i].size, ZGL_FLOAT,
+                                   ZGL_FALSE, 8 * (zgl_sizei)sizeof(float),
+                                   (const void *)a[i].off);
+        }
+    }
+    gl.BindVertexArray(0);
+    ms->index_count = m->index_count;
+    ms->used = 1;
+    return slot + 1;   /* 1-based mesh id; 0 stays "no mesh" */
+}
+
+static int gl_draw3d(zan_surface_t *s, int mesh, const zan_draw3d *d) {
+    if (g_gl_state <= 0 || !d) return 0;
+    if (mesh <= 0 || mesh > ZGL_MESH_VCAP || !g_zgl_meshes[mesh - 1].used)
+        return 0;
+    zgl_target *t = zgl_target_of(s);
+    if (!t) return 0;
+    zgl_flush();               /* 2D batch lands before the 3D pass */
+    zgl_upload(s, t);          /* newest CPU pixels in, incl. clear_rect */
+    if (!g_zgl_prog3d) return 0;
+    gl.BindFramebuffer(ZGL_FRAMEBUFFER, t->fbo);
+    zgl_depth_of(t);
+    gl.Viewport(0, 0, t->w, t->h);
+    /* The depth renderbuffer starts at 1.0 and only the 3D pass writes it, so
+     * clearing it here is what makes two 3D passes on one frame independent;
+     * colour keeps whatever the 2D passes painted. */
+    gl.ClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    gl.Clear(ZGL_DEPTH_BUFFER_BIT);
+    gl.Enable(ZGL_DEPTH_TEST);
+    gl.DepthFunc(ZGL_LEQUAL);
+    gl.Disable(ZGL_BLEND);
+    gl.UseProgram(g_zgl_prog3d);
+    gl.UniformMatrix4fv(g_zgl_u3d_mvp, 1, ZGL_FALSE, d->mvp);
+    gl.Uniform4f(g_zgl_u3d_color,
+                 (float)((d->color >> 16) & 0xFF) / 255.0f,
+                 (float)((d->color >> 8) & 0xFF) / 255.0f,
+                 (float)(d->color & 0xFF) / 255.0f,
+                 (float)((d->color >> 24) & 0xFF) / 255.0f);
+    int tw, th;
+    zgl_uint tex = zgl_3d_texture(d->texture, &tw, &th);
+    gl.ActiveTexture(ZGL_TEXTURE0);
+    gl.BindTexture(ZGL_TEXTURE_2D, tex);
+    gl.Uniform1i(g_zgl_u3d_tex, 0);
+    zgl_mesh *ms = &g_zgl_meshes[mesh - 1];
+    gl.BindVertexArray(ms->vao);
+    gl.DrawElements(ZGL_TRIANGLES, ms->index_count, ZGL_UNSIGNED_SHORT, 0);
+    gl.BindVertexArray(0);
+    gl.Disable(ZGL_DEPTH_TEST);
+    gl.Enable(ZGL_BLEND);
+    gl.BindFramebuffer(ZGL_FRAMEBUFFER, t->fbo);
+    t->gpu_ahead = 1;
+    return 1;
+}
+
+static void gl_mesh_drop_all(void) {
+    if (g_gl_state <= 0) return;
+    for (int i = 0; i < ZGL_MESH_VCAP; i++) {
+        zgl_mesh *ms = &g_zgl_meshes[i];
+        if (!ms->used) continue;
+        gl.DeleteBuffers(1, &ms->vbo);
+        gl.DeleteBuffers(1, &ms->ebo);
+        gl.DeleteVertexArrays(1, &ms->vao);
+        memset(ms, 0, sizeof(*ms));
+    }
+}
+
 static void gl_sync_from_cpu(zan_surface_t *s) {
     if (g_gl_state <= 0) return;
     zgl_target *t = zgl_target_of(s);
@@ -1331,6 +1565,8 @@ static const zan_gui_backend zan_gl_backend = {
     .draw_text    = NULL,
     .glyph_run    = gl_glyph_run,
     .blit_image   = NULL,
+    .mesh_create  = gl_mesh_create,
+    .draw3d       = gl_draw3d,
     .set_clip     = gl_set_clip,
     .flush        = gl_flush,
     .read_pixels  = gl_read_pixels,
@@ -1356,4 +1592,5 @@ int zan_gui_internal_gl_install(void) {
 void zan_gui_internal_gl_drop_present(void) {
     if (g_gl_state <= 0) return;
     zan_gl_ctx_present_drop_all();
+    gl_mesh_drop_all();
 }

@@ -59,6 +59,16 @@ typedef float         zgl_float;
 #define ZGL_RGBA8                        0x8058
 #define ZGL_NEAREST                      0x2600
 #define ZGL_LINEAR                       0x2601
+#define ZGL_DEPTH_TEST                   0x0B71
+#define ZGL_LEQUAL                       0x0203
+#define ZGL_DEPTH_COMPONENT              0x1902
+#define ZGL_DEPTH_COMPONENT16            0x81A5
+#define ZGL_DEPTH_ATTACHMENT             0x8D00
+#define ZGL_RENDERBUFFER                 0x8D41
+#define ZGL_ELEMENT_ARRAY_BUFFER         0x8893
+#define ZGL_UNSIGNED_SHORT               0x1403
+#define ZGL_UNSIGNED_INT                 0x1405
+#define ZGL_DEPTH_BUFFER_BIT             0x00000100
 #define ZGL_TEXTURE_MAG_FILTER           0x2800
 #define ZGL_TEXTURE_MIN_FILTER           0x2801
 #define ZGL_TEXTURE_WRAP_S               0x2802
@@ -68,6 +78,7 @@ typedef float         zgl_float;
 #define ZGL_TEXTURE1                     0x84C1
 #define ZGL_ARRAY_BUFFER                 0x8892
 #define ZGL_STREAM_DRAW                  0x88E0
+#define ZGL_STATIC_DRAW                  0x88E4
 #define ZGL_FRAGMENT_SHADER              0x8B30
 #define ZGL_VERTEX_SHADER                0x8B31
 #define ZGL_COMPILE_STATUS               0x8B81
@@ -97,6 +108,8 @@ typedef struct zan_gl_api_s {
     zgl_enum  (*GetError)(void);
     const zgl_char *(*GetString)(zgl_enum);
     void      (*DrawArrays)(zgl_enum, zgl_int, zgl_sizei);
+    void      (*DrawElements)(zgl_enum, zgl_sizei, zgl_enum, const void *);
+    void      (*DepthFunc)(zgl_enum);
     void      (*ReadPixels)(zgl_int, zgl_int, zgl_sizei, zgl_sizei,
                             zgl_enum, zgl_enum, void *);
     /* --- shaders -------------------------------------------------------- */
@@ -118,6 +131,9 @@ typedef struct zan_gl_api_s {
     zgl_int   (*GetAttribLocation)(zgl_uint, const zgl_char *);
     void      (*Uniform1i)(zgl_int, zgl_int);
     void      (*Uniform2f)(zgl_int, zgl_float, zgl_float);
+    void      (*Uniform4f)(zgl_int, zgl_float, zgl_float, zgl_float, zgl_float);
+    void      (*UniformMatrix4fv)(zgl_int, zgl_sizei, zgl_boolean,
+                                  const zgl_float *);
     /* --- buffers -------------------------------------------------------- */
     void      (*GenBuffers)(zgl_sizei, zgl_uint *);
     void      (*DeleteBuffers)(zgl_sizei, const zgl_uint *);
@@ -145,6 +161,12 @@ typedef struct zan_gl_api_s {
     void      (*BindFramebuffer)(zgl_enum, zgl_uint);
     void      (*FramebufferTexture2D)(zgl_enum, zgl_enum, zgl_enum, zgl_uint,
                                       zgl_int);
+    void      (*GenRenderbuffers)(zgl_sizei, zgl_uint *);
+    void      (*DeleteRenderbuffers)(zgl_sizei, const zgl_uint *);
+    void      (*BindRenderbuffer)(zgl_enum, zgl_uint);
+    void      (*RenderbufferStorage)(zgl_enum, zgl_enum, zgl_sizei, zgl_sizei);
+    void      (*FramebufferRenderbuffer)(zgl_enum, zgl_enum, zgl_enum,
+                                         zgl_uint);
     zgl_enum  (*CheckFramebufferStatus)(zgl_enum);
     /* Presentation: the finished frame is copied from the surface's FBO to the
      * window's back buffer, so presenting needs no shader or geometry of its

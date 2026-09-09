@@ -87,6 +87,37 @@ typedef struct {
     const zan_glyph_item *items;
 } zan_glyph_run;
 
+/* --- 3D: meshes, a camera and depth-tested draws ----------------------------
+ *
+ * The 2D primitives above paint into the surface in call order with no depth;
+ * 3D content needs a z-buffer and texture-mapped triangles, so it crosses the
+ * seam as a small orthogonal set: a mesh is uploaded once and referenced by
+ * id, a draw names the mesh, its model-view-projection matrix (column-major
+ * float[16], the convention Math3D.zan composes) and an optional texture, and
+ * the backend depth-tests the triangles into its own attachment. Everything
+ * between draws still goes through the 2D path, and a surface that never
+ * draws 3D never pays for a depth attachment (it is created lazily on the
+ * first draw3d).
+ *
+ * Vertex layout (interleaved floats): px, py, pz, nx, ny, nz, u, v -- 8 floats
+ * per vertex, `count` vertices, then `index_count` uint16 indices. `count == 0`
+ * makes a draw a no-op; a texture of NULL samples a 1x1 white pixel so
+ * untextured meshes need no special case. */
+typedef struct {
+    const float *verts;      /* count * 8 floats */
+    int count;
+    const unsigned short *indices;
+    int index_count;
+} zan_mesh_data;
+
+typedef struct {
+    float mvp[16];           /* column-major model-view-projection */
+    uint32_t color;          /* 0xAARRGGBB, multiplies the texture */
+    /* Image key into the runtime's cache: a file path or a "mem:" key loaded
+     * via zan_gui_image_load_mem, or NULL/"" for a plain 1x1 white texture. */
+    const char *texture;
+} zan_draw3d;
+
 typedef struct zan_gui_backend_s {
     const char *name;   /* "cpu", "gl", ... */
 
@@ -179,6 +210,19 @@ typedef struct zan_gui_backend_s {
     void (*blit_image)(struct zan_surface_s *s, const char *path,
                        int dx, int dy, int dw, int dh,
                        int sx, int sy, int sw, int sh);
+
+    /* --- 3D --------------------------------------------------------------- */
+    /* Uploads a mesh and returns a backend-local id (>0), 0 on refusal. The
+     * data is copied; the caller frees its buffers right after. Meshes live
+     * for the process (scenes reuse the same geometry across frames), so
+     * there is deliberately no per-mesh destroy: the whole table goes with
+     * the GL context when the backend is dropped. */
+    int  (*mesh_create)(struct zan_surface_s *s, const zan_mesh_data *m);
+    /* Depth-tested, texture-mapped triangle draw into the surface's 3D layer.
+     * Left NULL (CPU backend), the export falls back to nothing: the 3D part
+     * of the frame is skipped rather than half-drawn, and zan_gui_draw3d
+     * reports that to the caller through its return value. */
+    int  (*draw3d)(struct zan_surface_s *s, int mesh, const zan_draw3d *d);
 
     /* --- state and frame boundaries ------------------------------------- */
     void (*set_clip)(struct zan_surface_s *s, int x0, int y0, int x1, int y1);
