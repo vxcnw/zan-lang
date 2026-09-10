@@ -424,7 +424,14 @@ partial class ChartView {
             if (gs.hPct >= 0 || gs.hPx >= 0) {
                 int hAbs = gs.hPct >= 0 ? h * gs.hPct / 100 : app.Scale(gs.hPx);
                 if (gs.tPct >= 0 || gs.tPx >= 0) { gy1 = gy0 + hAbs; }
-                else { gy0 = gy1 - hAbs; }
+                else if (gs.bPct >= 0 || gs.bPx >= 0) { gy0 = gy1 - hAbs; }
+                else {
+                    // ECharts 缺省：height 声明而 top/bottom 全缺时
+                    // 按 top:60 顶锚（grid-multiple 上格只写 height，
+                    // 底锚会把它画到面板底部与下格重叠并被盖住）。
+                    gy0 = y + headerH;
+                    gy1 = gy0 + hAbs;
+                }
             }
             if (gy1 - gy0 < app.Scale(40) || gx1 - gx0 < app.Scale(40)) { continue; }
 

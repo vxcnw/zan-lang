@@ -1675,16 +1675,17 @@ null 解引用那半同理：普通 `obj.f` 直接 fault，加通用守卫是每
 
 * **A263 图表引擎对照 ECharts 6.1 的全量能力缺口盘点（2026-09-10，登记未修；用户指令"照 6.1 最新版"后逐能力域 grep 复核）**：用户连报 16 个 demo"和官方演示不一致"后做的两轮盘点（demo 逐个判定 + 组件级全量对照）。**定性结论**：引擎自述仍是「ECharts 2.2.x 声明性子集」（Chart.zan:7），此前"全部缓存 6.1"落在**色板/部分缺省值**层面（smooth=false、title left=center、splitArea 随 5.x 关、v6 色板），配置面/交互面/动态面与 6.1 的差距是系统性的。分四档登记：
 
-  **▶ A263-1 致命：整族空板/错位（渲染结果与官方完全不同）**
-  * [ ] **treemap/sunburst/tree 的 JSON 数据通道缺失**：FromJsonValue 无 children/层级解析（grep Get("children") 零命中），JSON 系列拿空 tree 列表 → 空板。渲染器本体存在（ChartViewHier.zan）。这是唯一整族空板的硬缺口。
-  * [ ] **polar 值-值极坐标不存在**：angleAxis/radiusAxis 全仓零解析；polar 键只按 ECharts2 雷达数组形态读（ChartModel.zan:4403），`polar:{}` 对象跳过；series coordinateSystem:'polar' 无分派 → line-polar/line-polar2 的 [radius,angle] 螺线数据被当 [x,y] 画直角折线（用户报"极坐标双数值轴数据不对"）。
-  * [ ] **多 grid 声明 height 无 top 时底边锚定**：`gy0 = gy1 - hAbs`（ChartViewLine.zan:423-427）；ECharts 缺省 top:60 顶锚 → grid-multiple（雨量蒸发量）上格画到底部与下格重叠并被后画的下格面板背景盖住（用户报"只有下面的表"）。
-  * [ ] **markLine 两点 coord 形式在类目轴坐标域错位**：f.xLo/xHi 只在 Value/time 轴赋真实域（Chart.zan:3084-3085），类目轴保持 0..100 缺省 → coord 斜线被压在最左侧（line-markline 症状之一）；label.formatter 无 {b}/{c} 占位展开、label.position 全系不支持（ChartViewShared.zan:1166-1175）。
-  * [ ] **对数轴是整数 floor-log10 量化**：Chart.Log10 取整（Chart.zan:1545、259），同一十进制档内所有值同高 → 曲线台阶状非连续对数；域钳 ≥1（官方可 0.1）；无 logBase/minorSplitLine（line-log"数据不一致"根因）。
+  **▶ A263-1 致命：整族空板/错位（渲染结果与官方完全不同）**（五项已于 2026-09-10 全部修复，ctest conformance_chart 26/26 + 截图逐个目检）
+  * [x] **treemap/sunburst/tree 的 JSON 数据通道缺失**：新增 ChartOption.ParseTree 递归解析 {name,value,children}（ChartModel.zan:3370），系列解析末尾 `ParseTree(s.Get("data"), cs.tree)`；渲染器本体在（ChartViewHier.zan）。
+  * [x] **polar 值-值极坐标不存在**：新增 PolarAxisSpec + ParsePolarAxes（angleAxis/radiusAxis 对象与数组形态、polarIndex/min/max/startAngle/endAngle/boundaryGap/data 类目）；`polar:{}` 对象形态落 RadarPolar[0]（圆心/外径）；series coordinateSystem:'polar' → coordSys="polar"，DispatchKind 分派 "polarCoord" → DrawPolarCoord（ChartViewPolar.zan：圆框网格 + cos/sin 投影，值轴 NiceRange、角度 0..360 四分、类目槽位均分）。**两条定点契约**：①数据投影全程保持 ×1000 milliunit（提前除回整数会把半径量化成刻度台阶、角度 ×1000 再 mod 360 锯齿——line-polar 心脏线两轮返工的根因）；②非整度角用 SinDegX10/CosDegX10（整度线性内插），跨 cos/sin 的 y 取负完成数学角→屏幕角。DrawOption/Clone/Create 三处都要拷 angleAxes/radiusAxes（漏 DrawOption → 渲染拿到空轴回落 startAngle=90，整图转 90°）。值-值数据序 [radius, angle, (value)] 进 points（x=r, y=θ, z=value, pointG=1000）。已验：line-polar 心脏线/line-polar2 四瓣玫瑰（0..0.5 域 0..1 轴）/scatter-polar-punchCard 168 点阵。bar-polar 族的扇形柱未落（DrawPolarCoord 跳过 Bar 系列，只剩圆框）→ 转入 A263-3 后续。
+  * [x] **多 grid 声明 height 无 top 时底边锚定**：缺省顶锚 top:60（ChartViewLine.zan:423）；grid-multiple 两面板各归其位（截图验证）。
+  * [x] **markLine 两点 coord 形式在类目轴坐标域错位**：类目轴按 CatX 槽位映射（ChartViewShared.zan:1078）；line-markline 对角 coord 线落在正确槽位（截图验证）。{b}/{c} 占位与 label.position 仍未做 → A263-3。
+  * [x] **对数轴是整数 floor-log10 量化**：ChartFrame.Log10F 定点 lg（×1000，整数段循环 + 四段折线 mantissa，误差 <0.03 档），YOfLog/ValueAtY 走 long 定点域（Chart.zan:259-330）；line-log 平滑连续无台阶（截图验证）。logBase/minorSplitLine 仍未做 → A263-3。
+  * [ ] **（本日新发现）radar 组件数组形态不解析**：`radar:[{indicator,...},{...}]`（ECharts5 多雷达）只读对象形态（ChartModel.zan:4463 IsObject 门），数组整块跳过 → radar-custom 的 5/6 指示器丢失、系列 data 名 "Data A/B" 被当轴标签画成双轴雷达。HEAD 已如此（非本次回归）。
 
   **▶ A263-2 严重：交互/缩放语义缺失（demo 能画但行为对不上）**
   * [ ] **dataZoom 只有滑条**：type:'inside' 键本身不读（ParseDataZoom 只认 show/start/end/startValue/endValue，ChartModel.zan:3163-3180）；无滚轮/捏合/绘图区拖拽框选；数组只取首项（y 轴 zoom 整条丢）；xAxisIndex/yAxisIndex/filterMode/minValueSpan/brushSelect 全不读；数值型 startValue/endValue 无效（只按类目名查字符串，Chart.zan:1914-1917，line-function 的 ±20 窗口丢失）。brush 全仓零命中。area-simple"坐标轴不随可见区域"根因=**Y 轴量程恒扫全量数据**（AxisMaxFor 无窗口参数，Chart.zan:2941），X 窗口化了 Y 没跟；sampling:'lttb' 无解析不抽稀。
-  * [ ] **emphasis 渐隐聚焦整体缺失**：emphasis.focus 字段（ChartModel.zan:1354，本日新加）无 JSON 读取、无渲染消费；悬停只出 tooltip/十字线，不渐隐其他系列不加粗本系列（bump-chart 官方核心观感）；axisPointer cross 十字有渲染实现但挂私有键 pointerCross（2289）无 JSON setter；axisPointer link 多格联动零解析；tooltip 只读 show/trigger，formatter/position/order/valueFormatter 全丢。
+  * [ ] **emphasis 渐隐聚焦整体缺失**：emphasis.focus 字段（ChartModel.zan:1354，本日新加）无 JSON 读取、无渲染消费；悬停只出 tooltip/十字线，不渐隐其他系列不加粗本系列（bump-chart 官方核心观感）；axisPointer cross 十字有渲染实现、JSON setter 已接（tooltip.axisPointer.type:"cross" → o.pointerCross，ChartModel.zan:4465）但仅直角坐标渲染器消费，极坐标/多格联动未接；axisPointer link 多格联动零解析；tooltip 只读 show/trigger，formatter/position/order/valueFormatter 全丢。
   * [ ] **动态数据无驱动路径**：ChartController.SetOption/AppendData API 在（ChartController.zan:213-280）但无 timer 接线，gallery 全静态 → dynamic-data/dynamic-data2/line-race/graph-force-dynamic 的 setInterval 语义全靠静态化数据（登记过的 JS_CALLBACK_REPLACED 类，但"应该动起来"的用户期待需内置驱动）；series animationEasing/animationDuration 无解析，line-easing 的 31 宫格核心表达（逐面板不同缓动）退化为 31 条静态曲线。
   * [ ] **line-pen 点击加点**：Click 事件在（ChartView.zan:406），gallery 无"点击 append"接线（JS 类登记偏差，但可作为引擎级 brush/drag 能力的验收 demo）。
 

@@ -629,6 +629,53 @@ class ChartParAxis {
     }
 }
 
+/// ECharts 5/6 极坐标的一根轴（angleAxis / radiusAxis）：值轴或
+/// 类目轴。圆心/外径在 polar 组件（RadarPolar 已承载），量程、
+/// 类目与角度基准在这——coordinateSystem:"polar" 的系列经
+/// polarIndex 绑定到第几组角度/半径轴。
+class PolarAxisSpec {
+    bool isAngle;       // true = angleAxis，false = radiusAxis
+    ChartAxisType type; // Value（ECharts 极轴缺省）/ Category
+    int polarIndex;     // 绑定第几个 polar（缺省 = 数组槽位）
+    int min;            // 显式量程；minSet=false 时从数据推导
+    int max;
+    bool minSet;
+    bool maxSet;
+    int startAngle;     // 仅角度轴：起始数学角（ECharts 缺省 90 = 12 点）
+    int endAngle;       // 仅角度轴：0 = 未声明（满圈）
+    bool boundaryGap;   // 类目轴（缺省 true：点落在带中央）
+    List<string> cats;  // 类目数据
+
+    static PolarAxisSpec Of(bool angle) {
+        PolarAxisSpec a = new PolarAxisSpec();
+        a.isAngle = angle;
+        a.type = ChartAxisType.Value;
+        a.polarIndex = 0;
+        a.min = ChartOption.Auto();
+        a.max = ChartOption.Auto();
+        a.minSet = false; a.maxSet = false;
+        a.startAngle = 90;
+        a.endAngle = 0;
+        a.boundaryGap = true;
+        a.cats = new List<string>();
+        return a;
+    }
+
+    static PolarAxisSpec Clone(PolarAxisSpec src) {
+        if (src == null) { return null; }
+        PolarAxisSpec a = PolarAxisSpec.Of(src.isAngle);
+        a.type = src.type;
+        a.polarIndex = src.polarIndex;
+        a.min = src.min; a.max = src.max;
+        a.minSet = src.minSet; a.maxSet = src.maxSet;
+        a.startAngle = src.startAngle;
+        a.endAngle = src.endAngle;
+        a.boundaryGap = src.boundaryGap;
+        for (int i = 0; i < src.cats.Count; i = i + 1) { a.cats.Add(src.cats[i]); }
+        return a;
+    }
+}
+
 /// Event River 的一个事件：名称、时间区间 [start, end]、值
 /// （驱动带宽）、可选颜色。普通标量 data 兼容转换为等距事件。
 class ChartEvent {
@@ -2259,6 +2306,8 @@ class ChartOption {
     List<ChartGeo> geos;   // ECharts geo 组件（底图地图，可多个）
     List<ChartCalendarSpec> calendars; // ECharts calendar[]（日历坐标系）
     List<ChartParAxis> parAxes; // ECharts parallelAxis[]（平行坐标维）
+    List<PolarAxisSpec> angleAxes;  // ECharts angleAxis（对象或数组，polarIndex 绑定）
+    List<PolarAxisSpec> radiusAxes; // ECharts radiusAxis
     // parallel 组件：layout 命名轴的"排布方向"——'vertical'（轴自上
     // 而下堆叠，每根轴横置，nutrients 官方图）| 'horizontal'（轴从
     // 左到右排开，每根轴竖置）。缺省 horizontal（与 ECharts 2.x
@@ -2444,6 +2493,14 @@ class ChartOption {
         for (int pai = 0; pai < src.parAxes.Count; pai = pai + 1) {
             o.parAxes.Add(ChartParAxis.Clone(src.parAxes[pai]));
         }
+        o.angleAxes = new List<PolarAxisSpec>();
+        for (int pai2 = 0; pai2 < src.angleAxes.Count; pai2 = pai2 + 1) {
+            o.angleAxes.Add(PolarAxisSpec.Clone(src.angleAxes[pai2]));
+        }
+        o.radiusAxes = new List<PolarAxisSpec>();
+        for (int pai3 = 0; pai3 < src.radiusAxes.Count; pai3 = pai3 + 1) {
+            o.radiusAxes.Add(PolarAxisSpec.Clone(src.radiusAxes[pai3]));
+        }
         o.dataRangeList = new List<ChartRangeSplit>();
         for (int i = 0; i < src.dataRangeList.Count; i = i + 1) {
             o.dataRangeList.Add(ChartRangeSplit.Clone(src.dataRangeList[i]));
@@ -2467,6 +2524,8 @@ class ChartOption {
         o.geos = new List<ChartGeo>();
         o.calendars = new List<ChartCalendarSpec>();
         o.parAxes = new List<ChartParAxis>();
+        o.angleAxes = new List<PolarAxisSpec>();
+        o.radiusAxes = new List<PolarAxisSpec>();
         o.parLayout = "";
         o.defaultType = ChartType.Line;
         o.showLegend = true;
@@ -3298,6 +3357,26 @@ class ChartOption {
         }
     }
 
+    /// series.data 的层级数据通道（tree/treemap/sunburst 官方形态）：
+    /// [{name, value, children:[...]}...] 递归。value 缺省 0（组节点
+    /// 由渲染器按子树累计）。此通道此前缺失，JSON 声明的三类层级
+    /// 系列拿到空 tree → 空板。
+    static void ParseTree(JsonValue v, List<ChartNode> into) {
+        if (v == null || !v.IsArray()) { return; }
+        for (int i = 0; i < v.Count(); i = i + 1) {
+            JsonValue it = v.At(i);
+            if (!it.IsObject()) { continue; }
+            string name = it.Str("name", "");
+            JsonValue ch = it.Get("children");
+            List<ChartNode> kids = new List<ChartNode>();
+            if (ch != null && ch.IsArray()) { ChartOption.ParseTree(ch, kids); }
+            ChartNode n = kids.Count > 0
+                ? ChartNode.GroupVal(name, it.Int("value", 0), kids)
+                : ChartNode.Leaf(name, it.Int("value", 0));
+            into.Add(n);
+        }
+    }
+
     /// graph 系列的 links 解析：端点可以是节点名、id 字符串
     ///（les-miserables 的 "1"）或数字序号（graph-grid source:0）。
     /// 名字精确命中优先；否则按 gnames 序号解析；解析失败跳过。
@@ -3550,6 +3629,47 @@ class ChartOption {
             while (o.parAxes.Count < dim) { o.parAxes.Add(ChartParAxis.Of()); }
             if (o.parAxes.Count == dim) { o.parAxes.Add(ax); } else { o.parAxes[dim] = ax; }
         }
+    }
+
+    /// ECharts angleAxis/radiusAxis：对象或数组形态（数组按
+    /// polarIndex 声明落位，缺省用数组序）。
+    static void ParsePolarAxes(JsonValue v, ChartOption o, bool isAngle) {
+        if (v == null) { return; }
+        if (v.IsArray()) {
+            for (int i = 0; i < v.Count(); i = i + 1) {
+                ChartOption.ParsePolarAxisOne(v.At(i), o, isAngle, i);
+            }
+            return;
+        }
+        ChartOption.ParsePolarAxisOne(v, o, isAngle, 0);
+    }
+
+    static void ParsePolarAxisOne(JsonValue a, ChartOption o, bool isAngle,
+                                  int slot) {
+        if (a == null || !a.IsObject()) { return; }
+        PolarAxisSpec ax = PolarAxisSpec.Of(isAngle);
+        ax.polarIndex = a.Int("polarIndex", slot);
+        string ty = a.Str("type", "");
+        if (ty == "category") { ax.type = ChartAxisType.Category; }
+        else if (ty == "value") { ax.type = ChartAxisType.Value; }
+        if (a.Has("min")) { ax.min = a.Int("min", 0); ax.minSet = true; }
+        if (a.Has("max")) { ax.max = a.Int("max", 0); ax.maxSet = true; }
+        if (isAngle) {
+            ax.startAngle = a.Int("startAngle", ax.startAngle);
+            ax.endAngle = a.Int("endAngle", 0);
+        }
+        JsonValue da = a.Get("data");
+        if (da != null && da.IsArray()) {
+            ax.type = ChartAxisType.Category;
+            for (int i = 0; i < da.Count(); i = i + 1) {
+                ax.cats.Add(da.At(i).AsString(""));
+            }
+        }
+        JsonValue bg = a.Get("boundaryGap");
+        if (bg != null && bg.IsBool()) { ax.boundaryGap = bg.AsBool(true); }
+        List<PolarAxisSpec> into = isAngle ? o.angleAxes : o.radiusAxes;
+        while (into.Count < ax.polarIndex) { into.Add(PolarAxisSpec.Of(isAngle)); }
+        if (into.Count == ax.polarIndex) { into.Add(ax); } else { into[ax.polarIndex] = ax; }
     }
 
     static void ParseGeoOne(JsonValue g, ChartOption o, int index) {
@@ -3805,18 +3925,22 @@ class ChartOption {
                 else { ax = Convert.ToInt(sv); }
             }
             if (!isCenter && ax < 0) { continue; }
+            // "center"/"middle" 覆盖默认锚（Of() 里 left/top 默认 = 80/60
+            // 且 hasXxx = true）。必须把同维的 hasXxx 清掉，否则渲染器会
+            // 先按 80 摆再被 center 覆盖，default 值仍然参与 width 推导
+            //（left+right 判据），居中日历会算错位。
             if (anks[ai] == "left") {
-                if (isCenter) { c.leftCenter = true; }
-                else { c.leftPx = ax; c.hasLeft = true; }
+                if (isCenter) { c.leftCenter = true; c.hasLeft = false; c.leftPx = 0; }
+                else { c.leftPx = ax; c.hasLeft = true; c.leftCenter = false; }
             } else if (anks[ai] == "right") {
-                if (isCenter) { c.rightCenter = true; }
-                else { c.rightPx = ax; c.hasRight = true; }
+                if (isCenter) { c.rightCenter = true; c.hasRight = false; c.rightPx = 0; }
+                else { c.rightPx = ax; c.hasRight = true; c.rightCenter = false; }
             } else if (anks[ai] == "top") {
-                if (isCenter) { c.topCenter = true; }
-                else { c.topPx = ax; c.hasTop = true; }
+                if (isCenter) { c.topCenter = true; c.hasTop = false; c.topPx = 0; }
+                else { c.topPx = ax; c.hasTop = true; c.topCenter = false; }
             } else {
-                if (isCenter) { c.bottomCenter = true; }
-                else { c.bottomPx = ax; c.hasBottom = true; }
+                if (isCenter) { c.bottomCenter = true; c.hasBottom = false; c.bottomPx = 0; }
+                else { c.bottomPx = ax; c.hasBottom = true; c.bottomCenter = false; }
             }
         }
         if (it.Has("width")) {
@@ -4075,7 +4199,18 @@ class ChartOption {
         }
         JsonValue cl = null;
         JsonValue ir = v.Get("inRange");
-        if (ir != null && ir.IsObject()) { cl = ir.Get("color"); }
+        if (ir != null && ir.IsObject()) {
+            cl = ir.Get("color");
+            // inRange.opacity（0..1）按 0..1000 千分位定点记录（与
+            // App.ScaleAlpha 同刻度）：官方 lunar 用 0.3 让 heatmap
+            // 半透明，底下的格线与上面的农历日名都可见。
+            if (ir.Has("opacity")) {
+                double iop = ir.Double("opacity", 1.0);
+                if (iop < 0.0) { iop = 0.0; }
+                if (iop > 1.0) { iop = 1.0; }
+                vm.inOpacity = (int)(iop * 1000.0 + 0.5);
+            }
+        }
         if (cl == null) { cl = v.Get("color"); }  // 2.x dataRange 遗留
         if (cl != null && cl.IsArray()) {
             for (int i = 0; i < cl.Count(); i = i + 1) {
@@ -4324,6 +4459,13 @@ class ChartOption {
         if (tp != null && tp.IsObject()) {
             o.showTooltip = tp.Bool("show", true);
             o.tooltipTrigger = tp.Str("trigger", o.tooltipTrigger);
+            // tooltip.axisPointer.type:"cross"（line7 双数值轴、
+            // line-polar 极坐标）：十字虚线 + 双轴值读数。
+            JsonValue apj = tp.Get("axisPointer");
+            if (apj != null && apj.IsObject()
+                && apj.Str("type", "") == "cross") {
+                o.pointerCross = true;
+            }
         }
         // ECharts toolbox：声明了组件才渲染，且只渲染 feature 中
         // 声明的按钮（未声明 feature = 空工具箱）。
@@ -4454,6 +4596,24 @@ class ChartOption {
                 }
                 o.polars.Add(p);
             }
+        } else if (pj != null && pj.IsObject()) {
+            // ECharts5/6 polar:{} 单对象形态（无 indicator）：只承载
+            // 圆心/外径/起始角，落 RadarPolar[0]（DrawPolarCoord 用）。
+            RadarPolar p = RadarPolar.Create();
+            p.startAngle = pj.Int("startAngle", p.startAngle);
+            p.splitNumber = pj.Int("splitNumber", p.splitNumber);
+            JsonValue pc = pj.Get("center");
+            if (pc != null && pc.IsArray() && pc.Count() >= 2) {
+                p.center = ChartOption.ParsePoint(pc,
+                    ChartPosition.Of(ChartScalar.Pct(50), ChartScalar.Pct(50)));
+            }
+            JsonValue prad = pj.Get("radius");
+            if (prad != null && prad.IsArray() && prad.Count() >= 2) {
+                p.radius = ChartOption.ParseScalar(prad.At(0), ChartScalar.Px(0));
+            } else if (prad != null) {
+                p.radius = ChartOption.ParseScalar(prad, ChartScalar.Px(0));
+            }
+            o.polars.Add(p);
         }
 
         ChartOption.ParseAxis(v.Get("xAxis"), o.xAxes, true);
@@ -4550,6 +4710,10 @@ class ChartOption {
         ChartOption.ParseGeo(v.Get("geo"), o);
         ChartOption.ParseCalendar(v.Get("calendar"), o);
         ChartOption.ParseParAxes(v.Get("parallelAxis"), o);
+        // ECharts 极坐标轴（angleAxis/radiusAxis）：对象或数组形态，
+        // polarIndex 绑定到 polar[]（coordinateSystem:"polar" 系列）。
+        ChartOption.ParsePolarAxes(v.Get("angleAxis"), o, true);
+        ChartOption.ParsePolarAxes(v.Get("radiusAxis"), o, false);
         // parallel 组件块：layout 命名轴排布方向（'vertical' = 轴横
         // 置自上而下堆叠，nutrients 官方图；'horizontal'/缺省 = 既有
         // 竖轴从左到右）。
@@ -4582,6 +4746,9 @@ class ChartOption {
                 // coordinateSystem:"geo"（散点/lines/graph 叠加地图）。
                 string csys = s.Str("coordinateSystem", "");
                 if (csys == "geo") { cs.coordSys = "geo"; }
+                // coordinateSystem:"polar"（ECharts5/6 极坐标：角度轴/
+                // 半径轴圆框，line/scatter 点投影）。
+                if (csys == "polar") { cs.coordSys = "polar"; }
                 // coordinateSystem:"calendar"（calendar-heatmap/scatter/
                 // graph/pie 叠加日历）。calendarIndex 选目标日历。
                 if (csys == "calendar") {
@@ -4688,7 +4855,11 @@ class ChartOption {
                         }
                     }
                 }
-                cs.color = s.Int("color", 0);
+                // series.color：数字（2.x int 通道）与字符串 "#xxx" 双
+                // 形态——字符串经 ParseColor，int-only 会把官方 demo
+                // 的命名色静默丢成"继承调色板"。
+                cs.color = s.Get("color") != null
+                    ? ChartOption.ParseColor(s.Get("color"), 0) : 0;
                 cs.axisIndex = s.Int("yAxisIndex", s.Int("axisIndex", 0));
                 cs.xIndex = s.Int("xAxisIndex", 0);
                 // ECharts id 绑定：series.xAxisId/yAxisId 按轴 id 串接
@@ -4901,6 +5072,8 @@ class ChartOption {
                 ChartOption.ParsePoints(s.Get("points"), cs.points);
                 ChartOption.ParseEvents(s.Get("events"), cs.events);
                 ChartOption.ParseRegions(s.Get("regions"), cs.regions);
+                // 层级数据（tree/treemap/sunburst 的 children 递归）。
+                ChartOption.ParseTree(s.Get("data"), cs.tree);
                 ChartOption.ParseMarks(s.Get("markPoint"), cs.marks);
                 ChartOption.ParseMarkLines(s.Get("markLine"), cs.markLines);
                 ChartOption.ParseMarkArea(s.Get("markArea"), o);
@@ -4934,6 +5107,26 @@ class ChartOption {
                                     }
                                 }
                                 cs.candles.Add(cd);
+                                continue;
+                            }
+                            // 极坐标值对 [[radius, angle(, value)],...]：
+                            // ECharts 数据序 [r, θ]；x=radius y=angle
+                            // z=value 千倍定点进 points（类目轴的坐标是
+                            // 类目下标，同为数值）。必须在 catPair 之前
+                            // 拦截——无 xAxis 时折线值对会被当 [名,值]。
+                            if (cs.coordSys == "polar") {
+                                cs.pointG = 1000;
+                                double rv = it.At(0).AsDouble(0.0);
+                                double av = it.At(1).AsDouble(0.0);
+                                ChartPoint pp = ChartPoint.Of(
+                                    (int)(rv >= 0 ? rv * 1000 + 0.5 : rv * 1000 - 0.5),
+                                    (int)(av >= 0 ? av * 1000 + 0.5 : av * 1000 - 0.5));
+                                if (it.Count() >= 3) {
+                                    double zv = it.At(2).AsDouble(0.0);
+                                    pp.z = (int)(zv >= 0 ? zv * 1000 + 0.5
+                                                         : zv * 1000 - 0.5);
+                                }
+                                cs.points.Add(pp);
                                 continue;
                             }
                             // ECharts 数值对 [[x,y],...]：数值轴上是点
@@ -4991,7 +5184,8 @@ class ChartOption {
                                 }
                             }
                             ChartData item = ChartData.NamedNumber(it.Double("value", 0.0), it.Str("name", ""));
-                            item.color = it.Int("color", 0);
+                            item.color = it.Get("color") != null
+                                ? ChartOption.ParseColor(it.Get("color"), 0) : 0;
                             item.hidden = it.Bool("hidden", item.hidden);
                             item.selected = it.Bool("selected", item.selected);
                             // calendar + 对象项（calendar-graph 的节点 /
@@ -5834,6 +6028,9 @@ class ChartVisualMap {
     // 出现过的字符串类目，inRange.color 同序一一对应；行按该列的
     // 字符串值查下标取色，找不到的类目走 outOfRange（#ccc）。
     List<string> vmCats;
+    // inRange.opacity（0..1000 千分位）：官方 lunar 的 heatmap 是 0.3，
+    // 让底下的日历格与叠在上面的农历日名都透出来。0 = 未声明（不透明）。
+    int inOpacity;
 
     static ChartVisualMap Of() {
         ChartVisualMap vm = new ChartVisualMap();
@@ -5842,6 +6039,7 @@ class ChartVisualMap {
         vm.rangeColors = new List<int>();
         vm.pieces = new List<ChartVisualPiece>();
         vm.vmCats = new List<string>();
+        vm.inOpacity = 0;
         return vm;
     }
 
@@ -5857,6 +6055,7 @@ class ChartVisualMap {
         }
         for (int i = 0; i < src.pieces.Count; i = i + 1) { vm.pieces.Add(src.pieces[i]); }
         for (int i = 0; i < src.vmCats.Count; i = i + 1) { vm.vmCats.Add(src.vmCats[i]); }
+        vm.inOpacity = src.inOpacity;
         return vm;
     }
 

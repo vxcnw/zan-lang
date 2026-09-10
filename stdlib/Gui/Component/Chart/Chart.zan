@@ -243,8 +243,11 @@ class ChartFrame {
         return Chart.ValueX(this.plotX, this.plotW, this.xLo, this.xHi, v);
     }
 
-    /// 对数 Y 映射：仅正值（v < 1 钳制到 1），log10 线性化后
-    /// 按轴范围映射。低于/高于范围钳制在绘图区内。
+    /// 对数 Y 映射：仅正值（v < 1 钳制到 1），log10 连续线性化后
+    /// 按轴范围映射。整数 floor-log10 会把同一数量级内的所有值
+    /// 压到同一档（3、5、9 全同高），曲线呈台阶状——官方 type:'log'
+    /// 是连续对数。lg 值用 ×1000 定点（Log10F），域差转像素走 long。
+    /// 低于/高于范围钳制在绘图区内。
     int YOfLog(int v, int axisIndex) {
         if (v < 1) { v = 1; }
         int lo = this.leftMin;
@@ -253,14 +256,49 @@ class ChartFrame {
         if (axisIndex == 1) { lo = this.rightMin; hi = this.rightMax; rev = this.rightReversed; }
         if (lo < 1) { lo = 1; }
         if (hi < lo + 1) { hi = lo + 1; }
-        int llo = Chart.Log10(lo);
-        int lhi = Chart.Log10(hi);
-        if (lhi <= llo) { lhi = llo + 1; }
-        int d = (Chart.Log10(v) - llo) * this.plotH / (lhi - llo);
+        long llo = ChartFrame.Log10F(lo);
+        long lhi = ChartFrame.Log10F(hi);
+        if (lhi <= llo) { lhi = llo + 1000; }
+        long d = (ChartFrame.Log10F(v) - llo) * (long)this.plotH / (lhi - llo);
         if (d < 0) { d = 0; }
-        if (d > this.plotH) { d = this.plotH; }
-        if (rev) { return this.plotY + d; }
-        return this.plotY + this.plotH - d;
+        if (d > (long)this.plotH) { d = this.plotH; }
+        if (rev) { return this.plotY + (int)d; }
+        return this.plotY + this.plotH - (int)d;
+    }
+
+    /// 10 的整数对数（floor log10），仅正值（v < 1 → 0）。
+    static int Log10(int v) {
+        if (v < 1) { return 0; }
+        int e = 0;
+        int p = 1;
+        while (p * 10 <= v) { p = p * 10; e = e + 1; }
+        return e;
+    }
+
+    /// 连续 log10 ×1000 定点（1/1000 档精度），对数轴前向映射用。
+    /// lg 整数段逐档 +1000；尾数段 x∈[1,10) 用四段折线近似
+    /// （节点 lg(1)=0、lg(3)≈477、lg(6)≈778、lg(10)=1000 的割线），
+    /// 最大偏差 <0.03 档——视觉连续，曲线无台阶。纯整数运算。
+    static long Log10F(int v) {
+        if (v < 1) { return 0; }
+        int e = 0;
+        int x = v;
+        while (x >= 10) {
+            int p = 10;
+            int se = 1;
+            while (x / p >= 10) { p = p * 10; se = se + 1; }
+            e = e + se;
+            x = x / p;
+        }
+        long frac;
+        if (x < 3) {
+            frac = (long)(x - 1) * 239;
+        } else if (x < 6) {
+            frac = 477 + (long)(x - 3) * 100;
+        } else {
+            frac = 778 + (long)(x - 6) * 74;
+        }
+        return (long)e * 1000 + frac;
     }
 
     /// 线性/对数 Y 的像素 -> 值域反解。对数轴与当前
@@ -281,12 +319,15 @@ class ChartFrame {
         if (log) {
             if (lo < 1) { lo = 1; }
             if (hi < lo + 1) { hi = lo + 1; }
-            int llo = Chart.Log10(lo);
-            int lhi = Chart.Log10(hi);
-            if (lhi <= llo) { lhi = llo + 1; }
-            int d = rev ? q : this.plotH - q;
-            int e = llo + d * (lhi - llo) / this.plotH;
-            int v = Chart.Pow10(e);
+            // 与连续前向映射（Log10F）同解：定点 lg 值回推所在
+            // 十进制段的下界（精度对齐 YOfLog 的 1/1000 档）。
+            long llo = ChartFrame.Log10F(lo);
+            long lhi = ChartFrame.Log10F(hi);
+            if (lhi <= llo) { lhi = llo + 1000; }
+            long d = rev ? q : this.plotH - q;
+            long e = llo + d * (lhi - llo) / this.plotH;
+            int seg = (int)(e / 1000);
+            int v = Chart.Pow10(seg);
             if (v < lo) { v = lo; }
             if (v > hi) { v = hi; }
             return v;

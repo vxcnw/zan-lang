@@ -1049,6 +1049,11 @@ partial class ChartView {
         // calendar 坐标系优先于系列类型分发：日历网格是面板骨架，
         // 子系列（heatmap/scatter/graph/pie）都是叠在格上的装饰。
         if (o.calendars.Count > 0) { return "calendar"; }
+        // 极坐标同理（ECharts5/6 angleAxis/radiusAxis 圆框）：
+        // coordinateSystem:"polar" 的 line/scatter 系列按角度投影。
+        for (int psi = 0; psi < o.series.Count; psi = psi + 1) {
+            if (o.series[psi].coordSys == "polar") { return "polarCoord"; }
+        }
         ChartType t = ChartView.LeadType(o);
         ChartSeries leadS = ChartView.LeadSeries(o);
         if (t == ChartType.Pie && leadS != null && leadS.piePerPoint) {
@@ -1404,6 +1409,8 @@ partial class ChartView {
             ChartView.DrawPie(app, x, y, w, h, option, option.pieLabels, g);
         } else if (kind == "calendar") {
             ChartView.DrawCalendar(app, x, y, w, h, option, g);
+        } else if (kind == "polarCoord") {
+            ChartView.DrawPolarCoord(app, x, y, w, h, option, g);
         } else if (kind == "rose") {
             // 玫瑰图 = pie 系列 + roseType（ECharts2 无独立渲染器）：
             // 与 pie 同一条 DrawPie 路径（roseP 逐扇区半径、逐环

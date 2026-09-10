@@ -1075,13 +1075,21 @@ partial class ChartView {
         if (nWin < 1) { nWin = 1; }
         for (int mi = 0; mi < s.markLines.Count; mi = mi + 1) {
             ChartMarkLine m = s.markLines[mi];
-            // 两点斜线（coord 对，回归/趋势线）：x 按数值域映射，
-            // 用 frame.xLo/xHi（散点等数值 x 视图填充；类目轴视图
-            // 不设，退回跳过）。
-            if (m.hasEnd && f.xHi > f.xLo) {
-                int px1 = Chart.ValueX(f.plotX, f.plotW, f.xLo, f.xHi, m.xValue);
+            // 两点斜线（coord 对，回归/趋势线）：x 按数值域映射
+            // （frame.xLo/xHi，散点等数值 x 视图填充）；类目轴视图
+            // 数值域未设时 coord x 是类目下标，按 CatX 槽位映射
+            // （line-markline 的 coord:[0,0.3]→[3,1]）。
+            if (m.hasEnd) {
+                int px1;
+                int px2;
+                if (f.xHi > f.xLo) {
+                    px1 = Chart.ValueX(f.plotX, f.plotW, f.xLo, f.xHi, m.xValue);
+                    px2 = Chart.ValueX(f.plotX, f.plotW, f.xLo, f.xHi, m.x2Value);
+                } else {
+                    px1 = f.CatX(m.xValue, nWin);
+                    px2 = f.CatX(m.x2Value, nWin);
+                }
                 int py1 = f.YOf(Chart.PointV(m.yValue, s.pointG), s.axisIndex);
-                int px2 = Chart.ValueX(f.plotX, f.plotW, f.xLo, f.xHi, m.x2Value);
                 int py2 = f.YOf(Chart.PointV(m.y2Value, s.pointG), s.axisIndex);
                 int col = m.color != 0 ? m.color : s.color;
                 string lt = m.lineType.Length > 0 ? m.lineType : "solid";
