@@ -32,6 +32,24 @@ Build and run it: `run_command("build/app")`. Print state at the boundary you
 suspect (`Console.WriteLine`) — cheap and decisive. Note that `Console.Error`
 does not exist; error text also goes through `Console.WriteLine`.
 
+### Crashes with no symbolized stack (the `0xC0000005` ritual)
+
+A native crash (Windows: `build/zan_crash.log` with register dump; `rcx` =
+`DEAD0000...` means ARC use-after-free) may print only bare addresses — the
+toolchain does not bundle `addr2line`/`objdump`. Do **not** do what one session
+did: 4 blind compile-run-probe rounds (v3→v6) guessing at the culprit. Instead:
+
+1. **Read the crash log first**: the register dump plus the faulting address
+   often identifies the poison (`DEAD0000DEAD0000` = freed memory reused).
+2. **Bisect with probe output, not rebuilds**: put `Console.WriteLine` markers
+   between suspicious statements so one run localizes the fault, rather than
+   one rebuild per hypothesis.
+3. **Suspect type mismatches across `await`**: a stdlib method that returns
+   `int` assigned to an object variable compiles silently (compiler defect —
+   report it with a `zan_compile` snippet) and dereferences the integer as a
+   pointer on first use. Check the real return type in the stdlib source
+   before debugging anything downstream.
+
 ## 3. Memory / ARC
 
 ```
