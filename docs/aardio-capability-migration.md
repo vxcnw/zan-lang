@@ -220,3 +220,73 @@
 - **UAC 与权限**：提权运行、服务安装、注册表 HKLM 写入在非管理员下会失败，API 要返回明确错误而不是崩溃。
 - **DPI**：显示器与截图相关 API 必须声明 per-monitor DPI 感知，否则在缩放屏上坐标会错位（IDE 已有缩放体系，注意别双重缩放）。
 - **aardio 是 GBK 源码**：读取参考实现时注意编码；迁移过来的字符串常量统一 UTF-8。
+
+---
+
+## 6. 第二期清单（2026-09 盘点）：跨平台封装，语义参考 aardio、实现走 Zan
+
+> 这一轮盘点只回答一个问题：`D:\aardio\lib` 里还有哪些能力值得进 Zan 标准库，
+> 且能**跨平台**落地。纪律沿用迁移原则第 1 条：aardio 源码只当行为规格与
+> API 清单（拿来确认语义细节，如 mDNS 的组播地址、STUN 的 magic cookie、
+> WOL 的魔术包格式），实现一律用 Zan 现有底座（Sockets、HttpClient、Zip、
+> ARC 类、`async/await`），禁止逐行直译表驱动风格。
+> 已被现有 stdlib 覆盖或明确不迁的（COM/`dotNet`/python/php 嵌入、gdip 整族、
+> aardio 的 HTML UI 布局体系、`web.rest`/`chrome` 自动化）不再重复列。
+
+### 6.1 A 档 — 通用价值高、Zan 有现成底座、优先做
+
+| 目标模块 | aardio 参考 | 覆盖范围 | Zan 底座 | 难度 |
+| --- | --- | --- | --- | --- |
+| `System.Xml` | `string/xml.aardio`（849 行：实体表、eachChild 遍历、queryEles 查询） | 解析（DOM 树 + 实体反转义）、序列化、按标签名/属性查询；XPath 可后置 | 纯算法，零依赖 | M |
+| `System.Net.Ftp` | `inet/ftp.aardio`（WinInet 封装：下载/上传/列目录/建删目录，被动模式） | FTP 客户端，语义对齐：List/Download/Upload/MkDir/Delete/Rename | `Sockets`/`TcpClient` + `async`（协议本身要自己实现控制+数据双连接） | M |
+| `System.Diagnostics.Log` 增强：控制台进度条 | `console/progress.aardio`（单行刷新、颜色、完成态） | 终端单行进度条（`\r` 重绘、百分比、消息行），非 TTY 时降级为逐条打印 | `Console` 内建（Write/ForegroundColor） | S |
+| `System.IO.NamedPipe` | `fsys/namedPipe.aardio` + `fsys/stream.aardio` | 命名管道服务端/客户端（Windows `\\.\pipe\`，POSIX FIFO），父子进程 IPC | 已有 `MemoryMappedFile` 同族的句柄封装套路；驱动层需补 `CreateNamedPipe`/`ConnectNamedPipe`/`open(FIFO)` | M |
+| 跨进程命名互斥体（`Mutex.OpenNamed`） | `process/mutex.aardio`（单实例检测：Open→conflict 判定） | 命名互斥体：单实例守护、跨进程资源锁 | `System.Threading.Mutex` 已有 Windows `CreateMutexA` 与 POSIX pthread 两条分支，补命名语义即可（POSIX 侧用文件锁） | S |
+| `System.Text.Base32` | `string/base32.aardio`（96 行，RFC 4648） | encode/decode（含 padding 开关） | 纯算法；顺手给 `Otp` 的 secret 输入接上（RFC 6238 标准就是 Base32） | S |
+| `System.Text.Patch` | `string/patch.aardio`（Aider 风格 SEARCH/REPLACE 块，530 行，版本号 2026.07.19.0） | 文本补丁应用（多块 SEARCH/REPLACE、唯一性校验）——AI 编码工具链直接受益 | 纯算法 | S |
+| `System.Text.EditorOps` | `string/editor.aardio`（EOL 探测/统一/计数） | 换行风格探测（CRLF/LF/CR）、统一、行数统计 | 纯算法；`CodeEditor` 组件是现成消费方 | S |
+
+### 6.2 B 档 — 值得做，但要么依赖面稍宽、要么使用面较窄
+
+| 目标模块 | aardio 参考 | 说明 | 难度 |
+| --- | --- | --- | --- |
+| `System.Net.NetworkDiscovery`（mDNS/SSDP/WOL/STUN 四合一或分四个小类） | `wsock/udp/{mdnsClient,ssdpClient,wolClient,stunClient}.aardio` | UDP 组播/广播三件套 + STUN 公网地址探测；IoT/局域网工具高频 | M（需要补 `Socket` 组播 `IP_ADD_MEMBERSHIP` 选项封装） |
+| `System.Cryptography.Certificate`（X.509 只读子集） | `crypt/cert.aardio`（666 行：PEM/DER 加载、subject/issuer/有效期/指纹读取） | 证书解析只读（列出字段），签名校验走已有 `Rsa`/`Sha*`；`RsaKey.zan` 已有 PEM/DER TLV 解析层可复用 | M |
+| `System.Cryptography.Des`（DES/3DES）+ `Rc4` | `crypt/des.aardio`、`crypt/rc4.aardio` | 纯为遗留系统互通（老协议、老文件格式解密）；新代码禁用，类注释写明"仅遗留互操作" | M |
+| `System.Cryptography.ProtectData`（DPAPI） | `crypt/protectData.aardio`（CryptProtectData/UnprotectData） | 用户级凭据加密落盘。Windows 直调 Crypt32；跨平台语义=本用户可解密，POSIX 用 libsecret/文件权限+密钥派生降级实现，文档写明强度差异 | S（Windows 侧）/ L（全平台对齐） |
+| `System.Text.Html`（实体表 + 极简解析） | `string/html.aardio`、`web/entities` | 只做：HTML 实体反转义、剥标签取纯文本、元信息提取；不做完整 DOM（那是浏览器引擎的事，CEF 已覆盖） | S |
+| `System.Text.Tfidf` | `string/tfidf.aardio` | 词频-逆文档频率打分；`Bm25Index` 已是同族（同一作者语义参照），补 TF-IDF 凑齐检索打分全家桶 | S |
+| `System.Time.SunTimes` | `time/sun.aardio` + `time/julianDay.aardio`（Delta T 数据表、节气时刻） | 日出日落/儒略日/节气精确时刻。注意：`Lunar` 已覆盖"当天是哪个节气"，本条补的是**时刻计算**（天文历表照搬） | M |
+| `System.Time.Period`（周期时间表达式） | `time/period.aardio`（22 行）+ `time/zone.aardio` | 相对时间窗口（"本周/上月/最近7天"）解析与求值——报表/筛选高频；时区转换目前 `DateTime` 只有本机时区，跨时区显式转换可并入 | S |
+| `System.IO.LatestFile` | `fsys/latest.aardio` | 目录里取最新匹配文件（下载目录轮询场景） | S |
+| `System.Text.ArgsTable`（命令行参数表） | `string/args.aardio`（131 行：键值对 ↔ 命令行文本双向序列化，dash-case 与引号转义规则齐全） | 内部工具把配置拼成命令行传给子进程的标准做法；`Environment.ArgAt` 只有裸数组，解析/拼接两端都缺 | S |
+| `System.Text.CmdLine`（argv 切分） | `string/cmdline.aardio`（Windows `CommandLineToArgvW` 语义：引号、反斜杠转义） | 把一条命令行文本按平台规则切成 argv；纯算法实现即可（不调 Shell32，跨平台一致） | S |
+| `System.Text.IntSegments` | `string/intSegments.aardio` | "1,3,5-8" ↔ 整数列表双向转换（分页/行号选择高频） | S |
+
+### 6.3 判定不迁（有证据）
+
+| aardio 库 | 不迁理由 |
+| --- | --- |
+| `gdip`/`gdi` 整族 | Zan GUI 已有自己的 `System.Drawing.Graphics` 自绘栈，GDI+ 只会是第二套绘图后端 |
+| `dotNet`/`com`/`java`/`golang`/`nodeJs`/`py2`/`py3` 嵌入 | 与"Zan 自成体系"路线冲突（一期已判，维持） |
+| `chrome`/`web.view`/`web.layout` | CEF 驱动（`Gui.Component.CefBrowser`）已覆盖内嵌浏览器 |
+| `web.rest`/`soapClient`/`feishu`/`npm` 等在线服务族 | 业务 API 包装不属于标准库；OAuth 等通用机制已由 HttpClient/CookieJar 承接 |
+| `string/regex.aardio`、`string/glob.aardio` | 已有 `System.Text.RegularExpressions`、`PathEx.Glob` |
+| `string/xml.aardio` 之外的 markdown 族 | 已有 `System.Text.Markdown` |
+| `sqlite`/`sqlServer`/`access`(OLE DB) | `System.Data` 已覆盖（access 仅 Windows OLE DB，跨平台无解，不迁） |
+| `console/_.aardio` 大部（Windows INPUT_RECORD 级别的控制台输入） | `Console` 内建已覆盖 CLI 常规需求；Win32 控制台 buffer 级操作不值得跨平台封装 |
+| `thread.works`/`thread.dlManager` | Zan 有真线程 + `async/await` + `BlockingQueue`，并发下载用 `async` 任务组实现更自然；aardio 的 fiber 工作线程模型是旧语言的妥协，不照搬 |
+| `fsys/media.aardio`（MCI 播放）、`fonts/`、`color/table.aardio`（色表） | 音频走 `System.Audio`（WASAPI）；字体/颜色是 Gui 皮肤层的事 |
+| `process/ffmpeg`/`process/git` 等外部工具包装 | 属于应用层，不值得进 stdlib（`Process.WinCapture` 已够用） |
+
+### 6.4 本期方法论要点（同上一轮验证）
+
+- **先探针再动手**：A 档里 `NamedPipe`、组播 socket 要先写最小探针确认驱动层
+  现状（`src/runtime` 是否已有/缺哪个调用），探针进 `_scratch/`，结论记这里。
+- **发现手搓重复实现的存货**：盘点发现 WebDAV 的 Multi-Status 解析、Xlsx 的
+  XML 转义都是手写字符串扫描——`System.Xml`（A 档第 1 条）落地后应回头把
+  这两处收敛到标准 XML 解析上，"影子解析器"只允许活到正式库落地为止。
+- **aardio 的协作式并发模型不迁**：`coroutine`/`thread.works` 那套 fiber +
+  共享表通信是 aardio 单线程 GUI 的历史产物；Zan 用 `async/await` +
+  线程安全集合表达同样的语义，这是"写法归 Zan"最典型的一处。
+
