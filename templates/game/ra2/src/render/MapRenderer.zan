@@ -390,13 +390,12 @@ class MapRenderer {
             }
         }
 
-        // Objects draw after the terrain, in the same back-to-front order, so
-        // a unit standing on a cell is over the ground under it.
-        if (this.world != null && this.art != null) {
-            drawn = drawn + ObjectRenderer.Render(this.world, this.art, canvas,
-                                                  camX, camY, this.originX,
-                                                  this.originY, this.playerSide);
-        }
+        // Objects do NOT bake into this canvas: the terrain layer only
+        // changes when the camera, the ore or a smudge does, so the
+        // expensive full-frame recomposite+encode runs on those events
+        // alone. Units draw live over the composited terrain every frame
+        // (ObjectRenderer.RenderToCanvas) -- a moving unit costs a handful
+        // of small blits instead of a whole-screen rebuild.
         return drawn;
     }
 

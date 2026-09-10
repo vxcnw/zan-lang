@@ -14,6 +14,9 @@ class ObjectArt {
     Vfs vfs;
     AssetDb db;
     Palette unitPal;
+    // Dev aid: the last BakeFacing's projection stats, read by the
+    // self-test's decode audit.
+    static string bakeStats;
     // The allied unit palette: unitPal with the remap slots recoloured from
     // soviet red to the allied player colour. Built on first use.
     Palette alliedPal;
@@ -67,9 +70,12 @@ class ObjectArt {
     List<int> vehSides;
     List<Texture> vehTex;
 
-    // Sidebar cameos: <ART>ICON.SHP decoded under SIDEBAR.PAL (the archive
-    // the portraits ship with), cached by name. A missing name caches as
-    // null so an absent portrait falls back to field art once.
+    // Sidebar cameos: <ART>ICON.SHP decoded under CAMEO.PAL (the palette the
+    // portraits ship with in CAMEO.MIX; SIDEBAR.PAL is only the stand-in),
+    // cached by name. A missing name caches as null so an absent portrait
+    // falls back to field art once. Both the unit and the structure path
+    // come through LoadCameoShp, so the palette no longer depends on which
+    // one happened to draw first.
     Palette cameoPal;
     List<string> cameoNames;
     List<Texture> cameoTex;
@@ -111,10 +117,16 @@ class ObjectArt {
         a.bldRegNames = new List<string>();
         a.bldShadow = new List<int>();
         a.bldBuildup = new List<string>();
-        // Buildings use the temperate theater palette. Using the unit palette
-        // made every structure render with wrong colours -- the yard's olive
-        // green came out as bright white.
-        a.theaterPal = db.PaletteNamed("isotem.pal");
+        // Buildings use the same object palette the units do. The reference
+        // renderer is explicit about it (ra-map/src/structure_paint.rs: the
+        // object palette is unittem.pal, the iso theater palette only a
+        // fallback), and the shipped sprites agree: decoding GACNST.SHP's
+        // first frame under isotem.pal reproduces the saturated static the
+        // yard used to draw as, while unittem.pal gives the grey-and-red
+        // construction yard. The iso palette belongs to terrain tiles and
+        // smears, not to object art.
+        a.theaterPal = db.PaletteNamed("unittem.pal");
+        if (a.theaterPal == null) { a.theaterPal = db.PaletteNamed("isotem.pal"); }
         if (a.theaterPal == null) { a.theaterPal = db.PaletteNamed("isosno.pal"); }
         return a;
     }
@@ -268,6 +280,14 @@ class ObjectArt {
     /// bake per facing below.</summary>
     Texture UnitTexture(UnitType ut, bool moving, int animFrame, int facing,
                         int side) {
+        return this.UnitTexture(ut, moving, animFrame, facing, side, false);
+    }
+
+    /// <summary>As above, with the deployer stance: a sat-down trooper draws
+    /// the sequence's Deployed block (GISequence Deployed=292,1,1 -- one
+    /// frame per facing) instead of the standing ring.</summary>
+    Texture UnitTexture(UnitType ut, bool moving, int animFrame, int facing,
+                        int side, bool deployed) {
         if (ut == null) { return null; }
         string name = ut.ShpName();
         if (name == null || name.Length == 0) { return null; }
@@ -276,6 +296,13 @@ class ObjectArt {
         }
         int ring = (8 - (facing % 8)) % 8;
         int count = this.ShapeFrameCount(name);
+        if (deployed && ut.HasDeployedSeq()) {
+            int sit = ut.DeployedStart() + ring * ut.DeployedFrames();
+            if (sit < count) {
+                return this.ShapeTextureFrame(name, sit,
+                                              this.UnitPalFor(side));
+            }
+        }
         if (ut.HasSeq()) {
             if (moving) {
                 int per = ut.WalkFrames();
@@ -327,53 +354,37 @@ class ObjectArt {
         return this.ShapeTextureFrame(name, 0, this.UnitPalFor(side));
     }
 
-    /// <summary>The sidebar portrait for a trainable unit: the shipped cameo
-    /// the original build menu shows. Cameos are named after the art image,
-    /// not the rules reg ([E1] draws GIICON, [FLAKT] FLAKICON), so the map
-    /// below carries the install's own Image= overrides for the regs whose
-    /// reg name and art name disagree; regs not listed (and every building)
-    /// resolve to <reg>ICON.SHP, whose misses fall back to field art. The
-    /// portraits decode under SIDEBAR.PAL, the palette shipped alongside
-    /// them in the SIDEC mixes.</summary>
+    /// <summary>The sidebar portrait for a trainable unit: the art section's
+    /// own Cameo= stem, resolved to <c>&lt;stem&gt;ICON.SHP</c> -- the install
+    /// names the picture, it is not derived from the rules name. [CMIN]
+    /// draws AHRVICON.SHP, [ENGINEER] ENGNICON.SHP, [GGI] GDGIICON.SHP, and
+    /// the Grizzly's art key GTNK draws GTNKICON.SHP; reading
+    /// <c>&lt;reg&gt;ICON.SHP</c> instead misses all of those and lands on a
+    /// different portrait or on nothing. The portraits decode under
+    /// CAMEO.PAL, the palette shipped alongside them in the CAMEO mixes.</summary>
     Texture CameoTexture(UnitType ut) {
         if (ut == null) { return null; }
-        string key = ut.ArtKey() != null && ut.ArtKey().Length > 0
-            ? ut.ArtKey() : ut.Reg();
-        // Art-key overrides where the reg name and the shipped cameo name
-        // disagree, transcribed from the install's rules Image= keys and
-        // the RA2 cameo naming the shipped art uses.
-        if (key == "GI") { key = "GI"; }
-        else if (ut.Reg() == "E2") { key = "E2"; }
-        else if (ut.Reg() == "ADOG") { key = "ADOG"; }
-        else if (ut.Reg() == "ENGINEER") { key = "WEED"; }
-        else if (ut.Reg() == "SNIPE") { key = "SNIP"; }
-        else if (ut.Reg() == "FLAKT") { key = "FLAK"; }
-        else if (ut.Reg() == "SHK") { key = "SHK"; }
-        else if (ut.Reg() == "GGI") { key = "PARA"; }
-        else if (ut.Reg() == "CMIN") { key = "SMIN"; }
-        else if (ut.Reg() == "BRUTE") { key = "BRUT"; }
-        else if (ut.Reg() == "INIT") { key = "INIT"; }
-        else if (ut.Reg() == "PCV") { key = "MCV"; }
-        string name = key + "ICON.SHP";
+        string key = ut.Cameo();
+        if (key == null || key.Length == 0) {
+            string art = ut.ArtKey() != null && ut.ArtKey().Length > 0
+                ? ut.ArtKey() : ut.Reg();
+            key = art + "ICON";
+        }
+        string name = key + ".SHP";
         for (int i = 0; i < this.cameoNames.Count; i = i + 1) {
             if (this.cameoNames[i] == name) { return this.cameoTex[i]; }
         }
-        Texture tex = null;
-        List<int> len = new List<int>();
-        len.Add(0);
-        byte[] raw = this.vfs.Read(name, len);
-        if (len[0] > 0) {
-            if (this.cameoPal == null) {
-                this.cameoPal = this.db.PaletteNamed("SIDEBAR.PAL");
-            }
-            if (this.cameoPal != null) {
-                ShpImage shp = ShpImage.Parse(raw, len[0]);
-                if (shp.FrameCount() > 0) {
-                    byte[] idx = shp.DecodeFrameCanvas(0);
-                    tex = Texture.FromIndexedShp(idx, shp.Width(),
-                                                 shp.Height(), this.cameoPal);
-                }
-            }
+        // The same loader the structure cameos use: CAMEO.PAL first, the
+        // sidebar palette only as the stand-in. Reading the portraits under
+        // SIDEBAR.PAL (which is what this path used to do) turns every card
+        // into multicoloured noise -- the two palettes are not the same
+        // table, and the shipped ICON.SHPs are authored for CAMEO.PAL.
+        Texture tex = this.LoadCameoShp(name);
+        if (tex == null) {
+            string art = ut.ArtKey() != null && ut.ArtKey().Length > 0
+                ? ut.ArtKey() : ut.Reg();
+            string plain = art + "ICON.SHP";
+            if (plain != name) { tex = this.LoadCameoShp(plain); }
         }
         this.cameoNames.Add(name);
         this.cameoTex.Add(tex);
@@ -632,23 +643,54 @@ class ObjectArt {
         return img;
     }
 
-    /// <summary>Bakes one compass facing of a voxel model with the map's 2:1
-    /// dimetric projection. Facings follow the TS/RA2 ring (0=N, 1=NE, 2=E,
-    /// 3=SE, 4=S, 5=SW, 6=W, 7=NW, clockwise); each facing turns the model
-    /// 45 degrees counter-clockwise on screen from north. Voxel depth orders
-    /// the draw. Each voxel is shaded by the normal index the format stores
-    /// for it, through the retail formula
+    /// <summary>Dev aid: the parsed main limb of a voxel model, for the
+    /// self-test's decode audit (voxel counts per z slice against the
+    /// independent Python decoder).</summary>
+    VxlImage RawVxl(string name) {
+        return this.VxlNamed(name);
+    }
+
+    /// <summary>Dev aid: stats of the most recent BakeFacing call.</summary>
+    static string LastBakeStats() {
+        return bakeStats;
+    }
+
+    /// <summary>Bakes one compass facing of a voxel model with the reference
+    /// engine's voxel projection, one screen pixel per model unit:
+    ///
+    ///   yaw  : rotate (x,y) by facing*45 degrees, counter-clockwise
+    ///   sx   = x - y            (2:1 dimetric, unit pitch)
+    ///   sy   = (x + y) / 2 - z  (z up the screen)
+    ///
+    /// Each voxel's model point is bounds_min + (grid * extent/size), exactly
+    /// the reference's section_point; the bare grid would put a model whose
+    /// box is off-centre (MTNK's x runs -27.9..30.3) a voxel or two away from
+    /// where the game draws it. Depth is x+y+z, painter-sorted far to near.
+    /// Every voxel shades by the normal index the format stores for it, with
+    /// the retail formula
     ///   shade = 0.8 + 1.3 * saturate(dot(normal, sunDir))
-    /// with sunDir from the reference's WorldScene light offset and the
-    /// normals from VxlNormals -- the same data the original shipped, which
-    /// is what gives a hull its continuous shading and its edge highlights.</summary>
+    /// (CNCMaps VxlRenderer Ambient 0.8 / Diffuse 1.3), diffuse only, no
+    /// specular -- that is what gives a hull its continuous shading and edge
+    /// highlights.</summary>
     static Texture BakeFacing(VxlImage img, Palette pal, int facing) {
         VxlLimb l = img.Main();
         if (l == null) { return null; }
         int sx = l.SizeX();
         int sy = l.SizeY();
         int sz = l.SizeZ();
-        double yaw = (6.0 - (double)facing) * 3.14159265358979 / 4.0;
+        // Model-space step per grid index, per axis (reference
+        // section_axis_scale): extent/size, or 1 when the box is unset.
+        double scx = l.BoundsExtent(0) / (double)sx;
+        double scy = l.BoundsExtent(1) / (double)sy;
+        double scz = l.BoundsExtent(2) / (double)sz;
+        if (!(scx > 0.0)) { scx = 1.0; }
+        if (!(scy > 0.0)) { scy = 1.0; }
+        if (!(scz > 0.0)) { scz = 1.0; }
+        double bx = l.BoundsMin(0);
+        double by = l.BoundsMin(1);
+        double bz = l.BoundsMin(2);
+        // Reference yaw_point: steps = facing/32, angle = steps*45deg, CCW.
+        double yaw = (double)(facing % 8) * 3.14159265358979 / 4.0;
         double cos = Math.Cos(yaw);
         double sin = Math.Sin(yaw);
 
@@ -667,12 +709,19 @@ class ObjectArt {
             for (int x = 0; x < sx; x = x + 1) {
                 for (int z = 0; z < sz; z = z + 1) {
                     if (l.VoxelAt(x, y, z) < 0) { continue; }
-                    double cx = (double)(x - sx / 2);
-                    double cy = (double)(y - sy / 2);
-                    double rx = cx * cos - cy * sin;
-                    double ry = cx * sin + cy * cos;
-                    double px = (rx - ry) * 0.866;
-                    double py = (rx + ry) * 0.5 - (double)z * 0.86;
+                    double mx = bx + (double)x * scx;
+                    double my = by + (double)y * scy;
+                    double mz = bz + (double)z * scz;
+                    double rx = mx * cos - my * sin;
+                    double ry = mx * sin + my * cos;
+                    // The reference rounds each model coordinate to an int
+                    // before projecting, so the sprite lands on the same
+                    // pixels the game does.
+                    int xi = (int)Math.Round(rx);
+                    int yi = (int)Math.Round(ry);
+                    int zi = (int)Math.Round(mz);
+                    double px = (double)(xi - yi);
+                    double py = (double)((xi + yi) / 2 - zi);
                     if (!any) {
                         minPx = px; maxPx = px; minPy = py; maxPy = py;
                         any = true;
@@ -683,8 +732,9 @@ class ObjectArt {
                         if (py > maxPy) { maxPy = py; }
                     }
                     gx[n] = x; gy[n] = y; gz[n] = z;
-                    // Painter key: rx+ry, quantised to sixteenths of a voxel.
-                    keys[n] = (int)((rx + ry) * 16.0);
+                    // Painter key: depth x+y+z, quantised so ties keep a
+                    // stable order.
+                    keys[n] = (xi + yi + zi) * 16;
                     n = n + 1;
                 }
             }
@@ -692,8 +742,22 @@ class ObjectArt {
         if (n == 0) { return null; }
 
         int pad = 4;
-        int w = (int)((maxPx - minPx) * 2.0) + pad * 2 + 1;
-        int h = (int)((maxPy - minPy) * 2.0) + pad * 2 + 1;
+        int w = (int)(maxPx - minPx) + pad * 2 + 1;
+        int h = (int)(maxPy - minPy) + pad * 2 + 1;
+        // Dev aid: the self-test's decode audit reads this after each bake.
+        bakeStats = "n=" + Convert.ToString(n)
+            + " w=" + Convert.ToString(w) + " h=" + Convert.ToString(h)
+            + " px=" + Convert.ToString((int)minPx) + ".."
+            + Convert.ToString((int)maxPx)
+            + " py=" + Convert.ToString((int)minPy) + ".."
+            + Convert.ToString((int)maxPy)
+            + " b=" + Convert.ToString((int)(bx * 100.0)) + ","
+            + Convert.ToString((int)(by * 100.0)) + ","
+            + Convert.ToString((int)(bz * 100.0)) + " e="
+            + Convert.ToString((int)(l.BoundsExtent(0) * 100.0)) + ","
+            + Convert.ToString((int)(l.BoundsExtent(1) * 100.0)) + ","
+            + Convert.ToString((int)(l.BoundsExtent(2) * 100.0));
+
         Texture tex = Texture.Create(w, h);
 
         // Counting sort by depth key, ascending: farthest drawn first.
@@ -753,18 +817,22 @@ class ObjectArt {
             int r = (int)((double)pal.R8(color) * shade);
             int g = (int)((double)pal.G8(color) * shade);
             int b = (int)((double)pal.B8(color) * shade);
-            double cx = (double)(x - sx / 2);
-            double cy = (double)(y - sy / 2);
-            double rx = cx * cos - cy * sin;
-            double ry = cx * sin + cy * cos;
-            int px = (int)(((rx - ry) * 0.866 - minPx) * 2.0) + pad;
-            int py = (int)(((rx + ry) * 0.5 - (double)z * 0.86 - minPy) * 2.0)
-                   + pad;
-            // Diamond stamp, two screen pixels per voxel unit, so a voxel
-            // covers its projected footprint without scanline gaps.
-            for (int dy = -2; dy <= 2; dy = dy + 1) {
-                int half = 2 - (dy < 0 ? 0 - dy : dy);
-                for (int dx = 0 - half; dx <= half; dx = dx + 1) {
+            double mx = bx + (double)x * scx;
+            double my = by + (double)y * scy;
+            double mz = bz + (double)z * scz;
+            double rx = mx * cos - my * sin;
+            double ry = mx * sin + my * cos;
+            int xi = (int)Math.Round(rx);
+            int yi = (int)Math.Round(ry);
+            int zi = (int)Math.Round(mz);
+            int px = (xi - yi) - (int)minPx + pad;
+            int py = ((xi + yi) / 2 - zi) - (int)minPy + pad;
+            // One screen pixel per model unit, the reference's pitch. A
+            // single pixel can leave a seam where two voxels project into
+            // the same column, so the four neighbours are filled too; the
+            // painter sort makes the nearest write win either way.
+            for (int dy = 0; dy <= 1; dy = dy + 1) {
+                for (int dx = 0; dx <= 1; dx = dx + 1) {
                     int tx = px + dx;
                     int ty = py + dy;
                     if (tx >= 0 && ty >= 0 && tx < w && ty < h) {
@@ -918,6 +986,206 @@ class ObjectRenderer {
         return drawn;
     }
 
+    /// <summary>The live half of the world draw: objects straight onto the
+    /// frame, over the composited terrain texture. Sprite picking mirrors
+    /// DrawOne exactly, but each sprite registers once under its identity
+    /// (type, side, facing, frame, damage) and later frames blit the cached
+    /// image -- so a battlefield whose units move costs a few dozen small
+    /// blits, not a recomposite and re-encode of the whole scene canvas.</summary>
+    static int RenderToCanvas(World world, ObjectArt art, R2Canvas r,
+                              int camX, int camY, int originX, int originY,
+                              int playerSide) {
+        if (world == null || art == null) { return 0; }
+        int drawn = 0;
+        List<WorldObject> vis = new List<WorldObject>();
+        for (int i = 0; i < world.ObjectCount(); i = i + 1) {
+            vis.Add(world.ObjectAt(i));
+        }
+        ObjectRenderer.SortByDepth(vis);
+        for (int i = 0; i < vis.Count; i = i + 1) {
+            if (ObjectRenderer.DrawOneToCanvas(world, art, vis[i], r, camX,
+                                               camY, originX, originY,
+                                               playerSide)) {
+                drawn = drawn + 1;
+            }
+        }
+        ObjectRenderer.DrawEffectsToCanvas(world, r, camX, camY,
+                                           originX, originY);
+        return drawn;
+    }
+
+    /// <summary>One object onto the frame canvas. The anchor math, sprite
+    /// choice and overlays match DrawOne; only the blit target differs.</summary>
+    static bool DrawOneToCanvas(World world, ObjectArt art, WorldObject o,
+                                R2Canvas r, int camX, int camY, int originX,
+                                int originY, int playerSide) {
+        int wx = IsoProjection.ScreenX(o.X(), o.Y()) - originX - camX;
+        int wy = IsoProjection.ScreenY(o.X(), o.Y(), 0) - originY - camY;
+        int cw = R2CanvasStageW(r);
+        int ch = R2CanvasStageH(r);
+        if (wx > cw + 128 || wx < 0 - 128 || wy > ch + 128 || wy < 0 - 128) {
+            return false;
+        }
+
+        Texture tex = null;
+        string key = null;
+        UnitType u = null;
+        if (o.Kind() == ObjKind.Structure()) {
+            StructureType t = world.TypeOf(o);
+            if (t != null) {
+                int progress = o.BuiltTicks();
+                int buildTime = t.BuildTime();
+                tex = art.StructureTextureOf(t, o.Side(), progress, buildTime,
+                                             o.Hp(), t.Hp());
+                // The identity mirrors StructureTextureOf's decision tree:
+                // construction stage, else damage state. hp (not the derived
+                // tier) keeps two states from ever sharing a slot.
+                if (buildTime > 0 && progress < buildTime) {
+                    key = "ra2:obj:bu:" + t.Reg() + ":" + o.Side() + ":"
+                        + Convert.ToString(progress);
+                } else {
+                    key = "ra2:obj:st:" + t.Reg() + ":" + o.Side() + ":"
+                        + Convert.ToString(o.Hp());
+                }
+            }
+        } else {
+            u = world.UnitTypeOf(o);
+            tex = art.UnitTexture(u, o.HasRoute(), o.AnimFrame(), o.Facing(),
+                                  o.Side(), o.Deployed());
+            if (u != null) {
+                key = "ra2:obj:u:" + u.Reg() + ":" + o.Side() + ":"
+                    + Convert.ToString(o.Facing()) + ":"
+                    + Convert.ToString(o.AnimFrame())
+                    + (o.Deployed() ? ":d" : (o.HasRoute() ? ":w" : ":s"));
+            }
+        }
+        if (tex != null && key != null) {
+            R2Tex img = Ra2Ui.TexOf(key, tex);
+            if (u != null) {
+                // The reference's mobile anchor: the sprite's box centres on
+                // the cell diamond's centre.
+                r.DrawTexture(img,
+                    wx + IsoProjection.TileW() / 2 - tex.Width() / 2,
+                    wy + IsoProjection.TileH() / 2 - tex.Height() / 2,
+                    tex.Width(), tex.Height());
+            } else {
+                // A structure's frame carries its own anchor, as in DrawOne.
+                r.DrawTexture(img, wx + (0 - tex.Width() / 2),
+                              wy + (0 - tex.Height()),
+                              tex.Width(), tex.Height());
+            }
+            if (u != null && u.TurretVxl() != null) {
+                Texture tur = art.TurretTexture(u.TurretVxl(), o.TurretFacing(),
+                                                o.Side());
+                if (tur != null) {
+                    R2Tex timg = Ra2Ui.TexOf("ra2:obj:tur:" + u.TurretVxl()
+                        + ":" + Convert.ToString(o.TurretFacing()) + ":"
+                        + Convert.ToString(o.Side()), tur);
+                    r.DrawTexture(timg,
+                        wx + IsoProjection.TileW() / 2 - tur.Width() / 2,
+                        wy + IsoProjection.TileH() / 2 - tur.Height() / 2,
+                        tur.Width(), tur.Height());
+                }
+            }
+        } else if (tex == null) {
+            Texture ph = ObjectRenderer.Placeholder(o.Side(), u);
+            R2Tex pimg = Ra2Ui.TexOf("ra2:obj:ph:" + Convert.ToString(o.Side())
+                + ":" + Convert.ToString(u == null ? 0 : u.Role()), ph);
+            r.DrawTexture(pimg, wx - ph.Width() / 2, wy - ph.Height(),
+                          ph.Width(), ph.Height());
+            ph.Close();
+        }
+
+        if (o.IsSelected()) {
+            if (o.Side() == playerSide) {
+                ObjectRenderer.DrawRingC(r, wx, wy, 30, 255, 80);
+            } else {
+                ObjectRenderer.DrawRingC(r, wx, wy, 232, 60, 60);
+            }
+        }
+        if (o.Hp() < o.MaxHp() && o.MaxHp() > 0) {
+            int bw = 30;
+            int bx = wx - bw / 2;
+            int by = wy - 34;
+            r.SetColor(0, 0, 0, 160);
+            r.FillRect(bx - 1, by, bw + 2, 1);
+            r.FillRect(bx - 1, by + 2, bw + 2, 1);
+            r.FillRect(bx - 1, by + 1, 1, 1);
+            r.FillRect(bx + bw, by + 1, 1, 1);
+            int fill = bw * o.Hp() / o.MaxHp();
+            int hr = 62;
+            int hg = 224;
+            int hb = 74;
+            if (fill < bw / 2) { hr = 232; hg = 60; hb = 60; }
+            else if (fill < bw * 3 / 4) { hr = 236; hg = 200; hb = 60; }
+            r.SetColor(hr, hg, hb, 255);
+            if (fill > 0) { r.FillRect(bx, by + 1, fill, 1); }
+            if (fill < bw) {
+                r.SetColor(160, 0, 0, 255);
+                r.FillRect(bx + fill, by + 1, bw - fill, 1);
+            }
+            r.SetColor(255, 255, 255, 255);
+        }
+        return true;
+    }
+
+    /// <summary>The diamond selection ring, drawn as one-pixel fills on the
+    /// frame canvas -- the same four-edge diamond DrawRing stamps into a
+    /// texture (radius 15, apex to apex).</summary>
+    static void DrawRingC(R2Canvas r, int cx, int cy, int cr, int cg, int cb) {
+        r.SetColor(cr, cg, cb, 255);
+        for (int i = 0; i <= 15; i = i + 1) {
+            r.FillRect(cx + i, cy - 15 + i, 1, 1);
+            r.FillRect(cx + 15 - i, cy + i, 1, 1);
+            r.FillRect(cx - i, cy + 15 - i, 1, 1);
+            r.FillRect(cx - 15 + i, cy - i, 1, 1);
+        }
+    }
+
+    /// <summary>Stage-space extents of the frame canvas, for culling.</summary>
+    static int R2CanvasStageW(R2Canvas r) { return r.OutW(); }
+    static int R2CanvasStageH(R2Canvas r) { return r.OutH(); }
+
+    /// <summary>Combat effects onto the frame canvas: flashes as bright dots,
+    /// explosions as rings sized by their remaining life.</summary>
+    static void DrawEffectsToCanvas(World world, R2Canvas r, int camX, int camY,
+                                    int originX, int originY) {
+        for (int i = 0; i < world.EffectCount(); i = i + 1) {
+            int kind = world.EffectKind(i);
+            int x = world.EffectX(i);
+            int y = world.EffectY(i);
+            int life = world.EffectLife(i);
+            int wx = IsoProjection.ScreenX(x, y) - originX - camX;
+            int wy = IsoProjection.ScreenY(x, y, 0) - originY - camY;
+            if (wx < -64 || wy < -64 || wx > r.OutW() + 64
+             || wy > r.OutH() + 64) {
+                continue;
+            }
+            if (kind == 0) {
+                r.SetColor(255, 236, 120, 220);
+                r.FillRect(wx - 1, wy - 1, 3, 3);
+            } else {
+                int radius = 18 - life * 2;
+                if (radius < 2) { radius = 2; }
+                int alpha = 120 + life * 8;
+                if (alpha > 240) { alpha = 240; }
+                r.SetColor(232, 120 + life * 6, 40, alpha);
+                for (int k = 0; k <= radius; k = k + 1) {
+                    int hy = (radius - k) / 2;
+                    r.FillRect(wx + k, wy + hy, 1, 1);
+                    r.FillRect(wx - k, wy + hy, 1, 1);
+                    r.FillRect(wx + k, wy - hy, 1, 1);
+                    r.FillRect(wx - k, wy - hy, 1, 1);
+                }
+                if (life > 8) {
+                    r.SetColor(255, 200, 60, 200);
+                    r.FillRect(wx - 2, wy - 2, 4, 4);
+                }
+            }
+        }
+        r.SetColor(255, 255, 255, 255);
+    }
+
     /// <summary>Draws live combat effects: flashes are bright dots, explosions
     /// are expanding rings whose size and fade track the remaining life.</summary>
     static void DrawEffects(World world, Texture canvas, int camX, int camY,
@@ -1047,14 +1315,25 @@ class ObjectRenderer {
             // way TypeOf does for civ structures.
             u = world.UnitTypeOf(o);
             tex = art.UnitTexture(u, o.HasRoute(), o.AnimFrame(), o.Facing(),
-                                  o.Side());
+                                  o.Side(), o.Deployed());
         }
         if (tex != null) {
-            // The sprite's box is drawn around the cell apex; the building's
-            // visual ground is the bottom of the sprite, which the frame's y
-            // places below the apex.
-            canvas.Blit(tex, wx + (0 - tex.Width() / 2),
-                        wy + (0 - tex.Height()));
+            if (u != null) {
+                // A mobile's bounding-box centre lands on the cell diamond's
+                // centre -- where the reference engine puts the blit
+                // (iso_to_screen + (-w/2 + TILE_W/2, -h/2 + TILE_H/2)).
+                // Anchoring the hull's *bottom* on the cell apex instead
+                // (what this did) floats a vehicle half a cell too high.
+                canvas.Blit(tex,
+                    wx + IsoProjection.TileW() / 2 - tex.Width() / 2,
+                    wy + IsoProjection.TileH() / 2 - tex.Height() / 2);
+            } else {
+                // A structure's own frame carries its anchor: the SHP's
+                // frame y places the building's visual ground below the apex,
+                // and its x centres it on the cell.
+                canvas.Blit(tex, wx + (0 - tex.Width() / 2),
+                            wy + (0 - tex.Height()));
+            }
         }
         // A turreted vehicle's gun mounts over the hull: bake the turret
         // model at its own facing and stamp it on the same anchor, so the
@@ -1064,10 +1343,13 @@ class ObjectRenderer {
             Texture tur = art.TurretTexture(u.TurretVxl(), o.TurretFacing(),
                                             o.Side());
             if (tur != null) {
-                // The turret model is smaller than the hull and sits toward
-                // its rear; the hull centre reads as the right mount point.
-                canvas.Blit(tur, wx + (0 - tur.Width() / 2),
-                            wy + (0 - tur.Height() / 2));
+                // The turret is a second limb of the same model: its own
+                // voxels carry the vehicle's model origin, so centring its
+                // box on the same cell centre stacks it on the hull the way
+                // the reference composites body+turret into one sprite.
+                canvas.Blit(tur,
+                    wx + IsoProjection.TileW() / 2 - tur.Width() / 2,
+                    wy + IsoProjection.TileH() / 2 - tur.Height() / 2);
             }
         }
         if (tex == null) {
@@ -1095,12 +1377,22 @@ class ObjectRenderer {
             int bw = 30;
             int bx = wx - bw / 2;
             int by = wy - 34;
-            canvas.SetPixel((by + 1) * canvas.Width() + (bx - 1), 0, 0, 0, 160);
-            canvas.SetPixel((by + 1) * canvas.Width() + (bx + bw), 0, 0, 0, 160);
+            // A damaged thing can stand above the viewport (the bar's row is
+            // 34px up), and SetPixel writes straight into the canvas buffer
+            // with no clipping -- an unguarded write there is an
+            // array-index-out-of-bounds at runtime. Skip the whole bar when
+            // any row it touches is off-canvas.
+            int rowW = canvas.Width();
+            int colH = canvas.Height();
+            bool fits = by >= 0 && by + 2 < colH && bx - 1 >= 0
+                     && bx + bw < rowW;
+            if (fits) {
+            canvas.SetPixel((by + 1) * rowW + (bx - 1), 0, 0, 0, 160);
+            canvas.SetPixel((by + 1) * rowW + (bx + bw), 0, 0, 0, 160);
             int fill = bw * o.Hp() / o.MaxHp();
             for (int i = 0; i <= bw + 1; i = i + 1) {
-                canvas.SetPixel(by * canvas.Width() + (bx - 1 + i), 0, 0, 0, 160);
-                canvas.SetPixel((by + 2) * canvas.Width() + (bx - 1 + i), 0, 0, 0, 160);
+                canvas.SetPixel(by * rowW + (bx - 1 + i), 0, 0, 0, 160);
+                canvas.SetPixel((by + 2) * rowW + (bx - 1 + i), 0, 0, 0, 160);
             }
             int hr = 62;
             int hg = 224;
@@ -1108,10 +1400,11 @@ class ObjectRenderer {
             if (fill < bw / 2) { hr = 232; hg = 60; hb = 60; }
             else if (fill < bw * 3 / 4) { hr = 236; hg = 200; hb = 60; }
             for (int i = 0; i < fill; i = i + 1) {
-                canvas.SetPixel((by + 1) * canvas.Width() + (bx + i), hr, hg, hb, 255);
+                canvas.SetPixel((by + 1) * rowW + (bx + i), hr, hg, hb, 255);
             }
             if (fill < bw) {
-                canvas.SetPixel((by + 1) * canvas.Width() + (bx + fill), 160, 0, 0, 255);
+                canvas.SetPixel((by + 1) * rowW + (bx + fill), 160, 0, 0, 255);
+            }
             }
         }
         return true;

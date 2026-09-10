@@ -123,7 +123,7 @@ class ShellArt {
         byte[] idx = shp.DecodeFrameCanvas(frame);
         Texture tex = Texture.FromIndexedShp(idx, shp.Width(), shp.Height(),
                                              pal);
-        string img = Ra2Ui.RegisterRgba(key, tex);
+        string img = Ra2Ui.RegisterKept(key, tex);
         tex.Close();
         if (img.Length == 0) { return null; }
         return R2Tex.Create(img, shp.Width(), shp.Height());
@@ -172,7 +172,7 @@ class ShellArt {
             }
         }
         full.Close();
-        string img = Ra2Ui.RegisterRgba(key, crop);
+        string img = Ra2Ui.RegisterKept(key, crop);
         crop.Close();
         if (img.Length == 0) { return null; }
         return R2Tex.Create(img, w, h);
@@ -185,7 +185,7 @@ class ShellArt {
         if (rgba == null) { return null; }
         int w = rgba.Width();
         int h = rgba.Height();
-        string img = Ra2Ui.RegisterRgba(key, rgba);
+        string img = Ra2Ui.RegisterKept(key, rgba);
         rgba.Close();
         if (img.Length == 0) { return null; }
         return R2Tex.Create(img, w, h);
@@ -244,7 +244,7 @@ class ShellArt {
             if (f == null || f.IsEmpty()) { continue; }
             byte[] idx = shp.DecodeFrame(i);
             Texture tex = Texture.FromIndexed(idx, f.Width(), f.Height(), pal);
-            string img = Ra2Ui.RegisterRgba(key + Convert.ToString(i), tex);
+            string img = Ra2Ui.RegisterKept(key + Convert.ToString(i), tex);
             if (img.Length > 0) {
                 outTex[i] = R2Tex.Create(img, f.Width(), f.Height());
             }
@@ -279,7 +279,7 @@ class ShellArt {
             if (f == null || f.IsEmpty()) { continue; }
             byte[] idx = shp.DecodeFrame(i);
             Texture tex = Texture.FromIndexed(idx, f.Width(), f.Height(), pal);
-            string img = Ra2Ui.RegisterRgba("ra2:btn" + Convert.ToString(i), tex);
+            string img = Ra2Ui.RegisterKept("ra2:btn" + Convert.ToString(i), tex);
             outTex[i] = R2Tex.Create(img, f.Width(), f.Height());
             tex.Close();
         }
@@ -431,6 +431,22 @@ class Ra2Ui {
     // registered once; every later frame reuses the registered image.
     static List<string> memoKeys;
     static List<R2Tex> memoVals;
+    // Retained source bytes of every kept registration. The canvas's image
+    // store holds only 64 decoded images and FIFO-evicts the oldest key, so
+    // a piece of fixed UI registered on frame 1 can be gone by frame 70 --
+    // with the source bytes kept, a draw that finds its key evicted simply
+    // re-registers them. The bytes stay valid even after the caller closed
+    // its Texture.
+    static List<string> keepKeys;
+    static List<byte[]> keepBytes;
+    static List<int> keepW;
+    static List<int> keepH;
+    // Per mutable surface, the previous frame's full key, evicted when the
+    // surface re-registers. Without this the terrain composite pushed a new
+    // key into the store every frame and the FIFO walked fixed UI art out
+    // from under the sidebar seconds into a battle.
+    static List<string> mutBase;
+    static List<string> mutPrev;
 
     /// <summary>Registers an RGBA Texture under key, returning the key, or
     /// "" when the texture is empty. Keys are uniquified with a counter so
@@ -461,14 +477,67 @@ class Ra2Ui {
         }
         registered = registered + 1;
         string full = "mem:" + key + "#" + Convert.ToString(registered);
+        Ra2Ui.lastBuf = buf;
         if (Canvas.ImageLoadMem(full, buf, buf.Length) == 0) { return ""; }
         return full;
+    }
+
+    /// <summary>Registers like RegisterRgba and keeps the encoded bytes, so
+    /// art that outlives its Texture (the callers decode, register, then
+    /// Close) can be re-registered if the store evicts it. Every fixed UI
+    /// image goes through here.</summary>
+    static string RegisterKept(string key, Texture t) {
+        string full = Ra2Ui.RegisterRgba(key, t);
+        if (full.Length == 0) { return full; }
+        if (Ra2Ui.keepKeys == null) {
+            Ra2Ui.keepKeys = new List<string>();
+            Ra2Ui.keepBytes = new List<byte[]>();
+            Ra2Ui.keepW = new List<int>();
+            Ra2Ui.keepH = new List<int>();
+        }
+        Ra2Ui.keepKeys.Add(full);
+        Ra2Ui.keepBytes.Add(t == null ? null : Ra2Ui.LastBuf());
+        Ra2Ui.keepW.Add(t.Width());
+        Ra2Ui.keepH.Add(t.Height());
+        return full;
+    }
+
+    /// <summary>The bytes RegisterRgba last encoded. RegisterKept reads it
+    /// right after the call; nothing else may.</summary>
+    static byte[] lastBuf;
+    static byte[] LastBuf() {
+        return Ra2Ui.lastBuf;
+    }
+
+    /// <summary>A live handle for t: t itself while the canvas store still
+    /// holds its image, otherwise a re-registration of the retained bytes
+    /// under a fresh key. Null when the art was mutable (whose bytes are
+    /// only kept by the surface's own re-register path).</summary>
+    static R2Tex Rebind(R2Tex t) {
+        if (t == null || !t.Ok()) { return null; }
+        if (Canvas.ImageWidth(t.Key()) > 0) { return t; }
+        if (Ra2Ui.keepKeys == null) { return null; }
+        for (int i = 0; i < Ra2Ui.keepKeys.Count; i = i + 1) {
+            if (Ra2Ui.keepKeys[i] != t.Key()) { continue; }
+            byte[] buf = Ra2Ui.keepBytes[i];
+            if (buf == null) { return null; }
+            Ra2Ui.registered = Ra2Ui.registered + 1;
+            string full = Ra2Ui.keepKeys[i] + "+"
+                + Convert.ToString(Ra2Ui.registered);
+            if (Canvas.ImageLoadMem(full, buf, buf.Length) == 0) {
+                return null;
+            }
+            Ra2Ui.keepKeys[i] = full;
+            return R2Tex.Create(full, Ra2Ui.keepW[i], Ra2Ui.keepH[i]);
+        }
+        return null;
     }
 
     /// <summary>Registers a Texture once under a stable key and returns the
     /// R2Tex handle. Repeat calls with the same key return the cached handle
     /// instead of re-encoding -- the per-frame cameo/icon draws depend on
-    /// this to stay cheap.</summary>
+    /// this to stay cheap. A cached handle whose canvas image was evicted
+    /// re-registers from the texture at hand and takes its slot.</summary>
     static R2Tex TexOf(string key, Texture t) {
         if (t == null) { return null; }
         if (Ra2Ui.memoKeys == null) {
@@ -476,13 +545,24 @@ class Ra2Ui {
             Ra2Ui.memoVals = new List<R2Tex>();
         }
         for (int i = 0; i < Ra2Ui.memoKeys.Count; i = i + 1) {
-            if (Ra2Ui.memoKeys[i] == key) { return Ra2Ui.memoVals[i]; }
+            if (Ra2Ui.memoKeys[i] != key) { continue; }
+            R2Tex v = Ra2Ui.memoVals[i];
+            if (Canvas.ImageWidth(v.Key()) > 0) { return v; }
+            // Evicted by the canvas's FIFO image store: register the caller's
+            // pixels afresh and take the memo slot.
+            int w = t.Width();
+            int h = t.Height();
+            string img = Ra2Ui.RegisterKept(key, t);
+            if (img.Length == 0) { return null; }
+            v = R2Tex.Create(img, w, h);
+            Ra2Ui.memoVals[i] = v;
+            return v;
         }
-        int w = t.Width();
-        int h = t.Height();
-        string img = Ra2Ui.RegisterRgba(key, t);
-        if (img.Length == 0) { return null; }
-        R2Tex rt = R2Tex.Create(img, w, h);
+        int w0 = t.Width();
+        int h0 = t.Height();
+        string img0 = Ra2Ui.RegisterKept(key, t);
+        if (img0.Length == 0) { return null; }
+        R2Tex rt = R2Tex.Create(img0, w0, h0);
         Ra2Ui.memoKeys.Add(key);
         Ra2Ui.memoVals.Add(rt);
         return rt;
@@ -492,6 +572,12 @@ class Ra2Ui {
     static void ResetMemo() {
         Ra2Ui.memoKeys = null;
         Ra2Ui.memoVals = null;
+        Ra2Ui.keepKeys = null;
+        Ra2Ui.keepBytes = null;
+        Ra2Ui.keepW = null;
+        Ra2Ui.keepH = null;
+        Ra2Ui.mutBase = null;
+        Ra2Ui.mutPrev = null;
     }
 
     // Mutable surfaces (the terrain composite, the map preview): re-registered
@@ -502,17 +588,32 @@ class Ra2Ui {
 
     /// <summary>Registers a CPU Texture as a canvas image with a fresh key
     /// each call -- for pixels that change between frames (the terrain
-    /// composite). Returns the R2Tex handle.</summary>
+    /// composite). The surface's previous image is evicted first, so the
+    /// surface owns exactly one slot in the canvas's FIFO image store at
+    /// any time and its churn cannot walk fixed UI art out of the 64-entry
+    /// cache. Returns the R2Tex handle.</summary>
     static R2Tex RegisterMutable(string key, Texture t) {
         if (t == null) { return null; }
         int w = t.Width();
         int h = t.Height();
         if (w <= 0 || h <= 0) { return null; }
-        Ra2Ui.mutCounter = Ra2Ui.mutCounter + 1;
-        string img = Ra2Ui.RegisterRgba(
-            key + Convert.ToString(Ra2Ui.mutCounter), t);
-        if (img.Length == 0) { return null; }
-        return R2Tex.Create(img, w, h);
+        if (Ra2Ui.mutBase == null) {
+            Ra2Ui.mutBase = new List<string>();
+            Ra2Ui.mutPrev = new List<string>();
+        }
+        for (int i = 0; i < Ra2Ui.mutBase.Count; i = i + 1) {
+            if (Ra2Ui.mutBase[i] != key) { continue; }
+            Canvas.EvictImage(Ra2Ui.mutPrev[i]);
+            string img = Ra2Ui.RegisterRgba(key, t);
+            if (img.Length == 0) { return null; }
+            Ra2Ui.mutPrev[i] = img;
+            return R2Tex.Create(img, w, h);
+        }
+        string img0 = Ra2Ui.RegisterRgba(key, t);
+        if (img0.Length == 0) { return null; }
+        Ra2Ui.mutBase.Add(key);
+        Ra2Ui.mutPrev.Add(img0);
+        return R2Tex.Create(img0, w, h);
     }
 }
 

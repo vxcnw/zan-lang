@@ -146,12 +146,34 @@ class AssetDb {
     IniDocument Art() { return this.art; }
     CsfTable Strings() { return this.strings; }
 
+    /// <summary>Parses a shipped INI out of the vfs. The text does not always
+    /// begin at byte 0: this install's loose ARTMD.INI opens with a ~940-byte
+    /// UTF-16 comment block whose interior NULs end a naive byte-to-string
+    /// conversion three characters in, so the whole of Yuri's Revenge's art
+    /// (the Guardian GI's portrait, the shipyard's, dozens more) parsed as an
+    /// empty document and every one of its overrides was silently dropped.
+    /// The original reader is line-based and simply ignores anything that is
+    /// not a section or a key, so start the text at the first line-opening
+    /// '[' -- identical for a clean file, a fix for this one.</summary>
     IniDocument LoadIni(string name) {
         List<int> len = new List<int>();
         len.Add(0);
         byte[] raw = this.vfs.Read(name, len);
         if (len[0] == 0) { return IniDocument.Create(); }
-        return IniParser.Parse(raw);
+        int start = AssetDb.IniTextStart(raw, len[0]);
+        return IniParser.Parse(raw.ToStr(start, len[0] - start));
+    }
+
+    /// <summary>Index of the first '[' that opens a line, or 0. Bytes before
+    /// it are a non-text prefix (see LoadIni).</summary>
+    static int IniTextStart(byte[] raw, int len) {
+        for (int i = 0; i < len; i = i + 1) {
+            if (raw[i] != 91) { continue; }         // '['
+            if (i == 0) { return 0; }
+            int prev = raw[i - 1];
+            if (prev == 10 || prev == 13) { return i; }
+        }
+        return 0;
     }
 
     CsfTable LoadCsf(string name) {

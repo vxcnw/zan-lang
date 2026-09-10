@@ -20,6 +20,12 @@ class VxlLimb {
     int normalType; // 2 = Tiberian Sun's 32 normals, 4 = RA2's 256
     byte[] vox;     // (y*sizeX + x)*sizeZ + z -> palette index + 1, 0 = empty
     byte[] nrm;     // same layout -> normal index into VxlNormals.Table(mode)
+    // Model-space bounding box [minX,minY,minZ, maxX,maxY,maxZ]. The reference
+    // engine's rasterizer builds each voxel's point as bounds_min + scaled
+    // grid, so the box, not the grid size, is the model's origin -- and a grid
+    // whose occupied cells are not centred in it (MTNK's x runs -27.9..30.3)
+    // would otherwise sit off-centre by a voxel or two.
+    double[] bounds;
 
     static VxlLimb Create(string name, int sizeX, int sizeY, int sizeZ,
                           int normalType) {
@@ -31,6 +37,7 @@ class VxlLimb {
         l.normalType = normalType;
         l.vox = new byte[sizeX * sizeY * sizeZ + 1];
         l.nrm = new byte[sizeX * sizeY * sizeZ + 1];
+        l.bounds = new double[6];
         return l;
     }
 
@@ -39,6 +46,27 @@ class VxlLimb {
     int SizeY() { return this.sizeY; }
     int SizeZ() { return this.sizeZ; }
     int NormalType() { return this.normalType; }
+
+    void SetBounds(double minX, double minY, double minZ, double maxX,
+                   double maxY, double maxZ) {
+        this.bounds[0] = minX; this.bounds[1] = minY; this.bounds[2] = minZ;
+        this.bounds[3] = maxX; this.bounds[4] = maxY; this.bounds[5] = maxZ;
+    }
+
+    /// <summary>Bounds minimum on axis 0/1/2, or 0 when the install file left
+    /// the box empty.</summary>
+    double BoundsMin(int axis) {
+        if (this.bounds == null || axis < 0 || axis > 2) { return 0.0; }
+        return this.bounds[axis];
+    }
+
+    /// <summary>Bounds extent on axis 0/1/2 -- the divisor the reference uses
+    /// to turn a grid index into model units (`section_axis_scale`). Zero
+    /// (an unset box) reads as a scale of 1.</summary>
+    double BoundsExtent(int axis) {
+        if (this.bounds == null || axis < 0 || axis > 2) { return 0.0; }
+        return this.bounds[axis + 3] - this.bounds[axis];
+    }
 
     /// <summary>The palette index of the voxel at (x,y,z), or -1 for empty.</summary>
     int VoxelAt(int x, int y, int z) {
@@ -75,6 +103,25 @@ class VxlLimb {
             return;
         }
         this.nrm[(y * this.sizeX + x) * this.sizeZ + z] = (byte)normal;
+    }
+
+    /// <summary>Dev aid for the self-test's decode audit: total filled
+    /// voxels, and the filled count of one z slice, both against the
+    /// independent Python decoder's numbers.</summary>
+    int FilledCount() {
+        int n = 0;
+        for (int i = 0; i < this.vox.Length; i = i + 1) {
+            if (this.vox[i] != 0) { n = n + 1; }
+        }
+        return n;
+    }
+
+    int FilledAtZ(int z) {
+        int n = 0;
+        for (int c = 0; c < this.sizeX * this.sizeY; c = c + 1) {
+            if (this.vox[c * this.sizeZ + z] != 0) { n = n + 1; }
+        }
+        return n;
     }
 }
 
@@ -127,6 +174,7 @@ class VxlImage {
         List<int> blocks = new List<int>();
         List<int> spansOfs = new List<int>();
         List<int> sizes = new List<int>();
+        List<double[]> boundsList = new List<double[]>();
         for (int i = 0; i < limbCount; i = i + 1) {
             int footer = baseOfs + 28 * limbCount + bodySize + 92 * i;
             if (footer + 92 > length) { return img; }
@@ -135,7 +183,15 @@ class VxlImage {
             r.Skip(4);                      // second table offset (unused)
             spansOfs.Add((int)r.ReadU32());
             r.Skip(4);                      // scale: unused, render at own px/voxel
-            r.Skip(72);                     // bounds + reserved
+            r.Skip(48);                     // 12-f32 limb transform (identity for
+                                            // vehicles; HVA carries the real one)
+            // The model-space box: six f32 at footer+64. It, not the grid
+            // size, is the origin the reference rasterizes from.
+            double[] bb = new double[6];
+            for (int k = 0; k < 6; k = k + 1) {
+                bb[k] = HvaFile.ReadF32(r);
+            }
+            boundsList.Add(bb);
             int sx = r.ReadU8();
             int sy = r.ReadU8();
             int sz = r.ReadU8();
@@ -152,6 +208,8 @@ class VxlImage {
             int headerOfs = baseOfs + 28 * i;
             string name = VxlImage.ReadName(r, headerOfs);
             VxlLimb limb = VxlLimb.Create(name, sx, sy, sz, normalType);
+            double[] bb = boundsList[i];
+            limb.SetBounds(bb[0], bb[1], bb[2], bb[3], bb[4], bb[5]);
             int block = baseOfs + 28 * limbCount + blocks[i];
             VxlImage.DecodeLimb(data, length, block, spansOfs[i], limb);
             img.limbs.Add(limb);

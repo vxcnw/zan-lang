@@ -169,7 +169,9 @@ class GameController {
     /// <summary>Steps the game one tick: money events settle, refineries and
     /// derricks trickle, the AI plans, then the world moves, fights and
     /// produces, and the win/lose condition is checked. Returns how many
-    /// units moved.</summary>
+    /// units moved. No redraw vote here: moving units draw live over the
+    /// terrain layer every frame, and the scene canvas only recomposites on
+    /// camera moves, ore or smudge changes.</summary>
     int Tick() {
         if (this.paused) { return 0; }
         this.tick = this.tick + 1;
@@ -177,10 +179,8 @@ class GameController {
         this.Economy();
         this.UpdateAi();
         List<int> r = this.world.Tick();
-        int moved = r[0];
-        if (moved > 0 || r[1] > 0 || r[2] > 0) { this.dirty = true; }
         this.CheckResult();
-        return moved;
+        return r[0];
     }
 
     // ---- economy -----------------------------------------------------------
@@ -545,7 +545,14 @@ class GameController {
         if (trainEvery < 1) { trainEvery = 1; }
         if (this.tick % buildEvery == 0) { this.AiBuildStep(aiSide, rules); }
         if (this.tick % trainEvery == 0) { this.AiTrainStep(aiSide, rules); }
-        // Attack: every unit without a live target acquires the nearest
+        // Unfold the base before anything else: the reference engine runs
+        // deploy_mcv_commands ahead of its build order, because a house with
+        // no construction yard can build nothing (AiBuyFromList bails out on
+        // a yardless house). Each AI starts on one MCV, exactly like the
+        // player, so this is what raises its base.
+        if (!this.HasRegBuilding(aiSide, rules.AiConst())) {
+            this.AiDeployMcv(aiSide);
+        }        // Attack: every unit without a live target acquires the nearest
         // hostile object. The world's chase logic then walks it into range.
         for (int i = 0; i < this.world.ObjectCount(); i = i + 1) {
             WorldObject o = this.world.ObjectAt(i);
@@ -559,6 +566,40 @@ class GameController {
                 this.world.AttackObject(i, this.world.ObjectAt(enemy));
             }
         }
+    }
+
+    /// <summary>Unfolds a house's mobile construction vehicle: the first own
+    /// unit whose rules carry DeploysInto is deployed where it stands. The
+    /// reference's deploy_mcv_commands does the same walk over its entities;
+    /// a house that already has a yard never reaches here.</summary>
+    void AiDeployMcv(int aiSide) {
+        for (int i = 0; i < this.world.ObjectCount(); i = i + 1) {
+            WorldObject o = this.world.ObjectAt(i);
+            if (o.Side() != aiSide || o.Kind() != ObjKind.Unit()) { continue; }
+            if (o.IsDead() || o.UnitType() == null) { continue; }
+            string into = o.UnitType().DeploysInto();
+            if (into == null || into.Length == 0) { continue; }
+            if (this.world.DeployObject(i) >= 0) { return; }
+        }
+    }
+
+    /// <summary>The player's deploy key (F, the original's binding): every
+    /// selected unit of the player's own house runs its Deploy -- an MCV
+    /// unfolds into its construction yard on the spot, a GI sits down into
+    /// his emplacement or stands back up. Returns true when at least one
+    /// deploy went through.</summary>
+    bool DeploySelected() {
+        bool any = false;
+        List<WorldObject> sel = this.world.SelectedObjects();
+        for (int i = 0; i < sel.Count; i = i + 1) {
+            WorldObject o = sel[i];
+            if (o.Side() != this.side || o.Kind() != ObjKind.Unit()) { continue; }
+            int idx = this.world.IndexOfObject(o);
+            if (idx < 0) { continue; }
+            if (this.world.DeployObject(idx) >= 0) { any = true; }
+        }
+        if (any) { this.dirty = true; }
+        return any;
     }
 
     /// <summary>One step of the AI's construction. The first pass walks the

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Ra2.Formats;
+using Ra2.Game;
 
 namespace Ra2.Assets;
 
@@ -36,6 +37,26 @@ class TileCacheEntry {
     int offsetY;
 }
 
+/// <summary>A decoded TMP template kept for terrain queries. Null `tmp`
+/// means "looked up and absent", which is distinct from "not looked up".</summary>
+class TileTemplateEntry {
+    int key;
+    TmpTemplate tmp;
+}
+
+/// <summary>One subtile's terrain classification, lifted out of the TMP
+/// header so callers that only ask "what is this cell" do not hold the
+/// whole template.</summary>
+class SubTileInfo {
+    int terrainType;
+    int rampType;
+    int height;
+
+    int TerrainType() { return this.terrainType; }
+    int RampType() { return this.rampType; }
+    int Height() { return this.height; }
+}
+
 class Theater {
     Vfs vfs;
     string name;
@@ -48,6 +69,11 @@ class Theater {
     // from "not looked up yet".
     List<TileCacheEntry> cache;
 
+    // Decoded TMP templates, keyed by tile id. Separate from `cache` above
+    // because terrain classification needs the template's header (terrain
+    // type, ramp flag, height) without ever building an RGBA texture.
+    List<TileTemplateEntry> tmpCache;
+
     /// <summary>The theater matching a map's Theater= value. Falls back to
     /// temperate, which every install has.</summary>
     static Theater Load(Vfs vfs, AssetDb db, string theaterName) {
@@ -56,6 +82,7 @@ class Theater {
         t.name = theaterName.ToUpper();
         t.sets = new List<TileSet>();
         t.cache = new List<TileCacheEntry>();
+        t.tmpCache = new List<TileTemplateEntry>();
 
         string ini = Theater.IniNameFor(t.name);
         t.extension = Theater.ExtensionFor(t.name);
@@ -127,6 +154,36 @@ class Theater {
     int SetCount() { return this.sets.Count; }
     TileSet SetAt(int i) { return this.sets[i]; }
     int TileCount() { return this.tileCount; }
+
+    /// <summary>The tile-id ranges that are water, as first,count pairs, read
+    /// off this theater's own set table: every set whose name says water
+    /// ("Water" 314-327, "ZMM Water" 769-782, "Water Caves", the waterfalls)
+    /// counts, and the bridge sets do not -- a bridge spans water but a
+    /// vehicle drives over it. This is what decides where a building may
+    /// stand, so a snow or urban map needs its own table, not temperate's
+    /// numbers.</summary>
+    List<int> WaterRanges() {
+        List<int> outRanges = new List<int>();
+        for (int i = 0; i < this.sets.Count; i = i + 1) {
+            TileSet ts = this.sets[i];
+            if (ts.Count() <= 0) { continue; }
+            string nm = ts.Name().ToLower();
+            if (!Theater.HasWord(nm, "water")) { continue; }
+            if (Theater.HasWord(nm, "bridge")) { continue; }
+            outRanges.Add(ts.FirstId());
+            outRanges.Add(ts.Count());
+        }
+        return outRanges;
+    }
+
+    static bool HasWord(string hay, string word) {
+        int n = word.Length;
+        if (n == 0 || hay.Length < n) { return false; }
+        for (int i = 0; i + n <= hay.Length; i = i + 1) {
+            if (hay.Substring(i, n) == word) { return true; }
+        }
+        return false;
+    }
 
     /// Cell records use 0xFFFF to mean "no tile chosen", which the engine draws
     /// as plain clear terrain rather than as a hole -- on MP02T2 that is 1551
@@ -248,6 +305,29 @@ class Theater {
         return tex;
     }
 
+    /// <summary>The TMP template backing a tile id, decoded on demand and
+    /// kept. Terrain classification asks for this for nearly every cell of
+    /// the map, so the decode is cached separately from the RGBA texture --
+    /// a passability query must not pay a palette conversion, and must
+    /// still answer on a headless run where no texture is ever built.</summary>
+    TmpTemplate TileTemplate(int tileId) {
+        for (int i = 0; i < this.tmpCache.Count; i = i + 1) {
+            if (this.tmpCache[i].key == tileId) { return this.tmpCache[i].tmp; }
+        }
+        TileTemplateEntry e = new TileTemplateEntry();
+        e.key = tileId;
+        e.tmp = null;
+        string file = this.FileForTile(tileId);
+        if (file.Length > 0) {
+            List<int> len = new List<int>();
+            len.Add(0);
+            byte[] raw = this.vfs.Read(file, len);
+            if (len[0] > 0) { e.tmp = TmpTemplate.Parse(raw, len[0]); }
+        }
+        this.tmpCache.Add(e);
+        return e.tmp;
+    }
+
     /// <summary>Where a cached tile's texture sits relative to the cell apex.
     /// Non-zero when a cliff's overhang reaches above or left of the diamond.</summary>
     int DrawOffsetX(int tileId, int subTile) {
@@ -256,6 +336,68 @@ class Theater {
         return this.cache[i].offsetX;
     }
 
+    // ---- terrain classification -------------------------------------
+    //
+    // The reference reads a cell's terrain class from the TMP template the
+    // cell's tile id names (`TileCollection.ts:100-113`: `getTileImage`
+    // then `tileImage.terrainType`, with `isCliffTile` as a second
+    // opinion). This port does the same, so a cell's land class comes from
+    // the art the map actually placed rather than from an id range.
+
+    /// <summary>A cell's TMP terrain-type byte, or -1 when the tile has no
+    /// art. The sentinel is distinct from every real byte (0..15).</summary>
+    int CellTerrainType(int tileId, int subTile) {
+        SubTileInfo si = this.SubTileOf(tileId, subTile);
+        if (si == null) { return -1; }
+        return si.terrainType;
+    }
+
+    /// <summary>A cell's ramp flag. Non-zero is the only legal way for a
+    /// ground unit to change height, which is why it is read per cell and
+    /// not derived from the elevation byte.</summary>
+    int CellRampType(int tileId, int subTile) {
+        SubTileInfo si = this.SubTileOf(tileId, subTile);
+        if (si == null) { return 0; }
+        return si.rampType;
+    }
+
+    /// <summary>A cell's own height byte from its TMP template. This is the
+    /// template's elevation, not the map's level byte: the pack's `level`
+    /// is a per-cell override the editor writes for raised terrain, while
+    /// the template height classifies the art.</summary>
+    int CellTemplateHeight(int tileId, int subTile) {
+        SubTileInfo si = this.SubTileOf(tileId, subTile);
+        if (si == null) { return 0; }
+        return si.height;
+    }
+
+    /// <summary>A cell's land class, or null when the tile is the map's
+    /// clear-terrain sentinel or has no art.
+    ///
+    /// A null answer means "unknown", not "impassable": the caller falls
+    /// back to the set-name heuristic so a partly-installed theater still
+    /// renders and plays.</summary>
+    LandType CellLandType(int tileId, int subTile) {
+        int tt = this.CellTerrainType(tileId, subTile);
+        if (tt < 0) { return null; }
+        return LandType.Of(LandType.FromTerrainType(tt));
+    }
+
+    /// <summary>The classification triple of one subtile, or null.</summary>
+    SubTileInfo SubTileOf(int tileId, int subTile) {
+        TmpTemplate tmp = this.TileTemplate(tileId);
+        if (tmp == null) { return null; }
+        int sub = subTile;
+        if (tileId == Theater.ClearTile) { sub = 0; }
+        if (sub < 0 || sub >= tmp.TileCount()) { return null; }
+        TmpTile t = tmp.TileAt(sub);
+        if (t == null) { return null; }
+        SubTileInfo si = new SubTileInfo();
+        si.terrainType = t.TerrainType();
+        si.rampType = t.RampType();
+        si.height = t.Height();
+        return si;
+    }
     int DrawOffsetY(int tileId, int subTile) {
         int i = this.CacheSlot(tileId, subTile);
         if (i < 0) { return 0; }

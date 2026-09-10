@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Ra2.Formats;
+using Ra2.Assets;
 
 namespace Ra2.Game;
 
@@ -42,6 +43,10 @@ class WorldObject {
     int facing;         // 0-7 compass direction the unit faces
     int turretFacing;   // 0-8: compass ring, 8 = resetting toward the body
     int turretTurn;     // ticks until the turret takes its next step
+    // The reference's movement ledger: each tick adds the rules Speed, and
+    // every CELL_MOVE_COST (64) banked buys one cell step. A Speed=4 rifleman
+    // thus advances a cell every 16 ticks instead of teleporting.
+    int moveAccum;
     // Move-attack: a destination cell the unit walks to, attacking any enemy
     // it comes across on the way. -1 when inactive.
     int maX;
@@ -77,6 +82,11 @@ class WorldObject {
     int repairAt;      // world tick of the next repair step
     int repairCarry;   // unbilled fraction of a credit from the last step
 
+    // Deployer infantry only: true while the trooper is sat down in his
+    // emplacement. A deployed soldier holds his ground -- the movement loop
+    // skips him and a fresh move order stands him back up.
+    bool deployed;
+
     static WorldObject CreateStructure(int side, int buildId, int x, int y,
                                        int hp) {
         WorldObject o = new WorldObject();
@@ -105,6 +115,7 @@ class WorldObject {
         o.repairing = false;
         o.repairAt = 0;
         o.repairCarry = 0;
+        o.deployed = false;
         return o;
     }
 
@@ -142,6 +153,7 @@ class WorldObject {
         o.repairing = false;
         o.repairAt = 0;
         o.repairCarry = 0;
+        o.deployed = false;
         return o;
     }
 
@@ -184,6 +196,8 @@ class WorldObject {
     void SetSide(int side) { this.side = side; }
 
     int Frozen() { return this.frozen; }
+    int MoveAccum() { return this.moveAccum; }
+    void SetMoveAccum(int v) { this.moveAccum = v; }
     void SetFrozen(int ticks) { this.frozen = ticks; }
     int BombTimer() { return this.bombTimer; }
     void SetBombTimer(int ticks) { this.bombTimer = ticks; }
@@ -206,6 +220,50 @@ class WorldObject {
     bool RouteRetry() { return this.routeCooldown > 0; }
     int RouteCooldown() { return this.routeCooldown; }
     void SetRouteCooldown(int ticks) { this.routeCooldown = ticks; }
+
+    // ---- deploy ---------------------------------------------------------
+
+    bool Deployed() { return this.deployed; }
+    void SetDeployed(bool on) { this.deployed = on; }
+
+    /// <summary>Unfolds the unit into the structure it DeploysInto, in place
+    /// -- the reference engine's GameCommand::Deploy. The archetype becomes
+    /// the building, every order and movement field is dropped, and the
+    /// health fraction carries over, so a damaged MCV yields a damaged yard.
+    /// The yard arrives finished (builtTicks = its build time): the original
+    /// unfolds one instantly, and an unfinished yard would not count as the
+    /// tech root its owner needs.</summary>
+    void MorphIntoStructure(int buildId, int hp, int maxHp, int buildTime) {
+        this.kind = ObjKind.Structure();
+        this.buildId = buildId;
+        this.unitType = null;
+        this.unitId = -1;
+        this.hp = hp;
+        this.maxHp = maxHp;
+        this.target = -1;
+        this.reload = 0;
+        this.pathX = null;
+        this.pathY = null;
+        this.pathAt = 0;
+        this.animFrame = 0;
+        this.facing = 0;
+        this.turretFacing = 0;
+        this.turretTurn = 0;
+        this.maX = -1;
+        this.maY = -1;
+        this.prodQueue = new List<int>();
+        this.prodLeft = new List<int>();
+        this.builtTicks = buildTime;
+        this.frozen = 0;
+        this.bombTimer = -1;
+        this.cargo = 0;
+        this.dockTimer = 0;
+        this.routeCooldown = 0;
+        this.repairing = false;
+        this.repairAt = 0;
+        this.repairCarry = 0;
+        this.deployed = false;
+    }
 
     // ---- production ------------------------------------------------------
 
@@ -363,6 +421,11 @@ class WorldObject {
     }
 
     void SetRoute(List<int> xs, List<int> ys) {
+        // A fresh order stands a sat-down trooper back up: the original's
+        // deployed GI packs his emplacement the moment he is told to move.
+        if (xs != null && xs.Count > 0 && this.deployed) {
+            this.deployed = false;
+        }
         this.pathX = xs;
         this.pathY = ys;
         this.pathAt = 0;
@@ -430,11 +493,27 @@ class UnitType {
     int readyStart;
     int walkStart;
     int walkFrames;
+    // The deployed pose's frame block (Sequence Deployed=), a one-frame
+    // block per facing for the troops that can sit down.
+    bool hasDeployedSeq;
+    int deployedStart;
+    int deployedFrames;
     string artKey;     // art ini section: Image= override or the regkey
     bool newTheater;   // art swaps the name's second letter per theater
+    string cameo;      // art.ini Cameo= stem: the sidebar portrait SHP
+    int techLevel;     // rules TechLevel=; -1 means "never buildable"
     // Tech tree: prereq slots resolved to build ids of this side's catalog.
     // Every slot needs one living built building from its list.
     List<List<int>> prereqs;
+    // Deploy semantics off the rules: DeploysInto names the structure this
+    // unit becomes in place (the MCVs), deployer marks the infantry whose
+    // deploy is a stance toggle (the GI sitting down).
+    string deploysInto;
+    bool deployer;
+    // The rules Speed= value: the reference feeds it to a per-tick move
+    // accumulator that buys one cell per 64 banked, so the raw number, not
+    // the per-tick step count, is what drives pace.
+    int speed;
 
     static UnitType Create(string reg, string label, int cost, int buildTime,
                            int hp, string shpName, int armor, Weapon primary,
@@ -453,11 +532,24 @@ class UnitType {
         t.primary = primary;
         t.secondary = secondary;
         t.steps = steps;
+        t.speed = steps * 4;
+        if (t.speed < 4) { t.speed = 4; }
         t.role = role;
         t.mindImmune = mindImmune;
         t.prereqs = new List<List<int>>();
         t.artKey = null;
         t.newTheater = false;
+        t.cameo = null;
+        t.techLevel = 1;
+        t.deploysInto = null;
+        t.deployer = false;
+        t.hasSeq = false;
+        t.readyStart = 0;
+        t.walkStart = 0;
+        t.walkFrames = 0;
+        t.hasDeployedSeq = false;
+        t.deployedStart = 0;
+        t.deployedFrames = 1;
         return t;
     }
 
@@ -474,6 +566,8 @@ class UnitType {
     Weapon Primary() { return this.primary; }
     Weapon Secondary() { return this.secondary; }
     int Steps() { return this.steps; }
+    int Speed() { return this.speed; }
+    void SetSpeed(int speed) { this.speed = speed; }
     int Role() { return this.role; }
     bool MindImmune() { return this.mindImmune; }
     List<List<int>> Prereqs() { return this.prereqs; }
@@ -483,15 +577,31 @@ class UnitType {
     int ReadyStart() { return this.readyStart; }
     int WalkStart() { return this.walkStart; }
     int WalkFrames() { return this.walkFrames; }
+    bool HasDeployedSeq() { return this.hasDeployedSeq; }
+    int DeployedStart() { return this.deployedStart; }
+    int DeployedFrames() { return this.deployedFrames; }
     string ArtKey() { return this.artKey; }
     void SetArtKey(string key) { this.artKey = key; }
     bool NewTheater() { return this.newTheater; }
     void SetNewTheater(bool on) { this.newTheater = on; }
+    string Cameo() { return this.cameo; }
+    void SetCameo(string c) { this.cameo = c; }
+    int TechLevel() { return this.techLevel; }
+    void SetTechLevel(int l) { this.techLevel = l; }
+    string DeploysInto() { return this.deploysInto; }
+    void SetDeploysInto(string reg) { this.deploysInto = reg; }
+    bool Deployer() { return this.deployer; }
+    void SetDeployer(bool on) { this.deployer = on; }
     void SetSequence(bool has, int ready, int walk, int frames) {
         this.hasSeq = has;
         this.readyStart = ready;
         this.walkStart = walk;
         this.walkFrames = frames;
+    }
+    void SetDeployedSequence(bool has, int start, int frames) {
+        this.hasDeployedSeq = has;
+        this.deployedStart = start;
+        this.deployedFrames = frames < 1 ? 1 : frames;
     }
 
     /// <summary>Primary-weapon damage for the info panel; 0 for the unarmed
@@ -559,8 +669,15 @@ class UnitCatalog {
             t.SetPrereqs(Rules.ResolvePrereqs(rules, d.Prereq(), bdefs));
             t.SetSequence(d.HasSeq(), d.ReadyStart(), d.WalkStart(),
                           d.WalkFrames());
+            t.SetDeployedSequence(d.HasDeployedSeq(), d.DeployedStart(),
+                                  d.DeployedFrames());
             t.SetArtKey(d.ArtKey());
             t.SetNewTheater(d.NewTheater());
+            t.SetCameo(d.Cameo());
+            t.SetTechLevel(d.TechLevel());
+            t.SetDeploysInto(d.DeploysInto());
+            t.SetDeployer(d.Deployer());
+            t.SetSpeed(d.Speed() > 0 ? d.Speed() : d.Steps() * 4);
             l.Add(t);
         }
         return l;
@@ -585,11 +702,22 @@ class UnitCatalog {
         return l[unitId];
     }
 
+    /// <summary>The unit id a regkey names in a side's roster, or -1. The
+    /// opener needs it to spawn the mobile construction vehicle the rules
+    /// name for a house (AMCV/SMCV/PCV).</summary>
+    int IdOfReg(World world, int side, string reg) {
+        if (reg == null || reg.Length == 0) { return -1; }
+        List<UnitType> l = this.ListFor(world, side);
+        for (int i = 0; i < l.Count; i = i + 1) {
+            if (l[i] != null && l[i].Reg() == reg) { return i; }
+        }
+        return -1;
+    }
+
     /// <summary>The side's harvester unit id, -1 when it fields none. The
     /// refinery hands out one of these on completion, as the shipped
     /// buildings always have.</summary>
-    int HarvesterIdFor(World world, int side) {
-        List<UnitType> l = this.ListFor(world, side);
+    int HarvesterIdFor(World world, int side) {        List<UnitType> l = this.ListFor(world, side);
         for (int i = 0; i < l.Count; i = i + 1) {
             if (l[i] != null && l[i].Role() == UnitRole.Harvester()) {
                 return i;
@@ -618,6 +746,7 @@ class UnitCatalog {
                           d.WalkFrames());
             t.SetArtKey(d.ArtKey());
             t.SetNewTheater(d.NewTheater());
+            t.SetSpeed(d.Speed() > 0 ? d.Speed() : d.Steps() * 4);
             this.civTypes.Add(t);
         }
         return this.civTypes;
@@ -665,6 +794,7 @@ class StructureType {
     string shpName;      // image file, e.g. "GACNST.SHP"
     bool newTheater;     // art swaps the name's second letter per theater
     string cameo;        // art.ini Cameo= stem: the sidebar portrait SHP
+    int techLevel;       // rules TechLevel=; -1 means "never buildable"
     int footprintW;      // footprint in cells
     int footprintH;
     int hp;              // full health
@@ -679,6 +809,7 @@ class StructureType {
     bool refinery;       // trickles credits every tick
     List<int> produces;  // unit ids this building can train, or null
     List<List<int>> prereqs;   // tech slots, see UnitType
+    bool waterBound;     // floats: its footprint must be water (the shipyard)
 
     static StructureType Create(BuildingDef d) {
         StructureType t = new StructureType();
@@ -686,6 +817,7 @@ class StructureType {
         t.shpName = d.Shp();
         t.newTheater = d.NewTheater();
         t.cameo = d.Cameo();
+        t.techLevel = d.TechLevel();
         t.footprintW = d.FootprintW();
         t.footprintH = d.FootprintH();
         t.hp = d.Hp();
@@ -700,6 +832,8 @@ class StructureType {
         t.refinery = d.IsRefinery();
         t.produces = null;
         t.prereqs = new List<List<int>>();
+        t.waterBound = d.WaterBound();
+        t.techLevel = d.TechLevel();
         return t;
     }
 
@@ -707,6 +841,9 @@ class StructureType {
     string ShpName() { return this.shpName; }
     bool NewTheater() { return this.newTheater; }
     string Cameo() { return this.cameo; }
+    void SetCameo(string c) { this.cameo = c; }
+    int TechLevel() { return this.techLevel; }
+    void SetTechLevel(int l) { this.techLevel = l; }
     int FootprintW() { return this.footprintW; }
     int FootprintH() { return this.footprintH; }
     int Hp() { return this.hp; }
@@ -719,6 +856,7 @@ class StructureType {
     Weapon Weapon() { return this.weapon; }
     bool Powered() { return this.powered; }
     bool IsRefinery() { return this.refinery; }
+    bool WaterBound() { return this.waterBound; }
     bool HasWeapon() { return this.weapon != null; }
     List<List<int>> Prereqs() { return this.prereqs; }
     void SetPrereqs(List<List<int>> prereqs) { this.prereqs = prereqs; }
@@ -837,6 +975,18 @@ class StructureCatalog {
         }
         return -1;
     }
+
+    /// <summary>The build id a side's own catalog gives a regkey, or -1. A
+    /// deployable's target (AMCV -&gt; GACNST) is named by reg in the rules,
+    /// so unfolding needs this lookup to find the building's slot.</summary>
+    int IdOfReg(World world, int side, string reg) {
+        if (reg == null || reg.Length == 0) { return -1; }
+        List<StructureType> l = this.ListFor(world, side);
+        for (int i = 0; i < l.Count; i = i + 1) {
+            if (l[i].Reg() == reg) { return i; }
+        }
+        return -1;
+    }
 }
 
 /// <summary>The world: a grid over the map's cells, the objects on it, and the
@@ -858,6 +1008,15 @@ class World {
     int selectedIndex;   // primary (first) selection; -1 when nothing selected
     List<int> selection; // all selected indices, first is the primary
     int worldTick;       // ticks elapsed since creation, for periodic rules
+    // The theater's water tile-id ranges as first,count pairs. Null until
+    // the theater loads, in which case IsWater falls back to temperate's
+    // own 314..327. See Theater.WaterRanges.
+    List<int> waterRanges;
+
+    // The theater whose TMP templates classify each cell's land type and
+    // ramp flag. Null is tolerated: CellLand then falls back to the
+    // set-name ranges above, so a map still plays without its theater art.
+    Theater theater;
 
     // House -> faction map. A house is who owns the stuff (0..7, one per
     // skirmish slot); a faction is what tech roster it draws from (Side2
@@ -920,6 +1079,8 @@ class World {
     int[] oreAmt;
     int[] oreVal;
     int oreLeft;         // cells carrying ore, for the growth pass
+    int oreVersion;      // bumped on every ore mutation: the terrain layer
+                         // bakes ore art, so a change means recomposite
 
     // Map smudges: the craters and burn marks a map declares in its own
     // [Smudge] section. Name + cell, no owner and no occupancy -- a decal
@@ -1120,7 +1281,13 @@ class World {
         this.oreVal[slot] = amt > 0 ? val : 0;
         if (amt > 0 && !was) { this.oreLeft = this.oreLeft + 1; }
         if (amt <= 0 && was) { this.oreLeft = this.oreLeft - 1; }
+        // The terrain layer bakes ore art in, so any change is a scene
+        // change; the loop watches this counter instead of recompositing
+        // speculatively.
+        this.oreVersion = this.oreVersion + 1;
     }
+
+    int OreVersion() { return this.oreVersion; }
 
     /// <summary>How much ore sits at a cell, 0 when none.</summary>
     int OreAt(int x, int y) {
@@ -1400,13 +1567,25 @@ class World {
     bool InBounds(int x, int y) { return this.CellSlot(x, y) >= 0; }
 
     /// <summary>True when a structure's footprint fits and its anchor cells
-    /// are all free. The footprint is anchored at its top-left; a placement
-    /// that runs off the map edge is rejected outright.</summary>
+    /// are all free AND solid ground. The footprint is anchored at its
+    /// top-left; a placement that runs off the map edge is rejected outright.
+    /// The surface is the structure's own: a WaterBound structure (the
+    /// shipyard, the only one in the shipped rules) must sit entirely on
+    /// water, and everything else entirely on ground -- so a yard can never
+    /// unfold with half its footprint floating on the sea, and only the
+    /// shipyard can stand in it.</summary>
     bool CanPlace(StructureType t, int x, int y) {
+        bool water = t.WaterBound();
         for (int dy = 0; dy < t.FootprintH(); dy = dy + 1) {
             for (int dx = 0; dx < t.FootprintW(); dx = dx + 1) {
                 if (!this.InBounds(x + dx, y + dy)) { return false; }
                 if (this.occupancy[this.CellSlot(x + dx, y + dy)] != 0) {
+                    return false;
+                }
+                IsoTile c = this.iso.At(x + dx, y + dy);
+                if (water) {
+                    if (!this.IsWater(c)) { return false; }
+                } else if (!this.IsGround(c) || this.IsWater(c)) {
                     return false;
                 }
             }
@@ -1430,6 +1609,96 @@ class World {
         if (!this.CanPlace(t, x, y)) { return -1; }
         WorldObject o = WorldObject.CreateStructure(side, buildId, x, y, t.Hp());
         return this.AddObject(o);
+    }
+
+    /// <summary>Runs a unit's Deploy on the object at idx. Two semantics live
+    /// under that one key in the rules, both taken from the reference engine:
+    ///
+    ///  - DeploysInto (the MCVs): the unit unfolds into that structure on the
+    ///    spot. The anchor is probed around the unit's cell so its cell ends
+    ///    up inside the new footprint; with no room anywhere the deploy is
+    ///    refused, the reference's CannotDeploy.
+    ///  - Deployer (the GI): the stance toggle. He sits down where he stands
+    ///    and roots there, or stands back up.
+    ///
+    /// Returns the object's index on success, -1 when refused.</summary>
+    int DeployObject(int idx) {
+        if (idx < 0 || idx >= this.objects.Count) { return -1; }
+        WorldObject o = this.objects[idx];
+        if (o == null || o.IsDead() || o.Kind() != ObjKind.Unit()) { return -1; }
+        UnitType ut = o.UnitType();
+        if (ut == null) { return -1; }
+        string target = ut.DeploysInto();
+        if (target != null && target.Length > 0) {
+            int buildId = this.catalog.IdOfReg(this, o.Side(), target);
+            if (buildId < 0) { return -1; }
+            StructureType t = this.catalog.TypeFor(this, o.Side(), buildId);
+            if (t == null) { return -1; }
+            // Vacate the unit's own cell first: the replacement covers it.
+            int oldSlot = this.CellSlot(o.X(), o.Y());
+            int was = this.occupancy[oldSlot];
+            this.occupancy[oldSlot] = 0;
+            List<int> at = new List<int>();
+            if (!this.FitDeployAnchor(t, o.X(), o.Y(), at)) {
+                this.occupancy[oldSlot] = was;      // put the unit back
+                return -1;
+            }
+            int ax = at[0];
+            int ay = at[1];
+            int maxHp = t.Hp();
+            int hp = maxHp;
+            if (o.MaxHp() > 0 && o.Hp() > 0) {
+                hp = maxHp * o.Hp() / o.MaxHp();
+                if (hp < 1) { hp = 1; }
+            }
+            o.MorphIntoStructure(buildId, hp, maxHp, t.BuildTime());
+            o.SetCell(ax, ay);
+            // The building takes the index the unit already had, so no other
+            // object's index moves: only its footprint cells need stamping.
+            for (int dy = 0; dy < t.FootprintH(); dy = dy + 1) {
+                for (int dx = 0; dx < t.FootprintW(); dx = dx + 1) {
+                    this.occupancy[this.CellSlot(ax + dx, ay + dy)] = idx + 1;
+                }
+            }
+            return idx;
+        }
+        if (ut.Deployer()) {
+            o.SetDeployed(!o.Deployed());
+            o.StopAttack();
+            return idx;
+        }
+        return -1;
+    }
+
+    /// <summary>The anchor a unit at (x,y) unfolds into for structure type t:
+    /// the placements whose footprint covers the unit's own cell, tried from
+    /// the most centred outwards. Fills outXy with the anchor and returns
+    /// true, or leaves it empty when no candidate fits.</summary>
+    bool FitDeployAnchor(StructureType t, int x, int y, List<int> outXy) {
+        int fw = t.FootprintW();
+        int fh = t.FootprintH();
+        List<int> offs = new List<int>();
+        offs.Add(0 - (fw / 2));
+        if (0 - (fw - 1) != 0 - (fw / 2)) { offs.Add(0 - (fw - 1)); }
+        if (offs[0] != 0 && offs[offs.Count - 1] != 0) { offs.Add(0); }
+        List<int> offsy = new List<int>();
+        offsy.Add(0 - (fh / 2));
+        if (0 - (fh - 1) != 0 - (fh / 2)) { offsy.Add(0 - (fh - 1)); }
+        if (offsy[0] != 0 && offsy[offsy.Count - 1] != 0) { offsy.Add(0); }
+        for (int i = 0; i < offs.Count; i = i + 1) {
+            for (int j = 0; j < offsy.Count; j = j + 1) {
+                int ax = x + offs[i];
+                int ay = y + offsy[j];
+                if (ax + fw <= x || ax > x) { continue; }   // cell not covered
+                if (ay + fh <= y || ay > y) { continue; }
+                if (this.CanPlace(t, ax, ay)) {
+                    outXy.Add(ax);
+                    outXy.Add(ay);
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /// <summary>Sells the structure at a cell: frees its footprint and every
@@ -1587,34 +1856,194 @@ class World {
         return this.SpawnMapUnit(side, unitId, x, y, hp, facing, u);
     }
 
-    /// <summary>RA2's walkable height ceiling. The maps store every playable
-    /// cell; flat ground sits at level 4 and ramps step 4 -> 8, so cells up to
-    /// level 7 are walkable. Level 8+ is cliff top, which is kept impassable
-    /// so units do not climb cliff faces without a ramp. Measured over the 18
-    /// skirmish maps this connects both player starts on 16 of them; the two
-    /// that stay apart (MP24T2, MP25T6) start on separate cliff-tops that only
-    /// bridges -- not yet parsed -- would join.</summary>
-    int GroundLevel() { return 7; }
+    /// <summary>A cell's land class, resolved the way the reference resolves
+    /// it: from the TMP template of the tile the cell placed
+    /// (`TileCollection.ts:100-113`).
+    ///
+    /// When the theater cannot answer -- a tile from a set whose art this
+    /// install lacks, or the 0xFFFF clear-terrain sentinel -- the fallback
+    /// keeps the old set-name heuristic so a partly-installed theater still
+    /// plays. A null return means "no opinion", never "impassable".
+    ///
+    /// The elevation byte is deliberately NOT consulted here. It used to
+    /// be: `IsGround` rejected any cell above a hardcoded level 7, which is
+    /// neither the reference's rule nor a workable one. Two cells either
+    /// side of a cliff edge share an elevation byte, so no height
+    /// comparison can distinguish "stand here" from "drive off the edge".
+    /// The land class and the ramp flag are what carry that information.</summary>
+    LandType CellLand(IsoTile t) {
+        if (t == null) { return null; }
+        if (this.theater != null) {
+            LandType lt = this.theater.CellLandType(t.Tile(), t.SubTile());
+            if (lt != null) { return lt; }
+        }
+        // Fallback: classify by the theater's set-name table, then by the
+        // built-in temperate ranges when even that is unavailable.
+        if (this.IsWater(t)) { return LandType.Of(LandType.Water()); }
+        if (this.IsBridge(t)) { return LandType.Of(LandType.Road()); }
+        if (t.IsClear()) { return LandType.Of(LandType.Clear()); }
+        return LandType.Of(LandType.Rock());
+    }
 
-    /// <summary>True when a cell is solid ground a unit can stand on: it is
-    /// part of the map's terrain and not raised above the base ground level.
-    /// Cells outside the playable diamond have no record and read as null;
-    /// the 0xFFFF "no tile" sentinel becomes clear ground in the real game,
-    /// so it is walkable, not a hole.</summary>
+    /// <summary>A cell's ramp flag: non-zero means a graded slope, the only
+    /// terrain a ground unit may use to change height.</summary>
+    int CellRamp(IsoTile t) {
+        if (t == null || this.theater == null) { return 0; }
+        return this.theater.CellRampType(t.Tile(), t.SubTile());
+    }
+
+    // ---- accessors for the terrain probe -----------------------------
+
+    bool CellIsCliff(int x, int y) {
+        if (!this.InBounds(x, y)) { return false; }
+        LandType lt = this.CellLand(this.iso.At(x, y));
+        return lt != null && lt.IsCliffClass();
+    }
+
+    int CellRampAt(int x, int y) {
+        if (!this.InBounds(x, y)) { return 0; }
+        return this.CellRamp(this.iso.At(x, y));
+    }
+
+    int CellTerrainType(int x, int y) {
+        if (!this.InBounds(x, y) || this.theater == null) { return -1; }
+        IsoTile t = this.iso.At(x, y);
+        if (t == null) { return -1; }
+        return this.theater.CellTerrainType(t.Tile(), t.SubTile());
+    }
+
+    bool CellRough(int x, int y) {
+        if (!this.InBounds(x, y)) { return false; }
+        LandType lt = this.CellLand(this.iso.At(x, y));
+        return lt != null && lt.IsRoughClass();
+    }
+
+    int LevelAt(int x, int y) {
+        if (!this.InBounds(x, y)) { return 0; }
+        IsoTile t = this.iso.At(x, y);
+        if (t == null) { return 0; }
+        return t.Level();
+    }
+
+    int ObjectX(int i) {
+        if (i < 0 || i >= this.objects.Count) { return 0; }
+        return this.objects[i].X();
+    }
+
+    int ObjectY(int i) {
+        if (i < 0 || i >= this.objects.Count) { return 0; }
+        return this.objects[i].Y();
+    }
+
+    bool IsUnitIndex(int i) {
+        if (i < 0 || i >= this.objects.Count) { return false; }
+        return this.objects[i].Kind() == ObjKind.Unit();
+    }
+
+    /// <summary>Cells reachable from the first unit's position by the same
+    /// rule movement uses. Reported by the terrain probe so a "0 illegal
+    /// steps" result cannot be a search that reaches nothing.</summary>
+    int ReachableFromFirstUnit() {
+        if (this.objects.Count == 0) { return 0; }
+        int sx = this.objects[0].X();
+        int sy = this.objects[0].Y();
+        if (!this.InBounds(sx, sy)) { return 0; }
+        int cells = this.width * this.height;
+        byte[] seen = new byte[cells];
+        List<int> qx = new List<int>();
+        List<int> qy = new List<int>();
+        qx.Add(sx);
+        qy.Add(sy);
+        seen[this.CellSlot(sx, sy)] = 1;
+        int n = 0;
+        int head = 0;
+        while (head < qx.Count) {
+            int cx = qx[head];
+            int cy = qy[head];
+            head = head + 1;
+            n = n + 1;
+            for (int d = 0; d < 4; d = d + 1) {
+                int nx = cx;
+                int ny = cy;
+                if (d == 0) { nx = cx + 1; }
+                else if (d == 1) { nx = cx - 1; }
+                else if (d == 2) { ny = cy + 1; }
+                else { ny = cy - 1; }
+                int slot = this.CellSlot(nx, ny);
+                if (slot < 0 || seen[slot] != 0) { continue; }
+                if (!this.CanStep(cx, cy, nx, ny, false)) { continue; }
+                seen[slot] = 1;
+                qx.Add(nx);
+                qy.Add(ny);
+            }
+        }
+        return n;
+    }
+
+    /// <summary>True when a cell is solid ground a unit can stand on.
+    ///
+    /// Expressed as the land class, matching the reference's rule: cliff
+    /// faces and walls are not ground, water is not ground for a land unit,
+    /// and rough/road/beach/clear all are. Nothing here compares heights.</summary>
     bool IsGround(IsoTile t) {
         if (t == null) { return false; }
-        if (t.Level() > this.GroundLevel()) { return false; }
-        if (this.IsWater(t)) { return false; }
-        return true;
+        LandType lt = this.CellLand(t);
+        if (lt == null) { return false; }
+        return lt.GroundPassable();
     }
-    /// <summary>True when a tile is a body of water. In the temperate theater
-    /// the water set occupies tile ids 314-327; these sit at the same level as
-    /// flat ground, so they are only distinguishable from their tile id, not
-    /// their height. Water is not walkable by ground units.</summary>
+    /// <summary>True when a tile is a body of water. The ranges come from the
+    /// theater's own tile-set table ("Water" 314-327, "ZMM Water" 769-782,
+    /// the water caves and waterfalls), so a snow or urban map classifies its
+    /// water by its own ids instead of by temperate's numbers. The built-in
+    /// temperate range stands in until the table arrives.</summary>
     bool IsWater(IsoTile t) {
+        // A cell the map's IsoMapPack5 never records (the diamond's corners
+        // on sparse maps) is outside the playable area, not sea.
+        if (t == null) { return false; }
         int id = t.Tile();
         if (id == 0xFFFF) { return false; }
+        if (this.waterRanges != null && this.waterRanges.Count >= 2) {
+            for (int i = 0; i + 1 < this.waterRanges.Count; i = i + 2) {
+                if (id >= this.waterRanges[i]
+                 && id < this.waterRanges[i] + this.waterRanges[i + 1]) {
+                    return true;
+                }
+            }
+            return false;
+        }
         return id >= 314 && id < 328;
+    }
+
+    /// <summary>Installs the theater's water-id ranges as first,count pairs.</summary>
+    void SetWaterRanges(List<int> ranges) { this.waterRanges = ranges; }
+
+    /// <summary>Installs the theater whose TMP templates classify terrain.
+    /// Must be called before any passability query for the land-class rule
+    /// to apply; until then CellLand falls back to the set-name ranges.</summary>
+    void SetTheater(Theater t) { this.theater = t; }
+
+    /// <summary>Per-cell water test for callers that only have a coordinate
+    /// (the dev ground-rule probe).</summary>
+    bool CellIsWater(int x, int y) {
+        if (!this.InBounds(x, y)) { return false; }
+        IsoTile t = this.iso.At(x, y);
+        if (t == null) { return false; }
+        return this.IsWater(t);
+    }
+
+    /// <summary>The build-slot id a side's catalog gives a registration name,
+    /// or -1. Used to ask placement questions about a named structure (the
+    /// shipyard) without hardcoding its slot.</summary>
+    int IdOfReg(int side, string reg) {
+        if (this.catalog == null) { return 0 - 1; }
+        return this.catalog.IdOfReg(this, side, reg);
+    }
+
+    /// <summary>A side's structure archetype by build slot (dev probes and
+    /// the sidebar both need to walk the catalog).</summary>
+    StructureType CatalogType(int side, int buildId) {
+        if (this.catalog == null) { return null; }
+        return this.catalog.TypeFor(this, side, buildId);
     }
 
     /// <summary>True when a tile is a bridge the ground units can cross. The
@@ -1623,6 +2052,7 @@ class World {
     /// every water crossing would be impassable and maps with a water divide
     /// would trap the two bases apart.</summary>
     bool IsBridge(IsoTile t) {
+        if (t == null) { return false; }
         int id = t.Tile();
         if (id == 0xFFFF) { return false; }
         if (id >= 277 && id < 293) { return true; }   // Ovrps
@@ -2182,6 +2612,41 @@ class World {
                               cell[0], cell[1]);
     }
 
+    /// <summary>Spawns a unit on the first free flat cell around a point on
+    /// the ground, scanning ring by ring outwards. The opening squad forms up
+    /// this way around its house's MCV -- a unit, not a building, so
+    /// SpawnNear's footprint search does not apply.</summary>
+    int SpawnNearCell(int side, int unitId, int x, int y) {
+        return this.SpawnNearCellAvoid(side, unitId, x, y, 0, 0, 0, 0);
+    }
+
+    /// <summary>As above, but never on a cell inside a reserved rectangle.
+    /// The opener reserves the footprint its MCV will unfold into: a soldier
+    /// standing there would block the deploy, and in the original the yard
+    /// simply appears around the vehicle. A zero-sized rectangle reserves
+    /// nothing.</summary>
+    int SpawnNearCellAvoid(int side, int unitId, int x, int y,
+                           int rvX, int rvY, int rvW, int rvH) {
+        for (int r = 1; r <= 8; r = r + 1) {
+            for (int dy = -r; dy <= r; dy = dy + 1) {
+                for (int dx = -r; dx <= r; dx = dx + 1) {
+                    int adx = dx < 0 ? -dx : dx;
+                    int ady = dy < 0 ? -dy : dy;
+                    if (adx != r && ady != r) { continue; }
+                    int cx = x + dx;
+                    int cy = y + dy;
+                    if (!this.InBounds(cx, cy)) { continue; }
+                    if (rvW > 0 && cx >= rvX && cx < rvX + rvW
+                     && cy >= rvY && cy < rvY + rvH) { continue; }
+                    if (!this.IsGround(this.iso.At(cx, cy))) { continue; }
+                    int u = this.SpawnUnit(side, unitId, cx, cy);
+                    if (u >= 0) { return u; }
+                }
+            }
+        }
+        return -1;
+    }
+
     /// <summary>Drops an enemy starter base at the far end of the map, used
     /// when the map has no second waypoint. The corner diagonal is tried
     /// first so the base sits opposite the player's start; if that line of
@@ -2694,15 +3159,19 @@ class World {
                 b.SetReload(rr - 1);
             }
         }
-        // Movement: a unit covers its speed class in cells per tick -- foot
-        // soldiers one, fast movers like dogs and terror drones two. Each
-        // step still needs a free cell, so a blocked unit waits.
+        // Movement, the reference's ledger: each tick a unit banks its rules
+        // Speed and every CELL_MOVE_COST (64) banked buys one cell along the
+        // route. A Speed=4 rifleman advances a cell every 16 ticks, a
+        // Speed=9 dog every 7 -- and each step still needs a free cell, so a
+        // blocked unit waits while its bank keeps growing, exactly like the
+        // original.
         for (int i = 0; i < this.objects.Count; i = i + 1) {
             WorldObject o = this.objects[i];
             if (o.Kind() != ObjKind.Unit()) { continue; }
-            if (o.Frozen() > 0 || !o.HasRoute()) { continue; }
-            int steps = o.UnitType().Steps();
-            while (steps > 0 && o.HasRoute()) {
+            if (o.Frozen() > 0 || o.Deployed() || !o.HasRoute()) { continue; }
+            int bank = o.MoveAccum() + o.UnitType().Speed();
+            while (bank >= Rules.CellMoveCost() && o.HasRoute()) {
+                bank = bank - Rules.CellMoveCost();
                 int nx = o.StepCellX();
                 int ny = o.StepCellY();
                 if (nx < 0 || this.occupancy[this.CellSlot(nx, ny)] != 0) { break; }
@@ -2720,8 +3189,8 @@ class World {
                 }
                 this.occupancy[this.CellSlot(o.X(), o.Y())] = i + 1;
                 moved = moved + 1;
-                steps = steps - 1;
             }
+            o.SetMoveAccum(bank);
         }
         // Harvesters run the mine-and-unload loop: mine the cell underfoot,
         // haul a full hold to the nearest own refinery, unload, repeat. The
@@ -3158,13 +3627,17 @@ class World {
             int cy = qy[head];
             head = head + 1;
             int cs = this.CellSlot(cx, cy);
-            goal = this.StepGoal(seen, prev, qx, qy, cx + 1, cy, cs, amphibious);
+            goal = this.StepGoalFrom(seen, prev, qx, qy, cx, cy, cx + 1, cy,
+                                     cs, amphibious);
             if (goal >= 0) { break; }
-            goal = this.StepGoal(seen, prev, qx, qy, cx - 1, cy, cs, amphibious);
+            goal = this.StepGoalFrom(seen, prev, qx, qy, cx, cy, cx - 1, cy,
+                                     cs, amphibious);
             if (goal >= 0) { break; }
-            goal = this.StepGoal(seen, prev, qx, qy, cx, cy + 1, cs, amphibious);
+            goal = this.StepGoalFrom(seen, prev, qx, qy, cx, cy, cx, cy + 1,
+                                     cs, amphibious);
             if (goal >= 0) { break; }
-            goal = this.StepGoal(seen, prev, qx, qy, cx, cy - 1, cs, amphibious);
+            goal = this.StepGoalFrom(seen, prev, qx, qy, cx, cy, cx, cy - 1,
+                                     cs, amphibious);
             if (goal >= 0) { break; }
         }
         if (goal < 0) { return false; }
@@ -3187,6 +3660,70 @@ class World {
         return true;
     }
 
+    /// <summary>Whether a ground unit may move from cell (ax,ay) to (bx,by).
+    ///
+    /// This is the check that was missing, and its absence is why a miner
+    /// drove onto a cliff. `PassableForRoute` answers "may a unit BE here",
+    /// which is a property of the destination alone. Movement needs "may a
+    /// unit GO from here to there", which is a property of the pair.
+    ///
+    /// The rule, following the reference: a height change is legal only
+    /// through a ramp. Concretely, a step is refused when
+    ///
+    ///   * either end is not ground for this unit (cliff face, wall, water
+    ///     for a land unit), or
+    ///   * the two ends sit at different elevations and neither end is a
+    ///     ramp, or
+    ///   * the destination is a cliff face -- the overhang art of a cliff
+    ///     occupies the cell above its base, and a unit that steps there is
+    ///     drawn inside the rock.
+    ///
+    /// Elevation is compared as the map's own level byte, the same field the
+    /// editor writes for raised terrain. A ramp's two ends differ by a whole
+    /// step and are both flagged, so a ramp connects its top and bottom and
+    /// nothing else does.</summary>
+    bool CanStep(int ax, int ay, int bx, int by, bool amphibious) {
+        if (!this.InBounds(ax, ay) || !this.InBounds(bx, by)) { return false; }
+        // A diagonal step must not cut a corner between two blocked cells:
+        // the unit would pass through the shared vertex of two cliff faces.
+        int dx = bx - ax;
+        int dy = by - ay;
+        if (dx != 0 && dy != 0) {
+            if (!this.PassableForRoute(ax + dx, ay, amphibious)) {
+                return false;
+            }
+            if (!this.PassableForRoute(ax, ay + dy, amphibious)) {
+                return false;
+            }
+        }
+        if (!this.PassableForRoute(bx, by, amphibious)) { return false; }
+        IsoTile a = this.iso.At(ax, ay);
+        IsoTile b = this.iso.At(bx, by);
+        if (a == null || b == null) { return false; }
+
+        // A cliff face is never enterable, whatever its footprint says.
+        LandType lb = this.CellLand(b);
+        if (lb != null && lb.IsCliffClass()) { return false; }
+
+        // Amphibious units ignore the elevation rule: a hovercraft climbs
+        // the shore in the original, and the reference exempts it the same
+        // way (it has no ramp requirement on the water/land boundary).
+        if (amphibious) { return true; }
+
+        if (a.Level() == b.Level()) { return true; }
+        // A height change: legal only when a ramp is involved. The ramp may
+        // be at either end -- maps flag the graded cell, and which end of a
+        // two-cell ramp carries the flag varies by tile set.
+        if (this.CellRamp(a) != 0 || this.CellRamp(b) != 0) { return true; }
+        LandType la = this.CellLand(a);
+        if (la != null && la.IsRoughClass()) {
+            // Rough ground is the game's natural slope; the reference lets
+            // units traverse it without a ramp tile.
+            return true;
+        }
+        return false;
+    }
+
     /// <summary>Looks at the cell (nx,ny) from the expanding cell (fromSlot).
     /// When it is a goal, links it to fromSlot and returns its slot so the
     /// search can stop. When it is unvisited and passable, enqueues it.
@@ -3201,6 +3738,29 @@ class World {
         }
         if (seen[slot] != 0) { return -1; }
         if (!this.PassableForRoute(nx, ny, amphibious)) { return -1; }
+        seen[slot] = 1;
+        prev[slot] = fromSlot;
+        qx.Add(nx);
+        qy.Add(ny);
+        return -1;
+    }
+
+    /// <summary>StepGoal with the source cell supplied, so the expansion
+    /// refuses illegal height changes. The route search calls this instead
+    /// of the source-less form above; the two differ only in the CanStep
+    /// gate, which is what keeps a column on its own level.</summary>
+    int StepGoalFrom(byte[] seen, List<int> prev, List<int> qx, List<int> qy,
+                     int fx, int fy, int nx, int ny, int fromSlot,
+                     bool amphibious) {
+        int slot = this.CellSlot(nx, ny);
+        if (slot < 0) { return -1; }
+        if (seen[slot] == 2) {
+            if (!this.CanStep(fx, fy, nx, ny, amphibious)) { return -1; }
+            prev[slot] = fromSlot;
+            return slot;
+        }
+        if (seen[slot] != 0) { return -1; }
+        if (!this.CanStep(fx, fy, nx, ny, amphibious)) { return -1; }
         seen[slot] = 1;
         prev[slot] = fromSlot;
         qx.Add(nx);

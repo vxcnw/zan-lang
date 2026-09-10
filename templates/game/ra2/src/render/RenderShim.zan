@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Gui;
+using Ra2.Game;
 
 
 namespace Ra2.Render;
@@ -94,9 +95,16 @@ class R2Canvas {
                         CDraw.MapW(w), CDraw.MapW(h), this.Cur(), 1);
     }
 
-    /// <summary>Scales a registered canvas image into (x,y,w,h).</summary>
+    /// <summary>Scales a registered canvas image into (x,y,w,h). A key the
+    /// canvas's FIFO image store has evicted re-registers from its retained
+    /// bytes first -- without that, fixed UI art silently stopped drawing
+    /// once newer registrations pushed it out of the 64-entry store.</summary>
     void DrawTexture(R2Tex t, int x, int y, int w, int h) {
         if (t == null || !t.Ok()) { return; }
+        if (Canvas.ImageWidth(t.Key()) <= 0) {
+            t = Ra2Ui.Rebind(t);
+            if (t == null) { return; }
+        }
         this.Cv().BlitImage(t.Key(), CDraw.MapX(x + CDraw.originX),
                             CDraw.MapY(y + CDraw.originY), CDraw.MapW(w),
                             CDraw.MapW(h), 0, 0, 0, 0);

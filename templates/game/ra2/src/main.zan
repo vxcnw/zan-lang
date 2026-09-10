@@ -309,6 +309,87 @@ class Ra2App {
     //    water it must accept the yard somewhere (waterYard>0), and it must
     //    never accept dry land (landYard must be 0).
     // The two "must be 0" counts are what a wrong water table would break.
+    // Dev aid: the terrain model, asserted rather than eyeballed.
+    //
+    // A miner was driving onto cliffs because passability asked only "may a
+    // unit BE in this cell" and never "may it GO from here to there". The
+    // numbers below are the assertion that the transition rule is live:
+    //
+    //   cliffCells   -- cells whose land class is Cliff. A ground unit must
+    //                   never be standing on one, and CanStep must never
+    //                   accept one as a destination.
+    //   illegalSteps -- height-changing steps accepted without a ramp. Must
+    //                   be 0 for a land unit.
+    //   rampSteps    -- height-changing steps accepted through a ramp. Must
+    //                   be > 0 on a map that has any ramp, or the rule is
+    //                   simply refusing everything and paths would vanish.
+    //   reachable    -- cells the route search can reach from the start
+    //                   position, so "0 illegal" cannot be the trivial
+    //                   result of a search that finds nothing at all.
+    static void ProbeTerrain(World world) {
+        int cliffCells = 0;
+        int unitsOnCliff = 0;
+        int illegal = 0;
+        int rampSteps = 0;
+        int legalFlats = 0;
+        int rampCells = 0;
+        int ttKnown = 0;
+        int ttUnknown = 0;
+
+        for (int y = 0; y < world.Height(); y = y + 1) {
+            for (int x = 0; x < world.Width(); x = x + 1) {
+                if (world.CellIsCliff(x, y)) { cliffCells = cliffCells + 1; }
+                if (world.CellRampAt(x, y) != 0) { rampCells = rampCells + 1; }
+                int tt = world.CellTerrainType(x, y);
+                if (tt < 0) { ttUnknown = ttUnknown + 1; } else { ttKnown = ttKnown + 1; }
+                // The four orthogonal steps out of this cell.
+                for (int d = 0; d < 4; d = d + 1) {
+                    int nx = x;
+                    int ny = y;
+                    if (d == 0) { nx = x + 1; }
+                    else if (d == 1) { nx = x - 1; }
+                    else if (d == 2) { ny = y + 1; }
+                    else { ny = y - 1; }
+                    if (!world.InBounds(nx, ny)) { continue; }
+                    if (!world.CanStep(x, y, nx, ny, false)) { continue; }
+                    int dz = world.LevelAt(x, y) - world.LevelAt(nx, ny);
+                    if (dz == 0) {
+                        legalFlats = legalFlats + 1;
+                    } else if (world.CellRampAt(x, y) != 0
+                            || world.CellRampAt(nx, ny) != 0) {
+                        rampSteps = rampSteps + 1;
+                    } else if (world.CellRough(x, y)) {
+                        rampSteps = rampSteps + 1;
+                    } else {
+                        illegal = illegal + 1;
+                    }
+                }
+            }
+        }
+
+        // Each unit's own cell must be legal ground.
+        for (int i = 0; i < world.ObjectCount(); i = i + 1) {
+            if (!world.IsUnitIndex(i)) { continue; }
+            int ux = world.ObjectX(i);
+            int uy = world.ObjectY(i);
+            if (world.CellIsCliff(ux, uy)) { unitsOnCliff = unitsOnCliff + 1; }
+        }
+
+        // Reachability from the first unit, so a vacuous 0 is visible.
+        int reachable = world.ReachableFromFirstUnit();
+
+        Console.WriteLine("selftest terrain cliffCells="
+            + Convert.ToString(cliffCells)
+            + " rampCells=" + Convert.ToString(rampCells)
+            + " unitsOnCliff=" + Convert.ToString(unitsOnCliff)
+            + " illegalSteps=" + Convert.ToString(illegal)
+            + " rampSteps=" + Convert.ToString(rampSteps)
+            + " legalFlats=" + Convert.ToString(legalFlats)
+            + " ttKnown=" + Convert.ToString(ttKnown)
+            + " ttUnknown=" + Convert.ToString(ttUnknown)
+            + " reachable=" + Convert.ToString(reachable));
+    }
+
     static void ProbeGroundRule(World world, int side, int buildId) {
         int blocked = 0;
         int bad = 0;
@@ -466,9 +547,25 @@ class Ra2App {
         models.Add("CMIN.VXL");
         models.Add("HARV.VXL");
         for (int m = 0; m < models.Count; m = m + 1) {
+            VxlImage img = art.RawVxl(models[m]);
+            if (img != null) {
+                VxlLimb l = img.Main();
+                string zt = "";
+                for (int z = 0; z < l.SizeZ() && z < 6; z = z + 1) {
+                    zt = zt + Convert.ToString(l.FilledAtZ(z)) + " ";
+                }
+                Console.WriteLine("selftest vox " + models[m]
+                    + " size=" + Convert.ToString(l.SizeX()) + "x"
+                    + Convert.ToString(l.SizeY()) + "x"
+                    + Convert.ToString(l.SizeZ())
+                    + " filled=" + Convert.ToString(l.FilledCount())
+                    + " z0..5=" + zt);
+            }
             for (int f = 0; f < 8; f = f + 1) {
                 Texture t = art.VehicleTexture(models[m], f, 0);
                 if (t == null) { continue; }
+                Console.WriteLine("selftest bake " + models[m] + " f"
+                    + Convert.ToString(f) + " " + ObjectArt.LastBakeStats());
                 Ra2App.DumpTexture("build/_vox/" + models[m] + "_f"
                     + Convert.ToString(f) + ".bmp", t);
             }
@@ -485,9 +582,6 @@ class Ra2App {
         names.Add("GTNKTUR.VXL");
         names.Add("MCV.VXL");
         names.Add("MCV.HVA");
-        names.Add("FV.VXL");
-        names.Add("SREF.VXL");
-        names.Add("TNKD.VXL");
         names.Add("FV.VXL");
         names.Add("SREF.VXL");
         names.Add("TNKD.VXL");
@@ -574,6 +668,15 @@ class Ra2App {
     static bool SelfTestSoviet() {
         string v = Ra2App.getenv("RA2_SELFTEST_SIDE");
         return v != null && v == "soviet";
+    }
+
+    // RA2_SELFTEST_TARGET=options swaps the walk from "menu -> setup ->
+    // game" to "menu -> options", so the Options screen gets its own
+    // screenshot without paying the cost of the load chain.
+    static string SelfTestTarget() {
+        string v = Ra2App.getenv("RA2_SELFTEST_TARGET");
+        if (v == null) { return ""; }
+        return v;
     }
 
     static int PreviewW() { return 396; }
@@ -1789,6 +1892,10 @@ class Ra2Loop : IGuiHostLoop {
     Rules rulesRef;
     bool dirty;
     int drawn;
+    // The world's ore counter as the scene canvas last saw it: ore sprites
+    // bake into the terrain layer, so growth and harvesting are scene
+    // changes and the layer must recomposite before the next present.
+    int seenOreVersion;
 
     R2Tex preview;
     int previewIndex;
@@ -2027,11 +2134,12 @@ class Ra2Loop : IGuiHostLoop {
         // The per-frame work lives in Render: the host passes the frame's
         // canvas there, and the scene draws (terrain composite, HUD, the
         // self-test walk) are what advance the visible state. The game's own
-        // logic clock is ticked from the render path as well. Update only
-        // keeps the redraw request alive while a game is running.
-        if (this.shell.CurrentScene() == 2 && this.game != null) {
-            this.dirty = true;
-        }
+        // logic clock is ticked from the render path, and its redraw need
+        // reaches the composite through GameController.NeedsRedraw -- which
+        // only fires on a tick that actually moved, shot or produced
+        // something. Forcing dirty here re-composited and re-encoded the
+        // full scene every frame whether or not anything changed, which is
+        // where the frame budget went.
     }
 
     public void Stop(GuiHost host) {
@@ -2194,6 +2302,13 @@ class Ra2Loop : IGuiHostLoop {
         }
         this.AdvanceClock();
         this.SpendGameInput();
+        // Ore grew or was harvested: its sprites bake into the terrain layer,
+        // so a changed counter means the scene canvas is stale.
+        if (this.world != null
+         && this.world.OreVersion() != this.seenOreVersion) {
+            this.seenOreVersion = this.world.OreVersion();
+            this.dirty = true;
+        }
         this.CompositeTerrain();
         this.DrawGameHud(host);
 
@@ -2470,6 +2585,11 @@ class Ra2Loop : IGuiHostLoop {
             // temperate's. This is what keeps every building but the
             // WaterBound shipyard off the sea.
             this.world.SetWaterRanges(theater.WaterRanges());
+            // The theater also classifies terrain: each cell's land class
+            // and ramp flag come from the TMP template of the tile it
+            // placed, which is how the reference decides passability and
+            // what makes a cliff edge distinguishable from a ramp.
+            this.world.SetTheater(theater);
             // Seed the ore fields from the map's GEM overlays: the
             // data byte is the amount in the cell, the type names
             // gold ore or the doubled-value crystal fields.
@@ -3132,6 +3252,10 @@ class Ra2Loop : IGuiHostLoop {
                     }
                 }
                 this.dirty = false;
+                // The world's redraw vote rides the same consume: without
+                // this the flag stays set forever after the first moving
+                // tick and the gate never gates.
+                if (this.game != null) { this.game.ClearRedraw(); }
             }
     }
 
@@ -3142,6 +3266,14 @@ class Ra2Loop : IGuiHostLoop {
             int pfA = Window.GetTickMs();
             this.R.DrawTexture(this.screen, 0, 0,
                 Ra2App.ViewW(), Ra2App.ViewH());
+            // Live objects over the terrain layer: units, buildings and
+            // combat effects draw from the world's current state every
+            // frame through memoized sprites, so nothing here needs the
+            // scene canvas recomposited.
+            ObjectRenderer.RenderToCanvas(this.world, this.objArt, this.R,
+                                 this.cam.X(), this.cam.Y(),
+                                 this.terrain.OriginX(), this.terrain.OriginY(),
+                                 this.shell.SideIndex());
             if (this.game != null) {
                 Ra2App.DrawSidebar(this.R, this.game, this.objArt,
                                    this.sideShell, this.mouseX, this.mouseY);
@@ -3221,6 +3353,18 @@ class Ra2Loop : IGuiHostLoop {
                 Ra2App.DumpScreen(Ra2App.ShotPath("ra2_shot_menu.bmp"),
                                   c);
             }
+            // The Options walk: RA2_SELFTEST_TARGET=options opens the
+            // Options screen on frame 2 and dumps it on frame 4.
+            if (this.frames == 4
+                && Ra2App.SelfTestTarget() == "options") {
+                Console.WriteLine("selftest options scene="
+                    + Convert.ToString(this.shell.CurrentScene())
+                    + " hasShellBg="
+                    + Convert.ToString(this.art != null
+                        && this.art.HasShellBg() ? 1 : 0));
+                Ra2App.DumpScreen(Ra2App.ShotPath("ra2_shot_options.bmp"),
+                                  c);
+            }
             if (this.frames == 4) {
                 Ra2App.DumpScreen(Ra2App.ShotPath("ra2_shot_single.bmp"),
                                   c);
@@ -3261,6 +3405,14 @@ class Ra2Loop : IGuiHostLoop {
     /// the two-sided perf corridor -- all without a human at the keyboard.</summary>
     void SelfTestScript(GuiHost host) {
         Canvas c = this.C;
+
+        string target = Ra2App.SelfTestTarget();
+        if (target == "options") {
+            // Menu -> Options -> Back: the simplest demo of an unimplemented
+            // home entry, captured without paying the load chain.
+            if (this.frames == 2) { this.shell.OpenOptions(); }
+            return;
+        }
 
         // The reference's home list has Skirmish at the top level, so the
         // walk goes menu -> setup directly (`HomeScreen.ts:55`).
@@ -3338,6 +3490,7 @@ class Ra2Loop : IGuiHostLoop {
                 + " objects=" + Convert.ToString(this.world.ObjectCount()));
             Ra2App.ProbeUnlocked(this.game, "afterDeploy");
             Ra2App.ProbeGroundRule(this.world, this.shell.SideIndex(), 1);
+            Ra2App.ProbeTerrain(this.world);
             Ra2App.ProbeCameos(this.game, this.objArt, this.db);
             if (Ra2App.DumpAssetsArmed()) {
                 Ra2App.DumpVehicleSprites(this.objArt);
@@ -3347,6 +3500,10 @@ class Ra2Loop : IGuiHostLoop {
          && this.frames > Ra2App.deployFrame && this.game != null) {
             if (!Ra2App.yardShown) {
                 Ra2App.yardShown = true;
+                Console.WriteLine("selftest shellstate yard sideShell="
+                    + Convert.ToString(this.sideShell == null ? -1
+                                       : this.sideShell.Ok() ? 1 : 0)
+                    + " gameMenu=" + Convert.ToString(Ra2App.gameMenu ? 1 : 0));
                 Ra2App.DumpScreen(this.shell.SideIndex() == 0
                                   ? Ra2App.ShotPath("ra2_shot_yard.bmp")
                                   : Ra2App.ShotPath("ra2_shot_yard_sov.bmp"), c);
@@ -3465,10 +3622,26 @@ class Ra2Loop : IGuiHostLoop {
                     }
                 }
             }
+            // Bring the parked tanks on-camera: the base start sits at the
+            // shot's right edge, so without a pan the dump proves nothing
+            // about the live object layer. Centre the grizzly in the view.
+            if (ta >= 0) {
+                WorldObject o = this.world.ObjectAt(ta);
+                int sx = IsoProjection.ScreenX(o.X(), o.Y())
+                       - this.terrain.OriginX() - this.cam.X();
+                int sy = IsoProjection.ScreenY(o.X(), o.Y(), 0)
+                       - this.terrain.OriginY() - this.cam.Y();
+                this.cam.MoveBy(sx - Ra2App.ViewW() / 2 + 80,
+                                sy - Ra2App.ViewH() / 2);
+            }
         }
         if (this.frames == 14) {
             // Dump before the fast-forward so the parked tanks are
             // captured without combat effects over them.
+            Console.WriteLine("selftest shellstate frame=14 sideShell="
+                + Convert.ToString(this.sideShell == null ? -1
+                                   : this.sideShell.Ok() ? 1 : 0)
+                + " gameMenu=" + Convert.ToString(Ra2App.gameMenu ? 1 : 0));
             int pside = this.shell.SideIndex();
             Ra2App.DumpScreen(pside == 0
                               ? Ra2App.ShotPath("ra2_shot_tanks.bmp")
