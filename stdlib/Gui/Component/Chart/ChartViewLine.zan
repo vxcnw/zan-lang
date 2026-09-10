@@ -405,6 +405,22 @@ partial class ChartView {
         c.DrawPolylineFx(ox, oy, color, th);
     }
 
+    /// ECharts `chart/line/LineView.ts:367-401 getIsIgnoreFunc` 的决策部分：
+    /// 本系列的拐点符号是否要按"显示标签的主刻度"抽稀。
+    /// `symTicks` 为空（非类目 X / 无抽稀基准）时源码提前 return，不抽稀；
+    /// `showAllSymbol:true` 直接不去重；`'auto'` 交给
+    /// CanShowAllSymbolForCategory（能放下就全放）。
+    static bool ThinSymbolsFor(ChartOption o, ChartSeries s, ChartFrame f,
+                               List<int> symTicks, int n, int i0, App app) {
+        if (symTicks == null) { return false; }
+        if (s.showAllSymbol > 0) { return false; }
+        if (s.showAllSymbol < 0 && o.XAxis0().type == ChartAxisType.Category) {
+            return !Chart.CanShowAllSymbolForCategory(f.plotW, n,
+                app.Scale(s.symbolSize), s.data, i0, app.dpiScale);
+        }
+        return true;
+    }
+
     // ---- 折线 / 面积 / 阶梯线（可叠加柱状 + 散点） ----
 
     /// 混合折线图中的柱/散点覆盖层不经过各自主渲染器，
@@ -739,9 +755,15 @@ partial class ChartView {
         int half = step / 2;
         int th = app.Scale(2);
         int rad = app.Scale(3);
-        // 拐点符号 auto 抽稀（ECharts2 showAllSymbol 缺省 false，符号
-        // 只落在显示标签的主刻度上）：仅类目 X 有标签时生效，雨量图
-        // 这类 3079 点密集线不再满线小圆点。showSymbol=1 全显、=0 隐藏。
+        // 拐点符号抽稀（ECharts `chart/line/LineView.ts:367-401 getIsIgnoreFunc`）：
+        //   showAllSymbol=true  → 不抽稀（全显）
+        //   'auto'（缺省）      → CanShowAllSymbolForCategory 通过则不抽稀，
+        //                        放不下才退回"按显示标签的主刻度"（源码注释：
+        //                        "we show all symbols as possible as we can"）
+        //   false               → 一律按标签间隔
+        //   无类目 X（数值轴）   → 不抽稀（源码 categoryAxis 不存在时提前 return）
+        // 仅类目 X 有标签时才有抽稀基准，雨量图这类 3079 点密集线走抽稀分支。
+        // showSymbol=1 全显、=0 隐藏。
         List<int> symTicks = null;
         if (n == winLabels.Count && o.XAxis0().type == ChartAxisType.Category) {
             symTicks = Chart.CategoryTicks(f, winLabels,
@@ -1082,6 +1104,8 @@ partial class ChartView {
                         // 高分窗口上符号只有标称一半大。
                         int nr = s.symbolSize > 0
                             ? app.Scale(Chart.SymbolRadius(s.symbolSize, 0)) : rad;
+                        bool thinSym2 = ChartView.ThinSymbolsFor(o, s, f,
+                            symTicks, n, i0, app);
                         int tickCur2 = 0;
                         for (int m2 = 0; m2 < pxs.Count; m2 = m2 + 1) {
                             if (gaps[m2]) { continue; }
@@ -1110,7 +1134,7 @@ partial class ChartView {
                             bool showSym = sym2 != "none" && sym2 != "pass"
                                 && (s.symbol.Length > 0 || s.showSymbol != 0
                                     || dataSym);
-                            if (showSym && symTicks != null
+                            if (showSym && thinSym2
                                 && s.symbol.Length == 0 && s.showSymbol < 0
                                 && !(oiN < s.data.Count
                                      && s.data[oiN].symbol.Length > 0)) {
@@ -1606,6 +1630,8 @@ partial class ChartView {
                     // symbolSize 直径语义随 DPI 缩放（同主线 pass）。
                     int nr = s.symbolSize > 0
                         ? app.Scale(Chart.SymbolRadius(s.symbolSize, 0)) : rad;
+                    bool thinSym3 = ChartView.ThinSymbolsFor(o, s, f,
+                        symTicks, n, i0, app);
                     int tickCur3 = 0;
                     for (int u = 0; u < n; u = u + 1) {
                         int oi2 = i0 + u;
@@ -1632,7 +1658,7 @@ partial class ChartView {
                         bool ovSym3 = oi2 < s.data.Count
                             && s.data[oi2].symbol.Length > 0;
                         if (!ovSym3 && s.symbol.Length == 0 && s.showSymbol == 0) { continue; }
-                        if (symTicks != null && s.symbol.Length == 0
+                        if (thinSym3 && s.symbol.Length == 0
                             && s.showSymbol < 0 && !ovSym3) {
                             // auto：符号只落在显示标签的主刻度上。
                             while (tickCur3 < symTicks.Count

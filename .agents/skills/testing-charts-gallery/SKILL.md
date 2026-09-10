@@ -1,6 +1,6 @@
 ---
 name: testing-charts-gallery
-description: Zan charts gallery (examples/gui_charts, 335 ECharts 官方对照 demo) 的代码级完整度对照与实机验证定式——scripts/chart_gap_audit.py 的未读配置键倒排/源引用率、源函数逐条对抄、数值 oracle（ECharts getLayout 归一化对比、bar 布局样板、scale 翻转对照——布尔语义只比方向不比端点）、颜色/字号预算闸门、recheck2 截图驱动、bindprobe 探针、--bench 帧计时、stdlib 快照同步坑、多 grid/dataZoom/定点数值三大契约。凡是要盘点图表迁移完整度、修复 stdlib/Gui/Component/Chart 引擎改动、核对某个 demo 与 ECharts 官方语义是否一致、排查"图表空板/缺元素/多面板窗口不同步"时使用。
+description: Zan charts gallery (examples/gui_charts, 335 ECharts 官方对照 demo) 的代码级完整度对照与实机验证定式——scripts/chart_gap_audit.py 的未读配置键倒排/源引用率（未读键按父路径+源默认值分诊，别把官方导出的缺省当缺口）、源函数逐条对抄、数值 oracle（ECharts getLayout 归一化对比、bar 布局样板、scale 翻转对照——布尔语义只比方向不比端点）、三态/枚举类缺省（`'auto'`≠`false`，如 showAllSymbol）、颜色/字号预算闸门、recheck2 截图驱动、bindprobe 探针、--bench 帧计时、stdlib 快照同步坑、多 grid/dataZoom/定点数值三大契约。凡是要盘点图表迁移完整度、修复 stdlib/Gui/Component/Chart 引擎改动、核对某个 demo 与 ECharts 官方语义是否一致、排查"图表空板/缺元素/多面板窗口不同步"时使用。
 ---
 
 # Charts gallery 验证与修复定式（Windows 实机）
@@ -26,8 +26,10 @@ description: Zan charts gallery (examples/gui_charts, 335 ECharts 官方对照 d
   ① 柱宽公式 `ChartViewBar.zan:351-354` 手写 `step*7/10`、`Scale(2)` 像素
   间距，对照 `layout/barGrid.ts:206-349` 的 `barCategoryGap` 求解
   （**已修**：`ChartBarLayout.zan` 严格对抄，见"数值对照 oracle"节）；
-  ② 折线符号漏了 `chart/line/LineView.ts:371-410` 的数值轴提前返回与
-  `canShowAllSymbolForCategory()` 通过分支；
+  ② 折线符号漏了 `chart/line/LineView.ts:367-401` 的数值轴提前返回与
+  `canShowAllSymbolForCategory()` 通过分支（**已修**：`showAllSymbol`
+  三态 + `Chart.CanShowAllSymbolForCategory` + `ThinSymbolsFor`，
+  见契约 11）；
   ③ `axis.scale` 从不读取，且 `AxisMinForF/AxisMaxForF` 初值为 0 →
   量程无条件并入 0，但 `coord/axisModelCommonMixin.ts:33` 只在
   `!scale` 时并入。**已修**：`ChartModel.zan` 读 `"scale"`、
@@ -39,8 +41,25 @@ description: Zan charts gallery (examples/gui_charts, 335 ECharts 官方对照 d
 
 1. 动手前先跑 `python scripts/chart_gap_audit.py`（仓库根）。它列出官方
    option 用到、而引擎**从不通过 Json 访问器读取**的配置键（当前
-   278/470），以及每个引擎文件引用了哪些源。**未读键 = 静默丢弃 =
+   274/470），以及每个引擎文件引用了哪些源。**未读键 = 静默丢弃 =
    这张图不可能对**，先看这里再决定修哪个。
+   **但"未读"不等于"该修"——先按父路径分类**（`python` 遍历 option 打印
+   每个键的父路径计数，比按文件名猜快得多）：官方的 ECharts option 导出
+   会把**引擎默认值也写进文件**，于是 `gridIndex:0`（69 次，几乎全是单
+   grid 的 0）、`axisLine.onZero`、`animationDuration:1000` 这类"配置原文
+   里的缺省"也会进未读榜。分辨方法：看父路径 + 查源里的默认值——
+   - `readOnly` 全在 `/toolbox/feature/dataView` 下 → 只是 dataView 面板
+     的只读开关，跳过。
+   - `gridIndex` 多轴各出现一次 → 多 grid demo 才真需要（按
+     `xAxisIndex`/`yAxisIndex` 已能路由时不急）。
+   - `axisLine.onZero` 的源默认是 `'auto'`（**不是 `true`**，
+     `coord/axisDefault.ts:62`），且 `Grid.ts:637-640` 注释写明：显式
+     `undefined` = 不 onZero、**不写** = onZero，bar/candlestick 因
+     `containShape` 被 `discourageOnAxisZero` 排除——语义在源码里是反直觉
+     的，不看源就照着键名修必错。
+   - `animation*` 全是进入动画，静态渲染器不适用。
+   真正该修的是"父路径落在渲染语义上、源默认非平凡"的键：`labelLine`
+   （饼/漏斗引线）、`rich`（富文本）、`showAllSymbol`（见契约 11）。
 2. 引擎新增/修改的逻辑，注释必须写 ECharts 源 `文件:行`。没有出处 =
    这条无法审计，等于欠债（审计工具就是按这个引用率给结论的）。
    **"已修"必须能在工作区 grep 到那行代码 / 有 conformance 用例支撑**：
@@ -247,6 +266,20 @@ powershell -File _scratch/recheck2.ps1 -OutDir D:/project/zan-lang/_scratch/shot
    同理 `min == max` 的兜底在 ECharts 里位于 `_calculateValue`、
    `_reformValue`（零并入）**之前**，所以它**不受 scale 门控**——Zan 的
    `NiceRange` 也把这段留在 `!scale` 块外。
+11. **三态/枚举类配置的缺省常是 `'auto'`，不是 `false`——把缺省当关会系统性
+   丢元素**。`line.showAllSymbol` 的源默认是 `'auto'`（`LineSeries.ts:210`），
+   `getIsIgnoreFunc`（`LineView.ts:367-401`）的语义是：`true` 全显；`'auto'`
+   **能放下就全显**（`canShowAllSymbolForCategory`，源码注释 "we show all
+   symbols as possible as we can"）；`false` 才一律抽稀；无类目轴也全显。
+   Zan 此前把缺省当"按标签间隔抽稀"，于是 30 点这类"符号放得下、标签放
+   不下"的类目折线丢了大半拐点。落地要**三态**存 `-1/0/1`（`'auto'` 字符
+   串也要认）而不是 bool；判定函数对抄 `LineView.ts:472-492`——`availSize =
+   plotW/n`、`step = n/5` 抽样至多 5 点、任一点 `size×1.5 > availSize` 即
+   放不下（逐点 `data[i].size` 覆盖也要折成 device 像素：本引擎 plotW 是
+   device 像素，option 的 symbolSize 是 CSS 像素，两边不同单位直接比会在
+   高 DPI 下偏）。抽稀/不抽稀的**决策**要提成 per-series 函数给多个符号
+   pass 共用（`ThinSymbolsFor`），否则又是一个"两处各写一遍"的漂移源。
+
 
 ## 已知刻意偏差（勿当 bug 修）
 

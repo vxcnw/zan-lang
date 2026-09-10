@@ -1,0 +1,88 @@
+using System;
+using Gui.Component.Chart;
+
+namespace Conf;
+
+/// ECharts 折线拐点符号的显隐策略——`chart/line/LineView.ts:367-401
+/// getIsIgnoreFunc` + `:472-492 canShowAllSymbolForCategory`：
+///   showAllSymbol:true        → 全显（源码第一个 return）
+///   'auto'（缺省）            → 能放下就全显：availSize = plotW/n，抽样 ≤5 点，
+///                               任一点 size×1.5 > availSize 即"放不下"
+///   false                     → 一律按显示标签的主刻度抽稀
+///   无类目 X（symTicks 为空）  → 不抽稀（源码 categoryAxis 缺失时提前 return）
+/// 把"标签放不下 ⇒ 符号也不放"当缺省是错的：源码注释是 "we show all
+/// symbols as possible as we can"。30 点这类"符号放得下、标签放不下"的
+/// 类目折线因此会丢大部分拐点。
+class Program {
+    /// 逐点 symbolSize 覆盖表：0 = 无覆盖。
+    static List<ChartData> OfSizes(int[] sz) {
+        List<ChartData> d = new List<ChartData>();
+        for (int i = 0; i < sz.Length; i = i + 1) {
+            ChartData c = ChartData.Of(i);
+            if (sz[i] > 0) { c.size = sz[i]; c.sizeSet = true; }
+            d.Add(c);
+        }
+        return d;
+    }
+
+    static string B(bool v) { return v ? "1" : "0"; }
+
+    static void Main() {
+        // 稀疏类目 7 格 × 600px：每格 85px，4px 符号 ×1.5=6 放得下。
+        Console.WriteLine("sparse=" + Program.B(
+            Chart.CanShowAllSymbolForCategory(600, 7, 4, new List<ChartData>(), 0, 100)));
+        // 30 点 × 600px：每格 20px，仍放得下符号（而 30 个标签放不下）——
+        // 缺省 'auto' 下必须全显，否则这批拐点被标签间隔误伤。
+        Console.WriteLine("mid=" + Program.B(
+            Chart.CanShowAllSymbolForCategory(600, 30, 4, new List<ChartData>(), 0, 100)));
+        // 密集线 3079 点：每格不足 1px（600/3079=0），放不下 → 抽稀。
+        Console.WriteLine("dense=" + Program.B(
+            Chart.CanShowAllSymbolForCategory(600, 3079, 4, new List<ChartData>(), 0, 100)));
+        // 逐点覆盖命中抽样点（n=5 → step=1 全采）：20px 格放不下 200px 符号。
+        Console.WriteLine("ovr=" + Program.B(
+            Chart.CanShowAllSymbolForCategory(600, 5, 4,
+                Program.OfSizes(new int[] { 0, 0, 200, 0, 0 }), 0, 100)));
+        // 抽样只取 ≤5 点（step = n/5 = 615，采 0/615/1230/1845/2460）：
+        // 大符号落在抽样外 → 判定不受影响；落在抽样内 → 一票否决。
+        int[] wide = new int[3079];
+        wide[3] = 5000;
+        Console.WriteLine("sample-skip=" + Program.B(
+            Chart.CanShowAllSymbolForCategory(307900, 3079, 4,
+                Program.OfSizes(wide), 0, 100)));
+        int[] wide2 = new int[3079];
+        wide2[615] = 5000;
+        Console.WriteLine("sample-hit=" + Program.B(
+            Chart.CanShowAllSymbolForCategory(307900, 3079, 4,
+                Program.OfSizes(wide2), 0, 100)));
+        // 系列符号本身过大。
+        Console.WriteLine("big=" + Program.B(
+            Chart.CanShowAllSymbolForCategory(600, 5, 200, new List<ChartData>(), 0, 100)));
+        // 窗口起点 i0 偏移后逐点覆盖要跟着走（窗口内第 2 项才是大符号）。
+        Console.WriteLine("off=" + Program.B(
+            Chart.CanShowAllSymbolForCategory(600, 5, 4,
+                Program.OfSizes(new int[] { 200, 0, 200, 0, 0 }), 1, 100)));
+        // DPI：device 像素下 4px 符号在 200% 缩放下是 8px，20px 格仍放得下。
+        Console.WriteLine("dpi=" + Program.B(
+            Chart.CanShowAllSymbolForCategory(1200, 30, 8, new List<ChartData>(), 0, 200)));
+        // 退化：n=0。
+        Console.WriteLine("zero=" + Program.B(
+            Chart.CanShowAllSymbolForCategory(600, 0, 4, new List<ChartData>(), 0, 100)));
+
+        // ---- 解析：showAllSymbol 三种形态 ----
+        string j = "{\"series\":[{\"type\":\"line\",\"showAllSymbol\":\"auto\",\"data\":[1]},"
+            + "{\"type\":\"line\",\"showAllSymbol\":true,\"data\":[1]},"
+            + "{\"type\":\"line\",\"showAllSymbol\":false,\"data\":[1]},"
+            + "{\"type\":\"line\",\"data\":[1]},"
+            + "{\"type\":\"line\",\"showSymbol\":false,\"data\":[1]}]}";
+        ChartOption o = ChartOption.FromJson(j);
+        string got = "";
+        for (int i = 0; i < o.series.Count; i = i + 1) {
+            if (i > 0) { got = got + ","; }
+            got = got + Convert.ToString(o.series[i].showAllSymbol);
+        }
+        Console.WriteLine("parse=" + got);
+        // 缺省 showAllSymbol='auto' 且 showSymbol 缺省为 auto(-1)：两者独立。
+        Console.WriteLine("showSymbol=" + Convert.ToString(o.series[4].showSymbol)
+            + ":" + Convert.ToString(o.series[4].showAllSymbol));
+    }
+}
