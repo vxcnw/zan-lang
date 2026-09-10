@@ -22,45 +22,57 @@ class Online : AdminController {
     [Description("在线会话")]
     async void Index() {
         ViewData d = await this.Layout("在线会话");
-        List<Session> rows = World.All();
-        long now = WebApp.NowSeconds();
+        /* 会话清单来自世界进程（本进程即世界时直读，否则经共享内存
+           中继）；在线计数读共享表，多 worker 各页一致。 */
+        JsonValue live = await GameShared.Sessions();
         List<GameMap> maps = new List<GameMap>();
         List<Realm> realms = new List<Realm>();
         if (this.DbReady()) {
             maps = await this.GameMap.OrderBy(a => a.sortOrder).ToListAsync();
             realms = await this.Realm.OrderBy(a => a.sort).ToListAsync();
         }
-        d.Set("count", Convert.ToString(rows.Count));
-        d.Set("inWorld", Convert.ToString(World.OnlineCount()));
+        long now = WebApp.NowSeconds();
+        int count = 0;
         List<StrMap> items = d.AddList("rows");
-        for (int i = 0; i < rows.Count; i = i + 1) {
-            Session s = rows[i];
-            StrMap row = new StrMap();
-            row.Set("cid", Convert.ToString(s.cid));
-            row.Set("username", s.username);
-            row.Set("realm", s.realmId > 0
-                ? Online.RealmName(realms, s.realmId) : "—");
-            if (s.row != null) {
-                row.Set("nickname", Fmt.Dash(s.row.nickname));
-                row.Set("level", Convert.ToString(s.row.level));
-                row.Set("map", Online.MapName(maps, s.row.mapId));
-                row.Set("pos", Convert.ToString(s.row.x) + ","
-                    + Convert.ToString(s.row.y));
-                row.Set("stage", "在世界中");
-                row.Set("stageClass", "ok");
-            } else {
-                row.Set("nickname", "—");
-                row.Set("level", "—");
-                row.Set("map", "—");
-                row.Set("pos", "—");
-                row.Set("stage", "未进区");
-                row.Set("stageClass", "off");
+        if (live != null) {
+            JsonValue rows = live.Get("rows");
+            if (rows != null) {
+            count = rows.Count();
+            for (int i = 0; i < rows.Count(); i = i + 1) {
+                JsonValue s = rows.At(i);
+                StrMap row = new StrMap();
+                row.Set("cid", Convert.ToString(s.Int("cid", 0)));
+                row.Set("username", s.Str("user", ""));
+                int realmId = s.Int("realm", 0);
+                row.Set("realm", realmId > 0
+                    ? Online.RealmName(realms, realmId) : "—");
+                string nickname = s.Str("name", "");
+                if (nickname.Length > 0) {
+                    row.Set("nickname", Fmt.Dash(nickname));
+                    row.Set("level", Convert.ToString(s.Int("level", 0)));
+                    row.Set("map", Online.MapName(maps, s.Int("map", 0)));
+                    row.Set("pos", Convert.ToString(s.Int("x", 0)) + ","
+                        + Convert.ToString(s.Int("y", 0)));
+                    row.Set("stage", "在世界中");
+                    row.Set("stageClass", "ok");
+                } else {
+                    row.Set("nickname", "—");
+                    row.Set("level", "—");
+                    row.Set("map", "—");
+                    row.Set("pos", "—");
+                    row.Set("stage", "未进区");
+                    row.Set("stageClass", "off");
+                }
+                row.Set("loginAt", Fmt.Stamp(s.Int("loginAt", 0)));
+                row.Set("idle", Fmt.Dur(
+                    (now - s.Int("lastSeen", 0)) * 1000000));
+                items.Add(row);
             }
-            row.Set("loginAt", Fmt.Stamp(s.loginAt));
-            row.Set("idle", Fmt.Dur((now - s.lastSeen) * 1000000));
-            items.Add(row);
+            }
         }
-        if (rows.Count == 0) { d.Set("empty", "1"); }
+        d.Set("count", Convert.ToString(count));
+        d.Set("inWorld", Convert.ToString(GameShared.OnlineTotal()));
+        if (count == 0) { d.Set("empty", "1"); }
         this.Page(d);
     }
 
@@ -70,12 +82,27 @@ class Online : AdminController {
     [Description("踢下线")]
     async void Kick() {
         int cid = this.InInt("cid", 0);
-        Session s = World.ByCid(cid);
-        if (s == null) { this.Fail(404, "0404", "该会话已不在线"); }
-        string who = s.username;
-        await World.Kick(s.accountId, "GM 强制下线");
+        /* 会话清单里按 cid 找账号（会话本体在世界进程）。 */
+        JsonValue live = await GameShared.Sessions();
+        if (live == null) { this.Fail(404, "0404", "该会话已不在线"); }
+        JsonValue rows = live.Get("rows");
+        int accountId = 0;
+        string who = "";
+        if (rows != null) {
+        for (int i = 0; i < rows.Count(); i = i + 1) {
+            JsonValue s = rows.At(i);
+            if (s.Int("cid", 0) == cid) {
+                accountId = s.Int("uid", 0);
+                who = s.Str("user", "");
+                break;
+            }
+        }
+        }
+        if (accountId == 0) { this.Fail(404, "0404", "该会话已不在线"); }
+        bool hit = await GameShared.GmKick(accountId, "GM 强制下线");
         await this.Note("在线踢下线", "#" + Convert.ToString(cid)
-            + " " + who, true, "");
+            + " " + who, hit, hit ? "" : "世界进程未响应");
+        if (!hit) { this.Saved("世界进程未响应，请稍后再试"); return; }
         this.Saved("已断开该会话");
     }
 
@@ -92,9 +119,10 @@ class Online : AdminController {
         if (this.who != null) {
             from = Fmt.Text(this.who.nickname, this.who.username);
         }
-        int hit = World.Broadcast(from, text);
-        await this.Note("全服喊话", text, true,
-            Convert.ToString(hit) + " 个会话");
+        int hit = await GameShared.GmBroadcast(from, text);
+        await this.Note("全服喊话", text, hit >= 0,
+            hit >= 0 ? Convert.ToString(hit) + " 个会话" : "世界进程未响应");
+        if (hit < 0) { this.Saved("世界进程未响应，请稍后再试"); return; }
         this.Saved("已推送给 " + Convert.ToString(hit) + " 个在线会话");
     }
 

@@ -31,7 +31,7 @@ class Realms : AdminController {
             row.Set("id", Convert.ToString(r.id));
             row.Set("name", r.name);
             row.Set("sort", Convert.ToString(r.sort));
-            row.Set("online", Convert.ToString(World.RealmOnline(r.id)));
+            row.Set("online", Convert.ToString(GameShared.OnlineRealm(r.id)));
             row.Set("stateText", r.state == 0 ? "开放" : "维护");
             row.Set("stateClass", r.state == 0 ? "ok" : "bad");
             row.Set("createdAt", Fmt.Stamp(r.createdAt));

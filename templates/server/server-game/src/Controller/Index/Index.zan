@@ -22,7 +22,7 @@ class Index : Controller {
         string site = await Settings.Get(SettingKeys.SiteTitle, "{{NAME}}");
         d.Set("title", site);
         d.Set("navHome", "page");
-        d.Set("online", Convert.ToString(World.OnlineCount()));
+        d.Set("online", Convert.ToString(GameShared.OnlineTotal()));
         d.Set("gamePort", Convert.ToString(Cfg.Game.port));
 
         d.Set("realmCount", "0");
@@ -48,7 +48,7 @@ class Index : Controller {
                         row.Set("name", realm.name);
                         row.Set("stateText", realm.state == 0 ? "开放" : "维护");
                         row.Set("stateClass", realm.state == 0 ? "ok" : "off");
-                        row.Set("online", Convert.ToString(World.RealmOnline(realm.id)));
+                        row.Set("online", Convert.ToString(GameShared.OnlineRealm(realm.id)));
                         realms.Add(row);
                         if (realm.state == 0) { open = open + 1; }
                     }

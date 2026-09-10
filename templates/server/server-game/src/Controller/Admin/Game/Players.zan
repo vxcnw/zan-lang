@@ -69,7 +69,7 @@ class Players : AdminController {
             row.Set("map", Players.MapName(maps, p.mapId));
             row.Set("lastLoginAt", p.lastLoginAt > 0
                 ? Fmt.Stamp(p.lastLoginAt) : "—");
-            bool online = World.ByChar(p.id) != null;
+            bool online = GameShared.PlayerOnline(p.id);
             row.Set("onlineText", online ? "在线" : "离线");
             row.Set("onlineClass", online ? "ok" : "off");
             items.Add(row);
@@ -85,11 +85,13 @@ class Players : AdminController {
     async void Form() {
         int id = this.InInt("id", 0);
         Player p = await this.Reach(id);
-        Session live = World.ByChar(id);
-        long curGold = live != null ? live.row.gold : p.gold;
-        long curGems = live != null ? live.row.gems : p.gems;
-        int curMap = live != null ? live.row.mapId : p.mapId;
-        int curLevel = live != null ? live.row.level : p.level;
+        /* 在线角色的实时值来自世界进程（本进程即世界时直读）；不在线
+           或世界不可达时展示库值。 */
+        JsonValue live = await GameShared.LivePlayer(id);
+        long curGold = live != null ? live.Long("gold", p.gold) : p.gold;
+        long curGems = live != null ? live.Long("gems", p.gems) : p.gems;
+        int curMap = live != null ? live.Int("mapId", p.mapId) : p.mapId;
+        int curLevel = live != null ? live.Int("level", p.level) : p.level;
         List<GameMap> maps = await this.GameMap.OrderBy(a => a.sortOrder)
             .ToListAsync();
         List<Realm> realms = await this.Realm.OrderBy(a => a.sort)
@@ -101,7 +103,7 @@ class Players : AdminController {
         ViewData d = new ViewData();
         d.Set("id", Convert.ToString(id));
         d.Set("username", p.username);
-        d.Set("nickname", live != null ? live.row.nickname : p.nickname);
+        d.Set("nickname", live != null ? live.Str("nickname", "") : p.nickname);
         d.Set("level", Convert.ToString(curLevel));
         d.Set("gold", Convert.ToString(curGold));
         d.Set("gems", Convert.ToString(curGems));
@@ -109,12 +111,12 @@ class Players : AdminController {
         d.Set("dialogTitle", "编辑角色 " + Fmt.Text(p.nickname, p.username));
         if (live != null) { d.Set("online", "1"); }
         if (acc != null && acc.status == 0) { d.Set("banned", "1"); }
-        int job = live != null ? live.row.job : p.job;
+        int job = live != null ? live.Int("job", p.job) : p.job;
         if (job == 1) { d.Set("job1", "selected"); }
         if (job == 2) { d.Set("job2", "selected"); }
         if (job == 0) { d.Set("job0", "selected"); }
-        int curRealm = live != null && live.realmId > 0
-            ? live.realmId : p.realmId;
+        int curRealm = live != null && live.Int("realmId", 0) > 0
+            ? live.Int("realmId", 0) : p.realmId;
         List<StrMap> ropts = d.AddList("realms");
         for (int i = 0; i < realms.Count; i = i + 1) {
             StrMap o = new StrMap();
@@ -158,7 +160,7 @@ class Players : AdminController {
     async void Save() {
         int id = this.InInt("id", 0);
         Player p = await this.Reach(id);
-        Session live = World.ByChar(id);
+        bool isOnline = GameShared.PlayerOnline(id);
         string nickname = this.Need("nickname", "角色名");
         if (Fmt.CharCount(nickname) > 32) {
             this.Fail(400, "0003", "角色名最长 32 字");
@@ -172,13 +174,10 @@ class Players : AdminController {
         if (level < 1) { level = 1; }
         if (gold < 0) { gold = 0; }
         if (gems < 0) { gems = 0; }
-        if (realmId != p.realmId && live != null) {
+        if (realmId != p.realmId && isOnline) {
             this.Fail(400, "0003", "该角色在线，先踢下线再换区服");
         }
 
-        long curGold = live != null ? live.row.gold : p.gold;
-        long curGems = live != null ? live.row.gems : p.gems;
-        string curNick = live != null ? live.row.nickname : p.nickname;
         string changed = "";
 
         /* GM 送物品：随本次保存一起发放（giftItem=0 表示不发）。 */
@@ -188,18 +187,17 @@ class Players : AdminController {
         if (giftCount > 999) { giftCount = 999; }
         string gifted = "";
 
-        if (live != null) {
-            /* 发奖差量走 World：内存即时生效、推送客户端、随 tick 落库。 */
-            if (gold != curGold || gems != curGems) {
-                World.Adjust(id, gold - curGold, gems - curGems);
-                changed = "发奖已实时生效";
-            }
-            World.ApplyEdit(id, level, job, mapId, nickname);
-            if (changed.Length == 0) { changed = "已应用到在线会话"; }
-            if (giftItem > 0) {
-                Fight.Gift(live, giftItem, giftCount);
-                gifted = "已发放物品并推送";
-            }
+        /* 在线角色整单交给世界进程（本进程即世界时直调）：金币/元宝
+           传绝对目标值，差量在世界侧对着实时内存值算，页面读不到的
+           中间变化不会算偏。返回 false 视为刚下线，走库路径。 */
+        bool appliedOnline = false;
+        if (isOnline) {
+            appliedOnline = await GameShared.SaveOnlinePlayer(id, level,
+                job, mapId, nickname, gold, gems, giftItem, giftCount);
+        }
+        if (appliedOnline) {
+            changed = "已应用到在线会话";
+            if (giftItem > 0) { gifted = "已发放物品并推送"; }
         } else {
             p.hp = Fight.ClampHp(p);
             int n = await this.Player.Update()
@@ -237,7 +235,8 @@ class Players : AdminController {
             int _b = await dao.SetStatus(acc.id, accStatus,
                 accStatus == 0 ? banReason : "");
             if (accStatus == 0) {
-                await World.Kick(acc.id, "账号已被封禁：" + banReason);
+                await GameShared.GmKick(acc.id,
+                    "账号已被封禁：" + banReason);
                 changed = "已封禁账号并踢下线";
             } else {
                 changed = "账号已解封";
@@ -256,7 +255,7 @@ class Players : AdminController {
     async void Kick() {
         int id = this.InInt("id", 0);
         Player p = await this.Reach(id);
-        bool hit = await World.Kick(p.accountId, "GM 强制下线");
+        bool hit = await GameShared.GmKick(p.accountId, "GM 强制下线");
         await this.Note("踢下线",
             "#" + Convert.ToString(id) + " " + p.username, hit,
             hit ? "" : "该账号不在线");

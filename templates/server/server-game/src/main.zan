@@ -26,13 +26,17 @@ class Program {
             Log.EchoToConsole(Cfg.Log.debug);
         }
 
-        /* 依赖注入：进程内一份连接池与缓存。游戏世界是单进程内存态，
-           [worker].count 必须为 1；缓存默认 memory 即可，无需 Redis。 */
+        /* 依赖注入：进程内一份连接池与缓存。多 worker（count>1，仅
+           Linux）时 HTTP 接入层水平扩，游戏世界固定在 1 号 worker；
+           Windows 的连接分发模型下游戏 TCP 无法固定到世界 worker，
+           维持单进程。 */
+        #if WINDOWS
         if (Cfg.Worker.count != 1) {
-            Console.WriteLine("[game] [worker].count must be 1"
-                + " -- the game world lives in this process");
+            Console.WriteLine("[game] multi-worker game requires Linux"
+                + " -- clamping [worker].count to 1 on Windows");
             Cfg.Worker.count = 1;
         }
+        #endif
         DbPool pool = Db.OpenPool();
         DbContext db = DbContext.Of(pool);
         CacheContext cache = CacheContext.Of(Db.OpenRedis());
@@ -55,7 +59,7 @@ class Program {
             }
         } else {
             Console.WriteLine("[cache] worker-local memory"
-                + " -- correct only while [worker].count is 1");
+                + " -- per-worker; use redis when [worker].count > 1");
         }
 
         /* 启动时执行一次 Schema 迁移和数据初始化 */
@@ -125,13 +129,20 @@ class Program {
         ApiDocs.Title(Cfg.Server.name);
         ApiDocs.MountSpec(app, "/api/docs");
 
-        /* 游戏域：世界 tick 协程 + TCP 网关，与 HTTP 同进程。
-           WebServer.Prepare 把 HTTP 管理后台注册为一个 Worker，
-           Gateway.Start 追加游戏 TCP Worker，RunAll 一并驱动。 */
-        World.Start(db);
-        Gateway.Start();
+        /* 游戏域：跨 worker 共享状态先建（匿名表，master 建、worker
+           继承；必须在派生 worker 之前）。世界 tick 协程与 TCP 网关
+           只在世界角色（单进程，或 1 号 worker）启动；其余 worker 的
+           世界类操作经 ops 表中继给它。 */
+        if (!GameShared.Open()) {
+            Console.WriteLine("[game] shared memory unavailable"
+                + " -- tokens/auth/online fall back per call site");
+        }
+        if (GameShared.WorldHere()) {
+            World.Start(db);
+            Gateway.Start();
+        }
         MenuBuilder.Section("game", "游戏管理");
-        WebServer.Prepare(app, 1, false);
+        WebServer.Prepare(app, Cfg.Worker.count, false);
         await Worker.RunAll();
     }
 

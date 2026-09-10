@@ -131,7 +131,29 @@ minLevel→BOSS 链、M2.DB 快照数值）。改了下面这些就要同步改 
    断言前 `pending.clear()`，并用带终值/金币差值的谓词，别裸
    `ok_for(m: "self" in m)`——会匹配到积压旧消息。
 
-## 7. 经验迭代纪律（本项目约束，写进 AGENTS.md）
+## 7. server-game 多 worker 定式（2026-09-10，count=4 实测入账）
+
+架构=**HTTP 接入层水平扩 + 游戏世界单写者**（GameShared.zan 五张匿名
+表，PermTable 模式：tokens/auth/sys/online/ops）。改这一层的铁律：
+
+1. **游戏 TCP 监听只在世界角色（1 号 worker）**：推送连接因此全部
+   本地，World/Fight/Play 的几十处 `Gateway.Send` 零改动；跨 worker
+   的登录会话登记、世界 op、GM 写动作一律走 ops 表 RPC（先 Increment
+   占序号再写行——世界侧消费指针单调前进，**两步之间读到新序号会把
+   请求整体跳过**，消费侧必须对缺行限时重试）。
+2. **RPC 协议字段单一来源**：初版世界侧读行内 acc 列、调用方只写进了
+   req JSON——全部中继以 accountId=0 执行、中继登录把会话登记到账号
+   0（跨账号互顶），而世界 worker 本机直调的一半正常，极易误判偶发。
+3. **Windows 钳制 count=1**：master 按自己的 worker 表接受/分发连接，
+   worker 多注册的游戏 worker 索引对不上；多 worker 仅 Linux。
+4. **压测 ritual**：单 IP 每 op 5 次/5s 的匿名限流是登录吞吐的假顶——
+   loopback 绑 `127.0.0.2..N` 源地址给每账号独立桶；并行客户端数不要
+   超过单进程 sqlite 池（poolSize=8，超了报"数据库不可用"= 池 fail-fast
+   非缺陷）；rm 掉服务端还开着的 sqlite 文件 = disk I/O error，先停
+   进程再清库。基线：count=1 63.5/s、count=4 178/s（24 并发，SQLite
+   单写为共享瓶颈）。
+
+## 8. 经验迭代纪律（本项目约束，写进 AGENTS.md）
 
 - 会话里**验证过**的新经验：当天并入本 skill（或对应 skill），随功能
   同一提交。

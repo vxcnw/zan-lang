@@ -140,6 +140,11 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
   上涨=每请求泄漏，段间恒定=有界设计成本**；async frame 对 `this` 的
   receiver-retain（防 fluent 接收者 use-after-free）是设计内所有权，
   leakcheck 残余 1 条非缺陷。
+- **新内建必须同步借用白名单（A264）**：白名单按内建名逐个枚举，
+  nm_sha256_fn（NativeMemory.Sha256）落地时 expr_yields_owned_rc_value
+  同步补 `is_call_to(e,"NativeMemory","Sha256") && args==2`——**加内建
+  不加白名单 = A262 的复刻**，且泄漏只在真实调用方出现，编译器自身
+  测试照绿。
 - **expr_yields_owned_rc_value 对 extern 调用必须返回 0**（irgen_generics.c）：
   声明返回 `string` 的 bodyless [DllImport] 返回的是裸 `char*`——extern 内存
   或**调用方传入的缓冲**，没有 rc 头。通用丢弃路径（AST_EXPR_STMT）把所有
@@ -162,6 +167,27 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
   （0x7ffff7xxxxxx 段）；崩溃地址落在 mallocng 元数据检查
   （__malloc_allzerop）且 RSS 平台化后不重现，优先怀疑高压竞争而非
   Zan 侧 UAF——先用低速率复跑分型。
+
+## 字节串 ABI 契约（stdlib crypto EVP 换装踩坑，2026-09-10）
+
+- **byte[] 按 string 形参传入时 `.Length` = strlen**：共享的是 payload
+  指针，没有数组头，长度按 0x00 截断——Hex.Decode 产物首字节为 0 时
+  `.Length==0`。stdlib 旧 crypto 从不读缓冲参数的 `.Length`、只索引；
+  新代码加 `.Length` 门禁会把合法密钥/密文判空（Aes.zan:127 报
+  "list index out of bounds" 的根源）。缓冲参数只判 null。
+- **GetString 产物不能写字节**：`s[i]=x` 触发长度缓存失效
+  （emit_string_len_invalidate），之后按 strlen 重 derive，NUL 开头的
+  内容坍缩成长度 1，第二次写就越界。GCM tag 这类含 NUL 的编组必须走
+  `byte[]`，仅在 extern 调用边界 `string tagBuf = tagB` 零拷转换。
+- **同符号异形参用 EntryPoint 别名**：`[DllImport("crypto",
+  EntryPoint="EVP_EncryptUpdate")] static extern int EVP_EncryptUpdateS(...)`
+  ——发明不存在的符号名链接期才炸；string 形态做零拷输入（CBC 2→196
+  MiB/s 的差额全在这一次字节拷贝）。
+- **EVP 单块 ECB 两方向都要 `set_padding(0)`**：解密侧 PKCS#7 默认把
+  末块扣在 Final 里，Update 返回 0 块（表现为"解密全零"）；SM4 微信
+  无 pad 语义同款。EncryptCbc 返回精确长度数组（golden 断言 ct.Length，
+  多给的 len+32 破档）；调用方对 outLen `List<int>` 预 `Add(0)`（空表
+  写 [0] 是 fail-soft：报错但继续，错误会漂到别处爆）。
 
 ## stdlib 按需拉入（demand-driven pull-in，2026-09-10）
 

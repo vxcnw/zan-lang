@@ -65,6 +65,16 @@ class GameApi : ApiController {
                 this.TooMany();
                 return null;
             }
+            if (!GameShared.WorldHere()) {
+                /* 本 worker 不持有世界：整单中继给世界进程执行。token
+                   认领与限流都发生在本进程（tokens 表跨 worker 共享），
+                   世界进程只做会话查找与 op 执行。 */
+                m.Set("gop", JsonValue.NewStr(op));
+                JsonValue rr = await GameShared.WorldCall("game", m,
+                    accountId);
+                this.ctx.Json(rr.ToJson());
+                return null;
+            }
             s = World.ByAccount(accountId);
             if (s == null) {
                 this.ctx.Status(401, "Unauthorized");

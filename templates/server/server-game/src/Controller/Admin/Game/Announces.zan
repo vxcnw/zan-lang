@@ -116,9 +116,11 @@ class Announces : AdminController {
         if (a.enabled != 1) {
             this.Fail(400, "0003", "公告已停用，先启用再推送");
         }
-        int hit = World.PushAnnounce(a.title, a.body);
+        int hit = await GameShared.GmAnnounce(a.title, a.body);
         await this.Note("推送公告", "#" + Convert.ToString(id)
-            + " " + a.title, true, Convert.ToString(hit) + " 人在线");
+            + " " + a.title, hit >= 0,
+            hit >= 0 ? Convert.ToString(hit) + " 人在线" : "世界进程未响应");
+        if (hit < 0) { this.Saved("世界进程未响应，请稍后再试"); return; }
         this.Saved("已推送给 " + Convert.ToString(hit) + " 个在线会话");
     }
 

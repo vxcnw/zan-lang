@@ -131,6 +131,7 @@ class World {
         s.row = row;
         s.dirty = false;
         s.lastSeen = now;
+        GameShared.OnlineEnter(realmId, row.id);
         Console.WriteLine("[world] enter #" + Convert.ToString(s.cid)
             + " " + s.username + " realm=" + Convert.ToString(realmId)
             + " rate=" + Convert.ToString(s.expRate) + "/"
@@ -145,8 +146,10 @@ class World {
         if (s.row == null) { return; }
         Fight.PersistBagNow(s);
         ZanWeb.Model.Game.Player row = s.row;
+        int fromRealm = s.realmId;
         s.row = null;
         s.realmId = 0;
+        GameShared.OnlineExit(fromRealm, row.id);
         row.lastLogoutAt = WebApp.NowSeconds();
         await World.PersistRow(row, true);
         Console.WriteLine("[world] exit #" + Convert.ToString(s.cid)
@@ -162,6 +165,7 @@ class World {
         Session idx = World.ByAccount(s.accountId);
         if (idx != null && idx.cid == cid) { World.byAccount.Remove(s.accountId); }
         if (s.row != null) {
+            GameShared.OnlineExit(s.realmId, s.row.id);
             /* 挂机尾巴先结算再落库：不足一个批量周期的产出也入账
                （连接已关，不推送）。 */
             if (s.autoMobId > 0) { Fight.Settle(s, WebApp.NowSeconds(), false); }
@@ -265,8 +269,69 @@ class World {
         World.dbctx = ctx;
         Task.Spawn(Fight.Bootstrap(ctx));
         Task.Spawn(World.Loop());
+        /* 跨 worker 中继的取单循环：HTTP worker 把登录会话登记、世界
+           op 与管理页写动作投进 ops 表，这里按序取出来执行。 */
+        Task.Spawn(GameShared.OpLoop());
         Console.WriteLine("[world] tick " + Convert.ToString(Cfg.Game.tickMs)
             + "ms flush=" + Convert.ToString(Cfg.Game.flushSeconds) + "s");
+    }
+
+    /* HTTP 登录的世界侧半场（Gateway.Login 与跨 worker 中继共用）：
+       顶掉同账号旧会话（当场落库），登记新会话并分配 HTTP 段 cid。
+       只做登记不做应答——token、区服列表由调用方自己组装。 */
+    static async int EnsureHttpSession(int accountId, string username,
+                                       long now) {
+        Session old = World.ByAccount(accountId);
+        if (old != null) { await World.Leave(old.cid); }
+        Session s = new Session();
+        s.cid = GameShared.NextHttpCid();
+        s.httpOwned = true;
+        s.conn = null;
+        s.pushCid = 0;
+        s.accountId = accountId;
+        s.username = username;
+        s.realmId = 0;
+        s.row = null;
+        s.dirty = false;
+        s.kicked = false;
+        s.lastSeen = now;
+        s.loginAt = now;
+        await World.Enter(s, now);
+        return s.cid;
+    }
+
+    /* 在线会话清单（管理页在线列表）：世界进程本地生成，跨 worker 时
+       经 ops 表中继（GameShared.Gm act=sessions）。 */
+    static JsonValue SessionsJson() {
+        JsonValue arr = JsonValue.NewArray();
+        List<Session> rows = World.All();
+        for (int i = 0; i < rows.Count; i = i + 1) {
+            Session s = rows[i];
+            JsonValue o = JsonValue.NewObject();
+            o.Set("cid", JsonValue.NewNum(Convert.ToString(s.cid)));
+            o.Set("user", JsonValue.NewStr(s.username));
+            o.Set("uid", JsonValue.NewNum(Convert.ToString(s.accountId)));
+            o.Set("realm", JsonValue.NewNum(Convert.ToString(s.realmId)));
+            o.Set("channel", JsonValue.NewStr(s.httpOwned ? "http" : "tcp"));
+            o.Set("push", JsonValue.NewNum(s.pushCid > 0 ? "1" : "0"));
+            o.Set("level", JsonValue.NewNum(Convert.ToString(
+                s.row != null ? s.row.level : 0)));
+            o.Set("name", JsonValue.NewStr(
+                s.row != null ? s.row.nickname : ""));
+            o.Set("map", JsonValue.NewNum(Convert.ToString(
+                s.row != null ? s.row.mapId : 0)));
+            o.Set("x", JsonValue.NewNum(Convert.ToString(
+                s.row != null ? s.row.x : 0)));
+            o.Set("y", JsonValue.NewNum(Convert.ToString(
+                s.row != null ? s.row.y : 0)));
+            o.Set("loginAt", JsonValue.NewNum(Convert.ToString(s.loginAt)));
+            o.Set("lastSeen", JsonValue.NewNum(Convert.ToString(s.lastSeen)));
+            arr.Append(o);
+        }
+        JsonValue r = JsonValue.NewObject();
+        r.Set("ok", JsonValue.NewNum("1"));
+        r.Set("rows", arr);
+        return r;
     }
 
     static async void Loop() {

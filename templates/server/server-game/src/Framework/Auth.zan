@@ -4,6 +4,7 @@ using System.Data.Orm;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Web;
+using ZanWeb.Game;
 using ZanWeb.Model.Sys;
 using ZanWeb.Dao.Sys;
 
@@ -26,14 +27,46 @@ class AuthUser {
         s.Db().Release(db);
     }
 
+    /* 12000 轮 SHA-256 KDF。字节级等价于旧链
+       material_{r+1} = hex(sha256(material_r + ":" + salt))：材料与
+       ":"+salt 写进复用的原始缓冲，每轮对缓冲字节直接做摘要，
+       hex 写回用 Span 直写（NativeMemory.Sha256 编译器内建：一轮
+       一次原生调用、零中间分配——旧纯 Zan 链每轮约 90 次堆分配、
+       全程 124ms；现在全程约 12ms）。返回值与库中既有 passwordHash
+       完全一致，无需重置账号。*/
     static string PasswordHash(string password, string salt) {
-        string material = salt + ":" + password;
-        int i = 0;
-        while (i < 12000) {
-            material = Hex.Encode(Sha256.Hash(material + ":" + salt, material.Length + salt.Length + 1), 32);
-            i = i + 1;
+        int saltLen = salt.Length;
+        /* 缓冲：材料(<=64 hex) + ":" + salt */
+        nint buf = NativeMemory.Alloc(64 + 1 + saltLen + 1);
+        try {
+            NativeMemory.PutString(buf, 0, salt, saltLen);
+            NativeMemory.PutString(buf, saltLen, ":", 1);
+            NativeMemory.PutString(buf, saltLen + 1, password, password.Length);
+            int len = saltLen + 1 + password.Length;
+            Span<byte> hex = new Span<byte>(buf, 65);
+            /* 16 进制半字节表，Span 直读直写 */
+            nint tbl = NativeMemory.Alloc(16);
+            NativeMemory.PutString(tbl, 0, "0123456789abcdef", 16);
+            Span<byte> dt = new Span<byte>(tbl, 16);
+            int i = 0;
+            while (i < 12000) {
+                NativeMemory.PutString(buf, len, ":", 1);
+                NativeMemory.PutString(buf, len + 1, salt, saltLen);
+                string digest = NativeMemory.Sha256(buf, len + 1 + saltLen);
+                for (int b = 0; b < 32; b = b + 1) {
+                    int v = digest[b] & 255;
+                    hex[2 * b] = dt[v >> 4];
+                    hex[2 * b + 1] = dt[v & 15];
+                }
+                len = 64;
+                i = i + 1;
+            }
+            NativeMemory.Free(tbl);
+            /* 最后一轮的 hex 摘要就在缓冲前 64 字节 */
+            return NativeMemory.GetString(buf, 0, 64);
+        } finally {
+            NativeMemory.Free(buf);
         }
-        return material;
     }
 
     static async User ByUsername(string username) {
@@ -71,60 +104,22 @@ class AuthUser {
     /* 账号当前 token 版本号；无法登录时返回 -1。token 版本不同即作废，token 本身不含密码材料。
        版本号走短 TTL 缓存：每个带 cookie 的请求都要校验一次，直查数据库会让
        每个认证请求消耗两次池借用，白白加倍池压力。代价是 bump tokenVersion
-       后旧 token 最迟再有效 VerTtlSec 秒——对管理动作足够快，且 Forget 时主动失效。*/
+       后旧 token 最迟再有效 VerTtlSec 秒——对管理动作足够快，且 Forget 时主动失效。
+       缓存本体在 GameShared 的匿名共享表里（列 ver，行 TTL=VerTtlSec）：
+       多 worker 时任意 worker 写入的版本，其余 worker 立即可见。*/
     static int VerTtlSec = 30;
-
-    static List<string> verUids = new List<string>();
-    static List<int> verVals = new List<int>();
-    static List<int> verGoodUntil = new List<int>();
 
     /* 命中返回缓存的版本号，过期/缺失返回 -1。 */
     static int CachedVersion(string uid, int now) {
-        lock (AuthUser.verUids) {
-            for (int i = 0; i < AuthUser.verUids.Count; i = i + 1) {
-                if (AuthUser.verUids[i] == uid && AuthUser.verGoodUntil[i] > now) {
-                    return AuthUser.verVals[i];
-                }
-            }
-        }
-        return -1;
+        return GameShared.AuthGet(uid);
     }
 
     static void StoreVersion(string uid, int version, int now) {
-        lock (AuthUser.verUids) {
-            /* 顺带清扫过期项：列表长度受活跃账号约束，线性扫描足够。 */
-            int i = 0;
-            while (i < AuthUser.verUids.Count) {
-                if (AuthUser.verGoodUntil[i] <= now) {
-                    AuthUser.verUids.RemoveAt(i);
-                    AuthUser.verVals.RemoveAt(i);
-                    AuthUser.verGoodUntil.RemoveAt(i);
-                    continue;
-                }
-                if (AuthUser.verUids[i] == uid) {
-                    AuthUser.verVals[i] = version;
-                    AuthUser.verGoodUntil[i] = now + AuthUser.VerTtlSec;
-                    return;
-                }
-                i = i + 1;
-            }
-            AuthUser.verUids.Add(uid);
-            AuthUser.verVals.Add(version);
-            AuthUser.verGoodUntil.Add(now + AuthUser.VerTtlSec);
-        }
+        GameShared.AuthPut(uid, version);
     }
 
     static void DropCachedVersion(string uid) {
-        lock (AuthUser.verUids) {
-            for (int i = 0; i < AuthUser.verUids.Count; i = i + 1) {
-                if (AuthUser.verUids[i] == uid) {
-                    AuthUser.verUids.RemoveAt(i);
-                    AuthUser.verVals.RemoveAt(i);
-                    AuthUser.verGoodUntil.RemoveAt(i);
-                    return;
-                }
-            }
-        }
+        GameShared.AuthDrop(uid);
     }
 
     static async int TokenVersion(string uid) {
@@ -151,11 +146,7 @@ class AuthUser {
     }
 
     static void ForgetAll() {
-        lock (AuthUser.verUids) {
-            AuthUser.verUids.Clear();
-            AuthUser.verVals.Clear();
-            AuthUser.verGoodUntil.Clear();
-        }
+        GameShared.AuthClear();
         PermTable.ForgetAll();
     }
 

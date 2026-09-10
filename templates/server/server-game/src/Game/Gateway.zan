@@ -248,13 +248,8 @@ class Gateway {
         }
     }
 
-    /* HTTP 会话的会话 id 段：与 TCP 连接 id（小整数）永不重叠。 */
-    static int httpCid = 1000000000;
-
-    static int NextHttpCid() {
-        Gateway.httpCid = Gateway.httpCid + 1;
-        return Gateway.httpCid;
-    }
+    /* HTTP 会话的会话 id 段由 GameShared 的共享发号器分配：多 worker 时
+       登录落在哪个 worker，cid 都出自同一序列，与 TCP 连接 id 永不重叠。 */
 
     /* 推送通道认领：凭 token 找到本账号的 HTTP 会话，把这条连接挂为
        它的事件出口。只收推送不跑操作；重复 attach 顶掉旧通道（顶号
@@ -299,7 +294,8 @@ class Gateway {
         if (op == "hb") {
             JsonValue r = Gateway.Ok();
             r.Set("t", JsonValue.NewNum(Convert.ToString(now)));
-            r.Set("online", JsonValue.NewNum(Convert.ToString(World.OnlineCount())));
+            r.Set("online", JsonValue.NewNum(Convert.ToString(
+                GameShared.OnlineTotal())));
             return r;
         }
 
@@ -517,34 +513,47 @@ class Gateway {
             }
             int _t = await dao.TouchLogin(row.id, now);
 
-            if (http) {
-                Session old = World.ByAccount(row.id);
-                if (old != null) { await World.Leave(old.cid); }
+            /* 密码校验在本 worker 完成（多 worker 时登录算力按请求分摊
+               到各 HTTP worker）；会话登记在世界进程：顶号与入表必须
+               单写者。本进程就是世界时直接登记。 */
+            if (http && !GameShared.WorldHere()) {
+                int rcid = await GameShared.CallLogin(row.id, row.username,
+                    now);
+                if (rcid <= 0) {
+                    return Gateway.Err("世界进程未响应，请稍后再试");
+                }
+                JsonValue rr = Gateway.Ok();
+                rr.Set("uid", JsonValue.NewNum(Convert.ToString(row.id)));
+                rr.Set("pushPort", JsonValue.NewNum(
+                    Convert.ToString(Cfg.Game.port)));
+                await Gateway.RealmsInto(rr, db);
+                rr.Set("token", JsonValue.NewStr(TokenBox.Issue(row.id, now)));
+                return rr;
             }
-
-            Session s = new Session();
-            s.cid = http ? Gateway.NextHttpCid() : cid;
-            s.httpOwned = http;
-            /* TCP 直连的会话连接即通道（设计文档：连接即推送出口）——
-               不挂上的话 AnnounceAll/聊天等 ev 推送会因 conn==null 被静默
-               丢弃；HTTP 会话则等 attach 再挂（OnPushClosed 各自收口）。 */
-            s.conn = null;
-            s.pushCid = 0;
-            if (!http) {
+            if (http) {
+                int _c = await World.EnsureHttpSession(row.id, row.username,
+                    now);
+            } else {
+                Session ts = new Session();
+                ts.cid = cid;
+                ts.httpOwned = false;
+                /* TCP 直连的会话连接即通道（设计文档：连接即推送出口）——
+                   不挂上的话 AnnounceAll/聊天等 ev 推送会因 conn==null 被静默
+                   丢弃。 */
                 Connection tc = null;
                 Gateway.conns.TryGetValue(cid, out tc);
-                s.conn = tc;
-                s.pushCid = cid;
+                ts.conn = tc;
+                ts.pushCid = cid;
+                ts.accountId = row.id;
+                ts.username = row.username;
+                ts.realmId = 0;
+                ts.row = null;
+                ts.dirty = false;
+                ts.kicked = false;
+                ts.lastSeen = now;
+                ts.loginAt = now;
+                await World.Enter(ts, now);
             }
-            s.accountId = row.id;
-            s.username = row.username;
-            s.realmId = 0;
-            s.row = null;
-            s.dirty = false;
-            s.kicked = false;
-            s.lastSeen = now;
-            s.loginAt = now;
-            await World.Enter(s, now);
 
             JsonValue r = Gateway.Ok();
             r.Set("uid", JsonValue.NewNum(Convert.ToString(row.id)));
@@ -641,7 +650,10 @@ class Gateway {
             /* 分区组（客户端「分区」窗分组展示），空列按永久区。 */
             o.Set("grp", JsonValue.NewStr(realm.grp.Length > 0 ? realm.grp : "永久区"));
             o.Set("state", JsonValue.NewNum(Convert.ToString(realm.state)));
-            o.Set("online", JsonValue.NewNum(Convert.ToString(World.RealmOnline(realm.id))));
+            /* 在线数读共享计数（世界进程维护），多 worker 下各 worker
+               看到同一份。 */
+            o.Set("online", JsonValue.NewNum(Convert.ToString(
+                GameShared.OnlineRealm(realm.id))));
             /* 倍率（万分比）随列表下发：客户端选区页直接展示“经验/金币/
                爆率 2.0 倍”之类的标签。 */
             o.Set("expRate", JsonValue.NewNum(Convert.ToString(realm.expRate)));
@@ -1223,6 +1235,8 @@ class Gateway {
             o.Set("name", JsonValue.NewStr(maps[i].name));
             o.Set("minLevel", JsonValue.NewNum(Convert.ToString(maps[i].minLevel)));
             o.Set("picture", JsonValue.NewNum(Convert.ToString(maps[i].picture)));
+            /* BOSS 名随地图下发：地图传送页卡片要照原版挂 BOSS 名。 */
+            o.Set("boss", JsonValue.NewStr(maps[i].boss));
             o.Set("open", JsonValue.NewNum(Convert.ToString(maps[i].status == 1 ? 1 : 0)));
             arr.Append(o);
         }

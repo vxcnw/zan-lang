@@ -152,6 +152,7 @@ static const zan_builtin_member_t members_nativemem[] = {
     { "AsF64",  'M', "double AsF64(long bits)" },
     { "GetString", 'M', "string GetString(nint ptr)" },
     { "PutString", 'M', "void PutString(nint ptr, string text)" },
+    { "Sha256", 'M', "string Sha256(nint ptr, long size)" },
 };
 
 static const zan_builtin_member_t members_task[] = {

@@ -76,35 +76,47 @@ class Dashboard : AdminController {
             d.Set("dbDown", "1");
         }
 
-        /* 在线会话来自 World 内存态：与在线页同源，不看库。 */
-        List<Session> live = World.All();
+        /* 在线会话来自世界进程（本进程即世界时直读，否则经共享内存
+           中继）；计数读共享表，多 worker 各页一致。 */
+        JsonValue live = await GameShared.Sessions();
         long now = WebApp.NowSeconds();
-        d.Set("online", Convert.ToString(World.OnlineCount()));
+        d.Set("online", Convert.ToString(GameShared.OnlineTotal()));
         List<GameMap> maps = new List<GameMap>();
         List<Realm> realms = new List<Realm>();
         if (this.DbReady()) {
             maps = await this.GameMap.OrderBy(a => a.sortOrder).ToListAsync();
             realms = await this.Realm.OrderBy(a => a.sort).ToListAsync();
         }
+        int liveCount = 0;
         List<StrMap> orows = d.AddList("onlineRows");
-        for (int i = 0; i < live.Count && i < 10; i = i + 1) {
-            Session s = live[i];
-            StrMap row = new StrMap();
-            row.Set("username", s.username);
-            if (s.row != null) {
-                row.Set("realm", Dashboard.RealmName(realms, s.realmId));
-                row.Set("level", Convert.ToString(s.row.level));
-                row.Set("map", Dashboard.MapName(maps, s.row.mapId));
-                row.Set("idle", Fmt.Dur((now - s.lastSeen) * 1000000));
-            } else {
-                row.Set("realm", "—");
-                row.Set("level", "—");
-                row.Set("map", "选区中");
-                row.Set("idle", Fmt.Dur((now - s.lastSeen) * 1000000));
+        if (live != null) {
+            JsonValue rows = live.Get("rows");
+            if (rows != null) {
+            liveCount = rows.Count();
+            for (int i = 0; i < rows.Count() && i < 10; i = i + 1) {
+                JsonValue s = rows.At(i);
+                StrMap row = new StrMap();
+                row.Set("username", s.Str("user", ""));
+                string nickname = s.Str("name", "");
+                if (nickname.Length > 0) {
+                    row.Set("realm", Dashboard.RealmName(realms,
+                        s.Int("realm", 0)));
+                    row.Set("level", Convert.ToString(s.Int("level", 0)));
+                    row.Set("map", Dashboard.MapName(maps, s.Int("map", 0)));
+                    row.Set("idle", Fmt.Dur(
+                        (now - s.Int("lastSeen", 0)) * 1000000));
+                } else {
+                    row.Set("realm", "—");
+                    row.Set("level", "—");
+                    row.Set("map", "选区中");
+                    row.Set("idle", Fmt.Dur(
+                        (now - s.Int("lastSeen", 0)) * 1000000));
+                }
+                orows.Add(row);
             }
-            orows.Add(row);
+            }
         }
-        if (live.Count == 0) { d.Set("noOnline", "1"); }
+        if (liveCount == 0) { d.Set("noOnline", "1"); }
         this.Page(d);
     }
 

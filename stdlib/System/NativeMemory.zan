@@ -58,4 +58,10 @@ class NativeMemory {
     /// p 处 len 字节的 CRC-32（IEEE，poly 0xEDB88320）。
     [DllImport("crt")]
     static extern int Crc32(nint p, int len);
+
+    /// 对 p 处 len 字节计算 FIPS 180-4 SHA-256，返回 32 字节原始
+    /// 摘要的新 ARC 字符串（调用方持有 +1）。返回值是真托管串，
+    /// 消费点照常释放；不是 extern 借用指针。
+    [DllImport("crt")]
+    static extern string Sha256(nint p, int len);
 }
