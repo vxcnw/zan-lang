@@ -103,6 +103,12 @@ class WqGame {
     string boardPath;
     string blackPath;
     string whitePath;
+    string menuBg2;   // 手绘美术资产（新名，绝不覆盖旧素材）
+    string playBg;
+    string boardArt;
+    string panel;
+    string blackPath2;
+    string whitePath2;
     bool texTried;
     bool demo;
     int demoAt;
@@ -158,11 +164,32 @@ class WqGame {
         this.boardPath = WqGame.FindAsset("assets/board_wood.png");
         this.blackPath = WqGame.FindAsset("assets/stone_black.png");
         this.whitePath = WqGame.FindAsset("assets/stone_white.png");
+        this.menuBg2 = WqGame.FindAsset("assets/menu_bg2.png");
+        this.playBg = WqGame.FindAsset("assets/play_bg.png");
+        this.boardArt = WqGame.FindAsset("assets/board_wood2.png");
+        this.panel = WqGame.FindAsset("assets/panel.png");
+        this.blackPath2 = WqGame.FindAsset("assets/stone_black2.png");
+        this.whitePath2 = WqGame.FindAsset("assets/stone_white2.png");
     }
     static string FindAsset(string path) {
         string p = Assets.Find(path);
         if (!File.Exists(p)) { return null; }
         return p;
+    }
+
+    // 全出血 cover：居中裁剪贴满舞台（长短边都铺满，不留 letterbox 条）。
+    static void BlitCover(Canvas c, string path, int dw, int dh) {
+        int iw = Canvas.ImageWidth(path);
+        int ih = Canvas.ImageHeight(path);
+        if (iw <= 0 || ih <= 0) { return; }
+        int sw = iw;
+        int sh = sw * dh / dw;
+        if (sh > ih) { sh = ih; sw = sh * dw / dh; }
+        string src = CDraw.BlitSource(c, path);
+        if (src == null) { return; }
+        c.BlitImage(src, CDraw.MapX(CDraw.originX), CDraw.MapY(CDraw.originY),
+                    CDraw.MapW(dw), CDraw.MapW(dh),
+                    (iw - sw) / 2, (ih - sh) / 2, sw, sh);
     }
 
     // ----- feedback --------------------------------------------------------
@@ -657,11 +684,22 @@ class WqGame {
 
     void DrawAmbient() {
         this.EnsureTex();
-        if (this.menuBg != null) {
-            CKitUi.Backdrop(this.c, this.menuBg, WqGame.VW(), WqGame.VH());
-            CDraw.FillRect(this.c, 0, 0, WqGame.VW(), WqGame.VH(), CDraw.Argb(190, 18, 14, 10));
+        int vw = WqGame.VW();
+        int vh = WqGame.VH();
+        if (this.playBg != null) {
+            // 对局底：整幅 cover + 轻压暗，两处暖光晕提棋室氛围。
+            WqGame.BlitCover(this.c, this.playBg, vw, vh);
+            CDraw.FillRect(this.c, 0, 0, vw, vh, CDraw.Argb(150, 18, 10, 7));
+            this.c.FillRadial(CDraw.MapX(vw / 3), CDraw.MapY(vh / 3), CDraw.MapW(430),
+                              CDraw.Argb(255, 220, 150, 80), 16);
+            this.c.FillRadial(CDraw.MapX(vw * 2 / 3), CDraw.MapY(vh * 4 / 5), CDraw.MapW(360),
+                              CDraw.Argb(255, 220, 140, 70), 12);
+        } else if (this.menuBg != null) {
+            CKitUi.Backdrop(this.c, this.menuBg, vw, vh);
+            CDraw.FillRect(this.c, 0, 0, vw, vh, CDraw.Argb(190, 18, 14, 10));
+            CDraw.FillCircle(this.c, vw / 3, vh / 3, 420, 255, 190, 110, 14);
         }
-        CDraw.FillCircle(this.c, WqGame.VW() / 3, WqGame.VH() / 3, 420, 255, 190, 110, 14);
+        CFx.Vignette(this.c, vw, vh, 70);
     }
 
     void DrawBoard(int now) {
@@ -670,13 +708,22 @@ class WqGame {
         int x0 = WqGame.BX();
         int y0 = WqGame.BY();
         int span = (n - 1) * c;
-        CDraw.RoundRectFill(this.c, x0 - 48, y0 - 48, span + 96, span + 96, 14, 60, 38, 20, 255);
-        if (this.boardPath != null) {
-            CDraw.BlitImage(this.c, this.boardPath, x0 - 40, y0 - 40, span + 80, span + 80);
-            CDraw.FillRect(this.c, x0 - 40, y0 - 40, span + 80, span + 80,
-                CDraw.Argb(18, 255, 220, 160));
+        // 漆木桌 + 真实榧木棋盘面（先投影后落板，再描金边）
+        if (this.boardArt != null) {
+            CFx.ShadowRect(this.c, x0 - 38, y0 - 30, span + 76, span + 76, 18, 22, 0, 0, 0, 130);
+            CDraw.BlitImage(this.c, this.boardArt, x0 - 38, y0 - 38, span + 76, span + 76);
+            CDraw.FillRect(this.c, x0 - 38, y0 - 38, span + 76, span + 76,
+                CDraw.Argb(18, 255, 226, 170));
+            CFx.Ring(this.c, x0 - 38, y0 - 38, span + 76, span + 76, 12, 1, 40, 20, 8, 150);
         } else {
-            CDraw.RoundRectFill(this.c, x0 - 40, y0 - 40, span + 80, span + 80, 10, 214, 168, 106, 255);
+            CDraw.RoundRectFill(this.c, x0 - 48, y0 - 48, span + 96, span + 96, 14, 60, 38, 20, 255);
+            if (this.boardPath != null) {
+                CDraw.BlitImage(this.c, this.boardPath, x0 - 40, y0 - 40, span + 80, span + 80);
+                CDraw.FillRect(this.c, x0 - 40, y0 - 40, span + 80, span + 80,
+                    CDraw.Argb(18, 255, 220, 160));
+            } else {
+                CDraw.RoundRectFill(this.c, x0 - 40, y0 - 40, span + 80, span + 80, 10, 214, 168, 106, 255);
+            }
         }
         int grid = CDraw.Argb(240, 40, 24, 12);
         for (int i = 0; i < n; i = i + 1) {
@@ -704,8 +751,10 @@ class WqGame {
                         CDraw.FillCircle(this.c, sx, sy, rad + 8, 255, 200, 110, 60);
                     }
                     CDraw.FillCircle(this.c, sx + 2, sy + 4, rad, 30, 18, 8, 90);
-                    string stone = this.blackPath;
-                    if (v == 2) { stone = this.whitePath; }
+                    string stone = this.blackPath2;
+                    if (v == 2) { stone = this.whitePath2; }
+                    if (stone == null) { stone = this.blackPath; }
+                    if (v == 2 && this.whitePath2 == null) { stone = this.whitePath; }
                     if (stone != null) {
                         CDraw.BlitImage(this.c, stone, sx - rad, sy - rad, rad * 2, rad * 2);
                     } else if (v == 1) {
@@ -740,8 +789,8 @@ class WqGame {
     void DrawSide(int now) {
         if (WqGame.Portrait()) { this.DrawTopBar(now); return; }
         int px = 720;
-        CDraw.RoundRectFill(this.c, px, 66, 492, 588, 16, 40, 28, 16, 205);
-        CDraw.RingRect(this.c, px, 66, 492, 588, 2, 214, 178, 120, 90);
+        CFx.Card(this.c, px, 66, 492, 588, 16, 40, 28, 16, 30, 20, 12, 226, 186, 128, 90, 1, 0);
+        CFx.Rule(this.c, px + 246, 148, 190, 226, 186, 128, 130);
         CText.Draw(this.c, "围棋", px + 36, 96, 5, 240, 224, 195, 255);
         string mn = "九路对弈 · 贴七目";
         if (this.mode > 0) { mn = "死活题 · " + WqGame.DrillName(this.mode); }
@@ -767,8 +816,7 @@ class WqGame {
     // 底部"停一手"整宽按钮行。
     void DrawTopBar(int now) {
         int vw = WqGame.VW();
-        CDraw.RoundRectFill(this.c, 16, 24, vw - 32, 112, 16, 40, 28, 16, 205);
-        CDraw.RingRect(this.c, 16, 24, vw - 32, 112, 2, 214, 178, 120, 90);
+        CFx.Card(this.c, 16, 24, vw - 32, 112, 16, 40, 28, 16, 30, 20, 12, 226, 186, 128, 90, 1, 0);
         CText.Draw(this.c, "对手 · 白棋", 40, 44, 3, 240, 224, 195, 255);
         string mn = "九路对弈 · 贴七目";
         if (this.mode > 0) { mn = "死活题 · " + WqGame.DrillName(this.mode); }
@@ -776,7 +824,7 @@ class WqGame {
         string turn = "轮到你落子";
         int tr = 140; int tg = 220; int tb = 170;
         if (this.aiTurn) { turn = "白棋长考中…"; tr = 255; tg = 214; tb = 150; }
-        CDraw.RoundRectFill(this.c, vw - 300, 48, 268, 64, 12, 26, 16, 10, 230);
+        CFx.Pill(this.c, vw - 300, 48, 268, 64, 0, 26, 16, 10, 16, 9, 5, 226, 186, 128, 70);
         CText.DrawCentered(this.c, turn, vw - 166, 66, 3, tr, tg, tb, 255);
         CText.Draw(this.c, "段位 " + this.prof.Title() + " · " + this.prof.pts + " 分 · 胜 "
             + this.prof.wins + " 负 " + this.prof.losses, 40, 200, 2, 200, 192, 172, 255);
@@ -822,29 +870,38 @@ class WqGame {
 
     void DrawMenu(int now) {
         this.EnsureTex();
-        CDraw.Clear(this.c, WqGame.VW(), WqGame.VH(), CDraw.Argb(255, 24, 18, 12));
-        CKitUi.Backdrop(this.c, this.menuBg, WqGame.VW(), WqGame.VH());
-        CDraw.FillRect(this.c, 0, 0, WqGame.VW(), WqGame.VH(), CDraw.Argb(120, 14, 10, 6));
-        if (this.titlePath != null) {
-            CDraw.BlitImage(this.c, this.titlePath, WqGame.VW() / 2 - 300, 30, 600, 200);
+        int vw = WqGame.VW();
+        int vh = WqGame.VH();
+        CDraw.Clear(this.c, vw, vh, CDraw.Argb(255, 24, 18, 12));
+        if (this.menuBg2 != null) {
+            WqGame.BlitCover(this.c, this.menuBg2, vw, vh);
+            CDraw.FillRect(this.c, 0, 0, vw, vh, CDraw.Argb(110, 18, 10, 6));
         } else {
-            CText.DrawCenteredShadow(this.c, "围棋", WqGame.VW() / 2, 70, 9, 245, 232, 205, 255);
+            CKitUi.Backdrop(this.c, this.menuBg, vw, vh);
+            CDraw.FillRect(this.c, 0, 0, vw, vh, CDraw.Argb(120, 14, 10, 6));
         }
-        CText.DrawCenteredShadow(this.c, "黑白之间 · 死活经典 · 段位成长", WqGame.VW() / 2, 244, 3, 255, 218, 160, 255);
+        CFx.Vignette(this.c, vw, vh, 90);
+        if (this.titlePath != null) {
+            CDraw.BlitImage(this.c, this.titlePath, vw / 2 - 300, 30, 600, 200);
+        } else {
+            CText.DrawCenteredShadow(this.c, "围棋", vw / 2, 70, 9, 245, 232, 205, 255);
+        }
+        CText.DrawCenteredShadow(this.c, "黑白之间 · 死活经典 · 段位成长", vw / 2, 244, 3, 255, 218, 160, 255);
+        CFx.Rule(this.c, vw / 2, 280, 150, 226, 186, 128, 190);
         if (WqGame.Portrait()) {
-            CKitUi.Button(this.c, this.mouseX, this.mouseY, WqGame.VW() / 2 - 210, 330, 420, 74, "九路对弈", 3, 1);
-            CKitUi.Button(this.c, this.mouseX, this.mouseY, WqGame.VW() / 2 - 210, 420, 420, 74, "死活题 · 征子", 3, 1);
-            CKitUi.Button(this.c, this.mouseX, this.mouseY, WqGame.VW() / 2 - 210, 510, 420, 74, "死活题 · 直三杀", 3, 1);
-            CKitUi.Button(this.c, this.mouseX, this.mouseY, WqGame.VW() / 2 - 210, 600, 420, 74, "死活题 · 关门吃", 3, 0);
+            CFx.GoldButton(this.c, this.mouseX, this.mouseY, vw / 2 - 210, 330, 420, 74, "九路对弈", 3, 1);
+            CFx.GoldButton(this.c, this.mouseX, this.mouseY, vw / 2 - 210, 420, 420, 74, "死活题 · 征子", 3, 0);
+            CFx.GoldButton(this.c, this.mouseX, this.mouseY, vw / 2 - 210, 510, 420, 74, "死活题 · 直三杀", 3, 1);
+            CFx.GoldButton(this.c, this.mouseX, this.mouseY, vw / 2 - 210, 600, 420, 74, "死活题 · 关门吃", 3, 0);
             CText.DrawCenteredShadow(this.c, "段位 " + this.prof.Title() + " · " + this.prof.pts
                 + " 分 · 胜 " + this.prof.wins + " 负 " + this.prof.losses
-                + " · 死活通关 " + this.prof.drills, WqGame.VW() / 2, 704, 2, 230, 212, 182, 255);
+                + " · 死活通关 " + this.prof.drills, vw / 2, 704, 2, 230, 212, 182, 255);
             return;
         }
-        CKitUi.Button(this.c, this.mouseX, this.mouseY, 430, 300, 420, 74, "九路对弈", 3, 1);
-        CKitUi.Button(this.c, this.mouseX, this.mouseY, 430, 390, 420, 74, "死活题 · 征子", 3, 1);
-        CKitUi.Button(this.c, this.mouseX, this.mouseY, 430, 480, 420, 74, "死活题 · 直三杀", 3, 1);
-        CKitUi.Button(this.c, this.mouseX, this.mouseY, 430, 570, 420, 74, "死活题 · 关门吃", 3, 0);
+        CFx.GoldButton(this.c, this.mouseX, this.mouseY, 430, 300, 420, 74, "九路对弈", 3, 1);
+        CFx.GoldButton(this.c, this.mouseX, this.mouseY, 430, 390, 420, 74, "死活题 · 征子", 3, 0);
+        CFx.GoldButton(this.c, this.mouseX, this.mouseY, 430, 480, 420, 74, "死活题 · 直三杀", 3, 1);
+        CFx.GoldButton(this.c, this.mouseX, this.mouseY, 430, 570, 420, 74, "死活题 · 关门吃", 3, 0);
         CText.DrawCenteredShadow(this.c, "段位 " + this.prof.Title() + " · " + this.prof.pts
             + " 分 · 胜 " + this.prof.wins + " 负 " + this.prof.losses
             + " · 死活通关 " + this.prof.drills, WqGame.VW() / 2, WqGame.VH() - 52, 2, 230, 212, 182, 255);
@@ -858,8 +915,14 @@ class WqGame {
         CDraw.FillRect(this.c, 0, 0, WqGame.VW(), WqGame.VH(), CDraw.Argb(165, 12, 10, 6));
         int by = WqGame.Portrait() ? WqGame.VH() / 2 - 170 : 190;
         int bx = WqGame.VW() / 2 - 250;
-        CDraw.RoundRectFill(this.c, bx, by, 500, 320, 20, 36, 26, 14, 245);
-        CDraw.RingRect(this.c, bx, by, 500, 320, 2, 214, 178, 120, 140);
+        if (this.panel != null) {
+            CFx.ShadowRect(this.c, bx, by, 500, 320, 18, 16, 0, 0, 0, 120);
+            CDraw.BlitImage(this.c, this.panel, bx, by, 500, 320);
+            CFx.Ring(this.c, bx, by, 500, 320, 18, 1, 226, 186, 128, 180);
+        } else {
+            CFx.Card(this.c, bx, by, 500, 320, 22, 36, 26, 14, 26, 18, 10, 250, 226, 186, 128, 160, 1);
+        }
+        CFx.Rule(this.c, WqGame.VW() / 2, by + 26, 150, 226, 186, 128, 190);
         if (this.winner == 1) {
             CText.DrawCenteredShadow(this.c, "妙手成局，黑胜！", WqGame.VW() / 2, by + 34, 5, 255, 218, 110, 255);
             if (this.mode == 0) {
@@ -879,8 +942,8 @@ class WqGame {
             }
             CText.DrawCentered(this.c, "复盘一手，胜负手就在眼前", WqGame.VW() / 2, by + 166, 2, 255, 216, 152, 255);
         }
-        CKitUi.Button(this.c, this.mouseX, this.mouseY, bx + 30, by + 240, 210, 60, "再来一局", 3, 1);
-        CKitUi.Button(this.c, this.mouseX, this.mouseY, bx + 260, by + 240, 210, 60, "回到菜单", 3, 0);
+        CFx.GoldButton(this.c, this.mouseX, this.mouseY, bx + 30, by + 240, 210, 60, "再来一局", 3, 1);
+        CFx.GoldButton(this.c, this.mouseX, this.mouseY, bx + 260, by + 240, 210, 60, "回到菜单", 3, 0);
         this.DrawFx(now);
     }
 
