@@ -170,3 +170,28 @@ description: Zan GUI 的 Android NativeActivity 实机验证仪式——probe AP
   但 2in1 模拟器（MateBook Pro，3120x2080@dpi304）应用是浮动窗口
   （约 515..2604 x 351..2048），先按窗口裁剪再差分/判读，整屏差分会
   混进桌面噪声。
+- **OHOS 2in1 窗口 resize 三环链**（2026-09-11，gui_3d_demo snap 最大化
+  黑带实锤）：2in1（MateBook Pro）拖拽/最大化**不销毁重建** XComponent
+  surface，三处必须都在位，缺一环画面就停在旧尺寸：
+  ①壳 `OnSurfaceChanged` 查 `OH_NativeXComponent_GetXComponentSize` 后
+  **必须转发 attach**（只记日志不转发=驱动永远不知道窗口变了）；
+  ②驱动 present 的重建判据必须认**同指针尺寸变化**：只比 `surf_nw != nw`
+  （旋转用）在 2in1 resize 下永不触发——struct 记 surf_w/surf_h，
+  指针或尺寸任一不符即销毁重建 EGL surface；
+  ③**记账必须记实际值，不是预期值**：snap 最大化是单次大尺寸跳变
+  （2090→3120），重建瞬间原生窗口 buffer geometry 可能未落定，
+  `eglCreateWindowSurface` 实际拿到旧尺寸 surface；若记账记 attach 的
+  预期值 w->w，账面"吻合"永不再重建、黑带永驻（连续小尺寸拖拽因最后
+  一次事件在 geometry 落定后到来而侥幸全对，极具迷惑性）。修法=
+  创建后 `eglQuerySurface(EGL_WIDTH/HEIGHT)` 记实际值，落定竞态由
+  下一帧判据自愈。**验证仪式**：`uitest uiInput drag <标题栏x> 355
+  <标题栏x> 5` 触发 snap 最大化（点系统 caption 按钮无效），
+  `hidumper -s WindowManagerService -a '-a'` 看窗口 rect，
+  hilog 等 "surface changed"，snapshot 后收紧深藏青区间判读
+  （宽松区间会把合成器黑边当内容）；还原=从顶边 drag 回下方。
+- **OHOS/Android 3D 性能定性**（用户问"复杂动画是否 CPU GPU 内存爆表"）：
+  `gui_gl_context.c` 平台臂只有 WGL/GLX/Metal，Android/OHOS 落 #else
+  空 stub——GPU 后端永不安装，3D=CPU 软件光栅 + 每帧整幅上传
+  （2090x1324 约 11 MB/帧，60fps 即 0.7 GB/s 带宽）。模拟器实测：
+  应用 ~35% 单核 + render_service ~63%，PSS 98 MB 不涨，帧 median 15ms。
+  GPU 臂缺失已挂 TASKS.md A267，另案补 EGL 臂。

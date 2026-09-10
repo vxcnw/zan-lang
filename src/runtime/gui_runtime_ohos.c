@@ -58,11 +58,12 @@ typedef struct {
      * app thread that later calls zan_gui_present. */
     EGLDisplay egl_dpy;
     EGLSurface egl_surf;
-    void      *surf_nw;   /* native window egl_surf was created for: a
-                           * rotation hands the shell a fresh window, so a
-                           * present against a surf_nw != nw must rebuild
-                           * the surface (context, program and texture
-                           * outlive it) */
+    void      *surf_nw;   /* native window egl_surf was created for */
+    int        surf_w, surf_h; /* size egl_surf was created for: a 2in1
+                                  maximize/drag resizes the SAME window
+                                  (pointer unchanged), so surf_nw alone
+                                  never detects it and swap would keep
+                                  presenting stale-size buffers */
     EGLContext egl_ctx;
     GLuint     gl_prog;
     GLuint     gl_tex;
@@ -742,6 +743,26 @@ static int ohos_gl_surface(zan_ohos_win_t *w) {
                                              (EGLNativeWindowType)w->nw, NULL);
         if (w->egl_surf == EGL_NO_SURFACE) return 1;
         w->surf_nw = w->nw;
+        /* Record the size the surface ACTUALLY got, not the attached one:
+         * a snap maximize is a single big resize (2090->3120) on the same
+         * window, and the native window's buffer geometry can still be the
+         * old one when the first post-resize present rebuilds here. Taking
+         * w->w made that stale surface look current (surf_w == w->w), the
+         * rebuild condition never fired again and the band stayed forever;
+         * the query reads the geometry eglCreateWindowSurface really used,
+         * so the next present still sees the mismatch and rebuilds -- by
+         * then the transition has settled and the new surface is full-size
+         * (the drag-resize path proves the geometry settles). */
+        EGLint qw = 0, qh = 0;
+        if (eglQuerySurface(w->egl_dpy, w->egl_surf, EGL_WIDTH, &qw)
+            && eglQuerySurface(w->egl_dpy, w->egl_surf, EGL_HEIGHT, &qh)
+            && qw > 0 && qh > 0) {
+            w->surf_w = qw;
+            w->surf_h = qh;
+        } else {
+            w->surf_w = w->w;
+            w->surf_h = w->h;
+        }
     }
     if (!w->egl_ctx) {
         const EGLint ctx_attrs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
@@ -911,16 +932,25 @@ egl_path:
      * across frames, so a frame that announced damage uploads only those
      * subrects (the HUD band / fx patches on idle ticks) instead of the
      * whole surface. */
-    if (g_owin.egl_surf && g_owin.surf_nw != g_owin.nw) {
-        /* Rotation handed the shell a fresh native window; the surface
-         * made from the old one is dead. Drop it here -- on the app
-         * thread, never racing a present -- and let ohos_gl_init rebuild
-         * against the new window. Context/program/texture survive. */
+    if (g_owin.egl_surf && (g_owin.surf_nw != g_owin.nw
+                            || g_owin.surf_w != g_owin.w
+                            || g_owin.surf_h != g_owin.h)) {
+        /* The surface's window or size went stale: a rotation hands the
+         * shell a fresh native window, while a 2in1 maximize/drag resizes
+         * the SAME window (OnSurfaceChanged, pointer unchanged). Either way
+         * the surface made for the old geometry presents stale-size buffers.
+         * Drop it here -- on the app thread, never racing a present -- and
+         * let ohos_gl_init rebuild against the new window/geometry.
+         * Context/program/texture survive. surf_w/surf_h are what
+         * eglCreateWindowSurface actually used (ohos_gl_surface queries
+         * them), so a rebuild raced against an unsettled geometry catches
+         * itself here on the next frame instead of going stale forever. */
         eglMakeCurrent(g_owin.egl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE,
                        EGL_NO_CONTEXT);
         eglDestroySurface(g_owin.egl_dpy, g_owin.egl_surf);
         g_owin.egl_surf = EGL_NO_SURFACE;
         g_owin.surf_nw = NULL;
+        g_owin.surf_w = g_owin.surf_h = 0;
     }
     if ((!g_owin.gl_prog || !g_owin.egl_surf) && ohos_gl_init(&g_owin) != 0) {
         ohos_dirty_reset();
@@ -949,6 +979,8 @@ EXPORT void zan_gui_ohos_shutdown(void) {
     w->egl_surf = EGL_NO_SURFACE;
     w->egl_ctx = EGL_NO_CONTEXT;
     w->egl_dpy = EGL_NO_DISPLAY;
+    w->surf_nw = NULL;
+    w->surf_w = w->surf_h = 0;
     w->gl_prog = 0;
     w->tex_w = w->tex_h = 0;
 }
