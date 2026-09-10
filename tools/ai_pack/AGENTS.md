@@ -141,3 +141,19 @@ goes in `build/`. Nothing throwaway in the project root.
 Report the command you ran and its outcome. Distinguish "compiled" from
 "tested" from "assumed". If something is unverified, say so — an unflagged
 assumption costs more than an admitted gap.
+
+## 9. Porting from another language: copy the behavior, not the idiom
+
+Reimplementing a program originally written in C#, JS, Python, aardio …? The
+original source is a *behavioral specification* — what it does, in what order,
+with which edge cases — not an implementation template. User-visible behavior
+is 1:1; the code underneath is 100% Zan:
+
+* Look the capability up before hand-rolling it (`zan_api_search`,
+  `zan_example`): collections, string APIs, HTTP, crypto, threads and
+  `async`/`await` already exist. A hand-rolled loop where a stdlib call belongs
+  is the old language's idiom wearing Zan syntax — slower and buggier.
+* Data shapes follow Zan conventions: typed classes with explicit fields, not
+  string-assembled records or dynamic property bags.
+* If a Zan equivalent genuinely does not exist, record the gap — don't bury a
+  private imitation of the old language's runtime in the codebase.

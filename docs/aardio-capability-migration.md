@@ -46,9 +46,10 @@
 
 ## 2. 迁移原则
 
-1. **走 DllImport 直连 Win32，不移植 aardio 运行时**。Zan 已支持 `[DllImport("user32", EntryPoint="...")]`（见 `Gui/Backend/Win32Shell.zan`、`System/Diagnostics/Process.zan`），aardio 的 `::User32.xxx` 调用可以一对一映射。
-2. **公共 API 跨平台，实现按平台分支**。用 `#if WINDOWS / #elif MACOS / #else` 分支（`Platform/Runtime.zan` 已是这个写法）。Windows 先落地，Linux/macOS 至少给出可编译的空实现或 X11/AppKit 实现，不要让接口只在 Windows 存在。
-3. **命名空间对齐 .NET 风格**，与现有 `System.*` 保持一致，不照搬 aardio 的小写命名：
+1. **语义照原版，写法归 Zan**。aardio 源码只当 API 清单与行为规格用，实现一律用 Zan 的现有能力写（标准库集合/字符串/线程/`async`、强类型类、`#if` 平台分支），禁止逐行直译 aardio 的表驱动、全局函数、弱类型传值风格——直译等于把旧语言的形状整体搬进来，之后每个模块都顺着旧形状继续长歪。下文的「不移植 aardio 运行时」「命名对齐 .NET」「强类型化」都是这条的具体化。
+2. **走 DllImport 直连 Win32，不移植 aardio 运行时**。Zan 已支持 `[DllImport("user32", EntryPoint="...")]`（见 `Gui/Backend/Win32Shell.zan`、`System/Diagnostics/Process.zan`），aardio 的 `::User32.xxx` 调用可以一对一映射。
+3. **公共 API 跨平台，实现按平台分支**。用 `#if WINDOWS / #elif MACOS / #else` 分支（`Platform/Runtime.zan` 已是这个写法）。Windows 先落地，Linux/macOS 至少给出可编译的空实现或 X11/AppKit 实现，不要让接口只在 Windows 存在。
+4. **命名空间对齐 .NET 风格**，与现有 `System.*` 保持一致，不照搬 aardio 的小写命名：
    - `System.Input.Mouse` / `System.Input.Keyboard` / `System.Input.Hotkey` / `System.Input.Hook`
    - `System.Management.SystemInfo` / `Cpu` / `Memory` / `Storage` / `Display` / `Power` / `Battery`
    - `System.Management.Registry`（Windows）
@@ -56,9 +57,9 @@
    - `System.Automation.Window` / `UiElement`（窗口与 UI 自动化）
    - `System.Windows.Clipboard` / `System.Windows.TrayIcon` / `System.Windows.Screen`
    - `System.IO.Compression.*`、`System.IO.DirectoryWatcher`、`System.IO.IniFile`、`System.IO.Shortcut`
-4. **结构体用类 + 显式字段**，返回值用强类型对象（如 `MemoryStatus`、`MonitorInfo`、`ProcessEntry`），不要返回字符串或字典 —— 仓库规范禁止 `Any`/动态取属性。
-5. **每个模块配一个 `tests/` 用例和 `examples/` 最小示例**，可自动跑的（信息读取类）优先做断言，需交互的（钩子、热键）做手动示例。
-6. **不迁**：aardio 的 COM/`dotNet`/`java`/`golang`/`nodeJs` 互操作层、`web/layout` 的 HTML UI 体系、`ide/*`（aardio IDE 自身）、`autos/skills`（Office/PS 自动化，依赖 COM）、`protobuf`/`bencode` 等小众协议。这些要么与 Zan 自绘 GUI 路线冲突，要么投入产出比低，需要时再单独立项。
+5. **结构体用类 + 显式字段**，返回值用强类型对象（如 `MemoryStatus`、`MonitorInfo`、`ProcessEntry`），不要返回字符串或字典 —— 仓库规范禁止 `Any`/动态取属性。
+6. **每个模块配一个 `tests/` 用例和 `examples/` 最小示例**，可自动跑的（信息读取类）优先做断言，需交互的（钩子、热键）做手动示例。
+7. **不迁**：aardio 的 COM/`dotNet`/`java`/`golang`/`nodeJs` 互操作层、`web/layout` 的 HTML UI 体系、`ide/*`（aardio IDE 自身）、`autos/skills`（Office/PS 自动化，依赖 COM）、`protobuf`/`bencode` 等小众协议。这些要么与 Zan 自绘 GUI 路线冲突，要么投入产出比低，需要时再单独立项。
 
 ---
 
