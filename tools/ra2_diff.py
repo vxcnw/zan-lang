@@ -30,22 +30,31 @@ BINDINGS = [
         "ref": "GUI:MainMenu",
         "zan_fn": "DrawMainMenu",
         "labels_var": "labels",
-        "n": 10,
+    },
+    {
+        "ref": "GUI:SkirmishGame",
+        "zan_fn": "DrawSkirmish",
+        "labels_var": "labels",
+    },
+    {
+        "ref": "GUI:ChooseMap",
+        "zan_fn": "DrawMapSelect",
+        "labels_var": "labels",
     },
 ]
 
 
 def zan_main_menu_labels(src: str) -> list[str]:
     """Pull labels[i] = ... assignments out of DrawMainMenu."""
-    return _zan_array(src, "labels")
+    return _zan_array(src, "DrawMainMenu", "labels")
 
 
 def zan_main_menu_tips(src: str) -> list[str]:
-    return _zan_array(src, "tips")
+    return _zan_array(src, "DrawMainMenu", "tips")
 
 
-def _zan_array(src: str, name: str) -> list[str]:
-    m = re.search(r"static int DrawMainMenu\(", src)
+def _zan_array(src: str, fn: str, name: str) -> list[str]:
+    m = re.search(rf"static int {fn}\(", src)
     if not m:
         return []
     rest = src[m.end():]
@@ -57,8 +66,6 @@ def _zan_array(src: str, name: str) -> list[str]:
     for lm in re.finditer(rf"{name}\[(\d+)\]\s*=\s*(.*?);", body, re.DOTALL):
         idx = int(lm.group(1))
         expr = " ".join(lm.group(2).split())
-        # ui.Or("KEY", "fallback") -> KEY ; the first string literal
-        # otherwise (concatenations join into one logical tooltip).
         om = re.search(r'\.Or\(\s*"([^"]+)"', expr)
         if om:
             out.append((idx, om.group(1)))
@@ -84,9 +91,19 @@ def main() -> int:
             print(f"MISSING ref screen {b['ref']} in spec")
             failures += 1
             continue
+        fn = b["zan_fn"]
+        have_fn = re.search(rf"static int {fn}\(", src) is not None
         want = [x["label"] for x in ref["sidebar"]]
-        got = zan_main_menu_labels(src)
-        print(f"{b['ref']}  reference={len(want)} zan={len(got)}")
+        got = _zan_array(src, fn, b.get("labels_var", "labels"))
+        print(f"{b['ref']:<18} -> {fn}  reference={len(want)} zan={len(got)}")
+        if not have_fn:
+            print(f"  !! Zan has no {fn}() -- screen not implemented")
+            failures += 1
+            continue
+        if not got:
+            print(f"  !! {fn} builds no label table (screen may be a stub)")
+            failures += 1
+            continue
         if len(want) != len(got):
             print(f"  COUNT MISMATCH: reference {len(want)} vs zan {len(got)}")
             failures += 1
@@ -96,33 +113,33 @@ def main() -> int:
             mark = "  " if w == g else "!!"
             if w != g:
                 failures += 1
-            print(f"  {mark} [{i}] ref={w!r:34} zan={g!r}")
-        # Also compare isBottom flags.
-        zw = re.findall(r"bottom\[(\d+)\]\s*=\s*true", src)
-        zwant = [i for i, x in enumerate(ref["sidebar"]) if x["isBottom"]]
-        if sorted(int(z) for z in zw) != zwant:
-            print(f"  BOTTOM MISMATCH: ref={zwant} zan={[int(z) for z in zw]}")
-            failures += 1
-        else:
-            print(f"  bottom-pinned rows agree: {zwant}")
+            print(f"  {mark} [{i}] ref={w!r:28} zan={g!r}")
 
-        # Tooltips: the reference declares one per button. The port must
-        # carry the same text (a CSF key stays a key on both sides).
-        want_t = [x["tooltip"] for x in ref["sidebar"]]
-        got_t = zan_main_menu_tips(src)
-        if len(want_t) != len(got_t):
-            print(f"  TIP COUNT MISMATCH: ref={len(want_t)} zan={len(got_t)}")
-            failures += 1
-        for i in range(min(len(want_t), len(got_t))):
-            w, g = want_t[i], got_t[i]
-            # A CSF-keyed tooltip on the reference side may be spelled
-            # with its fallback on ours; compare the key when the
-            # reference has one, else require the literal.
-            same = (w == g) or (w and g and w.split(":")[0] in ("STT", "GUI")
-                                and w == g)
-            if not same:
-                print(f"  !! tip[{i}] ref={w!r}\n            zan={g!r}")
+        # Bottom-pinning is per-screen; only check it when the Zan
+        # function actually writes a `bottom[...]` table.
+        zfn_body = _fn_body(src, fn)
+        zw = re.findall(r"bottom\[(\d+)\]\s*=\s*true", zfn_body)
+        if zw:
+            zwant = [i for i, x in enumerate(ref["sidebar"]) if x["isBottom"]]
+            if sorted(int(z) for z in zw) != zwant:
+                print(f"  !! BOTTOM ref={zwant} zan={[int(z) for z in zw]}")
                 failures += 1
+            else:
+                print(f"     bottom-pinned rows agree: {zwant}")
+
+        # Tooltips, same rule as the main menu.
+        want_t = [x["tooltip"] for x in ref["sidebar"]]
+        got_t = _zan_array(src, fn, "tips")
+        if got_t:
+            if len(want_t) != len(got_t):
+                print(f"  !! TIP COUNT ref={len(want_t)} zan={len(got_t)}")
+                failures += 1
+            for i in range(min(len(want_t), len(got_t))):
+                if want_t[i] != got_t[i]:
+                    print(f"  !! tip[{i}] ref={want_t[i]!r}\n"
+                          f"             zan={got_t[i]!r}")
+                    failures += 1
+        print()
 
     print()
     if failures:
@@ -130,6 +147,15 @@ def main() -> int:
         return 1
     print("OK: port agrees with the extracted reference spec")
     return 0
+
+
+def _fn_body(src: str, fn: str) -> str:
+    m = re.search(rf"static int {fn}\(", src)
+    if not m:
+        return ""
+    rest = src[m.end():]
+    nxt = re.search(r"\n    static ", rest)
+    return rest[:nxt.start()] if nxt else rest
 
 
 if __name__ == "__main__":

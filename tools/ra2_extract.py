@@ -37,7 +37,11 @@ SCREEN_FILES = sorted(set(SCREEN_FILES))
 
 
 def find_title(src: str) -> str:
+    # `this.title = this.strings.get("GUI:Key")` -- the screen's own title.
     m = re.search(r"this\.title\s*=\s*this\.strings\.get\(\s*\"([^\"]+)\"", src)
+    if m:
+        return m.group(1)
+    m = re.search(r"this\.title\s*=\s*this\.strings\.get\(\s*'([^']+)'", src)
     if m:
         return m.group(1)
     return ""
@@ -53,12 +57,30 @@ def find_main_video(src: str) -> bool:
 
 def extract_buttons(onenter_body: str) -> list[dict]:
     out: list[dict] = []
-    # Buttons in the reference come from three places:
+    # Buttons in the reference come from four places:
     # 1. The inline array literal:  const buttons: SidebarButton[] = [ {...}, ... ]
     # 2. Spread inside it:          ...(cond ? [ {...} ] : [])
     # 3. Conditional push after:    if (cond) { buttons.push({...}) }
+    # 4. Passed straight in:        setSidebarButtons([ {...}, ... ])
     out.extend(_buttons_in_array(onenter_body))
     out.extend(_buttons_in_push_calls(onenter_body))
+    if not out:
+        out.extend(_buttons_in_call_arg(onenter_body, "setSidebarButtons"))
+    return out
+
+
+def _buttons_in_call_arg(s: str, call: str) -> list[dict]:
+    """`setSidebarButtons([ {...}, {...} ], true)` -- the array is the
+    first argument of the call rather than a named local."""
+    out: list[dict] = []
+    m = re.search(rf"{call}\(\s*\[", s)
+    if not m:
+        return out
+    lb = m.end() - 1
+    rb = _find_matching_close(s, lb, "[", "]")
+    if rb < 0:
+        return out
+    _collect_from_array(s, lb, rb, out)
     return out
 
 
@@ -222,7 +244,54 @@ def parse_button(block: str) -> dict:
 
 
 def extract_onenter(src: str) -> str:
-    m = re.search(r"onEnter\([^)]*\)[^{]*\{", src)
+    return _method_body(src, "onEnter")
+
+
+def extract_all_button_bodies(src: str) -> dict[str, list[dict]]:
+    """Button lists can be declared in onEnter, or in a helper the screen
+    calls (SkirmishScreen builds its three rows in
+    `refreshSidebarButtons`). Return a mapping method -> buttons so the
+    spec records where each list came from."""
+    result: dict[str, list[dict]] = {}
+    for method in ("onEnter", "refreshSidebarButtons", "initSidebarButtons",
+                   "initSidebar", "updateSidebar", "buildSidebarButtons"):
+        body = _method_body(src, method)
+        if not body:
+            continue
+        btns = extract_buttons(body)
+        if btns:
+            result[method] = btns
+    # Fallback: some screens declare the list in a helper with a name we
+    # did not anticipate. Find any method whose body feeds
+    # setSidebarButtons and mine that. A method that only *catches* an
+    # exception mentioning the sidebar is not a button list, so require
+    # the setSidebarButtons call to be a direct statement in the body.
+    if not result:
+        for m in re.finditer(r"(?:^|\n)\s*(?:(?:public|private|protected|"
+                             r"static|async)\s+)*(\w+)\([^)]*\)[^{]*\{", src):
+            name = m.group(1)
+            if name in ("constructor", "captureException"):
+                continue
+            body = _method_body(src, name)
+            if not re.search(r"(?:^|\n)\s*(?:this\.)?(?:controller\.)?"
+                             r"setSidebarButtons\(", body):
+                continue
+            btns = extract_buttons(body)
+            if btns:
+                result[name] = btns
+    return result
+
+
+def _method_body(src: str, name: str) -> str:
+    """Return the body of a *declaration* of `name`, not a call site.
+
+    A declaration is preceded by a visibility/qualifier keyword or sits
+    at the start of a line with no `this.` / `.` before it. Matching a
+    call site (`this.refreshSidebarButtons()`) would then run forward to
+    the next method's opening brace and return the wrong body."""
+    pat = (rf"(?:^|\n)\s*(?:(?:public|private|protected|static|async)\s+)*"
+           rf"{name}\([^)]*\)[^{{]*\{{")
+    m = re.search(pat, src)
     if not m:
         return ""
     start = m.end() - 1
@@ -249,21 +318,40 @@ def main() -> None:
         title = find_title(src)
         if not title:
             continue
-        body = extract_onenter(src)
-        buttons = extract_buttons(body)
-        if not buttons and "setSidebarButtons" not in body:
+        lists = extract_all_button_bodies(src)
+        merged: list[dict] = []
+        origins: list[str] = []
+        for method, btns in lists.items():
+            merged.extend(btns)
+            origins.append(f"{method}({len(btns)})")
+        if not merged and "setSidebarButtons" not in src:
             continue
-        spec.append({
+        # The second argument of setSidebarButtons(list, true) marks a
+        # screen whose sidebar replaces the previous one outright.
+        replace = bool(re.search(r"setSidebarButtons\([^;]*,\s*true\s*\)", src))
+        entry = {
             "file": str(f.relative_to(REF.parent)),
             "title": title,
             "showVersion": find_version_hook(src),
             "toggleMainVideo": find_main_video(src),
-            "sidebar": buttons,
-        })
+            "sidebarOrigins": origins,
+            "sidebarReplace": replace,
+            "sidebar": merged,
+        }
+        if "hideSidebarButtons" in src:
+            entry["hidesSidebar"] = True
+        if "toggleSidebarPreview" in src:
+            entry["sidebarPreview"] = True
+        if "setSidebarMpContent" in src:
+            entry["sidebarMpText"] = True
+        spec.append(entry)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(spec, indent=2, ensure_ascii=False),
                    encoding="utf-8")
     print(f"wrote {len(spec)} screens to {OUT}")
+    for s in spec:
+        print(f"  {s['title']:26} n={len(s['sidebar']):2} "
+              f"{','.join(s['sidebarOrigins'])}")
 
 
 if __name__ == "__main__":
