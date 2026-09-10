@@ -118,6 +118,53 @@ themeRiver、graphic、dataset transform 等子系统仍缺。每批闭环：移
   扫可见窗口定时间域（area-time-axis 0–20% 窗口拉满绘图区），不再全量
   定域；ECharts filterMode 的 y 向窗口域仍未做（见待办）。
 
+## 渲染完整度审计（2026-09-10，官方基准截图对照）
+
+首次以**官方渲染结果**为基准做全量对照：用本仓库 `_scratch/echarts-master`
+（v6.1.0，与 `~/Downloads/echarts-master` 同源）的 dist 渲染 335 个
+`ready: true` 示例，得到官方基准图 `_scratch/official_shots/`，再与 Zan 侧
+的窗口截图逐例比对。审计脚本 `_scratch/render_audit.py`。
+
+**口径**：option JSON 两侧逐字一致（`options/<id>.json` 源自官方源码），
+故差异全部归因于引擎。判定用固定采样步长 3 的饱和度着色占比，分级见脚本
+头部注释；官方本身着色 <2% 的细折线（131 例）不参与判定。
+
+**结果**（204 例可比样本）：
+
+| 判定 | 数量 | 占可比样本 |
+|------|------|-----------|
+| ZAN_MISSING 绘图区无内容 | 82 | 40.2% |
+| ZAN_SPARSE 内容远少于官方 | 38 | 18.6% |
+| ZAN_THIN 明显偏少 | 14 | 6.9% |
+| OK 基本一致 | 70 | 34.3% |
+
+**整类失效**（100% 失败）：treemap(7)、sunburst(7)、pictorialBar(7)、
+dataset(7)、parallel(3)、graph(5)。**基本可用**：pie(8%)、funnel(0%)、
+bar(29%)。
+
+**新确认的确定性缺陷**（肉眼核验，不依赖统计）：
+
+| 缺陷 | 证据示例 | 影响面 |
+|------|----------|--------|
+| `title` 组件缺失（option.title 被当窗口标题栏，图内不绘） | pie-simple、area-simple、line-marker | 全量带 title 者 |
+| 双 y 轴 yAxisIndex 未生效 | line-marker（官方蓝线左轴 9~15°C / 绿线右轴 -3~6°C，Zan 共轴 0~16） | 全部双轴 |
+| markPoint 未实现 | line-marker（官方 "1"/"9"/"2" 圆标全无） | markPoint 系列 |
+| markLine 未实现 | line-marker（官方虚线+端点值 "11.14"/"1.57" 全无） | markLine 系列 |
+| 面积 LinearGradient 未解析 | area-simple（官方红橙渐变，Zan 纯粉平涂） | 全部渐变面积 |
+| y 轴 nice 分割与官方不一致 | scatter-simple（官方 0~10 步 2，Zan 4~8 步 1） | 数值轴全量 |
+| 时间轴标签密度失控 | area-simple（Zan 标签重叠成团） | 时间轴系列 |
+| 折线默认 symbol 未开启 | line-simple（官方每点带白心圆点，Zan 无） | 折线系列 |
+| 轴标签字号偏大 | line-simple（细线图 Zan 着色 0.0067 vs 官方 0.0030） | 全量 |
+| 图例默认位置计算错误 | pie-simple（官方图内左下，Zan 左上压导航栏） | 全量 |
+
+**修复优先级**：P0 = title 组件 / 轴标签默认字号 / 图例默认位置 / 折线默认
+symbol（四项均影响全量且改动集中）；P1 = treemap、sunburst、graph+force、
+pictorialBar、dataset+dataTransform、candlestick、calendar 七个整类；
+P2 = markPoint/markLine、双 y 轴、面积渐变、时间标签密度、matrix、parallel、
+nice 分割对齐。
+
+完整清单与可复现流水线见 `_scratch/CHART_PORT_AUDIT.md`（临时材料，不入库）。
+
 ## 待办
 
 - 值对坐标定点管线（见缺口表首行）：补齐后 line-function 按官方位置回补
