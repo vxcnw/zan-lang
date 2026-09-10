@@ -136,3 +136,37 @@ description: Zan GUI 的 Android NativeActivity 实机验证仪式——probe AP
   setComposingText，组词链路无从谈起——先查这个开关。
 - 验证收口看三处：probe 屏幕上的状态行（text/composing 读出）、
   输入框内渲染、logcat commit/store 日志；三者一致才算过。
+
+## 鸿蒙 OHOS 侧验证（踩坑：__ANDROID__ 独守的块在 OHOS musl 里落进 fontconfig/Xlib）
+
+- **OHOS 条件编译守卫丢失模式**：OHOS clang 预定义 `__OHOS__` 和
+  `__linux__`，但**不**定义 `__ANDROID__`；且 OHOS musl sysroot 没有
+  fontconfig/X11 头。凡 `#if defined(__ANDROID__)` 独守的块，在 OHOS
+  编译时不跳过、落进 Linux 分支的 fontconfig/Xlib 代码，而头文件又被
+  外层排除守卫挡掉 → 20+ 编译错一齐爆。修法=逐处补
+  `|| defined(__OHOS__)` / `&& !defined(__OHOS__)`（gui_runtime 的
+  font.c 字体探测 /tray.c/gl_context.c 三处实锤），顺手把
+  `/system/fonts/HarmonyOS_Sans.ttf` 放进 prim_paths 首位（OHOS 设备
+  字体布局与 Android 同构：/system/etc/fonts.xml + /system/fonts）。
+  证据链收口：llvm-nm 看驱动 —— 旧 .a `grep -E " U (Fc|X)"` 零引用
+  =旧驱动根本没编那段代码；新 .a 里 `T zan_gui_draw3d`/
+  `T zan_gui_present_full` 等新导出在位才算重编成功。
+- **DevEco Emulator 必须 CLI 启停**（踩坑：双击图标与
+  `Start-Process -ArgumentList` 都静默失败，不报错也不启动）：
+  `powershell "& 'C:\Program Files\Huawei\DevEco Studio\tools\emulator\Emulator.exe' -start 'MateBook Pro'"`
+  成功；`-list` 列实例（Mate X7/MateBook Pro/MatePad Pro 13/Pura 90
+  Pro/Pura X View），`-stop '<实例名>'` 停止。hdc 在
+  `.../sdk/default/openharmony/toolchains/hdc.exe`，目标 127.0.0.1:5555。
+- **hdc file recv 用 cwd 相对路径**（Git Bash）：绝对 POSIX 路径
+  `/data/...` 会被改写成 `C:/Program Files/Git/data/...`；recv 目标
+  写 `oh1-3.jpeg` 这类相对名即可。
+- **hilog 探针**：`hilog -r`（清日志）在 Git Bash 管道里挂死——避免，
+  用 `hilog -x | grep`。"EGL 提交活着"的探针=DGLES 的
+  `d_eglSwapBuffers_special` 持续 ~1 条/秒（OHOS 版 app_time_stats）。
+- **HAP 跨模拟器重启持久免重装**：模拟器重启后 com.zan.hapshell 仍在。
+  冷启定式：`hdc shell "aa force-stop com.zan.hapshell"` → `aa start`
+  → 等 ~20s → `pidof` 确认 + isForeground。画面冻结判别沿用三板斧
+  （hilog 提交探针 + 进程存活 + 三帧截图 md5 互异 + PIL 像素差分），
+  但 2in1 模拟器（MateBook Pro，3120x2080@dpi304）应用是浮动窗口
+  （约 515..2604 x 351..2048），先按窗口裁剪再差分/判读，整屏差分会
+  混进桌面噪声。
