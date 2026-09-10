@@ -996,13 +996,33 @@ class ObjectRenderer {
                               int camX, int camY, int originX, int originY,
                               int playerSide) {
         if (world == null || art == null) { return 0; }
-        int drawn = 0;
-        List<WorldObject> vis = new List<WorldObject>();
-        for (int i = 0; i < world.ObjectCount(); i = i + 1) {
-            vis.Add(world.ObjectAt(i));
+        // One buffer reused across frames: allocating a fresh list (and
+        // letting the sorter churn it) every frame is exactly the per-frame
+        // garbage a hundred-unit battle cannot afford.
+        if (ObjectRenderer.drawBuf == null) {
+            ObjectRenderer.drawBuf = new List<WorldObject>();
         }
-        ObjectRenderer.SortByDepth(vis);
-        for (int i = 0; i < vis.Count; i = i + 1) {
+        List<WorldObject> vis = ObjectRenderer.drawBuf;
+        int n = 0;
+        int cw = r.OutW();
+        int ch = r.OutH();
+        for (int i = 0; i < world.ObjectCount(); i = i + 1) {
+            WorldObject o = world.ObjectAt(i);
+            // Cull before the depth sort: the sort then covers the few dozen
+            // objects on screen instead of the whole map's population.
+            int wx = IsoProjection.ScreenX(o.X(), o.Y()) - originX - camX;
+            if (wx > cw + 128 || wx < 0 - 128) { continue; }
+            int wy = IsoProjection.ScreenY(o.X(), o.Y(), 0) - originY - camY;
+            if (wy > ch + 128 || wy < 0 - 128) { continue; }
+            if (n < vis.Count) { vis[n] = o; } else { vis.Add(o); }
+            n = n + 1;
+        }
+        // Release the buffer's stale tail: ARC keeps a referenced dead object
+        // alive, and a shrinking battle would otherwise pin its corpses.
+        for (int i = n; i < vis.Count; i = i + 1) { vis[i] = null; }
+        ObjectRenderer.InsertionSortByDepth(vis, n);
+        int drawn = 0;
+        for (int i = 0; i < n; i = i + 1) {
             if (ObjectRenderer.DrawOneToCanvas(world, art, vis[i], r, camX,
                                                camY, originX, originY,
                                                playerSide)) {
@@ -1012,6 +1032,28 @@ class ObjectRenderer {
         ObjectRenderer.DrawEffectsToCanvas(world, r, camX, camY,
                                            originX, originY);
         return drawn;
+    }
+
+    /// <summary>The persistent draw list RenderToCanvas reuses; declared
+    /// here so the buffer outlives frames and never reallocates mid-battle.
+    /// </summary>
+    static List<WorldObject> drawBuf;
+
+    /// <summary>Insertion sort on the first `n` entries. The visible set
+    /// changes by a step or two between frames, so nearly-sorted is the
+    /// common case -- insertion's best line -- where selection sort pays its
+    /// quadratic cost no matter how ordered the input already is.</summary>
+    static void InsertionSortByDepth(List<WorldObject> objs, int n) {
+        for (int i = 1; i < n; i = i + 1) {
+            WorldObject key = objs[i];
+            int kd = ObjectRenderer.Depth(key);
+            int j = i - 1;
+            while (j >= 0 && ObjectRenderer.Depth(objs[j]) > kd) {
+                objs[j + 1] = objs[j];
+                j = j - 1;
+            }
+            objs[j + 1] = key;
+        }
     }
 
     /// <summary>One object onto the frame canvas. The anchor math, sprite
@@ -1028,66 +1070,113 @@ class ObjectRenderer {
         }
 
         Texture tex = null;
-        string key = null;
         UnitType u = null;
+        R2Tex img = null;
         if (o.Kind() == ObjKind.Structure()) {
             StructureType t = world.TypeOf(o);
             if (t != null) {
-                int progress = o.BuiltTicks();
-                int buildTime = t.BuildTime();
-                tex = art.StructureTextureOf(t, o.Side(), progress, buildTime,
-                                             o.Hp(), t.Hp());
-                // The identity mirrors StructureTextureOf's decision tree:
-                // construction stage, else damage state. hp (not the derived
-                // tier) keeps two states from ever sharing a slot.
-                if (buildTime > 0 && progress < buildTime) {
-                    key = "ra2:obj:bu:" + t.Reg() + ":" + o.Side() + ":"
-                        + Convert.ToString(progress);
-                } else {
-                    key = "ra2:obj:st:" + t.Reg() + ":" + o.Side() + ":"
-                        + Convert.ToString(o.Hp());
+                // Sprite identity: construction progress, then raw hp. A
+                // finished building's stamp never changes, so it blits from
+                // the cache without building a key or touching the memo.
+                int stamp = (o.BuiltTicks() & 1023)
+                          | ((o.Hp() & 2047) << 10)
+                          | (o.Side() << 21);
+                img = o.ArtStampA() == stamp ? o.ArtTexA() : null;
+                if (img == null) {
+                    tex = art.StructureTextureOf(t, o.Side(), o.BuiltTicks(),
+                                                 t.BuildTime(), o.Hp(),
+                                                 t.Hp());
+                    if (tex != null) {
+                        // The key mirrors StructureTextureOf's decision
+                        // tree: construction stage, else damage state. hp
+                        // (not the derived tier) keeps two states from ever
+                        // sharing a slot.
+                        string key;
+                        if (t.BuildTime() > 0
+                         && o.BuiltTicks() < t.BuildTime()) {
+                            key = "ra2:obj:bu:" + t.Reg() + ":" + o.Side()
+                                + ":" + Convert.ToString(o.BuiltTicks());
+                        } else {
+                            key = "ra2:obj:st:" + t.Reg() + ":" + o.Side()
+                                + ":" + Convert.ToString(o.Hp());
+                        }
+                        img = Ra2Ui.TexOf(key, tex);
+                        o.SetArtCacheA(stamp, img);
+                    }
+                }
+                if (img != null) {
+                    // A structure's frame carries its own anchor, as in
+                    // DrawOne.
+                    r.DrawTexture(img, wx - img.W() / 2, wy - img.H(),
+                                  img.W(), img.H());
                 }
             }
         } else {
             u = world.UnitTypeOf(o);
-            tex = art.UnitTexture(u, o.HasRoute(), o.AnimFrame(), o.Facing(),
-                                  o.Side(), o.Deployed());
             if (u != null) {
-                key = "ra2:obj:u:" + u.Reg() + ":" + o.Side() + ":"
-                    + Convert.ToString(o.Facing()) + ":"
-                    + Convert.ToString(o.AnimFrame())
-                    + (o.Deployed() ? ":d" : (o.HasRoute() ? ":w" : ":s"));
-            }
-        }
-        if (tex != null && key != null) {
-            R2Tex img = Ra2Ui.TexOf(key, tex);
-            if (u != null) {
-                // The reference's mobile anchor: the sprite's box centres on
-                // the cell diamond's centre.
-                r.DrawTexture(img,
-                    wx + IsoProjection.TileW() / 2 - tex.Width() / 2,
-                    wy + IsoProjection.TileH() / 2 - tex.Height() / 2,
-                    tex.Width(), tex.Height());
-            } else {
-                // A structure's frame carries its own anchor, as in DrawOne.
-                r.DrawTexture(img, wx + (0 - tex.Width() / 2),
-                              wy + (0 - tex.Height()),
-                              tex.Width(), tex.Height());
-            }
-            if (u != null && u.TurretVxl() != null) {
-                Texture tur = art.TurretTexture(u.TurretVxl(), o.TurretFacing(),
-                                                o.Side());
-                if (tur != null) {
-                    R2Tex timg = Ra2Ui.TexOf("ra2:obj:tur:" + u.TurretVxl()
-                        + ":" + Convert.ToString(o.TurretFacing()) + ":"
-                        + Convert.ToString(o.Side()), tur);
-                    r.DrawTexture(timg,
-                        wx + IsoProjection.TileW() / 2 - tur.Width() / 2,
-                        wy + IsoProjection.TileH() / 2 - tur.Height() / 2,
-                        tur.Width(), tur.Height());
+                // Identity: facing, walk frame, stance, side. AnimFrame only
+                // advances on a step, so a battle's steady state -- units
+                // standing or reloading -- rides the cache entirely.
+                int stamp = (o.Facing() & 15)
+                          | ((o.AnimFrame() & 65535) << 4)
+                          | ((o.HasRoute() ? 1 : 0) << 20)
+                          | ((o.Deployed() ? 1 : 0) << 21)
+                          | ((o.Side() & 3) << 22);
+                img = o.ArtStampA() == stamp ? o.ArtTexA() : null;
+                if (img == null) {
+                    tex = art.UnitTexture(u, o.HasRoute(), o.AnimFrame(),
+                                          o.Facing(), o.Side(), o.Deployed());
+                    if (tex != null) {
+                        string key = "ra2:obj:u:" + u.Reg() + ":" + o.Side()
+                            + ":" + Convert.ToString(o.Facing()) + ":"
+                            + Convert.ToString(o.AnimFrame())
+                            + (o.Deployed() ? ":d"
+                                            : (o.HasRoute() ? ":w" : ":s"));
+                        img = Ra2Ui.TexOf(key, tex);
+                        o.SetArtCacheA(stamp, img);
+                    }
+                }
+                if (img != null) {
+                    // The reference's mobile anchor: the sprite's box
+                    // centres on the cell diamond's centre.
+                    r.DrawTexture(img,
+                        wx + IsoProjection.TileW() / 2 - img.W() / 2,
+                        wy + IsoProjection.TileH() / 2 - img.H() / 2,
+                        img.W(), img.H());
+                    // The turret is a second limb of the same model: its own
+                    // voxels carry the vehicle's model origin, so centring
+                    // its box on the same cell centre stacks it on the hull
+                    // the way the reference composites body+turret.
+                    if (u.TurretVxl() != null) {
+                        int tstamp = (o.TurretFacing() & 15)
+                                   | (o.Side() << 4);
+                        R2Tex timg = o.ArtStampB() == tstamp
+                                   ? o.ArtTexB() : null;
+                        if (timg == null) {
+                            Texture tur = art.TurretTexture(u.TurretVxl(),
+                                                            o.TurretFacing(),
+                                                            o.Side());
+                            if (tur != null) {
+                                timg = Ra2Ui.TexOf("ra2:obj:tur:"
+                                    + u.TurretVxl() + ":"
+                                    + Convert.ToString(o.TurretFacing())
+                                    + ":" + Convert.ToString(o.Side()), tur);
+                                o.SetArtCacheB(tstamp, timg);
+                            }
+                        }
+                        if (timg != null) {
+                            r.DrawTexture(timg,
+                                wx + IsoProjection.TileW() / 2 - timg.W() / 2,
+                                wy + IsoProjection.TileH() / 2 - timg.H() / 2,
+                                timg.W(), timg.H());
+                        }
+                    }
                 }
             }
-        } else if (tex == null) {
+        }
+        if (img == null) {
+            // No usable sprite: the side-coloured placeholder. Rare, and by
+            // definition uncached -- there is nothing to remember.
             Texture ph = ObjectRenderer.Placeholder(o.Side(), u);
             R2Tex pimg = Ra2Ui.TexOf("ra2:obj:ph:" + Convert.ToString(o.Side())
                 + ":" + Convert.ToString(u == null ? 0 : u.Role()), ph);

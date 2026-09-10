@@ -1896,6 +1896,10 @@ class Ra2Loop : IGuiHostLoop {
     // bake into the terrain layer, so growth and harvesting are scene
     // changes and the layer must recomposite before the next present.
     int seenOreVersion;
+    // When the layer last refreshed for ore: harvesting reshapes the field a
+    // few cells at a time, so the refresh coalesces instead of riding every
+    // mining tick.
+    int lastOreCompositeMs;
 
     R2Tex preview;
     int previewIndex;
@@ -2303,11 +2307,19 @@ class Ra2Loop : IGuiHostLoop {
         this.AdvanceClock();
         this.SpendGameInput();
         // Ore grew or was harvested: its sprites bake into the terrain layer,
-        // so a changed counter means the scene canvas is stale.
+        // so a changed counter means the scene canvas is stale. The refresh
+        // coalesces to one composite every 300ms -- a working miner would
+        // otherwise re-encode the full scene several times a second for a
+        // change the eye can barely catch. A trailing refresh is guaranteed
+        // because the counter only catches up when the composite runs.
         if (this.world != null
          && this.world.OreVersion() != this.seenOreVersion) {
-            this.seenOreVersion = this.world.OreVersion();
-            this.dirty = true;
+            int nowMs = Window.GetTickMs();
+            if (nowMs - this.lastOreCompositeMs >= 300) {
+                this.lastOreCompositeMs = nowMs;
+                this.seenOreVersion = this.world.OreVersion();
+                this.dirty = true;
+            }
         }
         this.CompositeTerrain();
         this.DrawGameHud(host);
@@ -3907,6 +3919,21 @@ class Ra2Loop : IGuiHostLoop {
                     }
                 }
             }
+            // Then start the fight: every fresh tank charges the nearest
+            // hostile, so the profiled corridor is a battle, not a parade
+            // ground -- shots, splash damage, walk frames and the retarget
+            // scans all under the clock the player would feel.
+            for (int oi = 0; oi < this.world.ObjectCount(); oi = oi + 1) {
+                WorldObject oo = this.world.ObjectAt(oi);
+                if (oo == null || oo.Side() != pside2
+                 || oo.Kind() != ObjKind.Unit()) { continue; }
+                if (oo.UnitType() == null
+                 || oo.UnitType().Primary() == null) { continue; }
+                int foe = this.world.NearestEnemy(pside2, oo.X(), oo.Y());
+                if (foe >= 0) {
+                    this.world.AttackObject(oi, this.world.ObjectAt(foe));
+                }
+            }
             Console.WriteLine("selftest stress spawned="
                 + Convert.ToString(spawned));
             }
@@ -3928,7 +3955,17 @@ class Ra2Loop : IGuiHostLoop {
                         + " terrMaxMs=" + Convert.ToString(
                             Ra2App.profTerMax)
                         + " upAvgMs=" + Convert.ToString(
-                            Ra2App.profUp / Ra2App.profN));
+                            Ra2App.profUp / Ra2App.profN)
+                        + " pathCalls=" + Convert.ToString(
+                            this.world.PathCalls()));
+                    if (Ra2App.profDraw / Ra2App.profN > 16
+                     || Ra2App.profTick / Ra2App.profN > 150) {
+                        Console.WriteLine("selftest FAIL perf: drawAvg="
+                            + Convert.ToString(Ra2App.profDraw / Ra2App.profN)
+                            + "ms (budget 16) worldAvg="
+                            + Convert.ToString(Ra2App.profTick / Ra2App.profN)
+                            + "ms (budget 150)");
+                    }
                 }
                 host.RequestStop();
             } else if (Ra2App.stressDone < 1) {
@@ -3967,7 +4004,17 @@ class Ra2Loop : IGuiHostLoop {
                         + " terrMaxMs=" + Convert.ToString(
                             Ra2App.profTerMax)
                         + " upAvgMs=" + Convert.ToString(
-                            Ra2App.profUp / Ra2App.profN));
+                            Ra2App.profUp / Ra2App.profN)
+                        + " pathCalls=" + Convert.ToString(
+                            this.world.PathCalls()));
+                    if (Ra2App.profDraw / Ra2App.profN > 16
+                     || Ra2App.profTick / Ra2App.profN > 150) {
+                        Console.WriteLine("selftest FAIL perf: drawAvg="
+                            + Convert.ToString(Ra2App.profDraw / Ra2App.profN)
+                            + "ms (budget 16) worldAvg="
+                            + Convert.ToString(Ra2App.profTick / Ra2App.profN)
+                            + "ms (budget 150)");
+                    }
                 }
                 this.shell.SetSide(Side.Soviet());
                 this.shell.Back();

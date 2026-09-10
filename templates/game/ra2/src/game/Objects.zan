@@ -66,6 +66,17 @@ class WorldObject {
     // ticks; Ivan sticks a timed bomb on whatever he reaches.
     int frozen;        // ticks the object stays frozen, 0 = free
     int bombTimer;     // ticks until the planted bomb detonates, -1 = none
+
+    // Render cache (filled by the renderer, read back next frame): a packed
+    // identity of everything that picks the body (and turret) sprite. When
+    // the packed value matches, the frame reuses the last texture and never
+    // builds a sprite key nor searches the shared memo -- that search is what
+    // made hundred-unit battles crawl. Dies with the object, so it can never
+    // dangle across the world's index compaction.
+    int artStampA;
+    Ra2.Render.R2Tex artTexA;
+    int artStampB;
+    Ra2.Render.R2Tex artTexB;
     bool civ;          // a map civilian structure (lives in the civ catalog)
 
     // Harvester state (units with the harvester role): credits in the hold,
@@ -201,6 +212,22 @@ class WorldObject {
     void SetFrozen(int ticks) { this.frozen = ticks; }
     int BombTimer() { return this.bombTimer; }
     void SetBombTimer(int ticks) { this.bombTimer = ticks; }
+
+    /// <summary>The renderer's per-object sprite cache: compare the packed
+    /// identity, reuse the texture on a match, rebuild on a change. Slot A
+    /// carries the body, slot B the turret.</summary>
+    int ArtStampA() { return this.artStampA; }
+    Ra2.Render.R2Tex ArtTexA() { return this.artTexA; }
+    void SetArtCacheA(int stamp, Ra2.Render.R2Tex tex) {
+        this.artStampA = stamp;
+        this.artTexA = tex;
+    }
+    int ArtStampB() { return this.artStampB; }
+    Ra2.Render.R2Tex ArtTexB() { return this.artTexB; }
+    void SetArtCacheB(int stamp, Ra2.Render.R2Tex tex) {
+        this.artStampB = stamp;
+        this.artTexB = tex;
+    }
     bool IsCiv() { return this.civ; }
     void SetCiv(bool on) { this.civ = on; }
     int Cargo() { return this.cargo; }
@@ -1008,6 +1035,14 @@ class World {
     int selectedIndex;   // primary (first) selection; -1 when nothing selected
     List<int> selection; // all selected indices, first is the primary
     int worldTick;       // ticks elapsed since creation, for periodic rules
+    // Reused breadth-first scratch for FindPathMulti (see the comment there).
+    // Kept on the world so a battle's constant re-pathing never allocates.
+    byte[] pathSeen;
+    int[] pathPrev;
+    List<int> pathQx;
+    List<int> pathQy;
+    int pathGen;
+    int pathCalls;       // dev: selftest perf line reports the search volume
     // The theater's water tile-id ranges as first,count pairs. Null until
     // the theater loads, in which case IsWater falls back to temperate's
     // own 314..327. See Theater.WaterRanges.
@@ -1288,6 +1323,11 @@ class World {
     }
 
     int OreVersion() { return this.oreVersion; }
+
+    /// <summary>Breadth-first path searches since the world was created --
+    /// the selftest's perf line reports it so the search volume of a battle
+    /// stays visible.</summary>
+    int PathCalls() { return this.pathCalls; }
 
     /// <summary>How much ore sits at a cell, 0 when none.</summary>
     int OreAt(int x, int y) {
@@ -3035,14 +3075,18 @@ class World {
             // Move-attack: while walking toward the order's destination, the
             // unit keeps an eye out for enemies within its range plus a small
             // reach; the first one it spots becomes the target and it stands
-            // to fire. On arrival the move-attack order is spent.
-            if (o.MoveAttacking() && this.Target(o) == null && o.HasRoute()) {
+            // to fire. On arrival the move-attack order is spent. The scan
+            // itself is staggered across units and ticks -- the reference's
+            // targeting runs on per-unit timers, not a same-tick sweep, and
+            // N armed walkers sweeping every tick is what made big battles
+            // quadratic.
+            if (o.MoveAttacking() && this.Target(o) == null && o.HasRoute()
+             && (this.worldTick + i) % 8 == 0) {
                 int e = this.NearestEnemyIn(o.X(), o.Y(), o.Side(),
                                             o.UnitType().Range() + 3);
                 if (e >= 0) {
                     this.AttackObject(i, this.objects[e]);
                 }
-                if (!o.HasRoute()) { o.ClearMoveAttack(); }
             }
             // A spent move-attack: the route is gone (spent on arrival, or
             // cancelled by StopAttack) and nothing is targeted, so the flag
@@ -3058,12 +3102,17 @@ class World {
             // Guard stance: an idle soldier with a gun watches the ground
             // around it and engages anything hostile that strays close, so a
             // garrisoned base defends itself while the player looks
-            // elsewhere. The response radius is wider than the weapon's reach
-            // -- the soldier spots an intruder, walks to meet him and opens
-            // up once in range. Units with orders -- a route or a
-            // move-attack -- keep their focus instead.
+            // elsewhere. The response radius is wider than the weapon's
+            // reach -- the soldier spots an intruder, walks to meet him and
+            // opens up once in range. Units with orders -- a route or a
+            // move-attack -- keep their focus instead. Same stagger as the
+            // move-attack scan: unit i looks on ticks where (tick+i)%8==0,
+            // so a hundred-strong idle army costs a dozen scans a tick, not
+            // a hundred, and no soldier waits more than half a second to
+            // react.
             if (t == null && !o.MoveAttacking() && !o.HasRoute()
-             && o.UnitType().Primary() != null) {
+             && o.UnitType().Primary() != null
+             && (this.worldTick + i) % 8 == 0) {
                 int e = this.NearestEnemyIn(o.X(), o.Y(), o.Side(),
                                             o.UnitType().Range() + 4);
                 if (e >= 0) {
@@ -3096,13 +3145,19 @@ class World {
                     // can be ringed by the building's own footprint and
                     // neighbouring structures, which would strand the unit.
                     o.SetReload(0);
-                    List<int> px = new List<int>();
-                    List<int> py = new List<int>();
-                    if (!this.HasRoute(o)) {
+                    // Re-pathing is staggered like the target scans: an
+                    // army arriving at its routes' ends must not throw a
+                    // hundred full-map breadth-first searches at one tick.
+                    // Unit i asks on (tick+i)%8, so the search volume per
+                    // tick stays at the army size divided by eight.
+                    if (!this.HasRoute(o)
+                     && (this.worldTick + i) % 8 == 0) {
+                        List<int> px = new List<int>();
+                        List<int> py = new List<int>();
                         if (this.FindPathTo(o.X(), o.Y(), t, px, py,
                                             o.Amphibious())) {
                             o.SetRoute(px, py);
-                        } else if ((this.worldTick + i) % 25 == 0) {
+                        } else if ((this.worldTick + i) % 40 == 0) {
                             // The ordered target cannot be reached -- a
                             // building sealed in by other structures has no
                             // free cell to stand on. Hunt the nearest enemy
@@ -3598,26 +3653,49 @@ class World {
     bool FindPathMulti(int sx, int sy, List<int> gx, List<int> gy,
                        List<int> px, List<int> py, bool amphibious) {
         int cells = this.width * this.height;
-        byte[] seen = new byte[cells + 1];
-        List<int> qx = new List<int>();
-        List<int> qy = new List<int>();
-        List<int> prev = new List<int>();
-        for (int i = 0; i < cells + 1; i = i + 1) { prev.Add(-1); }
+        // Reused breadth-first scratch. Allocating a fresh visited map and
+        // three queues per call -- and priming prev with one Add per cell --
+        // made a charging army's re-pathing eat whole frames. A generation
+        // stamp stands in for clearing: marks double per call (visited even,
+        // goal odd) and always outrank the stale ones, so nothing needs to
+        // be wiped until the byte wraps.
+        if (this.pathSeen == null || this.pathSeen.Length < cells + 1) {
+            this.pathSeen = new byte[cells + 1];
+            this.pathPrev = new int[cells + 1];
+            this.pathQx = new List<int>();
+            this.pathQy = new List<int>();
+            this.pathGen = 0;
+        }
+        int gen = this.pathGen + 1;
+        if (gen > 100) {
+            for (int i = 0; i < cells + 1; i = i + 1) { this.pathSeen[i] = 0; }
+            gen = 1;
+        }
+        this.pathGen = gen;
+        this.pathCalls = this.pathCalls + 1;
+        byte[] seen = this.pathSeen;
+        int[] prev = this.pathPrev;
+        List<int> qx = this.pathQx;
+        List<int> qy = this.pathQy;
+        qx.Clear();
+        qy.Clear();
+        int vmark = gen * 2;
+        int gmark = gen * 2 + 1;
 
         int startSlot = this.CellSlot(sx, sy);
         if (startSlot < 0) { return false; }
-        seen[startSlot] = 1;
+        seen[startSlot] = (byte)vmark;
         qx.Add(sx);
         qy.Add(sy);
         prev[startSlot] = startSlot;
 
-        // Goals are marked with 2, distinct from the visited mark 1, and are
+        // Goals carry their own mark, distinct from the visited one, and are
         // never enqueued -- the walker's last step is the free cell beside a
         // goal, or the goal itself when it is passable.
         for (int g = 0; g < gx.Count; g = g + 1) {
             int gs = this.CellSlot(gx[g], gy[g]);
             if (gs == startSlot) { return true; }
-            if (gs >= 0) { seen[gs] = 2; }
+            if (gs >= 0) { seen[gs] = (byte)gmark; }
         }
 
         int head = 0;
@@ -3627,23 +3705,24 @@ class World {
             int cy = qy[head];
             head = head + 1;
             int cs = this.CellSlot(cx, cy);
-            goal = this.StepGoalFrom(seen, prev, qx, qy, cx, cy, cx + 1, cy,
-                                     cs, amphibious);
+            goal = this.StepGoalFrom(seen, prev, qx, qy, vmark, gmark,
+                                     cx, cy, cx + 1, cy, cs, amphibious);
             if (goal >= 0) { break; }
-            goal = this.StepGoalFrom(seen, prev, qx, qy, cx, cy, cx - 1, cy,
-                                     cs, amphibious);
+            goal = this.StepGoalFrom(seen, prev, qx, qy, vmark, gmark,
+                                     cx, cy, cx - 1, cy, cs, amphibious);
             if (goal >= 0) { break; }
-            goal = this.StepGoalFrom(seen, prev, qx, qy, cx, cy, cx, cy + 1,
-                                     cs, amphibious);
+            goal = this.StepGoalFrom(seen, prev, qx, qy, vmark, gmark,
+                                     cx, cy, cx, cy + 1, cs, amphibious);
             if (goal >= 0) { break; }
-            goal = this.StepGoalFrom(seen, prev, qx, qy, cx, cy, cx, cy - 1,
-                                     cs, amphibious);
+            goal = this.StepGoalFrom(seen, prev, qx, qy, vmark, gmark,
+                                     cx, cy, cx, cy - 1, cs, amphibious);
             if (goal >= 0) { break; }
         }
         if (goal < 0) { return false; }
 
-        // Reconstruct start -> goal. prev points at the previous cell, so walk
-        // back from the goal and reverse.
+        // Reconstruct start -> goal. prev points at the previous cell, so
+        // walk back from the goal and reverse. Only cells marked this call
+        // are on the chain, so the reused prev needs no priming.
         List<int> rx = new List<int>();
         List<int> ry = new List<int>();
         int cur = goal;
@@ -3749,19 +3828,20 @@ class World {
     /// refuses illegal height changes. The route search calls this instead
     /// of the source-less form above; the two differ only in the CanStep
     /// gate, which is what keeps a column on its own level.</summary>
-    int StepGoalFrom(byte[] seen, List<int> prev, List<int> qx, List<int> qy,
+    int StepGoalFrom(byte[] seen, int[] prev, List<int> qx, List<int> qy,
+                     int vmark, int gmark,
                      int fx, int fy, int nx, int ny, int fromSlot,
                      bool amphibious) {
         int slot = this.CellSlot(nx, ny);
         if (slot < 0) { return -1; }
-        if (seen[slot] == 2) {
+        if (seen[slot] == gmark) {
             if (!this.CanStep(fx, fy, nx, ny, amphibious)) { return -1; }
             prev[slot] = fromSlot;
             return slot;
         }
-        if (seen[slot] != 0) { return -1; }
+        if (seen[slot] >= vmark) { return -1; }
         if (!this.CanStep(fx, fy, nx, ny, amphibious)) { return -1; }
-        seen[slot] = 1;
+        seen[slot] = (byte)vmark;
         prev[slot] = fromSlot;
         qx.Add(nx);
         qy.Add(ny);
