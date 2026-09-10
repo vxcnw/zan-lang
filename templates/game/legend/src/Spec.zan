@@ -645,4 +645,79 @@ class Spec {
     }
     static int RankSlotW() { return Px(32); }       // 图标 48 设备（格框 51）
     static int RankSlotH() { return Px(29); }       // 图标 43 设备（格框 46.5）
+
+    /* ---- 交易市场页（22）实测（设备像素 → 逻辑，窗口坐标）----
+       外框 374..1491 × 164..879：715 高的浮窗，不铺满页区（下方透出主界面）。
+       顶带 377..1489 × 167..204 满宽——「物品分类」与 6 个表头同一条带；
+       左栏 389..529 无自底色（外框底透出），钮/输入框直接摆在外框上；
+       表格盒 539..1490 × 205..812；页脚 812..877 也无自底色。 */
+    static int MkFrameH() { return Px(477); }        // 715
+    static int MkFramePadT() { return Px(2); }       // 164 → 167
+    static int MkFramePadL() { return Px(1); }       // 375 → 377
+    static int MkFramePadR() { return Px(1); }       // 1489 → 1490
+    static int MkMidPadL() { return Px(9); }         // 375 → 388 左栏
+    static int MkColGap() { return Px(6); }          // 529 → 538 表格盒边
+    static int MkLeftW() { return Px(94); }          // 141
+    static int MkBandH() { return Px(25); }          // 38
+    static int MkBandLine() { return Px(1); }
+    static int MkBandLabelW() { return Px(101); }    // 物品分类区 375..526（字在左栏 389..528 上居中）
+    static int MkBandLabelPadL() { return Px(9); }
+    static int MkBandLabelGap() { return Px(10); }   // 竖线 → 表头区起点 542 = 行格起点
+    static int MkBandToBtn() { return Px(11); }      // 205 → 221
+    static int MkCatH() { return Px(26); }           // 39（底 37 + 边；原版 38）
+    static int MkCatGap() { return Px(6); }          // 9 → 节距 48
+    static int MkBtnToBand() { return Px(11); }      // 597 → 613
+    static int MkBand2H() { return Px(23); }         // 34
+    static int MkLabelH() { return Px(25); }         // 647..683 = 37（字居中）
+    static int MkLabelPadL() { return Px(4); }       // 389 → 394
+    static int MkInputH() { return Px(19); }         // 28（底 26 + 边）
+    static int MkInputToCheck() { return Px(8); }    // 777 → 789
+    static int MkCheckH() { return Px(22); }         // 33
+    static int MkCheckPadL() { return Px(2); }       // 389 → 392
+    static int MkCheckToBtn() { return Px(8); }      // 822 → 834
+    static int MkSearchH() { return Px(21); }        // 31（底 29 + 边）；与页脚钮同高同顶
+    static int MkRowPadX() { return Px(1); }         // 行盒左右缩 1.5
+    static int MkBoxPadB() { return Px(1); }
+    static int MkHeadToRow() { return Px(3); }       // 206 → 210 首行外沿
+    static int MkRowH() { return Px(48); }           // 72（底 70 + 边）
+    static int MkRowGap() { return Px(2); }          // 3 → 节距 75
+    static List<int> MkCols() {                       // 行格：名称 542..777 / 价格 ..979 / 寄售人 ..1123 / 加密 ..1207 / 时长 ..1354（操作撑满）
+        List<int> w = new List<int>();
+        w.Add(Px(157)); w.Add(Px(138)); w.Add(Px(93)); w.Add(Px(56)); w.Add(Px(98));
+        return w;
+    }
+    static List<int> MkHeadCols() {                   // 表头格：按原版表头字中心 664/874/1051/1177/1276（操作撑满）
+        List<int> w = new List<int>();
+        w.Add(Px(163)); w.Add(Px(117)); w.Add(Px(119)); w.Add(Px(49)); w.Add(Px(83));
+        return w;
+    }
+    static int MkIconPadL() { return Px(6); }        // 541 → 549
+    static int MkIconPadT() { return Px(2); }        // 211 → 214
+    static int MkIconW() { return Px(45); }          // 67
+    static int MkIconH() { return Px(43); }          // 64
+    static int MkIconGap() { return Px(5); }         // 615 → 623
+    static int MkBadgeX() { return Px(7); }          // 角标内缩 549 → 559
+    static int MkBadgeY() { return Px(8); }          // 289 → 301
+    static int MkNamePadT() { return Px(8); }        // 名称行顶 223
+    static int MkNameH() { return Px(17); }
+    static int MkSubH() { return Px(12); }
+    static int MkCoinPadL() { return Px(16); }       // 777 → 798
+    static int MkCoinW() { return Px(14); }          // 21（原 20）
+    static int MkCoinH() { return Px(12); }          // 18
+    static int MkCoinGap() { return Px(18); }        // 819 → 849 价格数左锚
+    static int MkTagPadL() { return Px(9); }         // 1123 → 1136
+    static int MkTagW() { return Px(19); }           // 标签框 28
+    static int MkLockGap() { return Px(2); }         // 1164 → 1167
+    static int MkLockW() { return Px(13); }          // 20
+    static int MkLockH() { return Px(16); }          // 24
+    static int MkBuyW() { return Px(56); }           // 84
+    static int MkBuyH() { return Px(20); }           // 30
+    static int MkFootH() { return Px(44); }          // 812..877 = 66（只在右栏下，左栏的搜索钮与它同顶）
+    static int MkFootPadT() { return Px(10); }       // 812 → 827
+    static int MkFootPadL() { return Px(13); }       // 538 → 557
+    static int MkFootPadR() { return Px(5); }        // 1482 → 1490
+    static int MkFootGap() { return Px(9); }         // 674 → 687
+    static int MkFootBtnW() { return Px(78); }       // 117（底 115 + 边）
+    static int MkFootBtnH() { return Px(25); }       // 37（底 36 + 边）
+    static int MkPages() { return 649; }
 }

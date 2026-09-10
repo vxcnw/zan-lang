@@ -650,3 +650,37 @@ pagination::arrow { color: #089cf3; font-size: 12; }
 .rank-attr-k { color: #c0c000; font-size: 11; }
 .rank-attr-v { color: #e8e800; font-size: 11; }
 .rank-note { color: #c0c0c0; font-size: 12; }
+
+/* ---- 交易市场（页 22）：外框 + 左分类栏 + 黑底行盒表格 + 页脚带 ---- */
+.mk-frame { display: flex; flex-direction: column; background: #1d2633; border: 1px #3d4755; }
+.mk-mid { background: transparent; display: flex; flex-direction: row; }
+.mk-right { display: flex; flex-direction: column; }
+/* flex 容器里 Grow() 无效（见 .bag-fill 注）：撑满的子项挂 .mk-fill；
+   固定项挂 .mk-fixed 免得被按比例收缩（顶带曾被挤成 36 高、底线挤成 0）。 */
+.mk-fill { flex-grow: 1; flex-basis: 0; min-width: 0; min-height: 0; }
+.mk-fixed { flex-shrink: 0; }
+.mk-left { background: transparent; }
+.mk-band { background: #113555; display: flex; flex-direction: row; align-items: center; }
+.mk-band-line { background: #1e5180; }
+.mk-band-t { color: #00aeff; font-size: 14; }
+.mk-cat { font-size: 13; color: #02a8fa; }
+.mk-label-row { background: transparent; }
+.mk-label { color: #ffff00; font-size: 12; }
+.mk-input { background: #171e29; border: 1px #1d588d; color: #dcdcdc; font-size: 12; }
+.mk-check-row { background: transparent; display: flex; flex-direction: row; align-items: center; }
+.mk-check { color: #c8c8c8; font-size: 12; }
+.mk-box { background: #050708; border: 1px #3e4654; }
+.mk-row { background: #182128; border: 1px #1c2b35; display: flex; flex-direction: row; }
+.mk-cell { background: transparent; display: flex; justify-content: center; align-items: center; }
+.mk-cell-l { background: transparent; display: flex; flex-direction: row; justify-content: flex-start; align-items: center; }
+.mk-cell-r { background: transparent; display: flex; flex-direction: row; justify-content: flex-end; align-items: center; }
+.mk-badge { color: #ffd24a; font-size: 9; }
+.mk-name { color: #d0d000; font-size: 13; }
+.mk-sub { color: #707070; font-size: 12; }
+.mk-price { color: #d0d0d0; font-size: 13; }
+.mk-seller { color: #d000d0; font-size: 13; }
+.mk-tag { color: #00f4f4; font-size: 13; }
+.mk-time { color: #ff8000; font-size: 13; }
+.mk-buy { font-size: 13; color: #01acf9; }
+.mk-foot { background: transparent; display: flex; flex-direction: row; align-items: flex-start; }
+.mk-foot-btn { font-size: 13; color: #00aeff; }

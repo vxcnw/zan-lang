@@ -287,11 +287,18 @@ CSS 里非 token 的长度由 `Style.ScaleLayout` 补乘,`StyleBox.IsPrescaled`
 `children` 为 null、`visible` 为 false,首次 `With`/`Arrange` 即段错误。
 
 排版容器三条实测（2026-09-11 传奇「排行榜」页踩的）：
-- **`Panel.Row()` / `Column()` 默认是停靠布局，不是 flex**：`Grow()`（flex-grow）、
-  `align-items`、`justify-content` 只在该元素的 CSS 类显式写了
-  `display: flex; flex-direction: row|column` 时才被采纳。坑：六枚等分页签
-  `Grow()` 全无效、叠成一枚；左面板被 `align-items` 默认 stretch 拉满整页高
-  （给 flex + `align-items: flex-start` 才对上原图 167..876）。
+- **`Panel.Row()` / `Column()` 默认是停靠布局，不是 flex**：`align-items`、
+  `justify-content`、CSS `flex-grow` 只在该元素的 CSS 类显式写了
+  `display: flex; flex-direction: row|column` 时才被采纳；而代码里的 `Grow()`
+  **只在停靠路径有效**（第 7 条），进了 flex 容器要撑满必须给子项挂
+  `flex-grow: 1` 的类。坑：六枚等分页签叠成一枚（容器没声明 flex）；交易市场
+  表格盒右缘短 70 设备、页脚撑条不推分页（容器是 flex 却只写了 `Grow()`）；
+  左面板被 `align-items` 默认 stretch 拉满整页高（给 flex +
+  `align-items: flex-start` 才对上原图 167..876）。
+- **flex 容器内容超出主轴就按比例收缩所有子项**（flex-shrink 默认 1）：定高的
+  外框列里放「顶带 + 自适应中排 + 页脚」，中排按内容测量比可用高还大时，顶带
+  从 38 被挤成 36、1 设备底线挤成 0。撑满项写 `flex-grow: 1; flex-basis: 0`
+  （从 0 起分空间，不再溢出），定尺寸项写 `flex-shrink: 0`。
 - **`Prefer(w, 0)` 是"撑满可用高度"，不是"高度自适应"**：布局把声明高度 ≤ 0
   当 fill。要定高就写显式数（面板 710 设备）；要按内容就别写 Prefer 高度。
 - **显式 `Padding(top, …)` 与类上 `padding` 的优先级是"显式赢"**（padSet 优先；

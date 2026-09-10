@@ -106,6 +106,13 @@ partial class LegendApp {
     /// 技能格全用它——原版这些格子的像素就是这张图拉伸出来的。
     Panel SpriteCell(string cls, int wDevice, int hDevice,
                      string artPath, string badge, string badgeCls) {
+        return SpriteCellAt(cls, wDevice, hDevice, artPath, badge, badgeCls, 0, 0);
+    }
+
+    /// 同 SpriteCell，但角标从格子左上角再内缩 (bx, by) 设备像素——交易市场
+    /// 的角标画在格框斜边里侧（内缩 10×12），物品栏的贴角（0,0）。
+    Panel SpriteCellAt(string cls, int wDevice, int hDevice,
+                       string artPath, string badge, string badgeCls, int bx, int by) {
         Panel s = Panel.Row();
         if (cls.Length > 0) { s.Class = cls; }
         s.Pad(0); s.Prefer(wDevice, hDevice);
@@ -117,7 +124,7 @@ partial class LegendApp {
         }
         if (badge.Length > 0) {
             Label t = Text(badge, badgeCls.Length > 0 ? badgeCls : "slot-badge", 0);
-            t.DockManual(); t.Place(0, 0);
+            t.DockManual(); t.Place(bx, by);
             t.Prefer(0, Spec.Px(11));
             s.Add(t);
         }
