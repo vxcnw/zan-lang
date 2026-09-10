@@ -110,3 +110,35 @@ stdlib Chart 改动 → `cd build && ctest -R conformance_chart`（26 例，~96s
 两个 golden（chart_option_behavior.out 的 sr、chart_pie_layout.out 的 pal）
 曾在语义提交（symbolSize 直径、v6 色板）时没跟上，属欠账——引擎语义
 提交必须连 golden 一起核对，否则 standard 档永远挂着看不见的失败。
+
+## 渲染帧克隆税（大数据 demo 卡顿排查顺序）
+
+大数据 demo 卡顿先量化三处税源，别急着怀疑渲染器本体（`--bench` 对照）：
+1. **逐项深拷**：`ChartSeries.Clone` 默认全量深拷 data/points/candles 等
+   大集合。渲染帧对数据集合只读的类型走 `Clone(src, shareData:true)`
+   共享引用（`ResolvedSeries.Materialize(allowShare)` 按类型门控）。
+   **pie/funnel 系必须保持全量克隆**——它们经 `ApplyDataLegend` 写
+   `data[].hidden/selected`，共享会把交互态漏写进长寿缓存的源 option。
+   审计法：grep 渲染帧路径全部 `s.data`/集合写入点，逐个确认只在
+   drawOption/克隆列表上写（ChartView ApplyDataLegend 是唯一例外源）。
+2. **外壳标量漏抄**：`Clone(src, shareData)` 的早退共享分支会让
+   "早退之后才赋值"的字段全部漏抄。force*/chord*/funnel*/wc*/label*
+   等标量外壳字段必须在早退**之前**抄完——conformance drb6 探针
+   （DrawOption 物化后核对批 6 字段）就是抓这个的，别删探针迁就。
+3. **平滑细分步数**：BuildPathFxEx 固定 48 步/段在 600 段×2 边界的
+   时间轴面积图上每帧近百万插值点。步数按段像素跨度自适应
+   （定点域 ÷256，钳 2..48）——窄段亚像素插值由描边光栅化器采样，
+   收到 2 步也无可见折角；宽段保持原平滑度。
+另外 multi-grid 子面板曾每帧 `ChartOption.Clone` 整个 option（全系列
+逐项深拷）：子面板改的只有 xIndex/axisIndex 两个整数，改成 Create 空壳
++显式重建 axes/grids/titles/visualMaps+系列共享原对象（渲染只读）。
+
+## 快照也是灾备
+
+并发会话 checkout/分支切换会静默覆写工作区（本会话 4 个 Chart 文件被
+覆写、git 历史与全部 stash 均无痕迹）。每次改完 stdlib 同步进快照的那份
+副本**就是最近一次验证过的现场**：发现工作区被覆写时先
+`md5sum` 对比工作区与快照、`grep` 快照里的关键标记（如新增函数名），
+从快照整文件恢复再 `git diff --numstat` 核对范围，能省掉全部重写。
+快照恢复后必须重跑编译探针 + ctest 档位——被覆写可能同时吞掉后续
+手工修复（本会话 drb6 标量漏抄修复就被快照回滚了一次）。
