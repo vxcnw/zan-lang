@@ -194,8 +194,8 @@ Input box = new Input("type here");
 box.data = model.inputText;                     // data 是 Binding<T>
 ```
 
-💡 关键约定：**Zan 委托不能作为带状态的闭包长期持有**（委托是函数指针，
-不能捕获局部变量/this 来跨帧引用）。需要捕获状态的处理器请：
+💡 关键约定：**跨帧要读写同一份状态时，别指望闭包的捕获项**。闭包能捕获
+局部变量，但只读捕获是创建时的快照；需要跨帧共享状态的处理器请：
 - 存为类字段/静态字段，或
 - 用 `.zform` 的 `onClick: "Save"` + `Form.On("Save", () => ...)`（HandlerRegistry）。
 
@@ -687,7 +687,7 @@ IDE 内置的 `.zform` 设计器（`Gui.Designer`）：左侧分类控件面板�
 
 ## 常见问题 / 备忘
 
-- 事件委托不能捕获局部变量跨帧使用 → 用类字段或 `Form.On(name, Action)`。
+- 事件委托跨帧共享状态用类字段/`Signal`——闭包的只读捕获是创建时快照，改不出跨帧效果。
 - `.zform` 里 `kind` 用类名（`SelectBox` 不是 `Select`、`WebViewBox` 不是
   `WebView`、`CefBrowserBox` 不是 `CefBrowser`、`DataGrid` 不是 `DataTable`）。
 - 泛型控件 `.zform` 用 `of` 给类型实参；缺省 `string`。

@@ -950,8 +950,9 @@ Windows 上使用 Win32 API，POSIX（Linux/macOS）上使用 libc 中的 pthrea
 
 - static bool Start(ThreadStart body)
   - 在新的分离后台线程上运行 <paramref name="body"/> 并
-    立即返回。委托必须是非捕获的（只操作
-    静态/共享状态）；用原子操作或 App.Post 把结果
+    立即返回。静态方法组、实例方法组（接收者随闭包记录
+    一起保留）与捕获 lambda 都可以；启动后不要再改
+    body 捕获到的可变状态，用原子操作或 App.Post 把结果
     安全地交回另一线程。线程成功启动返回 true。
 
 - static void Sleep(int milliseconds)
@@ -1037,7 +1038,8 @@ t.Stop();
 
 ## void (delegate)
 
-无参数的线程入口点。可赋值 lambda 或静态方法
-组：<c>Thread.Start(() => { ... })</c> 或 <c>Thread.Start(Worker)</c>。
+无参数的线程入口点。可赋值 lambda、静态方法组或实例方法
+组：<c>Thread.Start(() => { ... })</c>、<c>Thread.Start(Worker)</c>
+或 <c>Thread.Start(new Job(1).Run)</c>。
 
 `delegate void ThreadStart();`

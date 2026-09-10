@@ -249,8 +249,8 @@ app.Post(() =&gt; { ... });                        // 后台线程安全投递�
 SignalString inputText = new SignalString();    // 响应式信号
 Input box = new Input(&quot;type here&quot;);
 box.data = model.inputText;                     // data 是 Binding&lt;T&gt;</code></pre></div>
-<p>💡 关键约定：<b>Zan 委托不能作为带状态的闭包长期持有</b>（委托是函数指针，
-不能捕获局部变量/this 来跨帧引用）。需要捕获状态的处理器请：</p>
+<p>💡 关键约定：<b>跨帧要读写同一份状态时，别指望闭包的捕获项</b>。闭包能捕获
+局部变量，但只读捕获是创建时的快照；需要跨帧共享状态的处理器请：</p>
 <ul><li>存为类字段/静态字段，或</li><li>用 <code class="inline">.zform</code> 的 <code class="inline">onClick: &quot;Save&quot;</code> + <code class="inline">Form.On(&quot;Save&quot;, () =&gt; ...)</code>（HandlerRegistry）。</li></ul>
 <h2 id="布局系统">布局系统</h2>
 <h3 id="停靠布局默认winforms-风格">停靠布局（默认，WinForms 风格）</h3>
@@ -606,7 +606,7 @@ ed.ApplyTheme(...);</code></pre></div>
 <p>手动写 <code class="inline">.zform</code> 也完全可行（IDE 的 json 视图可直接编辑），文本放上面
 「.zform 设计文档」。</p>
 <h2 id="常见问题-备忘">常见问题 / 备忘</h2>
-<ul><li>事件委托不能捕获局部变量跨帧使用 → 用类字段或 <code class="inline">Form.On(name, Action)</code>。</li><li><code class="inline">.zform</code> 里 <code class="inline">kind</code> 用类名（<code class="inline">SelectBox</code> 不是 <code class="inline">Select</code>、<code class="inline">WebViewBox</code> 不是</li></ul>
+<ul><li>事件委托跨帧共享状态用类字段/<code class="inline">Signal</code>——闭包的只读捕获是创建时快照，改不出跨帧效果。</li><li><code class="inline">.zform</code> 里 <code class="inline">kind</code> 用类名（<code class="inline">SelectBox</code> 不是 <code class="inline">Select</code>、<code class="inline">WebViewBox</code> 不是</li></ul>
 <p>  <code class="inline">WebView</code>、<code class="inline">CefBrowserBox</code> 不是 <code class="inline">CefBrowser</code>、<code class="inline">DataGrid</code> 不是 <code class="inline">DataTable</code>）。</p>
 <ul><li>泛型控件 <code class="inline">.zform</code> 用 <code class="inline">of</code> 给类型实参；缺省 <code class="inline">string</code>。</li><li><code class="inline">Panel.Root</code> 是窗口根容器；普通 <code class="inline">Panel</code> 是卡片。窗口本身是 <code class="inline">Form</code>。</li><li>控件文本/选中/禁用等字段是 <code class="inline">Binding&lt;T&gt;</code>：直接赋值每帧读一次模型字段，</li></ul>
 <p>  适合做双向绑定。</p>

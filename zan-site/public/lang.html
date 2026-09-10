@@ -314,7 +314,9 @@ delegate T Foo&lt;T&gt;(T x);
 BinOp add = (a, b) =&gt; a + b;              // lambda
 add(2, 3);                                // 5
 BinOp mul = delegate (int a, int b) { return a * b; };  // 匿名方法</code></pre></div>
-<p>✅ 委托支持捕获闭包（包括可变捕获），通过函数指针调用。⚠️ 事件处理器经 UI
+<p>✅ 委托支持捕获闭包：只读捕获在创建时快照进闭包记录，被闭包赋值的局部变量
+提升为共享单元（闭包内外的修改互相可见）。调用按形态分派——静态方法组与
+无捕获 lambda 是裸函数指针，实例方法组与捕获 lambda 是堆闭包记录。⚠️ 事件处理器经 UI
 线程派发队列执行，可安全重建控件树（见 GUI 指南）。</p>
 <h3 id="record">record</h3>
 <div class="code-card"><div class="code-bar"><i></i><i></i><i></i><span>zan</span></div>

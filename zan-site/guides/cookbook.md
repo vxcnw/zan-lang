@@ -318,8 +318,19 @@ class Cookbook {
 // cookbook: Thread 与 Channel（协程通信）
 using System;
 using System.Threading;
+
+// 线程入口可以是静态方法组、实例方法组或捕获 lambda：无捕获形态是裸函数
+// 指针，实例方法组与捕获 lambda 是堆闭包记录。线程启动时自己 retain、执行完
+// release，所以临时的接收者（new Job(7).Run）也能安全传进去。
+class Job {
+    public int n;
+    public Job(int x) { n = x; }
+    public void Run() { Console.WriteLine("job " + n + " on " + Thread.CurrentId()); }
+}
+
 class Cookbook {
     static void Main() {
+        Thread.Start(new Job(7).Run);
         Thread.Start(() => { Console.WriteLine("worker " + Thread.CurrentId()); });
         Thread.Sleep(50);
         Channel ch = new Channel(4);

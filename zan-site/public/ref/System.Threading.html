@@ -1193,8 +1193,9 @@ Windows 上使用 Win32 API，POSIX（Linux/macOS）上使用 libc 中的 pthrea
 </li>
 <li class=""><code class="sig">static bool Start(ThreadStart body)</code>
 <div class="mdoc">在新的分离后台线程上运行 &lt;paramref name=&quot;body&quot;/&gt; 并
-立即返回。委托必须是非捕获的（只操作
-静态/共享状态）；用原子操作或 App.Post 把结果
+立即返回。静态方法组、实例方法组（接收者随闭包记录
+一起保留）与捕获 lambda 都可以；启动后不要再改
+body 捕获到的可变状态，用原子操作或 App.Post 把结果
 安全地交回另一线程。线程成功启动返回 true。</div>
 </li>
 <li class=""><code class="sig">static void Sleep(int milliseconds)</code>
@@ -1286,8 +1287,9 @@ t.Stop();</div>
 </div></div>
 <div class="api"><div class="api-head"><span class="ns">void</span><span class="tag">delegate</span></div>
 <div class="api-body">
-<div class="mdoc">无参数的线程入口点。可赋值 lambda 或静态方法
-组：&lt;c&gt;Thread.Start(() =&gt; { ... })&lt;/c&gt; 或 &lt;c&gt;Thread.Start(Worker)&lt;/c&gt;。</div>
+<div class="mdoc">无参数的线程入口点。可赋值 lambda、静态方法组或实例方法
+组：&lt;c&gt;Thread.Start(() =&gt; { ... })&lt;/c&gt;、&lt;c&gt;Thread.Start(Worker)&lt;/c&gt;
+或 &lt;c&gt;Thread.Start(new Job(1).Run)&lt;/c&gt;。</div>
 </div></div>
     </div>
   </div>

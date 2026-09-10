@@ -173,6 +173,38 @@ Dynamic arrays use Copy-on-Write:
 
 ---
 
+### 3.6 Closure Record Layout (delegate)
+
+delegate 值是**一个指针两种形态**，bit 0（`ZAN_CLOSURE_TAG`）区分：
+
+| 形态 | bit 0 | 产生自 | 调用方式 |
+|------|-------|--------|----------|
+| 裸函数指针 | 0（偶） | 静态方法组、无捕获 lambda | 直接按签名调用，可原样交给 C 当回调 |
+| 带 tag 的堆闭包记录 | 1（奇） | 实例方法组、捕获 lambda | 卸掉 tag 后按 `fn(record, args...)` 调用（rec-first） |
+
+记录布局（64 位平台，见 `src/common/zan_abi.h`）：
+
+| 偏移 | 字段 |
+|------|------|
+| 0（`ZAN_CLOSURE_FN_OFF`） | `void *fn` —— thunk，第一个参数就是记录自身 |
+| 8（`ZAN_CLOSURE_DTOR_OFF`） | `void *dtor` —— 记录 rc 归零时调用，释放捕获项与 target |
+| 16（`ZAN_CLOSURE_TARGET_OFF`） | `void *target` —— 绑定的接收者，记录持有其引用 |
+| 24 起 | 捕获值（只读捕获是创建时的快照；被闭包赋值的局部变量提升为共享单元） |
+
+记录用对象分配器分配，因此带 16 字节 rc 头（`ZAN_OBJ_RC_OFF`）：retain 是
+`rec - 16` 处的计数加一，release 走记录自己的 dtor、归零时释放。
+
+**store-family 契约**：runtime 只要把 delegate 留下来、在其到达的那次调用之后
+再执行，就必须先 retain（执行完再 release）。现存的两个 store-family 站点是
+UI 派发队列与 `Thread.Start` 的 native trampoline —— 线程入口不 retain 的话，
+调用方在 `Thread.Start(...)` 语句结束就释放了自己的临时量，工作线程可能还没
+开始跑，闭包已被释放（use-after-free）。
+
+wasm32 没有真实函数指针（裸 fn 实为函数表索引），所有 delegate 都是记录形态，
+表基址取 2 使裸索引恒为偶；记录内的三个偏移按 32 位指针宽为 0/4/8。
+
+---
+
 ## 4. Virtual Dispatch
 
 ### 4.1 TypeDescriptor

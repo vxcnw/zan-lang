@@ -158,7 +158,7 @@ Type
 ├── Reference Types (heap allocated, ARC managed)
 │   ├── class              (user-defined reference type)
 │   ├── interface           (abstract contract)
-│   ├── delegate           (function pointer type)
+│   ├── delegate           (function pointer / tagged closure record)
 │   └── array T[]          (managed array)
 │
 └── Special Types
@@ -363,6 +363,13 @@ public delegate TResult Func<T, TResult>(T arg);
 ```
 
 支持捕获的 lambda（闭包）与无捕获 lambda。
+
+委托值是**一个指针两种形态**：静态方法组与无捕获 lambda 是裸函数指针
+（可直接交给 C 当回调）；实例方法组与捕获 lambda 是带 tag 的堆闭包记录，
+调用形式为 `fn(record, args...)`。捕获语义：只读捕获在创建闭包时把值复制
+进记录（此后外层的写入不可见）；被闭包**赋值**的局部变量提升为共享单元，
+闭包内外的修改互相可见。runtime 若要把委托留存到下一次调用之后，必须
+retain（见 `docs/ABI.md` §3.6）。
 
 ### 4.8 Access Control
 

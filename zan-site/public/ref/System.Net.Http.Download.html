@@ -299,8 +299,8 @@
 <code>HttpClient.DownloadBinaryToFileAsync</code>，因此断点续传、
 Range、超时的语义与别处一致。
 
-线程分工与 AiNet 一致：&lt;c&gt;Thread.Start&lt;/c&gt; 收的是非捕获委托，所以任务
-对象经一个受锁保护的队列交给 worker；worker 只写阶段/序号/当前文件名/
+线程分工与 AiNet 一致：任务对象经一个受锁保护的队列交给 worker；
+worker 只写阶段/序号/当前文件名/
 错误（受同一把锁），GUI 线程每帧读一次。单个文件的字节进度不走锁：
 HttpClient 把 &quot;已收/总计&quot; 写进伴生进度文件，读的那一侧（GUI 或
 <code>Poll</code> 的调用方）自己去读，因此外部下载器也能驱动同一个
