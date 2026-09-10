@@ -12,7 +12,16 @@ $sources = @(
     'Save.zan', 'Net.zan', 'Shell.zan', 'PageMap.zan', 'PageMapInner.zan',
     'PageArena.zan', 'PageBag.zan', 'PageScene.zan', 'Slots.zan'
 ) | ForEach-Object { "$template/src/$_" }
-& $Compiler @sources --auto-stdlib -o "$Output/Legend.exe"
+# 并行会话在改 stdlib/Gui/Component/Chart（`Chart.StackExtentF` 等签名变化还没
+# 落完）；--auto-stdlib 看到 `using Gui;` 会把整张 Chart 拉进编译。legend 本身
+# 不用 Chart，复用 _scratch/stdlib-noc（HEAD 干净副本）做局部旁路。
+$nocRoot = Join-Path $repo '_scratch/stdlib-noc'
+$useNoc = (Test-Path $nocRoot) -and $env:LEGEND_STDLIB_HEAD -eq '1'
+if ($useNoc) {
+    & $Compiler @sources --stdlib-path $nocRoot -o "$Output/Legend.exe"
+} else {
+    & $Compiler @sources --auto-stdlib -o "$Output/Legend.exe"
+}
 if ($LASTEXITCODE -ne 0) { throw 'Legend compilation failed' }
 foreach ($dir in @('assets', 'skins', 'data')) { Copy-Item -LiteralPath "$template/$dir" -Destination $Output -Recurse -Force }
 Write-Host "Built: $Output/Legend.exe"

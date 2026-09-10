@@ -3,31 +3,55 @@ using Gui;
 using Gui.Widget;
 using Legend;
 
-/// 页 2「幻境」——照原版 `幻境.png` 1:1 还原。
-///
-/// 场景页家族（幻境 2 / BOSS之家 3 / 押镖 4 / 秘境 12 / 世界BOSS 13）共用
-/// 这套骨架：左列上半是场景面板、左列下半是掉落格、右列是排行榜；差别只在
-/// 标题文案、怪物/NPC 立绘、底部提示与按钮。本文件先落幻境。
+/// 场景页家族内部用的无参回调（与 Gui.Action 等价，但写在 file 顶作用域，
+/// 让 `delegate {...}` 字面量也能解到）。
+delegate void SceneFn();
+
+/// 页 2「幻境」+ 场景页家族（幻境 2 / 秘境 12 / 世界BOSS 13）——
+/// 照原版 1:1 还原，骨架在 `BuildSceneFamily`，每页只覆盖自己的内容：
+/// 标题、怪物、立绘、按钮、提示、排行榜。BOSS之家（页 3）/ 押镖（页 4）
+/// 是另一族（场景面板 + 怪物 + 掉落格 + 表格式右栏），各自建独立页。
 ///
 /// 分区（REFERENCE_AUDIT.md §5.11 实测，设备像素 = 150% 屏上的原图）：
 ///   内容块     x 374..1491   y 163..902
 ///   场景面板   x 374..1102   y 163..717
-///       标题「幻境N」贴左上（内边距 27/20），玩家头像+气血贴右上（19/19），
+///       标题贴左上（内边距 27/20），玩家头像+气血贴右上（19/19），
 ///       怪物立绘在面板中下（血字 + 血条压在立绘上方），底部右下三行
-///       自动重置 → 提示 → 四个按钮，左下「最高幻境记录」。
+///       自动重置 → 提示 → 四个按钮，左下「最高N记录」。
 ///   掉落格面板 x 374..1102   y 717..880（12 格 × 3 行，格 57×49 设备）
 ///   排行榜面板 x 1102..1491  y 163..880（10 行，行距 70.7 设备）
 ///
-/// 数据来源：进度/怪物取离线 `Game`（floor / best / enemyHp 与当前层怪物），
-/// 联机时玩家气血走 `net.Self()`。排行榜服务端还没有这个 op（缺口记在
-/// TASKS.md），先照原版截图的演示榜渲染——与竞技场页的兜底同一套思路。
+/// 数据来源：进度/怪物取离线 `Game`，联机时玩家气血走 `net.Self()`。
+/// 排行榜服务端还没有这个 op（缺口记在 TASKS.md），先照原版截图的
+/// 演示榜渲染——与竞技场页的兜底同一套思路。
 ///
-/// 一处**已知差异**（数据而非界面）：原版 `幻境1` 画的怪物是白野猪的美术
+/// 一处**已知差异**（数据而非界面）：原版层 1 画的怪物是白野猪的美术
 /// （assets/boss/00801.png），我们的 maps.csv 第 1 层配的是稻草人（00101 系
 /// 的 01601）。这里按我们自己的数据画——要改的是数据不是界面。
 partial class LegendApp {
     /* =====================================================================
-       数据
+       场景页家族配置
+       ===================================================================== */
+
+    /// 一个场景页的全部差异：标题、按钮、怪物、提示、排行样式、怪物区底图。
+    /// 每页只需填一份 SceneCfg 调 `BuildSceneFamily(cfg)`。
+    class SceneCfg {
+        string title;            // 标题：原版「幻境1」「秘境1」「等级64」
+        string bestLabel;        // 左下「最高N记录」前缀：原版「最高幻境记录」
+        string bestValue;        // 数字串
+        string challengeLabel;   // 挑战钮：「挑战幻境」「挑战秘境」「挑战BOSS」
+        string sweepLabel;       // 扫荡钮：「扫荡幻境」「扫荡秘境」（无则空）
+        string sweepHint;        // 提示行（与右下方「提示：…」同位）
+        bool showAutoReset;      // 是否显示「自动重置」复选框
+        int enemyPicture;        // 怪物立绘 picture 号（0 = 空白占位）
+        int enemyHp;             // 怪物当前血量
+        int enemyHpMax;          // 怪物最大血量
+        string enemyHpText;      // 怪物血字（已含分隔符，如 "200/200"），空=用上面两个数算
+        bool isWorldBoss;        // 世界BOSS 立绘较大
+    }
+
+    /* =====================================================================
+       数据：场景页家族共享
        ===================================================================== */
 
     /// 排行榜演示数据：原版截图上的 10 行。
@@ -38,6 +62,8 @@ partial class LegendApp {
         };
     }
 
+    /// 排行榜演示楼层（层）：原版 6063/6003/... 截图取自幻境页。
+    /// 秘境和世界BOSS 复用同一组数（顶几位的层数差异不影响演示态）。
     static int[] SceneDemoFloors() {
         return new int[] { 6063, 6003, 5783, 5428, 5392, 5356, 5245, 5185, 5174, 5082 };
     }
@@ -55,27 +81,23 @@ partial class LegendApp {
     /// 血条配色：原版逐行换色（品红/红/绿/青/蓝/蓝绿/紫/蓝/蓝/深蓝）。
     static string SceneBarCls(int i) { return "scene-rank-bar scene-rank-bar-" + Rules.N(i % 10); }
 
-    /// 面板标题：原版是「幻境N」——场景名 + 当前层号（截图上是「幻境1」）。
-    string SceneTitle() { return "幻境" + Rules.N(SceneFloor()); }
-
-    int SceneFloor() { return g.floor; }
-    int SceneBest() { return g.best; }
-
-    /// 当前层怪物。离线取 `Game.EnemyData()`（地图 → 怪物 id → 怪物行），
-    /// 立绘走 `PicturePath("boss", picture)`——monsters.csv 的 picture 列就是
-    /// 美术号（00101 系）。
-    DataRow SceneEnemy() { return g.EnemyData(); }
-
-    int SceneEnemyMax() {
-        int live = g.enemyMax;
-        if (live > 0) { return live; }
-        return SceneEnemy().Int("hp");
+    /// 榜头像：原版每人一张职业立绘；离线榜按行轮换我们的 6 张（与竞技场
+    /// 同一套素材）。
+    static string SceneRankFacePath(int i) {
+        int n = 43 + i % 6;
+        return "assets/ui/000" + Rules.N(n) + ".jpg";
     }
 
-    int SceneEnemyHp() {
-        if (g.enemyMax <= 0) { return SceneEnemyMax(); }
-        return Rules.Clamp(g.enemyHp, 0, g.enemyMax);
+    /// 榜头像边框：第 1 名金、第 2/3 名品红、其余暗品红（原版实拍）。
+    static string SceneRankFaceCls(int i) {
+        if (i == 0) { return " scene-rank-face-1"; }
+        if (i == 1 || i == 2) { return " scene-rank-face-2"; }
+        return " scene-rank-face-3";
     }
+
+    string SceneRankName(int i) { return SceneDemoNames()[i % Spec.SceneRankRows()]; }
+    int SceneRankFloor(int i) { return SceneDemoFloors()[i % Spec.SceneRankRows()]; }
+    int SceneRankLevel(int i) { return SceneDemoLevels()[i % Spec.SceneRankRows()]; }
 
     /// 玩家气血：联机以服务端 self 为准，离线用本地进度。
     string ScenePlayerHp() {
@@ -84,32 +106,82 @@ partial class LegendApp {
         return Rules.N(g.hp) + "/" + Rules.N(g.MaxHp());
     }
 
-    /// 本层掉落池的道具 id：地图 → drop_pool → drops.csv 的 item_id。
-    List<int> SceneDropIds() {
-        List<int> ids = new List<int>();
-        int pool = GameTables.current.Map(SceneFloor()).Int("drop_pool");
-        for (int i = 0; i < GameTables.current.drops.rows.Count; i = i + 1) {
-            DataRow d = GameTables.current.drops.rows[i];
-            if (d.Int("pool") == pool) { ids.Add(d.Int("item_id")); }
-            if (ids.Count >= Spec.SceneLootCells()) { break; }
-        }
-        return ids;
+    /// 道具图标：items.csv 的 picture → assets/item/NNNNN.png。
+    /// 00002.png 是 art.csv 里的空白占位图，缺图一律落它（画出来是空格）。
+    string SceneItemPath(int itemId) {
+        if (itemId <= 0) { return "assets/item/00002.png"; }
+        string path = "assets/item/" + Rules.N(GameTables.current.items.At(itemId).Int("picture")).PadLeft(5, "0") + ".png";
+        if (System.IO.File.Exists(path)) { return path; }
+        return "assets/item/00002.png";
     }
 
-    /// 道具图标：items.csv 的 picture → assets/item/NNNNN.png（art.csv 把
-    /// 00002.png 当空白占位，缺图也落它）。格子本体走通用 `Slots.zan`。
-    string SceneItemPath(int itemId) { return ItemArtById(itemId); }
-
     /* =====================================================================
-       页面
+       家族调度
        ===================================================================== */
 
+    /// 页 2 入口：幻境。
     void BuildScene() {
-        /* 宽高按运行期画布算（同地图页/竞技场：窗口 resize 后要重建本页）。 */
+        SceneCfg cfg = new SceneCfg();
+        cfg.title = "幻境" + Rules.N(g.floor);
+        cfg.bestLabel = "最高幻境记录：";
+        cfg.bestValue = Rules.N(g.best) + "层";
+        cfg.challengeLabel = "挑战幻境";
+        cfg.sweepLabel = "扫荡幻境";
+        cfg.sweepHint = "提示：只有终身会员才能扫荡";
+        cfg.showAutoReset = true;
+        DataRow m = g.EnemyData();
+        cfg.enemyPicture = m.Int("picture");
+        cfg.enemyHp = SceneEnemyHp();
+        cfg.enemyHpMax = SceneEnemyMax();
+        cfg.enemyHpText = "";
+        cfg.isWorldBoss = false;
+        BuildSceneFamily(cfg, delegate { SceneChallenge(); }, delegate { SceneSweep(); }, delegate { SceneHelp(); });
+    }
+
+    /// 页 12 入口：秘境——与幻境同族，差异：标题、怪物、最高记录、提示文案。
+    void BuildSecret() {
+        SceneCfg cfg = new SceneCfg();
+        cfg.title = "秘境" + Rules.N(g.secretFloor);
+        cfg.bestLabel = "最高秘境记录：";
+        cfg.bestValue = Rules.N(g.secrets) + "层";
+        cfg.challengeLabel = "挑战秘境";
+        cfg.sweepLabel = "扫荡秘境";
+        cfg.sweepHint = "提示：巅峰人物才能挑战秘境";
+        cfg.showAutoReset = g.secretAutoPush;
+        DataRow m = g.EnemyData();
+        cfg.enemyPicture = m.Int("picture");
+        cfg.enemyHp = SceneEnemyHp();
+        cfg.enemyHpMax = SceneEnemyMax();
+        cfg.enemyHpText = "";
+        cfg.isWorldBoss = false;
+        BuildSceneFamily(cfg, delegate { SecretChallenge(); }, delegate { SecretSweep(); }, delegate { SecretHelp(); });
+    }
+
+    /// 页 13 入口：世界BOSS——怪物大（占位更大）、与 BOSS之家共享挑战次数、
+    /// 排行榜 10 行（玩家名 + "次/伤害"），与幻境共家族，但右下列出的玩家
+    /// 攻击/伤害。差异在 cfg + 挑战动作。
+    void BuildWorldBoss() {
+        SceneCfg cfg = new SceneCfg();
+        cfg.title = "等级 " + Rules.N(g.level);
+        cfg.bestLabel = "剩余BOSS挑战次数：";
+        cfg.bestValue = Rules.N(g.bossTries > 0 ? g.bossTries : GameTables.Value("boss_tries")) + "次";
+        cfg.challengeLabel = "挑战BOSS";
+        cfg.sweepLabel = "";
+        cfg.sweepHint = "提示：挑战都会消耗次数";
+        cfg.showAutoReset = false;
+        DataRow m = g.EnemyData();
+        cfg.enemyPicture = m.Int("picture");
+        cfg.enemyHp = SceneEnemyHp();
+        cfg.enemyHpMax = SceneEnemyMax();
+        cfg.enemyHpText = "";
+        cfg.isWorldBoss = true;
+        BuildSceneFamily(cfg, delegate { WorldBossChallenge(); }, null, delegate { WorldBossHelp(); });
+    }
+
+    /// 家族渲染：把 SceneCfg 喂进统一的场景面板/掉落/排行/底部。
+    void BuildSceneFamily(SceneCfg cfg, SceneFn onChallenge, SceneFn onSweep, SceneFn onHelp) {
         int pageW = app.ClientWidth() - Spec.LeftPad() - Spec.LeftW()
             - Spec.ChatW() - Spec.ChatPadR();
-        int pageH = app.ClientHeight() - app.ContentTop() - Spec.ContentTopPad()
-            - Spec.TopH() - Spec.BotTileRowH() - Spec.BotTileBottom();
         int sceneW = pageW - Spec.SceneRankW();
         if (sceneW < Spec.Px(200)) { sceneW = Spec.Px(200); }
 
@@ -121,7 +193,7 @@ partial class LegendApp {
         Panel leftCol = Panel.Column(); leftCol.Pad(0); leftCol.Gap(0); leftCol.Grow();
         body.With(leftCol);
 
-        Panel scene = ScenePane(sceneW);
+        Panel scene = ScenePane(cfg, sceneW, onChallenge, onSweep, onHelp);
         scene.Grow(); leftCol.With(scene);
         Panel botPad = Panel.Column(); botPad.Prefer(0, Spec.SceneBotPad());
         botPad.DockBottom(); leftCol.Add(botPad);
@@ -138,7 +210,7 @@ partial class LegendApp {
     }
 
     /// 场景面板：标题行 → 怪物区（吃余量）→ 底部操作区。
-    Panel ScenePane(int paneW) {
+    Panel ScenePane(SceneCfg cfg, int paneW, SceneFn onChallenge, SceneFn onSweep, SceneFn onHelp) {
         Panel pane = Panel.Column(); pane.Class = "scene-panel";
         pane.Pad(0); pane.Gap(0);
 
@@ -150,13 +222,13 @@ partial class LegendApp {
         Panel titleCol = Panel.Column(); titleCol.Pad(0); titleCol.Gap(0); titleCol.Grow();
         titleCol.Padding(Spec.SceneTitleInsetT(), 0, 0, Spec.SceneTitleInsetL());
         head.With(titleCol);
-        titleCol.With(Text(SceneTitle(), "scene-title", 0));
+        titleCol.With(Text(cfg.title, "scene-title", 0));
         Panel face = ScenePlayerBlock();
         face.Prefer(Spec.SceneFaceW(), 0); face.DockRight(); head.Add(face);
 
-        Panel mon = SceneMonsterZone(paneW, ScenePaneHeight());
+        Panel mon = SceneMonsterZone(cfg, paneW, ScenePaneHeight());
         mon.Grow(); pane.With(mon);
-        Panel foot = SceneFooter();
+        Panel foot = SceneFooter(cfg, onChallenge, onSweep, onHelp);
         foot.DockBottom(); pane.Add(foot);
         return pane;
     }
@@ -206,7 +278,7 @@ partial class LegendApp {
     }
 
     /// 怪物区：立绘沉在区域底部（上方留空），血字 + 血条压在立绘上。
-    Panel SceneMonsterZone(int paneW, int paneH) {
+    Panel SceneMonsterZone(SceneCfg cfg, int paneW, int paneH) {
         Panel zone = Panel.Column(); zone.Class = "scene-mon-zone";
         zone.Pad(0); zone.Gap(0);
 
@@ -234,16 +306,18 @@ partial class LegendApp {
         hpRow.Pad(0); hpRow.Prefer(0, Spec.SceneMonHpTextH());
         hpRow.Padding(0, 0, 0, hpInset);
         block.With(hpRow);
-        hpRow.With(Text(Rules.N(SceneEnemyHp()) + "/" + Rules.N(SceneEnemyMax()),
-            "scene-mon-hp", 0));
+        string hpText = cfg.enemyHpText.Length > 0
+            ? cfg.enemyHpText
+            : Rules.N(cfg.enemyHp) + "/" + Rules.N(cfg.enemyHpMax);
+        hpRow.With(Text(hpText, "scene-mon-hp", 0));
         Panel barGap = Panel.Column(); barGap.Prefer(0, Spec.SceneMonBarGap());
         block.With(barGap);
         Panel barRow = Panel.Row(); barRow.Pad(0); barRow.Prefer(0, Spec.SceneMonHpBarH());
         block.With(barRow);
         barRow.With(SpacerW(hpInset));
-        int maxHp = SceneEnemyMax();
+        int maxHp = cfg.enemyHpMax;
         int barW = Spec.SceneMonHpW();
-        if (maxHp > 0) { barW = Spec.SceneMonHpW() * SceneEnemyHp() / maxHp; }
+        if (maxHp > 0) { barW = Spec.SceneMonHpW() * cfg.enemyHp / maxHp; }
         if (barW < Spec.Px(2)) { barW = Spec.Px(2); }
         Panel bar = Panel.Row(); bar.Class = "scene-mon-bar"; bar.Prefer(barW, Spec.SceneMonHpBarH());
         barRow.With(bar);
@@ -252,7 +326,7 @@ partial class LegendApp {
         Panel spRow = Panel.Row(); spRow.Pad(0); spRow.Prefer(0, Spec.SceneMonBoxH());
         block.With(spRow);
         spRow.With(SpacerW(spInset));
-        int pic = SceneEnemy().Int("picture");
+        int pic = cfg.enemyPicture;
         Image sp = new Image(pic > 0 ? PicturePath("boss", pic) : "assets/item/00002.png",
             "怪物", "contain");
         sp.Prefer(Spec.SceneMonBoxW(), Spec.SceneMonBoxH()); spRow.With(sp);
@@ -262,7 +336,7 @@ partial class LegendApp {
     /// 底部操作区：从底往上码 下留白 → 按钮行 → 缝 → 提示 → 缝 → 自动重置。
     /// 停靠容器按插入序摆放同侧子项，**第一个** DockBottom 落在最底——所以
     /// 从底往上码就得按「离底最近的在最前」写，反了整块会往下平移一个下留白。
-    Panel SceneFooter() {
+    Panel SceneFooter(SceneCfg cfg, SceneFn onChallenge, SceneFn onSweep, SceneFn onHelp) {
         Panel foot = Panel.Column(); foot.Class = "scene-foot";
         foot.Pad(0); foot.Gap(0); foot.Prefer(0, Spec.SceneFootH());
 
@@ -272,33 +346,37 @@ partial class LegendApp {
         btnRow.Prefer(0, Spec.SceneBtnH());
         btnRow.Padding(0, Spec.SceneBtnInsetR(), 0, Spec.SceneBtnPadL());
         btnRow.DockBottom(); foot.Add(btnRow);
-        /* 左：最高幻境记录（自然宽，dock 3 落左端，行高内垂直居中）。 */
-        btnRow.With(Text("最高幻境记录：" + Rules.N(SceneBest()) + "层", "scene-record", 0));
+        /* 左：最高记录（自然宽，dock 3 落左端，行高内垂直居中）。 */
+        btnRow.With(Text(cfg.bestLabel + cfg.bestValue, "scene-record", 0));
         /* 右：一排按钮。先加撑条（dock 5）再加按钮行（dock 4）——顺序反了
            按钮会被推到左端（停靠容器按插入序先摆 dock 1..4）。 */
         Panel fill = Panel.Row(); fill.Grow(); btnRow.With(fill);
         Panel btns = Panel.Row(); btns.Pad(0); btns.Gap(Spec.SceneBtnGap());
         btns.DockRight(); btnRow.Add(btns);
-        btns.With(SceneAutoToggle());
-        btns.With(SceneBtn("挑战幻境", Spec.SceneBtnChallengeW(), () => SceneChallenge()));
-        btns.With(SceneBtn("扫荡幻境", Spec.SceneBtnSweepW(), () => SceneSweep()));
-        btns.With(SceneBtn("说明", Spec.SceneBtnHelpW(), () => SceneHelp()));
+        if (cfg.showAutoReset) { btns.With(SceneAutoToggle()); }
+        btns.With(SceneBtn(cfg.challengeLabel, Spec.SceneBtnChallengeW(), onChallenge));
+        if (cfg.sweepLabel.Length > 0) {
+            btns.With(SceneBtn(cfg.sweepLabel, Spec.SceneBtnSweepW(), onSweep));
+        }
+        btns.With(SceneBtn("说明", Spec.SceneBtnHelpW(), onHelp));
 
         Panel g1 = Panel.Column(); g1.Prefer(0, Spec.SceneFootGap1()); g1.DockBottom(); foot.Add(g1);
         Panel hintRow = Panel.Row(); hintRow.Pad(0); hintRow.Prefer(0, Spec.SceneHintH());
         hintRow.Padding(0, Spec.SceneHintInsetR(), 0, 0);
         hintRow.DockBottom(); foot.Add(hintRow);
         Panel hintFill = Panel.Row(); hintFill.Grow(); hintRow.With(hintFill);
-        Label hint = Text("提示：只有终身会员才能扫荡", "scene-hint", 0);
+        Label hint = Text(cfg.sweepHint, "scene-hint", 0);
         hint.DockRight(); hintRow.Add(hint);
 
-        Panel g2 = Panel.Column(); g2.Prefer(0, Spec.SceneFootGap2()); g2.DockBottom(); foot.Add(g2);
-        Panel chkRow = Panel.Row(); chkRow.Pad(0); chkRow.Prefer(0, Spec.SceneChkRowH());
-        chkRow.Padding(0, Spec.SceneChkInsetR(), 0, 0);
-        chkRow.DockBottom(); foot.Add(chkRow);
-        Panel chkFill = Panel.Row(); chkFill.Grow(); chkRow.With(chkFill);
-        Checkbox autoReset = SceneAutoResetCheck();
-        autoReset.DockRight(); chkRow.Add(autoReset);
+        if (cfg.showAutoReset) {
+            Panel g2 = Panel.Column(); g2.Prefer(0, Spec.SceneFootGap2()); g2.DockBottom(); foot.Add(g2);
+            Panel chkRow = Panel.Row(); chkRow.Pad(0); chkRow.Prefer(0, Spec.SceneChkRowH());
+            chkRow.Padding(0, Spec.SceneChkInsetR(), 0, 0);
+            chkRow.DockBottom(); foot.Add(chkRow);
+            Panel chkFill = Panel.Row(); chkFill.Grow(); chkRow.With(chkFill);
+            Checkbox autoReset = SceneAutoResetCheck();
+            autoReset.DockRight(); chkRow.Add(autoReset);
+        }
         return foot;
     }
 
@@ -352,10 +430,12 @@ partial class LegendApp {
             row.Prefer(0, Spec.SceneLootCellH()); pane.With(row);
             for (int c = 0; c < Spec.SceneLootCols(); c = c + 1) {
                 int i = r * Spec.SceneLootCols() + c;
-                int id = 0;
-                if (n > 0) { id = ids[i % n]; }
-                row.With(ItemSlotById("scene-loot-cell",
-                    Spec.SceneLootCellW(), Spec.SceneLootCellH(), id, 1));
+                Panel cell = Panel.Row(); cell.Class = "scene-loot-cell";
+                cell.Prefer(Spec.SceneLootCellW(), Spec.SceneLootCellH()); row.With(cell);
+                if (n == 0) { continue; }
+                int id = ids[i % n];
+                Image icon = new Image(SceneItemPath(id), "掉落", "contain");
+                icon.Prefer(Spec.SceneLootCellW(), Spec.SceneLootCellH()); cell.With(icon);
             }
         }
         return pane;
@@ -397,26 +477,33 @@ partial class LegendApp {
         return pane;
     }
 
-    /// 榜头像：原版每人一张职业立绘；离线榜按行轮换我们的 6 张（与竞技场
-    /// 同一套素材）。
-    static string SceneRankFacePath(int i) {
-        int n = 43 + i % 6;
-        return "assets/ui/000" + Rules.N(n) + ".jpg";
+    /// 本层掉落池的道具 id：地图 → drop_pool → drops.csv 的 item_id。
+    List<int> SceneDropIds() {
+        List<int> ids = new List<int>();
+        int pool = GameTables.current.Map(SceneFloor()).Int("drop_pool");
+        for (int i = 0; i < GameTables.current.drops.rows.Count; i = i + 1) {
+            DataRow d = GameTables.current.drops.rows[i];
+            if (d.Int("pool") == pool) { ids.Add(d.Int("item_id")); }
+            if (ids.Count >= Spec.SceneLootCells()) { break; }
+        }
+        return ids;
     }
 
-    /// 榜头像边框：第 1 名金、第 2/3 名品红、其余暗品红（原版实拍）。
-    static string SceneRankFaceCls(int i) {
-        if (i == 0) { return " scene-rank-face-1"; }
-        if (i == 1 || i == 2) { return " scene-rank-face-2"; }
-        return " scene-rank-face-3";
+    int SceneFloor() { return g.floor; }
+
+    int SceneEnemyMax() {
+        int live = g.enemyMax;
+        if (live > 0) { return live; }
+        return g.EnemyData().Int("hp");
     }
 
-    string SceneRankName(int i) { return SceneDemoNames()[i % Spec.SceneRankRows()]; }
-    int SceneRankFloor(int i) { return SceneDemoFloors()[i % Spec.SceneRankRows()]; }
-    int SceneRankLevel(int i) { return SceneDemoLevels()[i % Spec.SceneRankRows()]; }
+    int SceneEnemyHp() {
+        if (g.enemyMax <= 0) { return SceneEnemyMax(); }
+        return Rules.Clamp(g.enemyHp, 0, g.enemyMax);
+    }
 
     /* =====================================================================
-       动作（原版这一页的四个按钮）
+       动作（页 2 幻境的四个按钮）
        ===================================================================== */
 
     void SceneChallenge() {
@@ -438,6 +525,50 @@ partial class LegendApp {
 
     void SceneHelp() {
         string text = "幻境：在幻境推层，击败守卫上一层、战败退一层；自动重置打开后会战败自动退层继续。";
+        if (net.Self() != null) { net.AddChat("[系统]", text); return; }
+        g.Log(text);
+    }
+
+    /// 秘境：挑战 = 开始一次秘境战斗（与幻境共用 AutoHunt 路径）。
+    void SecretChallenge() {
+        if (net.Self() != null) {
+            JsonValue mob = net.MobCount() > 0 ? net.MobAt(0) : null;
+            if (mob != null) { net.AutoHunt(mob.Int("tpl", 0), true); return; }
+            net.AddChat("[系统]", "怪物列表还没拉到，稍后再试。");
+            return;
+        }
+        g.active = true;
+        g.Log("秘境第 " + Rules.N(g.secretFloor) + " 层：开战。");
+    }
+
+    /// 秘境：扫荡按钮 = 提示文案。
+    void SecretSweep() {
+        if (net.Self() != null) { net.AddChat("[系统]", "扫荡秘境需要巅峰等级。"); return; }
+        g.Log("扫荡秘境需要巅峰等级。");
+    }
+
+    /// 秘境：说明。
+    void SecretHelp() {
+        string text = "秘境：可挑战层数上限 = 人物等级 + 100；巅峰人物才能挑战高秘境。";
+        if (net.Self() != null) { net.AddChat("[系统]", text); return; }
+        g.Log(text);
+    }
+
+    /// 世界BOSS：挑战。
+    void WorldBossChallenge() {
+        if (net.Self() != null) {
+            JsonValue mob = net.MobCount() > 0 ? net.MobAt(0) : null;
+            if (mob != null) { net.AutoHunt(mob.Int("tpl", 0), true); return; }
+            net.AddChat("[系统]", "怪物列表还没拉到，稍后再试。");
+            return;
+        }
+        g.active = true;
+        g.Log("挑战世界BOSS中。");
+    }
+
+    /// 世界BOSS：说明。
+    void WorldBossHelp() {
+        string text = "世界BOSS：挑战次数与 BOSS之家共享。挑战都会消耗次数，胜利后获得丰厚奖励。";
         if (net.Self() != null) { net.AddChat("[系统]", text); return; }
         g.Log(text);
     }
