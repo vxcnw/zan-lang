@@ -55,6 +55,8 @@ class Warhead {
     bool mindControl;     // converts a living unit to the shooter's side
     bool freeze;          // the hit unit stands frozen for a while
     bool plantsBomb;      // sticks a timed bomb on the target
+    List<string> animList;  // impact art, small to large by damage tier
+    bool conventional;      // Conventional=yes: bullets/shells (water splash)
 
     static Warhead Create(string name, string verses) {
         Warhead w = new Warhead();
@@ -75,6 +77,15 @@ class Warhead {
     bool Freeze() { return this.freeze; }
     bool PlantsBomb() { return this.plantsBomb; }
     void SetSpread(int cells) { this.spread = cells; }
+
+    /// <summary>The impact art list, ordered small to large: the detonation
+    /// picks AnimList[damage/25], so a rifle piff and a battleship shell
+    /// share one list and land on different entries.</summary>
+    void SetAnimList(List<string> names) { this.animList = names; }
+    int AnimCount() { return this.animList == null ? 0 : this.animList.Count; }
+    bool Conventional() { return this.conventional; }
+    void SetConventional(bool v) { this.conventional = v; }
+    string AnimAt(int i) { return this.animList[i]; }
     void SetKillsInfantry(bool on) { this.killsInfantry = on; }
     void SetMindControl(bool on) { this.mindControl = on; }
     void SetFreeze(bool on) { this.freeze = on; }
@@ -103,6 +114,18 @@ class Weapon {
     int rof;       // ticks between shots
     int range;     // cells (manhattan)
     Warhead warhead;
+    // Projectile flight. Speed is the INI's own unit (100 = one cell a
+    // tick, the reference caps at one tile per tick); the projectile type
+    // carries the shape and guidance of the round itself.
+    int speed;
+    ProjectileType proj;
+    // Beam guns -- prism (IsLaser), tesla (IsElectricBolt), radiation and
+    // chrono (IsRadBeam): the light drawn from firer to target IS the
+    // shot, so they hit the instant they fire instead of launching a round.
+    bool isLaser;
+    bool isElectricBolt;
+    bool isRadBeam;
+    int laserDuration;
 
     static Weapon Create(string name, int damage, int rof, int range,
                          Warhead warhead) {
@@ -112,6 +135,8 @@ class Weapon {
         w.rof = rof;
         w.range = range;
         w.warhead = warhead;
+        w.speed = 100;
+        w.laserDuration = 15;
         return w;
     }
 
@@ -124,6 +149,66 @@ class Weapon {
     void SetRof(int rof) { this.rof = rof; }
     void SetRange(int range) { this.range = range; }
     void SetWarhead(Warhead w) { this.warhead = w; }
+    int Speed() { return this.speed; }
+    void SetSpeed(int speed) { this.speed = speed; }
+    ProjectileType Proj() { return this.proj; }
+    void SetProj(ProjectileType p) { this.proj = p; }
+    bool IsLaser() { return this.isLaser; }
+    bool IsElectricBolt() { return this.isElectricBolt; }
+    bool IsRadBeam() { return this.isRadBeam; }
+    void SetBeamFlags(bool laser, bool bolt, bool rad) {
+        this.isLaser = laser;
+        this.isElectricBolt = bolt;
+        this.isRadBeam = rad;
+    }
+    int LaserDuration() { return this.laserDuration; }
+    void SetLaserDuration(int ticks) { this.laserDuration = ticks; }
+
+    /// <summary>A beam gun: the shot is light, not a travelling round, so
+    /// damage lands this tick and the renderer draws the ray.</summary>
+    bool IsBeamWeapon() {
+        return this.isLaser || this.isElectricBolt || this.isRadBeam;
+    }
+}
+
+/// <summary>A projectile type straight out of RULES' [Projectiles] sections:
+/// what the round looks like (Image=, "" when none or Inviso) and how it
+/// flies. Arcing rounds loft on a gravity parabola (tank shells); rounds
+/// with ROT are guided missiles that steer ROT×1.40625° a tick and
+/// accelerate from rest; everything else flies straight at the weapon's
+/// Speed. A weapon whose projectile has no ini section flies the defaults,
+/// exactly like the reference engine's getOrCreateSection fallback.</summary>
+class ProjectileType {
+    string name;
+    string image;      // SHP art name, "" = nothing drawn
+    bool arcing;
+    bool inviso;
+    int rot;           // ini ROT, 0 = unguided
+    int acceleration;  // leptons/tick gained per tick (default 3)
+    bool subjectToWalls;
+
+    static ProjectileType Create(string name) {
+        ProjectileType p = new ProjectileType();
+        p.name = name;
+        p.image = "";
+        p.rot = 0;
+        p.acceleration = 3;
+        p.subjectToWalls = true;
+        return p;
+    }
+
+    string Name() { return this.name; }
+    string Image() { return this.image; }
+    bool Arcing() { return this.arcing; }
+    bool Inviso() { return this.inviso; }
+    int Rot() { return this.rot; }
+    int Acceleration() { return this.acceleration; }
+    void SetImage(string image) { this.image = image; }
+    void SetArcing(bool on) { this.arcing = on; }
+    void SetInviso(bool on) { this.inviso = on; }
+    void SetRot(int rot) { this.rot = rot; }
+    void SetAcceleration(int a) { this.acceleration = a; }
+    bool Homing() { return this.rot > 0 && !this.arcing; }
 }
 
 /// <summary>What a soldier (or drone) is, straight out of RULES.INI: cost and
@@ -403,6 +488,9 @@ class BuildingDef {
 class Rules {
     List<Warhead> warheads;
     List<Weapon> weapons;
+    List<ProjectileType> projectiles;
+    List<string> splashList;   // [CombatDamage] SplashList: water impact art
+    double gravity;            // ini Gravity= (leptons/tick²), retail 6
     List<UnitDef> units;
     List<BuildingDef> buildings;   // both sides interleaved, menu order per side
     List<BuildingDef> civs;        // neutral structures from the map
@@ -470,6 +558,9 @@ class Rules {
         Rules r = new Rules();
         r.warheads = new List<Warhead>();
         r.weapons = new List<Weapon>();
+        r.projectiles = new List<ProjectileType>();
+        r.splashList = new List<string>();
+        r.gravity = 6.0;
         r.units = new List<UnitDef>();
         r.buildings = new List<BuildingDef>();
         r.civs = new List<BuildingDef>();
@@ -602,6 +693,67 @@ class Rules {
         }
         return null;
     }
+
+    /// <summary>Resolves a weapon's Projectile= to a projectile type, taking
+    /// flags from the install's own section when it carries one and plain
+    /// defaults when it does not (the reference synthesizes an empty section
+    /// for pointers at types like YR's InvisibleLow). Cached, so the ini is
+    /// read once per type.</summary>
+    ProjectileType ProjectileFromIni(string name, IniDocument ini) {
+        string key = name.ToUpper();
+        for (int i = 0; i < this.projectiles.Count; i = i + 1) {
+            if (this.projectiles[i].Name() == key) {
+                return this.projectiles[i];
+            }
+        }
+        ProjectileType p = ProjectileType.Create(key);
+        this.projectiles.Add(p);
+        IniSection s = ini.Section(name);
+        if (s != null) {
+            string img = s.Get("Image");
+            if (img.Length > 0 && img.ToLower() != "none") {
+                p.SetImage(img.ToUpper());
+            }
+            if (Rules.YesNo(s.Get("Inviso"))) { p.SetInviso(true); }
+            if (Rules.YesNo(s.Get("Arcing"))) { p.SetArcing(true); }
+            if (s.Contains("ROT")) { p.SetRot(s.GetIntOr("ROT", p.Rot())); }
+            if (s.Contains("Acceleration")) {
+                p.SetAcceleration(s.GetIntOr("Acceleration",
+                                            p.Acceleration()));
+            }
+            if (Rules.YesNo(s.Get("SubjectToWalls")) == false
+             && s.Contains("SubjectToWalls")) {
+                p.subjectToWalls = false;
+            }
+        }
+        return p;
+    }
+
+    /// <summary>The projectile every weapon flies when its section (or the
+    /// weapon's whole firing line) predates the install: an invisible,
+    /// unguided straight round -- the reference's all-flags default.</summary>
+    ProjectileType DefaultProjectile() {
+        if (this.projectiles.Count == 0) {
+            this.projectiles.Add(ProjectileType.Create("INVISIBLE"));
+            this.projectiles[0].SetInviso(true);
+        }
+        return this.projectiles[0];
+    }
+
+    /// <summary>Gravity for arcing shots, from [AudioVisual] Gravity= in
+    /// cells/tick². The retail file carries 6 leptons/tick²; dividing by
+    /// 256 leptons a cell puts the tank-shell arc at the shallow dome the
+    /// original draws.</summary>
+    double GravityCells() { return this.gravity / 256.0; }
+
+    /// <summary>The water-impact animation for damage tier damage/50 -- the
+    /// reference's splashList pick for conventional warheads that burst in
+    /// water. Empty until the install's rules carry the list.</summary>
+    int SplashCount() {
+        return this.splashList == null ? 0 : this.splashList.Count;
+    }
+
+    string SplashAt(int i) { return this.splashList[i]; }
 
     UnitDef UnitNamed(string reg) {
         for (int i = 0; i < this.units.Count; i = i + 1) {
@@ -1553,6 +1705,19 @@ class Rules {
     }
 
     void ApplyIni(IniDocument ini) {
+        // Gravity steers every arcing shot; the retail file carries it under
+        // [AudioVisual].
+        IniSection av = ini.Section("AudioVisual");
+        if (av != null && av.Contains("Gravity")) {
+            this.gravity = av.GetIntOr("Gravity", 6);
+        }
+        IniSection cd = ini.Section("CombatDamage");
+        if (cd != null) {
+            string spl = cd.Get("SplashList");
+            if (spl.Length > 0) {
+                this.splashList = Rules.Csv(spl.ToUpper());
+            }
+        }
         // Warheads first: weapons relink against them below.
         for (int i = 0; i < this.warheads.Count; i = i + 1) {
             Warhead w = this.warheads[i];
@@ -1569,6 +1734,13 @@ class Rules {
             if (s.Contains("CellSpread")) {
                 w.SetSpread(s.GetIntOr("CellSpread", w.Spread()));
             }
+            if (s.Contains("Conventional")) {
+                w.SetConventional(Rules.YesNo(s.Get("Conventional")));
+            }
+            string anims = s.Get("AnimList");
+            if (anims.Length > 0) {
+                w.SetAnimList(Rules.Csv(anims.ToUpper()));
+            }
         }
         for (int i = 0; i < this.weapons.Count; i = i + 1) {
             Weapon w = this.weapons[i];
@@ -1581,6 +1753,20 @@ class Rules {
             string wh = s.Get("Warhead");
             if (wh.Length > 0 && this.WarheadNamed(wh) != null) {
                 w.SetWarhead(this.WarheadNamed(wh));
+            }
+            string spd = s.Get("Speed");
+            if (spd.Length > 0) { w.SetSpeed(s.GetIntOr("Speed", w.Speed())); }
+            string pj = s.Get("Projectile");
+            if (pj.Length > 0) {
+                w.SetProj(this.ProjectileFromIni(pj, ini));
+            }
+            bool laser = Rules.YesNo(s.Get("IsLaser"));
+            bool bolt = Rules.YesNo(s.Get("IsElectricBolt"));
+            bool rad = Rules.YesNo(s.Get("IsRadBeam"));
+            if (laser || bolt || rad) { w.SetBeamFlags(laser, bolt, rad); }
+            if (s.Contains("LaserDuration")) {
+                w.SetLaserDuration(s.GetIntOr("LaserDuration",
+                                              w.LaserDuration()));
             }
         }
         for (int i = 0; i < this.units.Count; i = i + 1) {

@@ -59,6 +59,10 @@ class SubTileInfo {
 
 class Theater {
     Vfs vfs;
+
+    /// <summary>The install's virtual file system, for game-side art probes
+    /// (impact anim frame counts) that do not belong to the render side.</summary>
+    Vfs Vfs() { return this.vfs; }
     string name;
     string extension;
     Palette palette;

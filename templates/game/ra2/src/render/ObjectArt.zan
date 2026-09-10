@@ -844,6 +844,38 @@ class ObjectArt {
         return tex;
     }
 
+    /// <summary>The sprite for a round in flight, one frame from the
+    /// projectile type's own directional SHP. The reference maps its flying
+    /// direction to its facing ring with a 45-degree phase (frame 0 of the
+    /// baked art points a step off north), so n-frame art maps the same
+    /// way; art the install doesn't carry yields null and the round simply
+    /// doesn't draw, the way the original's Inviso rounds behave.</summary>
+    Texture ProjectileTexture(ProjectileType pt, int facing, int side) {
+        string name = pt.Image();
+        if (name.Length == 0) { return null; }
+        string file = name + ".SHP";
+        int count = this.ShapeFrameCount(file);
+        if (count <= 0) { return null; }
+        int deg = ((facing * 45 - 45) % 360 + 360) % 360;
+        int frame = deg * count / 360;
+        if (frame >= count) { frame = count - 1; }
+        return this.ShapeTextureFrame(file, frame, this.UnitPalFor(side));
+    }
+
+    /// <summary>One frame of a warhead's impact animation under the theatre
+    /// palette -- the explosion and crater art is theatre-tinted the same
+    /// way the terrain is. Null when the install lacks the SHP.</summary>
+    Texture AnimTexture(string name, int frame, int side) {
+        // The rules name animations bare ("EXPLOSML"); every shape on the
+        // art side is keyed and read with its .SHP extension on.
+        string file = name + ".SHP";
+        int count = this.ShapeFrameCount(file);
+        if (count <= 0) { return null; }
+        if (frame < 0) { frame = 0; }
+        if (frame >= count) { frame = count - 1; }
+        return this.ShapeTextureFrame(file, frame, this.TheaterPalFor(side));
+    }
+
     /// <summary>How many frames a shape carries, 0 when absent. Drives the
     /// construction animation mapping. Kept in its own cache: the texture
     /// cache's "frame" slot holds a frame index, not a count, so a name-only
@@ -1031,6 +1063,8 @@ class ObjectRenderer {
         }
         ObjectRenderer.DrawEffectsToCanvas(world, r, camX, camY,
                                            originX, originY);
+        ObjectRenderer.DrawFxLayer(world, art, r, camX, camY,
+                                   originX, originY, playerSide);
         return drawn;
     }
 
@@ -1216,6 +1250,98 @@ class ObjectRenderer {
             r.SetColor(255, 255, 255, 255);
         }
         return true;
+    }
+
+    /// <summary>The projectile layer: rounds in flight, impact animations
+    /// and beam rays, all over the units. Sprites come from the install's
+    /// own SHP art through the same cached frame decoder the units use; a
+    /// round the install gives no art for draws nothing (Inviso rounds
+    /// never draw), exactly like the original's invisible bullets.</summary>
+    static void DrawFxLayer(World world, ObjectArt art, R2Canvas r,
+                            int camX, int camY, int originX, int originY,
+                            int playerSide) {
+        if (world == null || art == null) { return; }
+        int cw = r.OutW();
+        int ch = r.OutH();
+        for (int i = 0; i < world.ProjectileCount(); i = i + 1) {
+            Projectile p = world.ProjectileAt(i);
+            ProjectileType pt = p.Type();
+            if (pt.Inviso() || pt.Image().Length == 0) { continue; }
+            int sx = FxScreenX(p.Px(), p.Py(), originX, camX);
+            int sy = FxScreenY(p.Px(), p.Py(), p.Pz(), originY, camY);
+            if (sx < 0 - 64 || sx > cw + 64 || sy < 0 - 64
+             || sy > ch + 64) { continue; }
+            // The sprite rings run counter-clockwise from north, one frame
+            // per 360/n degrees; the direction the round actually flies
+            // picks the frame, the way the reference maps its 32 facings.
+            int facing = WorldObject.FacingOf(
+                (int)(p.DirX() * 1000.0), (int)(p.DirY() * 1000.0));
+            Texture tex = art.ProjectileTexture(pt, facing, p.SideOf());
+            if (tex == null) { continue; }
+            R2Tex img = Ra2Ui.TexOf("ra2:fx:pj:" + pt.Name() + ":"
+                + Convert.ToString(facing) + ":" + Convert.ToString(p.SideOf()),
+                tex);
+            r.DrawTexture(img,
+                sx + IsoProjection.TileW() / 2 - tex.Width() / 2,
+                sy + IsoProjection.TileH() / 2 - tex.Height() / 2,
+                tex.Width(), tex.Height());
+        }
+        for (int i = 0; i < world.AnimFxCount(); i = i + 1) {
+            FxAnim a = world.AnimFxAt(i);
+            if (a.Frames() <= 0) { continue; }
+            int sx = FxScreenX(a.Px(), a.Py(), originX, camX);
+            int sy = FxScreenY(a.Px(), a.Py(), 0, originY, camY);
+            if (sx < 0 - 96 || sx > cw + 96 || sy < 0 - 96
+             || sy > ch + 96) { continue; }
+            Texture tex = art.AnimTexture(a.Name(), a.Frame(), playerSide);
+            if (tex == null) { continue; }
+            R2Tex img = Ra2Ui.TexOf("ra2:fx:an:" + a.Name() + ":"
+                + Convert.ToString(a.Frame()), tex);
+            // Impact art sits centred on the tile it detonated over.
+            r.DrawTexture(img,
+                sx + IsoProjection.TileW() / 2 - tex.Width() / 2,
+                sy + IsoProjection.TileH() / 2 - tex.Height() / 2,
+                tex.Width(), tex.Height());
+        }
+        for (int i = 0; i < world.BeamCount(); i = i + 1) {
+            FxBeam b = world.BeamAt(i);
+            int x0 = FxScreenX(b.X0(), b.Y0(), originX, camX)
+                   + IsoProjection.TileW() / 2;
+            int y0 = FxScreenY(b.X0(), b.Y0(), 0, originY, camY)
+                   + IsoProjection.TileH() / 2;
+            int x1 = FxScreenX(b.X1(), b.Y1(), originX, camX)
+                   + IsoProjection.TileW() / 2;
+            int y1 = FxScreenY(b.X1(), b.Y1(), 0, originY, camY)
+                   + IsoProjection.TileH() / 2;
+            int hr = 255;
+            int hg = 40;
+            int hb = 40;
+            if (b.Kind() == 1) { hr = 130; hg = 190; hb = 255; }
+            else if (b.Kind() == 2) { hr = 90; hg = 225; hb = 90; }
+            r.SetColor(hr, hg, hb, 230);
+            int adx = x1 > x0 ? x1 - x0 : x0 - x1;
+            int ady = y1 > y0 ? y1 - y0 : y0 - y1;
+            int steps = (adx > ady ? adx : ady) / 3;
+            if (steps < 1) { steps = 1; }
+            for (int k = 0; k <= steps; k = k + 1) {
+                int x = x0 + (x1 - x0) * k / steps;
+                int y = y0 + (y1 - y0) * k / steps;
+                r.FillRect(x - 1, y, 3, 2);
+            }
+            r.SetColor(255, 255, 255, 255);
+        }
+    }
+
+    /// <summary>Float cell coordinates through the iso projection, the same
+    /// mapping the integer cell version uses.</summary>
+    static int FxScreenX(double cx, double cy, int originX, int camX) {
+        return (int)((cx - cy) * IsoProjection.HalfW()) - originX - camX;
+    }
+
+    static int FxScreenY(double cx, double cy, double pz, int originY,
+                         int camY) {
+        return (int)((cx + cy) * IsoProjection.HalfH() - pz * 15.0)
+             - originY - camY;
     }
 
     /// <summary>The diamond selection ring, drawn as one-pixel fills on the

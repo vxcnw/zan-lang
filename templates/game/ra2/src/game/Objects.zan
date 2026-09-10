@@ -1043,6 +1043,11 @@ class World {
     List<int> pathQy;
     int pathGen;
     int pathCalls;       // dev: selftest perf line reports the search volume
+    int pathPopCap;      // 0 = unbounded; combat repaths bound their flood
+    int pathBestSlot;    // explored cell closest to the goal (cap fallback)
+    int pathBestD;
+    int pathGoalX;
+    int pathGoalY;
     // The theater's water tile-id ranges as first,count pairs. Null until
     // the theater loads, in which case IsWater falls back to temperate's
     // own 314..327. See Theater.WaterRanges.
@@ -1083,6 +1088,17 @@ class World {
             this.factions[h] = (playerHouse + 1 + i) % 3;
         }
     }
+
+    // Rounds in flight, one-shot anims and beams: the projectile layer.
+    // Damage lands when the round DETONATES, not when the trigger is pulled
+    // -- the reference's Projectile state machine, Travel -> Detonation.
+    List<Projectile> projectiles;
+    List<FxAnim> anims;
+    List<FxBeam> beams;
+    // SHP frame counts for the anims already probed (the world reads the
+    // sprite header once per anim name; the renderer reuses its own cache).
+    List<string> animNames;
+    List<int> animFrames;
 
     // Combat effects for the renderer: a flat list of (kind, cellX, cellY,
     // life) quadruples. Spawned on shots and kills, aged in Tick, drawn by the
@@ -1135,6 +1151,11 @@ class World {
         w.selection = new List<int>();
         w.worldTick = 0;
         w.effects = new List<int>();
+        w.projectiles = new List<Projectile>();
+        w.anims = new List<FxAnim>();
+        w.beams = new List<FxBeam>();
+        w.animNames = new List<string>();
+        w.animFrames = new List<int>();
         w.events = new List<int>();
         // One blackout slot per house (8), not per faction: a spy blacks out
         // the house whose plant he walked into.
@@ -2904,6 +2925,310 @@ class World {
         return sb.ToString();
     }
 
+    // ---- projectiles --------------------------------------------------------
+
+    /// <summary>Launches a round from the shooter at the target. The aim is
+    /// locked to the target's cell at fire time (guided rounds keep tracking
+    /// their mark); speed and guidance come from the weapon's projectile
+    /// type, converted from the reference's lepton space -- one cell a tick
+    /// at Speed=100, gravity in cells per tick squared.</summary>
+    void SpawnProjectile(WorldObject shooter, WorldObject target, Weapon w) {
+        ProjectileType pt = w.Proj();
+        if (pt == null) { pt = this.Rules().DefaultProjectile(); }
+        Projectile p = new Projectile();
+        p.px = shooter.X();
+        p.py = shooter.Y();
+        p.pz = 0.0;
+        p.sx = p.px;
+        p.sy = p.py;
+        p.ax = target.X();
+        p.ay = target.Y();
+        double dx = p.ax - p.px;
+        double dy = p.ay - p.py;
+        p.total = Math.Sqrt(dx * dx + dy * dy);
+        if (p.total < 0.25) { p.total = 0.25; }
+        p.dirX = dx / p.total;
+        p.dirY = dy / p.total;
+        double v = w.Speed() / 100.0;
+        if (v > 1.0) { v = 1.0; }        // the reference caps at one tile/tick
+        if (v < 0.05) { v = 0.05; }
+        if (pt.Arcing()) {
+            // Reference arc tuning: (1 + g/6)/2 of the gun's speed, and
+            // long lobs speed up so the shell does not hang all day.
+            double graw = this.Rules().gravity;
+            v = v * (1.0 + graw / 6.0) / 2.0;
+            if (p.total > 8.0) {
+                v = v * (1.0 + (p.total / 8.0) * 0.5);
+            }
+        }
+        p.maxSpeed = v;
+        p.speed = v;
+        p.weapon = w;
+        p.type = pt;
+        p.side = shooter.Side();
+        p.shooter = this.IndexOfObject(shooter);
+        p.target = this.IndexOfObject(target);
+        if (p.target < 0) {
+            // The mark was lost between trigger and launch: the round flies
+            // to the cell it was aimed at and bursts there.
+            p.target = 0 - 1;
+        }
+        if (!pt.Homing()) {
+            // Unguided rounds hold their fire-time course.
+            p.target = 0 - 1;
+        }
+        this.projectiles.Add(p);
+    }
+
+    /// <summary>Advances every round one tick and lands the ones that
+    /// arrived. Order in the list never matters, so arrivals swap-remove.
+    /// </summary>
+    void TickProjectiles() {
+        int i = 0;
+        while (i < this.projectiles.Count) {
+            Projectile p = this.projectiles[i];
+            bool landed;
+            if (p.type.Homing()) { landed = this.StepHoming(p); }
+            else if (p.type.Arcing()) { landed = this.StepArcing(p); }
+            else { landed = this.StepStraight(p); }
+            p.ticks = p.ticks + 1;
+            if (p.ticks > 300) { landed = true; }
+            if (landed) {
+                this.DetonateProjectile(p);
+                int last = this.projectiles.Count - 1;
+                this.projectiles[i] = this.projectiles[last];
+                this.projectiles.RemoveAt(last);
+            } else {
+                i = i + 1;
+            }
+        }
+    }
+
+    /// <summary>Straight flight: constant speed toward the locked aim. The
+    /// reference snaps the last step onto a target that held still, which
+    /// is what landing directly on the aim cell models.</summary>
+    bool StepStraight(Projectile p) {
+        double step = Math.Min(p.speed, p.total - p.flown);
+        p.px = p.px + p.dirX * step;
+        p.py = p.py + p.dirY * step;
+        p.flown = p.flown + step;
+        return p.flown >= p.total;
+    }
+
+    /// <summary>Arcing flight: the same ground course, with the height the
+    /// reference's ballistic formula gives -- a gravity dome
+    /// (g/2v^2) * x * (D-x) over the straight course, in cells.</summary>
+    bool StepArcing(Projectile p) {
+        double step = Math.Min(p.speed, p.total - p.flown);
+        p.px = p.px + p.dirX * step;
+        p.py = p.py + p.dirY * step;
+        p.flown = p.flown + step;
+        double g = this.Rules().GravityCells();
+        double v = Math.Max(p.speed, 0.05);
+        p.pz = (g / (2.0 * v * v)) * p.flown * (p.total - p.flown);
+        return p.flown >= p.total;
+    }
+
+    /// <summary>Guided flight: accelerate, steer ROT degrees a tick onto the
+    /// mark's live cell, arrive when the remaining gap is under a tick's
+    /// travel. A mark that dies mid-flight stops steering the round; it
+    /// lands where it was headed.</summary>
+    bool StepHoming(Projectile p) {
+        WorldObject t = p.target >= 0 && p.target < this.objects.Count
+                      ? this.objects[p.target] : null;
+        if (t != null && t.IsDead()) { t = null; }
+        double tx = t != null ? t.X() : p.ax;
+        double ty = t != null ? t.Y() : p.ay;
+        double dx = tx - p.px;
+        double dy = ty - p.py;
+        double dist = Math.Sqrt(dx * dx + dy * dy);
+        if (dist <= p.speed) { return true; }
+        // Steer the heading toward the mark: the reference turns
+        // (ROT/256)*360 degrees a tick.
+        double wantX = dist > 0.0001 ? dx / dist : p.dirX;
+        double wantY = dist > 0.0001 ? dy / dist : p.dirY;
+        double cross = p.dirX * wantY - p.dirY * wantX;
+        double dot = p.dirX * wantX + p.dirY * wantY;
+        double maxTurn = p.type.Rot() * 3.14159265358979 / 256.0;
+        double cos = Math.Cos(maxTurn);
+        double sin = Math.Sin(maxTurn);
+        if (dot >= cos) {
+            // The mark is inside this tick's turn budget: lock onto it.
+            p.dirX = wantX;
+            p.dirY = wantY;
+        } else {
+            // Rotate the full budget toward it (cross sign picks the side).
+            if (cross < 0) { sin = 0 - sin; }
+            p.dirX = p.dirX * cos - p.dirY * sin;
+            p.dirY = p.dirX * sin + p.dirY * cos;
+        }
+        double nx = p.dirX * cos - p.dirY * sin;
+        double ny = p.dirX * sin + p.dirY * cos;
+        p.dirX = nx;
+        p.dirY = ny;
+        p.speed = Math.Min(p.maxSpeed,
+                           p.speed + p.type.Acceleration() / 256.0);
+        p.px = p.px + p.dirX * p.speed;
+        p.py = p.py + p.dirY * p.speed;
+        p.flown = p.flown + p.speed;
+        return false;
+    }
+
+    /// <summary>The round lands: the warhead bites the mark (or the ground
+    /// it was aimed at), and the impact art plays -- the warhead's own
+    /// AnimList entry for the damage tier, or the procedural ring when the
+    /// install carries no such sprite.</summary>
+    void DetonateProjectile(Projectile p) {
+        WorldObject t = p.target >= 0 && p.target < this.objects.Count
+                      ? this.objects[p.target] : null;
+        if (t != null && t.IsDead()) { t = null; }
+        Weapon w = p.weapon;
+        WorldObject shooter = p.shooter >= 0 && p.shooter < this.objects.Count
+                            ? this.objects[p.shooter] : null;
+        if (shooter != null && shooter.IsDead()) { shooter = null; }
+        int gx = (int)Math.Round(p.ax);
+        if (gx < 0) { gx = 0; }
+        if (gx > this.width - 1) { gx = this.width - 1; }
+        int gy = (int)Math.Round(p.ay);
+        if (gy < 0) { gy = 0; }
+        if (gy > this.height - 1) { gy = this.height - 1; }
+        Warhead wh = w.Warhead();
+        WorldObject hit = t;
+        if (t != null) {
+            this.ApplyShotSide(p.side, shooter, w, t);
+        } else {
+            // Ground strike: whoever stands at the impact cell takes the
+            // full bore -- that is where the round burst -- and the
+            // neighbours the falloff splash, so an artillery miss still
+            // punishes a crowd. The occupant lookup is what keeps
+            // no-spread warheads (AP) from fizzling on the ground.
+            int zero = this.OccupantAt(gx, gy);
+            WorldObject direct = zero >= 0 ? this.objects[zero] : null;
+            if (direct != null && (direct.Side() == p.side
+             || direct.Side() == Side2.Neutral())) { direct = null; }
+            hit = direct;
+            if (direct != null) {
+                int armor = this.ArmorOf(direct);
+                int dmg = w.Damage() * wh.Verse(armor) / 100;
+                this.SplashAround(p.side, wh, gx, gy, direct, dmg);
+            } else {
+                int dmg = w.Damage() * wh.Verse(4) / 100;
+                this.SplashAround(p.side, wh, gx, gy, null, dmg);
+            }
+        }
+        // The impact art follows the reference exactly: a conventional
+        // warhead that lands in water (missing everything, or hitting a
+        // building, which does not sink) plays the combat-damage splash
+        // list by damage tier; otherwise the warhead's own AnimList, and
+        // a warhead with no list -- the tank shells' AP -- shows nothing
+        // at all, as shipped.
+        string anim = null;
+        if (w.Damage() > 0 && wh.Conventional() && t == null
+         && this.IsWater(this.iso.At(gx, gy))
+         && (hit == null || hit.Kind() == ObjKind.Structure())) {
+            int n = this.Rules().SplashCount();
+            if (n > 0) {
+                int idx = w.Damage() / 50;
+                if (idx > n - 1) { idx = n - 1; }
+                anim = this.Rules().SplashAt(idx);
+            }
+        }
+        if (anim == null) { anim = this.PickWarheadAnim(w); }
+        if (anim != null) { this.SpawnAnim(anim, p.ax, p.ay); }
+    }
+
+    /// <summary>The warhead's impact anim for the damage tier: the
+    /// reference picks AnimList[damage/25] -- bigger bores bring bigger
+    /// fireballs, in the order the rules list them.</summary>
+    string PickWarheadAnim(Weapon w) {
+        Warhead wh = w.Warhead();
+        int n = wh.AnimCount();
+        if (n == 0) { return null; }
+        int idx = w.Damage() / 25;
+        if (idx >= n) { idx = n - 1; }
+        if (idx < 0) { idx = 0; }
+        return wh.AnimAt(idx);
+    }
+
+    /// <summary>Spawns a one-shot anim on a cell. The frame count comes from
+    /// the sprite header (probed once per name); false when the install
+    /// carries no such SHP, so the caller can fall back.</summary>
+    bool SpawnAnim(string name, double cx, double cy) {
+        int frames = this.ProbeAnimFrames(name);
+        if (frames <= 0) { return false; }
+        FxAnim a = new FxAnim();
+        a.name = name;
+        a.px = cx;
+        a.py = cy;
+        a.frames = frames;
+        this.anims.Add(a);
+        return true;
+    }
+
+    int ProbeAnimFrames(string name) {
+        for (int i = 0; i < this.animNames.Count; i = i + 1) {
+            if (this.animNames[i] == name) { return this.animFrames[i]; }
+        }
+        int frames = 0 - 1;
+        Theater th = this.theater;
+        if (th != null && th.Vfs() != null) {
+            List<int> len = new List<int>();
+            len.Add(0);
+            byte[] raw = th.Vfs().Read(name + ".SHP", len);
+            if (len[0] > 0) {
+                ShpImage shp = ShpImage.Parse(raw, len[0]);
+                frames = shp.FrameCount();
+            }
+        }
+        this.animNames.Add(name);
+        this.animFrames.Add(frames);
+        return frames;
+    }
+
+    /// <summary>A beam gun's ray, from firer to mark. Lasers hold for the
+    /// weapon's LaserDuration; tesla and radiation beams flash briefly.
+    /// </summary>
+    void SpawnBeam(WorldObject shooter, WorldObject target, Weapon w) {
+        FxBeam b = new FxBeam();
+        b.x0 = shooter.X();
+        b.y0 = shooter.Y();
+        b.x1 = target.X();
+        b.y1 = target.Y();
+        int kind = 0;                       // laser red
+        if (w.IsElectricBolt()) { kind = 1; }
+        else if (w.IsRadBeam()) { kind = 2; }
+        b.kind = kind;
+        b.life = w.IsLaser() ? w.LaserDuration() : 3;
+        this.beams.Add(b);
+    }
+
+    /// <summary>Sets the age of a live impact animation -- the selftest
+    /// uses it to pose a shipped blast at its peak frame for a screenshot.
+    /// </summary>
+    void AnimTick(int i, int t) { this.anims[i].ticks = t; }
+
+    void TickFx() {
+        int i = 0;
+        while (i < this.anims.Count) {
+            FxAnim a = this.anims[i];
+            a.ticks = a.ticks + 1;
+            // One-shot: play every frame, hold the last briefly, drop.
+            int life = a.frames * 2 + 4;
+            if (a.ticks >= life) {
+                this.anims.RemoveAt(i);
+            } else {
+                i = i + 1;
+            }
+        }
+        i = 0;
+        while (i < this.beams.Count) {
+            FxBeam b = this.beams[i];
+            b.life = b.life - 1;
+            if (b.life <= 0) { this.beams.RemoveAt(i); }
+            else { i = i + 1; }
+        }
+    }
+
     // ---- combat effects -----------------------------------------------------
 
     /// <summary>Muzzle flash at a cell: a brief bright dot on the shooter's
@@ -2934,6 +3259,20 @@ class World {
     int EffectY(int i) { return this.effects[i * 4 + 2]; }
 
     int EffectLife(int i) { return this.effects[i * 4 + 3]; }
+
+    // ---- projectile / fx accessors for the renderer -------------------------
+
+    int ProjectileCount() { return this.projectiles.Count; }
+
+    Projectile ProjectileAt(int i) { return this.projectiles[i]; }
+
+    int AnimFxCount() { return this.anims.Count; }
+
+    FxAnim AnimFxAt(int i) { return this.anims[i]; }
+
+    int BeamCount() { return this.beams.Count; }
+
+    FxBeam BeamAt(int i) { return this.beams[i]; }
 
     /// <summary>Ages every effect and drops the expired ones.</summary>
     void TickEffects() {
@@ -3154,8 +3493,16 @@ class World {
                      && (this.worldTick + i) % 8 == 0) {
                         List<int> px = new List<int>();
                         List<int> py = new List<int>();
-                        if (this.FindPathTo(o.X(), o.Y(), t, px, py,
-                                            o.Amphibious())) {
+                        // A furball must not flood the whole map per search:
+                        // combat repaths run with a pop budget and settle for
+                        // the closest reachable cell when the budget runs
+                        // out -- the army keeps flowing, and the next
+                        // staggered turn refines the route.
+                        this.pathPopCap = 6000;
+                        bool routed = this.FindPathTo(o.X(), o.Y(), t, px, py,
+                                                      o.Amphibious());
+                        this.pathPopCap = 0;
+                        if (routed) {
                             o.SetRoute(px, py);
                         } else if ((this.worldTick + i) % 40 == 0) {
                             // The ordered target cannot be reached -- a
@@ -3164,8 +3511,10 @@ class World {
                             // the unit CAN walk to instead of idling out the
                             // war. Throttled so a stuck army re-scans in
                             // staggered turns, not all on one tick.
+                            this.pathPopCap = 6000;
                             int alt = this.NearestReachableEnemy(
                                 o.X(), o.Y(), o.Side(), o.Amphibious());
+                            this.pathPopCap = 0;
                             if (alt >= 0 && alt != o.TargetIndex()) {
                                 this.AttackObject(i, this.objects[alt]);
                             }
@@ -3206,9 +3555,8 @@ class World {
             if (tgt == null) { b.SetReload(0); continue; }
             int rr = b.Reload();
             if (rr <= 0) {
-                this.ApplyShot(b, bt.Weapon(), tgt);
+                this.FireWeapon(b, bt.Weapon(), tgt);
                 b.SetReload(bt.Cooldown());
-                this.SpawnFlash(b.X(), b.Y());
                 fired = fired + 1;
             } else {
                 b.SetReload(rr - 1);
@@ -3337,7 +3685,9 @@ class World {
             produced = produced + 1;
         }
         this.RemoveDead();
+        this.TickProjectiles();
         this.TickEffects();
+        this.TickFx();
         List<int> result = new List<int>();
         result.Add(moved);
         result.Add(fired);
@@ -3395,10 +3745,24 @@ class World {
         }
         Weapon w = this.PickWeapon(u, t);
         if (w == null) { o.SetReload(20); return false; }
-        this.ApplyShot(o, w, t);
+        this.FireWeapon(o, w, t);
         o.SetReload(w.Rof());
-        this.SpawnFlash(o.X(), o.Y());
         return true;
+    }
+
+    /// <summary>One trigger pull, shared by units and defence structures.
+    /// Beam guns (prism, tesla, radiation) hit this tick -- the light is the
+    /// shot. Everything else launches a round: the warhead lands when the
+    /// projectile reaches its mark, so a distant target sees the shell
+    /// coming, exactly like the reference's flight-time model.</summary>
+    void FireWeapon(WorldObject shooter, Weapon w, WorldObject t) {
+        if (w.IsBeamWeapon()) {
+            this.ApplyShot(shooter, w, t);
+            this.SpawnBeam(shooter, t, w);
+        } else {
+            this.SpawnProjectile(shooter, t, w);
+        }
+        this.SpawnFlash(shooter.X(), shooter.Y());
     }
 
     /// <summary>Lands one shot: the warhead's verse against the target's
@@ -3406,20 +3770,28 @@ class World {
     /// bite kills infantry outright, a chrono beam freezes, Yuri's pulse
     /// converts, Ivan sticks a bomb.</summary>
     void ApplyShot(WorldObject shooter, Weapon w, WorldObject t) {
+        this.ApplyShotSide(shooter.Side(), shooter, w, t);
+    }
+
+    /// <summary>The shot-landing core. `side` rides separately from the
+    /// shooter object because a projectile can outlive its firer: the round
+    /// keeps the allegiance it was fired with even after the shooter is
+    /// rubble, so splash still skips friends and mind control still flips.</summary>
+    void ApplyShotSide(int side, WorldObject shooter, Weapon w, WorldObject t) {
         Warhead wh = w.Warhead();
         int armor = this.ArmorOf(t);
         int dmg = w.Damage() * wh.Verse(armor) / 100;
         if (wh.KillsInfantry() && t.Kind() == ObjKind.Unit()) {
             dmg = t.Hp();   // dogs take infantry down regardless of health
         }
-        this.SplashAround(shooter, wh, t.X(), t.Y(), t, dmg);
+        this.SplashAround(side, wh, t.X(), t.Y(), t, dmg);
         if (t.IsDead()) { return; }
         if (wh.Freeze() && t.Kind() == ObjKind.Unit()) {
             t.SetFrozen(this.Rules().FreezeTicks());
         }
         if (wh.MindControl() && t.Kind() == ObjKind.Unit()
-         && !t.UnitType().MindImmune() && t.Side() != shooter.Side()) {
-            t.SetSide(shooter.Side());
+         && !t.UnitType().MindImmune() && t.Side() != side) {
+            t.SetSide(side);
             t.StopAttack();
         }
         if (wh.PlantsBomb() && t.BombTimer() < 0) {
@@ -3428,9 +3800,11 @@ class World {
         // Retaliation: a soldier who takes a hit turns on whoever dealt it.
         // Explicit orders are kept -- only a unit without a target reacts --
         // and a mind-flip lands first, so a converted soldier never turns on
-        // his new master.
-        if (t.Kind() == ObjKind.Unit() && t.TargetIndex() < 0
-         && t.UnitType().Primary() != null && shooter.Side() != t.Side()) {
+        // his new master. A round whose shooter died mid-flight cannot be
+        // retaliated against.
+        if (shooter != null && t.Kind() == ObjKind.Unit()
+         && t.TargetIndex() < 0
+         && t.UnitType().Primary() != null && side != t.Side()) {
             int sIdx = this.IndexOfObject(shooter);
             if (sIdx >= 0) { t.SetTarget(sIdx); }
         }
@@ -3443,14 +3817,14 @@ class World {
     /// verse like a direct shot, and skips friends and neutrals -- the
     /// original punishes careless artillery, it does not friendly-fire a
     /// whole squad. Special effects stay direct-hit only.</summary>
-    void SplashAround(WorldObject shooter, Warhead wh, int cx, int cy,
+    void SplashAround(int side, Warhead wh, int cx, int cy,
                       WorldObject t, int dmg) {
-        if (wh.Spread() <= 0) { t.TakeDamage(dmg); return; }
-        t.TakeDamage(dmg);
+        if (t != null) { t.TakeDamage(dmg); }
+        if (wh.Spread() <= 0) { return; }
         int radius = wh.Spread() + 2;   // cells around the impact point
         for (int i = 0; i < this.objects.Count; i = i + 1) {
             WorldObject o = this.objects[i];
-            if (o == t || o.IsDead() || o.Side() == shooter.Side()
+            if (o == t || o.IsDead() || o.Side() == side
              || o.Side() == Side2.Neutral()) { continue; }
             int vx = o.X() - cx;
             int vy = o.Y() - cy;
@@ -3580,6 +3954,16 @@ class World {
             // Point attackers away from the vacated slot: a target at `i` is
             // gone, and any target past it shifts down with the list. Without
             // this, a new object spawned at `i` would be shot at by mistake.
+            // Flying rounds hold object indices too: a shot whose victim
+            // just died falls to a ground strike at its locked aim cell, and
+            // every later index shifts down with the list.
+            for (int k = 0; k < this.projectiles.Count; k = k + 1) {
+                Projectile p = this.projectiles[k];
+                if (p.target == i) { p.target = 0 - 1; }
+                else if (p.target > i) { p.target = p.target - 1; }
+                if (p.shooter == i) { p.shooter = 0 - 1; }
+                else if (p.shooter > i) { p.shooter = p.shooter - 1; }
+            }
             for (int j = 0; j < this.objects.Count; j = j + 1) {
                 WorldObject other = this.objects[j];
                 int tj = other.TargetIndex();
@@ -3698,9 +4082,29 @@ class World {
             if (gs >= 0) { seen[gs] = (byte)gmark; }
         }
 
+        // Open field charges do not need a flood: the monotone walk below
+        // settles most of them in a straight stroke, so the queue only runs
+        // when terrain or a crowd actually forces a detour.
+        if (gx.Count == 1
+         && this.MonotoneRoute(sx, sy, gx[0], gy[0], true, px, py,
+                               amphibious)) {
+            return true;
+        }
+        if (gx.Count == 1
+         && this.MonotoneRoute(sx, sy, gx[0], gy[0], false, px, py,
+                               amphibious)) {
+            return true;
+        }
+        int cap = this.pathPopCap;
+        if (cap > 0) {
+            this.pathBestSlot = 0 - 1;
+            this.pathBestD = 0x7fffffff;
+            this.pathGoalX = gx[0];
+            this.pathGoalY = gy[0];
+        }
         int head = 0;
         int goal = -1;
-        while (head < qx.Count) {
+        while (head < qx.Count && (cap <= 0 || head < cap)) {
             int cx = qx[head];
             int cy = qy[head];
             head = head + 1;
@@ -3717,6 +4121,14 @@ class World {
             goal = this.StepGoalFrom(seen, prev, qx, qy, vmark, gmark,
                                      cx, cy, cx, cy - 1, cs, amphibious);
             if (goal >= 0) { break; }
+        }
+        if (goal < 0 && cap > 0 && this.pathBestSlot >= 0
+         && this.pathBestSlot != startSlot) {
+            // The flood hit its budget: route to the explored cell nearest
+            // the goal instead of giving up, so a capped melee keeps an
+            // army flowing toward the fight. The chain is intact -- the
+            // best cell was visited this call.
+            goal = this.pathBestSlot;
         }
         if (goal < 0) { return false; }
 
@@ -3843,8 +4255,120 @@ class World {
         if (!this.CanStep(fx, fy, nx, ny, amphibious)) { return -1; }
         seen[slot] = (byte)vmark;
         prev[slot] = fromSlot;
+        if (this.pathPopCap > 0) {
+            int dgx = nx > this.pathGoalX ? nx - this.pathGoalX
+                                          : this.pathGoalX - nx;
+            int dgy = ny > this.pathGoalY ? ny - this.pathGoalY
+                                          : this.pathGoalY - ny;
+            int d = dgx + dgy;
+            if (d < this.pathBestD) {
+                this.pathBestD = d;
+                this.pathBestSlot = slot;
+            }
+        }
         qx.Add(nx);
         qy.Add(ny);
         return -1;
     }
+
+    /// <summary>The open-field route: walk monotonically toward the goal
+    /// along one axis then the other, keeping every step to the same
+    /// adjacency rules the search uses. True when the whole walk is legal
+    /// right now -- a charge across open ground never needs the flood, and
+    /// a route blocked anywhere falls through to the search unchanged.</summary>
+    bool MonotoneRoute(int sx, int sy, int tx, int ty, bool xFirst,
+                       List<int> px, List<int> py, bool amphibious) {
+        int cx = sx;
+        int cy = sy;
+        px.Clear();
+        py.Clear();
+        while (cx != tx || cy != ty) {
+            int nx = cx;
+            int ny = cy;
+            bool stepX = xFirst ? cx != tx : cy == ty;
+            if (stepX) {
+                nx = nx + (tx > cx ? 1 : 0 - 1);
+            } else {
+                ny = ny + (ty > cy ? 1 : 0 - 1);
+            }
+            if (!this.CanStep(cx, cy, nx, ny, amphibious)) { return false; }
+            px.Add(nx);
+            py.Add(ny);
+            cx = nx;
+            cy = ny;
+        }
+        return px.Count > 0;
+    }
+}
+
+/// <summary>A round in flight, in cell coordinates (floats -- the visuals
+/// interpolate between cells) plus an elevation for arcing shots. Carries
+/// its weapon and allegiance so the warhead lands correctly even if the
+/// firer dies while the shell is in the air.</summary>
+class Projectile {
+    double px;            // position, cells
+    double py;
+    double pz;            // height above ground, cells (arcing)
+    double sx;            // launch cell
+    double sy;
+    double ax;            // locked aim cell
+    double ay;
+    double dirX;          // flight direction, unit vector in cell space
+    double dirY;
+    double speed;         // cells/tick now
+    double maxSpeed;
+    double total;         // launch -> aim distance at fire time
+    double flown;         // distance travelled
+    Weapon weapon;
+    ProjectileType type;
+    int shooter;          // object index, -1 once the firer is gone
+    int side;             // the allegiance the round flies under
+    int target;           // object index for guided rounds, -1 otherwise
+    int ticks;
+
+    double Px() { return this.px; }
+    double Py() { return this.py; }
+    double Pz() { return this.pz; }
+    double DirX() { return this.dirX; }
+    double DirY() { return this.dirY; }
+    ProjectileType Type() { return this.type; }
+    int SideOf() { return this.side; }
+}
+
+/// <summary>A one-shot impact animation playing on a cell: the warhead's
+/// AnimList art, frame-stepped by the world and drawn from the install's
+/// own SHP frames.</summary>
+class FxAnim {
+    double px;
+    double py;
+    string name;
+    int frames;    // from the SHP header; 0 = art missing (never drawn)
+    int ticks;
+
+    double Px() { return this.px; }
+    double Py() { return this.py; }
+    string Name() { return this.name; }
+    int Frames() { return this.frames; }
+    int Frame() {
+        int f = this.ticks / 2;
+        if (f > this.frames - 1) { f = this.frames - 1; }
+        return f;
+    }
+}
+
+/// <summary>A beam gun's ray, in cell coordinates. kind: 0 laser (prism
+/// red), 1 electric bolt (tesla blue), 2 rad beam (rad green).</summary>
+class FxBeam {
+    double x0;
+    double y0;
+    double x1;
+    double y1;
+    int kind;
+    int life;
+
+    double X0() { return this.x0; }
+    double Y0() { return this.y0; }
+    double X1() { return this.x1; }
+    double Y1() { return this.y1; }
+    int Kind() { return this.kind; }
 }

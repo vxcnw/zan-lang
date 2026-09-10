@@ -1911,6 +1911,9 @@ class Ra2Loop : IGuiHostLoop {
     bool selfTest;
     int frames;
     WorldObject minerObj;
+    int tankIdx = 0 - 1;   // parked grizzly, for the frame-14 camera re-pan
+    int duelX;
+    int duelY;             // the probe duel site, for the corridor boom shot
     int oreX;
     int oreY;
 
@@ -3578,6 +3581,7 @@ class Ra2Loop : IGuiHostLoop {
                 tb = this.world.SpawnUnit(1, htnk, bx + r, by + 2);
                 if (tb < 0) { tb = this.world.SpawnUnit(1, htnk, bx, by + 2 + r); }
             }
+            this.tankIdx = ta;
             Console.WriteLine("selftest tanks mtnk="
                 + Convert.ToString(ta) + " htnk=" + Convert.ToString(tb));
             if (ta >= 0) {
@@ -3646,8 +3650,111 @@ class Ra2Loop : IGuiHostLoop {
                 this.cam.MoveBy(sx - Ra2App.ViewW() / 2 + 80,
                                 sy - Ra2App.ViewH() / 2);
             }
+            // Projectile flight timing: a fresh grizzly fires at a victim
+            // parked inside gun range. The hit must land when the shell
+            // arrives, not when the trigger pulls -- the probe ticks the
+            // world inside this frame so the timing is deterministic.
+            int shId = Ra2App.UnitIdOfReg(this.world, 0, "MTNK");
+            // Fire from a quiet mid-map cell: base guard scans must not
+            // march the victim out from under the shell while it flies.
+            int pa = 0 - 1;
+            int qx = this.world.Width() / 2;
+            int qy = this.world.Height() / 2;
+            for (int r = 0; r < 20 && pa < 0; r = r + 1) {
+                pa = this.world.SpawnUnit(0, shId, qx + r, qy);
+                if (pa < 0) { pa = this.world.SpawnUnit(0, shId, qx, qy + r); }
+            }
+            if (pa >= 0) {
+                WorldObject sh = this.world.ObjectAt(pa);
+                Weapon pw = sh.UnitType() != null
+                          ? sh.UnitType().Primary() : null;
+                int dist = 4;
+                if (pw != null && pw.Range() > 1) {
+                    dist = pw.Range() - 1;
+                }
+                if (dist > 7) { dist = 7; }
+                int pv = 0 - 1;
+                for (int r = 0; r < 8 && pv < 0; r = r + 1) {
+                    if (this.world.Passable(sh.X() + dist, sh.Y() + r)) {
+                        pv = this.world.SpawnUnit(1, htnk, sh.X() + dist,
+                                                  sh.Y() + r);
+                    }
+                }
+                if (pv >= 0 && pw != null) {
+                    WorldObject vic = this.world.ObjectAt(pv);
+                    int hp0 = vic.Hp();
+                    this.world.AttackObject(pa, vic);
+                    int k = 0;
+                    while (this.world.ProjectileCount() == 0 && k < 8) {
+                        this.world.Tick();
+                        k = k + 1;
+                    }
+                    bool fired = this.world.ProjectileCount() > 0;
+                    if (fired) {
+                        // Hold the duel on camera: the shell is in the air
+                        // between shooter and victim, and the frame-14 dump
+                        // catches it mid-flight.
+                        int mx = (sh.X() + vic.X()) / 2;
+                        int my = (sh.Y() + vic.Y()) / 2;
+                        int sx = IsoProjection.ScreenX(mx, my)
+                               - this.terrain.OriginX() - this.cam.X();
+                        int sy = IsoProjection.ScreenY(mx, my, 0)
+                               - this.terrain.OriginY() - this.cam.Y();
+                        this.cam.MoveBy(sx - Ra2App.ViewW() / 2,
+                                        sy - Ra2App.ViewH() / 2);
+                    }
+                    int hpMid = vic.Hp();
+                    while (this.world.ProjectileCount() > 0 && k < 90) {
+                        this.world.Tick();
+                        k = k + 1;
+                    }
+                    int hpEnd = vic.Hp();
+                    this.duelX = sh.X() + 1;
+                    this.duelY = sh.Y() + 1;
+                    // The anim render path, proved with shipped art: a
+                    // small blast plays right beside the duel for the
+                    // frame-14 dump.
+                    this.world.SpawnAnim("EXPLOSML", sh.X() + 1.5,
+                                         sh.Y() + 1.5);
+                    Console.WriteLine("selftest proj range="
+                        + Convert.ToString(pw.Range())
+                        + " dist=" + Convert.ToString(dist)
+                        + " fired=" + (fired ? "1" : "0")
+                        + " flight=" + Convert.ToString(k)
+                        + " hp0=" + Convert.ToString(hp0)
+                        + " hpMid=" + Convert.ToString(hpMid)
+                        + " hpEnd=" + Convert.ToString(hpEnd)
+                        + " vicAt=" + Convert.ToString(vic.X()) + ","
+                        + Convert.ToString(vic.Y())
+                        + " PIFFPIFF=" + Convert.ToString(
+                            this.world.ProbeAnimFrames("PIFFPIFF"))
+                        + " EXPLOSML=" + Convert.ToString(
+                            this.world.ProbeAnimFrames("EXPLOSML")));
+                    if (!fired || hpMid != hp0 || hpEnd >= hp0) {
+                        Console.WriteLine("selftest FAIL proj: shell must"
+                            + " fly before it bites");
+                    }
+                } else {
+                    Console.WriteLine("selftest FAIL proj: spawn refused");
+                }
+            }
         }
         if (this.frames == 14) {
+            // The duel from frame 13: shell mid-flight between shooter and
+            // victim, its explosion anim right behind it.
+            Ra2App.DumpScreen(Ra2App.ShotPath("ra2_shot_proj.bmp"), c);
+            // Back to the parked grizzly for the established tank shot.
+            if (this.tankIdx >= 0 && this.world != null) {
+                WorldObject o = this.world.ObjectAt(this.tankIdx);
+                if (o != null) {
+                    int sx = IsoProjection.ScreenX(o.X(), o.Y())
+                           - this.terrain.OriginX() - this.cam.X();
+                    int sy = IsoProjection.ScreenY(o.X(), o.Y(), 0)
+                           - this.terrain.OriginY() - this.cam.Y();
+                    this.cam.MoveBy(sx - Ra2App.ViewW() / 2 + 80,
+                                    sy - Ra2App.ViewH() / 2);
+                }
+            }
             // Dump before the fast-forward so the parked tanks are
             // captured without combat effects over them.
             Console.WriteLine("selftest shellstate frame=14 sideShell="
@@ -4046,6 +4153,84 @@ class Ra2Loop : IGuiHostLoop {
         // next frame sees 17 and the gate fires.
         if (Ra2App.stressLeft > 0) {
             Ra2App.stressLeft = Ra2App.stressLeft - 1;
+            if (Ra2App.stressLeft == 21) {
+                // Pan a frame before the dump: the canvas this frame's
+                // dump captures was composed before this update ran. Aim
+                // the camera where the war actually is -- the recent
+                // impact sites when guns are firing, the whole army's
+                // centroid while it still marches.
+                int pside = this.shell.SideIndex();
+                int cx2 = 0;
+                int cy2 = 0;
+                int fn = this.world.ProjectileCount();
+                for (int pi = 0; pi < fn; pi = pi + 1) {
+                    Projectile pr = this.world.ProjectileAt(pi);
+                    cx2 = cx2 + (int)pr.Px();
+                    cy2 = cy2 + (int)pr.Py();
+                }
+                if (fn == 0) {
+                    fn = this.world.AnimFxCount();
+                }
+                for (int ai = 0; ai < this.world.AnimFxCount();
+                     ai = ai + 1) {
+                    FxAnim a = this.world.AnimFxAt(ai);
+                    cx2 = cx2 + (int)a.Px();
+                    cy2 = cy2 + (int)a.Py();
+                }
+                if (fn == 0) {
+                    for (int oi = 0; oi < this.world.ObjectCount();
+                         oi = oi + 1) {
+                        WorldObject oo = this.world.ObjectAt(oi);
+                        if (oo == null || oo.Kind() != ObjKind.Unit()
+                         || oo.IsDead()) {
+                            continue;
+                        }
+                        cx2 = cx2 + oo.X();
+                        cy2 = cy2 + oo.Y();
+                        fn = fn + 1;
+                    }
+                }
+                if (fn > 0 && this.game != null) {
+                    int sx = IsoProjection.ScreenX(cx2 / fn, cy2 / fn)
+                           - this.terrain.OriginX() - this.cam.X();
+                    int sy = IsoProjection.ScreenY(cx2 / fn, cy2 / fn, 0)
+                           - this.terrain.OriginY() - this.cam.Y();
+                    this.cam.MoveBy(sx - Ra2App.ViewW() / 2,
+                                    sy - Ra2App.ViewH() / 2);
+                }
+            }
+            if (Ra2App.stressLeft == 35 && this.world != null) {
+                // Pose the anim layer's screenshot proof: a shipped blast
+                // at the duel site, set to its peak frame this update so
+                // the next frame's render shows it in full flower.
+                string boom = "EXPLOLRG";
+                if (this.world.ProbeAnimFrames(boom) <= 0) {
+                    boom = "EXPLOMED";
+                }
+                if (this.world.ProbeAnimFrames(boom) > 0
+                 && this.world.SpawnAnim(boom, this.duelX, this.duelY)) {
+                    this.world.AnimTick(this.world.AnimFxCount() - 1, 14);
+                }
+                int sx = IsoProjection.ScreenX(this.duelX, this.duelY)
+                       - this.terrain.OriginX() - this.cam.X();
+                int sy = IsoProjection.ScreenY(this.duelX, this.duelY, 0)
+                       - this.terrain.OriginY() - this.cam.Y();
+                this.cam.MoveBy(sx - Ra2App.ViewW() / 2,
+                                sy - Ra2App.ViewH() / 2);
+            }
+            if (Ra2App.stressLeft == 34) {
+                // The posed blast, one frame on.
+                Ra2App.DumpScreen(Ra2App.ShotPath("ra2_shot_boom.bmp"), c);
+            }
+            if (Ra2App.stressLeft == 12) {
+                // Mid-melee: rounds in flight, arcs and impact art over
+                // the fight -- the projectile layer's screenshot proof.
+                int pside = this.shell.SideIndex();
+                Ra2App.DumpScreen(pside == 0
+                                  ? Ra2App.ShotPath("ra2_shot_battle.bmp")
+                                  : Ra2App.ShotPath("ra2_shot_battle_sov.bmp"),
+                                  c);
+            }
             if (Ra2App.stressLeft == 0) {
                 this.frames = 16;
             } else {
