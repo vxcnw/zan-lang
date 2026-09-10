@@ -521,4 +521,33 @@ class Spec {
     static int LordFootCol2W() { return Px(160); }  // 671 → 916  240+4 设备
     static int LordFootLblW() { return Px(38); }    // 「元宝:」盒 57 设备
     static int LordFootBoxW() { return Px(55); }    // 数量框 / 捐献钮 82 设备
+
+    /* ---- 行会页（5）实测（`mir2/mir/行会.png`，同一 150% 标尺）----
+       列宽（设备）89/183/97/129/169/165/121/120，列缝 4.5、首列左缘 386
+       与称谓/爵位同；12 行同高。
+       页脚与称谓/爵位**不同**：
+         · 左组 = 「创建行会」钮（150×30 设备，左缘 399 = 容器左 374 + 25）
+           + 16 设备缝 + 提示文字「创建行会需要沃玛号角和500W金币」（灰 #b8b8b8）
+         · 右组**没有「说明」钮**，只有 上一页 / 1/13 / 下一页
+       格子内容：等级列是一枚**红椭圆徽章**（47×20 设备，白字「二十」），
+       申请列是一个 97×27 设备按钮（比称谓的「领取」82 宽）。 */
+    static List<int> TblGuildCols() {
+        List<int> w = new List<int>();
+        w.Add(Px(59));                              // 排名      89
+        w.Add(Px(122));                             // 行会名称 183
+        w.Add(Px(65));                              // 等级      97
+        w.Add(Px(86));                              // 成员数   129
+        w.Add(Px(113));                             // 会长     169
+        w.Add(Px(110));                             // 行会物资 165
+        w.Add(Px(81));                              // 限制等级 121
+        w.Add(Px(80));                              // 申请     120
+        return w;
+    }
+    static int GuildFootPadL() { return Px(17); }   // 页脚左内缩 25 设备
+    static int GuildCreateW() { return Px(100); }   // 创建行会钮 150 设备
+    static int GuildCreateGap() { return Px(11); }  // 钮 → 提示文字 16 设备
+    static int GuildLvW() { return Px(32); }        // 等级徽章 47 设备（含 1 设备描边共 48）
+    static int GuildLvH() { return Px(15); }        // 21 设备（同上共 22）
+    static int GuildApplyW() { return Px(65); }     // 申请钮 97 设备
+    static int GuildApplyH() { return Px(18); }     // 27 设备
 }

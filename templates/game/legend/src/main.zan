@@ -145,6 +145,7 @@ partial class LegendApp {
                 if (t - lastSave >= 15) { Save(); }
                 Refresh();
             } catch (Exception e) {
+                try { File.WriteAllText("dbg-tick-err.txt", e.ToString()); } catch (Exception e2) { }
                 if (UiDriver.Active()) {
                     try { UiDriver.SetProbe("tick-err", e.ToString()); } catch (Exception e2) { }
                 }
@@ -386,6 +387,7 @@ partial class LegendApp {
         if (page == 2) { BuildScene(); return; }
         if (page == 3) { BuildBossHome(); return; }
         if (page == 4) { BuildEscort(); return; }
+        if (page == 5) { BuildGuildPage(); return; }
         if (page == 12) { BuildSecret(); return; }
         if (page == 13) { BuildWorldBoss(); return; }
         if (page == 20) { BuildBag(); return; }
