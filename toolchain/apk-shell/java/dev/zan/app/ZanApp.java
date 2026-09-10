@@ -9,7 +9,7 @@ import android.os.Bundle;
 /**
  * Zan runtime host: asks for the storage permissions the in-app
  * FilePicker/Upload components need to browse shared storage. Declared as
- * the manifest {@code application android:name}, so no SDL Activity code
+ * the manifest {@code application android:name}, so no shell Activity code
  * changes; the request fires once, when the first activity is created
  * (runtime grants on API 23+, media-scoped grants on API 33+).
  */

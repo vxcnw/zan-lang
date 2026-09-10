@@ -43,9 +43,8 @@ GuiHost 版（Game.Foundation.Gui）：窗口/事件/呈现由 stdlib/Gui 原生
 - HUD 层（DrawFallbackHud）：半透明顶栏（关卡、金币进度、厘秒
   倒计时、连击、炸药）与结算/拆弹面板，同一套 CText 场景层自绘，
   信息始终可读。
-- 音频：SDL3 驱动（SdlAudio/SdlAudioClip）暂留，待原生音频落地后
-  切换（与 wuwei AudioService 同一先例）；SdlAudio.Open 失败自动
-  哑火，不影响运行。
+- 音频：System.Audio 原生驱动（AudioClip）；打开失败自动哑火，
+  不影响运行。
 
 构建
 ----

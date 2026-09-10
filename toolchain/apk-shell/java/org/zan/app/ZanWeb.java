@@ -24,7 +24,7 @@ import java.util.List;
 /**
  * Embedded-browser bridge backing Gui.Component.WebView's WebViewBackend on
  * Android: one android.webkit.WebView (the system engine, updated through
- * Play) per Zan handle, overlaid on the SDL surface. The native side
+ * Play) per Zan handle, overlaid on the native GL surface. The native side
  * (libzan_gui.so, gui_runtime_android.c) owns the handle table and state
  * cache; every view operation here hops to the UI thread, and page events
  * come back through the single {@link #zanGuiWebEvent} native sink.

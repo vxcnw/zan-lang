@@ -4,7 +4,7 @@ Set-Location $root
 
 # The gallery is a pure Gui stdlib program: on Windows its window shell is the
 # Zan-side Win32Shell (Native.zan #if WINDOWS), so the native Win32 GUI
-# runtime is enough -- no SDL3 is linked (the IDE's SDL3 link is a game/IDE
+# runtime is enough -- no SDL3 is linked (the IDE's game link is a game/IDE
 # thing, the gallery does not need it). The runtime is built as a static
 # mingw-ABI archive plus zanc's own link driver, which pulls in the async
 # reactor (rt_io) and sync runtime (rt_sync) automatically.

@@ -29,7 +29,7 @@
 `/ref/System.Security.Cryptography.md`、`/ref/System.Threading.md`、
 `/ref/System.Text.md`、`/ref/System.Web.md`、`/ref/Gui.md`、
 `/ref/Gui.Widget.md`、`/ref/Gui.Component.md`、`/ref/Gui.Hmi.md`、
-`/ref/Game.Arpg.md`、`/ref/SDL3.md`。
+`/ref/Game.Arpg.md`。
 
 ## 按任务类型推荐抓取
 

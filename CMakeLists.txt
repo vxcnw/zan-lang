@@ -460,7 +460,7 @@ endif()
 # ---- HarmonyOS sysroot subset (ohos-x64/arm64 cross-compilation) ----
 # Same layout as the android subsets: crt1.o + musl libc.a + zanrt_*.o for
 # static exe links, plus zap_main.o, which a --emit-lib HAP shell library
-# links instead of SDL_main.o (it exports zan_hap_main() -> module main).
+# links instead of a shell main (it exports zan_hap_main() -> module main).
 if(EXISTS "${CMAKE_SOURCE_DIR}/toolchain/ohos-x64/libc.a")
     list(APPEND _cross_sysroot_cmds
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -474,7 +474,7 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/toolchain/ohos-arm64/libc.a")
                 $<TARGET_FILE_DIR:zanc>/ohos-arm64)
 endif()
 
-# ---- SDLActivity APK shell (--emit-apk packaging assets) ----
+# ---- NativeActivity APK shell (--emit-apk packaging assets) ----
 if(EXISTS "${CMAKE_SOURCE_DIR}/toolchain/apk-shell/classes.dex")
     list(APPEND _cross_sysroot_cmds
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -1223,18 +1223,6 @@ add_test(NAME policy_sdk_wechat
 set_tests_properties(policy_sdk_wechat PROPERTIES TIMEOUT 120)
 
 
-# The RA2 format tests were moved out of stdlib into
-# tests/ra2/stdlib_rts; they need its Formats sources on the command
-# line so the compiler can resolve Ra2.StdlibRts.Formats.
-set(_rts_stdlib_srcs
-  ${CMAKE_SOURCE_DIR}/tests/ra2/stdlib_rts/Formats/Binary.zan
-  ${CMAKE_SOURCE_DIR}/tests/ra2/stdlib_rts/Formats/Csf.zan
-  ${CMAKE_SOURCE_DIR}/tests/ra2/stdlib_rts/Formats/Ini.zan
-  ${CMAKE_SOURCE_DIR}/tests/ra2/stdlib_rts/Formats/Pal.zan
-  ${CMAKE_SOURCE_DIR}/tests/ra2/stdlib_rts/Formats/Shp.zan
-  ${CMAKE_SOURCE_DIR}/tests/ra2/stdlib_rts/Formats/Tmp.zan)
-string(JOIN ";" _rts_stdlib_zanc_args ${_rts_stdlib_srcs})
-
 # A conformance case that uses the Gui namespace reaches the
 # [DllImport("zan_gui")] exports, so it must link the library this build just
 # produced: the driver bundle committed under stdlib/Gui/drivers/ lags behind
@@ -1275,9 +1263,7 @@ endfunction()
 foreach(_src ${_conf_srcs})
   get_filename_component(_name ${_src} NAME_WE)
   zan_uses_gui_driver(${_src} _needs_gui_driver)
-  if(_name MATCHES "^rts_")
-    set(_extra_args "${_rts_stdlib_zanc_args}")
-  elseif(_name MATCHES "^async_mt")
+  if(_name MATCHES "^async_mt")
     # ZAN_CO_DRIVER tests: exercise the multi-worker coroutine driver.
     set(_extra_args "--async-workers")
   elseif(_name STREQUAL "server_mvc_timezone")
@@ -1377,9 +1363,7 @@ endif()
 # (reproducible-build / correctness net).
 foreach(_src ${_conf_srcs})
   get_filename_component(_name ${_src} NAME_WE)
-  if(_name MATCHES "^rts_")
-    set(_extra_args "${_rts_stdlib_zanc_args}")
-  elseif(_name MATCHES "^async_mt")
+  if(_name MATCHES "^async_mt")
     set(_extra_args "--async-workers")
   else()
     set(_extra_args "")
@@ -1460,9 +1444,7 @@ set(_known_leaky
 foreach(_src ${_conf_srcs})
   get_filename_component(_name ${_src} NAME_WE)
   zan_uses_gui_driver(${_src} _needs_gui_driver)
-  if(_name MATCHES "^rts_")
-    set(_extra_args "${_rts_stdlib_zanc_args}")
-  elseif(_name MATCHES "^async_mt")
+  if(_name MATCHES "^async_mt")
     set(_extra_args "--async-workers")
   elseif(_needs_gui_driver)
     set(_extra_args "${_gui_driver_args}")
@@ -1502,9 +1484,7 @@ endforeach()
 foreach(_src ${_conf_srcs})
   get_filename_component(_name ${_src} NAME_WE)
   zan_uses_gui_driver(${_src} _needs_gui_driver)
-  if(_name MATCHES "^rts_")
-    set(_extra_args "${_rts_stdlib_zanc_args}")
-  elseif(_name MATCHES "^async_mt")
+  if(_name MATCHES "^async_mt")
     set(_extra_args "--async-workers")
   elseif(_name STREQUAL "server_mvc_timezone")
     set(_extra_args

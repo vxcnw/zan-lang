@@ -1,8 +1,7 @@
 /* ===================================================================
  * zan_audio — native zero-dependency audio runtime, part of zan_gui.
  *
- * Replaces the SDL3 audio bridge (zan_sdl3.c) as part of the "remove
- * SDL3 entirely" plan: one physical playback device opened by
+ * Native zero-dependency replacement for the old audio bridge:
  * zan_audio_open, every voice mixed by our own background thread, so
  * a clip can sound several times at once. Clips are fully decoded
  * into s16 PCM up front (WAV parsed here, OGG Vorbis via the vendored
@@ -815,7 +814,7 @@ static AAudioStream *zan_audio_aa_open_stream(void) {
 #endif /* __ANDROID__ */
 
 /* ------------------------------------------------------------------
- * Exported API. Signatures are byte-identical to the SDL3 bridge's
+ * Exported API. Signatures match the original audio bridge's
  * audio entries so the Zan-side Audio module is a drop-in swap of the
  * DllImport target.
  * =================================================================== */

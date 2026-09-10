@@ -1,6 +1,6 @@
 # Generates the self-contained `zan_gui` native driver bundle that lets zanc
 # link GUI / WebView apps with its own bundled GNU ld -- no external clang or
-# LLVM required (mirrors the SDL3 driver under stdlib\SDL3\drivers). The
+# LLVM required (mirrors the native driver staging convention). The
 # Win32-backend runtime DLL (build\zan_gui.dll, from the CMake zan_gui_runtime
 # target) imports only system DLLs, so a linked GUI exe needs only zan_gui.dll
 # beside it. zanc auto-discovers this via stdlib\Gui\drivers\driver.manifest.

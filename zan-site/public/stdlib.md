@@ -13,7 +13,7 @@
 | `System` | 语言内建 + 核心类型：`DateTime` `TimeSpan` `Guid` `Random` `Exception` `IDisposable` `MessageBox` `Binding<T>` `Interop` `Com` `NativeMemory` `ZanVersion` 等 | [System](/ref/System) |
 | `System.Collections` / `.Generic` | `HashSet<T>` `LinkedList<T>` `Queue<T>` `Stack<T>` `KeyValuePair<K,V>` / `KVP<K,V>` | [引用](/ref/System.Collections) |
 | `System.Compiler` | 编译期代码生成：`ZanGen` `GenDb` `GenForm`（.zform 投影）`GenJson` `GenRoute` `GenScene` | [引用](/ref/System.Compiler) |
-| `System.Data` | 数据库统一层：`DbConnection` `DbResult` `DbParams` `DbPool` + 方言（`Sqlite` `MySql` `Postgres` `SqlServer` `Firebird` `TDengine` `Redis` `Odbc`）+ ORM（`Model` `ModelQuery` `QueryBuilder` `Migration`）+ `ZanDb` 嵌入式 KV | [引用](/ref/System.Data) |
+| `System.Data` | 数据库统一层：`DbConnection` `DbResult` `DbParams` `DbPool` + 方言（`Sqlite` `MySql` `Postgres` `SqlServer` `Firebird` `TDengine` `Redis` `Odbc`）+ ORM（`Model` `ModelQuery` `QueryBuilder` `Migration`）+ `ZanDb` 嵌入式 KV；`Excel/`（`XlsxBook` 纯 Zan 写 .xlsx：多工作表、文本/数字/布尔/日期单元格、表头加粗、冻结首行、列宽自适应；大表用 `SaveStreaming` + `XlsxRowSource` 流式落盘——内存占用与行数无关、超 1048576 行自动分表、可取消） | [引用](/ref/System.Data) |
 | `System.Diagnostics` | `Process` `ProcessHost` `ProcessList` `Stopwatch` `ServerMetrics` `Log`（分级文件日志）`Privileges` | [引用](/ref/System.Diagnostics) |
 | `System.Drawing` | Win32 风格：`Graphics`（HDC）`Bitmap` `Font` `Color` `Point` `Size` `Rectangle` `PrinterSettings` `RawPrinter`（无 Pen/Brush，用 color+penWidth 传参） | [引用](/ref/System.Drawing) |
 | `System.Globalization` | `Lunar` `LunarDate`（农历） | [引用](/ref/System.Globalization) |
@@ -40,11 +40,10 @@
 | `Gui.Designer` | 可视化设计器（`.zform` 编辑/检查器/画布） | [引用](/ref/Gui.Designer) |
 | `Gui.Backend` | 原生层：`Window` `UiDriver` `Win32Shell` | [引用](/ref/Gui.Backend) |
 | `Game.Core` | 游戏主循环 `App` | [引用](/ref/Game.Core) |
-| `Game.Foundation` (+ `.Sdl`) | 固定步长计时、语义化输入、场景生命周期、SDL 宿主 | [引用](/ref/Game.Foundation) |
+| `Game.Foundation` | 固定步长计时、语义化输入、场景生命周期、Gui 宿主 | [引用](/ref/Game.Foundation) |
 | `Game.Board` / `Game.Cards` / `Game.Arcade2D` | 可克隆网格/寻路、卡牌构筑、几何与碰撞 | [引用](/ref/Game.Board) · [引用](/ref/Game.Cards) · [引用](/ref/Game.Arcade2D) |
 | `Game.Scene` / `Game.Render` | 场景文档/设计器、精灵与位图字体 | [引用](/ref/Game.Scene) · [引用](/ref/Game.Render) |
 | `Game.Arpg` | 完整类型化 RPG 运行时（项目、世界、战斗、UI、存档、SD 渲染、联网） | [引用](/ref/Game.Arpg) |
-| `SDL3` | SDL3 绑定：`Sdl` `SdlWindow` `SdlRenderer` `SdlTexture` `SdlAudio` `SdlEvent` `SdlGamepad` `SdlTouch` `SdlGpu` | [引用](/ref/SDL3) |
 | `Platform` | `Runtime.GetPlatform()`（编译期目标） | [引用](/ref/Platform) |
 | `Sdk.Jd` / `Sdk.Wechat` | 平台业务 SDK：京东联盟（`Api/*` `Domain/*` `JdClient/JdSign`）、微信生态（`Mp/Open/Work/TenPay/WxOpen`、`WechatClient`、`WXBizMsgCrypt`） | [引用](/ref/Sdk.Jd) · [引用](/ref/Sdk.Wechat) |
 

@@ -40,11 +40,10 @@
 | `Gui.Designer` | 可视化设计器（`.zform` 编辑/检查器/画布） | [引用](/ref/Gui.Designer) |
 | `Gui.Backend` | 原生层：`Window` `UiDriver` `Win32Shell` | [引用](/ref/Gui.Backend) |
 | `Game.Core` | 游戏主循环 `App` | [引用](/ref/Game.Core) |
-| `Game.Foundation` (+ `.Sdl`) | 固定步长计时、语义化输入、场景生命周期、SDL 宿主 | [引用](/ref/Game.Foundation) |
+| `Game.Foundation` | 固定步长计时、语义化输入、场景生命周期、Gui 宿主 | [引用](/ref/Game.Foundation) |
 | `Game.Board` / `Game.Cards` / `Game.Arcade2D` | 可克隆网格/寻路、卡牌构筑、几何与碰撞 | [引用](/ref/Game.Board) · [引用](/ref/Game.Cards) · [引用](/ref/Game.Arcade2D) |
 | `Game.Scene` / `Game.Render` | 场景文档/设计器、精灵与位图字体 | [引用](/ref/Game.Scene) · [引用](/ref/Game.Render) |
 | `Game.Arpg` | 完整类型化 RPG 运行时（项目、世界、战斗、UI、存档、SD 渲染、联网） | [引用](/ref/Game.Arpg) |
-| `SDL3` | SDL3 绑定：`Sdl` `SdlWindow` `SdlRenderer` `SdlTexture` `SdlAudio` `SdlEvent` `SdlGamepad` `SdlTouch` `SdlGpu` | [引用](/ref/SDL3) |
 | `Platform` | `Runtime.GetPlatform()`（编译期目标） | [引用](/ref/Platform) |
 | `Sdk.Jd` / `Sdk.Wechat` | 平台业务 SDK：京东联盟（`Api/*` `Domain/*` `JdClient/JdSign`）、微信生态（`Mp/Open/Work/TenPay/WxOpen`、`WechatClient`、`WXBizMsgCrypt`） | [引用](/ref/Sdk.Jd) · [引用](/ref/Sdk.Wechat) |
 

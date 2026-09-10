@@ -4,7 +4,7 @@ Set-Location $root
 
 # The charts example is a pure Gui stdlib program: on Windows its window shell
 # is the Zan-side Win32Shell (Native.zan #if WINDOWS), so the native Win32 GUI
-# runtime is enough -- no SDL3 is linked. The runtime is built as a static
+# runtime is enough -- no extra driver is linked. The runtime is built as a static
 # mingw-ABI archive plus zanc's own link driver, which pulls in the async
 # reactor (rt_io) and sync runtime (rt_sync) automatically.
 #

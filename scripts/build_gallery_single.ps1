@@ -8,7 +8,7 @@
 #
 # The gallery is a pure Gui stdlib program: on Windows its window shell is the
 # Zan-side Win32Shell (Native.zan #if WINDOWS), so the native Win32 GUI runtime
-# is enough -- no SDL3 is linked (the IDE's SDL3 static link is a game/IDE
+# is enough -- no SDL3 is linked (the IDE's static link is a game/IDE
 # thing, the gallery does not need it).
 #
 # Usage:  powershell -ExecutionPolicy Bypass -File scripts\build_gallery_single.ps1

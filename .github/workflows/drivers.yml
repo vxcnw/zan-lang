@@ -1,6 +1,6 @@
 name: drivers
 
-# Builds the native driver bundles (SDL3, SQLite, PostgreSQL/libpq) for every
+# Builds the native driver bundles (SQLite, PostgreSQL/libpq) for every
 # supported target on its own native runner, then uploads each per-target
 # directory as an artifact. Generated bundles can also refresh the committed
 # per-target drivers.
@@ -33,7 +33,6 @@ on:
       - 'src/runtime/gui_runtime.c'
       - 'src/runtime/gui_runtime.h'
       - 'src/runtime/gui_runtime_mac.m'
-      - 'stdlib/SDL3/**'
       - 'stdlib/System/Data/**'
       - 'scripts/stage_*'
 
@@ -41,7 +40,6 @@ permissions:
   contents: read
 
 env:
-  SDL3_VERSION: '3.4.10'
   SQLITE_URL: 'https://sqlite.org/2024/sqlite-amalgamation-3460100.zip'
   SQLITE_DIR: 'sqlite-amalgamation-3460100'
   # Lua 5.4.6 source tarball (drivers.yml "Stage Lua driver"); saved as
@@ -90,33 +88,6 @@ jobs:
             sleep 15
             sudo apt-get update || true
           done
-
-      - name: Build SDL3 from source
-        run: |
-          set -eux
-          curl -fsSL -o sdl.tar.gz \
-            "https://github.com/libsdl-org/SDL/releases/download/release-${SDL3_VERSION}/SDL3-${SDL3_VERSION}.tar.gz"
-          sh scripts/verify_dep.sh sdl.tar.gz
-          tar xzf sdl.tar.gz
-          cmake -S "SDL3-${SDL3_VERSION}" -B sdlbuild -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release -DSDL_SHARED=ON -DSDL_STATIC=OFF \
-            -DSDL_TEST_LIBRARY=OFF -DCMAKE_INSTALL_PREFIX="$PWD/sdlinst"
-          cmake --build sdlbuild
-          cmake --install sdlbuild
-
-      - name: Stage SDL3 driver
-        run: |
-          set -eux
-          export PKG_CONFIG_PATH="$PWD/sdlinst/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-          DEST="stdlib/SDL3/drivers/${{ matrix.target }}"
-          mkdir -p "$DEST"
-          cc -O2 -fPIC -shared -Wl,-soname,libzan_sdl3.so \
-            -o "$DEST/libzan_sdl3.so" stdlib/SDL3/native/zan_sdl3.c \
-            $(pkg-config --cflags sdl3) $(pkg-config --libs sdl3) -lm
-          cp -L "$(pkg-config --variable=libdir sdl3)/libSDL3.so.0" "$DEST/libSDL3.so.0"
-          patchelf --set-rpath '$ORIGIN' "$DEST/libzan_sdl3.so"
-          printf 'libzan_sdl3.so\nlibSDL3.so.0\n' > "$DEST/zan_sdl3.bundle"
-          ldd "$DEST/libzan_sdl3.so" || true
 
       - name: Stage SQLite driver
         run: |
@@ -167,7 +138,6 @@ jobs:
         with:
           name: drivers-${{ matrix.target }}
           path: |
-            stdlib/SDL3/drivers/${{ matrix.target }}/
             stdlib/System/Data/Sqlite/drivers/${{ matrix.target }}/
             stdlib/System/Data/Postgres/drivers/${{ matrix.target }}/
             stdlib/System/Scripting/drivers/${{ matrix.target }}/
@@ -198,27 +168,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install deps
-        run: brew install sdl3 libpq sqlite pkg-config
-
-      - name: Stage SDL3 driver
-        run: |
-          set -eux
-          export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig:$(brew --prefix sdl3)/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-          DEST="stdlib/SDL3/drivers/${{ matrix.target }}"
-          mkdir -p "$DEST"
-          xcrun clang -O2 -fPIC -dynamiclib -install_name @rpath/libzan_sdl3.dylib \
-            -o "$DEST/libzan_sdl3.dylib" stdlib/SDL3/native/zan_sdl3.c \
-            $(pkg-config --cflags sdl3) $(pkg-config --libs sdl3) -lm
-          cp -L "$(pkg-config --variable=libdir sdl3)/libSDL3.0.dylib" "$DEST/libSDL3.0.dylib"
-          chmod u+w "$DEST/libSDL3.0.dylib"
-          SDLDEP="$(otool -L "$DEST/libzan_sdl3.dylib" | awk '/libSDL3/{print $1; exit}')"
-          install_name_tool -change "$SDLDEP" @rpath/libSDL3.0.dylib "$DEST/libzan_sdl3.dylib"
-          install_name_tool -id @rpath/libSDL3.0.dylib "$DEST/libSDL3.0.dylib"
-          install_name_tool -add_rpath @loader_path "$DEST/libzan_sdl3.dylib" || true
-          codesign --force --sign - "$DEST/libSDL3.0.dylib"
-          codesign --force --sign - "$DEST/libzan_sdl3.dylib"
-          printf 'libzan_sdl3.dylib\nlibSDL3.0.dylib\n' > "$DEST/zan_sdl3.bundle"
-          otool -L "$DEST/libzan_sdl3.dylib"
+        run: brew install libpq sqlite pkg-config
 
       - name: Stage SQLite driver
         run: |
@@ -289,7 +239,7 @@ jobs:
       # and the macOS SDK carries both slices -- so the Intel one can be built
       # right here with -arch. That keeps GUI cross-linking for `macos-x64`
       # independent of the (perpetually queued) Intel runner, which is still
-      # needed for the brew-installed drivers (SDL3/libpq/sqlite).
+      # needed for the brew-installed drivers (libpq/sqlite).
       - name: Stage zan_gui driver for macos-x64 (cross -arch)
         if: matrix.target == 'macos-arm64'
         run: |
@@ -338,7 +288,6 @@ jobs:
         with:
           name: drivers-${{ matrix.target }}
           path: |
-            stdlib/SDL3/drivers/${{ matrix.target }}/
             stdlib/System/Data/Sqlite/drivers/${{ matrix.target }}/
             stdlib/System/Data/Postgres/drivers/${{ matrix.target }}/
             stdlib/Gui/drivers/${{ matrix.target }}/
@@ -353,8 +302,6 @@ jobs:
           - { target: win-x64,   msystem: MINGW64,    prefix: mingw-w64-x86_64 }
           - { target: win-arm64, msystem: CLANGARM64, prefix: mingw-w64-clang-aarch64 }
     runs-on: ${{ matrix.target == 'win-arm64' && 'windows-11-arm' || 'windows-latest' }}
-    # win-arm64 SDL3 packaging is not yet reliably available in MSYS2; keep the
-    # job best-effort so it never blocks the other targets.
     continue-on-error: ${{ matrix.target == 'win-arm64' }}
     # This job commits the refreshed cross-link runtime objects to main; see
     # the macos job for the environment/approval note.
@@ -373,7 +320,6 @@ jobs:
           update: true
           install: >-
             ${{ matrix.prefix }}-gcc
-            ${{ matrix.prefix }}-sdl3
             ${{ matrix.prefix }}-sqlite3
             ${{ matrix.prefix }}-postgresql
             ${{ matrix.target == 'win-x64' && 'mingw-w64-x86_64-openssl' || '' }}
@@ -495,20 +441,10 @@ jobs:
           git pull --rebase --autostash origin main
           git push origin HEAD:main
 
-      - name: Stage drivers (SDL3 + SQLite + libpq)
+      - name: Stage drivers (SQLite + libpq)
         run: |
           set -eux
           P="$(cygpath -u "$MINGW_PREFIX")"
-          # SDL3 bridge
-          SDEST="stdlib/SDL3/drivers/${{ matrix.target }}"
-          mkdir -p "$SDEST"
-          # msys2 has no pkg-config here (and the mingw pkg-config package is
-          # unavailable for CLANGARM64), so link SDL3 directly from $MINGW_PREFIX.
-          cc -O2 -shared -o "$SDEST/zan_sdl3.dll" stdlib/SDL3/native/zan_sdl3.c \
-            -I"$P/include" -L"$P/lib" -lSDL3 \
-            -Wl,--out-implib,"$SDEST/libzan_sdl3.dll.a" -static-libgcc
-          cp "$P/bin/SDL3.dll" "$SDEST/SDL3.dll"
-          printf 'zan_sdl3.dll\nSDL3.dll\n' > "$SDEST/zan_sdl3.bundle"
           # SQLite: mingw ships this as libsqlite3-0.dll, but the driver
           # manifest loads "sqlite3", so stage it as sqlite3.dll.
           QDEST="stdlib/System/Data/Sqlite/drivers/${{ matrix.target }}"
@@ -591,7 +527,6 @@ jobs:
         with:
           name: drivers-${{ matrix.target }}
           path: |
-            stdlib/SDL3/drivers/${{ matrix.target }}/
             stdlib/System/Data/Sqlite/drivers/${{ matrix.target }}/
             stdlib/System/Data/Postgres/drivers/${{ matrix.target }}/
             stdlib/System/Net/Tls/drivers/${{ matrix.target }}/

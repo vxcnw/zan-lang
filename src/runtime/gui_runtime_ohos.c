@@ -1,8 +1,8 @@
 /* gui_runtime_ohos.c -- HarmonyOS window/event/present shell (ZAN_GUI_OHOS).
  *
  * Part of the gui_runtime translation unit: #include'd by gui_runtime.c in
- * a fixed order; not compiled standalone. Plays the role gui_runtime_sdl.c
- * plays for SDL3 builds: owns the zan_gui_* window/event/present exports.
+ * a fixed order; not compiled standalone. Owns the zan_gui_* window/
+ * event/present exports like every platform shell in this family.
  *
  * One window = the XComponent surface the HAP shell attaches via
  * zan_gui_ohos_attach(); the HAP shell feeds touch through
@@ -47,7 +47,7 @@ static FnNWHandleOpt       g_nw_handleopt;
 /* ---- window record -----------------------------------------------------
  * The HAP shell owns the real native window (from the XComponent); we only
  * ever hold the pointer it hands us. The Zan-facing hwnd is this record's
- * address, exactly like the SDL shell hands back SDL_Window*. */
+ * address, exactly like every platform shell hands back its window. */
 typedef struct {
     void *nw;             /* NULL until the shell attaches the surface */
     int w, h;             /* attached surface size, device pixels */
@@ -77,7 +77,7 @@ static int  g_window_height = 0;
 static int  g_dpi           = 96;
 
 /* ---- event ring --------------------------------------------------------
- * Same flat event protocol as the SDL shell: e[0] kind, e[1] x, e[2] y,
+ * Same flat event protocol as every shell: e[0] kind, e[1] x, e[2] y,
  * e[3] button, e[4] code (keycode / wheel delta), e[5] mods, e[6] flag.
  * Kinds: 0 wake, 1 move, 2 down, 3 up, 7 resize (x=w y=h), 8 close,
  * 13 wheel, 14 surface (re)attached / exposed (full repaint).
@@ -93,7 +93,7 @@ static iptr g_event_win = 0;
 static long long g_ev_seq = 0;
 
 /* Plain moves coalesce (freshest x/y wins) and wheel floods coalesce by
- * SUMMING deltas -- same contract as the SDL shell. The touch layer emits
+ * SUMMING deltas -- same contract across shells. The touch layer emits
  * one wheel per finger sample while the app eats one event per rendered
  * frame, so an un-coalesced wheel backlog lags the page visibly behind the
  * finger on slow-rendering pages (the gallery's glass theme runs ~1-6 fps
@@ -183,13 +183,13 @@ EXPORT void zan_gui_ohos_detach(void) {
     pthread_mutex_unlock(&g_oq_lock);
 }
 
-/* ---- touch gesture synthesis (port of the SDL shell's finger layer) -----
+/* ---- touch gesture synthesis (port of the shared finger layer) -----
  * A phone has no wheel: the first finger's drag beyond an 8 px slop turns
  * into Win32-scale wheel events (kind 13) that move content 1:1 with the
  * finger, a tap under the slop is delivered as a full synthesized click at
  * the anchor, and finger-up with residual speed coasts (fling) through a
  * 16 ms thread until exponential friction eats it. The formulas are the
- * SDL shell's verbatim, so both phones scroll identically:
+ * original shell's verbatim, so both phones scroll identically:
  *   wheel degrees = finger dy * 288 / dpi  (sub-degree remainder carries) */
 static i64 ohs_tick_ms(void) {
     struct timespec ts;
@@ -284,7 +284,7 @@ EXPORT void zan_gui_ohos_touch(int action, int x, int y) {
          * gestures (long-press context menus, press-state feedback on
          * cells/buttons) need the press while the finger is still down.
          * A plain move precedes it so hover/enter state settles first.
-         * Mirrors the SDL shell's finger layer. */
+         * Mirrors the shared finger layer. */
         oq_push_locked(1, (int)g_tg_ax, (int)g_tg_ay, 0, 0, 0);
         oq_push_locked(2, (int)g_tg_ax, (int)g_tg_ay, 0, 0, 0);
         pthread_mutex_unlock(&g_oq_lock);
@@ -649,7 +649,7 @@ static void ime_feature_detect(void) {
 }
 
 /* Open/close the IME session, driven by text-widget focus exactly like the
- * SDL shell's SDL_StartTextInput/StopTextInput pairing. Attach with
+ * platform shell's Start/StopTextInput pairing. Attach with
  * showKeyboard=true summons the soft keyboard; Detach retires it. Called
  * on the app (render) thread only. */
 EXPORT void zan_gui_set_ime_open(i32 on) {
@@ -812,7 +812,21 @@ EXPORT i32 zan_gui_present_dirty_add(i32 x, i32 y, i32 w, i32 h) {
     return 0;
 }
 
-static void ohos_dirty_reset(void) { g_dirty_count = 0; g_dirty_overflow = 0; }
+static int g_dirty_full;
+
+static void ohos_dirty_reset(void) {
+    g_dirty_count = 0;
+    g_dirty_overflow = 0;
+    g_dirty_full = 0;
+}
+
+/* Whole-window frame declaration (Win32Shell.PresentFull's counterpart):
+ * a frame that repainted every pixel must not reuse earlier subrects; the
+ * EGL texture persists, so honor the flag by falling back to the whole-
+ * surface upload. */
+EXPORT void zan_gui_present_full(void) {
+    g_dirty_full = 1;
+}
 
 static void ohos_texture(zan_ohos_win_t *w, const zan_surface_t *s) {
     glActiveTexture(GL_TEXTURE0);
@@ -828,7 +842,7 @@ static void ohos_texture(zan_ohos_win_t *w, const zan_surface_t *s) {
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, s->width, s->height,
                         GL_RGBA, GL_UNSIGNED_BYTE, s->pixels);
         glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    } else if (g_dirty_count > 0 && !g_dirty_overflow) {
+    } else if (g_dirty_count > 0 && !g_dirty_overflow && !g_dirty_full) {
         glPixelStorei(GL_UNPACK_ROW_LENGTH, s->stride);
         for (int i = 0; i < g_dirty_count; i++) {
             i32 x = g_dirty[i * 4 + 0], y = g_dirty[i * 4 + 1];
@@ -991,7 +1005,7 @@ static int oq_pop(void) {
     return 1;
 }
 
-/* Return contract mirrors the SDL driver -- the reference implementation the
+/* Return contract mirrors the reference driver -- the implementation the
  * Zan Window wrapper and every custom event loop (gallery, IDE) are written
  * against: poll 0 = event delivered / 1 = queue empty; wait 0 = delivered;
  * wait_event_timeout 0 = delivered / 1 = timed out. Inverting these starves
@@ -1066,7 +1080,7 @@ EXPORT i32 zan_gui_get_dpi_scale(void) { return (i32)(g_dpi * 100 / 96); }
 /* The HAP shell resolves the display density (libnative_display_manager lives
  * in the default linker namespace, out of reach of dlsym(RTLD_DEFAULT) from
  * this dlopened library) and hands it over before zan_hap_main. Mobile DPI is
- * denominated in 160 dpi (a 3.0x phone reports 480), but the SDL driver keeps
+ * denominated in 160 dpi (a 3.0x phone reports 480), but the reference driver keeps
  * g_dpi on the desktop 96-dpi base (contentScale*96) and every consumer --
  * the percent conversion above and the wheel synthesis 288/g_dpi -- assumes
  * that convention. Store the 96-base value: a 480 dpi device must yield

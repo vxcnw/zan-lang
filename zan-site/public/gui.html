@@ -269,9 +269,18 @@ c.StylePad... c.SetShown(v).Grow();</code></pre></div>
 <code class="inline">grow=true</code> 的节点填满剩余主轴空间。配合 <code class="inline">Gap()</code> 使用。</p>
 <h3 id="css-flex-布局">CSS flex 布局</h3>
 <p>给容器加 <code class="inline">display: flex</code>（样式表/<code class="inline">Style</code>），支持
-<code class="inline">flex-direction</code>（row/col）、<code class="inline">flex-grow</code>、<code class="inline">flex-shrink</code>、<code class="inline">justify-content</code>
+<code class="inline">flex-direction</code>（row/column）、<code class="inline">flex-wrap</code>、<code class="inline">justify-content</code>
 （start/center/end/between/around）、<code class="inline">align-items</code>（stretch/start/center/end）、
-margin、gap、min/max/百分比宽高。</p>
+<code class="inline">align-content</code>（换行后各行在交叉轴的分布，含 stretch）、<code class="inline">gap</code>/<code class="inline">row-gap</code>/
+<code class="inline">column-gap</code>、margin、min/max/百分比宽高。</p>
+<p>子项上可以写 <code class="inline">flex</code>（<code class="inline">1 1 0</code> / <code class="inline">none</code> / <code class="inline">auto</code>）、<code class="inline">flex-grow</code>、<code class="inline">flex-shrink</code>
+（<code class="inline">0</code> = 溢出时不让位）、<code class="inline">flex-basis</code>、<code class="inline">align-self</code>（覆盖容器的 <code class="inline">align-items</code>）、
+<code class="inline">aspect-ratio</code>（只给一根轴，另一根按比例推出）、<code class="inline">order</code>。</p>
+<p><code class="inline">flex-basis: 0</code> 配 <code class="inline">flex-grow: 1</code> 是等宽列的标准写法——剩余空间按 grow 平分，
+整除余数给最后一项，所以右边缘精确对齐容器。</p>
+<p>不必手写这些的场合用现成容器：<code class="inline">Gui.Widget.Flex</code>（对标 n-flex/n-space）和
+<code class="inline">Gui.Widget.Grid</code> + <code class="inline">GridItem</code>（对标 n-grid/n-gi，等宽列、span/offset、
+按最小列宽自动降列）。两者只往 <code class="inline">Class</code> 写类名，几何全部由 <code class="inline">base.css</code> 给出。</p>
 <h3 id="特殊容器">特殊容器</h3>
 <ul><li><code class="inline">Panel.Root(name)</code>：窗口根；<code class="inline">Layout()</code> 透明流式容器；<code class="inline">Titled(t)</code> 带标题分区。</li><li><code class="inline">FbFlow</code>（<code class="inline">Gui.Widget.FormBuilder</code>）：24 列流式网格，<code class="inline">AddCell(ctrl, span)</code></li></ul>
 <p>  （1..24 行内贪心换行）——<code class="inline">.zform layoutMode: 0</code> 用它在页面里排字段。</p>
@@ -282,13 +291,24 @@ margin、gap、min/max/百分比宽高。</p>
 <code class="inline">UseAppCss</code>）→ 控件内联（<code class="inline">Bg()/Class/...</code>）。</p>
 <h3 id="css-文本stylesheetparseguicss">CSS 文本（<code class="inline">StyleSheet.Parse</code>/<code class="inline">guicss</code>）</h3>
 <p><code class="inline">font-size</code>/<code class="inline">font</code>、<code class="inline">width</code>/<code class="inline">min-width</code>/<code class="inline">max-width</code>、<code class="inline">height</code>/<code class="inline">min/max</code>、
-<code class="inline">gap</code>/<code class="inline">row-gap</code>/<code class="inline">column-gap</code>、<code class="inline">radius</code>/<code class="inline">border-radius</code>、<code class="inline">padding</code>/<code class="inline">pad</code>（+每边）、
-<code class="inline">margin</code>（+每边）、<code class="inline">background</code>/<code class="inline">background-color</code>/<code class="inline">bg</code>、<code class="inline">opacity</code>、<code class="inline">color</code>、
-<code class="inline">accent-color</code>、<code class="inline">font-weight</code>、<code class="inline">line-height</code>、<code class="inline">text-align</code>、<code class="inline">vertical-align</code>、
-<code class="inline">text-transform</code>、<code class="inline">border-width</code>/<code class="inline">border-color</code>（+每边）、<code class="inline">box-shadow</code>/<code class="inline">shadow</code>、
-<code class="inline">display</code>（flex/inline-flex/none）、<code class="inline">flex-direction</code>、<code class="inline">justify-content</code>、
-<code class="inline">align-items</code>、<code class="inline">flex-grow</code>、<code class="inline">overflow</code>、<code class="inline">z-index</code>、<code class="inline">cursor</code>、<code class="inline">transition</code>、
-<code class="inline">transform</code>。颜色：命名色 + <code class="inline">#hex</code> + <code class="inline">0xAARRGGBB</code>。</p>
+<code class="inline">aspect-ratio</code>、<code class="inline">gap</code>（<code class="inline">&lt;both&gt;</code> 或 <code class="inline">&lt;row&gt; &lt;column&gt;</code>）/<code class="inline">row-gap</code>/<code class="inline">column-gap</code>、
+<code class="inline">radius</code>/<code class="inline">border-radius</code>（1~4 值）+ <code class="inline">border-&lt;corner&gt;-radius</code> 四个单角、
+<code class="inline">padding</code>/<code class="inline">pad</code>（+每边）、<code class="inline">margin</code>（+每边）、<code class="inline">background</code>/<code class="inline">background-color</code>/<code class="inline">bg</code>、
+<code class="inline">opacity</code>、<code class="inline">color</code>、<code class="inline">accent-color</code>、<code class="inline">font-weight</code>、<code class="inline">line-height</code>、
+<code class="inline">letter-spacing</code>、<code class="inline">text-align</code>、<code class="inline">vertical-align</code>、<code class="inline">text-transform</code>、
+<code class="inline">text-overflow</code>、<code class="inline">white-space</code>、<code class="inline">border</code>（+每边简写）、<code class="inline">border-width</code>/
+<code class="inline">border-color</code>（+每边）、<code class="inline">border-style</code>、<code class="inline">box-shadow</code>/<code class="inline">shadow</code>、
+<code class="inline">display</code>（flex/inline-flex/none）、<code class="inline">flex-direction</code>、<code class="inline">flex-wrap</code>、
+<code class="inline">justify-content</code>、<code class="inline">align-items</code>、<code class="inline">align-content</code>、<code class="inline">place-content</code>、
+<code class="inline">flex</code>/<code class="inline">flex-grow</code>/<code class="inline">flex-shrink</code>/<code class="inline">flex-basis</code>、<code class="inline">align-self</code>、<code class="inline">order</code>、
+<code class="inline">position</code>、<code class="inline">top</code>/<code class="inline">right</code>/<code class="inline">bottom</code>/<code class="inline">left</code>/<code class="inline">inset</code>、<code class="inline">overflow</code>、<code class="inline">z-index</code>、
+<code class="inline">visibility</code>、<code class="inline">cursor</code>、<code class="inline">box-sizing</code>（盒子一律 border-box，照收不改）、
+<code class="inline">transition</code>（+<code class="inline">-duration</code>/<code class="inline">-timing-function</code>）、<code class="inline">transform</code>、
+<code class="inline">rotate</code>/<code class="inline">scale</code>/<code class="inline">translate</code>（脱离 transform 的单独写法）、
+<code class="inline">animation</code>（+<code class="inline">-name</code>/<code class="inline">-duration</code>）、<code class="inline">backdrop-filter</code>/<code class="inline">filter</code>（blur）。
+颜色：命名色 + <code class="inline">#hex</code> + <code class="inline">0xAARRGGBB</code>。</p>
+<p>长度按 100% 编写，DPI 缩放由引擎统一施加（含 <code class="inline">row-gap</code>/<code class="inline">column-gap</code>、
+单角圆角与 <code class="inline">flex-basis</code>）。百分比不缩放。</p>
 <p>支持选择器：类型 <code class="inline">button { }</code>、类 <code class="inline">.primary { }</code>、状态 <code class="inline">button:hover</code>/
 <code class="inline">:active</code>/<code class="inline">:focus</code>/<code class="inline">:checked</code>、<code class="inline">a,b{}</code>、子件 <code class="inline">select::option</code>、
 <code class="inline">:root { --name: value }</code> 自定义属性 <code class="inline">var(--name)</code>。</p>
@@ -314,6 +334,11 @@ sunset</code>。</p>
 checked:/selected:/focus-visible:</code>；任意值 <code class="inline">w-[240px]</code>、<code class="inline">bg-[#0f172a]</code>；
 透明度 <code class="inline">bg-black/40</code>；工具类最后应用覆盖皮肤规则。
 ❌ 没有 <code class="inline">md:/sm:/dark:/group-hover:</code> 断点变体。</p>
+<p>布局类：<code class="inline">flex flex-col flex-wrap items-center justify-between gap-4 gap-x-2</code>、
+<code class="inline">grid grid-cols-3</code>；子项 <code class="inline">flex-1</code>（<code class="inline">1 1 0</code>，一排即等宽）/<code class="inline">flex-auto</code>/
+<code class="inline">flex-initial</code>/<code class="inline">flex-none</code>、<code class="inline">grow grow-0 shrink shrink-0</code>、
+<code class="inline">basis-0 basis-1/3 basis-full basis-24</code>、<code class="inline">self-center self-end self-stretch</code>、
+<code class="inline">content-between content-stretch</code>、<code class="inline">aspect-video aspect-square</code>。</p>
 <h2 id="事件机制">事件机制</h2>
 <h3 id="三条路径都可用">三条路径（都可用）</h3>
 <div class="code-card"><div class="code-bar"><i></i><i></i><i></i><span>zan</span></div>

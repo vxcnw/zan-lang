@@ -29,7 +29,7 @@
 
 ## 音频
 
-`assets/audio/bgm_main.ogg` 等经 SDL3 播放，主菜单进入后循环播放。
+`assets/audio/bgm_main.ogg` 等经 System.Audio 播放，主菜单进入后循环播放。
 
 ## 内嵌与校验
 

@@ -13,7 +13,7 @@ name: release
 #             toolchain/{zanc, zan-lsp, zan-dap, zanfmt, zandoc, ...}
 #             stdlib/ templates/ examples/ README.txt VERSION
 #
-# NOTE: the IDE binary itself is currently Windows-only (clang-cl + SDL3). The
+# NOTE: the IDE binary itself is currently Windows-only (clang-cl). The
 # Linux/macOS bundles ship the compiler + CLIs + stdlib as an SDK until the
 # cross-platform IDE build recipe (docs/RELEASE.md 5.2) lands.
 
@@ -60,7 +60,7 @@ jobs:
       - name: Build toolchain
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="$LLVM_DIR" \
-            -DZAN_BUILD_GUI=OFF -DZAN_BUILD_SDL3=OFF -DZAN_BUILD_GUI_TESTS=OFF
+            -DZAN_BUILD_GUI=OFF -DZAN_BUILD_GUI_TESTS=OFF
           cmake --build build -j --target zanc zan-lsp zan-dap zanfmt zandoc
 
       - name: Package bundle
@@ -91,7 +91,7 @@ jobs:
       - name: Build toolchain
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="$LLVM_DIR" \
-            -DZAN_BUILD_GUI=OFF -DZAN_BUILD_SDL3=OFF -DZAN_BUILD_GUI_TESTS=OFF
+            -DZAN_BUILD_GUI=OFF -DZAN_BUILD_GUI_TESTS=OFF
           cmake --build build -j --target zanc zan-lsp zan-dap zanfmt zandoc
 
       - name: Package bundle
@@ -103,7 +103,7 @@ jobs:
           path: out/*.tar.gz*
 
   # ------------------------------------------------------------- Windows ----
-  # Full IDE bundle: reproduces the local build (clang-cl + LLVM + staged SDL3 +
+  # Full IDE bundle: reproduces the local build (clang-cl + LLVM + staged GUI +
   # bundled MinGW linker), then build_ide.ps1 + publish_ide.ps1.
   windows:
     runs-on: windows-latest

@@ -1004,7 +1004,7 @@ partial class ZanIDE {
         if (!proj) {
             // A loose file still needs the modules it imports: WithUsedModules
             // below walks the `using X;` lines and finds each declaring file
-            // near the entry. stdlib namespaces (Gui, Game.Kit, SDL3, ...)
+            // near the entry. stdlib namespaces (Gui, Game.Kit, ...)
             // resolve through --auto-stdlib at compile time and need no extra
             // files on the command line.
             string args0 = "\"" + entry + "\"";
@@ -1342,7 +1342,7 @@ partial class ZanIDE {
         ids.Add("linux-x64"); ids.Add("linux-arm64");
         ids.Add("macos-arm64"); ids.Add("macos-x64");
         #endif
-        // Android GUI: one signed SDLActivity APK per ABI (zanc --emit-apk;
+        // Android GUI: one signed NativeActivity APK per ABI (zanc --emit-apk;
         // packaging assets + apksigner ship beside zanc, no Android SDK).
         ids.Add("android-x64"); ids.Add("android-arm64");
         // HarmonyOS GUI: one HAP per ABI (zanc --emit-hap; same bundled-
@@ -1975,8 +1975,8 @@ partial class ZanIDE {
                     exes.Add(exe);
                     log.Add("> Publishing linux-arm64 ...");
                 } else if (id == "android-x64" || id == "android-arm64") {
-                    // One signed SDLActivity APK per ABI. zanc --emit-apk
-                    // compiles, links libmain.so, packages the SDLActivity
+                    // One signed NativeActivity APK per ABI. zanc --emit-apk
+                    // compiles, links libmain.so, packages the NativeActivity
                     // shell and signs it -- no Android SDK on this machine.
                     string apk = outDir + "/" + baseName + ".apk";
                     steps.Add(zc + pubFlag + " " + inputs

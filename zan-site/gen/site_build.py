@@ -337,7 +337,7 @@ def build_guides():
             "desc": "Zan IDE 指南：下载安装、项目模板、编辑器、可视化 .zform 设计器、运行/调试、发布、AI 助手与 MCP。",
         },
         "stdlib": {
-            "desc": "Zan 标准库总览与 API 参考：按命名空间索引，覆盖 System/Gui/Game/Sdk/SDL3，提供完整签名与说明。",
+            "desc": "Zan 标准库总览与 API 参考：按命名空间索引，覆盖 System/Gui/Game/Sdk，提供完整签名与说明。",
         },
         "examples": {
             "desc": "Zan 示例与项目模板：console/gui/server-mvc/server-iot/server-http/server-ws-gateway/server-tcp/library 等可运行模板与原样示例。",
@@ -379,7 +379,6 @@ NS_GROUP = [
     ("Gui", "Gui"),
     ("Game", "Game"),
     ("Sdk", "Sdk"),
-    ("SDL3", "SDL3"),
     ("Platform", "Platform"),
 ]
 
@@ -397,7 +396,7 @@ def ref_sidebar(data, current):
         root = ns.split(".")[0]
         roots.setdefault(root, []).append(ns)
     out = []
-    for root in ["System", "Gui", "Game", "Sdk", "SDL3", "Platform"]:
+    for root in ["System", "Gui", "Game", "Sdk", "Platform"]:
         nss = roots.get(root, [])
         if not nss:
             continue
