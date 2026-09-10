@@ -34,6 +34,15 @@ class ShellArt {
     R2Tex lowerStrip;    // lwscrnl.shp + shell.pal
     R2Tex modalBg;       // pudlgbgn.shp + dialogn.pal (exit confirm)
     R2Tex msgBtns;       // mnbttn.shp + mainbttn.pal (up / pressed)
+    // The sidebar menu slots: SDBTNANM.SHP's 17 frames over SDBTNANM.PAL,
+    // the button plate the reference's MenuSlotAnimationRunner indexes by
+    // state (`MenuSlotAnimationRunner.ts:68-98`). Distinct from msgBtns --
+    // MNBTTN is the in-dialog button, this is the menu column.
+    R2Tex[] slotFrames;  // sdbtnanm.shp + sdbtnanm.pal, frames 0..16
+    R2Tex[] sdTp;        // sdtp.shp + shell.pal, frame 0 closed / 1 open
+    R2Tex[] sdWrnTmp;    // sdwrntmp.shp + shell.pal, the slide overlay
+    R2Tex[] mpBtn;       // sdmpbtn.shp + shell.pal, the MP slot
+    R2Tex[] wrnAnim;     // sdwrnanm.shp + shell.pal, the right-panel loop
     R2Tex fsBkgDlg;      // fsbkgdlg.shp + fsscrn.pal (campaign page base)
     R2Tex fsAllied;      // fsalg.shp + fsscrn.pal
     R2Tex fsTutorial;    // fsbclg.shp + fsscrn.pal
@@ -55,6 +64,17 @@ class ShellArt {
                                            0, "ra2:sdtp");
         a.warnAnim = ShellArt.LoadShpFrame(vfs, "SDWRNANM.SHP", "shell.pal",
                                            0, "ra2:sdwrnanm");
+        // The multi-frame shell sheets the reference's animation runners walk.
+        a.slotFrames = ShellArt.LoadFrames(vfs, "SDBTNANM.SHP", "SDBTNANM.PAL",
+                                           "ra2:slot", 17);
+        a.sdTp = ShellArt.LoadFrames(vfs, "SDTP.SHP", "shell.pal",
+                                     "ra2:sdtpf", 2);
+        a.sdWrnTmp = ShellArt.LoadFrames(vfs, "SDWRNTMP.SHP", "shell.pal",
+                                         "ra2:sdwrntmp", 6);
+        a.mpBtn = ShellArt.LoadFrames(vfs, "SDMPBTN.SHP", "shell.pal",
+                                      "ra2:sdmpbtn", 7);
+        a.wrnAnim = ShellArt.LoadFrames(vfs, "SDWRNANM.SHP", "shell.pal",
+                                        "ra2:wrnf", 1);
         a.panelTile = ShellArt.LoadShpFrame(vfs, "SDBTNBKGD.SHP", "shell2.pal",
                                             0, "ra2:sdbtnbkgd");
         a.panelBottom = ShellArt.LoadShpFrame(vfs, "SDBTM.SHP", "shell.pal",
@@ -193,6 +213,46 @@ class ShellArt {
     /// alone. Returns the "" on encode failure -- callers fall back to drawn
     /// panels.</summary>
 
+    /// <summary>Decodes up to <paramref name="want"/> frames of an SHP onto
+    /// each frame's own sub-rect (not the file canvas), registering each
+    /// under a stable key. This is the path the reference's animation runners
+    /// take: they index a sheet by number and place the frame at the slot
+    /// origin, so a frame that ships a smaller sub-rect must not be padded out
+    /// to the canvas. <paramref name="want"/> 0 means "all frames". Returns
+    /// null when the install lacks the pair.</summary>
+    static R2Tex[] LoadFrames(Vfs vfs, string shpName, string palName,
+                              string key, int want) {
+        if (!vfs.Contains(shpName) || !vfs.Contains(palName)) { return null; }
+        List<int> plen = new List<int>();
+        plen.Add(0);
+        byte[] praw = vfs.Read(palName, plen);
+        if (plen[0] < 768) { return null; }
+        Palette pal = Palette.Parse(praw, plen[0]);
+
+        List<int> slen = new List<int>();
+        slen.Add(0);
+        byte[] sraw = vfs.Read(shpName, slen);
+        if (slen[0] == 0) { return null; }
+        ShpImage shp = ShpImage.Parse(sraw, slen[0]);
+        int n = shp.FrameCount();
+        if (n <= 0) { return null; }
+        if (want > 0 && want < n) { n = want; }
+
+        R2Tex[] outTex = new R2Tex[n];
+        for (int i = 0; i < n; i = i + 1) {
+            ShpFrame f = shp.FrameAt(i);
+            if (f == null || f.IsEmpty()) { continue; }
+            byte[] idx = shp.DecodeFrame(i);
+            Texture tex = Texture.FromIndexed(idx, f.Width(), f.Height(), pal);
+            string img = Ra2Ui.RegisterRgba(key + Convert.ToString(i), tex);
+            if (img.Length > 0) {
+                outTex[i] = R2Tex.Create(img, f.Width(), f.Height());
+            }
+            tex.Close();
+        }
+        return outTex;
+    }
+
     /// <summary>MNBTTN.SHP's three 126x25 frames over MAINBTTN.PAL -- the
     /// exact plates the original menu drew its buttons from. Frame order is
     /// the state order the game cycles through: rest, hover, pressed.</summary>
@@ -261,13 +321,66 @@ class ShellArt {
     bool Loaded() { return this.loaded; }
 
     /// <summary>The button plate for a state (0 rest, 1 hover, 2 pressed),
-    /// or null when the install did not carry the plates.</summary>
+    /// or null when the install did not carry the plates. This is the dialog
+    /// button (MNBTTN); the menu column uses SlotFrame().</summary>
     R2Tex Btn(int state) {
         if (this.btns == null || state < 0 || state > 2) { return null; }
         return this.btns[state];
     }
     bool HasBtns() { return this.btns != null && this.btns[0] != null
                         && this.btns[0].Ok(); }
+
+    /// <summary>The sidebar menu slot plate for one of the reference's 17
+    /// animation frames. The runner's map (`MenuSlotAnimationRunner.ts:68-98`)
+    /// is: collapsed+hidden 16, collapsed+other 10, open+hidden 0, unlit 1,
+    /// normal 2, active 4, and the slide sequences 5..10 (in) / 11..16 (out).
+    /// Null when this install lacks SDBTNANM.</summary>
+    R2Tex SlotFrame(int frame) {
+        if (this.slotFrames == null) { return null; }
+        if (frame < 0 || frame >= this.slotFrames.Length) { return null; }
+        return this.slotFrames[frame];
+    }
+    bool HasSlotFrames() { return this.slotFrames != null
+                               && this.slotFrames.Length >= 17
+                               && this.slotFrames[2] != null; }
+
+    /// <summary>SDTP's closed (0) / open (1) right-panel plate.</summary>
+    R2Tex PanelTopState(int state) {
+        if (this.sdTp == null) { return null; }
+        if (state < 0 || state >= this.sdTp.Length) { return null; }
+        return this.sdTp[state];
+    }
+
+    /// <summary>The right-panel slide overlay (SDWRNTMP), 6 frames.</summary>
+    R2Tex PanelSlideFrame(int frame) {
+        if (this.sdWrnTmp == null) { return null; }
+        if (frame < 0 || frame >= this.sdWrnTmp.Length) { return null; }
+        return this.sdWrnTmp[frame];
+    }
+    bool HasPanelSlide() { return this.sdWrnTmp != null; }
+
+    /// <summary>The MP slot plate (SDMPBTN), 7 frames; the runner's rest
+    /// frames are 6 collapsed / 0 open (`MenuMpSlotAnimRunner.ts:7`).</summary>
+    R2Tex MpBtnFrame(int frame) {
+        if (this.mpBtn == null) { return null; }
+        if (frame < 0 || frame >= this.mpBtn.Length) { return null; }
+        return this.mpBtn[frame];
+    }
+    bool HasMpBtn() { return this.mpBtn != null; }
+
+    /// <summary>The right-panel's looping animation sheet (SDWRNANM), 91
+    /// frames; the reference loops it with loopCount -1 over shell2.pal
+    /// (`SidebarPreview.tsx:52,76-83`).</summary>
+    R2Tex WarnLoopFrame(int frame) {
+        if (this.wrnAnim == null) { return null; }
+        if (frame < 0 || frame >= this.wrnAnim.Length) { return null; }
+        return this.wrnAnim[frame];
+    }
+    bool HasWarnLoop() { return this.wrnAnim != null; }
+    int WarnLoopCount() {
+        if (this.wrnAnim == null) { return 0; }
+        return this.wrnAnim.Length;
+    }
 
     /// <summary>Registered canvas images live in the runtime's shared
     /// registry; dropping the references is all the teardown needed.</summary>
@@ -285,6 +398,11 @@ class ShellArt {
         this.lowerStrip = null;
         this.modalBg = null;
         this.msgBtns = null;
+        this.slotFrames = null;
+        this.sdTp = null;
+        this.sdWrnTmp = null;
+        this.mpBtn = null;
+        this.wrnAnim = null;
         this.fsBkgDlg = null;
         this.fsAllied = null;
         this.fsTutorial = null;
@@ -436,16 +554,41 @@ class ShellLayout {
     static int BaseW() { return 800; }
     static int BaseH() { return 600; }
     static int PanelW() { return 168; }      // right chrome column width
-    static int PanelTopH() { return 199; }   // sdtp
+    static int PanelTopH() { return 199; }   // sdtp (measured 168x199)
     static int WarnX() { return 38; }        // sdwrnanm inside sdtp
     static int WarnY() { return 48; }
-    static int TileH() { return 42; }        // sdbtnbkgd strip
+    static int TileH() { return 42; }        // sdbtnbkgd strip (measured 168x42)
+    // The menu plate is SDBTNANM.SHP, measured 156x42, drawn at x=12 inside
+    // the 168-wide column (reference `MainMenu.ts:348,356`: sprite and text
+    // box both at x:12). 12+156 = 168, so the plate is inset 12 left and flush
+    // right -- the reference's "146 wide" is the HTML text box, not the art.
     static int CellW() { return 156; }       // owner-draw button cell
     static int CellH() { return 42; }
-    static int LowerH() { return 32; }       // lwscrnl strip
-    static int MovieH() { return 570; }      // ra2ts_l film area height
-    static int TitleW() { return 163; }
-    static int TitleH() { return 18; }
+    static int CellX() { return 12; }        // plate/text inset in the column
+    static int SlotX() { return 632; }       // 800 - 168, the column origin
+    static int SlotTopY() { return PanelTopH(); }   // slots start under sdtp
+    static int LowerH() { return 32; }       // lwscrnl strip (measured 632x32)
+    static int MovieH() { return 570; }      // mnscrnl art area height
+    // sdtp is 199 tall; the column has 600-199 = 401 px of slots, which is
+    // floor(401/42) = 9 tiles at pitch 42, leaving 401-378 = 23 px for the
+    // SDBTM cap. SDBTM is 168x65 on disk and the reference clips it to the
+    // leftover (`MainMenu.ts:318-320`) -- the clip height is derived, not the
+    // 23 constant, so a different install still lands correctly.
+    static int SlotCount() {
+        return (ShellLayout.BaseH() - ShellLayout.SlotTopY()) / ShellLayout.TileH();
+    }
+    static int CapY() {
+        return ShellLayout.SlotTopY()
+             + ShellLayout.SlotCount() * ShellLayout.TileH();
+    }
+    static int CapH() {
+        return ShellLayout.BaseH() - ShellLayout.CapY();
+    }
+    // SidebarTitle (reference `SidebarPreview.tsx:62-69`): x 25, width 118,
+    // height 18 open / 32 closed, vertically centred in that box.
+    static int TitleX() { return 25; }
+    static int TitleY() { return 3; }
+    static int TitleW() { return 118; }
     static int TooltipW() { return 455; }
     static int TooltipH() { return 20; }
 
@@ -503,46 +646,144 @@ class ShellLayout {
         outRect[3] = bh;
     }
 
-    /// <summary>An owner-draw button cell: the 156x42 cell in the right
-    /// column, at the tile row the reference snaps to.</summary>
+    /// <summary>An owner-draw button cell: the 156x42 plate inset 12 px into
+    /// the 168-wide right column, at the tile row the slot grid lands on.</summary>
     static void ButtonCell(int rowY, List<int> outRect) {
-        int panelX = ShellLayout.BaseW() - ShellLayout.PanelW();
-        int cellX = panelX + (ShellLayout.PanelW() - ShellLayout.CellW());
-        outRect[0] = cellX;
+        outRect[0] = ShellLayout.SlotX() + ShellLayout.CellX();
         outRect[1] = rowY;
         outRect[2] = ShellLayout.CellW();
         outRect[3] = ShellLayout.CellH();
     }
 
-    /// <summary>The caption rect inside a button cell (owner_draw_caption_rect):
-    /// unpressed offsets (0,1), pressed (2,5), the rect shrinks by the same
-    /// amounts.</summary>
+    /// <summary>The caption rect inside a button cell. The reference centres
+    /// the label in the HTML box (`MenuButton.tsx:42-59`: line-height = box
+    /// height, text-align centre), so the caption is the plate rect itself
+    /// with a small press nudge -- the plate art carries the bevel, the text
+    /// rides on top of it.</summary>
     static void CaptionRect(int cellX, int cellY, int cellW, int cellH,
                             bool pressed, List<int> outRect) {
-        int dx = pressed ? 2 : 0;
-        int dy = pressed ? 5 : 1;
-        int w = cellW - 2 - dx;
-        int h = cellH - dy;
-        if (w < 0) { w = 0; }
-        if (h < 0) { h = 0; }
+        int dx = pressed ? 1 : 0;
+        int dy = pressed ? 2 : 0;
         outRect[0] = cellX + dx;
         outRect[1] = cellY + dy;
-        outRect[2] = w;
-        outRect[3] = h;
+        outRect[2] = cellW;
+        outRect[3] = cellH;
+    }
+}
+
+/// <summary>One sidebar menu slot's animation state, ported from the
+/// reference's MenuSlotAnimationRunner: the slot has a button state
+/// (hidden/unlit/normal/active), a collapse state, and an optional slide
+/// animation that walks frames 0..5 while sliding in and 0..5 while sliding
+/// out. getCurrentFrame() picks the SDBTNANM frame to draw.
+///
+/// Frame map (`MenuSlotAnimationRunner.ts:68-98`):
+///   sliding in  -> base 10 (or 5 when hidden) minus the animation frame
+///   sliding out -> base  5 (or 0 when hidden) plus  the animation frame
+///   at rest     -> collapsed ? (hidden ? 16 : 10) : (0/1/2/4 by state)
+/// </summary>
+class MenuSlot {
+    static int StateHidden() { return 0; }
+    static int StateUnlit() { return 1; }
+    static int StateNormal() { return 2; }
+    static int StateActive() { return 3; }
+
+    // Slide direction 0 none, 1 in, 2 out.
+    static int SlideNone() { return 0; }
+    static int SlideIn() { return 1; }
+    static int SlideOut() { return 2; }
+
+    // The reference's animation runs 6 logical frames (loopEnd = 5) at the
+    // UI animation speed; the window between sound cues is ~50 ms, so a slot
+    // takes 6 * 50 = 300 ms to slide.
+    static int SlideFrames() { return 6; }
+    static int SlideStepMs() { return 50; }
+
+    int index;          // slot index, also the per-slot delay in frames
+    int state;
+    int slide;          // SlideNone / SlideIn / SlideOut
+    int slideFrame;     // 0..SlideFrames()
+    int slideAccMs;     // ms accumulator inside the current frame
+    bool collapsed;
+
+    static MenuSlot Create(int index) {
+        MenuSlot s = new MenuSlot();
+        s.index = index;
+        s.state = MenuSlot.StateHidden();
+        s.slide = MenuSlot.SlideNone();
+        s.slideFrame = 0;
+        s.slideAccMs = 0;
+        s.collapsed = true;
+        return s;
+    }
+
+    int State() { return this.state; }
+    void SetState(int s) { this.state = s; }
+    bool Collapsed() { return this.collapsed; }
+    bool Sliding() { return this.slide != MenuSlot.SlideNone(); }
+
+    void SlideInNow() {
+        this.slide = MenuSlot.SlideIn();
+        this.slideFrame = 0;
+        this.slideAccMs = 0;
+        // The reference staggers slots by index (`delayFrames` ctor arg), so
+        // the column unfurls top-down rather than snapping at once.
+        this.slideAccMs = 0 - this.index * MenuSlot.SlideStepMs();
+    }
+
+    void SlideOutNow() {
+        this.slide = MenuSlot.SlideOut();
+        this.slideFrame = 0;
+        this.slideAccMs = 0 - this.index * MenuSlot.SlideStepMs();
+    }
+
+    /// <summary>Advances the slide by <paramref name="dtMs"/>; a negative
+    /// accumulator is the start delay, so frames only advance once it turns
+    /// positive.</summary>
+    void Tick(int dtMs) {
+        if (this.slide == MenuSlot.SlideNone()) { return; }
+        this.slideAccMs = this.slideAccMs + dtMs;
+        while (this.slideAccMs >= MenuSlot.SlideStepMs()
+            && this.slide != MenuSlot.SlideNone()) {
+            this.slideAccMs = this.slideAccMs - MenuSlot.SlideStepMs();
+            this.slideFrame = this.slideFrame + 1;
+            if (this.slideFrame >= MenuSlot.SlideFrames()) {
+                this.collapsed = this.slide == MenuSlot.SlideOut();
+                this.slide = MenuSlot.SlideNone();
+                this.slideFrame = 0;
+            }
+        }
+    }
+
+    /// <summary>The SDBTNANM frame this slot draws this instant.</summary>
+    int CurrentFrame() {
+        if (this.slide != MenuSlot.SlideNone()) {
+            int dir = this.slide == MenuSlot.SlideIn() ? 0 - 1 : 1;
+            int baseFrame = this.state != MenuSlot.StateHidden() ? 5 : 11;
+            if (dir == 0 - 1) { baseFrame = baseFrame + 5; }
+            int f = baseFrame + dir * this.slideFrame;
+            if (f < 0) { f = 0; }
+            if (f > 16) { f = 16; }
+            return f;
+        }
+        if (this.collapsed) {
+            return this.state == MenuSlot.StateHidden() ? 16 : 10;
+        }
+        if (this.state == MenuSlot.StateHidden()) { return 0; }
+        if (this.state == MenuSlot.StateUnlit()) { return 1; }
+        if (this.state == MenuSlot.StateNormal()) { return 2; }
+        if (this.state == MenuSlot.StateActive()) { return 4; }
+        return 2;
     }
 }
 
 class Screens {
-    /// <summary>Main menu, composed exactly as the reference's
-    /// compose_main_menu_page: the MNSCRNL.SHP 800x600 base (shell.pal),
-    /// the film area (0,0,632,570), SDTP + SDWRNANM at (38,48) over it,
-    /// SDBTNBKGD tiled down the right column, SDBTM at the bottom, the
-    /// LWSCRNL lower strip, then the six SDBTNANM buttons (frame 2 at rest,
-    /// frame 4 pressed, hover changes no frame) with gold CSF captions in
-    /// owner-draw rects, the right-column title and the lower tooltip.
-    /// Disabled entries (the original's placeholders) keep the normal frame
-    /// dimmed 110. Returns the action clicked: 1 single player, 2 options,
-    /// 3 exit, 0 none.</summary>
+    /// <summary>Main menu: the MNSCRNL base, SDTP + SDWRNANM right chrome,
+    /// SDBTNBKGD tiles, the SDBTM cap and the LWSCRNL strip, then the
+    /// reference's sidebar entry list (`HomeScreen.ts:47-161`) as SDBTNANM
+    /// plates with gold captions, the right-column title and the hovered
+    /// entry's tooltip on the lower strip. Returns the action clicked:
+    /// 1 skirmish, 2 options, 4 fullscreen, 0 none.</summary>
     static int DrawMainMenu(R2Canvas r, ShellArt art, Strings ui,
                             int viewW, int viewH,
                             int mouseX, int mouseY, bool clicked) {
@@ -605,36 +846,99 @@ class Screens {
                                   632, 32, bw, bh);
             }
 
-            // ---- the six entries -----------------------------------------
-            // ids in slot order: single_player, ww_online, network, movies,
-            // options, exit. Buttons sit on the tile rows; exit on the
-            // bottom cap's top row.
-            string[] labels = new string[6];
-            bool[] enabled = new bool[6];
-            int[] ids = new int[6];
-            labels[0] = ui.Or("GUI:SinglePlayer", "单人游戏");
-            labels[1] = ui.Or("GUI:WWOnline", "网际网络");
-            labels[2] = ui.Or("GUI:Network", "网络对战");
-            labels[3] = ui.Or("GUI:MoviesAndCredits", "影片与制作群");
-            labels[4] = ui.Or("GUI:Options", "选项");
-            labels[5] = ui.Or("GUI:ExitGame", "退出游戏");
-            // The shell can only honour single player, options and exit,
-            // exactly the reference's enabled set.
-            enabled[0] = true; enabled[1] = false; enabled[2] = false;
-            enabled[3] = false; enabled[4] = true; enabled[5] = true;
-            ids[0] = 1; ids[1] = 0; ids[2] = 0; ids[3] = 0; ids[4] = 2;
-            ids[5] = 3;
+            // ---- the sidebar entries ------------------------------------
+            // The reference builds this list per screen and hands it to the
+            // sidebar (`HomeScreen.ts:47-161` -> `MainMenu.setButtons`). The
+            // order, labels and bottom-pinning below are that list verbatim:
+            // Skirmish, Load Game, Live Interaction, Replays, LAN Multiplayer,
+            // Mods, Info & Credits, Options, Test Tools, and Fullscreen
+            // bottom-pinned (`isBottom`, `HomeScreen.ts:152`).
+            //
+            // Entries whose subsystem this port has not built yet keep their
+            // slot and label -- the original's rows are all present -- but
+            // draw Unlit so they read as unavailable rather than silently
+            // doing nothing (`MenuButtonState.Unlit`, the same state the
+            // reference gives a disabled entry, `MainMenu.ts:436-438`).
+            string[] labels = new string[10];
+            bool[] enabled = new bool[10];
+            bool[] bottom = new bool[10];
+            int[] ids = new int[10];
+            labels[0] = ui.Or("GUI:Skirmish", "遭遇战");
+            labels[1] = "Load Game";
+            labels[2] = "Live Interaction";
+            labels[3] = "Replays";
+            labels[4] = "LAN Multiplayer";
+            labels[5] = ui.Or("GUI:Mods", "模组");
+            labels[6] = ui.Or("TS:InfoAndCredits", "信息与制作群");
+            labels[7] = ui.Or("GUI:Options", "选项");
+            labels[8] = "Test Tools";
+            labels[9] = ui.Or("GUI:Fullscreen", "全屏");
+            enabled[0] = true;    // Skirmish -> the setup screen
+            enabled[1] = false;   // save/load not built
+            enabled[2] = false;   // live interaction is a web-only mode
+            enabled[3] = false;   // replay browser not built
+            enabled[4] = false;   // LAN transport not built
+            enabled[5] = false;   // mod manager not built
+            enabled[6] = false;   // credits viewer not built
+            enabled[7] = true;    // Options
+            enabled[8] = false;   // test tools are a dev-shell entry
+            enabled[9] = true;    // Fullscreen
+            ids[0] = 1; ids[1] = 0; ids[2] = 0; ids[3] = 0; ids[4] = 0;
+            ids[5] = 0; ids[6] = 0; ids[7] = 2; ids[8] = 0; ids[9] = 4;
+            bottom[9] = true;
 
-            int tileY = 199;
-            int exitY = 577 - 42;
-            for (int i = 0; i < 6; i = i + 1) {
-                int rowY = i < 5 ? tileY + i * 42 : exitY;
+            // The reference's tooltips (`HomeScreen.ts:50,66,78,86,98,110,
+            // 120,131,142,151`), shown on the lower strip on hover.
+            string[] tips = new string[10];
+            tips[0] = ui.Or("STT:SkirmishButtonStartGame",
+                            "与电脑进行一场单人遭遇战");
+            tips[1] = "继续一场已保存的遭遇战";
+            tips[2] = "进入直播互动模式";
+            tips[3] = "观看并回放对战录像";
+            tips[4] = "通过交换 SDP 建立局域网对战";
+            tips[5] = ui.Or("STT:Mods", "管理并游玩修改版");
+            tips[6] = ui.Or("STT:InfoAndCredits", "信息与制作群");
+            tips[7] = ui.Or("STT:MainButtonOptions", "游戏设置");
+            tips[8] = "底层文件系统与测试工具";
+            tips[9] = ui.Or("STT:Fullscreen", "切换全屏模式");
+
+            int slotCount = ShellLayout.SlotCount();
+            int bottomRow = slotCount - 1;
+            // The reference's slot assignment (`MainMenu.updateButtons` /
+            // `setSlots`, `MainMenu.ts:106-161`): the normal entries fill
+            // slots 0,1,2,... and the single `isBottom` entry takes the LAST
+            // slot. The entries are NOT positioned by their index in the
+            // caller's array -- the bottom entry is pulled out first, so it
+            // never shares a row with the entry that would otherwise reach
+            // that slot.
+            int normalSlots = 0;
+            for (int i = 0; i < 10; i = i + 1) {
+                if (!bottom[i]) { normalSlots = normalSlots + 1; }
+            }
+            // Slots the normal entries may use: everything above the bottom
+            // row. When there are more entries than that, the tail is dropped
+            // rather than overlapping (the reference's slots simply stay
+            // Hidden).
+            int normalRoom = slotCount - 1;
+            if (normalRoom < 0) { normalRoom = 0; }
+            int hoveredSlot = 0 - 1;
+            int clickSlot = 0 - 1;
+            int placed = 0;
+            for (int i = 0; i < 10; i = i + 1) {
+                int slot = 0 - 1;
+                if (bottom[i]) {
+                    slot = bottomRow;
+                } else if (placed < normalRoom) {
+                    slot = placed;
+                    placed = placed + 1;
+                }
+                if (slot < 0 || slot >= slotCount) { continue; }
+                int rowY = ShellLayout.SlotTopY() + slot * ShellLayout.TileH();
                 ShellLayout.ButtonCell(rowY, rect);
                 int cellX = bx + rect[0] * bw / 800;
                 int cellY = by + rect[1] * bh / 600;
                 int cellW = rect[2] * bw / 800;
                 int cellH = rect[3] * bh / 600;
-                // Hit-test in shell space (the click maps back exactly).
                 List<int> mp = new List<int>();
                 mp.Add(0); mp.Add(0);
                 bool inside = ShellLayout.FromBase(viewW, viewH, mouseX,
@@ -642,37 +946,72 @@ class Screens {
                 bool hov = inside && enabled[i]
                     && R2Panel.PointIn(mp[0], mp[1], rect[0], rect[1],
                                        rect[2], rect[3]);
-                bool pressed = hov && clicked;
-                if (pressed) { action = ids[i]; }
+                if (hov) { hoveredSlot = i; }
+                if (hov && clicked) { clickSlot = i; }
 
-                Screens.DrawSdbtnanm(r, art, cellX, cellY, cellW, cellH,
-                                     pressed, !enabled[i]);
-                // Caption in the owner-draw rect, gold enabled / grey out.
+                // The plate is the slot's state frame from the SDBTNANM
+                // sheet; hover picks Normal (2), press Active (4), disabled
+                // Unlit (1) -- `MenuSlotAnimationRunner.ts:85-93`.
+                // The plate is the slot's state frame from the SDBTNANM
+                // sheet: Unlit (1) for a disabled entry, Normal (2) for a
+                // live one, Active (4) while the mouse is held down
+                // (`MenuSlotAnimationRunner.ts:85-93`). The reference's
+                // mousedown->mouseup hold lives in the shell state
+                // (`MainMenu.ts:358-365`), so a click past the press flag
+                // still reads as Active for this frame.
+                int state = !enabled[i] ? 1 : (hov && clicked ? 4 : 2);
+                R2Tex plate = art.SlotFrame(state);
+                if (plate != null) {
+                    Screens.BlitShell(r, plate, cellX, cellY, cellW, cellH,
+                                      bw, bh);
+                } else {
+                    Screens.DrawSdbtnanm(r, art, cellX, cellY, cellW, cellH,
+                                         hov && clicked, !enabled[i]);
+                }
                 ShellLayout.CaptionRect(rect[0], rect[1], rect[2], rect[3],
-                                        pressed, rect);
+                                        false, rect);
                 int capX = bx + rect[0] * bw / 800;
                 int capY = by + rect[1] * bh / 600;
                 int capW = rect[2] * bw / 800;
+                int capH = rect[3] * bh / 600;
                 if (enabled[i]) {
                     ShellLayout.TextEnabled(rgb);
                 } else {
                     ShellLayout.TextDisabled(rgb);
                 }
-                R2Text.DrawCentered(r, labels[i], capX + capW / 2, capY,
-                                    2, rgb[0], rgb[1], rgb[2], 255);
+                // The label is centred in the plate, vertically too
+                // (`MenuButton.tsx:58` line-height = box height).
+                R2Text.DrawCentered(r, labels[i], capX + capW / 2,
+                                    capY + (capH - 12) / 2, 2,
+                                    rgb[0], rgb[1], rgb[2], 255);
             }
+            if (clickSlot >= 0) { action = ids[clickSlot]; }
 
-            // Right-column title (主選單) and the tooltip line.
-            int titleX = bx + (panelX + 3) * bw / 800;
-            int titleY = by + 9 * bh / 600;
-            int titleW = 163 * bw / 800;
+            // Right-column title: the reference centres it in a 118-wide box
+            // at x 25 y 3 inside the sdtp plate (`SidebarPreview.tsx:62-69`).
+            int titleX = bx + (panelX + ShellLayout.TitleX()) * bw / 800;
+            int titleY = by + ShellLayout.TitleY() * bh / 600;
+            int titleW = ShellLayout.TitleW() * bw / 800;
+            int titleH = 18 * bh / 600;
             ShellLayout.TextEnabled(rgb);
             R2Text.DrawCentered(r, ui.Or("GUI:MainMenu", "主選單"),
-                                titleX + titleW / 2, titleY, 2,
+                                titleX + titleW / 2,
+                                titleY + (titleH - 12) / 2, 2,
                                 rgb[0], rgb[1], rgb[2], 255);
+
+            // The lower strip carries the hovered entry's tooltip, falling
+            // back to the idle hint (`MenuTooltip.tsx:18-23`: the strip reads
+            // the hovered element's data-r-tooltip).
+            // The lower strip carries the hovered entry's tooltip, falling
+            // back to the idle hint (`MenuTooltip.tsx:18-23`: the strip reads
+            // the hovered element's data-r-tooltip). The idle text is the
+            // reference's own menu hint; the CSF usually has no STT:MainHint,
+            // so the literal is what shows when nothing is hovered.
+            string tip = ui.Or("STT:MainHint", "主選單");
+            if (hoveredSlot >= 0) { tip = tips[hoveredSlot]; }
             ShellLayout.TextEnabled(rgb);
-            R2Text.Draw(r, ui.Or("STT:MainHint", ""),
-                        bx + 10 * bw / 800, by + (600 - 21) * bh / 600, 1,
+            R2Text.Draw(r, tip, bx + 10 * bw / 800,
+                        by + (600 - 21) * bh / 600, 1,
                         rgb[0], rgb[1], rgb[2], 255);
             return action;
         }

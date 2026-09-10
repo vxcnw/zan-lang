@@ -89,6 +89,42 @@ class Ra2App {
         File.WriteAllBytes(path, bmp);
     }
 
+    /// <summary>Writes a 24-bit BMP of an in-memory Texture. The screen dumps
+    /// go through DumpScreen (a Gui surface); a baked sprite lives in a
+    /// Texture, which has no surface to read back, so the header is written
+    /// here the same way.</summary>
+    static void DumpTexture(string path, Texture t) {
+        int slash = path.Length - 1;
+        while (slash >= 0 && path.Substring(slash, 1) != "/") { slash = slash - 1; }
+        if (slash > 0) { Directory.CreateDirectoryRecursive(path.Substring(0, slash)); }
+        int w = t.Width();
+        int h = t.Height();
+        if (w <= 0 || h <= 0) { return; }
+        int rowBytes = w * 3;
+        int pad = (4 - (rowBytes % 4)) % 4;
+        int imageBytes = (rowBytes + pad) * h;
+        byte[] bmp = new byte[54 + imageBytes];
+        bmp[0] = (byte)0x42;
+        bmp[1] = (byte)0x4D;
+        Ra2App.PutU32(bmp, 2, 54 + imageBytes);
+        Ra2App.PutU32(bmp, 10, 54);
+        Ra2App.PutU32(bmp, 14, 40);
+        Ra2App.PutI32(bmp, 18, w);
+        Ra2App.PutI32(bmp, 22, h);
+        bmp[26] = (byte)1;
+        bmp[28] = (byte)24;
+        for (int y = 0; y < h; y = y + 1) {
+            int dstRow = 54 + y * (rowBytes + pad);
+            for (int x = 0; x < w; x = x + 1) {
+                int argb = t.PixelAt(x, h - 1 - y);
+                bmp[dstRow + x * 3] = (byte)(argb & 0xFF);
+                bmp[dstRow + x * 3 + 1] = (byte)((argb >> 8) & 0xFF);
+                bmp[dstRow + x * 3 + 2] = (byte)((argb >> 16) & 0xFF);
+            }
+        }
+        File.WriteAllBytes(path, bmp);
+    }
+
     static void PutU32(byte[] b, int at, int v) {
         b[at] = (byte)(v & 0xFF);
         b[at + 1] = (byte)((v >> 8) & 0xFF);
@@ -114,8 +150,24 @@ class Ra2App {
         b[at + 3] = (byte)((v >> 24) & 0xFF);
     }
 
-    static int ViewW() { return 1280; }
-    static int ViewH() { return 720; }
+    // The drawing stage. The host maps the window onto a logical surface
+    // with ONE scale (the short axis matches the 1280x720 design), so the
+    // long axis extends into extra logical room; StageViewport republishes
+    // that extended size each frame and the template anchors every layout
+    // to it. Resizing the window therefore never reflows anything -- the
+    // whole picture scales uniformly, and the shell's 4:3 base stays
+    // centred because BaseRect fits it inside whatever W/H it is handed.
+    static int vw;
+    static int vh;
+
+    static int ViewW() { return vw > 0 ? vw : 1280; }
+    static int ViewH() { return vh > 0 ? vh : 720; }
+
+    /// <summary>Adopts the host's stage for this frame (called at the top of
+    /// Render, before any layout reads ViewW/ViewH).</summary>
+    static void SetStage(int w, int h) {
+        if (w > 0 && h > 0) { vw = w; vh = h; }
+    }
 
     // Loading-screen and options state: the frames the load screen has run
     // (drives the bar), the cached LS800 backdrop (closed when a different
@@ -138,6 +190,14 @@ class Ra2App {
     static int profUp;
     static int stressLeft;
     static int stressDone;
+    // The self-test opener: the world is up on its MCV, so shoot it, unfold
+    // it (deploy), and arm the first building once the yard stands. Frame
+    // numbers are not fixed here -- the load screen decides when the world
+    // appears -- so the walk gates on these flags instead.
+    static bool deployTried;
+    static int deployFrame;
+    static bool yardShown;
+    static bool buildArmed;
 
     // Locates data/ regardless of the working directory the game was launched
     // from (repo root, build/, or a double-click on the exe). Falls back to the
@@ -168,6 +228,279 @@ class Ra2App {
     static bool SelfTestArmed() {
         string v = Ra2App.getenv("RA2_SELFTEST");
         return v != null && v.Length > 0 && v != "0";
+    }
+
+    // RA2_DUMP_ASSETS=1 copies a short list of shipped art out of the install's
+    // mixes, so a decoder under test can be checked against the raw bytes by an
+    // outside tool. Dev aid only; the game itself never needs it.
+    static bool DumpAssetsArmed() {
+        string v = Ra2App.getenv("RA2_DUMP_ASSETS");
+        return v != null && v.Length > 0 && v != "0";
+    }
+
+    // Dev aid: the shipped ground rules, asserted rather than assumed.
+    //  - a ground unit cannot cross water, and no ordinary structure may sit
+    //    on it either (buildableOnWater must be 0);
+    //  - the WaterBound shipyard is the one exception: if the map carries
+    //    water it must accept the yard somewhere (waterYard>0), and it must
+    //    never accept dry land (landYard must be 0).
+    // The two "must be 0" counts are what a wrong water table would break.
+    static void ProbeGroundRule(World world, int side, int buildId) {
+        int blocked = 0;
+        int bad = 0;
+        int fx = 0 - 1;
+        int fy = 0 - 1;
+        int water = 0;
+        int waterYard = 0;
+        int landYard = 0;
+        int yard = world.IdOfReg(side, "GAYARD");
+        if (yard < 0) { yard = world.IdOfReg(side, "NAYARD"); }
+        if (yard < 0) { yard = world.IdOfReg(side, "YAYARD"); }
+        for (int y = 0; y < world.Height(); y = y + 1) {
+            for (int x = 0; x < world.Width(); x = x + 1) {
+                bool isW = world.CellIsWater(x, y);
+                if (!isW && !world.PassableForRoute(x, y, false)) {
+                    blocked = blocked + 1;
+                    if (world.CanPlaceBuilding(side, buildId, x, y)) {
+                        bad = bad + 1;
+                        if (fx < 0) { fx = x; fy = y; }
+                    }
+                }
+                if (!isW) {
+                    if (yard >= 0 && world.CanPlaceBuilding(side, yard, x, y)) {
+                        landYard = landYard + 1;
+                    }
+                    continue;
+                }
+                water = water + 1;
+                if (yard >= 0 && world.CanPlaceBuilding(side, yard, x, y)) {
+                    waterYard = waterYard + 1;
+                }
+            }
+        }
+        Console.WriteLine("selftest groundRule impassable="
+            + Convert.ToString(blocked)
+            + " buildableOnImpassable=" + Convert.ToString(bad)
+            + " first=" + Convert.ToString(fx) + "," + Convert.ToString(fy)
+            + " water=" + Convert.ToString(water)
+            + " waterYard=" + Convert.ToString(waterYard)
+            + " landYard=" + Convert.ToString(landYard)
+            + " yardId=" + Convert.ToString(yard));
+        string names = "";
+        for (int i = 0; i < 40; i = i + 1) {
+            StructureType st = world.CatalogType(side, i);
+            if (st == null) { continue; }
+            names = names + st.Reg() + (st.WaterBound() ? "*" : "") + " ";
+        }
+        Console.WriteLine("selftest catalog side=" + Convert.ToString(side)
+            + " n=" + Convert.ToString(names.Trim()));
+    }
+
+    // Dev aid: the basic build rule, asserted. Before the MCV has unfolded
+    // nothing in the sidebar may be unlocked -- the shipped tree gates every
+    // structure behind the construction yard (GAPOWR is Prerequisite=GACNST,
+    // and the rest chain off it). After the deploy at least the power plant
+    // must be unlocked. Prints the count and the unlocked regs.
+    static void ProbeUnlocked(GameController game, string tag) {
+        int n = 0;
+        string names = "";
+        for (int i = 0; i < 40; i = i + 1) {
+            StructureType t = game.World().CatalogType(game.Side(), i);
+            if (t == null) { continue; }
+            if (t.TechLevel() < 0) { continue; }
+            if (!game.BuildUnlocked(i)) { continue; }
+            n = n + 1;
+            names = names + t.Reg() + " ";
+        }
+        Console.WriteLine("selftest unlocked " + tag + " n=" + Convert.ToString(n)
+            + " " + names.Trim());
+    }
+
+    // Dev aid: every sidebar portrait of both sides, resolved and decoded the
+    // way the sidebar draws it. A line per entry names the reg, the art key
+    // the Cameo= reader produced, and "ok"/"MISSING" for the texture. A
+    // MISSING is exactly the "wrong art on the card" bug: the card falls back
+    // to a guessed <reg>ICON.SHP that the install does not carry.
+    static void ProbeCameos(GameController game, ObjectArt art, AssetDb db) {
+        Ra2.Formats.IniDocument artIni = db.Art();
+        Ra2.Formats.IniSection ggi = artIni.Section("GGI");
+        string hits = "";
+        for (int i = 0; i < artIni.Count(); i = i + 1) {
+            string nm = artIni.SectionAt(i).Name();
+            if (nm.Length >= 3 && nm.Substring(0, 3).ToUpper() == "GGI") {
+                hits = hits + "[" + nm + "]";
+            }
+        }
+        Console.WriteLine("selftest artprobe GGI section="
+            + (ggi == null ? "null" : "found")
+            + " entries=" + (ggi == null ? "-" : Convert.ToString(ggi.Count()))
+            + " cameo=" + (ggi == null ? "-" : ggi.Get("Cameo"))
+            + " artSections=" + Convert.ToString(artIni.Count())
+            + " ggiHits=" + hits
+            + " mdSections=" + Convert.ToString(db.LoadIni("ARTMD.INI").Count())
+            + " mdGGI=" + (db.LoadIni("ARTMD.INI").Section("GGI") == null
+                            ? "null" : "found")
+            + " baseSections=" + Convert.ToString(db.LoadIni("ART.INI").Count())
+            + " rulesMd=" + Convert.ToString(db.LoadIni("RULESMD.INI").Count())
+            + " artMdBytes=" + Convert.ToString(Ra2App.ProbeReadLen(db, "ARTMD.INI")));
+        Console.WriteLine("selftest artprobe head="
+            + Ra2App.ProbeReadHead(db, "ARTMD.INI"));
+        for (int s = 0; s < 3; s = s + 1) {
+            List<UnitType> us = game.World().Units().ListFor(game.World(), s);
+            for (int i = 0; i < us.Count; i = i + 1) {
+                UnitType u = us[i];
+                Texture tx = art.CameoTexture(u);
+                Console.WriteLine("selftest cameo side=" + Convert.ToString(s)
+                    + " " + u.Reg()
+                    + " art=" + (u.ArtKey() == null ? "-" : u.ArtKey())
+                    + " key=" + (u.Cameo() == null ? "-" : u.Cameo())
+                    + " " + (tx == null ? "MISSING" : "ok"));
+            }
+            List<StructureType> bs = game.World().Catalog().ListFor(game.World(), s);
+            for (int i = 0; i < bs.Count; i = i + 1) {
+                StructureType b = bs[i];
+                Texture tx = art.StructureCameoTexture(b);
+                Console.WriteLine("selftest cameo side=" + Convert.ToString(s)
+                    + " BUILD " + b.Reg()
+                    + " key=" + (b.Cameo() == null ? "-" : b.Cameo())
+                    + " " + (tx == null ? "MISSING" : "ok"));
+            }
+        }
+    }
+
+    /// <summary>Dev aid: the raw vfs read length of a file, or -1.</summary>
+    static int ProbeReadLen(AssetDb db, string name) {
+        List<int> len = new List<int>();
+        len.Add(0);
+        db.Files().Read(name, len);
+        return len[0];
+    }
+
+    static string ProbeReadHead(AssetDb db, string name) {
+        List<int> len = new List<int>();
+        len.Add(0);
+        byte[] raw = db.Files().Read(name, len);
+        if (len[0] <= 0) { return "(empty)"; }
+        int n = len[0] < 24 ? len[0] : 24;
+        return raw.ToStr(0, n);
+    }
+
+    /// <summary>Dev aid: writes the engine's own baked voxel sprites, one BMP
+    /// per model+facing, so an offline sheet can diff them against the
+    /// reference engine's projection (build/_vfs/refvxl.py). A whole-frame
+    /// screenshot hides exactly the thing under test -- a vehicle's size and
+    /// hull shape.</summary>
+    static void DumpVehicleSprites(ObjectArt art) {
+        List<string> models = new List<string>();
+        models.Add("GTNK.VXL");
+        models.Add("GTNKTUR.VXL");
+        models.Add("MTNK.VXL");
+        models.Add("MCV.VXL");
+        models.Add("FV.VXL");
+        models.Add("SREF.VXL");
+        models.Add("TNKD.VXL");
+        models.Add("CMIN.VXL");
+        models.Add("HARV.VXL");
+        for (int m = 0; m < models.Count; m = m + 1) {
+            for (int f = 0; f < 8; f = f + 1) {
+                Texture t = art.VehicleTexture(models[m], f, 0);
+                if (t == null) { continue; }
+                Ra2App.DumpTexture("build/_vox/" + models[m] + "_f"
+                    + Convert.ToString(f) + ".bmp", t);
+            }
+        }
+        Console.WriteLine("selftest dumped vehicles="
+            + Convert.ToString(models.Count));
+    }
+
+    static void DumpAssets(Vfs vfs) {
+        List<string> names = new List<string>();
+        names.Add("GI.SHP");
+        names.Add("MTNK.VXL");
+        names.Add("GTNK.VXL");
+        names.Add("GTNKTUR.VXL");
+        names.Add("MCV.VXL");
+        names.Add("MCV.HVA");
+        names.Add("FV.VXL");
+        names.Add("SREF.VXL");
+        names.Add("TNKD.VXL");
+        names.Add("FV.VXL");
+        names.Add("SREF.VXL");
+        names.Add("TNKD.VXL");
+        names.Add("MTNK.HVA");
+        names.Add("HARV.VXL");
+        names.Add("HARVTUR.VXL");
+        names.Add("CMIN.VXL");
+        names.Add("SMIN.VXL");
+        names.Add("GACNST.SHP");
+        names.Add("GAPOWR.SHP");
+        names.Add("GAREFN.SHP");
+        names.Add("unittem.pal");
+        names.Add("isotem.pal");
+        names.Add("CAMEO.PAL");
+        names.Add("SIDEBAR.PAL");
+        names.Add("GIICON.SHP");
+        names.Add("E1ICON.SHP");
+        names.Add("CMINICON.SHP");
+        names.Add("SMINICON.SHP");
+        names.Add("HARVICON.SHP");
+        names.Add("MTNKICON.SHP");
+        names.Add("GACNSTICON.SHP");
+        names.Add("GAPOWRICON.SHP");
+        names.Add("CNSTICON.SHP");
+        names.Add("AHRVICON.SHP");
+        names.Add("POWRICON.SHP");
+        names.Add("REFICON.SHP");
+        names.Add("GWEPICON.SHP");
+        names.Add("BRRKICON.SHP");
+        names.Add("TECHICON.SHP");
+        names.Add("NWEPICON.SHP");
+        names.Add("NREFICON.SHP");
+        names.Add("AYARICON.SHP");
+        names.Add("GTNKICON.SHP");
+        names.Add("MCVICON.SHP");
+        names.Add("SMCVICON.SHP");
+        names.Add("YPCVICON.SHP");
+        names.Add("GDGIICON.SHP");
+        names.Add("SNIPICON.SHP");
+        names.Add("ENGNICON.SHP");
+        names.Add("FLKTICON.SHP");
+        names.Add("DOGICON.SHP");
+        names.Add("ADOGICON.SHP");
+        names.Add("SHKICON.SHP");
+        names.Add("BRUTICON.SHP");
+        names.Add("YCLNICON.SHP");
+        names.Add("INITICON.SHP");
+        names.Add("DESOICON.SHP");
+        names.Add("CLEGICON.SHP");
+        names.Add("TRSTICON.SHP");
+        names.Add("LUNRICON.SHP");
+        names.Add("JJETICON.SHP");
+        names.Add("SPYICON.SHP");
+        names.Add("YENGICON.SHP");
+        names.Add("SEALICON.SHP");
+        names.Add("TANYICON.SHP");
+        names.Add("BRISICON.SHP");
+        names.Add("PSICICON.SHP");
+        names.Add("E2ICON.SHP");
+        names.Add("WEEDICON.SHP");
+        names.Add("TEMPERAT.INI");
+        names.Add("ART.INI");
+        names.Add("ARTMD.INI");
+        names.Add("SNOW.INI");
+        names.Add("URBAN.INI");
+        for (int i = 0; i < names.Count; i = i + 1) {
+            List<int> len = new List<int>();
+            len.Add(0);
+            byte[] raw = vfs.Read(names[i], len);
+            if (len[0] <= 0) {
+                Console.WriteLine("dump miss " + names[i]);
+                continue;
+            }
+            File.WriteBytes("build/_vfs/" + names[i], raw.ToStr(0, len[0]),
+                            len[0]);
+            Console.WriteLine("dump " + names[i] + " " + Convert.ToString(len[0]));
+        }
     }
 
 
@@ -401,17 +734,15 @@ class Ra2App {
         return rc[4] * Ra2App.CardCols();
     }
 
-    /// <summary>The card lists only what can actually be built, and a
-    /// construction yard is nobody's build item -- the original's structures
-    /// tab starts at the power plant. The tab pair splits the rest the way
-    /// the original's 建筑物/防御设施 tabs do: armed structures on the
+    /// <summary>The card lists only what can actually be built. TechLevel=-1
+    /// is the install's own "never buildable" flag and covers the construction
+    /// yards ([GACNST] TechLevel=-1), so the structures tab starts at the
+    /// power plant the way the original's does. The tab pair splits the rest
+    /// the way the original's 建筑物/防御设施 tabs do: armed structures on the
     /// defence page, the rest on buildings.</summary>
     static bool IsBuildItem(StructureType t, int tab) {
         if (t == null) { return false; }
-        string reg = t.Reg();
-        if (reg == "GACNST" || reg == "NACNST" || reg == "YACNST") {
-            return false;
-        }
+        if (t.TechLevel() < 0) { return false; }
         return tab == 1 ? t.HasWeapon() : !t.HasWeapon();
     }
 
@@ -560,7 +891,15 @@ class Ra2App {
         int creditsH = shell.H("CREDITS.SHP");
         Ra2App.Blit(r, shell, "CREDITS.SHP", 0, x0, 0);
         Ra2App.Blit(r, shell, "TOP.SHP", 0, x0, creditsH);
-        Ra2App.Blit(r, shell, "RADAR.SHP", 0, x0, creditsH + shell.H("TOP.SHP"));
+        // The radar box: the SIDE chrome frames it, and RADAR.SHP itself is
+        // the offline radar SCREEN -- its first frame is the house emblem on
+        // a starburst, the picture retail shows while the radar is down. The
+        // live radar draws the minimap here instead, so blitting that emblem
+        // underneath leaves its wings poking out around the map. The screen
+        // area is left black and the minimap is painted on top.
+        r.SetColor(0, 0, 0, 255);
+        r.FillRect(x0, creditsH + shell.H("TOP.SHP"), shell.W("RADAR.SHP"),
+                   shell.H("RADAR.SHP"));
         Ra2App.Blit(r, shell, "SIDE1.SHP", 0, x0, rc[1]);
         for (int i = 0; i < rc[4]; i = i + 1) {
             int y = rc[2] + shell.H("SIDE2.SHP") * i;
@@ -1417,6 +1756,7 @@ class Ra2Loop : IGuiHostLoop {
     /// <summary>Start: everything the old Main did before its while loop.</summary>
     public void Start(GuiHost host) {
         this.vfs = AssetDb.MountInstall(this.Dir);
+        if (Ra2App.DumpAssetsArmed()) { Ra2App.DumpAssets(this.vfs); }
         this.db = AssetDb.Load(this.vfs);
         this.maps = this.db.SkirmishMaps();
         Console.WriteLine("maps=" + Convert.ToString(this.maps.Count));
@@ -1597,6 +1937,11 @@ class Ra2Loop : IGuiHostLoop {
             if (vk == 65 && this.game != null) {         // A
                 this.game.ToggleMoveAttack();
             }
+            // F: deploy. The original's key for unfolding an MCV into its
+            // construction yard and for sitting a GI down in his emplacement.
+            if (vk == 70 && this.game != null) {         // F
+                if (this.game.DeploySelected()) { this.dirty = true; }
+            }
             // Squads: Ctrl+1..0 saves the current selection, plain 1..0
             // recalls it.
             int num = -1;
@@ -1660,6 +2005,10 @@ class Ra2Loop : IGuiHostLoop {
     public void Render(GuiHost host, Canvas c, double alpha) {
         this.C = c;
         this.R = R2Canvas.Create(c);
+        // The stage for this frame: StageViewport has already mapped the
+        // window, so this is the extended logical size the layout hangs
+        // off. On a 16:9 window it is exactly 1280x720.
+        Ra2App.SetStage(host.StageWidth(), host.StageHeight());
         if (this.shell.CurrentScene() == 2) {
             this.RenderGame(host);
         } else {
@@ -1674,16 +2023,28 @@ class Ra2Loop : IGuiHostLoop {
         if (this.selfTest) { this.SelfTestScript(host); }
     }
 
+    /// <summary>The reference's Fullscreen entry toggles the window's full
+    /// screen state (`HomeScreen.toggleFullscreen`). The Zan stdlib exposes no
+    /// dedicated fullscreen API, so this rides the window's maximize toggle --
+    /// the closest available state -- and the entry is only offered when the
+    /// host actually has a window to drive.</summary>
+    static void ToggleFullscreen(GuiHost host) {
+        if (host == null || host.app == null) { return; }
+        host.app.window.ToggleMaximize();
+    }
+
     /// <summary>The shell scenes: menu (0), single player (4), options (5),
     /// loading (3) and skirmish setup (1).</summary>
     void RenderShell(GuiHost host) {
-
         if (this.shell.CurrentScene() == 0) {
             int act = Screens.DrawMainMenu(this.R, this.art, this.ui,
                 Ra2App.ViewW(), Ra2App.ViewH(), this.mouseX, this.mouseY, this.clicked);
-            if (act == 1) { this.shell.OpenSinglePlayer(); }
+            // The reference's home list goes straight to its target: Skirmish
+            // is a top-level entry (`HomeScreen.ts:55` goToScreen(Skirmish)),
+            // not nested under a single-player page.
+            if (act == 1) { this.shell.OpenSkirmish(); }
             if (act == 2) { this.shell.OpenOptions(); }
-            if (act == 3) { host.RequestStop(); }
+            if (act == 4) { Ra2Loop.ToggleFullscreen(host); }
         } else if (this.shell.CurrentScene() == 4) {
             int act = Screens.DrawSinglePlayer(this.R, this.art, this.ui,
                 this.shell, this.mouseX, this.mouseY, this.clicked,
@@ -1873,6 +2234,117 @@ class Ra2Loop : IGuiHostLoop {
         }
     }
 
+    /// <summary>The mobile construction vehicle's regkey for a faction: every
+    /// skirmish house opens on one and unfolds it into its construction yard.
+    /// The install's rules name the trio AMCV/SMCV/PCV; Yuri's Revenge reuses
+    /// the Soviet hull under PCV.</summary>
+    static string McvReg(int faction) {
+        if (faction == Side2.Soviet()) { return "SMCV"; }
+        if (faction == Side2.Yuri()) { return "PCV"; }
+        return "AMCV";
+    }
+
+    /// <summary>The structure regkey an MCV unfolds into, so the opener can
+    /// test that the yard actually fits where the vehicle is put down.</summary>
+    string McvTargetReg(int side, int unitId) {
+        UnitType mu = this.world.Units().TypeFor(this.world, side, unitId);
+        if (mu == null) { return null; }
+        return mu.DeploysInto();
+    }
+
+    /// <summary>The build id the MCV's deploy target occupies in a side's own
+    /// structure list, or -1.</summary>
+    int McvTargetId(int side, int unitId) {
+        string reg = this.McvTargetReg(side, unitId);
+        if (reg == null || reg.Length == 0) { return -1; }
+        return this.world.Catalog().IdOfReg(this.world, side, reg);
+    }
+
+    /// <summary>A start cell for a house's MCV near a map waypoint: the
+    /// nearest cell where the construction yard that vehicle unfolds into
+    /// actually fits, tested at the very anchor the deploy will pick. The
+    /// unfold probes its anchor list from the most centred outwards, so the
+    /// MCV cell is accepted only when the centred placement is free -- that
+    /// is the one the opener then reserves for the opening squad, and the
+    /// one the deploy finds waiting when the player presses F.</summary>
+    bool FindMcvSpot(int side, int unitId, int wx, int wy, List<int> outXy) {
+        int yardId = this.McvYardId(side, unitId);
+        StructureType t = this.world.Catalog().TypeFor(this.world, side, yardId);
+        if (t == null) { return false; }
+        for (int r = 0; r <= 8; r = r + 1) {
+            for (int dy = -r; dy <= r; dy = dy + 1) {
+                for (int dx = -r; dx <= r; dx = dx + 1) {
+                    int adx = dx < 0 ? -dx : dx;
+                    int ady = dy < 0 ? -dy : dy;
+                    if (r > 0 && adx != r && ady != r) { continue; }
+                    int x = wx + dx;
+                    int y = wy + dy;
+                    if (!this.world.Passable(x, y)) { continue; }
+                    if (!this.McvSpotFits(side, yardId, t, x, y)) { continue; }
+                    outXy.Add(x);
+                    outXy.Add(y);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /// <summary>The MCV spot for a house with no usable waypoint: the
+    /// furthest-flat-corner scan PlaceEnemyBase used, so a fallback base
+    /// still lands opposite the player's start.</summary>
+    bool FindMcvSpotAnywhere(int side, int unitId, List<int> outXy) {
+        int yardId = this.McvYardId(side, unitId);
+        StructureType t = this.world.Catalog().TypeFor(this.world, side, yardId);
+        if (t == null) { return false; }
+        int bestX = -1;
+        int bestY = -1;
+        for (int y = 0; y < this.world.Height(); y = y + 1) {
+            for (int x = 0; x < this.world.Width(); x = x + 1) {
+                if (!this.world.Passable(x, y)) { continue; }
+                if (!this.McvSpotFits(side, yardId, t, x, y)) { continue; }
+                if (bestX < 0 || x + y > bestX + bestY) {
+                    bestX = x;
+                    bestY = y;
+                }
+            }
+        }
+        if (bestX < 0) { return false; }
+        outXy.Add(bestX);
+        outXy.Add(bestY);
+        return true;
+    }
+
+    /// <summary>The yard's build id for a house's MCV, or 0 (the roster's
+    /// own construction yard) when the rules name no deploy target.</summary>
+    int McvYardId(int side, int unitId) {
+        int targetId = this.McvTargetId(side, unitId);
+        return targetId >= 0 ? targetId : 0;
+    }
+
+    /// <summary>Whether the centred deploy anchor for an MCV standing at
+    /// (x,y) fits. See FindMcvSpot.</summary>
+    bool McvSpotFits(int side, int yardId, StructureType t, int x, int y) {
+        int ax = x - t.FootprintW() / 2;
+        int ay = y - t.FootprintH() / 2;
+        return this.world.CanPlaceBuilding(side, yardId, ax, ay);
+    }
+
+    /// <summary>The rectangle the MCV at (x,y) will occupy once deployed,
+    /// written to outRect as x,y,w,h, using the same centred anchor the
+    /// deploy probes first. The opener hands this to the squad spawn so the
+    /// soldiers stand clear of the unfold. Leaves outRect empty when the
+    /// target is unknown.</summary>
+    void McvFootprintRect(int side, int unitId, int x, int y, List<int> outRect) {
+        int yardId = this.McvYardId(side, unitId);
+        StructureType t = this.world.Catalog().TypeFor(this.world, side, yardId);
+        if (t == null) { return; }
+        outRect.Add(x - t.FootprintW() / 2);
+        outRect.Add(y - t.FootprintH() / 2);
+        outRect.Add(t.FootprintW());
+        outRect.Add(t.FootprintH());
+    }
+
     /// <summary>Builds the world the setup screen asked for: terrain, the
     /// rules-driven catalogs, the player's base and every open AI house, the
     /// neutral map structures, and the controller. Runs on the first frame of
@@ -1914,6 +2386,11 @@ class Ra2Loop : IGuiHostLoop {
             this.world = World.Create(this.map.Terrain(),
                                  StructureCatalog.CreateWith(rules),
                                  UnitCatalog.CreateWith(rules));
+            // The theater's own water table decides what counts as water, so
+            // a snow or urban map classifies by its own ids instead of by
+            // temperate's. This is what keeps every building but the
+            // WaterBound shipyard off the sea.
+            this.world.SetWaterRanges(theater.WaterRanges());
             // Seed the ore fields from the map's GEM overlays: the
             // data byte is the amount in the cell, the type names
             // gold ore or the doubled-value crystal fields.
@@ -1955,37 +2432,82 @@ class Ra2Loop : IGuiHostLoop {
                 sx = start[0];
                 sy = start[1];
             }
-            int yardIdx = this.world.PlaceBase(side, sx, sy);
-            if (yardIdx < 0) { yardIdx = this.world.PlaceBase(side, 1, 2); }
-            // The opening squad, sized by the setup screen's 部队数:
-            // each walks out beside the construction yard, and the
-            // first stays selected so its click orders a move
-            // immediately.
-            int scout = 0 - 1;
-            int su = 0;
-            while (su < this.shell.UnitCount()) {
-                int u = this.world.SpawnNear(yardIdx, 0);
-                if (u < 0) { break; }
-                if (scout < 0) { scout = u; }
-                su = su + 1;
+            // The house opens on a mobile construction vehicle, as the
+            // original does: no pre-placed base. The vehicle stands on the
+            // nearest cell where the construction yard it unfolds into
+            // actually fits, so the deploy always has room, and it starts
+            // selected -- F (or the deploy order) unfolds it on the spot.
+            int mcvId = this.world.Units().IdOfReg(this.world, side,
+                                                   this.McvReg(side));
+            List<int> mcvSpot = new List<int>();
+            int mcv = 0 - 1;
+            if (mcvId >= 0) {
+                if (this.FindMcvSpot(side, mcvId, sx, sy, mcvSpot)) {
+                    mcv = this.world.SpawnUnit(side, mcvId, mcvSpot[0],
+                                               mcvSpot[1]);
+                } else if (this.FindMcvSpotAnywhere(side, mcvId, mcvSpot)) {
+                    mcv = this.world.SpawnUnit(side, mcvId, mcvSpot[0],
+                                               mcvSpot[1]);
+                }
             }
+            // The opening squad, sized by the setup screen's 部队数: each
+            // walks out on the ground around the vehicle, keeping off the
+            // cells the yard will occupy when the vehicle unfolds. Without an
+            // MCV (an install whose rules name none) the old pre-placed
+            // starter base stands in, so the game still opens.
+            List<int> mcvRect = new List<int>();
+            if (mcv >= 0) {
+                WorldObject m0 = this.world.ObjectAt(mcv);
+                this.McvFootprintRect(side, mcvId, m0.X(), m0.Y(), mcvRect);
+            }
+            int yardIdx = 0 - 1;
+            if (mcv >= 0) {
+                int rvx = mcvRect.Count >= 4 ? mcvRect[0] : 0;
+                int rvy = mcvRect.Count >= 4 ? mcvRect[1] : 0;
+                int rvw = mcvRect.Count >= 4 ? mcvRect[2] : 0;
+                int rvh = mcvRect.Count >= 4 ? mcvRect[3] : 0;
+                int su = 0;
+                while (su < this.shell.UnitCount()) {
+                    WorldObject m = this.world.ObjectAt(mcv);
+                    int u = this.world.SpawnNearCellAvoid(side, 0, m.X(), m.Y(),
+                                                          rvx, rvy, rvw, rvh);
+                    if (u < 0) { break; }
+                    su = su + 1;
+                }
+            } else {
+                yardIdx = this.world.PlaceBase(side, sx, sy);
+                if (yardIdx < 0) { yardIdx = this.world.PlaceBase(side, 1, 2); }
+                int su = 0;
+                while (yardIdx >= 0 && su < this.shell.UnitCount()) {
+                    if (this.world.SpawnNear(yardIdx, 0) < 0) { break; }
+                    su = su + 1;
+                }
+            }
+            int scout = mcv >= 0 ? mcv : yardIdx;
             if (scout >= 0) {
                 WorldObject s = this.world.ObjectAt(scout);
                 this.world.SelectAt(s.X(), s.Y());
             }
-            // Every open enemy slot gets a house: ids follow the
-            // player's (1..N), factions rotate after the player's so
-            // the roster mix mirrors the original's slots. Houses --
-            // not factions -- are the sides in the war, so two AIs on
-            // one faction still fight each other; the world's
-            // NearestEnemy treats every foreign non-neutral house as
-            // hostile, which is the free-for-all.
+            // Every open enemy slot gets a house. A house id is a slot in
+            // the world's 8-entry tables, and the player already holds
+            // `side`, so the AIs take the ids after it (wrapping) -- giving
+            // them 1..N instead would hand the player's own slot away on a
+            // Soviet or Yuri start, swapping the roster under them.
+            // Factions rotate after the player's so the roster mix mirrors
+            // the original's slots. Houses -- not factions -- are the sides
+            // in the war, so two AIs on one faction still fight each other;
+            // the world's NearestEnemy treats every foreign non-neutral
+            // house as hostile, which is the free-for-all.
             List<int> aiHouses = new List<int>();
             List<int> aiDiffs = new List<int>();
+            int nextHouse = side + 1;
             for (int s = 0; s < 7; s = s + 1) {
                 if (!this.shell.EnemyOpen(s)) { continue; }
-                aiHouses.Add(aiHouses.Count + 1);
+                if (nextHouse >= 8) { nextHouse = 0; }
+                if (nextHouse == side) { nextHouse = nextHouse + 1; }
+                aiHouses.Add(nextHouse);
                 aiDiffs.Add(this.shell.EnemyDifficulty(s));
+                nextHouse = nextHouse + 1;
             }
             this.world.SetFactions(side, aiHouses);
 
@@ -2014,24 +2536,63 @@ class Ra2Loop : IGuiHostLoop {
                     }
                 }
                 if (eSpot >= 0) { spotTaken[eSpot] = true; }
+                // Every AI house opens on its own MCV, like the player's:
+                // the vehicle goes down where its yard fits and the AI's
+                // own deploy step (deploy_mcv_commands) unfolds it once the
+                // game starts ticking.
+                int aiMcvId = this.world.Units().IdOfReg(this.world, aiSide,
+                    this.McvReg(this.world.FactionOf(aiSide)));
+                List<int> aiSpot = new List<int>();
+                int aiMcv = 0 - 1;
                 int aiYard = 0 - 1;
-                if (eSpot >= 0) {
-                    aiYard = this.world.PlaceBase(aiSide, eStart[0],
-                                             eStart[1]);
+                if (aiMcvId >= 0 && eSpot >= 0
+                 && this.FindMcvSpot(aiSide, aiMcvId, eStart[0], eStart[1],
+                                     aiSpot)) {
+                    aiMcv = this.world.SpawnUnit(aiSide, aiMcvId, aiSpot[0],
+                                                 aiSpot[1]);
+                } else if (aiMcvId >= 0
+                        && this.FindMcvSpotAnywhere(aiSide, aiMcvId, aiSpot)) {
+                    aiMcv = this.world.SpawnUnit(aiSide, aiMcvId, aiSpot[0],
+                                                 aiSpot[1]);
                 } else {
-                    // Far corner, nudged diagonally per fallback so
-                    // two corner AIs do not overlap their yards.
-                    int fy = 0 - 1 - fallback * 6;
-                    int fyy = fy < 0 ? 0 - fy : 0;
-                    aiYard = this.world.PlaceBase(aiSide,
-                        this.world.Width() - 4 - fallback * 5,
-                        fyy > 0 ? fyy : 1);
-                    fallback = fallback + 1;
-                    if (aiYard < 0) { this.world.PlaceEnemyBase(aiSide); }
+                    // No MCV art or no room anywhere: the old pre-placed
+                    // base keeps the AI in the game.
+                    if (eSpot >= 0) {
+                        aiYard = this.world.PlaceBase(aiSide, eStart[0],
+                                                 eStart[1]);
+                    } else {
+                        int fy = 0 - 1 - fallback * 6;
+                        int fyy = fy < 0 ? 0 - fy : 0;
+                        aiYard = this.world.PlaceBase(aiSide,
+                            this.world.Width() - 4 - fallback * 5,
+                            fyy > 0 ? fyy : 1);
+                        fallback = fallback + 1;
+                        if (aiYard < 0) { this.world.PlaceEnemyBase(aiSide); }
+                    }
+                }
+                // The AI's squad stands clear of its own yard's footprint
+                // for the same reason the player's does: its deploy step
+                // must find the anchor free.
+                List<int> aiRect = new List<int>();
+                if (aiMcv >= 0) {
+                    WorldObject m0 = this.world.ObjectAt(aiMcv);
+                    this.McvFootprintRect(aiSide, aiMcvId, m0.X(), m0.Y(),
+                                          aiRect);
                 }
                 int au = 0;
-                while (aiYard >= 0 && au < this.shell.UnitCount()) {
-                    if (this.world.SpawnNear(aiYard, 0) < 0) { break; }
+                while (au < this.shell.UnitCount()) {
+                    int u = 0 - 1;
+                    if (aiMcv >= 0) {
+                        WorldObject m = this.world.ObjectAt(aiMcv);
+                        u = this.world.SpawnNearCellAvoid(aiSide, 0, m.X(),
+                            m.Y(), aiRect.Count >= 4 ? aiRect[0] : 0,
+                            aiRect.Count >= 4 ? aiRect[1] : 0,
+                            aiRect.Count >= 4 ? aiRect[2] : 0,
+                            aiRect.Count >= 4 ? aiRect[3] : 0);
+                    } else if (aiYard >= 0) {
+                        u = this.world.SpawnNear(aiYard, 0);
+                    }
+                    if (u < 0) { break; }
                     au = au + 1;
                 }
                 a = a + 1;
@@ -2079,11 +2640,24 @@ class Ra2Loop : IGuiHostLoop {
                                 this.terrain.WorldWidth(), this.terrain.WorldHeight());
             // Start the camera on the player's own base, not the map
             // centre -- a 6000px-wide map centred on open ground looks
-            // like a dead fixed view. The yard's cell projects to a
-            // world pixel; centre on it.
+            // like a dead fixed view. The centre is the house's own opening
+            // piece: its MCV when the rules gave it one (the spot search may
+            // have walked it off the waypoint), else the pre-placed yard. The
+            // cell projects to a world pixel; centre on it.
             {
-                int yardX = IsoProjection.ScreenX(sx, sy) - this.terrain.OriginX();
-                int yardY = IsoProjection.ScreenY(sx, sy, 0) - this.terrain.OriginY();
+                int viewX = sx;
+                int viewY = sy;
+                if (mcv >= 0) {
+                    WorldObject mv = this.world.ObjectAt(mcv);
+                    viewX = mv.X();
+                    viewY = mv.Y();
+                } else if (yardIdx >= 0) {
+                    WorldObject yd = this.world.ObjectAt(yardIdx);
+                    viewX = yd.X();
+                    viewY = yd.Y();
+                }
+                int yardX = IsoProjection.ScreenX(viewX, viewY) - this.terrain.OriginX();
+                int yardY = IsoProjection.ScreenY(viewX, viewY, 0) - this.terrain.OriginY();
                 this.cam.MoveTo(yardX - this.cam.SpanW() / 2,
                            yardY - this.cam.SpanH() / 2);
             }
@@ -2621,9 +3195,72 @@ class Ra2Loop : IGuiHostLoop {
         // plant), place it at (12,12), then fast-forward a few hundred
         // ticks so the enemy AI builds, trains and starts attacking.
         // The printed state proves the skirmish is actually running.
-        if (this.frames == 12 && this.game != null) { this.game.OnClickBuild(1); }
+        // The game comes up on its mobile construction vehicle: shoot it,
+        // then unfold it with the deploy key -- the original's opening move,
+        // and the construction yard every later step needs. The load screen
+        // decides which frame the world appears on, so these gate on flags
+        // rather than frame numbers.
+        if (this.selfTest && this.game != null && !Ra2App.deployTried) {
+            Ra2App.deployTried = true;
+            Ra2App.deployFrame = this.frames;
+            Ra2App.ProbeUnlocked(this.game, "beforeDeploy");
+            Ra2App.DumpScreen(this.shell.SideIndex() == 0
+                              ? "build/ra2_shot_mcv.bmp"
+                              : "build/ra2_shot_mcv_sov.bmp", c);
+            bool dep = this.game.DeploySelected();
+            Console.WriteLine("selftest deploy " + (dep ? "ok" : "refused")
+                + " objects=" + Convert.ToString(this.world.ObjectCount()));
+            Ra2App.ProbeUnlocked(this.game, "afterDeploy");
+            Ra2App.ProbeGroundRule(this.world, this.shell.SideIndex(), 1);
+            Ra2App.ProbeCameos(this.game, this.objArt, this.db);
+            if (Ra2App.DumpAssetsArmed()) {
+                Ra2App.DumpVehicleSprites(this.objArt);
+            }
+        }
+        if (this.selfTest && Ra2App.deployTried
+         && this.frames > Ra2App.deployFrame && this.game != null) {
+            if (!Ra2App.yardShown) {
+                Ra2App.yardShown = true;
+                Ra2App.DumpScreen(this.shell.SideIndex() == 0
+                                  ? "build/ra2_shot_yard.bmp"
+                                  : "build/ra2_shot_yard_sov.bmp", c);
+            }
+            if (!Ra2App.buildArmed) {
+                Ra2App.buildArmed = true;
+                this.game.OnClickBuild(1);
+            }
+        }
         if (this.frames == 13 && this.game != null) {
-            this.game.OnClickCell(12, 12);
+            // Place the armed power plant on the first cell beside the
+            // house's own construction yard that will take it. This is how a
+            // player builds, and it is the only reliable target now that
+            // placement honours the terrain: the old fixed (12,12) lands in
+            // water on half the shipped maps, which silently dropped the
+            // order and left the money untouched.
+            int px = 12;
+            int py = 12;
+            int side0 = this.shell.SideIndex();
+            for (int i = 0; i < this.world.ObjectCount(); i = i + 1) {
+                WorldObject o0 = this.world.ObjectAt(i);
+                if (o0.Side() != side0 || o0.Kind() != ObjKind.Structure()
+                 || o0.IsDead() || o0.BuildId() != 0) { continue; }
+                StructureType yt = this.world.TypeOf(o0);
+                if (yt == null) { continue; }
+                bool found = false;
+                for (int dy = -1; dy <= yt.FootprintH() && !found; dy = dy + 1) {
+                    for (int dx = -1; dx <= yt.FootprintW() && !found; dx = dx + 1) {
+                        int cx = o0.X() + dx;
+                        int cy = o0.Y() + dy;
+                        if (this.world.CanPlaceBuilding(side0, 1, cx, cy)) {
+                            px = cx;
+                            py = cy;
+                            found = true;
+                        }
+                    }
+                }
+                if (found) { break; }
+            }
+            this.game.OnClickCell(px, py);
             // Park one tank per side beside the player's base so the
             // voxel bake lands in the frame dump; the printed ids
             // prove the roster-to-catalog wiring end to end.
@@ -2879,6 +3516,29 @@ class Ra2Loop : IGuiHostLoop {
                 + Convert.ToString(sfc) + " "
                 + Convert.ToString(this.sideShell.W("SIDEBTTN.SHP")) + "x"
                 + Convert.ToString(this.sideShell.H("SIDEBTTN.SHP")));
+            // The menu column plate is SDBTNANM, not MNBTTN: report the sheet
+            // the shell loaded so a regression back to the dialog button is
+            // caught here rather than by eye.
+            if (this.art != null) {
+                Console.WriteLine("selftest menucol hasSlotFrames="
+                    + Convert.ToString(this.art.HasSlotFrames() ? 1 : 0)
+                    + " hasMpBtn="
+                    + Convert.ToString(this.art.HasMpBtn() ? 1 : 0)
+                    + " hasWarnLoop="
+                    + Convert.ToString(this.art.HasWarnLoop() ? 1 : 0)
+                    + " warnLoop="
+                    + Convert.ToString(this.art.WarnLoopCount())
+                    + " hasPanelSlide="
+                    + Convert.ToString(this.art.HasPanelSlide() ? 1 : 0));
+                for (int f = 0; f < 17; f = f + 1) {
+                    R2Tex slotTex = this.art.SlotFrame(f);
+                    if (slotTex == null) { continue; }
+                    Console.WriteLine("selftest slotframe f"
+                        + Convert.ToString(f) + "="
+                        + Convert.ToString(slotTex.W()) + "x"
+                        + Convert.ToString(slotTex.H()));
+                }
+            }
             for (int f = 0; f < sfc && f < 12; f = f + 1) {
                 this.sideShell.DumpPiece(this.sideShell.Piece("SIDEBTTN.SHP", f),
                                     "build/sidebttn_f"
@@ -3020,6 +3680,13 @@ class Ra2Loop : IGuiHostLoop {
                 this.minerObj = null;
                 this.oreX = -1;
                 this.oreY = -1;
+                // The opener's flags are static, so the Soviet leg has to
+                // clear them or it would walk the whole second run with no
+                // MCV shot and no deploy.
+                Ra2App.deployTried = false;
+                Ra2App.deployFrame = 0;
+                Ra2App.yardShown = false;
+                Ra2App.buildArmed = false;
                 this.frames = 4;
             }
             Ra2App.stressDone = Ra2App.stressDone + 1;
