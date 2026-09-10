@@ -279,7 +279,38 @@
 | `fsys/media.aardio`（MCI 播放）、`fonts/`、`color/table.aardio`（色表） | 音频走 `System.Audio`（WASAPI）；字体/颜色是 Gui 皮肤层的事 |
 | `process/ffmpeg`/`process/git` 等外部工具包装 | 属于应用层，不值得进 stdlib（`Process.WinCapture` 已够用） |
 
-### 6.4 本期方法论要点（同上一轮验证）
+### 6.4 示例面（aardio/examples，1292 个示例、20 分类）
+
+aardio 的示例库（`D:\aardio\examples`）与其库目录一样值得当**选题清单**用，
+但不能照搬形态：aardio 示例 = 单文件 + DSG 窗体设计器块 + 控制台输出；
+Zan 示例的既有惯例（见 `examples/net`、`examples/db`）是 README + 每个主题
+一个可运行 `.zan` + 自带测试服务端/数据。以下按"Zan examples 现有 15 项"
+的缺口挑：
+
+**值得成批参照的分类**（跟 §6.1/6.5 的库清单一一配套，示例随库走）：
+
+| aardio 示例分类 | 数量 | 对应 Zan 缺口 | 取什么 |
+| --- | --- | --- | --- |
+| `Console/`（14） | loading 动画、progress、textTable、ColorConsole、Countdown、菜单选择 | §6.1 控制台进度条 + `TextTable` 增强 | `loading.aardio` 的旋转帧表（十几套 ASCII 动画帧）照搬就是现成测试数据 |
+| `Text/`（48） | chineseNumber、matching、sentences、radix-convert、regex | §6.5 ChineseNumber、§6.1 Patch/EditorOps | 每个示例的**断言式输入输出对**直接变成 conformance 用例 |
+| `Network/wsock/`+`Transfer/`（~96） | tcp/udp 框架用法、文件分块传输、ip/stat | `Sockets`/`TcpListener` 示例已在 `examples/net`，缺**组合层**：断线重连、分块续传 | 只抄场景不抄实现（wsock 是 winsock select 模型，Zan 用 async） |
+| `File/`（76） | Monitor（watch）、NamedPipe、Config、Storage、SpecialPath、Compressed | §6.1 NamedPipe、已有 DirectoryWatcher 缺示例 | `File/Monitor`、`File/NamedPipe` 两个目录的示例脚本 = API 行为规格 |
+| `Windows/`（147） | TrayIcon/Hotkey/ListView/Tab/对话框全族 | Gui 组件对照：验证 Zan Gui 组件行为是否对齐用户预期 | 挑高频交互逐个做 Gui gallery 条目（非移植代码，只对齐行为） |
+| `System/`（42） | Clipboard/Registry/Hardware/EventLog/service | 已迁库（Clipboard/Registry/ProcessList…）**全部还没有示例** | `examples/input` 已有 9 个 demo 的模式扩展到其余 Management 模块 |
+
+**不参照的分类**（带理由）：`Languages/`（278 个——全是别种语言嵌入，
+与 Zan 无关）、`COM/`（54）、`WebUI/`（120，HTML 布局引擎路线，Zan 是自绘
+Gui）、`plus/`（47，aardio 专有控件）、`AI/`（26，调外部 LLM API 的包装，
+HttpClient 足够，业务层）、`Excel/`（第三方库 NPOI/SheetJS 用法，不是
+aardio 自身能力）、`Database/access|mssql`（Zan `examples/db` 已覆盖同类
+场景且更完整）。
+
+**执行方式**：示例跟库走，不做单独"示例迁移"工程——§6.1/6.5 每个库落地时，
+从对应 aardio 示例抄 2~3 个场景做验收脚本（输出对齐即可当 golden）。
+aardio 示例里的中文注释与命名场景（票据、金额、农历）是需求挖掘素材：
+它们代表着这门语言的真实用户在做什么，Zan 缺什么库，看示例比看库目录更准。
+
+
 
 - **先探针再动手**：A 档里 `NamedPipe`、组播 socket 要先写最小探针确认驱动层
   现状（`src/runtime` 是否已有/缺哪个调用），探针进 `_scratch/`，结论记这里。
