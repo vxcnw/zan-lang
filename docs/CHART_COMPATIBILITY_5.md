@@ -26,11 +26,17 @@ id = 官方注册表 id，标题取注册表中英文原文，option 与数据**
 custom 20 / …）已全部内嵌为 `examples/gui_charts/options/*.json` +
 `charts-registry.json`（`zanc --embed`），demo 层只加载渲染，不掺自造
 数据。渲染正确性由引擎子系统覆盖度决定：缺口见上表，按菜单顺序
-"发现一个修一个"；map/geo、custom、pictorialBar、matrix、parallel、
-themeRiver、graphic、dataset transform 等子系统仍缺。map/geo、custom、pictorialBar、matrix、parallel、
-themeRiver、graphic、dataset transform 等子系统仍缺。每批闭环：移植 → 构建 → 截图对照官方 → 提交。
+"发现一个修一个"；matrix、custom(renderItem)、graphic、aria、brush、
+singleAxis、dataset transform 等子系统仍缺。每批闭环：移植 → 构建 → 截图对照官方 → 提交。
 
 ## 引擎缺口账本（示例侧已记录，未修引擎）
+
+> **2026-09-11**：本表是**示例侧**（用户能看到的缺口）的手工记录，粒度到
+> "某个选项没生效"。**代码侧**账本（按 ECharts 源函数，含已验证的
+> 语义错误与 never-read 配置键倒排）见
+> [`CHART_CODE_GAP_LEDGER.md`](CHART_CODE_GAP_LEDGER.md)。下表已有多行随
+> 后续提交闭合（toolbox、timeline、visualMap piecewise、多 grid/多 x 轴、
+> 动态数据首帧等），推进前先对照代码侧账本复核，勿直接开工。
 
 | 缺口 | 受影响官方示例 | 备注 |
 |------|----------------|------|
@@ -120,6 +126,15 @@ themeRiver、graphic、dataset transform 等子系统仍缺。每批闭环：移
 
 ## 渲染完整度审计（2026-09-10，官方基准截图对照）
 
+> **⚠ 2026-09-11 修订：本节数字已过期，口径已被代码级账本取代。**
+> 本节测的是 2026-09-10 02:54 的构建，早于 `28207b3f`（treemap/sunburst/
+> pictorialBar/parallel/themeRiver 渲染器）、`f4eae183`（polar/tree 通道）、
+> `4aa39232`（calendar）、`94592269`（title）等提交；其引用的 Zan 侧截图
+> `_scratch/shots/`（335 张）现存 5 张。**「整类失效」名单与 82/38/14/70
+> 分布均不可再作为工作依据。** 现行口径见
+> [`CHART_CODE_GAP_LEDGER.md`](CHART_CODE_GAP_LEDGER.md)（按 ECharts 源函数记账，
+> 可再生：`python scripts/chart_gap_audit.py`）。
+
 首次以**官方渲染结果**为基准做全量对照：用本仓库 `_scratch/echarts-master`
 （v6.1.0，与 `~/Downloads/echarts-master` 同源）的 dist 渲染 335 个
 `ready: true` 示例，得到官方基准图 `_scratch/official_shots/`，再与 Zan 侧
@@ -163,7 +178,8 @@ pictorialBar、dataset+dataTransform、candlestick、calendar 七个整类；
 P2 = markPoint/markLine、双 y 轴、面积渐变、时间标签密度、matrix、parallel、
 nice 分割对齐。
 
-完整清单与可复现流水线见 `_scratch/CHART_PORT_AUDIT.md`（临时材料，不入库）。
+完整清单与可复现流水线见 `_scratch/CHART_PORT_AUDIT.md`（临时材料，不入库；
+**已被代码级账本取代**，见 [`CHART_CODE_GAP_LEDGER.md`](CHART_CODE_GAP_LEDGER.md)）。
 
 ## 待办
 

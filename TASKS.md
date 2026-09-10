@@ -999,6 +999,13 @@ sel = sel.OrderByDescending(x => x.id);   // error: 'string' has no member 'Orde
 
 # A44 · Chart 组件对照 ECharts 的搁置项（2026-08-06，范围决策记录）
 
+> **2026-09-11 修订**：本条的对照基准是 ECharts **2.2.4**，已过时。引擎现行
+> 基准是 **6.1.0**（`examples/gui_charts` 的 option 与官方示例站 1:1），
+> 2.2.x 的"已表达/未表达"结论不再适用。代码侧现行缺口账本见
+> [`docs/CHART_CODE_GAP_LEDGER.md`](docs/CHART_CODE_GAP_LEDGER.md)
+> （含已验证的语义错误 W1–W4 与 never-read 配置键倒排，可再生）。
+> 本条保留仅作历史范围决策记录，不再作为待办来源。
+
 图表组件完善（补齐雷达面积填充/每轴 max、markPoint、嵌套环饼、K 线 dataZoom、
 悬停 emphasis，新增和弦/力导向/事件河/韦恩渲染器 + `examples/gui_charts`
 独立示例）时，对照 ECharts 2.2.4 明确**不做**、留待后续的部分。均非缺陷绕过：

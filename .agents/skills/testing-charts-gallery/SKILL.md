@@ -1,9 +1,49 @@
 ---
 name: testing-charts-gallery
-description: Zan charts gallery (examples/gui_charts, 335 ECharts 官方对照 demo) 的构建、截图、探针与修复定式——recheck2 截图驱动、bindprobe 解析态探针、--bench 帧计时、stdlib 快照同步坑、多 grid/dataZoom/定点数值三大契约。凡是要验证或修复 stdlib/Gui/Component/Chart 引擎改动、核对某个 demo 与 ECharts 官方语义是否一致、排查"图表空板/缺元素/多面板窗口不同步"时使用。
+description: Zan charts gallery (examples/gui_charts, 335 ECharts 官方对照 demo) 的代码级完整度对照与实机验证定式——scripts/chart_gap_audit.py 的未读配置键倒排/源引用率、源函数逐条对抄、recheck2 截图驱动、bindprobe 探针、--bench 帧计时、stdlib 快照同步坑、多 grid/dataZoom/定点数值三大契约。凡是要盘点图表迁移完整度、修复 stdlib/Gui/Component/Chart 引擎改动、核对某个 demo 与 ECharts 官方语义是否一致、排查"图表空板/缺元素/多面板窗口不同步"时使用。
 ---
 
 # Charts gallery 验证与修复定式（Windows 实机）
+
+## 口径：先比代码，后谈截图（2026-09-11 定调）
+
+**截图不是完整度判据。** 引擎的完整性按 **ECharts 源函数**记账；
+"跑 demo 看图"抓不到语义错误，而且这种账本会自己腐烂。
+
+为什么（本仓实测，踩过的坑）：
+
+- ECharts 6.1 有 **596** 个 `src/*.ts`；引擎 35 个文件里只有 **6 个**
+  引用过源（共 14 个源文件），核心的 `barGrid.ts` / `LineSeries.ts` /
+  `PieView.ts` / `Scale.ts` / `axisNiceTicks.ts` / `symbol.ts` /
+  `LegendView.ts` / `ChartView.ts` 一个没引。大多数代码是 2.2.7 时代
+  手写的（`ChartModel.zan` 的 `ChartType` 注释自己写着 2.2.7），v6 语义
+  没抄——这就是"有些完全就是错的"的来源，不是玄学。
+- `docs/CHART_PORT_AUDIT_2026-09-10.md` 的"82 例白板"基于 2026-09-10
+  02:54 的构建，它引用的 Zan 侧截图 `_scratch/shots/`（335 张）**现在只剩
+  5 张**，`render_audit.json` 早于其后 4 个修复提交。截图口径的账本
+  既不自证正确，也留不住。
+- 着色占比只能抓白板。已核实的三个语义错误在着色占比里全都"正常"：
+  ① 柱宽公式 `ChartViewBar.zan:351-354` 手写 `step*7/10`、`Scale(2)` 像素
+  间距，对照 `layout/barGrid.ts:206-349` 的 `barCategoryGap` 求解；
+  ② 折线符号漏了 `chart/line/LineView.ts:371-410` 的数值轴提前返回与
+  `canShowAllSymbolForCategory()` 通过分支；
+  ③ `axis.scale` 从不读取，且 `Chart.zan:1019,3006` 的
+  `AxisMinForF/AxisMaxForF` 初值为 0 → 量程无条件并入 0，
+  但 `coord/axisModelCommonMixin.ts:33` 只在 `!scale` 时并入。
+
+定式：
+
+1. 动手前先跑 `python scripts/chart_gap_audit.py`（仓库根）。它列出官方
+   option 用到、而引擎**从不通过 Json 访问器读取**的配置键（当前
+   278/470），以及每个引擎文件引用了哪些源。**未读键 = 静默丢弃 =
+   这张图不可能对**，先看这里再决定修哪个。
+2. 引擎新增/修改的逻辑，注释必须写 ECharts 源 `文件:行`。没有出处 =
+   这条无法审计，等于欠债（审计工具就是按这个引用率给结论的）。
+3. 代码级账本在 `docs/CHART_CODE_GAP_LEDGER.md`，按源函数记账，
+   **修一条删一条**，不留已完成项。
+4. 截图留给**渲染层**问题：控制点已与源一致、画出来仍不对的那种
+   （如 smooth 的"麻花"，见下节——控制点手算与 JS 参考逐值相同，
+   病在采样率/描边光栅器）。语义层用截图判等会误判，渲染层才是它的地盘。
 
 ## 构建（快照 stdlib，避开并发会话的在途编辑）
 
