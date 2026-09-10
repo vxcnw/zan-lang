@@ -1033,6 +1033,12 @@ class Chart {
                     int vi = (int)(v * 1000 + (v >= 0 ? 0.5 : 0 - 0.5));
                     if (vi < mn) { mn = vi; }
                 }
+                // 类目 data 系列（`data:[2,7,...]`）没有点坐标。dataZoom
+                // 窗口下 i0/i1>=0，p0/p1 会被钳成 -1，而 `j2 <= p1` 在
+                // p0==p1==-1 时为真 → s.points[-1] 越界（bump-chart 的
+                // list index out of bounds）。空表跳过点坐标段（上面的
+                // data 段已计完）。
+                if (s.points.Count < 1) { continue; }
                 int p0 = 0; int p1 = s.points.Count - 1;
                 if (i0 >= 0 && i1 >= 0) {
                     p0 = i0; p1 = i1;
@@ -2982,6 +2988,7 @@ class Chart {
                     if (j1 < j0) { j1 = j0; }
                 }
                 for (int j = j0; j <= j1; j = j + 1) { if (s.Value(j) > mx) { mx = s.Value(j); } }
+                if (s.points.Count < 1) { continue; }
                 int p0 = 0; int p1 = s.points.Count - 1;
                 if (i0 >= 0 && i1 >= 0) {
                     p0 = i0; p1 = i1;
@@ -3020,6 +3027,7 @@ class Chart {
                     int vi = (int)(v * 1000 + (v >= 0 ? 0.5 : 0 - 0.5));
                     if (vi > mx) { mx = vi; }
                 }
+                if (s.points.Count < 1) { continue; }
                 int p0 = 0; int p1 = s.points.Count - 1;
                 if (i0 >= 0 && i1 >= 0) {
                     p0 = i0; p1 = i1;
@@ -3065,6 +3073,7 @@ class Chart {
                     if (j1 < j0) { j1 = j0; }
                 }
                 for (int j = j0; j <= j1; j = j + 1) { if (s.Value(j) < mn) { mn = s.Value(j); } }
+                if (s.points.Count < 1) { continue; }
                 int p0 = 0; int p1 = s.points.Count - 1;
                 if (i0 >= 0 && i1 >= 0) {
                     p0 = i0; p1 = i1;

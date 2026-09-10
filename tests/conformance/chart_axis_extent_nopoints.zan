@@ -1,0 +1,50 @@
+using System;
+using Gui.Component.Chart;
+
+namespace Conf;
+
+/// 轴量程的窗口路径不得越界：类目 data 系列（`data:[1..7]`，没有点
+/// 坐标）在 dataZoom 窗口（i0/i1>=0）下走过
+/// AxisMinFor(F)/AxisMaxFor(F)，四个函数都会把 p0/p1 钳成 -1，
+/// 而 `j2 <= p1` 在 p0==p1==-1 时为真 → s.points[-1] 越界
+/// （bump-chart 的 list index out of bounds）。
+/// 断言：窗口内的 data 段极值正确，且带点坐标的系列窗口语义不变。
+class Program {
+    static List<int> Seq(int n) {
+        List<int> v = new List<int>();
+        for (int i = 1; i <= n; i = i + 1) { v.Add(i); }
+        return v;
+    }
+
+    static void Main() {
+        // A：类目 data 折线（1..7），points 为空。
+        ChartSeries a = ChartSeries.Of("A", ChartType.Line, Seq(7));
+        // B：值对系列，点坐标 y = 3 / 30 / 300，pointG 缺省 1。
+        ChartSeries b = ChartSeries.OfPoints("B", new List<ChartPoint>{
+            ChartPoint.Of(0, 3), ChartPoint.Of(1, 30), ChartPoint.Of(2, 300) });
+
+        List<ChartSeries> sa = new List<ChartSeries>{a};
+        List<ChartSeries> sb = new List<ChartSeries>{b};
+
+        // 窗口 [2,4] → data 段 3,4,5：定点域上界 5000，整数域 5；
+        // 下界仍按 ECharts 的"无负值并入 0"= 0。
+        Console.WriteLine("nopoints-max=" + Convert.ToString(Chart.AxisMaxForF(sa, 0, 2, 4)));
+        Console.WriteLine("nopoints-min=" + Convert.ToString(Chart.AxisMinForF(sa, 0, 2, 4)));
+        Console.WriteLine("nopoints-maxI=" + Convert.ToString(Chart.AxisMaxFor(sa, 0, 2, 4)));
+        Console.WriteLine("nopoints-minI=" + Convert.ToString(Chart.AxisMinFor(sa, 0, 2, 4)));
+        // 无窗口（i0/i1 = -1）同值：越界只在窗口路径上。
+        Console.WriteLine("nopoints-nowin=" + Convert.ToString(Chart.AxisMaxForF(sa, 0, 0 - 1, 0 - 1)));
+
+        // 有点坐标的系列：窗口 [0,1] → y 3,30 → 定点 30000 / 整数 30，
+        // 证明窗口路径本身仍然生效（不是被守卫一并跳过）。
+        Console.WriteLine("points-max=" + Convert.ToString(Chart.AxisMaxForF(sb, 0, 0, 1)));
+        Console.WriteLine("points-maxI=" + Convert.ToString(Chart.AxisMaxFor(sb, 0, 0, 1)));
+        Console.WriteLine("points-all=" + Convert.ToString(Chart.AxisMaxForF(sb, 0, 0 - 1, 0 - 1)));
+
+        // 空系列（data、points 都空）也要安全。
+        ChartSeries e = ChartSeries.Of("E", ChartType.Line, new List<int>());
+        List<ChartSeries> se = new List<ChartSeries>{e};
+        Console.WriteLine("empty=" + Convert.ToString(Chart.AxisMaxForF(se, 0, 0, 3))
+            + ":" + Convert.ToString(Chart.AxisMinFor(se, 0, 0, 3)));
+    }
+}

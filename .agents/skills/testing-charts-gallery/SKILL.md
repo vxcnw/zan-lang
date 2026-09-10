@@ -40,6 +40,11 @@ description: Zan charts gallery (examples/gui_charts, 335 ECharts 官方对照 d
    这张图不可能对**，先看这里再决定修哪个。
 2. 引擎新增/修改的逻辑，注释必须写 ECharts 源 `文件:行`。没有出处 =
    这条无法审计，等于欠债（审计工具就是按这个引用率给结论的）。
+   **"已修"必须能在工作区 grep 到那行代码 / 有 conformance 用例支撑**：
+   台账/提交信息写着"加了守卫"而代码里没有，就是僵尸结论——空 points
+   越界（B3）这样假报修好一次，直到 2026-09-11 实测复现出
+   `Chart.zan:3031 list index out of bounds` 才补上。复现靠"直接调
+   `Chart.AxisMaxForF(series, 0, 2, 4)`"这种最小探针（比开窗口截图快得多）。
 3. 代码级账本：`docs/CHART_PORT_AUDIT_2026-09-10.md` 是**已提交**的
    完整度审计报告；逐条施工台账在 `_scratch/ECHARTS_PORT_LEDGER.md`
    （A=缺席 / B=已修 / C=待定位 / D=验证纪律）。按源函数记账，
