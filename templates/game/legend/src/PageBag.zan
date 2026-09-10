@@ -21,8 +21,8 @@ partial class LegendApp {
     static int BagCell() { return 42; }   // 物品格边长
     static int BagCols() { return 6; }    // 物品栏列数
     static int BagRows() { return 6; }    // 物品栏行数
-    static int BagActW() { return 76; }   // 竖排功能钮宽
-    static int BagActH() { return 30; }   // 竖排功能钮高
+    static int BagActW() { return 88; }   // 竖排功能钮宽（包住最宽 00026=85）
+    static int BagActH() { return 33; }   // 竖排功能钮高
     static int BagTabW() { return 76; }   // 下段 tab 宽
     static int BagTabH() { return 26; }   // 下段 tab 高
 
@@ -56,28 +56,18 @@ partial class LegendApp {
     //  上段：立绘 + 物品栏 + 竖排功能钮
     // =====================================================================
     void BuildBagTop(Panel top) {
-        /* 左：人物立绘区（装备格用绝对定位压在立绘两侧，见 skin.css）。 */
+        /* 左：人物立绘区。**整图** assets/ui/00009.jpg = 男子 + 6 个
+           装备环格 + 4 个底部背包格（168×250，撑满后跟原版 1:1）。它
+           已经压好 6 个环位的相对位置，自带 0c0d0e 黑底，省得我们
+           自己摆 6 个空 RingEmpty 与绝对定位。 */
         Panel portrait = Panel.Row(); portrait.Class = "bag-portrait";
-        portrait.Pad(0); portrait.Prefer(235, 0); top.With(portrait);
-        Image man = new Image("assets/show/00001.png", "", "cover");
-        man.Class = "bag-man"; man.DockFill(); portrait.Add(man);
+        portrait.Pad(0); portrait.Prefer(Spec.Px(168), Spec.Px(250));
+        top.With(portrait);
+        Image pic = new Image("assets/ui/00009.jpg", "人物+装备环", "cover");
+        pic.DockFill(); portrait.Add(pic);
 
-        /* 左列 3 格（项链/手镯/戒指）。 */
-        Panel colL = Panel.Column(); colL.Class = "bag-slotcol bag-slotcol-l";
-        colL.Gap(4); colL.DockLeft(); portrait.Add(colL);
-        for (int i = 0; i < 3; i = i + 1) { colL.With(BagSlot(0)); }
-
-        /* 右列 3 格（勋章/宝石/腰带）。 */
-        Panel colR = Panel.Column(); colR.Class = "bag-slotcol bag-slotcol-r";
-        colR.Gap(4); colR.DockRight(); portrait.Add(colR);
-        for (int i = 0; i < 3; i = i + 1) { colR.With(BagSlot(0)); }
-
-        /* 中：金币条 + 6×6 物品栏。 */
-        Panel mid = Panel.Column(); mid.Gap(6); mid.Grow(); top.With(mid);
-        Panel money = Panel.Row(); money.Class = "bag-money";
-        money.Gap(6); money.Prefer(0, 28); mid.With(money);
-        money.With(Text("金币", "bag-money-label", 14));
-        money.With(Text("0", "bag-money-value", 14));
+        /* 中：6×6 物品栏（细金边静态格，参见 Slots.zan CellEmpty）。 */
+        Panel mid = Panel.Column(); mid.Gap(0); mid.Grow(); top.With(mid);
 
         for (int r = 0; r < BagRows(); r = r + 1) {
             Panel row = Panel.Row(); row.Gap(2); row.Prefer(0, BagCell() + 2); mid.With(row);
@@ -86,32 +76,75 @@ partial class LegendApp {
             }
         }
 
-        /* 右：竖排 9 个功能钮。 */
+        /* 右：竖排 9 个功能钮（精灵底 + 文字）。底用 `00021..00036` 这套
+           6 档宽 × 2 色的圆角按钮条（27..85 × 33），按 label 字符数选档
+           ——既不再有 label 被截的视觉，也跟原版观感一致。 */
         Panel acts = Panel.Column(); acts.Class = "bag-acts";
-        acts.Gap(4); acts.Prefer(BagActW(), 0); top.With(acts);
+        acts.Gap(Spec.Px(3)); acts.Prefer(BagActW(), 0); top.With(acts);
         string[] labels = new string[] { "切换仓库", "入库(F)", "加锁", "使用(A)", "整理",
                             "放入图鉴", "仓库3", "一键熔炼", "卖出(X)" };
         for (int i = 0; i < 9; i = i + 1) {
-            Button b = Btn(labels[i], "bag-act", () => { });
-            b.Prefer(BagActW(), BagActH()); acts.With(b);
+            int chars = BagLabelChars(labels[i]);
+            int frameN = BagBtnFrame(chars, false);
+            int w = Spec.Px(BtnFrameWidth(frameN));
+            int h = Spec.Px(BtnFrameHeight(frameN));
+            Panel btn = Panel.Row(); btn.Class = "bag-act";
+            btn.Pad(0); btn.Prefer(w, h);
+            Image bg = new Image(BtnFramePath(frameN, false), labels[i], "stretch");
+            bg.DockFill(); btn.Add(bg);
+            Label t = Text(labels[i], "bag-act-label", 0);
+            t.DockFill(); btn.Add(t);
+            int bIdx = i;
+            btn.OnClick(() => { BagAct(bIdx); });
+            acts.With(btn);
         }
     }
 
-    /// 一个空的装备格（金边动画）。
-    Panel BagSlot(int count) {
-        Panel c = Panel.Row();
-        c.Class = GoldSlotCls("bag-slot", count);
-        c.Pad(0); c.Prefer(BagCell(), BagCell());
-        c.Named("bag-slot-" + Rules.N(count));
-        return c;
+    /// 字符数 = 取按钮条档位（多按括号与字母占 1）。
+    static int BagLabelChars(string s) {
+        int n = 0;
+        for (int i = 0; i < s.Length; i = i + 1) {
+            char c = s[i];
+            if (c == '(' || c == ')') { continue; }
+            n = n + 1;
+        }
+        return n;
     }
 
-    /// 物品栏里第 i 格（行优先，0 起）——空格子走普通 slot（无金边动画）。
+    /// 字符数 → 00021..00026 蓝色档位（按 27/37/49/61/73/85 选）。
+    /// 0→小 1→1 2→2 3→3 4→4 5→5 ≥6→6。
+    static int BagBtnFrame(int chars, bool yellow) {
+        int off = yellow ? 10 : 0;     // 黄档 = 蓝档号 + 10
+        if (chars <= 1) { return 21 + off; }
+        if (chars <= 2) { return 22 + off; }
+        if (chars <= 3) { return 23 + off; }
+        if (chars <= 4) { return 24 + off; }
+        if (chars <= 5) { return 25 + off; }
+        return 26 + off;
+    }
+
+    /// 通用：按 frame 号取 000NN 路径。
+    static string BtnFramePath(int n, bool yellow) {
+        return "assets/ui/" + Rules.N(n).PadLeft(5, "0") + ".png";
+    }
+    static int BtnFrameWidth(int n) {
+        int[] ws = new int[] { 27, 37, 49, 61, 73, 85 };
+        int off = (n - 21) % 10;
+        return ws[off < 6 ? off : 5];
+    }
+    static int BtnFrameHeight(int n) { return 33; }
+
+    /// 人物立绘两侧 6 个装备环格（72×70 大格，粗金边）。
+    Panel BagSlot(int idx) {
+        int w = Spec.Px(50); int h = Spec.Px(48);
+        return RingEmpty(w, h);
+    }
+
+    /// 物品栏 6×6 = 36 格（细金边，无动画）。原版 背包-技能.png 与
+    /// 背包-宝石.png 内 6×6 区域就是这种静态细金边。
     Panel BagCellView(int i) {
-        Panel c = Panel.Row(); c.Class = "bag-cell";
-        c.Pad(0); c.Prefer(BagCell(), BagCell());
-        c.Named("bag-cell-" + Rules.N(i));
-        return c;
+        int w = BagCell(); int h = BagCell();
+        return CellEmpty(w, h);
     }
 
     // =====================================================================
@@ -333,5 +366,19 @@ partial class LegendApp {
         right.With(Text(owned ? "Lv.2" : "0/0", "bag-skill-lv", 14));
         right.With(Btn("升级", "bag-mini", () => { }));
         return r;
+    }
+
+    /// 9 个竖排功能钮的回调。原版功能键对应动作如下（无后端时全
+    /// 走 g.Log；联机时走 net.* op）。下标 = 上方 labels[] 顺序。
+    void BagAct(int idx) {
+        if (idx == 0) { if (net.Self() != null) { net.AddChat("[系统]", "切换仓库。"); return; } g.Log("切换仓库"); return; }
+        if (idx == 1) { if (net.Self() != null) { net.AddChat("[系统]", "入库(F)。"); return; } g.Log("入库(F)"); return; }
+        if (idx == 2) { if (net.Self() != null) { net.AddChat("[系统]", "加锁/解锁。"); return; } g.Log("加锁/解锁"); return; }
+        if (idx == 3) { if (net.Self() != null) { net.AddChat("[系统]", "使用(A)。"); return; } g.Log("使用(A)"); return; }
+        if (idx == 4) { if (net.Self() != null) { net.AddChat("[系统]", "整理背包。"); return; } g.Log("整理背包"); return; }
+        if (idx == 5) { if (net.Self() != null) { net.AddChat("[系统]", "放入图鉴。"); return; } g.Log("放入图鉴"); return; }
+        if (idx == 6) { if (net.Self() != null) { net.AddChat("[系统]", "仓库3。"); return; } g.Log("仓库3"); return; }
+        if (idx == 7) { if (net.Self() != null) { net.AddChat("[系统]", "一键熔炼。"); return; } g.Log("一键熔炼"); return; }
+        if (idx == 8) { if (net.Self() != null) { net.AddChat("[系统]", "卖出(X)。"); return; } g.Log("卖出(X)"); return; }
     }
 }
