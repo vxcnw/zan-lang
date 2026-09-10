@@ -33,14 +33,48 @@ partial class LegendApp {
     /// 故取常量而不是每行一格数据。
     static string GuildLvText() { return "二十"; }
 
-    /// 12 个行会名（数据与「申请」反馈文案同源，只此一份）。
-    static List<string> GuildNames() {
-        List<string> nm = new List<string>();
-        nm.Add("花落三千"); nm.Add("哇卡卡"); nm.Add("神兵利器");
-        nm.Add("自由之翼"); nm.Add("近代第一城"); nm.Add("千涯");
-        nm.Add("永恒总会"); nm.Add("古烈大帝"); nm.Add("新生");
-        nm.Add("滥竽充数"); nm.Add("天上...人间"); nm.Add("第一个行会");
-        return nm;
+    /// 一行行会数据。**一行一实体**——原先是 5 个平行数组（行会名 / 成员数 /
+    /// 会长 / 物资 / 限制等级）靠下标对齐。成员数拆成「当前 + 上限」两个数、
+    /// 物资与限制等级存数值（物资 11 位，超 int32），显示时才拼字。
+    class GuildRow {
+        string name;
+        int members;
+        int memberCap;
+        string master;
+        long goods;
+        int limitLevel;
+        string MemText() { return Rules.N(members) + "/" + Rules.N(memberCap); }
+        string GoodsText() { return Convert.ToString(goods); }
+        string LimitText() { return Rules.N(limitLevel) + "级"; }
+    }
+
+    /// 12 行行会数据（照 `行会.png` 逐行抄录；名次即下标 + 1）。上限原版恒 48。
+    static List<GuildRow> guildData = null;
+    static List<GuildRow> GuildData() {
+        if (guildData != null) { return guildData; }
+        List<GuildRow> v = new List<GuildRow>();
+        v.Add(GuildRowOf("花落三千", 47, "漆黑天使", 92490177127, 20));
+        v.Add(GuildRowOf("哇卡卡", 4, "遗忘者", 15226824211, 20));
+        v.Add(GuildRowOf("神兵利器", 8, "风之魔装机神", 6295621723, 20));
+        v.Add(GuildRowOf("自由之翼", 5, "曲颈向天歌", 5909780090, 20));
+        v.Add(GuildRowOf("近代第一城", 37, "Simple", 2969990226, 20));
+        v.Add(GuildRowOf("千涯", 20, "道职", 1203290188, 500));
+        v.Add(GuildRowOf("永恒总会", 19, "龙卫——圣战", 732242069, 20));
+        v.Add(GuildRowOf("古烈大帝", 3, "鑫森淼焱垚", 451730366, 20));
+        v.Add(GuildRowOf("新生", 17, "三胖", 331378877, 20));
+        v.Add(GuildRowOf("滥竽充数", 48, "无敌绵羊", 307235779, 20));
+        v.Add(GuildRowOf("天上...人间", 11, "龙卫——法神", 231241407, 600));
+        v.Add(GuildRowOf("第一个行会", 5, "龙卫——天尊", 169101711, 600));
+        guildData = v;
+        return guildData;
+    }
+
+    static GuildRow GuildRowOf(string name, int members, string master,
+                               long goods, int limitLevel) {
+        GuildRow r = new GuildRow();
+        r.name = name; r.members = members; r.memberCap = 48;
+        r.master = master; r.goods = goods; r.limitLevel = limitLevel;
+        return r;
     }
 
     void BuildGuildPage() {
@@ -57,35 +91,20 @@ partial class LegendApp {
         Panel wall = Panel.Column(); wall.Pad(0); wall.Gap(Spec.TblRowGap());
         box.With(wall);
 
-        List<string> nm = GuildNames();
-        string[] mem = new string[] {
-            "47/48", "4/48", "8/48", "5/48", "37/48", "20/48",
-            "19/48", "3/48", "17/48", "48/48", "11/48", "5/48" };
-        string[] ld = new string[] {
-            "漆黑天使", "遗忘者", "风之魔装机神", "曲颈向天歌", "Simple", "道职",
-            "龙卫——圣战", "鑫森淼焱垚", "三胖", "无敌绵羊", "龙卫——法神",
-            "龙卫——天尊" };
-        string[] goods = new string[] {
-            "92490177127", "15226824211", "6295621723", "5909780090",
-            "2969990226", "1203290188", "732242069", "451730366",
-            "331378877", "307235779", "231241407", "169101711" };
-        string[] lim = new string[] {
-            "20级", "20级", "20级", "20级", "20级", "500级",
-            "20级", "20级", "20级", "20级", "600级", "600级" };
-
+        List<GuildRow> rows = GuildData();
         for (int r = 0; r < Spec.TblRows(); r = r + 1) {
+            GuildRow gu = rows[r];
             List<Panel> cells = new List<Panel>();
             cells.Add(TblCell(Rules.N(r + 1), "guild-c0", ws[0]));
-            cells.Add(TblCell(nm[r], "guild-c1", ws[1]));
+            cells.Add(TblCell(gu.name, "guild-c1", ws[1]));
             cells.Add(TblCellBox(GuildLvBadge(), ws[2]));
-            cells.Add(TblCell(mem[r], "guild-c2", ws[3]));
-            cells.Add(TblCell(ld[r], "guild-c1", ws[4]));
-            cells.Add(TblCell(goods[r], "guild-c1", ws[5]));
-            cells.Add(TblCell(lim[r], "guild-c3", ws[6]));
-            int pick = r;
+            cells.Add(TblCell(gu.MemText(), "guild-c2", ws[3]));
+            cells.Add(TblCell(gu.master, "guild-c1", ws[4]));
+            cells.Add(TblCell(gu.GoodsText(), "guild-c1", ws[5]));
+            cells.Add(TblCell(gu.LimitText(), "guild-c3", ws[6]));
             cells.Add(TblActionCell("申请", "guild-btn", Spec.GuildApplyW(),
                                     Spec.GuildApplyH(), ws[7], TblRowHAt(r),
-                                    () => { GuildApply(pick); }));
+                                    () => { GuildApply(gu); }));
             wall.With(TblRowBoxes(cells, r, "tbl-row"));
         }
         box.With(TblPad(Spec.TblBottomPad()));
@@ -128,9 +147,8 @@ partial class LegendApp {
     }
 
     /// 「申请」钮：尚未接玩法，按本模板惯例给明确反馈（不假装已实现）。
-    void GuildApply(int row) {
-        List<string> nm = GuildNames();
-        string msg = "已申请加入：「" + nm[row] + "」";
+    void GuildApply(GuildRow gu) {
+        string msg = "已申请加入：「" + gu.name + "」";
         if (net.Self() != null) { net.AddChat("[系统]", msg); return; }
         g.Log(msg);
     }

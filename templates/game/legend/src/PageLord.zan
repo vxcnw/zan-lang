@@ -35,8 +35,61 @@ partial class LegendApp {
         return "lord-attr lord-t3";
     }
 
-    /// 「自己」所在行（原版高亮的那一行，0 起）。
-    static int LordSelfRow() { return 3; }
+    /// 一行爵位数据。**一行一实体**——原先是 6 个平行数组（爵位名 / 玩家 /
+    /// 累计贡献 / 加成 / 速度 / 经验）靠下标对齐。爵位名由 `tier` 推出，
+    /// 贡献与加成存数值（贡献原版写「50,1300」= 万位分隔），「自己」是**行的
+    /// 一个属性**（原版高亮那一行），不是写死的下标——接真实数据后就是
+    /// `row.playerId == self.id`。
+    class LordRow {
+        int tier;               // 0 亲王 / 1 国公 / 2 侯爵 / 3 伯爵
+        string player;
+        long contribution;
+        int bonusPct;           // 七项属性加成（气血/法力/攻击/魔法/道术/防御/魔防）
+        int speedPct;
+        int expPct;
+        bool self;
+        string NameText() {
+            if (tier == 0) { return "亲王"; }
+            if (tier == 1) { return "国公"; }
+            if (tier == 2) { return "侯爵"; }
+            return "伯爵";
+        }
+        string ContributionText() { return Rules.Wan(contribution); }
+        string BonusText() { return Rules.Percent(bonusPct); }
+        string SpeedText() { return Rules.Percent(speedPct); }
+        string ExpText() { return Rules.Percent(expPct); }
+    }
+
+    /// 12 行爵位数据（照 `爵位.png` 逐行抄录；下标 + 1 为名次）。
+    /// 第 4 行（下标 3）是原版高亮的「自己」。
+    static List<LordRow> lordData = null;
+    static List<LordRow> LordData() {
+        if (lordData != null) { return lordData; }
+        List<LordRow> v = new List<LordRow>();
+        v.Add(LordRowOf(0, "龙卫——圣战", 501300, 20, 10, 50, false));
+        v.Add(LordRowOf(1, "龙卫——天尊", 501200, 12, 7, 40, false));
+        v.Add(LordRowOf(1, "大白花", 351700, 12, 7, 40, false));
+        v.Add(LordRowOf(1, "焱森粥熟夷", 351400, 12, 7, 40, true));
+        v.Add(LordRowOf(2, "无敌绵羊", 351400, 8, 5, 25, false));
+        v.Add(LordRowOf(2, "漆黑天使", 342400, 8, 5, 25, false));
+        v.Add(LordRowOf(2, "风之魔装机神", 339600, 8, 5, 25, false));
+        v.Add(LordRowOf(2, "大块头", 294600, 8, 5, 25, false));
+        v.Add(LordRowOf(2, "龙卫——法神", 278600, 8, 5, 25, false));
+        v.Add(LordRowOf(3, "风车车", 278400, 5, 3, 15, false));
+        v.Add(LordRowOf(3, "画饼", 278300, 5, 3, 15, false));
+        v.Add(LordRowOf(3, "无敌奶糖", 235000, 5, 3, 15, false));
+        lordData = v;
+        return lordData;
+    }
+
+    static LordRow LordRowOf(int tier, string player, long contribution,
+                             int bonusPct, int speedPct, int expPct, bool self) {
+        LordRow r = new LordRow();
+        r.tier = tier; r.player = player; r.contribution = contribution;
+        r.bonusPct = bonusPct; r.speedPct = speedPct; r.expPct = expPct;
+        r.self = self;
+        return r;
+    }
 
     void BuildLordPage() {
         Panel page0 = Panel.Column(); page0.Class = "tbl-page";
@@ -52,43 +105,23 @@ partial class LegendApp {
         Panel wall = Panel.Column(); wall.Pad(0); wall.Gap(Spec.TblRowGap());
         box.With(wall);
 
-        string[] nm = new string[] {
-            "亲王", "国公", "国公", "国公", "侯爵", "侯爵",
-            "侯爵", "侯爵", "侯爵", "伯爵", "伯爵", "伯爵" };
-        string[] pl = new string[] {
-            "龙卫——圣战", "龙卫——天尊", "大白花", "焱森粥熟夷", "无敌绵羊",
-            "漆黑天使", "风之魔装机神", "大块头", "龙卫——法神", "风车车",
-            "画饼", "无敌奶糖" };
-        string[] con = new string[] {
-            "50,1300", "50,1200", "35,1700", "35,1400", "35,1400", "34,2400",
-            "33,9600", "29,4600", "27,8600", "27,8400", "27,8300", "23,5000" };
-        string[] pct = new string[] {
-            "20%", "12%", "12%", "12%", "8%", "8%",
-            "8%", "8%", "8%", "5%", "5%", "5%" };
-        string[] spd = new string[] {
-            "10%", "7%", "7%", "7%", "5%", "5%",
-            "5%", "5%", "5%", "3%", "3%", "3%" };
-        string[] exp = new string[] {
-            "50%", "40%", "40%", "40%", "25%", "25%",
-            "25%", "25%", "25%", "15%", "15%", "15%" };
-        int[] tier = new int[] {
-            0, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3 };
-
+        List<LordRow> rows = LordData();
         for (int r = 0; r < Spec.TblRows(); r = r + 1) {
+            LordRow lo = rows[r];
             List<string> cells = new List<string>();
-            cells.Add(nm[r]); cells.Add(pl[r]); cells.Add(con[r]);
-            for (int i = 0; i < 7; i = i + 1) { cells.Add(pct[r]); }
-            cells.Add(spd[r]); cells.Add(exp[r]);
+            cells.Add(lo.NameText()); cells.Add(lo.player);
+            cells.Add(lo.ContributionText());
+            for (int i = 0; i < 7; i = i + 1) { cells.Add(lo.BonusText()); }
+            cells.Add(lo.SpeedText()); cells.Add(lo.ExpText());
 
             List<string> cls = new List<string>();
             cls.Add("lord-c0"); cls.Add("lord-c1"); cls.Add("lord-c2");
-            for (int i = 0; i < 7; i = i + 1) { cls.Add(LordAttrCls(tier[r])); }
+            for (int i = 0; i < 7; i = i + 1) { cls.Add(LordAttrCls(lo.tier)); }
             cls.Add("lord-cy"); cls.Add("lord-cy");
 
-            bool self = r == LordSelfRow();
             wall.With(TblRowCls(cells, cls, ws, r,
-                                self ? "tbl-row-hl" : "tbl-row",
-                                self ? "tbl-cell tbl-cell-hl" : "tbl-cell"));
+                                lo.self ? "tbl-row-hl" : "tbl-row",
+                                lo.self ? "tbl-cell tbl-cell-hl" : "tbl-cell"));
         }
         box.With(TblPad(Spec.TblBottomPad()));
 
