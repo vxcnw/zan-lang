@@ -1,0 +1,81 @@
+using System;
+using System.IO;
+
+namespace Ra2.StdlibRts;
+
+/// <summary>现代 RA2 兼容运行时的配置。</summary>
+class RtsConfig {
+    string installPath;
+    string title;
+    int windowWidth;
+    int windowHeight;
+    int logicalWidth;
+    int logicalHeight;
+    int simulationTicksPerSecond;
+    bool verticalSync;
+
+    RtsConfig(string installPath) {
+        this.installPath = installPath;
+        this.title = "Zan RA2";
+        this.windowWidth = 1280;
+        this.windowHeight = 720;
+        this.logicalWidth = 640;
+        this.logicalHeight = 360;
+        this.simulationTicksPerSecond = 30;
+        this.verticalSync = true;
+    }
+
+    string InstallPath() { return this.installPath; }
+    string Title() { return this.title; }
+    int WindowWidth() { return this.windowWidth; }
+    int WindowHeight() { return this.windowHeight; }
+    int LogicalWidth() { return this.logicalWidth; }
+    int LogicalHeight() { return this.logicalHeight; }
+    int SimulationTicksPerSecond() { return this.simulationTicksPerSecond; }
+    bool VerticalSync() { return this.verticalSync; }
+
+    void SetTitle(string newTitle) { this.title = newTitle; }
+    void SetWindowSize(int width, int height) {
+        this.windowWidth = width;
+        this.windowHeight = height;
+    }
+    void SetLogicalSize(int width, int height) {
+        this.logicalWidth = width;
+        this.logicalHeight = height;
+    }
+    void SetSimulationTicksPerSecond(int ticksPerSecond) {
+        this.simulationTicksPerSecond = ticksPerSecond;
+    }
+    void SetVerticalSync(bool enabled) { this.verticalSync = enabled; }
+}
+
+/// <summary>
+/// 校验用户自有的《红色警戒 2》安装，不重新分发其
+/// copyrighted assets.
+/// </summary>
+class RtsInstall {
+    string root;
+    List<string> missing;
+
+    static RtsInstall Inspect(string root) {
+        RtsInstall install = new RtsInstall();
+        install.root = root;
+        install.missing = new List<string>();
+        install.Require("ra2.mix");
+        install.Require("language.mix");
+        install.Require("multi.mix");
+        return install;
+    }
+
+    void Require(string name) {
+        string path = Path.Combine(this.root, name);
+        if (!File.Exists(path)) {
+            this.missing.Add(name);
+        }
+    }
+
+    bool IsValid() { return this.missing.Count == 0; }
+    string Root() { return this.root; }
+    int MissingCount() { return this.missing.Count; }
+    string MissingAt(int index) { return this.missing[index]; }
+}

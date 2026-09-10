@@ -1,0 +1,132 @@
+using System;
+using System.Collections.Generic;
+
+namespace Ra2.StdlibRts.Formats;
+
+// Westwood CSF 字符串表中的单条 label -> value 绑定。一个 label 在文件中
+// 可能携带多个字符串；这里只保留第一个（引擎使用的那一个），
+// 即此处的值。
+class CsfEntry {
+    string label;
+    string text;
+
+    static CsfEntry Of(string label, string text) {
+        CsfEntry e = new CsfEntry();
+        e.label = label;
+        e.text = text;
+        return e;
+    }
+
+    string Label() { return this.label; }
+    string Text() { return this.text; }
+}
+
+// 解析 Westwood CSF（Compiled String File，编译字符串文件）字符串表，
+// 用于《泰伯利亚之日》/《红色警戒 2》的本地化 UI 文本。
+//
+// 布局（小端）：
+//   header  : " FSC" 魔数、version、labelCount、stringCount、unused、language
+//   label   : " LBL" 魔数、pairCount、labelLen、label[labelLen]
+//   value   : " RTS"（或 "WRTS"）魔数、valueLen、utf16le[valueLen]
+//             （WRTS 还带末尾的 extraLen + ascii[extraLen]）
+//
+// 磁盘上每个值字节按位取反存储；代码单元为
+// UTF-16LE，此处重新编码为 UTF-8。净室实现：未嵌入任何原始字符串，
+// 测试自行构造表。
+class CsfTable {
+    int version;
+    int language;
+    int labelCount;
+    int stringCount;
+    List<CsfEntry> entries;
+
+    static CsfTable Parse(string data, int length) {
+        CsfTable t = new CsfTable();
+        t.entries = new List<CsfEntry>();
+        BinaryReader r = BinaryReader.FromBuffer(data, length);
+
+        r.Skip(4);                    // " FSC" 魔数
+        t.version = (int)r.ReadU32();
+        t.labelCount = (int)r.ReadU32();
+        t.stringCount = (int)r.ReadU32();
+        r.Skip(4);                    // 未使用
+        t.language = (int)r.ReadU32();
+
+        for (int li = 0; li < t.labelCount; li = li + 1) {
+            r.Skip(4);                // " LBL" 魔数
+            int pairCount = (int)r.ReadU32();
+            int labelLen = r.ReadI32();
+            string label = CsfTable.ReadAscii(r, labelLen);
+
+            string firstValue = "";
+            for (int pi = 0; pi < pairCount; pi = pi + 1) {
+                int typeTag = r.ReadU8();  // ' ' (0x20) 表示 RTS，'W' (0x57) 表示 WRTS
+                r.Skip(3);                 // "RTS"
+                bool wide = typeTag == 87;
+                int valueLen = r.ReadI32();
+                string val = CsfTable.ReadValue(r, valueLen);
+                if (pi == 0) { firstValue = val; }
+                if (wide) {
+                    int extraLen = r.ReadI32();
+                    r.Skip(extraLen);
+                }
+            }
+            t.entries.Add(CsfEntry.Of(label, firstValue));
+        }
+        return t;
+    }
+
+    static string ReadAscii(BinaryReader r, int len) {
+        byte[] buf = new byte[len + 1];
+        for (int i = 0; i < len; i = i + 1) {
+            buf[i] = (byte)r.ReadU8();
+        }
+        return buf.ToStr(0, len);
+    }
+
+    // 解码 valueLen 个 UTF-16LE 代码单元（磁盘上每个字节按位取反）
+    // 为 UTF-8 字符串。
+    static string ReadValue(BinaryReader r, int valueLen) {
+        byte[] buf = new byte[valueLen * 3 + 1];
+        int outp = 0;
+        for (int i = 0; i < valueLen; i = i + 1) {
+            int lo = (r.ReadU8() ^ 0xFF) & 0xFF;
+            int hi = (r.ReadU8() ^ 0xFF) & 0xFF;
+            int cu = (hi << 8) | lo;
+            if (cu < 0x80) {
+                buf[outp] = (byte)cu;
+                outp = outp + 1;
+            } else if (cu < 0x800) {
+                buf[outp] = (byte)(0xC0 | (cu >> 6));
+                buf[outp + 1] = (byte)(0x80 | (cu & 0x3F));
+                outp = outp + 2;
+            } else {
+                buf[outp] = (byte)(0xE0 | (cu >> 12));
+                buf[outp + 1] = (byte)(0x80 | ((cu >> 6) & 0x3F));
+                buf[outp + 2] = (byte)(0x80 | (cu & 0x3F));
+                outp = outp + 3;
+            }
+        }
+        return buf.ToStr(0, outp);
+    }
+
+    int Version() { return this.version; }
+    int Language() { return this.language; }
+    int LabelCount() { return this.labelCount; }
+    int StringCount() { return this.stringCount; }
+    int Count() { return this.entries.Count; }
+
+    CsfEntry EntryAt(int index) {
+        if (index < 0 || index >= this.entries.Count) { return null; }
+        return this.entries[index];
+    }
+
+    string Lookup(string label) {
+        for (int i = 0; i < this.entries.Count; i = i + 1) {
+            if (this.entries[i].Label() == label) {
+                return this.entries[i].Text();
+            }
+        }
+        return null;
+    }
+}

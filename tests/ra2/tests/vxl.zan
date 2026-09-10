@@ -1,0 +1,187 @@
+// VXL voxel models: the span decoder against a synthetic model, plus the
+// vehicle-facing bake and the art-name routing.
+//
+// Clean-room: no game data. A synthetic one-limb VXL is assembled in code --
+// header, limb header, column tables, span records, footer -- so every field
+// the parser reads is chosen by the test. The bake is checked for shape and
+// a stable pixel checksum; the routing helpers decide .VXL vs .SHP names.
+using System;
+using System.Collections.Generic;
+using Ra2.Assets;
+using Ra2.Formats;
+using Ra2.Game;
+using Ra2.Render;
+
+namespace T;
+
+class Program {
+
+    static void PutU32(byte[] buf, int at, int v) {
+        buf[at] = (byte)(v & 0xFF);
+        buf[at + 1] = (byte)((v >> 8) & 0xFF);
+        buf[at + 2] = (byte)((v >> 16) & 0xFF);
+        buf[at + 3] = (byte)((v >> 24) & 0xFF);
+    }
+
+    // A one-limb VXL, 2x2x4. Column (0,0) carries one span -- gap 1 then
+    // colours 10,20,30 at z=1..3 -- and column (1,1) carries colours 5,9 at
+    // z=0..1. The other two columns are empty (-1). Field offsets follow the
+    // layout VxlImage.Parse documents.
+    static byte[] BuildVxl() {
+        int baseOfs = 802;
+        int bodyOfs = baseOfs + 28;
+        int tableBytes = 4 * 4;              // two 4-column i32 tables
+        int spansOfs = tableBytes;           // spans start after both tables
+        int bodySize = tableBytes + 22;      // spans: 12 + 10 bytes
+        int footerOfs = bodyOfs + bodySize;
+        byte[] buf = new byte[footerOfs + 92];
+
+        // Header: magic, skip, limbs, skip, bodySize, 770-byte palette.
+        string magic = "Voxel Animation";
+        for (int i = 0; i < 16; i = i + 1) {
+            buf[i] = i < magic.Length ? (byte)magic[i] : (byte)0;
+        }
+        PutU32(buf, 16, 0);
+        PutU32(buf, 20, 1);                  // limbCount
+        PutU32(buf, 24, 0);
+        PutU32(buf, 28, bodySize);
+
+        // Limb header: name + 12 pad.
+        string name = "TANK";
+        for (int i = 0; i < name.Length; i = i + 1) {
+            buf[baseOfs + i] = (byte)name[i];
+        }
+
+        // Column offset table (relative to the spans section) and the unused
+        // second table.
+        int spansAbs = bodyOfs + spansOfs;
+        PutU32(buf, bodyOfs, 0);             // col (0,0) -> record at spans+0
+        PutU32(buf, bodyOfs + 4, 0xFFFFFFFF); // (1,0) empty
+        PutU32(buf, bodyOfs + 8, 0xFFFFFFFF); // (0,1) empty
+        PutU32(buf, bodyOfs + 12, 12);       // (1,1) -> record at spans+12
+        // table 2 stays zero
+
+        // Span record for (0,0): gap 1, run of 3, terminator, zero-count end.
+        int p = spansAbs;
+        buf[p] = 1; buf[p + 1] = 3;
+        buf[p + 2] = 10; buf[p + 3] = 0;
+        buf[p + 4] = 20; buf[p + 5] = 0;
+        buf[p + 6] = 30; buf[p + 7] = 0;
+        buf[p + 8] = 0;                      // terminator
+        buf[p + 9] = 0; buf[p + 10] = 0;     // gap 0, count 0: end
+
+        // Span record for (1,1): gap 0, run of 2, terminator, end.
+        p = spansAbs + 12;
+        buf[p] = 0; buf[p + 1] = 2;
+        buf[p + 2] = 5; buf[p + 3] = 0;
+        buf[p + 4] = 9; buf[p + 5] = 0;
+        buf[p + 6] = 0;
+        buf[p + 7] = 0; buf[p + 8] = 0;
+
+        // Footer: block offset, table-2 offset, spans offset, scale,
+        // bounds+reserved, sizes, normal type.
+        PutU32(buf, footerOfs, 0);
+        PutU32(buf, footerOfs + 4, tableBytes);
+        PutU32(buf, footerOfs + 8, spansOfs);
+        // scale + 72 reserved bytes stay zero
+        buf[footerOfs + 88] = 2;             // sizeX
+        buf[footerOfs + 89] = 2;             // sizeY
+        buf[footerOfs + 90] = 4;             // sizeZ
+        buf[footerOfs + 91] = 4;             // normalType (RA2)
+        return buf;
+    }
+
+    // A palette with known 6-bit entries for the colours the model uses.
+    static Palette BuildPal() {
+        byte[] raw = new byte[768];
+        raw[10 * 3] = 63;                    // colour 10: red
+        raw[20 * 3 + 1] = 63;                // colour 20: green
+        raw[30 * 3 + 2] = 63;                // colour 30: blue
+        raw[5 * 3] = 31; raw[5 * 3 + 1] = 31; // colour 5: dark yellow
+        raw[9 * 3 + 2] = 31;                 // colour 9: dark blue
+        return Palette.Parse(raw, 768);
+    }
+
+    static int Main() {
+        byte[] raw = BuildVxl();
+        VxlImage img = VxlImage.Parse(raw, raw.Length);
+        Console.WriteLine("limbs=" + Convert.ToString(img.LimbCount()));
+        VxlLimb l = img.Main();
+        if (l == null) {
+            Console.WriteLine("main limb MISSING");
+            return 1;
+        }
+        Console.WriteLine("name=" + l.Name()
+            + " size=" + Convert.ToString(l.SizeX())
+            + "x" + Convert.ToString(l.SizeY())
+            + "x" + Convert.ToString(l.SizeZ()));
+        // Column (0,0): gap 1 puts z=0 empty, the run fills z=1..3.
+        Console.WriteLine("c000=" + Convert.ToString(l.VoxelAt(0, 0, 0))
+            + " c001=" + Convert.ToString(l.VoxelAt(0, 0, 1))
+            + " c002=" + Convert.ToString(l.VoxelAt(0, 0, 2))
+            + " c003=" + Convert.ToString(l.VoxelAt(0, 0, 3)));
+        // Column (1,1): run of 2 at the column foot, empty above.
+        Console.WriteLine("c110=" + Convert.ToString(l.VoxelAt(1, 1, 0))
+            + " c111=" + Convert.ToString(l.VoxelAt(1, 1, 1))
+            + " c112=" + Convert.ToString(l.VoxelAt(1, 1, 2)));
+        // The empty columns and out-of-bounds reads.
+        Console.WriteLine("c100=" + Convert.ToString(l.VoxelAt(1, 0, 0))
+            + " c010=" + Convert.ToString(l.VoxelAt(0, 1, 0))
+            + " oob=" + Convert.ToString(l.VoxelAt(5, 5, 5)));
+
+        // The bake: canvas of a sane shape, opaque voxels on it, stable
+        // checksum. The model is asymmetric (one tall column, one short),
+        // so the checksum pins the projection and painter order.
+        Palette pal = BuildPal();
+        Texture tex = ObjectArt.BakeFacing(img, pal, 0);
+        if (tex == null) {
+            Console.WriteLine("bake FAILED");
+            return 1;
+        }
+        int lit = 0;
+        long sum = 0;
+        for (int y = 0; y < tex.Height(); y = y + 1) {
+            for (int x = 0; x < tex.Width(); x = x + 1) {
+                int px = tex.PixelAt(x, y);
+                if (((px >> 24) & 0xFF) != 0) {
+                    lit = lit + 1;
+                    sum = sum + (px & 0xFFFFFF);
+                }
+            }
+        }
+        Console.WriteLine("bake=" + Convert.ToString(tex.Width())
+            + "x" + Convert.ToString(tex.Height())
+            + " lit=" + Convert.ToString(lit)
+            + " sum=" + Convert.ToString(sum % 1000003));
+
+        // Routing: voxel names and shape names, and the Image= override's
+        // extension choice.
+        Console.WriteLine("isvxl htnk="
+            + (ObjectArt.IsVxlName("HTNK.VXL") ? 1 : 0)
+            + " gi=" + (ObjectArt.IsVxlName("GI.SHP") ? 1 : 0));
+        Console.WriteLine("ext vxl=" + Rules.ArtExtension("GTNK.VXL")
+            + " shp=" + Rules.ArtExtension("GGI.SHP")
+            + " bare=" + Rules.ArtExtension("WEIRD"));
+
+        // The default roster carries both tanks through their factories.
+        Rules r = Rules.Default();
+        UnitDef mtnk = r.UnitNamed("MTNK");
+        UnitDef htnk = r.UnitNamed("HTNK");
+        if (mtnk == null || htnk == null) {
+            Console.WriteLine("tank regs MISSING");
+            return 1;
+        }
+        Console.WriteLine("mtnk " + mtnk.Shp()
+            + " producer=" + mtnk.Producer()
+            + " mask=" + Convert.ToString(mtnk.SideMask())
+            + " armor=" + Convert.ToString(mtnk.Armor()));
+        Console.WriteLine("htnk " + htnk.Shp()
+            + " producer=" + htnk.Producer()
+            + " mask=" + Convert.ToString(htnk.SideMask()));
+        Weapon gun = mtnk.Primary();
+        Console.WriteLine("105mm dmg=" + Convert.ToString(gun.Damage())
+            + " rof=" + Convert.ToString(gun.Rof())
+            + " range=" + Convert.ToString(gun.Range()));
+        return 0;
+    }
+}

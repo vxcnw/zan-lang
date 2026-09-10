@@ -1,0 +1,231 @@
+using System;
+
+namespace SDL3;
+
+/// <summary>
+/// 访问最近轮询到的 SDL 事件。
+/// 在主线程上轮询并读取事件。
+/// </summary>
+class SdlEvent {
+    /// 轮询一个事件；true 表示取到（先 Poll 再读其他字段）。
+    static bool Poll() { return SdlNative.zan_sdl_poll_event() != 0; }
+    /// 最近事件的类型（对照 SdlEventType 常量）。
+    static int Type() { return SdlNative.zan_sdl_event_type(); }
+    /// 事件时间戳（纳秒，SDL 时间基准）。
+    static int Timestamp() { return SdlNative.zan_sdl_event_timestamp(); }
+    /// 事件关联的窗口实例 id。
+    static int WindowId() { return SdlNative.zan_sdl_event_window_id(); }
+    /// 事件附加数据 1（含义随类型，如窗口移动的新 x）。
+    static int Data1() { return SdlNative.zan_sdl_event_data1(); }
+    /// 事件附加数据 2（含义随类型，如窗口移动的新 y）。
+    static int Data2() { return SdlNative.zan_sdl_event_data2(); }
+    /// 键盘事件的物理扫描码（对照 SdlScancode）。
+    static int Scancode() { return SdlNative.zan_sdl_event_scancode(); }
+    /// 键盘事件的逻辑键码（受布局影响）。
+    static int Keycode() { return SdlNative.zan_sdl_event_keycode(); }
+    /// 按键时的修饰键位组合（对照 SdlKeymod）。
+    static int Keymod() { return SdlNative.zan_sdl_event_keymod(); }
+    /// 是否长按重复触发。
+    static bool IsRepeat() { return SdlNative.zan_sdl_event_repeat() != 0; }
+    /// 鼠标窗口坐标 X（像素，非设计单位——游戏里请用 host.MouseX()）。
+    static double MouseX() { return SdlNative.zan_sdl_event_mouse_x(); }
+    /// 鼠标窗口坐标 Y（像素）。
+    static double MouseY() { return SdlNative.zan_sdl_event_mouse_y(); }
+    /// 鼠标相对位移 X。
+    static double MouseDeltaX() { return SdlNative.zan_sdl_event_mouse_dx(); }
+    /// 鼠标相对位移 Y。
+    static double MouseDeltaY() { return SdlNative.zan_sdl_event_mouse_dy(); }
+    /// 鼠标按键号（对照 SdlMouseButton）。
+    static int MouseButton() { return SdlNative.zan_sdl_event_mouse_button(); }
+    /// 连击次数（双击为 2）。
+    static int MouseClicks() { return SdlNative.zan_sdl_event_mouse_clicks(); }
+    /// 文本输入事件的输入文本（UTF-8）。
+    static string Text() { return SdlNative.zan_sdl_event_text(); }
+
+    /// <summary>手柄实例 id：ADDED/REMOVED/按键/轴事件都用它区分手柄。</summary>
+    static int GamepadWhich() { return SdlNative.zan_sdl_event_gamepad_which(); }
+    /// 手柄按键号（对照 SdlGamepad）。
+    static int GamepadButton() { return SdlNative.zan_sdl_event_gamepad_button(); }
+    /// 手柄轴号（对照 SdlGamepad 的轴常量）。
+    static int GamepadAxis() { return SdlNative.zan_sdl_event_gamepad_axis(); }
+
+    /// <summary>轴原始值：摇杆 -32768..32767，扳机 0..32767。</summary>
+    static int GamepadAxisValue() {
+        return SdlNative.zan_sdl_event_gamepad_axis_value();
+    }
+
+    /// <summary>手指 id：多点触控靠它把 DOWN/MOTION/UP 串成一根手指。</summary>
+    static long FingerId() { return SdlNative.zan_sdl_event_finger_id(); }
+    /// 触控设备 id。
+    static long TouchDevice() { return SdlNative.zan_sdl_event_touch_device(); }
+
+    /// <summary>手指位置，窗口内归一化 0..1（乘窗口尺寸得像素）。</summary>
+    static double FingerX() { return SdlNative.zan_sdl_event_finger_x(); }
+    /// 手指位置 Y（归一化 0..1）。
+    static double FingerY() { return SdlNative.zan_sdl_event_finger_y(); }
+    /// 手指位移 X（归一化）。
+    static double FingerDeltaX() { return SdlNative.zan_sdl_event_finger_dx(); }
+    /// 手指位移 Y（归一化）。
+    static double FingerDeltaY() { return SdlNative.zan_sdl_event_finger_dy(); }
+
+    /// <summary>压感 0..1；不支持压感的设备恒为 1。</summary>
+    static double FingerPressure() {
+        return SdlNative.zan_sdl_event_finger_pressure();
+    }
+
+    /// 最近事件是退出（Quit 或窗口关闭请求）——主循环据此结束。
+    static bool IsQuit() {
+        int type = Type();
+        return type == SdlEventType.Quit() || type == SdlEventType.WindowCloseRequested();
+    }
+}
+
+/// SDL 事件类型常量（值与 SDL_EventType 对齐），对照 `SdlEvent.Type()`。
+class SdlEventType {
+    /// 退出请求（主循环收到后自行清理退出）。
+    static int Quit() { return 256; }
+    /// 窗口显示。
+    static int WindowShown() { return 514; }
+    /// 窗口隐藏。
+    static int WindowHidden() { return 515; }
+    /// 窗口移动（Data1/Data2 为新的 x/y）。
+    static int WindowMoved() { return 517; }
+    /// 窗口尺寸变化（Data1/Data2 为新的宽/高）。
+    static int WindowResized() { return 518; }
+    /// 像素尺寸变化（DPI/缩放改变；与 Resized 不同，DPR 变了才算）。
+    static int WindowPixelSizeChanged() { return 519; }
+    /// 窗口最小化。
+    static int WindowMinimized() { return 521; }
+    /// 窗口最大化。
+    static int WindowMaximized() { return 522; }
+    /// 窗口从最小化/最大化恢复。
+    static int WindowRestored() { return 523; }
+    /// 窗口获得键盘焦点。
+    static int WindowFocusGained() { return 526; }
+    /// 窗口失去键盘焦点。
+    static int WindowFocusLost() { return 527; }
+    /// 用户点关闭按钮（收到后自行清理退出，SDL 不自动退）。
+    static int WindowCloseRequested() { return 528; }
+    /// 键按下（读 Scancode/Keycode/Keymod）。
+    static int KeyDown() { return 768; }
+    /// 键抬起。
+    static int KeyUp() { return 769; }
+    /// 输入法编辑中的组合文本。
+    static int TextEditing() { return 770; }
+    /// 最终输入文本（读 SdlEvent.Text()）。
+    static int TextInput() { return 771; }
+    /// 鼠标移动。
+    static int MouseMotion() { return 1024; }
+    /// 鼠标按键按下。
+    static int MouseButtonDown() { return 1025; }
+    /// 鼠标按键抬起。
+    static int MouseButtonUp() { return 1026; }
+    /// 滚轮滚动。
+    static int MouseWheel() { return 1027; }
+    /// 手柄轴移动。
+    static int GamepadAxisMotion() { return 1616; }
+    /// 手柄按键按下。
+    static int GamepadButtonDown() { return 1617; }
+    /// 手柄按键抬起。
+    static int GamepadButtonUp() { return 1618; }
+    /// 手柄接入（读 GamepadWhich 得实例 id）。
+    static int GamepadAdded() { return 1619; }
+    /// 手柄拔出。
+    static int GamepadRemoved() { return 1620; }
+    /// 手柄映射变更。
+    static int GamepadRemapped() { return 1621; }
+    /// 手指按下。
+    static int FingerDown() { return 1792; }
+    /// 手指抬起。
+    static int FingerUp() { return 1793; }
+    /// 手指移动。
+    static int FingerMotion() { return 1794; }
+    /// 手指事件被系统取消。
+    static int FingerCanceled() { return 1795; }
+}
+
+/// 键盘物理扫描码常量（布局无关，WASD 类游戏用这组）。
+class SdlScancode {
+    /// 物理键 A。
+    static int A() { return 4; }
+    /// 物理键 C。
+    static int C() { return 6; }
+    /// 物理键 D。
+    static int D() { return 7; }
+    /// 物理键 E。
+    static int E() { return 8; }
+    /// 物理键 I。
+    static int I() { return 12; }
+    /// 物理键 K。
+    static int K() { return 14; }
+    /// 物理键 Q。
+    static int Q() { return 20; }
+    /// 物理键 S。
+    static int S() { return 22; }
+    /// 物理键 W。
+    static int W() { return 26; }
+    /// 回车键。
+    static int Enter() { return 40; }
+    /// Esc 键。
+    static int Escape() { return 41; }
+    /// 空格键。
+    static int Space() { return 44; }
+    /// 功能键 F1。
+    static int F1() { return 58; }
+    /// 功能键 F5。
+    static int F5() { return 62; }
+    /// 功能键 F11。
+    static int F11() { return 68; }
+    /// Delete 键。
+    static int Delete() { return 76; }
+    /// 方向键右。
+    static int Right() { return 79; }
+    /// 方向键左。
+    static int Left() { return 80; }
+    /// 方向键下。
+    static int Down() { return 81; }
+    /// 方向键上。
+    static int Up() { return 82; }
+
+    /// 当前物理按键是否按下（轮询式读键，与事件流独立）。
+    static bool IsDown(int scancode) {
+        return SdlNative.zan_sdl_key_down(scancode) != 0;
+    }
+}
+
+/// 修饰键位常量与组合判断（值与 SDL_Keymod 对齐）。
+class SdlKeymod {
+    /// 左 Shift。
+    static int LeftShift() { return 1; }
+    /// 右 Shift。
+    static int RightShift() { return 2; }
+    /// 左 Ctrl。
+    static int LeftControl() { return 64; }
+    /// 右 Ctrl。
+    static int RightControl() { return 128; }
+    /// 左 Alt。
+    static int LeftAlt() { return 256; }
+    /// 右 Alt。
+    static int RightAlt() { return 512; }
+
+    /// 修饰组合里含任一 Shift。
+    static bool HasShift(int modifiers) { return (modifiers & 3) != 0; }
+    /// 修饰组合里含任一 Ctrl。
+    static bool HasControl(int modifiers) { return (modifiers & 192) != 0; }
+    /// 修饰组合里含任一 Alt。
+    static bool HasAlt(int modifiers) { return (modifiers & 768) != 0; }
+}
+
+/// 鼠标按键号常量（对照 SdlEvent.MouseButton()）。
+class SdlMouseButton {
+    /// 左键。
+    static int Left() { return 1; }
+    /// 中键。
+    static int Middle() { return 2; }
+    /// 右键。
+    static int Right() { return 3; }
+    /// 侧键 1。
+    static int Side1() { return 4; }
+    /// 侧键 2。
+    static int Side2() { return 5; }
+}

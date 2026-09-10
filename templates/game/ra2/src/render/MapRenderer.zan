@@ -1,0 +1,387 @@
+using System;
+using System.Collections.Generic;
+using Ra2.Assets;
+using Ra2.Formats;
+using Ra2.Game;
+
+namespace Ra2.Render;
+
+/// <summary>Draws the visible part of a map's terrain into a view-sized image.</summary>
+///
+/// The whole map is far larger than any window -- a 105x95 map projects to
+/// 6300x2865, which is 72 MB as an RGBA texture and close to the maximum
+/// texture size on older GPUs. Only a window's worth is ever on screen, so the
+/// terrain is never composited whole: each frame blits the cells that fall
+/// inside the camera and skips the rest.
+///
+/// Cells are drawn back-to-front in x+y order. In an isometric view that is
+/// the painter's order: a cell with a larger x+y is nearer the viewer and its
+/// diamond overlaps the ones behind it, so raised ground and cliff faces only
+/// occlude correctly when the far side is laid down first. The order is
+/// computed once at load rather than per frame.
+class MapRenderer {
+    IsoMap iso;
+    Theater theater;
+    List<int> order;      // cell indices, back to front
+    int originX;          // world (0,0) in projected pixels
+    int originY;
+    int worldW;
+    int worldH;
+    World world;          // objects drawn on top; null until the game sets one
+    ObjectArt art;
+    int playerSide;       // Side2 of the human player, for selection colours
+    // [Terrain] scatter (trees, rocks), sorted back-to-front like cells: the
+    // parallel arrays hold cell x, cell y, level and the art name.
+    List<int> terrX;
+    List<int> terrY;
+    List<int> terrLevel;
+    List<string> terrName;
+
+    /// <summary>The pixel size of a map's full diamond, and the offset that
+    /// shifts it into positive coordinates.</summary>
+    ///
+    /// Cell (0,0) projects to x=0 but cell (0,span) projects to -span*30, so
+    /// the left half of the map sits at negative x. The bounds come from the
+    /// cells the map actually carries rather than the declared size, because
+    /// IsoMapPack5 covers the whole (w+h) square.
+    static void Bounds(IsoMap iso, List<int> out4) {
+        int minX = 0;
+        int maxX = 0;
+        int minY = 0;
+        int maxY = 0;
+        bool any = false;
+        for (int i = 0; i < iso.Count(); i = i + 1) {
+            IsoTile t = iso.TileAt(i);
+            int sx = IsoProjection.ScreenX(t.X(), t.Y());
+            int sy = IsoProjection.ScreenY(t.X(), t.Y(), t.Level());
+            if (!any) {
+                minX = sx; maxX = sx; minY = sy; maxY = sy;
+                any = true;
+            }
+            if (sx < minX) { minX = sx; }
+            if (sx > maxX) { maxX = sx; }
+            if (sy < minY) { minY = sy; }
+            if (sy > maxY) { maxY = sy; }
+        }
+        // maxX/maxY are apex positions; a tile extends a further tile past them.
+        MapRenderer.SetSlot(out4, 0, minX);
+        MapRenderer.SetSlot(out4, 1, minY);
+        MapRenderer.SetSlot(out4, 2, maxX - minX + IsoProjection.TileW());
+        MapRenderer.SetSlot(out4, 3, maxY - minY + IsoProjection.TileH());
+    }
+
+    static MapRenderer Create(IsoMap iso, Theater theater) {
+        MapRenderer m = new MapRenderer();
+        m.iso = iso;
+        m.theater = theater;
+        List<int> b = new List<int>();
+        MapRenderer.Bounds(iso, b);
+        m.originX = b[0];
+        m.originY = b[1];
+        m.worldW = b[2];
+        m.worldH = b[3];
+        m.order = MapRenderer.BuildOrder(iso);
+        m.world = null;
+        m.art = null;
+        return m;
+    }
+
+    /// <summary>Gives the renderer the game's objects to draw. The map renderer
+    /// is created before a game's world exists, so this is set when a game
+    /// starts and never unset within a game.</summary>
+    void SetWorld(World world, ObjectArt art, int playerSide) {
+        this.world = world;
+        this.art = art;
+        this.playerSide = playerSide;
+    }
+
+    /// <summary>Takes the map's [Terrain] objects, sorted into painter order
+    /// (x+y, then level) so a tree in front covers the one behind it.</summary>
+    void SetTerrain(MapFile map) {
+        this.terrX = new List<int>();
+        this.terrY = new List<int>();
+        this.terrLevel = new List<int>();
+        this.terrName = new List<string>();
+        List<int> keys = new List<int>();
+        for (int i = 0; i < map.TerrainCount(); i = i + 1) {
+            int x = map.TerrainX(i);
+            int y = map.TerrainY(i);
+            int lvl = 0;
+            IsoTile cell = this.iso.At(x, y);
+            if (cell != null) { lvl = cell.Level(); }
+            int key = (x + y) * 64 + lvl;
+            int at = 0;
+            while (at < keys.Count && keys[at] <= key) { at = at + 1; }
+            keys.Insert(at, key);
+            this.terrX.Insert(at, x);
+            this.terrY.Insert(at, y);
+            this.terrLevel.Insert(at, lvl);
+            this.terrName.Insert(at, map.TerrainType(i));
+        }
+    }
+
+    int WorldWidth() { return this.worldW; }
+    int WorldHeight() { return this.worldH; }
+    int CellCount() { return this.order.Count; }
+    int OriginX() { return this.originX; }
+    int OriginY() { return this.originY; }
+
+    /// <summary>Cell indices sorted back-to-front by x+y, then by elevation.</summary>
+    ///
+    /// Bucketed rather than compared: the key is a small dense integer, so
+    /// this is linear and needs no comparator. The buckets are singly-linked
+    /// through a flat next[] array so a 20k-cell map does not allocate a List
+    /// per bucket.
+    ///
+    /// Elevation is folded into the key beneath x+y. A raised cell is drawn
+    /// `level * 15` pixels higher than flat ground, which uncovers the space
+    /// it would otherwise have filled; the cells behind and below it have to
+    /// be laid down first for that gap to be painted over. Ordering by x+y
+    /// alone left transparent diamonds wherever a cliff rose above its
+    /// neighbours -- every hole on MP01T4 sat on a cell with level > 0.
+    static List<int> BuildOrder(IsoMap iso) {
+        int maxDepth = 0;
+        int maxLevel = 0;
+        int i = 0;
+        for (; i < iso.Count(); i = i + 1) {
+            IsoTile t = iso.TileAt(i);
+            int d = t.X() + t.Y();
+            if (d > maxDepth) { maxDepth = d; }
+            if (t.Level() > maxLevel) { maxLevel = t.Level(); }
+        }
+        int levels = maxLevel + 1;
+        int maxKey = maxDepth * levels + maxLevel;
+
+        List<int> heads = new List<int>();
+        int k = 0;
+        for (; k <= maxKey; k = k + 1) { heads.Add(-1); }
+        List<int> next = new List<int>();
+        i = 0;
+        while (i < iso.Count()) { next.Add(-1); i = i + 1; }
+        i = iso.Count() - 1;
+        while (i >= 0) {
+            IsoTile t = iso.TileAt(i);
+            int key = (t.X() + t.Y()) * levels + t.Level();
+            next[i] = heads[key];
+            heads[key] = i;
+            i = i - 1;
+        }
+
+        List<int> order = new List<int>();
+        k = 0;
+        while (k <= maxKey) {
+            int at = heads[k];
+            while (at >= 0) {
+                order.Add(at);
+                at = next[at];
+            }
+            k = k + 1;
+        }
+        return order;
+    }
+
+    /// <summary>Blits every cell that falls inside the camera into `canvas`,
+    /// which the caller sizes to the view and clears. Returns the number of
+    /// cells actually drawn, so a caller can see the culling working.</summary>
+    int RenderInto(Texture canvas, int camX, int camY) {
+        int drawn = 0;
+        int cw = canvas.Width();
+        int ch = canvas.Height();
+        bool trace = RenderTrace();
+        for (int i = 0; i < this.order.Count; i = i + 1) {
+            IsoTile t = this.iso.TileAt(this.order[i]);
+            int sx = IsoProjection.ScreenX(t.X(), t.Y()) - this.originX - camX;
+            int sy = IsoProjection.ScreenY(t.X(), t.Y(), t.Level())
+                   - this.originY - camY;
+            // A tile is anchored at its apex and extends one tile right and
+            // down, so the reject test has to allow for that overhang. Cliff
+            // art reaches further still, which the generous margin covers.
+            if (sx > 0 - IsoProjection.TileW() * 2 && sx < cw
+             && sy > 0 - IsoProjection.TileH() * 4 && sy < ch) {
+                Texture tile = this.theater.TileTexture(t.Tile(), t.SubTile());
+                if (tile != null) {
+                    // Cliff overhangs extend above and left of the diamond, so
+                    // the texture's own origin is offset from the cell apex.
+                    int ox = this.theater.DrawOffsetX(t.Tile(), t.SubTile());
+                    int oy = this.theater.DrawOffsetY(t.Tile(), t.SubTile());
+                    canvas.Blit(tile, sx + ox, sy + oy);
+                    drawn = drawn + 1;
+                }
+                if (trace && sx >= 280 && sx <= 580 && sy >= 130 && sy <= 360) {
+                    Console.WriteLine("cell " + Convert.ToString(t.X()) + ","
+                        + Convert.ToString(t.Y()) + " lvl="
+                        + Convert.ToString(t.Level()) + " tile="
+                        + Convert.ToString(t.Tile()) + " sub="
+                        + Convert.ToString(t.SubTile()) + " at "
+                        + Convert.ToString(sx) + "," + Convert.ToString(sy)
+                        + (tile == null ? " NULLTEX" : ""));
+                }
+            }
+        }
+
+        // Terrain scatter draws after the flat tiles: trees and rocks stand
+        // on the ground and must cover the tiles behind them, but sit under
+        // anything that moves.
+        if (this.terrX != null) {
+            for (int i = 0; i < this.terrX.Count; i = i + 1) {
+                int sx = IsoProjection.ScreenX(this.terrX[i], this.terrY[i])
+                       - this.originX - camX;
+                int sy = IsoProjection.ScreenY(this.terrX[i], this.terrY[i],
+                                               this.terrLevel[i])
+                       - this.originY - camY;
+                if (sx <= 0 - IsoProjection.TileW() * 2 || sx >= cw
+                 || sy <= 0 - IsoProjection.TileH() * 6 || sy >= ch) {
+                    continue;
+                }
+                string name = this.terrName[i];
+                if (name.Length == 0) { continue; }
+                Texture spr = this.theater.TerrainSprite(name);
+                if (spr == null) { continue; }
+                // A scatter sprite stands on its cell: the art's bottom-centre
+                // sits at the diamond's centre.
+                int px = sx + IsoProjection.TileW() / 2 - spr.Width() / 2;
+                int py = sy + IsoProjection.TileH() / 2 - spr.Height();
+                canvas.Blit(spr, px, py);
+                drawn = drawn + 1;
+            }
+        }
+
+        // Ore fields lie on the ground, under everything that moves. The
+        // install carries no GEM*.SHP overlay art -- every GEM name hashes
+        // absent from all 27 of its mix mounts, walls and twinkle survive --
+        // so the fields draw as deterministic lumps that densify with the
+        // cell's amount, standing in for the original's staged frames.
+        if (this.world != null) {
+            for (int i = 0; i < this.order.Count; i = i + 1) {
+                IsoTile t = this.iso.TileAt(this.order[i]);
+                int amt = this.world.OreAt(t.X(), t.Y());
+                if (amt <= 0) { continue; }
+                int sx = IsoProjection.ScreenX(t.X(), t.Y()) - this.originX
+                       - camX;
+                int sy = IsoProjection.ScreenY(t.X(), t.Y(), t.Level())
+                       - this.originY - camY;
+                if (sx > 0 - IsoProjection.TileW() && sx < cw
+                 && sy > 0 - IsoProjection.TileH() && sy < ch) {
+                    int bucket = amt >= 12 ? 7 : amt * 8 / 12;
+                    int kind = this.world.OreValueAt(t.X(), t.Y()) >= 2 ? 1 : 0;
+                    Texture ore = this.OreSprite(bucket, kind);
+                    canvas.Blit(ore, sx, sy);
+                    drawn = drawn + 1;
+                }
+            }
+        }
+
+        // Objects draw after the terrain, in the same back-to-front order, so
+        // a unit standing on a cell is over the ground under it.
+        if (this.world != null && this.art != null) {
+            drawn = drawn + ObjectRenderer.Render(this.world, this.art, canvas,
+                                                  camX, camY, this.originX,
+                                                  this.originY, this.playerSide);
+        }
+        return drawn;
+    }
+
+    static void SetSlot(List<int> list, int slot, int v) {
+        while (list.Count <= slot) { list.Add(0); }
+        list[slot] = v;
+    }
+
+    [DllImport("crt")]
+    static extern string getenv(string name);
+
+    static bool RenderTrace() {
+        string v = RenderTraceEnv();
+        return v != null && v.Length > 0 && v != "0";
+    }
+
+    static string RenderTraceEnv() {
+        return getenv("RA2_TRACE");
+    }
+
+    // The ore sprite cache: eight wealth buckets per kind (gold ore, gem
+    // crystal), built on first use. Bucket 0 is a bare scatter, bucket 7 a
+    // packed field -- the drawn density tracks the cell's ore amount the way
+    // the original's overlay frames do.
+    List<Texture> oreSprites;
+
+    /// <summary>The ore sprite for a wealth bucket and kind. Kind 0 is the
+    /// plain gold ore (GEM01..06), kind 1 the doubled-value crystal fields
+    /// (GEM07..12): golds versus icy blues, readable at a glance.</summary>
+    Texture OreSprite(int bucket, int kind) {
+        if (this.oreSprites == null) { this.oreSprites = new List<Texture>(); }
+        int slot = bucket * 2 + kind;
+        // The list fills in whatever order buckets are first demanded, so a
+        // high slot can be materialised before a low one. A null in the slot
+        // means "not built yet", never "no art" -- fall through and build it.
+        if (slot < this.oreSprites.Count && this.oreSprites[slot] != null) {
+            return this.oreSprites[slot];
+        }
+        while (this.oreSprites.Count <= slot) { this.oreSprites.Add(null); }
+
+        int w = IsoProjection.TileW();
+        int h = IsoProjection.TileH();
+        Texture tex = Texture.Create(w, h);
+        int cx = w / 2;
+        int cy = h / 2;
+        int lumps = 2 + bucket;
+        for (int i = 0; i < lumps; i = i + 1) {
+            // A fixed pseudo-scatter: same every game, spread inside the
+            // diamond by rejecting points off its inscribed ellipse.
+            int px = (i * 37 + bucket * 13 + kind * 7 + 5) % (w - 4) + 2;
+            int py = (i * 23 + bucket * 5 + kind * 3 + 2) % (h - 2) + 1;
+            for (int tries = 0; tries < 6; tries = tries + 1) {
+                int dx = (px - cx) * h;
+                int dy = (py - cy) * w;
+                if (dx * dx / (w * w) + dy * dy / (h * h) <= 1) { break; }
+                if (px > cx) { px = px - 1; } else { px = px + 1; }
+                if (py > cy) { py = py - 1; } else { py = py + 1; }
+            }
+            // A lump: a 2x2 body with one bright face, gold or ice.
+            int br = kind == 1 ? 96 : 198;
+            int bg = kind == 1 ? 180 : 146;
+            int bb = kind == 1 ? 240 : 58;
+            for (int yy = 0; yy < 2; yy = yy + 1) {
+                for (int xx = 0; xx < 2; xx = xx + 1) {
+                    tex.SetPixel((py + yy) * w + px + xx, br, bg, bb, 255);
+                }
+            }
+            tex.SetPixel(py * w + px, kind == 1 ? 224 : 240,
+                         kind == 1 ? 244 : 202, kind == 1 ? 252 : 122, 255);
+        }
+        this.oreSprites[slot] = tex;
+        return tex;
+    }
+
+    /// <summary>Draws a whole-map thumbnail into a canvas of any size.</summary>
+    ///
+    /// One pixel per cell rather than a scaled-down render: a map is thousands
+    /// of tiles and compositing them all just to shrink the result would cost
+    /// a second per preview. The colour is sampled from the tile's own art, so
+    /// water reads blue and cliffs grey without a lookup table.
+    void RenderPreview(Texture canvas) {
+        int cw = canvas.Width();
+        int ch = canvas.Height();
+        if (cw <= 0 || ch <= 0) { return; }
+
+        for (int i = 0; i < this.order.Count; i = i + 1) {
+            IsoTile t = this.iso.TileAt(this.order[i]);
+            // Project, then squeeze the map's own bounds into the canvas.
+            int wx = IsoProjection.ScreenX(t.X(), t.Y()) - this.originX;
+            int wy = IsoProjection.ScreenY(t.X(), t.Y(), t.Level()) - this.originY;
+            int px = wx * cw / this.worldW;
+            int py = wy * ch / this.worldH;
+            if (px >= 0 && py >= 0 && px < cw && py < ch) {
+                Texture tile = this.theater.TileTexture(t.Tile(), t.SubTile());
+                if (tile != null) {
+                    // The diamond's centre is the most representative pixel;
+                    // its corners are transparent.
+                    int c = tile.PixelAt(tile.Width() / 2, tile.Height() / 2);
+                    if (((c >> 24) & 0xFF) != 0) {
+                        canvas.SetPixel(py * cw + px, (c >> 16) & 0xFF,
+                                        (c >> 8) & 0xFF, c & 0xFF, 255);
+                    }
+                }
+            }
+        }
+    }
+}

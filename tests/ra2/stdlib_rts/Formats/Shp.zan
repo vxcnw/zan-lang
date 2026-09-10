@@ -1,0 +1,120 @@
+using System;
+using System.Collections.Generic;
+
+namespace Ra2.StdlibRts.Formats;
+
+// SHP(TS) 精灵的一帧。坐标为帧在精灵包围盒内的
+// 位置；format 选择磁盘编码格式。
+class ShpFrame {
+    int x;
+    int y;
+    int width;
+    int height;
+    int format;   // 1 = 未压缩，2 = 行原始，3 = 行零 RLE
+    int offset;   // 帧像素数据在文件中的字节偏移
+
+    int X() { return this.x; }
+    int Y() { return this.y; }
+    int Width() { return this.width; }
+    int Height() { return this.height; }
+    int Format() { return this.format; }
+    int Offset() { return this.offset; }
+    bool IsEmpty() { return this.offset == 0 || this.width == 0 || this.height == 0; }
+}
+
+// 解析《泰伯利亚之日》/《红色警戒 2》使用的 SHP(TS) 精灵。像素为
+// 8 位调色板索引（索引 0 = 透明）；与 Palette 配合可得到
+// RGB。净室实现：未嵌入原始精灵，测试自行合成帧。
+//
+// 布局（小端）：
+//   header      : zero(u16), width(u16), height(u16), frameCount(u16)
+//   frameHeader : x(u16), y(u16), w(u16), h(u16),
+//                 format(u32, low byte used), unknown(u32), zero(u32), offset(u32)
+//   frame data  : format 1 = w*h raw bytes;
+//                 format 2/3 = per row: rowLen(u16, incl. the 2 length bytes)
+//                              then rowLen-2 bytes (format 3 uses zero-RLE:
+//                              a 0 byte is followed by a transparent run count).
+class ShpImage {
+    string data;
+    int length;
+    int width;
+    int height;
+    int frameCount;
+    List<ShpFrame> frames;
+
+    static ShpImage Parse(string data, int length) {
+        ShpImage s = new ShpImage();
+        s.data = data;
+        s.length = length;
+        s.frames = new List<ShpFrame>();
+
+        BinaryReader r = BinaryReader.FromBuffer(data, length);
+        r.Skip(2);                         // 零值
+        s.width = r.ReadU16();
+        s.height = r.ReadU16();
+        s.frameCount = r.ReadU16();
+
+        for (int i = 0; i < s.frameCount; i = i + 1) {
+            ShpFrame f = new ShpFrame();
+            f.x = r.ReadU16();
+            f.y = r.ReadU16();
+            f.width = r.ReadU16();
+            f.height = r.ReadU16();
+            f.format = (int)(r.ReadU32() & 0xFF);
+            r.Skip(4);                     // 未知
+            r.Skip(4);                     // 零值
+            f.offset = (int)r.ReadU32();
+            s.frames.Add(f);
+        }
+        return s;
+    }
+
+    int Width() { return this.width; }
+    int Height() { return this.height; }
+    int FrameCount() { return this.frames.Count; }
+
+    ShpFrame FrameAt(int index) {
+        if (index < 0 || index >= this.frames.Count) { return null; }
+        return this.frames[index];
+    }
+
+    // 将一帧解码为 width*height 的调色板索引缓冲区（0 = 透明）。
+    byte[] DecodeFrame(int index) {
+        ShpFrame f = this.FrameAt(index);
+        if (f == null) { return new byte[1]; }
+        int w = f.Width();
+        int h = f.Height();
+        byte[] outBuf = new byte[w * h + 1];
+        if (f.IsEmpty()) { return outBuf; }
+
+        BinaryReader r = BinaryReader.FromBuffer(this.data, this.length);
+        r.Seek(f.Offset());
+
+        if (f.Format() == 1) {
+            int total = w * h;
+            for (int i = 0; i < total; i = i + 1) {
+                outBuf[i] = (byte)r.ReadU8();
+            }
+            return outBuf;
+        }
+
+        for (int y = 0; y < h; y = y + 1) {
+            int rowLen = r.ReadU16();
+            int rowDataStart = r.Position();
+            int remaining = rowLen - 2;
+            int x = 0;
+            while (r.Position() < rowDataStart + remaining && x < w) {
+                int b = r.ReadU8();
+                if (f.Format() == 3 && b == 0) {
+                    int count = r.ReadU8();
+                    x = x + count;         // 透明连续段（缓冲区本就是 0）
+                } else {
+                    outBuf[y * w + x] = (byte)b;
+                    x = x + 1;
+                }
+            }
+            r.Seek(rowDataStart + remaining);
+        }
+        return outBuf;
+    }
+}
