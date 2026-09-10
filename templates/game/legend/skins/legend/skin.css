@@ -1,4 +1,4 @@
-/* 迷你传奇皮肤 —— 照原版逐像素还原。
+﻿/* 迷你传奇皮肤 —— 照原版逐像素还原。
    所有颜色/尺寸的事实来源是 REFERENCE_AUDIT.md；
    页面代码只写 CSS 类名，不写死像素。 */
 
@@ -536,14 +536,17 @@ button.tiny { font-size: var(--font-size-small); }
 .tbl-page { padding: 0; }
 .tbl-box { background: #1d2633; border: 1px #3d4756; }
 .tbl-head { background: #103555; }
-.tbl-head-t { color: #00a4e9; font-size: 13; text-align: center; }
+.tbl-head-t { color: #00a4e9; font-size: 13; }
+/* 居中靠 flex justify-content：stdlib Label.OnPaint 直接按盒子左缘画字，
+   text-align 对 Label 无效（实测整列文字贴左）。 */
+.tbl-head-c, .tbl-cell { display: flex; justify-content: center; align-items: center; }
 .tbl-cell { background: #121f2d; }
 .tbl-row { background: transparent; }
-.tbl-c0 { color: #eb7600; font-size: 12; text-align: center; }
-.tbl-c1 { color: #dcdcdc; font-size: 12; text-align: center; }
-.tbl-c2 { color: #ebeb00; font-size: 12; text-align: center; }
-.tbl-c3 { color: #00d4d4; font-size: 12; text-align: center; }
-.tbl-attr { font-size: 12; text-align: center; }
+.tbl-c0 { color: #eb7600; font-size: 12; }
+.tbl-c1 { color: #dcdcdc; font-size: 12; }
+.tbl-c2 { color: #ebeb00; font-size: 12; }
+.tbl-c3 { color: #00d4d4; font-size: 12; }
+.tbl-attr { font-size: 12; }
 .tbl-atk { color: #d4436a; }
 .tbl-mag { color: #0071d4; }
 .tbl-tao { color: #00e000; }
@@ -563,3 +566,21 @@ button.tiny { font-size: var(--font-size-small); }
 /* 标准库 Pagination 走主题默认档（heightMedium 34 逻辑），比原版页脚的
    30 设备高出一大截、整组也宽 —— 压到 20 逻辑 + 12 号字，接近原版。 */
 pagination { height: 20; font-size: 12; }
+
+/* 爵位（页 24）：整行高亮（「自己」）连格缝都是紫红，格子必须透明。 */
+.tbl-row-hl { background: #570d41; }
+.tbl-cell-hl { background: transparent; }  /* 与 .tbl-cell 连用 */
+.lord-c0 { color: #eb7600; font-size: 12; }
+.lord-c1 { color: #00d4d4; font-size: 12; }
+.lord-c2 { color: #ebeb00; font-size: 12; }
+.lord-attr { font-size: 12; }
+/* 七列属性值按爵位分档：亲王红 / 国公橙 / 侯爵绿 / 伯爵浅灰。 */
+.lord-t0 { color: #d40000; }
+.lord-t1 { color: #d46a00; }
+.lord-t2 { color: #00d400; }
+.lord-t3 { color: #b8b8b8; }
+.lord-cy { color: #ebeb00; font-size: 12; }
+.lord-input { background: #171e29; border: 1px #1d5486; color: #ebeb00; font-size: 12; text-align: center; }
+.lord-donate { color: #089cf3; background: #1f2936; border: 1px #3f4956; font-size: 12; }
+.lord-note-o { color: #eb7600; font-size: 13; }
+.lord-note-p { color: #f04a6c; font-size: 13; }

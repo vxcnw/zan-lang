@@ -41,8 +41,9 @@ partial class LegendApp {
         page0.Pad(0); page0.Gap(0); page0.Grow(); content.With(page0);
 
         /* 表格容器上缘 = 页内容顶（原版 164），故不加任何前导留白。 */
+        List<int> ws = Spec.TblNameCols();
         Panel box = TblBox(); page0.With(box);
-        box.With(TblHead(TitleHeads()));
+        box.With(TblHead(TitleHeads(), ws));
 
         Panel headGap = Panel.Row(); headGap.Pad(0);
         headGap.Prefer(0, Spec.TblHeadGap()); box.With(headGap);
@@ -91,7 +92,7 @@ partial class LegendApp {
             cls.Add(TitleAttrCls(7, def[r]));
             cls.Add(TitleAttrCls(8, mdef[r]));
             int row = r;
-            wall.With(TblActionRow(cells, cls, r, "领取", "tbl-btn",
+            wall.With(TblActionRow(cells, cls, ws, r, "领取", "tbl-btn",
                                    () => { TitleClaim(row); }));
         }
         box.With(TblPad(Spec.TblBottomPad()));

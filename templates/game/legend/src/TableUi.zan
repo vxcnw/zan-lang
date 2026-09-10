@@ -49,9 +49,16 @@ partial class LegendApp {
     /// 落到 804（应 811）。
     static int TblRowHAt(int r) { return Spec.TblRowH() + (r % 2); }
 
-    /// 一个格子：定宽 + 定高、文字居中。`cls` 给文字着色（`.tbl-c0` …）。
-    Panel TblCell(string text, string cls, int wDevice) {
-        Panel c = Panel.Row(); c.Class = "tbl-cell";
+    /// 一个格子：定宽 + 定高、文字居中。`cls` 给文字着色（`.tbl-c0` …）；
+    /// `boxCls` 给格子底色（高亮行的格子要透明，露出整行紫红底）。
+    ///
+    /// **居中靠格子的 flex `justify-content`，不靠 `text-align`**：stdlib
+    /// `Label.OnPaint` 直接在盒子左缘 `DrawText`，`text-align` 对它无效
+    /// （实测第一版表格整列文字贴左、与原版差 29 设备）。格子挂
+    /// `.tbl-cell`（`display:flex; justify-content:center`）后，标签按自身
+    /// 测量宽参与 flex 排布，才真正居中。
+    Panel TblCellCls(string text, string cls, int wDevice, string boxCls) {
+        Panel c = Panel.Row(); c.Class = boxCls;
         c.Pad(0); c.Prefer(wDevice, Spec.TblRowH());
         Label t = Text(text, cls, 0);
         t.Grow();
@@ -59,15 +66,21 @@ partial class LegendApp {
         return c;
     }
 
-    /// 表头带：满宽底色 + 内缩 12 设备的定宽格 + 居中青字。列数 = heads.Count。
-    Panel TblHead(List<string> heads) {
+    Panel TblCell(string text, string cls, int wDevice) {
+        return TblCellCls(text, cls, wDevice, "tbl-cell");
+    }
+
+    /// 表头带：满宽底色 + 内缩 12 设备的定宽格 + 居中青字。列数 = heads.Count，
+    /// 列宽由调用方给（各页列数不同：称谓 10 列、爵位 12 列）。
+    Panel TblHead(List<string> heads, List<int> ws) {
         Panel band = Panel.Row(); band.Class = "tbl-head";
         band.Pad(0); band.Gap(Spec.TblColGap());
         band.Prefer(0, Spec.TblHeadH());
         band.Padding(0, 0, 0, Spec.TblPadL());
         for (int i = 0; i < heads.Count; i = i + 1) {
-            Panel c = Panel.Row(); c.Pad(0);
-            c.Prefer(Spec.TblColW(i), Spec.TblHeadH());
+            Panel c = Panel.Row(); c.Class = "tbl-head-c";
+            c.Pad(0);
+            c.Prefer(ws[i], Spec.TblHeadH());
             Label t = Text(heads[i], "tbl-head-t", 0);
             t.Grow();
             c.With(t);
@@ -76,33 +89,40 @@ partial class LegendApp {
         return band;
     }
 
-    /// 数据行：cells 与 classes 一一对应，列宽取 `Spec.TblColW(i)`。
-    Panel TblRow(List<string> cells, List<string> classes, int r) {
-        Panel row = Panel.Row(); row.Class = "tbl-row";
+    /// 数据行：cells 与 classes 一一对应，列宽由调用方给。`rowCls` 是整行的
+    /// 皮肤类、`boxCls` 是格子底色类（原版高亮行「自己」是整行紫红
+    /// `#570d41`——连格缝都是紫红，所以格子必须透明，只靠行底显色）。
+    Panel TblRowCls(List<string> cells, List<string> classes, List<int> ws,
+                    int r, string rowCls, string boxCls) {
+        Panel row = Panel.Row(); row.Class = rowCls;
         row.Pad(0); row.Gap(Spec.TblColGap());
         row.Prefer(0, TblRowHAt(r));
         row.Padding(0, 0, 0, Spec.TblPadL());
         for (int i = 0; i < cells.Count; i = i + 1) {
             string cls = i < classes.Count ? classes[i] : "tbl-c";
-            row.With(TblCell(cells[i], cls, Spec.TblColW(i)));
-        }
-        return row;
+            row.With(TblCellCls(cells[i], cls, ws[i], boxCls));
+        }        return row;
     }
 
-    /// 带操作钮的数据行：前 9 格数据，末列一个定尺寸按钮（原版「领取」
+    Panel TblRow(List<string> cells, List<string> classes, List<int> ws, int r) {
+        return TblRowCls(cells, classes, ws, r, "tbl-row", "tbl-cell");
+    }
+
+    /// 带操作钮的数据行：前 N-1 格数据，末列一个定尺寸按钮（原版「领取」
     /// /「申请」/「回收」这类）。按钮按实测 82×27 设备随行高等比缩放，
     /// **在格内居中**——用 `Add` + `Place` 手动摆位：`With` 会把 dock 改成
     /// 3（贴左），按钮就贴到格子左缘、还拉满行高（与实测差 9/9 设备）。
-    Panel TblActionRow(List<string> cells, List<string> classes, int r,
-                       string btn, string btnCls, Action fn) {
-        Panel row = TblRow(cells, classes, r);
+    Panel TblActionRow(List<string> cells, List<string> classes, List<int> ws,
+                       int r, string btn, string btnCls, Action fn) {
+        Panel row = TblRow(cells, classes, ws, r);
+        int last = ws.Count - 1;
         Panel box = Panel.Row(); box.Pad(0);
-        box.Prefer(Spec.TblColW(9), TblRowHAt(r));
+        box.Prefer(ws[last], TblRowHAt(r));
         int bw = Spec.TblRowH() * 82 / 45;
         int bh = Spec.TblRowH() * 27 / 45;
         Button b = BtnDev(btn, btnCls, bw, bh, fn);
         b.DockManual();
-        b.Place((Spec.TblColW(9) - bw) / 2, (TblRowHAt(r) - bh) / 2);
+        b.Place((ws[last] - bw) / 2, (TblRowHAt(r) - bh) / 2);
         box.Add(b);
         row.With(box);
         return row;
@@ -119,18 +139,23 @@ partial class LegendApp {
         return p;
     }
 
-    /// 表格页页脚：左状态文字 + 右「说明」钮 + 标准库 Pagination。
-    /// `pg` 由调用方持有（切页回调里重建页面）；不需要时传 null。
-    Panel TblFoot(Panel note, Pagination pg) {
+    /// 表格页页脚：左侧任意内容 + 撑条 + 右「说明」钮 + 标准库 Pagination。
+    /// `left` 为 null 时只剩右侧组。`pg` 由调用方持有（切页回调里重建页面）。
+    Panel TblFootCustom(Panel left, Pagination pg) {
         Panel foot = Panel.Row(); foot.Class = "tbl-foot";
         foot.Pad(0); foot.Gap(Spec.TblColGap());
         foot.Prefer(0, Spec.TblFootH());
         foot.Padding(0, Spec.TblFootPadR(), 0, Spec.TblFootPadL());
-        if (note != null) { foot.With(note); }
+        if (left != null) { foot.With(left); }
         Panel fill = Panel.Row(); fill.Class = "bag-fill"; foot.With(fill);
         foot.With(BtnDev("说明", "tbl-btn", Spec.TblFootNoteW(),
                          Spec.TblFootH(), null));
         if (pg != null) { foot.With(pg); }
         return foot;
+    }
+
+    /// 表格页页脚（左端单个状态文字）：`TblFootCustom` 的常用简写。
+    Panel TblFoot(Panel note, Pagination pg) {
+        return TblFootCustom(note, pg);
     }
 }

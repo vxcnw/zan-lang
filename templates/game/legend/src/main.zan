@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Diagnostics;
 using Gui;
@@ -92,6 +92,7 @@ partial class LegendApp {
             /* 离线壳：LEGEND_OFFLINE=1 时不拨号（UI 自动化回归与
                无服务器试玩走这条路），窗口标题标明离线。 */
             form.SetTitle("迷你传奇 · 离线");
+            net.SeedDemoChat();
         } else {
             ConnectPublished(dataDir);
         }
@@ -388,6 +389,7 @@ partial class LegendApp {
         if (page == 12) { BuildSecret(); return; }
         if (page == 13) { BuildWorldBoss(); return; }
         if (page == 20) { BuildBag(); return; }
+        if (page == 24) { BuildLordPage(); return; }
         if (page == 25) { BuildTitlePage(); return; }
         if (page == 27) { BuildShop(); return; }
         if (page == 31) { BuildMapInner(); return; }

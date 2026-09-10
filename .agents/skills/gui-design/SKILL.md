@@ -266,11 +266,17 @@ CSS 里非 token 的长度由 `Style.ScaleLayout` 补乘,`StyleBox.IsPrescaled`
     `b.DockManual(); b.Place(dx, dy); box.Add(b);` 才落回量出来的位置。
     注意 `DockManual()` 是 `dock = 0`，容器只在 `dock==0` 分支读 `mx/my`，
     所以这条也意味着**这个子项退出了自动流**，尺寸要自己给（`Prefer`）。
-11. **控件默认对齐/尺寸跟原图不一致时，先改皮肤规则，不回去自绘也不在手摆里
-    凑**。两个实测：`Label` 默认**左对齐**，表头/数据格要居中得写
-    `text-align: center`；stdlib `Pagination` 默认吃 `heightMedium`（34 逻辑），
-    比原图的页码条高一截，用一条 `pagination { height: 20; font-size: 12; }`
-    压回去。皮肤按类名全局生效，比在每个使用处补坐标稳。
+11. **`Label` 不认 `text-align`，居中靠容器的 flex `justify-content`**。
+    `Label.OnPaint` 直接 `canvas.DrawText(bx, …)` 按盒子左缘画字；认
+    `text-align` 的是 `StyleBox.DrawLabel`（自绘/控件内部走的那条路），Label
+    没走。所以给 Label 的类写 `text-align: center` 是**死规则**——实测整张表
+    的文字都贴左、与原版差 29 设备。正解：让**容器**挂
+    `display: flex; justify-content: center; align-items: center`，Label 作为
+    flex 项按自身测量宽排布（代码里的 `Grow()` 在 flex 容器里不参与，见第 7 条）。
+    同理：控件默认尺寸/配色跟原图不一致时**先改皮肤规则**（如 stdlib
+    `Pagination` 默认吃 `heightMedium` 34 逻辑，原图页脚只有 20 逻辑，加一条
+    `pagination { height: 20; font-size: 12; }` 即可），不要回去自绘、也不要在
+    每个使用处补坐标。
 
 这两道闸门随工具链走:安装版 SDK 是发布时刻的冻结副本——早于 2026-09-09
 的安装里没有它们,环境变量静默无效(skill 跑在工具链前面时先查工具链日期,

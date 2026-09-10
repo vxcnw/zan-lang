@@ -101,6 +101,7 @@ class Spec {
     static int BotStatusX() { return Px(171); }     // 「状态: 空闲中」左 170.7
     static int BotStatusW() { return Px(70); }      // 实测字宽 105 物理 / 1.5 = 70
     static int ChatSendH() { return Px(21); }       // 聊天输入行高（与左簇同高）
+    static int ChatFontPx() { return Px(13); }      // 聊天正文字号
 
     /* ---- 左栏（角色信息）----
        实测（原图 x 4..375 物理，内容 y (y−53)/1.5）：
@@ -471,20 +472,53 @@ class Spec {
     static int TblPadL() { return Px(8); }          // 容器左缘 → 首列 12 设备
     static int TblColGap() { return Px(3); }        // 列缝 4.5 设备
     static int TblRows() { return 12; }
-    static int TblCols() { return 10; }
-    /// 第 i 列宽（设备实测 ÷1.5）。
-    static int TblColW(int i) {
-        if (i == 0) { return Px(87); }              // 称谓    131
-        if (i == 1) { return Px(82); }              // 需要声望 123
-        if (i == 2) { return Px(95); }              // 需要金钱 142
-        if (i == 3) { return Px(68); }              // 等级    102
-        if (i == 9) { return Px(67); }              // 领取    100
-        return Px(62);                              // 攻击/魔法/道术/防御/魔防 93
+
+    /// 称谓（页 25）列宽（设备实测 ÷1.5）：131/123/142/102/93×5/100。
+    static List<int> TblNameCols() {
+        List<int> w = new List<int>();
+        w.Add(Px(87));                              // 称谓    131
+        w.Add(Px(82));                              // 需要声望 123
+        w.Add(Px(95));                              // 需要金钱 142
+        w.Add(Px(68));                              // 等级    102
+        for (int i = 0; i < 5; i = i + 1) {
+            w.Add(Px(62));                          // 攻击/魔法/道术/防御/魔防 93
+        }
+        w.Add(Px(67));                              // 领取    100
+        return w;
     }
+
+    /// 爵位（页 24）列宽（设备实测 ÷1.5）：92/170/96/70/69/70/69/70/69/70/
+    /// 111/103。列缝同为 4.5 设备；首列左缘 386 与称谓同。
+    static List<int> TblLordCols() {
+        List<int> w = new List<int>();
+        w.Add(Px(61));                              // 爵位     92
+        w.Add(Px(113));                             // 玩家    170
+        w.Add(Px(64));                              // 累计贡献 96
+        w.Add(Px(47));                              // 气血     70
+        w.Add(Px(46));                              // 法力     69
+        w.Add(Px(47));                              // 攻击     70
+        w.Add(Px(46));                              // 魔法     69
+        w.Add(Px(47));                              // 道术     70
+        w.Add(Px(46));                              // 防御     69
+        w.Add(Px(47));                              // 魔防     70
+        w.Add(Px(74));                              // 速度    111
+        w.Add(Px(69));                              // 经验加成 103
+        return w;
+    }
+
     static int TblFootGap() { return Px(12); }      // 表底 → 页脚 18 设备
     static int TblFootH() { return Px(20); }        // 页脚钮高 30 设备
     static int TblFootPadL() { return Px(12); }     // 页脚左内缩 18 设备
     static int TblFootPadR() { return Px(6); }      // 页脚右内缩 9 设备
     static int TblFootNoteW() { return Px(39); }    // 「说明」钮 59 设备
     static int TblFootBtnW() { return Px(55); }     // 上一页/下一页 83 设备
+
+    /* ---- 爵位页（24）页脚实测（设备）：元宝组 392 / 累计捐献组 671 /
+       我的爵位组 916；「元宝:」标签盒 392..449、数量框 453..534（82 设备）、
+       捐献钮 537..618（82 设备）。三组用定宽盒摆位（组距不等，Gap 凑不出来），
+       两段宽**已扣掉页脚容器的 4 设备缝**。 */
+    static int LordFootCol1W() { return Px(184); }  // 392 → 671  276+4 设备
+    static int LordFootCol2W() { return Px(160); }  // 671 → 916  240+4 设备
+    static int LordFootLblW() { return Px(38); }    // 「元宝:」盒 57 设备
+    static int LordFootBoxW() { return Px(55); }    // 数量框 / 捐献钮 82 设备
 }
