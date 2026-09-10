@@ -2,36 +2,45 @@ using System;
 using System.Diagnostics;
 using System.Json;
 using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 using System.Web;
 
 namespace ZanWeb.Game;
 
 /* 跨 worker 共享状态：登录令牌、管理端令牌版本缓存、HTTP 会话发号、
-   在线计数与跨进程操作通道。多 worker（[worker].count>1）时 HTTP 接入层
-   水平扩，游戏世界（会话/tick/战斗/推送连接）固定在 1 号 worker 单写；
-   其它 worker 上的世界类操作经 ops 表转发给世界进程执行——请求与应答
-   都走共享内存，和 PermTable 一样是匿名表：master 建好，句柄经
-   ZAN_SHARE_* 下发，worker 继承映射，机器上其它进程无法触及。
+   在线计数。多 worker（[worker].count>1）时 HTTP 接入层水平扩，游戏世界
+   （会话/tick/战斗/推送连接）固定在 1 号 worker 单写；四张表都是匿名
+   共享内存：master 建好，句柄经 ZAN_SHARE_* 下发，worker 继承映射，
+   机器上其它进程无法触及。
 
    count==1（单进程）时同样走这组表：建表者即使用者，所有中继路径被
    WorldHere() 短路为进程内直调，行为与改造前一致。
 
-   轮询说明：SharedTable 没有订阅机制，世界进程以 2ms 轮询 ops 表的
-   自增序号取请求；一次往返约 2-6ms，相对登录/进区的数据库开销可忽略。 */
+   控制通道说明：世界类操作（登录会话登记/游戏 op/管理写动作）经世界
+   进程的环回 TCP 控制通道执行（GatewayWorker 同构）：世界进程在
+   127.0.0.1 上从 HTTP 端口+1 起扫描第一个空闲端口监听，实际端口写进
+   sys 表供其它进程发现；请求与应答都是一行紧凑 JSON + '\n'（ToJson
+   不产换行，可安全分帧）。每请求一条短连接、进程间无共享连接状态，
+   一次往返约 0.1-0.3ms（替换原 ops 表 2ms 轮询的 2-6ms）。世界重启
+   换端口后，调用方连接失败即失效端口缓存重新发现。 */
 class GameShared {
     /* 句柄在 master 与 worker 之间传递所用的名字（ZAN_SHARE_<name>）。 */
     static const string ShareTokens = "GAME_TOKENS";
     static const string ShareAuth = "GAME_AUTH";
     static const string ShareSys = "GAME_SYS";
     static const string ShareOnline = "GAME_ONLINE";
-    static const string ShareOps = "GAME_OPS";
 
     static SharedTable tokens = null;
     static SharedTable auth = null;
     static SharedTable sys = null;
     static SharedTable online = null;
-    static SharedTable ops = null;
+
+    /* 控制通道（环回 TCP）：端口发现缓存、超时与帧上限。 */
+    static int rpcPort = 0;
+    static int RpcConnectMs = 1000;
+    static int RpcTimeoutMs = 8000;
+    static int RpcMaxFrame = 1048576;
 
     static bool opened = false;
     /* 本进程是否世界权威（tick/会话/推送连接所在地）。 */
@@ -44,12 +53,8 @@ class GameShared {
     static long TokenTtlMs = 864000000;
     /* 管理端令牌版本缓存 TTL（与 AuthUser.VerTtlSec 同源）。 */
     static long AuthTtlMs = 30000;
-    /* 跨进程请求行的存活时间：调用方 8 秒超时，行多留一会便于排查。 */
-    static long OpTtlMs = 30000;
-    /* 调用方等待应答的上限（约 8s：2ms × 4000 拍）。 */
-    static int OpPollLoops = 4000;
 
-    /* master/worker 双侧初始化：worker 侧映射 master 下发的五张表，
+    /* master/worker 双侧初始化：worker 侧映射 master 下发的四张表，
      * 缺一即不可用（调用方走进程内回退或明确报错）；master/单进程侧
      * 创建匿名表并登记句柄。必须在 Worker.RunAll 之前调用。 */
     static bool Open() {
@@ -59,32 +64,31 @@ class GameShared {
         long ha = Worker.InheritedHandle(GameShared.ShareAuth);
         long hs = Worker.InheritedHandle(GameShared.ShareSys);
         long ho = Worker.InheritedHandle(GameShared.ShareOnline);
-        long hp = Worker.InheritedHandle(GameShared.ShareOps);
-        if (ht != 0 || ha != 0 || hs != 0 || ho != 0 || hp != 0) {
+        if (ht != 0 || ha != 0 || hs != 0 || ho != 0) {
             SharedTable t = SharedTable.Attach(ht);
             SharedTable a = SharedTable.Attach(ha);
             SharedTable s = SharedTable.Attach(hs);
             SharedTable o = SharedTable.Attach(ho);
-            SharedTable p = SharedTable.Attach(hp);
-            if (!t.IsOpen() || !a.IsOpen() || !s.IsOpen() || !o.IsOpen()
-                    || !p.IsOpen()) {
+            if (!t.IsOpen() || !a.IsOpen() || !s.IsOpen() || !o.IsOpen()) {
                 return false;
             }
             t.Label("game tokens");
             a.Label("game auth ver");
             s.Label("game sys");
             o.Label("game online");
-            p.Label("game ops");
             GameShared.tokens = t;
             GameShared.auth = a;
             GameShared.sys = s;
             GameShared.online = o;
-            GameShared.ops = p;
             GameShared.opened = true;
             return true;
         }
 
-        SharedTable nt = new SharedTable("", 8192);
+        /* tokens 容量要按「峰值日登录数 × TTL 天数」给足：表满了
+           SetInt 会静默失败，之后签出的 token 全都解析不到（实测
+           8192 容量在数小时压测内就被打穿）。131072 ≈ 1.3 万日登录
+           × 10 天，行宽 ~100B，共享段约 13MB。 */
+        SharedTable nt = new SharedTable("", 131072);
         nt.KeySize(40);
         nt.ColumnInt("acc");
         if (!nt.CreateAnonymous()) { return false; }
@@ -101,9 +105,9 @@ class GameShared {
         ns.ColumnInt("v");
         if (!ns.CreateAnonymous()) { return false; }
         ns.Label("game sys");
-        /* 发号段与请求序号种子：worker 侧只 Increment，不重置。 */
+        /* 发号段种子：worker 侧只 Increment，不重置。控制通道端口由
+           世界进程启动后写进 "rpc" 行。 */
         bool _c = ns.SetInt("cid", "v", GameShared.HttpCidBase);
-        bool _q = ns.SetInt("op", "v", 0);
 
         SharedTable no = new SharedTable("", 256);
         no.KeySize(24);
@@ -111,23 +115,14 @@ class GameShared {
         if (!no.CreateAnonymous()) { return false; }
         no.Label("game online");
 
-        SharedTable np = new SharedTable("", 256);
-        np.KeySize(24);
-        np.ColumnString("req", 2048);
-        np.ColumnString("resp", 16384);
-        if (!np.CreateAnonymous()) { return false; }
-        np.Label("game ops");
-
         Worker.ShareHandle(GameShared.ShareTokens, nt.OsHandle());
         Worker.ShareHandle(GameShared.ShareAuth, na.OsHandle());
         Worker.ShareHandle(GameShared.ShareSys, ns.OsHandle());
         Worker.ShareHandle(GameShared.ShareOnline, no.OsHandle());
-        Worker.ShareHandle(GameShared.ShareOps, np.OsHandle());
         GameShared.tokens = nt;
         GameShared.auth = na;
         GameShared.sys = ns;
         GameShared.online = no;
-        GameShared.ops = np;
         GameShared.opened = true;
         return true;
     }
@@ -145,10 +140,12 @@ class GameShared {
 
     /* ---- 登录令牌（TokenBox 的存储层）---- */
 
-    static void TokenPut(string token, int accountId) {
-        if (!GameShared.Ready()) { return; }
-        bool _s = GameShared.tokens.SetInt(token, "acc", accountId);
-        bool _e = GameShared.tokens.Expire(token, GameShared.TokenTtlMs);
+    /* 写入失败（表满/共享内存不可用）返回 false：调用方必须让登录
+       响亮失败，绝不能把一个解析不到的 token 发给客户端。 */
+    static bool TokenPut(string token, int accountId) {
+        if (!GameShared.Ready()) { return false; }
+        if (!GameShared.tokens.SetInt(token, "acc", accountId)) { return false; }
+        return GameShared.tokens.Expire(token, GameShared.TokenTtlMs);
     }
 
     /* 命中返回账号 id；未知/已过期（表 TTL 回收）返回 0。 */
@@ -237,12 +234,13 @@ class GameShared {
         return GameShared.online.Exists("p" + Convert.ToString(playerId));
     }
 
-    /* ---- 跨进程操作通道（ops 表）----
+    /* ---- 跨进程控制通道（环回 TCP）----
      *
-     * 调用方：序号发号 → 写请求行（req+acc）→ 轮询 resp 列；世界进程：
-     * 2ms 轮询序号，按序取行执行，把应答 JSON 写回 resp。请求体里带
-     * rpc 标记区分三类：login=登记登录会话（世界进程做顶号+入表），
-     * game=完整游戏 op（token 已由调用方认领并限流），gm=管理页写动作。 */
+     * 调用方：发现端口 → 连接 → 发一行请求 JSON → 收一行应答 → 断开；
+     * 世界进程：RpcLoop 接受连接，ServeConn 逐行 Dispatch 后原连接写回。
+     * 请求体里带 rpc 标记区分三类：login=登记登录会话（世界进程做顶号
+     * +入表），game=完整游戏 op（token 已由调用方认领并限流），gm=管理
+     * 页写动作。协议字段（rpc/acc）只在请求 JSON 一处。 */
 
     static JsonValue RpcFail(string why) {
         JsonValue r = JsonValue.NewObject();
@@ -256,31 +254,97 @@ class GameShared {
         if (!GameShared.Ready()) {
             return GameShared.RpcFail("共享内存不可用，请稍后再试");
         }
-        long seq = GameShared.sys.Increment("op", "v", 1);
-        string key = "q" + Convert.ToString(seq);
         payload.Set("rpc", JsonValue.NewStr(kind));
         payload.Set("acc", JsonValue.NewNum(Convert.ToString(accountId)));
-        if (!GameShared.ops.SetString(key, "req", payload.ToJson())) {
-            return GameShared.RpcFail("共享内存不可用，请稍后再试");
+        string resp = await GameShared.RoundTrip(payload.ToJson());
+        if (resp == null) {
+            return GameShared.RpcFail("世界进程未响应，请稍后再试");
         }
-        bool _e = GameShared.ops.Expire(key, GameShared.OpTtlMs);
-        for (int i = 0; i < GameShared.OpPollLoops; i = i + 1) {
-            await Task.Delay(2);
-            if (!GameShared.ops.Exists(key)) {
-                return GameShared.RpcFail("世界进程未响应，请稍后再试");
+        try {
+            JsonValue r = JsonValue.ParseLenient(resp);
+            if (r != null && r.IsObject()) { return r; }
+        } catch (Exception ex) { }
+        return GameShared.RpcFail("世界进程应答异常");
+    }
+
+    /* 一次完整的请求-应答。每请求一条短连接：进程间零共享连接状态，
+       坏连接/半开连接的影响面只有当次调用。两轮尝试覆盖世界重启换
+       端口——首轮失败失效端口缓存，重发现后再试一次。 */
+    static async string RoundTrip(string req) {
+        for (int attempt = 0; attempt < 2; attempt = attempt + 1) {
+            int port = await GameShared.DiscoverRpcPort();
+            if (port <= 0) { return null; }
+            long t0 = Stopwatch.GetMicroseconds();
+            TcpClient c = await TcpClient.ConnectAsync("127.0.0.1", port,
+                GameShared.RpcConnectMs, true);
+            if (c == null) {
+                Console.WriteLine("[gameshared] rpc connect fail port="
+                    + Convert.ToString(port) + " attempt="
+                    + Convert.ToString(attempt));
+                GameShared.rpcPort = 0;
+                continue;
             }
-            string resp = GameShared.ops.GetString(key, "resp");
-            if (resp.Length > 0) {
-                bool _d = GameShared.ops.Delete(key);
-                try {
-                    JsonValue r = JsonValue.ParseLenient(resp);
-                    if (r != null && r.IsObject()) { return r; }
-                } catch (Exception ex) { }
-                return GameShared.RpcFail("世界进程应答异常");
+            string frame = req + "\n";
+            int ns = await c.SendBytesAsync(frame, frame.Length);
+            if (ns != frame.Length) {
+                /* 部分写=帧被截断，对端永远等不到换行：换新连接重试 */
+                Console.WriteLine("[gameshared] rpc short send "
+                    + Convert.ToString(ns) + "/"
+                    + Convert.ToString(frame.Length));
+                c.Close();
+                continue;
             }
+            string line = await GameShared.RecvLine(c);
+            c.Close();
+            long dt = Stopwatch.GetMicroseconds() - t0;
+            if (line == null) {
+                Console.WriteLine("[gameshared] rpc no reply "
+                    + Convert.ToString(dt) + "us len="
+                    + Convert.ToString(frame.Length) + " attempt="
+                    + Convert.ToString(attempt));
+                continue;
+            }
+            if (dt > 200000) {
+                Console.WriteLine("[gameshared] rpc slow "
+                    + Convert.ToString(dt) + "us len="
+                    + Convert.ToString(frame.Length));
+            }
+            return line;
         }
-        bool _t = GameShared.ops.Delete(key);
-        return GameShared.RpcFail("世界进程超时，请稍后再试");
+        return null;
+    }
+
+    /* 端口发现：世界进程启动后写 sys 表 "rpc" 行；未写时最多等 2s
+       （世界可能还在迁移 schema）。缓存命中不再读表。 */
+    static async int DiscoverRpcPort() {
+        if (GameShared.rpcPort > 0) { return GameShared.rpcPort; }
+        for (int i = 0; i < 100; i = i + 1) {
+            if (!GameShared.Ready()) { return 0; }
+            int p = (int)GameShared.sys.GetInt("rpc", "v");
+            if (p > 0) { GameShared.rpcPort = p; return p; }
+            await Task.Delay(20);
+        }
+        return 0;
+    }
+
+    /* 收一行（到 '\n' 为止）。对端先关/超时/超帧上限都返回 null。 */
+    static async string RecvLine(TcpClient c) {
+        string buf = "";
+        while (buf.Length < GameShared.RpcMaxFrame) {
+            string chunk = await c.RecvAsync(16384, GameShared.RpcTimeoutMs);
+            if (chunk == null || chunk.Length == 0) { return null; }
+            buf = buf + chunk;
+            int nl = GameShared.IndexOfNl(buf);
+            if (nl >= 0) { return buf.Substring(0, nl); }
+        }
+        return null;
+    }
+
+    static int IndexOfNl(string s) {
+        for (int i = 0; i < s.Length; i = i + 1) {
+            if ((s[i] & 255) == 10) { return i; }
+        }
+        return -1;
     }
 
     /* HTTP 登录的世界侧半场：顶号 + 建会话入世界，返回分配的 cid。 */
@@ -292,44 +356,93 @@ class GameShared {
         return r.Int("cid", 0);
     }
 
-    /* 世界进程侧：轮询并执行 ops 表请求。只在 World.Start 里拉起。 */
-    static async void OpLoop() {
-        long last = 0;
+    /* 世界进程侧：监听并派发。从 HTTP 端口+1 扫第一个空闲端口（实际
+       用哪个写进 sys 表，调用方不关心），每连接一个协程逐行执行。
+       count==1 时全部中继路径都是进程内直调，不监听。 */
+    static async void RpcLoop() {
+        if (Cfg.Worker.count <= 1) { return; }
+        int want = Cfg.Server.port + 1;
+        TcpListener ln = null;
+        for (int i = 0; i < 64 && ln == null; i = i + 1) {
+            try {
+                ln = TcpListener.CreateAndStart("127.0.0.1", want + i, 64);
+                GameShared.rpcPort = want + i;
+            } catch (Exception ex) { ln = null; }
+        }
+        if (ln == null) {
+            Console.WriteLine("[gameshared] rpc listen failed"
+                + " -- cross-worker relay unavailable");
+            return;
+        }
+        bool _p = GameShared.sys.SetInt("rpc", "v", GameShared.rpcPort);
+        Console.WriteLine("[gameshared] rpc on 127.0.0.1:"
+            + Convert.ToString(GameShared.rpcPort));
         while (true) {
-            await Task.Delay(2);
-            if (!GameShared.Ready()) { continue; }
-            long hi = GameShared.sys.GetInt("op", "v");
-            while (last < hi) {
-                last = last + 1;
-                await GameShared.ServeOne("q" + Convert.ToString(last));
-            }
+            nint c = await ln.AcceptAsync();
+            if (c < 0) { continue; }
+            Task.Spawn(GameShared.ServeConn(c));
         }
     }
 
-    static async void ServeOne(string key) {
-        /* 请求行可能还没落地：调用方先 Increment 占序号再写行，两步
-           之间世界进程就可能读到新序号——限时重试，别把请求跳过去。 */
-        bool found = false;
-        for (int w = 0; w < 5 && !found; w = w + 1) {
-            if (GameShared.ops.Exists(key)) {
-                found = true;
+    /* 单连接读循环：攒缓冲、切行、按序执行（同一连接严格 FIFO）。
+       空闲 8s 或对端关闭即断——配合调用方的每请求短连接，不会有
+       长期挂着的半开连接。 */
+    static async void ServeConn(nint sock) {
+        string buf = "";
+        bool alive = true;
+        while (alive && buf.Length < GameShared.RpcMaxFrame) {
+            string chunk = await Socket.RecvAsync(sock, 16384,
+                GameShared.RpcTimeoutMs);
+            if (chunk == null || chunk.Length == 0) {
+                if (Socket.LastRecvTimedOut()) {
+                    Console.WriteLine("[gameshared] serve conn idle timeout"
+                        + " (client gone before finish?)");
+                }
                 break;
             }
-            await Task.Delay(2);
+            buf = buf + chunk;
+            int nl = GameShared.IndexOfNl(buf);
+            while (nl >= 0) {
+                string line = buf.Substring(0, nl);
+                buf = buf.Substring(nl + 1, buf.Length - nl - 1);
+                alive = await GameShared.ServeLine(sock, line);
+                if (!alive) { break; }
+                nl = GameShared.IndexOfNl(buf);
+            }
         }
-        if (!found) { return; }
-        string req = GameShared.ops.GetString(key, "req");
-        if (req.Length == 0) { return; }
+        #if WINDOWS
+        Socket.ShutdownBoth(sock);
+        #endif
+        Socket.Close(sock);
+    }
+
+    /* 执行一行请求并把应答写回同一连接。返回 false=写失败或部分写
+       （帧被截断，连接不可再用于下一行），读循环应当断开。 */
+    static async bool ServeLine(nint sock, string line) {
+        long t0 = Stopwatch.GetMicroseconds();
         JsonValue m = null;
         try {
-            m = JsonValue.ParseLenient(req);
+            m = JsonValue.ParseLenient(line);
         } catch (Exception ex) { }
-        if (m == null || !m.IsObject()) { return; }
-        /* 调用方认领过的账号 id 随请求体携带（列 acc 不再使用）。 */
-        JsonValue r = await GameShared.Dispatch(m, m.Int("acc", 0));
-        if (r == null) { r = GameShared.RpcFail("世界进程处理失败"); }
-        /* 行可能已被调用方超时删除：写失败即放弃，无副作用。 */
-        bool _w = GameShared.ops.SetString(key, "resp", r.ToJson());
+        JsonValue r;
+        if (m == null || !m.IsObject()) {
+            r = GameShared.RpcFail("请求格式错误");
+        } else {
+            /* 调用方认领过的账号 id 随请求体携带。 */
+            r = await GameShared.Dispatch(m, m.Int("acc", 0));
+            if (r == null) { r = GameShared.RpcFail("世界进程处理失败"); }
+        }
+        string outp = r.ToJson() + "\n";
+        int w = await Socket.SendAsync(sock, outp, outp.Length);
+        long dt = Stopwatch.GetMicroseconds() - t0;
+        if (dt > 200000 || w != outp.Length) {
+            Console.WriteLine("[gameshared] serve line len="
+                + Convert.ToString(line.Length) + " resp="
+                + Convert.ToString(outp.Length) + " sent="
+                + Convert.ToString(w) + " "
+                + Convert.ToString(dt) + "us");
+        }
+        return w == outp.Length;
     }
 
     static async JsonValue Dispatch(JsonValue m, int accountId) {

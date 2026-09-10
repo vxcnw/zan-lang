@@ -527,7 +527,11 @@ class Gateway {
                 rr.Set("pushPort", JsonValue.NewNum(
                     Convert.ToString(Cfg.Game.port)));
                 await Gateway.RealmsInto(rr, db);
-                rr.Set("token", JsonValue.NewStr(TokenBox.Issue(row.id, now)));
+                string rtok = TokenBox.Issue(row.id, now);
+                if (rtok.Length == 0) {
+                    return Gateway.Err("登录服务繁忙，请稍后再试");
+                }
+                rr.Set("token", JsonValue.NewStr(rtok));
                 return rr;
             }
             if (http) {
@@ -562,7 +566,11 @@ class Gateway {
             r.Set("pushPort", JsonValue.NewNum(Convert.ToString(Cfg.Game.port)));
             await Gateway.RealmsInto(r, db);
             if (http) {
-                r.Set("token", JsonValue.NewStr(TokenBox.Issue(row.id, now)));
+                string tok = TokenBox.Issue(row.id, now);
+                if (tok.Length == 0) {
+                    return Gateway.Err("登录服务繁忙，请稍后再试");
+                }
+                r.Set("token", JsonValue.NewStr(tok));
             }
             return r;
         } finally {

@@ -269,9 +269,10 @@ class World {
         World.dbctx = ctx;
         Task.Spawn(Fight.Bootstrap(ctx));
         Task.Spawn(World.Loop());
-        /* 跨 worker 中继的取单循环：HTTP worker 把登录会话登记、世界
-           op 与管理页写动作投进 ops 表，这里按序取出来执行。 */
-        Task.Spawn(GameShared.OpLoop());
+        /* 跨 worker 中继的服务循环：HTTP worker 把登录会话登记、世界
+           op 与管理页写动作发到本进程的环回 TCP 控制通道，这里逐连接
+           接入执行。 */
+        Task.Spawn(GameShared.RpcLoop());
         Console.WriteLine("[world] tick " + Convert.ToString(Cfg.Game.tickMs)
             + "ms flush=" + Convert.ToString(Cfg.Game.flushSeconds) + "s");
     }

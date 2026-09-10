@@ -131,27 +131,42 @@ minLevel→BOSS 链、M2.DB 快照数值）。改了下面这些就要同步改 
    断言前 `pending.clear()`，并用带终值/金币差值的谓词，别裸
    `ok_for(m: "self" in m)`——会匹配到积压旧消息。
 
-## 7. server-game 多 worker 定式（2026-09-10，count=4 实测入账）
+## 7. server-game 多 worker 定式（2026-09-11，count=4 实测入账）
 
-架构=**HTTP 接入层水平扩 + 游戏世界单写者**（GameShared.zan 五张匿名
-表，PermTable 模式：tokens/auth/sys/online/ops）。改这一层的铁律：
+架构=**HTTP 接入层水平扩 + 游戏世界单写者**（GameShared.zan 四张匿名
+表，PermTable 模式：tokens/auth/sys/online）。改这一层的铁律：
 
 1. **游戏 TCP 监听只在世界角色（1 号 worker）**：推送连接因此全部
-   本地，World/Fight/Play 的几十处 `Gateway.Send` 零改动；跨 worker
-   的登录会话登记、世界 op、GM 写动作一律走 ops 表 RPC（先 Increment
-   占序号再写行——世界侧消费指针单调前进，**两步之间读到新序号会把
-   请求整体跳过**，消费侧必须对缺行限时重试）。
-2. **RPC 协议字段单一来源**：初版世界侧读行内 acc 列、调用方只写进了
-   req JSON——全部中继以 accountId=0 执行、中继登录把会话登记到账号
-   0（跨账号互顶），而世界 worker 本机直调的一半正常，极易误判偶发。
-3. **Windows 钳制 count=1**：master 按自己的 worker 表接受/分发连接，
+   本地，World/Fight/Play 的几十处 `Gateway.Send` 零改动。
+2. **跨 worker 中继走环回 TCP 控制通道，不走共享表轮询**（早期的
+   ops 表 2ms 轮询已被推翻：写表+轮询读+序号协议三段开销 2-6ms，
+   换环回短连接后 RTT 0.1-0.3ms，8 并发登录 178→299-330/s）。世界
+   进程从 `Cfg.Server.port+1` 起扫 64 个端口取第一个空闲（facade 无
+   getsockname），实际端口写 sys 表 "rpc" 行作服务发现，调用方读表
+   缓存、连接失败失效缓存重发现；每请求一条环回短连接、换行分帧
+   紧凑 JSON，同一连接严格 FIFO 保序，两轮重试覆盖世界重启换端口。
+   坑：`SendAsync` 返回值是**已发字节数**（可短写），`>= 0` 判成功
+   = 帧被截断、对端永远等不到换行——必须全等比较，短写换新连接。
+3. **RPC 协议字段单一来源**：早期版本世界侧读行内 acc 列、调用方只
+   写进了 req JSON——全部中继以 accountId=0 执行、中继登录把会话
+   登记到账号 0（跨账号互顶），而世界 worker 本机直调的一半正常，
+   极易误判偶发。
+4. **共享表容量按「峰值日写入量 × TTL 天数」给足，写入返回值不可
+   丢**：SharedTable 固定容量无扩容，表满后 SetInt 静默 false——
+   tokens 表 8192 容量 × 10 天 TTL，36k 次登录压测打穿后新签 token
+   全部解析不到而登录仍 ok=1（"登录已过期"假故障）。修法=容量给足
+   （131072 ≈ 1.3 万日登录 × 10 天）+ 写失败让登录响亮失败。
+5. **Windows 钳制 count=1**：master 按自己的 worker 表接受/分发连接，
    worker 多注册的游戏 worker 索引对不上；多 worker 仅 Linux。
-4. **压测 ritual**：单 IP 每 op 5 次/5s 的匿名限流是登录吞吐的假顶——
-   loopback 绑 `127.0.0.2..N` 源地址给每账号独立桶；并行客户端数不要
-   超过单进程 sqlite 池（poolSize=8，超了报"数据库不可用"= 池 fail-fast
-   非缺陷）；rm 掉服务端还开着的 sqlite 文件 = disk I/O error，先停
-   进程再清库。基线：count=1 63.5/s、count=4 178/s（24 并发，SQLite
-   单写为共享瓶颈）。
+6. **压测 ritual**：单 IP 每 op 5 次/5s 的匿名限流是登录吞吐的假顶——
+   loopback 绑 `127.0.0.2..N` 源地址给每账号独立桶，sustained soak
+   也要每请求轮转源 IP（固定 8 个 IP 各 18 rps 同样触发限流）；并行
+   客户端数不要超过单进程 sqlite 池（poolSize=8，超了报"数据库不可
+   用"= 池 fail-fast 非缺陷）；rm 掉服务端还开着的 sqlite 文件 =
+   disk I/O error，先停进程再清库。基线（count=4）：8 并发突发
+   299-330/s p50 23ms，60s 持续 ~200/s。**已知预存缺陷**：高并发突发
+   有 bistable 停摆（13-24s 自愈，单进程复现，根因=RecvAsync 轮询帧
+   淹没就绪队列）——吞吐数字要在"飞起"轮次取。
 
 ## 8. 经验迭代纪律（本项目约束，写进 AGENTS.md）
 

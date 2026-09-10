@@ -17,7 +17,7 @@ class TokenBox {
 
     static string Issue(int accountId, long now) {
         string token = Hex.Encode(RandomNumberGenerator.GetBytes(16), 16);
-        GameShared.TokenPut(token, accountId);
+        if (!GameShared.TokenPut(token, accountId)) { return ""; }
         return token;
     }
 
