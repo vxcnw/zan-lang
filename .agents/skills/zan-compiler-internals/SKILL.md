@@ -188,6 +188,15 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
   无 pad 语义同款。EncryptCbc 返回精确长度数组（golden 断言 ct.Length，
   多给的 len+32 破档）；调用方对 outLen `List<int>` 预 `Add(0)`（空表
   写 [0] 是 fail-soft：报错但继续，错误会漂到别处爆）。
+- **Zan 逐字节循环 ~130 MiB/s（1 MiB≈8ms），热路径字节过 native 边界
+  进出两个方向都必须零拷贝**：进=byte[]→string 形参直传（上一条）；
+  出=native 写进**精确长度预分配**的 byte[] 原样返回（CBC 加密 PKCS#7
+  长度加密前确定 `(len/16+1)*16`；GCM 流式等长；仅解密剥填充会缩——
+  未缩原样返回、缩则一次 `EntryPoint="memcpy"` 收缩，byte[] 形参直传
+  载荷指针，File.EmbedCopyIn 同款）。坑：A264 只零拷了输入侧，吞吐立
+  即被输出侧的"len+32 上界分配+逐字节收紧拷贝"钉死在 ~200 MiB/s
+  平板（与算法无关=与 native 库无关=拷贝循环在扛），输出零拷贝后
+  CBC 1267-1319 / GCM 2000-4413 MiB/s（raw 的 88-96%）。
 
 ## stdlib 按需拉入（demand-driven pull-in，2026-09-10）
 

@@ -34,6 +34,10 @@ class Sm4 {
     static extern int EVP_CIPHER_CTX_set_padding(string ctx, int pad);
     [DllImport("crypto")]
     static extern string EVP_sm4_cbc();
+    /* 收缩拷贝（解密剥填充后明文短于密文）用 native memcpy，理由同
+       Aes.zan：逐字节 Zan 循环只有 ~130 MiB/s。 */
+    [DllImport("crt", EntryPoint = "memcpy")]
+    static extern void BufCopy(byte[] dst, byte[] src, int n);
 
     static int CellRead(nint cell) {
         return new Span<int>(cell, 1)[0];
@@ -48,7 +52,8 @@ class Sm4 {
         if (cipher == null) { return null; }
         string ctx = EVP_CIPHER_CTX_new();
         if (ctx == null) { return null; }
-        byte[] outb = new byte[len + 16];
+        /* 无填充：密文与明文严格等长，缓冲精确分配、原样返回 */
+        byte[] outb = new byte[len];
         nint cell = NativeMemory.Alloc(4);
         int ok;
         if (enc == 1) {
@@ -77,20 +82,14 @@ class Sm4 {
 
     /// <summary>加密单个 16 字节分组。返回新的 16 字节缓冲区。</summary>
     static byte[] EncryptBlock(string key, string in16) {
-        byte[] o = Sm4.CryptCbcNoPad(key, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", in16, 16, 1);
-        if (o == null) { return null; }
-        byte[] r = new byte[16];
-        for (int i = 0; i < 16; i = i + 1) { r[i] = o[i] & 255; }
-        return r;
+        return Sm4.CryptCbcNoPad(key,
+            "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", in16, 16, 1);
     }
 
     /// <summary>解密单个 16 字节分组。返回新的 16 字节缓冲区。</summary>
     static byte[] DecryptBlock(string key, string in16) {
-        byte[] o = Sm4.CryptCbcNoPad(key, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", in16, 16, 0);
-        if (o == null) { return null; }
-        byte[] r = new byte[16];
-        for (int i = 0; i < 16; i = i + 1) { r[i] = o[i] & 255; }
-        return r;
+        return Sm4.CryptCbcNoPad(key,
+            "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", in16, 16, 0);
     }
 
     /// <summary>带 PKCS#7 填充的 SM4-CBC 加密。</summary>
@@ -101,7 +100,10 @@ class Sm4 {
         if (cipher == null) { outLen[0] = -1; return null; }
         string ctx = EVP_CIPHER_CTX_new();
         if (ctx == null) { outLen[0] = -1; return null; }
-        byte[] outb = new byte[len + 32];
+        /* PKCS#7 密文长度加密前即确定：(len/16+1)*16。缓冲精确分配、
+           EVP 直接写入、原样返回——契约与 Aes.EncryptCbc 一致
+           （返回 byte[].Length == outLen[0]，不再带 len+32 尾巴）。 */
+        byte[] outb = new byte[(len / 16 + 1) * 16];
         nint cell = NativeMemory.Alloc(4);
         int ok = EVP_EncryptInit_ex(ctx, cipher, null, key, iv);
         int total = -1;
@@ -118,7 +120,7 @@ class Sm4 {
         }
         NativeMemory.Free(cell);
         EVP_CIPHER_CTX_free(ctx);
-        if (ok != 1) { outLen[0] = -1; return null; }
+        if (ok != 1 || total != outb.Length) { outLen[0] = -1; return null; }
         outLen[0] = total;
         return outb;
     }
@@ -150,6 +152,12 @@ class Sm4 {
         EVP_CIPHER_CTX_free(ctx);
         if (ok != 1) { outLen[0] = -1; return null; }
         outLen[0] = total;
+        if (total != outb.Length) {
+            /* 填充剥离后明文短于密文：收缩拷贝走 native memcpy */
+            byte[] exact = new byte[total];
+            Sm4.BufCopy(exact, outb, total);
+            return exact;
+        }
         return outb;
     }
 }

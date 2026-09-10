@@ -41,6 +41,9 @@ class AesGcm {
     static extern string EVP_aes_192_gcm();
     [DllImport("crypto")]
     static extern string EVP_aes_256_gcm();
+    /* 防御收缩拷贝（GCM 下不触发）：native memcpy，理由同 Aes.zan */
+    [DllImport("crt", EntryPoint = "memcpy")]
+    static extern void BufCopy(byte[] dst, byte[] src, int n);
 
     /* EVP_CTRL_GCM_SET_IVLEN = 0x9, GET_TAG = 0x10, SET_TAG = 0x11 */
     static int EVP_CTRL_GCM_SET_IVLEN() { return 0x9; }
@@ -104,9 +107,10 @@ class AesGcm {
         string ctx = AesGcm.GcmInit(cipher, key, iv, 1);
         if (ctx == null) { return null; }
         nint cell = NativeMemory.Alloc(4);
-        byte[] aadB = new byte[aadLen + 1];
-        for (int i = 0; i < aadLen; i = i + 1) { aadB[i] = aad[i] & 255; }
-        byte[] ctB = new byte[ptLen + 16];
+        /* GCM 是流式（CTR）：密文与明文等长、Final 不产出。输出缓冲
+           按精确长度分配，EVP 直接写入、原样返回（aad 同样以零拷贝
+           string 直接过边界，另建 byte[] 逐字节拷贝是死代码）。 */
+        byte[] ctB = new byte[ptLen];
         int ok = 1;
         if (aadLen > 0) {
             ok = EVP_EncryptUpdateS(ctx, null, cell, aad, aadLen);
@@ -128,9 +132,7 @@ class AesGcm {
         NativeMemory.Free(cell);
         EVP_CIPHER_CTX_free(ctx);
         if (ok != 1) { return null; }
-        byte[] ct = new byte[ptLen];
-        for (int i = 0; i < ptLen; i = i + 1) { ct[i] = ctB[i] & 255; }
-        return ct;
+        return ctB;
     }
 
     /// <summary>AES-GCM 解密，使用 96 位 IV。校验通过时返回明文
@@ -150,9 +152,7 @@ class AesGcm {
         string ctx = AesGcm.GcmInit(cipher, key, iv, 0);
         if (ctx == null) { ok[0] = 0; return null; }
         nint cell = NativeMemory.Alloc(4);
-        byte[] aadB = new byte[aadLen + 1];
-        for (int i = 0; i < aadLen; i = i + 1) { aadB[i] = aad[i] & 255; }
-        byte[] ptB = new byte[ctLen + 16];
+        byte[] ptB = new byte[ctLen];
         int good = 1;
         if (aadLen > 0) {
             good = EVP_DecryptUpdateS(ctx, null, cell, aad, aadLen);
@@ -175,8 +175,11 @@ class AesGcm {
         EVP_CIPHER_CTX_free(ctx);
         if (good != 1) { ok[0] = 0; return null; }
         ok[0] = -1;
-        byte[] pt = new byte[produced];
-        for (int i = 0; i < produced; i = i + 1) { pt[i] = ptB[i] & 255; }
-        return pt;
+        if (produced == ptB.Length) { return ptB; }
+        /* 防御收缩：GCM(CTR) 下 produced 恒等于 ctLen，此分支仅为保留
+           旧契约（返回精确 produced 长度）而存在 */
+        byte[] exact = new byte[produced];
+        AesGcm.BufCopy(exact, ptB, produced);
+        return exact;
     }
 }
