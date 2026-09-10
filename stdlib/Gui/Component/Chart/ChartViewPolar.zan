@@ -150,7 +150,7 @@ partial class ChartView {
             if (lbl.Length > 0) {
                 ChartView.DrawPolarLabel(app, c, cx, cy, r, ang, lbl,
                     Style.Part(app, "chart", "axis", "", "", "", Style.SNormal()).FgOr(0),
-                    Style.FontFallback(app, "small"), boxX, boxY, boxW, boxH);
+                    ChartFonts.SeriesLabel(app), boxX, boxY, boxW, boxH);
             }
         }
 
@@ -268,7 +268,7 @@ partial class ChartView {
                                     Style.SNormal());
         int themeAxisFg = Style.Part(app, "chart", "axis", "", "", "",
                                      Style.SNormal()).FgOr(0);
-        int smallFont = Style.FontFallback(app, "small");
+        int smallFont = ChartFonts.SeriesLabel(app);
 
         int pn = o.polars.Count;
         // 逐 polar 预解析几何与样式（并行数组，下标 = polar 序号）。

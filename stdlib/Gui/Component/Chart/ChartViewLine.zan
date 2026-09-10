@@ -534,7 +534,7 @@ partial class ChartView {
             ChartTitleSpec ts = o.titles[ti3];
             if (ts.text.Length < 1) { continue; }
             int fs = Style.FontFallback(app, "large");
-            int subFs = Style.FontFallback(app, "small");
+            int subFs = ChartFonts.SeriesLabel(app);
             int tH = Canvas.FontHeight(fs)
                 + (ts.sub.Length > 0 ? Canvas.FontHeight(subFs) + app.Scale(2) : 0);
             int ty = y + app.theme.paddingMedium;
@@ -644,7 +644,7 @@ partial class ChartView {
         List<int> symTicks = null;
         if (n == winLabels.Count && o.XAxis0().type == ChartAxisType.Category) {
             symTicks = Chart.CategoryTicks(f, winLabels,
-                Style.FontFallback(app, "small"), f.plotX, app.Scale(6),
+                ChartFonts.SeriesLabel(app), f.plotX, app.Scale(6),
                 o.XAxis0());
         }
 
@@ -1035,7 +1035,7 @@ partial class ChartView {
         c.PopClip();
         // ECharts line.endLabel 补画（绘图区 clip 外）。
         if (endLblText.Count > 0) {
-            int elFs = Style.FontFallback(app, "small");
+            int elFs = ChartFonts.SeriesLabel(app);
             for (int eli = 0; eli < endLblText.Count; eli = eli + 1) {
                 c.DrawText(endLblX[eli], Canvas.CenterTextYAt(endLblY[eli], elFs),
                     endLblText[eli], endLblColor[eli], elFs);
@@ -1246,7 +1246,7 @@ partial class ChartView {
         List<int> symTicks = null;
         if (winLabels.Count > 0 && o.XAxis0().type == ChartAxisType.Category) {
             symTicks = Chart.CategoryTicks(f, winLabels,
-                Style.FontFallback(app, "small"), f.plotX, app.Scale(6),
+                ChartFonts.SeriesLabel(app), f.plotX, app.Scale(6),
                 o.XAxis0());
         }
 

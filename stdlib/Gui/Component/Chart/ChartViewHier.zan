@@ -294,7 +294,7 @@ partial class ChartView {
     /// 并用单元格矩形裁剪，避免长名称画出格子。
     static void TreemapCell(App app, int x, int y, int w, int h, string name, string val) {
         Canvas c = app.canvas;
-        int fs = Style.FontFallback(app, "small");
+        int fs = ChartFonts.SeriesLabel(app);
         int fh = Canvas.FontHeight(fs);
         if (w < app.Scale(20) || h < fh + app.Scale(4)) { return; }
         c.PushClip(x, y, w, h);
@@ -569,7 +569,7 @@ partial class ChartView {
 
         // 中心标签 = 根节点名称
         if (root.name.Length > 0) {
-            int fs = Style.FontFallback(app, "small");
+            int fs = ChartFonts.SeriesLabel(app);
             c.DrawTextCentered(cx - ringH / 2, Canvas.CenterTextYAt(cy, fs),
                 ringH, Canvas.FontHeight(fs), root.name,
                 Style.Part(app, "chart", "label", "", "", "", Style.SNormal()).FgOr(0), fs);
@@ -807,7 +807,7 @@ partial class ChartView {
             SankeyNodeLayout node = nodes[ni];
             c.FillRoundRect(node.x, node.y, nodeW, node.h,
                 app.Scale(3), Chart.WithAlpha(Chart.Palette(t, ni), revealAlpha));
-            int fs = Style.FontFallback(app, "small");
+            int fs = ChartFonts.SeriesLabel(app);
             int fh = Canvas.FontHeight(fs);
             int lx2 = node.x + nodeW + app.Scale(4);
             if (node.layer == 0) {
@@ -1292,7 +1292,7 @@ partial class ChartView {
         int ay = plotTop;
         int aw = w - pad * 2;
         int ah = (y + h - pad) - plotTop;
-        int hintFs = Style.FontFallback(app, "small");
+        int hintFs = ChartFonts.SeriesLabel(app);
         int hintH = Canvas.FontHeight(hintFs) + app.Scale(6);
         if (ah > hintH + app.Scale(24)) { ah = ah - hintH; }
         if (aw < app.Scale(10) || ah < app.Scale(10)) { return; }
@@ -1318,7 +1318,7 @@ partial class ChartView {
         }
 
         // 字号保持可读：缩放改节点间距，标签跟节点走、越出视口裁掉。
-        int fs = Style.FontFallback(app, "small");
+        int fs = ChartFonts.SeriesLabel(app);
         int fh = Canvas.FontHeight(fs);
         int labelW = ChartView.TreeLabelWidth(root, fs);
         int rad = app.Scale(4);

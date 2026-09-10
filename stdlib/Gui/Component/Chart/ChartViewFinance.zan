@@ -144,7 +144,7 @@ partial class ChartView {
             if (span1 < 1) { span1 = 1; }
             yTicks1 = ysp1.ticks;
             if (yTicks1 < 1) { yTicks1 = 5; }
-            int yFs = Style.FontFallback(app, "small");
+            int yFs = ChartFonts.SeriesLabel(app);
             StyleBox sAx1 = Style.Part(app, "chart", "axis", "", "", "",
                 Style.SNormal());
             for (int k1 = 0; k1 <= yTicks1; k1 = k1 + 1) {
@@ -339,7 +339,7 @@ partial class ChartView {
                 mCnt = mCnt + 1;
             }
             if (mCnt < 1) { continue; }
-            int omFs = Style.FontFallback(app, "small");
+            int omFs = ChartFonts.SeriesLabel(app);
             string omFmt = "";
             if (ms.axisIndex == 1 && o.yAxes.Count > 1) {
                 omFmt = o.yAxes[1].labelFormatter;
@@ -396,7 +396,7 @@ partial class ChartView {
             }
         }
         if (o.markPoint || ksrc.marks.Count > 0) {
-            int mFs = Style.FontFallback(app, "small");
+            int mFs = ChartFonts.SeriesLabel(app);
             bool anyDrawn = false;
             for (int mi = 0; mi < ksrc.marks.Count; mi = mi + 1) {
                 ChartMarkPoint m = ksrc.marks[mi];
@@ -437,7 +437,7 @@ partial class ChartView {
                     Chart.PointV(cs[i0 + maxK].high, ksrc.pointG));
                 ChartView.CandleMarkPin(app, c, lx, ly, app.Scale(10),
                     Chart.Palette(t, 0), lbl,
-                    Style.FontFallback(app, "small"), f);
+                    ChartFonts.SeriesLabel(app), f);
             }
         }
         c.PopClip();

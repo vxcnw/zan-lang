@@ -94,7 +94,7 @@ class ChartViewDataRange {
     static void Draw(App app, int x, int y, int w, int h, ChartOption o) {
         if (!o.dataRangeShow || o.iwid == 0) { return; }
         Canvas c = app.canvas;
-        int fs = Style.FontFallback(app, "small");
+        int fs = ChartFonts.SeriesLabel(app);
         int fg = Style.Part(app, "chart", "axis", "", "", "",
                             Style.SNormal()).FgOr(0);
         if (o.dataRangeList.Count > 0) {

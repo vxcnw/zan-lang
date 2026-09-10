@@ -1769,7 +1769,7 @@ class Chart {
         if (title.Length > 0) {
             titleH = Canvas.FontHeight(Style.FontFallback(app, "large"));
             if (Chart.TitleSubText().Length > 0) {
-                titleH = titleH + Canvas.FontHeight(Style.FontFallback(app, "small"))
+                titleH = titleH + Canvas.FontHeight(ChartFonts.SeriesLabel(app))
                     + app.Scale(2);
             }
         }
@@ -2141,7 +2141,7 @@ class Chart {
         if (Chart.gridPanelSub) { return y + pad; }
         int titleH = Canvas.FontHeight(Style.FontFallback(app, "large"));
         if (title.Length > 0 && Chart.TitleSubText().Length > 0) {
-            titleH = titleH + Canvas.FontHeight(Style.FontFallback(app, "small"))
+            titleH = titleH + Canvas.FontHeight(ChartFonts.SeriesLabel(app))
                 + app.Scale(2);
         }
         int headH = titleH;
@@ -2157,7 +2157,7 @@ class Chart {
             extra = Chart.LegendRowCount(app, x, w, title, series);
             if (Chart.toolReserve > 0) { belowGap = app.Scale(4); }
         }
-        int rowH = Canvas.FontHeight(Style.FontFallback(app, "small")) + app.Scale(6);
+        int rowH = Canvas.FontHeight(ChartFonts.Legend(app)) + app.Scale(6);
         return y + pad + headH + belowGap + extra * rowH + app.Scale(6);
     }
 
@@ -2441,7 +2441,7 @@ class Chart {
             dx = dx + dash * 2;
         }
         if (o.markLabel.Length > 0) {
-            int fs = Style.FontFallback(app, "small");
+            int fs = ChartFonts.SeriesLabel(app);
             int lw = Canvas.MeasureText(o.markLabel, fs);
             c.DrawText(f.plotX + f.plotW - lw, my - Canvas.FontHeight(fs) - app.Scale(1),
                 o.markLabel, sMark.FgOr(0), fs);
@@ -2931,7 +2931,7 @@ class Chart {
         Canvas c = app.canvas;
         Theme t = app.theme;
         int pad = t.paddingMedium;
-        int fs = Style.FontFallback(app, "small");
+        int fs = ChartFonts.AxisLabel(app);
         int fh = Canvas.FontHeight(fs);
         ChartAxis y0 = o.YAxis0();
         ChartAxis y1 = o.YAxis1();

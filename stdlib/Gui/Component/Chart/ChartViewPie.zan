@@ -439,7 +439,7 @@ partial class ChartView {
                     }
                 }
             }
-            int rowH = Canvas.FontHeight(Style.FontFallback(app, "small")) + app.Scale(6);
+            int rowH = Canvas.FontHeight(ChartFonts.Legend(app)) + app.Scale(6);
             int gap = app.Scale(8);
             int x0 = x + pad;
             int maxX = x + w - pad;
@@ -747,9 +747,9 @@ partial class ChartView {
                         r5 = r5.Replace("{c}", Convert.ToString(sl.value));
                         pl = r5;
                     }
-                    int pw = Canvas.MeasureText(pl, Style.FontFallback(app, "small"));
-                    c.DrawText(lxp - pw / 2, Canvas.CenterTextYAt(lyp, Style.FontFallback(app, "small")),
-                        pl, lblColor, Style.FontFallback(app, "small"));
+                    int pw = Canvas.MeasureText(pl, ChartFonts.SeriesLabel(app));
+                    c.DrawText(lxp - pw / 2, Canvas.CenterTextYAt(lyp, ChartFonts.SeriesLabel(app)),
+                        pl, lblColor, ChartFonts.SeriesLabel(app));
                 } else if (sl.a1 <= sweepMax && pct >= 2 && outerLabel) {
                     int roLbl = ChartView.PieSliceRo(geoRi[ring], geoRo[ring],
                         sl.roseP);
@@ -768,11 +768,11 @@ partial class ChartView {
                     c.DrawLine(x2, y2, x3, y2, sl.color, 1);
                     // ECharts2 外标 formatter 默认 {b}：只有项名。
                     string txt = sl.name;
-                    int tw2 = Canvas.MeasureText(txt, Style.FontFallback(app, "small"));
+                    int tw2 = Canvas.MeasureText(txt, ChartFonts.SeriesLabel(app));
                     int txp = rightSide ? x3 + app.Scale(3) : x3 - app.Scale(3) - tw2;
                     if (txp < x + pad) { txp = x + pad; }
                     if (txp + tw2 > x + w - pad) { txp = x + w - pad - tw2; }
-                    int fsO = Style.FontFallback(app, "small");
+                    int fsO = ChartFonts.SeriesLabel(app);
                     int tyo = Canvas.CenterTextYAt(y2, fsO);
                     if (tyo < bodyY) { tyo = bodyY; }
                     int tyMax = y + h - pad - Canvas.FontHeight(fsO);
@@ -1113,7 +1113,7 @@ partial class ChartView {
                             ls = gauge.axisLabel.formatter.Replace("{value}", ls);
                         }
                         int labelSize = ChartView.GaugeFont(app,
-                            gauge.axisLabel.textStyle.fontSize, Style.FontFallback(app, "small"),
+                            gauge.axisLabel.textStyle.fontSize, ChartFonts.AxisLabel(app),
                             radius, 150);
                         // 标签紧贴分隔线内侧。钳制环半径
                         // 可在表盘小到刻度 + 间隙几乎占据整个
@@ -1190,7 +1190,7 @@ partial class ChartView {
                     titleText = s.data[0].name;
                 }
                 int titleSize = ChartView.GaugeFont(app,
-                    gauge.title.textStyle.fontSize, Style.FontFallback(app, "small"),
+                    gauge.title.textStyle.fontSize, ChartFonts.AxisLabel(app),
                     radius, 180);
                 int titleBottom = cy
                     + ChartView.GaugeScalar(app, gauge.title.offsetCenter.y, radius)
@@ -1354,7 +1354,7 @@ partial class ChartView {
         int lx = x + w - pad - legendW;
         int ly = Chart.LegendStartY(app, y, top);
         int sw = app.Scale(12);
-        int lh = Canvas.FontHeight(Style.FontFallback(app, "small")) + app.Scale(6);
+        int lh = Canvas.FontHeight(ChartFonts.Legend(app)) + app.Scale(6);
         for (int j = 0; j < n; j = j + 1) {
             int val = 0;
             if (o.series[j].Count() > 0) { val = o.series[j].Value(0); }
@@ -1362,7 +1362,7 @@ partial class ChartView {
             string lbl = o.series[j].name + "  " + Convert.ToString(val);
             c.DrawText(lx + sw + app.Scale(6), ly + app.Scale(1), lbl,
                 Style.Part(app, "chart", "label", "", "", "", Style.SNormal()).FgOr(0),
-                Style.FontFallback(app, "small"));
+                ChartFonts.SeriesLabel(app));
             ly = ly + lh;
         }
 
@@ -1533,15 +1533,15 @@ partial class ChartView {
                     ox = x + w - pad - app.Scale(60);
                 }
                 c.DrawText(ox, ry + (rowH - Canvas.FontHeight(
-                    Style.FontFallback(app, "small"))) / 2, lbl,
+                    ChartFonts.SeriesLabel(app))) / 2, lbl,
                     Style.Part(app, "chart", "label", "", "", "",
                         Style.SNormal()).FgOr(0),
-                    Style.FontFallback(app, "small"));
+                    ChartFonts.SeriesLabel(app));
             } else {
-                c.DrawTextCentered(cx - areaW / 2, ry + rowH / 2 - Canvas.FontHeight(Style.FontFallback(app, "small")) / 2,
-                    areaW, Canvas.FontHeight(Style.FontFallback(app, "small")), lbl,
+                c.DrawTextCentered(cx - areaW / 2, ry + rowH / 2 - Canvas.FontHeight(ChartFonts.Legend(app)) / 2,
+                    areaW, Canvas.FontHeight(ChartFonts.SeriesLabel(app)), lbl,
                     Style.Part(app, "chart", "value", "", "", "", Style.SNormal()).FgOr(0),
-                    Style.FontFallback(app, "small"));
+                    ChartFonts.SeriesLabel(app));
             }
         }
 
@@ -1583,7 +1583,7 @@ partial class ChartView {
                     Chart.WithAlpha(crossCol, 200));
                 string lblF = nm + "  " + Convert.ToString(st.val);
                 if (fPct) { lblF = lblF + ChartView.FunnelPct(stages, idx); }
-                int fs = Style.FontFallback(app, "small");
+                int fs = ChartFonts.SeriesLabel(app);
                 int lw = Canvas.MeasureText(lblF, fs);
                 int labelX = x + pad - lw - app.Scale(6);
                 if (labelX < 0) { labelX = 0; }
@@ -1622,7 +1622,7 @@ c.DrawText(labelX, labelY, lblF, Style.Part(app, "chart",
         int xCur = x0;
         int yCur = top;
         int maxX = x + w - pad;
-        int rowH = Canvas.FontHeight(Style.FontFallback(app, "small")) + app.Scale(6);
+        int rowH = Canvas.FontHeight(ChartFonts.Legend(app)) + app.Scale(6);
         int bodyY = top;
         Theme t = app.theme;
         if (o.series.Count > 1) {
@@ -1673,7 +1673,7 @@ c.DrawText(labelX, labelY, lblF, Style.Part(app, "chart",
     /// 漏斗/玫瑰等"阶段图"的图例绘制（单列定宽）。
     static void DrawStageLegend(App app, ChartOption o, int lx, int ly, int legendW) {
         Theme t = app.theme;
-        int lh = Canvas.FontHeight(Style.FontFallback(app, "small")) + app.Scale(6);
+        int lh = Canvas.FontHeight(ChartFonts.Legend(app)) + app.Scale(6);
         if (o.series.Count > 1) {
             for (int si = 0; si < o.series.Count; si = si + 1) {
                 ChartSeries s = o.series[si];
@@ -1736,7 +1736,7 @@ c.DrawText(labelX, labelY, lblF, Style.Part(app, "chart",
         c.DrawLine(px, py, ex, ey, sCol, 1);
         c.FillCircle(ex, ey, app.Scale(2), sCol);
         string txt = lbl + " " + Convert.ToString(sl.value);
-        int fs = Style.FontFallback(app, "small");
+        int fs = ChartFonts.SeriesLabel(app);
         int tw = Canvas.MeasureText(txt, fs);
         int tx = ex;
         int ty = ey - Canvas.FontHeight(fs) - app.Scale(2);

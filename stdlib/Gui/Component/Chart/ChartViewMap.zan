@@ -444,7 +444,7 @@ partial class ChartView {
                 if (lead.labelShow) {
                     int fg2 = Style.Part(app, "chart", "", "", "", "",
                         Style.SNormal()).FgOr(0);
-                    int fs = Style.FontFallback(app, "small");
+                    int fs = ChartFonts.SeriesLabel(app);
                     for (int i = 0; i < n; i = i + 1) {
                         MapPolygon p = layout.polys[i];
                         if (p.hole) { continue; }
@@ -493,7 +493,7 @@ partial class ChartView {
                 if (!p.hole) {
                     string nm = lead.regions[p.region].name;
                     if (nm.Length > 0) {
-                        int fs = Style.FontFallback(app, "small");
+                        int fs = ChartFonts.SeriesLabel(app);
                         int tw = Canvas.MeasureText(nm, fs);
                         int th = Canvas.FontHeight(fs);
                         if (tw + app.Scale(4) <= p.maxX - p.minX
@@ -630,14 +630,14 @@ partial class ChartView {
                 int t2 = 1000 - yi * 1000 / bh;
                 c.FillRect(bx, by + yi, app.Scale(10), 1, Chart.RampAt(o.rampColors, t2));
             }
-            int fs2 = Style.FontFallback(app, "small");
+            int fs2 = ChartFonts.SeriesLabel(app);
             int lfg = Style.Part(app, "chart", "label", "", "", "", Style.SNormal()).FgOr(0);
             c.DrawText(bx, by - Canvas.FontHeight(fs2), "高", lfg, fs2);
             c.DrawText(bx, by + bh, "低", lfg, fs2);
         }
 
         if (o.roam) {
-            int fs3 = Style.FontFallback(app, "small");
+            int fs3 = ChartFonts.SeriesLabel(app);
             c.DrawText(plotX + app.Scale(8), plotY + plotH - Canvas.FontHeight(fs3) - app.Scale(4),
                 "滚轮缩放  ·  拖拽平移",
                 Style.Part(app, "chart", "hint", "", "", "", Style.SNormal()).FgOr(0), fs3);
@@ -658,7 +658,7 @@ partial class ChartView {
         // o.markPoint=true 时在最大值/最小值两个区域的质心标 pin。
         // 显式点的 x/y 是图坐标系（与 rings 同一坐标系），跟随漫游缩放。
         if (lead.marks.Count > 0 || o.markPoint) {
-            int fsM = Style.FontFallback(app, "small");
+            int fsM = ChartFonts.SeriesLabel(app);
             int fgM = Style.Part(app, "chart", "value", "", "", "", Style.SNormal()).FgOr(0);
             // 数据边界（与 MapLayout 一致）用于把图坐标换算到屏幕。
             int bsX = 0; int bsY = 0;
@@ -727,7 +727,7 @@ partial class ChartView {
         int alpha = 255;
         if (g < 1000) { alpha = 60 + 195 * g / 1000; }
         if (alpha > 255) { alpha = 255; }
-        int fs = Style.FontFallback(app, "small");
+        int fs = ChartFonts.SeriesLabel(app);
         int lblFg = Style.Part(app, "chart", "label", "", "", "",
             Style.SNormal()).FgOr(0);
         int mx = app.mouseX;

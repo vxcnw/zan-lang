@@ -279,13 +279,13 @@ class ChartTimeline {
                          bi == idx ? dotOn : dotBg);
             if (bi == idx && this.LabelAt(bi).Length > 0) {
                 string lb = this.LabelAt(bi);
-                int lw = Canvas.MeasureText(lb, Style.FontFallback(app, "small"));
+                int lw = Canvas.MeasureText(lb, ChartFonts.Legend(app));
                 int lx = cx - lw / 2;
                 if (lx < trackX) { lx = trackX; }
                 if (lx + lw > trackX + trackW) { lx = trackX + trackW - lw; }
-                c.DrawText(lx, cy - Canvas.FontHeight(Style.FontFallback(app, "small"))
+                c.DrawText(lx, cy - Canvas.FontHeight(ChartFonts.Legend(app))
                            - app.Scale(2), lb, fg,
-                           Style.FontFallback(app, "small"));
+                           ChartFonts.Legend(app));
             }
             if (Ui.Clicked(app, did)) {
                 app.StateSet(ChartTimeline.TlIdxKey(wid), bi);

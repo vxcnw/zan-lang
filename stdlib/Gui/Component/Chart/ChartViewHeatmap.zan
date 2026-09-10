@@ -124,7 +124,7 @@ partial class ChartView {
                     c.DrawTextCentered(colX, top, colW, colHeadH,
                         labels[ci],
                         Style.Part(app, "chart", "axis", "", "", "", Style.SNormal()).FgOr(0),
-                        Style.FontFallback(app, "small"));
+                        ChartFonts.SeriesLabel(app));
                 }
             }
         }
@@ -142,10 +142,10 @@ partial class ChartView {
             int rowY = gridY + ChartView.HeatmapCellStart(gridH, r, rows);
             int rowH = ChartView.HeatmapCellSize(gridH, r, rows);
             if (rowH >= app.Scale(12)) {
-                c.DrawText(x + pad, rowY + Canvas.CenterTextY(rowH, rowH, Style.FontFallback(app, "small")),
+                c.DrawText(x + pad, rowY + Canvas.CenterTextY(rowH, rowH, ChartFonts.AxisLabel(app)),
                     o.series[r].name,
                     Style.Part(app, "chart", "label", "", "", "", Style.SNormal()).FgOr(0),
-                    Style.FontFallback(app, "small"));
+                    ChartFonts.SeriesLabel(app));
             }
             for (int cc = 0; cc < cols; cc = cc + 1) {
                 // 稀疏行的尾部不是零值数据：保持空白，且与

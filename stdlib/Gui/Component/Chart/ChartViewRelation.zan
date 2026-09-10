@@ -104,7 +104,7 @@ partial class ChartView {
             int xCur = x0;
             int yCur = top;
             int maxX = x + w - pad;
-            int rowH = Canvas.FontHeight(Style.FontFallback(app, "small")) + app.Scale(6);
+            int rowH = Canvas.FontHeight(ChartFonts.Legend(app)) + app.Scale(6);
             for (int i = 0; i < nn; i = i + 1) {
                 ChordNodeArc naL = layout.nodes[i];
                 int cw = Chart.LegendChipW(app, naL.name);
@@ -257,7 +257,7 @@ partial class ChartView {
             string nm = na.name;
             int mid = (na.a0 + na.a1) / 2;
             int gapL = app.Scale(6);
-            int fsN = Style.FontFallback(app, "small");
+            int fsN = ChartFonts.SeriesLabel(app);
             int twN = Canvas.MeasureText(nm, fsN);
             int lxN = ChartView.FillX(cx, r + gapL, mid);
             int lyN = Canvas.CenterTextYAt(ChartView.FillY(cy, r + gapL, mid), fsN);
@@ -360,7 +360,7 @@ partial class ChartView {
                 int exM = ChartView.FillX(cx, r + offM, midM);
                 int eyM = ChartView.FillY(cy, r + offM, midM);
                 int fgM = Style.Part(app, "chart", "value", "", "", "", Style.SNormal()).FgOr(0);
-                int fsM = Style.FontFallback(app, "small");
+                int fsM = ChartFonts.SeriesLabel(app);
                 c.DrawLine(pxM, pyM, exM, eyM, fgM, 1);
                 c.FillCircle(exM, eyM, app.Scale(2), fgM);
                 string txtM = "max " + Convert.ToString(nb.weight);
@@ -743,7 +743,7 @@ partial class ChartView {
         int scy = oy + areaH / 2;
         int lblCol = Style.Part(app, "chart", "label", "", "", "",
                                 Style.SNormal()).FgOr(0);
-        int fs = Style.FontFallback(app, "small");
+        int fs = ChartFonts.SeriesLabel(app);
         for (int i = 0; i < nn; i = i + 1) {
             if (i < nodeHid.Count && nodeHid[i]) { continue; }
             ForceNode nd = layout.nodes[i];
@@ -795,7 +795,7 @@ partial class ChartView {
         if (o.showLegend && lead.graphCats.Count > 0) {
             int lx2 = x + w - pad - legendW;
             int ly2 = Chart.LegendStartY(app, y, top);
-            int lh2 = Canvas.FontHeight(Style.FontFallback(app, "small")) + app.Scale(6);
+            int lh2 = Canvas.FontHeight(ChartFonts.Legend(app)) + app.Scale(6);
             for (int i = 0; i < lead.graphCats.Count; i = i + 1) {
                 string cn = lead.graphCats[i];
                 if (cn.Length < 1) { cn = "cat-" + Convert.ToString(i); }
@@ -809,7 +809,7 @@ partial class ChartView {
         } else if (o.showLegend && nn <= 16) {
             int lx2 = x + w - pad - legendW;
             int ly2 = Chart.LegendStartY(app, y, top);
-            int lh2 = Canvas.FontHeight(Style.FontFallback(app, "small")) + app.Scale(6);
+            int lh2 = Canvas.FontHeight(ChartFonts.Legend(app)) + app.Scale(6);
             for (int i = 0; i < nn; i = i + 1) {
                 ForceNode nd = layout.nodes[i];
                 int key = 0;

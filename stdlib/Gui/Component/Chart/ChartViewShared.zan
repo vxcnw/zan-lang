@@ -38,7 +38,7 @@ partial class ChartView {
             // ECharts title.subtext（副标题小字）；对齐与 DrawPanelI 同法。
             string titleSub = Chart.TitleSubText();
             if (titleSub.Length > 0) {
-                titleH = titleH + Canvas.FontHeight(Style.FontFallback(app, "small"))
+                titleH = titleH + Canvas.FontHeight(ChartFonts.SeriesLabel(app))
                     + app.Scale(2);
             }
             int titleMax = x + w - pad - Chart.toolReserve - (x + pad) - app.Scale(8);
@@ -52,7 +52,7 @@ partial class ChartView {
                 c.PushClip(x + pad, top, titleMax, titleH);
                 c.DrawText(tx, top, title, sPanel.FgOr(0), titleFs);
                 if (titleSub.Length > 0) {
-                    int subFs = Style.FontFallback(app, "small");
+                    int subFs = ChartFonts.SeriesLabel(app);
                     int subW = Canvas.MeasureText(titleSub, subFs);
                     int sx = tx;
                     if (tal == "center") { sx = x + pad + (titleMax - subW) / 2; }
@@ -132,7 +132,7 @@ partial class ChartView {
             sPanel.BgOr(0));
         c.DrawRoundRect(cardX, cardY, cardW, cardH, t.borderRadiusMedium,
             sPanel.BorderOr(0), 1);
-        int fs = Style.FontFallback(app, "small");
+        int fs = ChartFonts.SeriesLabel(app);
         int lh = Canvas.FontHeight(fs) + app.Scale(4);
         c.DrawText(cardX + pad, cardY + app.Scale(10), "数据视图",
             sPanel.FgOr(0), Style.FontFallback(app, "large"));
@@ -352,7 +352,7 @@ partial class ChartView {
             if (inside && my > f.plotY && my < f.plotY + f.plotH) {
                 c.FillRect(f.plotX, my, f.plotW, 1, lineCol);
             }
-            int fs = Style.FontFallback(app, "small");
+            int fs = ChartFonts.SeriesLabel(app);
             int chipH = Canvas.FontHeight(fs);
             int labelFg = Style.Part(app, "chart", "crosshair-label", "", "",
                 "", Style.SNormal()).FgOr(0);
@@ -554,7 +554,7 @@ partial class ChartView {
         if (app.PointerCaptured()) { return; }
         Canvas c = app.canvas;
         Theme t = app.theme;
-        int fs = Style.FontFallback(app, "small");
+        int fs = ChartFonts.SeriesLabel(app);
         int lh = Canvas.FontHeight(fs) + app.Scale(4);
         int rowCount = rows.Count;
         int boxW = app.Scale(28);
@@ -774,7 +774,7 @@ partial class ChartView {
                 dy = dy + dash + gap;
             }
             if (m.labelShow) {
-                int fs = Style.FontFallback(app, "small");
+                int fs = ChartFonts.SeriesLabel(app);
                 // 标签默认是具体数值（ECharts markLine.label 默认 {c}），
                 // 不是 "max/min/avg" 字样；显式 label 可带 {value} 占位。
                 string lbl = m.label;
@@ -809,7 +809,7 @@ partial class ChartView {
                                   int i0, int nCat, int seriesColor) {
         if (o.markAreas.Count < 1) { return; }
         Canvas c = app.canvas;
-        int fs = Style.FontFallback(app, "small");
+        int fs = ChartFonts.SeriesLabel(app);
         for (int i = 0; i < o.markAreas.Count; i = i + 1) {
             ChartMarkArea a = o.markAreas[i];
             int col = a.color;
@@ -891,7 +891,7 @@ partial class ChartView {
             } else {
                 lbl = lbl + ": " + Chart.PointText(ext, s.pointG);
             }
-            int fs = Style.FontFallback(app, "small");
+            int fs = ChartFonts.SeriesLabel(app);
             int lw = Canvas.MeasureText(lbl, fs);
             int tx = lx - lw / 2;
             int ty = ly - Canvas.FontHeight(fs) - app.Scale(1);
@@ -963,7 +963,7 @@ partial class ChartView {
                     c.FillRect(cvx, my, seg, 1, lineCol);
                     cvx = cvx + dash + gp;
                 }
-                int fs = Style.FontFallback(app, "small");
+                int fs = ChartFonts.SeriesLabel(app);
                 int yAx = 0;
                 for (int asi = 0; asi < series.Count; asi = asi + 1) {
                     if (!series[asi].hidden) { yAx = series[asi].axisIndex; break; }
@@ -1111,7 +1111,7 @@ partial class ChartView {
                     }
                 }
                 if (m.labelShow && m.label.Length > 0) {
-                    int fs = Style.FontFallback(app, "small");
+                    int fs = ChartFonts.SeriesLabel(app);
                     int lw2 = Canvas.MeasureText(m.label, fs);
                     int lx2 = px2 + app.Scale(4);
                     if (lx2 + lw2 > f.plotX + f.plotW) {
@@ -1166,7 +1166,7 @@ partial class ChartView {
                 } else {
                     lbl = lbl + ": " + Chart.PointText(val, s.pointG);
                 }
-                int fs = Style.FontFallback(app, "small");
+                int fs = ChartFonts.SeriesLabel(app);
                 int lw = Canvas.MeasureText(lbl, fs);
                 int lx = f.plotX + f.plotW - lw;
                 if (lx < f.plotX) { lx = f.plotX; }
@@ -1222,7 +1222,7 @@ partial class ChartView {
                 } else {
                     lbl = lbl + ": " + Convert.ToString(val);
                 }
-                int fs = Style.FontFallback(app, "small");
+                int fs = ChartFonts.SeriesLabel(app);
                 int lw = Canvas.MeasureText(lbl, fs);
                 int tx = lx - lw / 2;
                 if (tx < plotX) { tx = plotX; }
@@ -1321,7 +1321,7 @@ partial class ChartView {
             ChartView.MarkLabelAt(app, c, f, lx, ly, rad, lbl, below);
             return;
         }
-        int mFs = Style.FontFallback(app, "small");
+        int mFs = ChartFonts.SeriesLabel(app);
         int lw = Canvas.MeasureText(lbl, mFs);
         // 显式 symbolSize 是几何半径（原版 pin 头 = symbolSize 圆、
         // 尾长 1.5r）；数值挤不进头里才按文字宽度撑头（同原版 auto
@@ -1350,7 +1350,7 @@ partial class ChartView {
     /// 水平钳制进绘图区。
     static void MarkLabelAt(App app, Canvas c, ChartFrame f, int lx,
                             int ly, int rad, string lbl, bool below) {
-        int mFs = Style.FontFallback(app, "small");
+        int mFs = ChartFonts.SeriesLabel(app);
         int lw = Canvas.MeasureText(lbl, mFs);
         int tx = lx - lw / 2;
         if (tx < f.plotX) { tx = f.plotX; }

@@ -159,11 +159,11 @@ class ChartBig {
         int si = src.SeriesCount() - 1;
         while (si >= 0) {
             string nm = src.SeriesName(si);
-            int tw = Canvas.MeasureText(nm, Style.FontFallback(app, "small"));
+            int tw = Canvas.MeasureText(nm, ChartFonts.Legend(app));
             lx = lx - tw;
             c.DrawText(lx, top + app.Scale(2), nm,
                 Style.Part(app, "chart", "legend", "", "", "", Style.SNormal()).FgOr(0),
-                Style.FontFallback(app, "small"));
+                ChartFonts.Legend(app));
             int col = src.SeriesColor(si);
             if (col == 0) { col = Chart.Palette(t, si); }
             lx = lx - app.Scale(6) - sw;
