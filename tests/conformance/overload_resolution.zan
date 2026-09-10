@@ -1,6 +1,13 @@
 // Conformance: method overload resolution by arity. Same-named methods that
 // differ in parameter count (and static vs instance) must each dispatch to the
 // correct definition instead of always binding to the first-declared one.
+//
+// The overloads below deliberately return *different* types where the arity
+// differs, and the lower-arity one is declared first. With one uniform return
+// type the checker's name-only call lookup still produced a type that checked
+// (irgen emitted the right call anyway), so the defect stayed invisible; when
+// the results differ, a bare same-class call was typed by the first-declared
+// overload and the assignment was rejected with "cannot convert".
 using System;
 
 class Box {
@@ -24,6 +31,46 @@ class Box {
     static int Sum(int a, int b, int c) { return a + b + c; }
 }
 
+// Wide/Tall stand in for the shape that broke in stdlib Gui: a class holding
+// `Panel Cell(label, value, cls)` next to `Label Cell(row, kw, cls, value,
+// left)`, each called by bare name from another part of the same class.
+class Wide { }
+
+class Tall { }
+
+class Cells {
+    // arity 1 declared first: the pre-fix lookup typed every call by this one
+    static Wide Cell(int a) { return new Wide(); }
+    static Tall Cell(int a, int b) { return new Tall(); }
+    static Tall Cell(int a, int b, int c) { return new Tall(); }
+
+    // a `params` tail absorbs the larger count
+    static Wide Tail(int a) { return new Wide(); }
+    static Tall Tail(int a, int b, params int[] rest) { return new Tall(); }
+
+    public static string Check() {
+        Wide w1 = Cell(1);
+        Tall t2 = Cell(1, 2);
+        Tall t3 = Cell(1, 2, 3);
+        Wide w2 = Tail(1);
+        Tall t4 = Tail(1, 2, 3, 4);
+        return "Cell " + Convert.ToString(w1 != null && t2 != null && t3 != null)
+            + " Tail " + Convert.ToString(w2 != null && t4 != null);
+    }
+}
+
+// A derived declaration fitting no arity must not shadow a base one that does:
+// `Widen(1)` inside Derived has to reach `Base.Widen(int)`.
+class Base {
+    public static string Widen(int a) { return "base-one"; }
+}
+
+class Derived : Base {
+    public static int Widen(int a, int b) { return a + b; }
+
+    public static string Check() { return Widen(1); }
+}
+
 class Program {
     static void Main() {
         Box box = Box.Make(1);
@@ -32,5 +79,7 @@ class Program {
         Console.WriteLine(box.Combine(2, 3));      // 1 + 20 + 300 = 321
         Console.WriteLine(Box.Sum(7));             // 7
         Console.WriteLine(Box.Sum(7, 8, 9));       // 24
+        Console.WriteLine(Cells.Check());
+        Console.WriteLine(Derived.Check());
     }
 }

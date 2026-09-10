@@ -10,28 +10,129 @@ namespace Legend;
 ///
 /// 本文件是**唯一**的界面尺寸/配色来源。任何页面都不许自己写死像素值，
 /// 一律从这里取——这样「跟原版一致」这件事才有单一事实来源，改动也有
-/// 一个地方可查。原版客户区 1246×646，分区如下：
+/// 一个地方可查。原版整窗 1246×646（含自绘标题栏 ~35），内容区 1246×612：
 ///
 ///     ┌──────────────────────────────────────────────────┐
-///     │ 顶部导航 y 0..110（2 行瓦片）                     │
+///     │ 顶部导航 2 行瓦片   y 0..66（内容区相对）          │
 ///     ├──────────┬─────────────────────┬────────────────┤
 ///     │ 左栏     │  主区（每按钮一页） │  聊天区         │
 ///     │ 0..249   │  251..1003          │  1004..1245     │
-///     ├──────────┴─────────────────────┴────────────────┤
-///     │ 底部导航 y 586..645                               │
-///     └──────────────────────────────────────────────────┘
+///     ├──────────┼─────────────────────┤                │
+///     │ 战斗统计 │ 底部导航瓦片 y 565   │ 输入 + 发送     │
+///     └──────────┴─────────────────────┴────────────────┘
+///
+/// 「内容区相对 y」= 原图像素 ÷ 1.5 − 35.3（原图自绘标题栏高）。原图量法
+/// 见 REFERENCE_AUDIT.md §一。
+///
+/// **DPI**：Zan 的 `Prefer()/Pad()/Gap()` 是**设备像素**（不随 DPI 缩放），
+/// 而本文件所有实测值都是原版**逻辑像素**。启动时记下设备缩放（150% 屏上
+/// 是 150），所有 getter 一律过 `Px()`——否则整个界面在 150% 屏上会缩成
+/// 2/3（实测：瓷砖 94 逻辑渲染成 93 设备像素，而原版是 141）。
 class Spec {
-    /* ---- 窗口 ---- */
-    static int WindowW() { return 1246; }
-    static int WindowH() { return 646; }
+    static int dpi = 100;
+    static void SetDpi(int scale) { if (scale > 0) { dpi = scale; } }
+    /// 逻辑像素 → 设备像素。
+    static int Px(int v) { return v * dpi / 100; }
 
-    /* ---- 分区 ---- */
-    static int TopH() { return 111; }        // 顶部导航高（2 行）
-    static int BottomH() { return 60; }      // 底部导航高
-    static int LeftW() { return 250; }       // 左栏宽
-    static int ChatW() { return 242; }       // 聊天区宽
-    static int MainX() { return 251; }       // 主区左边界
-    static int MainW() { return 753; }       // 主区宽
+    /* ---- 窗口 ---- */
+    static int WindowW() { return 1244; }        // 客户区宽（原版实测 1866/1.5）
+    /// 客户区高 = 内容 610 + 自绘标题栏 32，再让出 17：卡阵块在主区里居中后
+    /// 上下留白 57 设备像素，比左右（44）多，收掉这 17 逻辑像素两边才相等
+    /// （用户：「整个窗口高度应该可以缩小一点，元素整体上收」）。
+    static int WindowH() { return 625; }
+    static int ContentH() { return 610; }        // 内容区高（原版 53..968 物理）
+    /// 内容区顶端到第 1 行瓦片的留白。与瓦片行间距（NavRowGap）同值：顶栏
+    /// 上下的留白才一致——原来这里是 0（瓦片直接贴标题栏），下面却空 13
+    /// 逻辑像素，用户点名「按钮贴顶、下面反而有间距，上下间距要一致」。
+    static int ContentTopPad() { return NavRowGap(); }
+
+    /* ---- 分区 ----
+       实测（2026-09 二次精测，原图 1871×971，内容原点 = 物理 53，÷1.5）：
+         顶栏两行瓦片 y 0..67.3，其后 6.7 空白，主体自 y 74 起
+         左栏面板 x 2.7..250（底色 #171e29，与窗口底 #243040 不同）
+         主区   x 250.7..993.3
+         聊天   x 993.3..1229.3（满高 0..610，右侧余 14.7 窗口底）*/
+    static int TopH() { return NavTileH() * 2 + NavRowGap() + NavBandPad(); }
+    static int NavBandPad() { return Px(4); }     // 瓦片行下沿到主体的空白（69.7→74）
+    static int LeftPad() { return Px(3); }        // 左栏面板左缘
+    static int LeftW() { return Px(247); }        // 左栏面板宽（3..250）
+    static int MainX() { return Px(251); }        // 主区左边界
+    static int ChatW() { return Px(236); }        // 聊天面板宽
+    static int ChatPadR() { return Px(15); }      // 聊天面板右侧的窗口底
+
+    /* ---- 顶部导航（逐格实测 x/w，见 data/navigation.csv）----
+       CSV 的 x = 瓦片**外框**左缘、w = **外框**宽（边框画在盒内，所以外框
+       就是盒子的宽，不要再 +2）。外框宽实测：141/141/111/156/111/111/
+       137/141/137/141 物理 → 94/94/74/104/74/74/91/94/91/94 逻辑。 */
+    static int NavTileW(int w) { return Px(w); }
+    static int NavTileH() { return Px(33); }       // 外框高 32.7
+    static int NavRowGap() { return Px(4); }       // 两行间隙：行顶 0 与 36.7 → 33 高的瓦片间 3.7
+    static int NavIconW() { return Px(19); }       // 图标 18.7 宽
+    static int NavIconH() { return Px(21); }       // 图标 20.7 高
+    static int NavIconInset() { return Px(9); }    // 图标距瓦片左 9.4
+    static int NavPadY() { return Px(5); }         // 瓦片内上下留白
+    static int NavGearW() { return Px(31); }       // 右上角设置齿轮格宽
+    static int NavGearX() { return Px(955); }      // 齿轮外框左缘（实测）
+
+    /// 顶栏瓦片左缘的整行平移：原版第 1 格实测 x=11，比它正下方的左栏
+    /// 面板左缘（LeftPad=3）缩进 8 逻辑像素。用户明确要求「按钮左移，
+    /// 与下面的最左侧对齐」（原版这条缝本来就看着不齐），故整行左移 8；
+    /// 瓦片宽、格间隙仍取实测值，只有这一行的起点偏离原图。
+    static int NavRowShift() { return Px(11) - LeftPad(); }
+    /// CSV 实测 x → 实际落位 x（顶栏两行与右上角齿轮都过这里）。
+    static int NavX(int csvX) { return Px(csvX) - NavRowShift(); }
+
+    /* ---- 底部导航带 ----
+       底排瓦片骑在主体下半部：外框 y 564.7..597.3（高 32.7），其下 12.7
+       到内容区底。逐格实测外框宽 [68.7,88,87.3,68.7×7]→填充 = 外框−2。 */
+    static int BotTileRowH() { return NavTileH(); }      // 与顶栏同高
+    /// 瓦片行下沿到内容区底的留白。与 ContentTopPad/NavRowGap 同值，整幅
+    /// 界面的竖向节奏才是一个间距（用户：「上下间距要一致，最好和按钮之间
+    /// 的间距也统一」）。原版这里是 12.7 逻辑，按用户要求收紧到同一档。
+    static int BotTileBottom() { return NavRowGap(); }
+    static int BotTileInset() { return Px(3); }          // 瓦片行距主区左缘
+    static int BotTileGap() { return Px(4) / 3; }        // 相邻瓦片间隙 1.33
+
+    /* 底栏左簇（左栏内，贴内容区底） */
+    static int BotStatBtnX() { return Px(7); }      // 战斗统计外框左 6.7
+    static int BotStatBtnW() { return Px(79); }     // 外框宽 78.7
+    static int BotStatBtnH() { return Px(21); }     // 外框高 21.3
+    static int BotStatBottom() { return Px(5); }    // 按钮下沿到内容区底
+    static int BotStatusX() { return Px(171); }     // 「状态: 空闲中」左 170.7
+    static int BotStatusW() { return Px(70); }      // 实测字宽 105 物理 / 1.5 = 70
+    static int ChatSendH() { return Px(21); }       // 聊天输入行高（与左簇同高）
+
+    /* ---- 左栏（角色信息）----
+       实测（原图 x 4..375 物理，内容 y (y−53)/1.5）：
+         头像块 y 85.3..146（头像 64×57 逻辑，左 16）
+         经验行 y 152..176（条 82..302 物理、升级钮 206..238）
+         数值区 y 176..296（5 行 × 24：181/205/229/253/277 起字）
+         分隔线 y 305.3 与 y 578.7
+         信息流 y 306..578.7
+         底簇 y 578.7..610（战斗统计钮 583.3..604.7） */
+    static int HeroHeadH() { return Px(72); }      // 面板顶 → 头像块底（74→146）
+    static int HeroTopPad() { return Px(11); }     // 头像块上留白
+    static int HeroPadL() { return Px(13); }       // 面板内左留白（文字左 16）
+    static int HeroAvatarW() { return Px(64); }    // 头像 96 物理宽
+    static int HeroAvatarH() { return Px(57); }    // 头像 85 物理高
+    static int HeroTextGap() { return Px(11); }    // 头像到右侧文字的间距
+    static int HeroNameH() { return Px(19); }      // 名字行
+    static int HeroKvH() { return Px(19); }        // 称谓/行会行
+    static int ExpRowH() { return Px(30); }        // 经验行总高（146..176）
+    static int ExpLabelW() { return Px(39); }      // 「经验：」列宽
+    static int ExpBarW() { return Px(147); }       // 经验条 82..302 物理
+    static int ExpBarH() { return Px(15); }        // 条高
+    static int LvUpW() { return Px(32); }          // 升级钮宽
+    static int LvUpH() { return Px(19); }          // 升级钮高
+    static int StatRowH() { return Px(24); }       // 数值行行距（5 行）
+    static int StatColW() { return Px(117); }      // 右列（声望/战功…）起点
+    static int StatLabelW() { return Px(37); }     // 每格「生命：」三字列宽
+    static int BtnH() { return Px(19); }           // 小按钮高（升级/每日福利…）
+    static int SepH() { return Px(9); }            // 数值区到分隔线
+    static int QuickTop() { return Px(2); }        // 侧栏底簇：分隔线上的留白
+    static int QuickBtnH() { return Px(24); }      // 每日福利/充值/刷新 行高
+    static int QuickBtnW() { return Px(65); }      // 每日福利钮宽（178..243）
+    static int QuickBtn2W() { return Px(28); }     // 充值/刷新钮宽
 
     /* ---- 配色（原版实拍取样）---- */
     // 窗口底色：瓦片直接坐在它上面，无独立底板
@@ -40,17 +141,24 @@ class Spec {
     static string NavText() { return "#00a8f0"; }
 
     /* ---- 地图传送页（页 0）---- */
-    static int MapCardW() { return 160; }    // = 地图素材原始宽
-    static int MapCardH() { return 70; }     // = 地图素材原始高
-    static int MapColGap() { return 20; }
-    static int MapRowGap() { return 15; }
+    static int MapCardW() { return Px(160); }    // = 地图素材原始宽
+    static int MapCardH() { return Px(70); }     // = 地图素材原始高
+    static int MapColGap() { return Px(20); }
+    static int MapRowGap() { return Px(15); }
     static int MapCols() { return 4; }
     static int MapRows() { return 5; }
     static int MapPerPage() { return 20; }
-    static int MapOriginX() { return 271; }  // 卡阵起点（含主区左边距）
-    static int MapOriginY() { return 128; }
+    /// 卡阵外框最小留白（上下左右同一个值）——用户要求「整个外部有一个
+    /// 等边框」：卡阵与页码块整体在主区里居中，四边留白不小于这个数。
+    static int MapMargin() { return Px(20); }
+    /* 原版实测卡阵原点（内容区相对）：x 271 含主区左边距，y 128。
+       271 = 主区 743 里 700 宽的卡阵居中（左右各 21.5）；页内实际落位
+       由 PageMap 按「居中 + 等留白」算，这两个值只作对照与下限。 */
+    static int MapOriginX() { return Px(271); }
+    static int MapOriginY() { return Px(128); }
 
-    /* ---- 页码方块 ---- */
-    static int PagerSize() { return 26; }
-    static int PagerGap() { return 8; }
+    /* ---- 页码 ----
+       用标准库 Pagination 组件（用户：「分页有分页组件」，不再自绘数字方块）。
+       组件高度 = 主题 heightMedium（Theme.zan = 34 逻辑），块高按它预算。 */
+    static int PagerH() { return Px(34); }
 }

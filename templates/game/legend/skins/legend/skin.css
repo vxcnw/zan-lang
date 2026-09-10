@@ -22,9 +22,9 @@
  --border-radius-small: 0;
  --border-radius-medium: 0;
  --border-radius-large: 0;
- --font-size-tiny: 12;
+ --font-size-tiny: 11;
  --font-size-small: 13;
- --font-size-medium: 14;
+ --font-size-medium: 13;
  --font-size-large: 16;
  --font-size-huge: 20;
 
@@ -56,26 +56,73 @@
 }
 
 /* ===================== 全局骨架 ===================== */
-.legend-root { background: #24303e; }
+.legend-root { background: #243040; }
 grid { column-gap: 0; row-gap: 0; padding: 0; }
 progress { font-size: var(--font-size-tiny); }
 image { background: transparent; border-width: 0; }
 
-.page-surface, .battlefield { background: #1e2633; }
-.sidebar, .profile, .feed, .chat-panel, .rank-panel {
-    background: #171e29; border: 1px var(--border-primary); }
+.page-surface, .battlefield { background: #1d2633; }
+/* 左栏与聊天面板是同一种更深的底（实测 #171e29），与主区 #1d2633 明显分开。 */
+.sidebar, .profile, .hero-feed, .feed, .chat-panel, .rank-panel {
+    background: #171e29; border: 1px #272e38; }
 .frame { background: var(--bg-surface); border: 1px #256489; }
 
-/* ===================== 顶部/底部导航 ===================== */
+/* ===================== 左栏「角色信息」=====================
+   逐项实测（原图 ÷1.5）：头像 64×57、三行 19、经验条 147×12、
+   数值 5 行 × 24（左列字起 16、右列字起 133）、分隔线 #2a3348。
+   字号：数值 12（= --font-size-tiny）、导航 14（= --font-size-medium）——
+   主题字号会随 DPI 放大，所以这里只挑语义档，不写死像素。 */
+.hero-head, .hero-exp, .hero-grid, .hero-row, .hero-quick,
+.exp-box, .side-sep, .hero-feed { background: transparent; border-width: 0; }
+.hero-name { color: #ffff00; font-size: var(--font-size-medium); }
+.hero-kv { color: #a4a5a7; font-size: var(--font-size-tiny); }
+.hero-vv { color: #ffffff; }
+.el-exp { color: #d805db; font-size: var(--font-size-tiny); }
+.kv-hp { color: #f57c02; }
+.kv-fame { color: #7bd702; }
+.kv-mp { color: #0476db; }
+.kv-merit { color: #04d9db; }
+.kv-lv { color: #d870a7; }
+.kv-spirit { color: #7e7efb; }
+.kv-gold { color: #d8d907; }
+.kv-yuan { color: #fd00fd; }
+.side-sep { background: #2a3348; }
+.hero-feed-text { color: #cfd3d8; font-size: var(--font-size-tiny); }
+/* 经验条：条内压数值（居中），与原版一致。 */
+.exp-box { position: relative; align-items: center; }
+.exp-over { color: #ffffff; font-size: var(--font-size-tiny);
+    position: absolute; left: 0; right: 0; text-align: center; }
+progress { background: #2a394d; border: 1px #1f2937; }
+progress::fill { background: #2a394d; }
+
+/* 左栏小按钮（升级 / 每日福利 / 充值 / 刷新）：19 高、12 号字。
+   尺寸一律走代码侧 Spec.Px（CSS 的 width/height 是**设备像素**，不随
+   DPI 缩放，写在这里会让 150% 屏上的按钮缩水）。 */
+.level-up, .daily, .recharge, .refresh { font-size: var(--font-size-tiny); }
+
+/* ===================== 顶部/底部导航 =====================
+   实测（REFERENCE_AUDIT.md §一）：瓦片底色 #1f2936、边框 #3f4a57、
+   文字 #00aeff 字号 14。当前页原版**没有**高亮（实测三项完全一致），
+   `.navtile-active` 是我们自己补的选中反馈（用户拍板可加）。 */
+.nav-band, .nav-band-bottom, .nav-row { background: transparent; border-width: 0; }
 .navtile { display: flex; flex-direction: row; align-items: center;
-    background: #1f2936; border: 1px #444e5c; border-radius: 0; }
-.navtile:hover { background: #26374a; border-color: var(--primary); }
+    justify-content: center;   /* 图标+文字整组居中（原版实测如此） */
+    background: #1f2936; border: 1px #3f4a57; border-radius: 0; }
+.navtile:hover { border-color: var(--primary); }
+/* 选中态：只换边框 + 提亮底色，字号/字色不动（避免文字宽度跳变）。 */
+.navtile-active { background: #2b3f57; border-color: #00aeff; }
 .navicon { flex-shrink: 0; }
-.navtext { flex: 1 1 0; min-width: 0; color: #00a8f0; font-size: var(--font-size-tiny); }
-.navtile-active { background: #26374a; border-color: #bda36a; }
-.navtile-active .navtext { align-self: center; color: #f1d592; }
-.navigation-grid { column-gap: 4px; row-gap: 4px; }
-.bottom-nav { background: transparent; border: 1px transparent; }
+/* flex: 0 1 auto —— 标签按自身文字宽度，不参与分配剩余空间；剩余空间留给
+   瓦片里前后两个 Grow 撑条，图标+文字才是整组居中（写成 flex:1 会让标签
+   抢走三分之一的余量，整组被推到左边）。 */
+.navtext { flex: 0 1 auto; min-width: 0; color: #00aeff; font-size: var(--font-size-medium); }
+/* 底栏左簇：战斗统计按钮与瓦片同框，状态文字是黄绿色（实测 #d8d907）。 */
+.bot-stat-row { background: transparent; border-width: 0; }
+.bot-stat { background: #1f2936; border: 1px #3f4a57; border-radius: 0;
+    color: #00aeff; font-size: var(--font-size-medium); }
+.bot-stat:hover { border-color: var(--primary); }
+/* 状态文字实测 105 物理宽 / 6 字 = 17.5 → 是 tiny 档，不是 medium。 */
+.bot-status { color: #d8d907; font-size: var(--font-size-tiny); }
 
 /* ===================== 通用颜色/字号 ===================== */
 .yellow { color: var(--game-yellow); }
@@ -97,9 +144,11 @@ image { background: transparent; border-width: 0; }
 .battle-title { font-size: var(--font-size-huge); font-weight: 700; color: var(--game-orange); }
 .align-start { align-items: flex-start; }
 
-/* ===================== 通用按钮 ===================== */
+/* ===================== 通用按钮 =====================
+   padding 是**设备像素**，故取最小档（原版按钮框就是紧贴文字的：
+   升级 32×19 装「升级」两字、每日福利 65×19 装四字）。 */
 button { color: var(--primary); background: #202c39; border: 1px var(--border-primary);
-    border-radius: 0; padding: 2px 4px; }
+    border-radius: 0; padding: 0 2px; }
 button.small { font-size: var(--font-size-medium); }
 button.tiny { font-size: var(--font-size-small); }
 /* 主按钮：橙黄渐变（升级/购买/挑战/开始） */
@@ -128,12 +177,12 @@ button.tiny { font-size: var(--font-size-small); }
 /* ===================== 地图传送页（页 0）=====================
    4 列 × 5 行 = 20 张地图卡。卡片 = 地图素材原始 160×70，
    列距 20、行距 15。图名压在卡片内上方居中（白字黑描边）。
-   左下角一行方页码，灰底灰框+蓝字，没有箭头/价格/转生档。 */
-.map-page { background: transparent; padding: 8px; }
+   页码走标准库 Pagination，样式见下方的说明。 */
+.map-page { background: transparent; padding: 0; }
 .map-wall { background: transparent; padding: 0; }
 .map-row { background: transparent; padding: 0; }
 .map-tile { background: #172330; border: 1px #3b4956; border-radius: 3px;
-    position: relative; width: 160px; height: 70px; padding: 0; overflow: hidden; }
+    position: relative; padding: 0; overflow: hidden; }
 .map-tile-here { border: 1px #5c8cb8; }
 .map-tile-open { border: 1px #4d7fa8; }
 .map-tile-open:hover { border: 1px #7fb0d8; }
@@ -142,11 +191,8 @@ button.tiny { font-size: var(--font-size-small); }
     position: absolute; top: 1px; left: 0; right: 0; text-align: center;
     text-shadow: 1px 1px 0 #000000, -1px -1px 0 #000000,
                  1px -1px 0 #000000, -1px 1px 0 #000000; }
-.map-pager { background: transparent; border-width: 0; padding: 0 0 0 4px; }
-.map-pageno { background: #202832; border: 1px #6b7581; color: #3fb7e8;
-    font-size: var(--font-size-small); align-items: center; text-align: center; }
-.map-pageno-on { background: #26313d; border: 1px #8a949f; color: #4fc8ff; }
-.map-pageno-text { color: #3fb7e8; font-size: var(--font-size-small); text-align: center; }
+/* 页码改用标准库 Pagination（用户：「分页有分页组件」），
+   .map-pager / .map-pageno* 那套自绘方块的样式已随代码删除。 */
 
 /* 场景页（幻境/秘境/BOSS之家/世界BOSS/押镖/挂机主界面） */
 .boss-scene { background: #0d131c; border: 1px #29323b; }

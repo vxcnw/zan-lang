@@ -1299,6 +1299,66 @@ static bool method_arity(zan_symbol_t *m, int *min, int *max) {
     return true;
 }
 
+/* Same test irgen's resolve_overload applies (irgen.c: method_accepts_arity):
+ * `argc` is the declared arity, or fewer arguments filling trailing defaults,
+ * or a `params` tail absorbing the rest. The `params`/extension declaration is
+ * exactly what method_arity cannot judge, so it is repeated here. */
+static bool method_accepts_argc(zan_symbol_t *m, int argc) {
+    int lo, hi;
+    if (method_arity(m, &lo, &hi)) return argc >= lo && argc <= hi;
+    if (!m->decl || m->decl->kind != AST_METHOD_DECL) return false;
+    zan_ast_list_t *ps = &m->decl->method_decl.params;
+    if (ps->count == 0) return false;
+    zan_ast_node_t *last = ps->items[ps->count - 1];
+    if (!last || last->kind != AST_PARAM || !last->param.is_params) return false;
+    return argc >= ps->count - 1;
+}
+
+static bool method_is_params_tail(zan_symbol_t *m) {
+    if (!m->decl || m->decl->kind != AST_METHOD_DECL) return false;
+    zan_ast_list_t *ps = &m->decl->method_decl.params;
+    if (ps->count == 0) return false;
+    zan_ast_node_t *last = ps->items[ps->count - 1];
+    return last && last->kind == AST_PARAM && last->param.is_params;
+}
+
+/* The same-named method a call with `argc` arguments can actually invoke.
+ * `checker_find_method` answers by name alone, so on a legal overload pair --
+ * `Panel StatCell(label, value, cls)` next to `Label StatCell(row, kw, cls,
+ * value, left)` on one class -- every call typed as the first-declared one and
+ * the assignment was rejected with a bogus "cannot convert 'Panel' to 'Label'"
+ * even though irgen's arity-aware resolve_overload picked the right target and
+ * emitted a correct call. Mirror that resolver step for step, so the type the
+ * checker computes can never disagree with the call irgen emits: within the
+ * most-derived type that supplies an arity match, an exact/default-filled
+ * overload beats a `params` tail, and only a level with no match at all
+ * descends to its base. The most-derived same-named method is kept as a
+ * fallback when nothing in the chain fits, so a genuinely wrong argument count
+ * is still reported by check_call_arity against a real signature. */
+static zan_symbol_t *checker_find_method_argc(zan_symbol_t *type_sym,
+                                              zan_istr_t name, int argc) {
+    zan_symbol_t *fallback = NULL;
+    for (zan_symbol_t *s = type_sym; s;
+         s = (s->type && s->type->base_type) ? s->type->base_type->sym : NULL) {
+        zan_symbol_t *variadic = NULL;
+        for (int i = 0; i < s->member_count; i++) {
+            zan_symbol_t *m = s->members[i];
+            if (!m || m->kind != SYM_METHOD || m->name.len != name.len ||
+                memcmp(m->name.str, name.str, (size_t)name.len) != 0)
+                continue;
+            if (!fallback) fallback = m;
+            if (!method_accepts_argc(m, argc)) continue;
+            if (method_is_params_tail(m)) {
+                if (!variadic) variadic = m;
+                continue;
+            }
+            return m;
+        }
+        if (variadic) return variadic;
+    }
+    return fallback;
+}
+
 /* Reject a call that passes the wrong number of arguments. Without this the
  * mismatch survived every source-level phase and only turned up as an LLVM
  * verifier failure ("Incorrect number of arguments passed to called
@@ -2057,8 +2117,9 @@ zan_type_t *zan_checker_check_expr(zan_checker_t *c, zan_ast_node_t *expr) {
         if (expr->call.callee && expr->call.callee->kind == AST_MEMBER_ACCESS) {
             recv = zan_checker_check_expr(c, expr->call.callee->member.object);
             if (recv && recv->sym) {
-                zan_symbol_t *m = checker_find_method(recv->sym,
-                                                      expr->call.callee->member.name);
+                zan_symbol_t *m = checker_find_method_argc(
+                    recv->sym, expr->call.callee->member.name,
+                    expr->call.args.count);
                 if (m && m->kind == SYM_METHOD) {
                     /* the unresolved path below reports through
                      * check_member_access, so report here only for the
@@ -2094,11 +2155,27 @@ zan_type_t *zan_checker_check_expr(zan_checker_t *c, zan_ast_node_t *expr) {
         if (!called_sym && expr->call.callee &&
             expr->call.callee->kind == AST_IDENTIFIER)
             called_sym = zan_binder_lookup(c->binder, expr->call.callee->ident.name);
-        if (!called_sym && expr->call.callee &&
-            expr->call.callee->kind == AST_IDENTIFIER &&
-            c->current_type_sym)
-            called_sym = checker_find_method(c->current_type_sym,
-                                             expr->call.callee->ident.name);
+        /* A same-class call by bare name, on an overloaded method. The scope
+         * lookup (and checker_find_method below it) hands back the
+         * first-declared method of that name whatever the argument count, so a
+         * call that cannot possibly invoke it is re-resolved by arity against
+         * the enclosing type -- otherwise the call is typed by an overload the
+         * emitted code does not call (`Label StatCell(row, kw, cls, v, left)`
+         * rejected because the first-declared `Panel StatCell(label, value,
+         * cls)` does not take five arguments). A symbol the lookup found that
+         * does accept the count, or one that is not a method at all (a
+         * delegate-typed local shadowing the name), is left alone, and the
+         * re-resolution only overwrites when it actually found something. */
+        if (expr->call.callee && expr->call.callee->kind == AST_IDENTIFIER &&
+            c->current_type_sym &&
+            (!called_sym || (called_sym->kind == SYM_METHOD &&
+                             !method_accepts_argc(called_sym,
+                                                  expr->call.args.count)))) {
+            zan_symbol_t *resolved = checker_find_method_argc(
+                c->current_type_sym, expr->call.callee->ident.name,
+                expr->call.args.count);
+            if (resolved) called_sym = resolved;
+        }
         c->last_call_node = expr;
         c->last_call_method = called_sym;
         check_call_arity(c, expr, recv);

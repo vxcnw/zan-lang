@@ -28,6 +28,11 @@ partial class LegendApp {
     /* ---- 页面状态 ---- */
     int page = 0;
     int mapPage = 0;       // 地图传送页当前页码
+    /* 上一帧的客户区尺寸：变了就整页重建。页面里的居中留白是按画布算的，
+       而 SetClientSize 只是把请求交给窗口，画布要到处理完 resize 才更新
+       ——启动时那次 BuildPage 读到的是初值，卡阵会被顶到左上角。 */
+    int lastClientW = -1; int lastClientH = -1;
+    int lastNetKey = -1;   // 联机数据版本：变了才整页重建（旧版心跳逻辑）
     long lastTick; long lastSave;
 
     /* ---- 左栏控件（每帧刷新）---- */
@@ -58,7 +63,7 @@ partial class LegendApp {
         string dataDir = KnownFolders.GetEnv("LEGEND_DATA_DIR");
         if (dataDir.Length == 0) { dataDir = "data"; }
         GameTables.Initialize(dataDir);
-        navigationData = DataTable.Load(dataDir + "/navigation.csv", "id:0:30,name,icon,label");
+        navigationData = DataTable.Load(dataDir + "/navigation.csv", "id:0:30,name,icon,label,x,w");
         saves = new SaveStore(SaveStore.DefaultPath());
         long now = DateTime.UtcNow().epoch;
         g = saves.Read(now); lastTick = now; lastSave = now;
@@ -66,23 +71,65 @@ partial class LegendApp {
 
         form = Form.CreateDark("迷你传奇", Spec.WindowW(), Spec.WindowH());
         app = form.GetApp(); net.Attach(app);
+        /* DPI：窗口客户区要正好等于「设计尺寸 × 设备缩放」，否则界面会
+           在 150% 屏上按 1:1 铺进 1.5 倍的画布（所有控件缩成 2/3，实测
+           瓷砖 94 逻辑画成 93 设备像素，而原版是 141）。SetClientSize 收
+           逻辑像素、内部按真实 DPI 换算，Spec 则把实测逻辑值乘回设备像素。
+
+           顺序有讲究：Prefer()/Pad()/Gap() 存的是**设备像素**（不走
+           dpiScale），必须在建壳前就把 scale 定下来，否则 Spec 的量全
+           按 1:1 落笔。而 app.Scale(100) 在 Show() 之前恒等于构造默认
+           100（App.dpiScale 是 Show() 里才读的设备值），所以这里直接问
+           Canvas.GetDpiScale()，它在窗口创建前后都返回同一个设备值。 */
+        Spec.SetDpi(Canvas.GetDpiScale());
+        app.SetClientSize(Spec.WindowW(), Spec.WindowH());
         app.UseSkin("legend"); app.SetBackdropFx(false);
 
         BuildShell();
         BuildPage();
         Refresh();
-        ConnectPublished(dataDir);
+        if (KnownFolders.GetEnv("LEGEND_OFFLINE").Length > 0) {
+            /* 离线壳：LEGEND_OFFLINE=1 时不拨号（UI 自动化回归与
+               无服务器试玩走这条路），窗口标题标明离线。 */
+            form.SetTitle("迷你传奇 · 离线");
+        } else {
+            ConnectPublished(dataDir);
+        }
 
         form.Every(120, () => {
             try { net.PollHttp(); } catch (Exception) { }
+            try {
+                if (app.ClientWidth() != lastClientW
+                    || app.ClientHeight() != lastClientH) {
+                    /* 先重建再记尺寸：重建抛异常时尺寸不会被记下，下一个
+                       刻度还会再试——记在重建之前会让这次失败被永久吞掉，
+                       窗口停在不居中（甚至缩成半屏）的旧布局上。 */
+                    BuildPage();
+                    Refresh();
+                    lastClientW = app.ClientWidth();
+                    lastClientH = app.ClientHeight();
+                }
+            } catch (Exception) { }
         });
         form.Every(1000, () => {
             try {
+                if (KnownFolders.GetEnv("LEGEND_DBG").Length > 0) {
+                    File.WriteAllText("dbg.txt", "client=" + Rules.N(app.ClientWidth()) + "x" + Rules.N(app.ClientHeight())
+                        + " dpi=" + Rules.N(app.Scale(100)) + " contentTop=" + Rules.N(app.ContentTop()));
+                }
                 long t = DateTime.UtcNow().epoch;
                 long dt = t - lastTick; lastTick = t;
                 if (dt > 0 && !net.InWorld()) {
                     int secs = dt > 3600 ? 3600 : (int)dt;
                     g.Advance(secs, t);
+                } else {
+                    net.DemoRound();
+                }
+                /* 联机数据变了（服务端异步回报/Bump）就整页重建，内页
+                   才能跟上挑战/扫荡/挂机的结果。 */
+                if (net.InWorld() && net.DataVersion() != lastNetKey) {
+                    lastNetKey = net.DataVersion();
+                    BuildPage();
                 }
                 if (t - lastSave >= 15) { Save(); }
                 Refresh();
@@ -99,14 +146,29 @@ partial class LegendApp {
     void Save() { if (g != null && saves != null) { saves.Write(g, DateTime.UtcNow().epoch); lastSave = DateTime.UtcNow().epoch; } }
 
     // =====================================================================
-    //  窗口框架：顶部导航 / 左栏 / 主区 / 聊天区 / 底部导航
+    //  窗口框架：顶部导航 / 左栏 / 主区 / 聊天区 / 底部导航带
     //
-    //  照原版分区（Spec 里是实测值）：
-    //    顶部导航 2 行瓦片 → 左栏 250 + 主区 753 + 聊天区 242 → 底部导航
+    //  照原版分区（Spec 里是实测值，y 一律「内容区相对」）：
+    //    顶部导航 2 行瓦片 y 0..66 → 左栏 250 + 主区 753 + 聊天区 242
+    //    → 底部：左簇（战斗统计/状态）y 583，主区瓦片行 y 565，聊天输入 y 583
+    //
+    //  两条容易搞错的实测事实（见 REFERENCE_AUDIT.md §一）：
+    //   · 瓦片宽度随文字自适应，每格 x/w 都不同 → 逐格读 navigation.csv，
+    //     不能用等分 Grow()；
+    //   · 底栏瓦片行比左栏底边（y 578.7）还高 13，所以它**不能**塞进中段
+    //     里当普通行——左栏要一直铺到 578.7，瓦片行叠在它下半部。
     // =====================================================================
     void BuildShell() {
         root = Panel.Root("legend-root"); root.Pad(0); root.DockFill();
+        /* 内容区顶端到第 1 行瓦片的留白 = 瓦片行间距（Spec.ContentTopPad）：
+           顶栏上下的留白一个值，下面不再比上面空。 */
+        root.Padding(Spec.ContentTopPad(), 0, 0, 0);
         root.Class = "legend-root"; form.Add(root);
+
+        /* 右侧先让出 15 逻辑像素的窗口底（原版聊天面板没顶到右缘），
+           再放聊天面板——它满高，盖住顶栏两行瓦片的右端。 */
+        Panel chatPad = Panel.Row(); chatPad.Prefer(Spec.ChatPadR(), 0);
+        chatPad.DockRight(); root.Add(chatPad);
 
         chatPanel = Panel.Column(); chatPanel.Class = "chat-panel";
         chatPanel.Prefer(Spec.ChatW(), 0); chatPanel.DockRight();
@@ -115,46 +177,133 @@ partial class LegendApp {
         mainCol = Panel.Column(); mainCol.Pad(0); mainCol.Gap(0);
         mainCol.DockFill(); root.Add(mainCol);
 
-        /* 顶部导航：2 行 × 10 格（原版 20 格 + 行末齿轮）。 */
-        Panel topNav = Panel.Column(); topNav.Class = "nav-band"; topNav.Pad(0); topNav.Gap(0);
+        /* 顶部导航：2 行 × 10 格 + 第 1 行行末的设置齿轮。 */
+        Panel topNav = Panel.Column(); topNav.Class = "nav-band";
+        topNav.Pad(0); topNav.Gap(Spec.NavRowGap());
         topNav.Prefer(0, Spec.TopH()); mainCol.With(topNav);
-        for (int r = 0; r < 2; r = r + 1) {
-            Panel row = Panel.Row(); row.Class = "nav-row"; row.Pad(0); row.Gap(0);
-            row.Grow(); topNav.With(row);
-            for (int c = 0; c < 10; c = c + 1) {
-                int n = r * 10 + c;
-                row.With(NavTile(n));
-            }
-        }
+        topNav.With(NavRow(0));
+        topNav.With(NavRow(1));
+        /* 瓦片行下沿到主体之间的空白，用一条撑条把 topNav 撑到 TopH。 */
+        Panel navTail = Panel.Column(); navTail.Grow(); topNav.With(navTail);
 
-        /* 中段：左栏 + 主区。 */
+        /* 中段：左栏（含底簇）+ 主区（含底瓦片行）。 */
         Panel body = Panel.Row(); body.Gap(0); body.Grow(); mainCol.With(body);
+        body.With(SpacerW(Spec.LeftPad()));
         Panel sidebar = Panel.Column(); sidebar.Class = "sidebar";
         sidebar.Prefer(Spec.LeftW(), 0); sidebar.Gap(0); body.With(sidebar);
         BuildProfile(sidebar);
-        content = Panel.Column(); content.Class = "page-surface";
-        content.Pad(0); content.Gap(0); content.Grow(); body.With(content);
+        BuildBottomLeft(sidebar);
 
-        /* 底部导航：1 行 × 10 格。 */
-        Panel botNav = Panel.Row(); botNav.Class = "nav-band nav-band-bottom";
-        botNav.Pad(0); botNav.Gap(0); botNav.Prefer(0, Spec.BottomH());
-        botNav.DockBottom(); mainCol.Add(botNav);
-        for (int i = 20; i < 30; i = i + 1) { botNav.With(NavTile(i)); }
+        Panel right = Panel.Column(); right.Gap(0); right.Grow(); body.With(right);
+        Panel tileStrip = Panel.Column(); tileStrip.Pad(0); tileStrip.Gap(0);
+        tileStrip.Prefer(0, Spec.BotTileRowH() + Spec.BotTileBottom());
+        /* 底瓦片行贴内容区底：必须用 DockBottom（dock=2），不能用 With
+           （dock=1）。停靠容器是「先按顺序摆 1..4，再摆 5」——content 是
+           Grow()（dock=5），若靠 With 追加，瓦片行会被摆到它的**上面**，
+           整个底栏跑到主区顶部去（实测踩过）。 */
+        tileStrip.DockBottom(); right.Add(tileStrip);
+        tileStrip.With(BottomTileRow());
+        Panel tilesFill = Panel.Row(); tilesFill.Grow(); tileStrip.With(tilesFill);
+        content = Panel.Column(); content.Class = "page-surface";
+        content.Pad(0); content.Gap(0); content.Grow(); right.With(content);
     }
 
-    /* 一个导航瓦片：圆形图标 + 文字（原版无底板，字为青色）。 */
+    /* 一行顶部导航瓦片：按实测 x/w 逐格落位（间隙用空白撑开）。
+       左端整体左移（Spec.NavX）：原版第 1 格 x=11 比它正下方的左栏面板
+       左缘（LeftPad=3）缩进 8 逻辑像素，用户要求「按钮左移，与下面的最
+       左侧对齐」——瓦片宽与格间隙仍是实测值，只有这一行的起点改过。 */
+    Panel NavRow(int r) {
+        Panel row = Panel.Row(); row.Class = "nav-row"; row.Pad(0); row.Gap(0);
+        row.Prefer(0, Spec.NavTileH());
+        int prev = 0;
+        for (int c = 0; c < 10; c = c + 1) {
+            int n = r * 10 + c;
+            int x = Spec.NavX(navigationData.At(n).Int("x"));
+            int gap = x - prev;
+            if (gap > 0) { row.With(SpacerW(gap)); }
+            row.With(NavTile(n));
+            prev = x + Spec.NavTileW(navigationData.At(n).Int("w"));
+        }
+        if (r == 0) {
+            /* 右上角设置齿轮（= 页 30），右缘与第 2 行末格对齐。 */
+            int gx = Spec.NavX(navigationData.At(30).Int("x"));
+            int gap = gx - prev;
+            if (gap > 0) { row.With(SpacerW(gap)); }
+            row.With(NavTile(30));
+        }
+        return row;
+    }
+
+    /* 一行底部导航瓦片：x 是整窗坐标，主区列起点在 250，故减去左栏区宽。 */
+    Panel BottomTileRow() {
+        Panel row = Panel.Row(); row.Class = "nav-row"; row.Pad(0); row.Gap(0);
+        row.Prefer(0, Spec.BotTileRowH());
+        int prev = 0;
+        for (int i = 20; i < 30; i = i + 1) {
+            int x = Spec.Px(navigationData.At(i).Int("x")) - Spec.LeftPad() - Spec.LeftW();
+            int gap = x - prev;
+            if (gap > 0) { row.With(SpacerW(gap)); }
+            row.With(NavTile(i));
+            prev = x + Spec.NavTileW(navigationData.At(i).Int("w"));
+        }
+        return row;
+    }
+
+    /* 底栏左簇：左栏内贴内容区底，「战斗统计」+「状态: 空闲中」。 */
+    void BuildBottomLeft(Panel side) {
+        Panel zone = Panel.Column(); zone.Pad(0); zone.Gap(0);
+        zone.Prefer(0, Spec.BotStatBtnH() + Spec.BotStatBottom());
+        /* DockBottom（dock=2）+ Add：With 会把 dock 改成 1，簇就贴到数值区
+           正下方而不是面板底（信息流是 Grow/dock=5，本来就被排到最后）。 */
+        zone.DockBottom(); side.Add(zone);
+        Panel row = Panel.Row(); row.Class = "bot-stat-row"; row.Pad(0); row.Gap(0);
+        row.Prefer(0, Spec.BotStatBtnH()); zone.With(row);
+        row.With(SpacerW(Spec.BotStatBtnX()));
+        row.With(BtnSized("战斗统计", "bot-stat", 79, 21, () => { Navigate(26); }));
+        row.With(SpacerW(Spec.BotStatusX() - Spec.BotStatBtnX() - Spec.BotStatBtnW()));
+        statusText = Text("状态：空闲中", "bot-status", 0);
+        statusText.Prefer(Spec.BotStatusW(), 0); row.With(statusText);
+        Panel fill = Panel.Row(); fill.Grow(); row.With(fill);
+        Panel tail = Panel.Column(); tail.Prefer(0, Spec.BotStatBottom()); zone.With(tail);
+    }
+
+    /* 一个导航瓦片：独有图标（page-NN.png）+ 文字（原版无底板，字为青色）。
+       原版的图标+文字是**整组居中**的（实测：地图传送 组宽 119 逻辑在 141
+       的框里左右各留 ~10；交易市场 组宽 119 在 127 的框里只剩 ~3——瓦片宽
+       是逐格给定的，不是文字撑出来的）。居中用 CSS 的 justify-content:
+       center，不要拿两个 Grow 撑条去凑：撑条本身也要吃一份 gap，四段之间
+       三条 9px 的缝把内容挤到溢出，标签反而被省略号截断（实测踩过）。 */
     Panel NavTile(int n) {
-        Panel b = Panel.Row(); b.Class = "navtile"; b.Pad(4); b.Gap(4);
-        b.Grow(); b.Named("nav-" + Rules.N(n));
+        bool iconOnly = navigationData.At(n).Text("label").Length == 0 || n == 30;
+        Panel b = Panel.Row(); b.Class = "navtile";
+        b.Pad(0); b.Gap(Spec.Px(6));
+        b.Prefer(Spec.NavTileW(navigationData.At(n).Int("w")), Spec.NavTileH());
+        b.Named("nav-" + Rules.N(n));
         Image icon = new Image(navigationData.At(n).Text("icon"), "", "contain");
-        icon.Class = "navicon"; icon.Prefer(28, 28); b.With(icon);
-        Label l = Text(navigationData.At(n).Text("label"), "navtext", 0);
-        l.Grow(); b.With(l);
+        icon.Class = "navicon"; icon.Prefer(Spec.NavIconW(), Spec.NavIconH());
+        b.With(icon);
+        if (!iconOnly) {
+            Label l = Text(navigationData.At(n).Text("label"), "navtext", 0);
+            b.With(l);
+        }
         int target = n;
         b.OnClick(() => { Navigate(target); });
         navTiles[n] = b;
         return b;
     }
+
+    /* 当前页瓦片加激活态。原版没有这个态（实测所有瓦片底色/边框/字色
+       三项完全一致），但按钮按下去没反馈不好用，故补一个克制的选中态：
+       只换边框与底色，不动字色。 */
+    void MarkNavActive() {
+        for (int i = 0; i < 31; i = i + 1) {
+            if (navTiles[i] == null) { continue; }
+            navTiles[i].Class = i == page ? "navtile navtile-active" : "navtile";
+        }
+    }
+
+    /* 布局用的空白撑条（原版是对齐到像素，不是等分）。 */
+    Panel SpacerW(int w) { Panel s = Panel.Row(); s.Prefer(w, 0); return s; }
 
     // =====================================================================
     //  通用小工厂（原版控件都在这三个里）
@@ -162,8 +311,14 @@ partial class LegendApp {
     /// 一行文字。cls 可空格分隔多个 CSS 类。
     /// size 只作语义映射（12 及以下 tiny、14 以下 small、16 以下 medium、
     /// 20 以下 large、其余 title），真实字号由 skin.css 决定 —— 页面里不写死像素。
+    /// size == 0 表示「字号交给 cls 自己定」，此时**不**追加尺寸类：追加了
+    /// 也没用，`.tiny .small …` 这些通用档在 skin.css 里排在 `.navtext`
+    /// `.hero-kv` 这些语义类之后，同优先级后者胜——结果全界面都是 tiny
+    /// （实测：导航字 19 设备像素/字 vs 原版 21，左栏 19 vs 18，标签全被
+    /// 省略号截断）。
     Label Text(string s, string cls, int size) {
         Label l = new Label(s);
+        if (size <= 0) { l.Class = cls; return l; }
         string sz = size <= 12 ? "tiny" : size <= 14 ? "small" : size <= 16 ? "medium" : size <= 20 ? "large" : "title";
         l.Class = cls.Length > 0 ? cls + " " + sz : sz;
         return l;
@@ -174,6 +329,14 @@ partial class LegendApp {
         Button b = new Button(s);
         if (cls.Length > 0) { b.Class = cls; }
         if (fn != null) { b.OnClick(fn); }
+        return b;
+    }
+
+    /// 定尺寸按钮。CSS 的 width/height 是设备像素（不随 DPI 缩放），
+    /// 所以尺寸一律在这里用 Spec.Px 落定——见 Spec 顶部 DPI 说明。
+    Button BtnSized(string s, string cls, int w, int h, Action fn) {
+        Button b = Btn(s, cls, fn);
+        b.Prefer(Spec.Px(w), Spec.Px(h));
         return b;
     }
 
@@ -190,8 +353,10 @@ partial class LegendApp {
 
     void BuildPage() {
         content.RemoveAll();
+        MarkNavActive();
         if (page == 0) { BuildMapTravel(); return; }
         if (page == 20) { BuildBag(); return; }
+        if (page == 31) { BuildMapInner(); return; }
         BuildPlaceholder();
     }
 

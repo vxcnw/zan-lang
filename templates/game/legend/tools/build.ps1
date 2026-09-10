@@ -9,7 +9,8 @@ if ($Output.StartsWith($template + [IO.Path]::DirectorySeparatorChar, [StringCom
 New-Item -ItemType Directory -Force -Path $Output | Out-Null
 $sources = @(
     'main.zan', 'Spec.zan', 'Tables.zan', 'Data.zan', 'Game.zan',
-    'Save.zan', 'Net.zan', 'Shell.zan', 'PageMap.zan', 'PageBag.zan'
+    'Save.zan', 'Net.zan', 'Shell.zan', 'PageMap.zan', 'PageMapInner.zan',
+    'PageBag.zan'
 ) | ForEach-Object { "$template/src/$_" }
 & $Compiler @sources --auto-stdlib -o "$Output/Legend.exe"
 if ($LASTEXITCODE -ne 0) { throw 'Legend compilation failed' }

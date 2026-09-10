@@ -6,90 +6,133 @@ using Legend;
 /// 左栏「角色信息」+ 右侧聊天区 + 底部状态行。
 /// 原版实测结构见 REFERENCE_AUDIT.md「左栏」一节。
 partial class LegendApp {
-    /* ---- 左栏 ---- */
+    /* ---- 左栏 ----
+       逐项实测（Spec 里的 Hero、Exp、Stat 一组 getter 的注释写了出处），全部按
+       「内容区相对逻辑像素」落位：整块不用 Gap 自适应，而是给出每段的
+       固定高度，这样行距才和原版一样是等距的。 */
     void BuildProfile(Panel side) {
         side.Class = "profile";
         JsonValue st = net.Self();
 
-        /* 头像 + 角色名（黄字）+ VIP。 */
-        Panel head = Panel.Row(); head.Class = "hero-head"; head.Pad(6); head.Gap(6);
-        head.Prefer(0, 72); side.With(head);
-        Image avatar = new Image("assets/show/00001.png", "角色", "cover");
-        avatar.Prefer(60, 60); head.With(avatar);
-        Panel headCol = Panel.Column(); headCol.Gap(2); headCol.Grow(); head.With(headCol);
+        /* 头像块：头像 64×57，右侧三行（名字/称谓/行会）与头像等高。 */
+        Panel head = Panel.Row(); head.Class = "hero-head";
+        head.Padding(Spec.HeroTopPad(), 0, 0, Spec.HeroPadL()); head.Gap(Spec.HeroTextGap());
+        head.Prefer(0, Spec.HeroHeadH()); side.With(head);
+        Image avatar = new Image("assets/show/02717.png", "角色", "cover");
+        avatar.Prefer(Spec.HeroAvatarW(), Spec.HeroAvatarH()); head.With(avatar);
+        Panel headCol = Panel.Column(); headCol.Gap(0); headCol.Grow(); head.With(headCol);
         string nm = st != null ? st.Str("name", "无名") : "无名";
-        heroName = Text(nm, "hero-name", 0); headCol.With(heroName);
-        heroTitle = Text("称谓：无", "hero-kv", 0); headCol.With(heroTitle);
-        heroGuild = Text("行会：无", "hero-kv", 0); headCol.With(heroGuild);
+        heroName = Text(nm, "hero-name", 0);
+        heroName.Prefer(0, Spec.HeroNameH()); headCol.With(heroName);
+        heroTitle = Text("称谓：无", "hero-kv", 0);
+        heroTitle.Prefer(0, Spec.HeroKvH()); headCol.With(heroTitle);
+        heroGuild = Text("行会：无", "hero-kv", 0);
+        heroGuild.Prefer(0, Spec.HeroKvH()); headCol.With(heroGuild);
 
-        /* 经验条 + 数值 + 升级钮。 */
-        Panel expRow = Panel.Row(); expRow.Class = "hero-exp"; expRow.Pad(6); expRow.Gap(4);
-        expRow.Prefer(0, 28); side.With(expRow);
-        expText = Text("经验：", "hero-label", 0); expRow.With(expText);
-        expBar = new Progress(0, 1); expBar.Prefer(0, 14); expBar.Grow(); expRow.With(expBar);
-        expRow.With(Btn("升级", "level-up", () => { }));
-        /* 数值栅格：两列。 */
-        Panel grid = Panel.Column(); grid.Class = "hero-grid"; grid.Pad(6); grid.Gap(4);
-        grid.Prefer(0, 176); side.With(grid);
-        Panel r1 = Panel.Row(); r1.Gap(4); r1.Grow(); grid.With(r1);
-        heroHp = Text("生命：0", "hero-kv", 0); heroHp.Grow(); r1.With(heroHp);
-        heroFame = Text("声望：0", "hero-kv", 0); heroFame.Grow(); r1.With(heroFame);
-        Panel r2 = Panel.Row(); r2.Gap(4); r2.Grow(); grid.With(r2);
-        heroMp = Text("法力：0", "hero-kv", 0); heroMp.Grow(); r2.With(heroMp);
-        heroMerit = Text("战功：0", "hero-kv", 0); heroMerit.Grow(); r2.With(heroMerit);
-        Panel r3 = Panel.Row(); r3.Gap(4); r3.Grow(); grid.With(r3);
-        heroLv = Text("等级：1级", "hero-kv", 0); heroLv.Grow(); r3.With(heroLv);
-        heroSpirit = Text("灵符：0", "hero-kv", 0); heroSpirit.Grow(); r3.With(heroSpirit);
-        Panel r4 = Panel.Row(); r4.Gap(4); r4.Grow(); grid.With(r4);
-        heroGold = Text("金币：0", "hero-kv", 0); heroGold.Grow(); r4.With(heroGold);
-        heroYuan = Text("元宝：0", "hero-kv", 0); heroYuan.Grow(); r4.With(heroYuan);
+        /* 经验行：「经验：」+ 条（数值压在条内居中）+ 升级钮。 */
+        Panel expRow = Panel.Row(); expRow.Class = "hero-exp";
+        expRow.Padding(0, Spec.Px(12), 0, Spec.HeroPadL()); expRow.Gap(0);
+        expRow.Prefer(0, Spec.ExpRowH()); side.With(expRow);
+        Panel expLabel = Panel.Row(); expLabel.Pad(0); expLabel.Prefer(Spec.ExpLabelW(), 0);
+        expRow.With(expLabel);
+        Label ek = Text("经验：", "el-exp", 0); ek.Grow(); expLabel.With(ek);
+        Panel barBox = Panel.Row(); barBox.Class = "exp-box";
+        barBox.Prefer(Spec.ExpBarW(), Spec.ExpBarH()); expRow.With(barBox);
+        expBar = new Progress(0, 1); expBar.Prefer(Spec.ExpBarW(), Spec.ExpBarH());
+        barBox.With(expBar);
+        expText = Text("0/0", "exp-over", 0); expText.Grow(); barBox.With(expText);
+        Panel expFill = Panel.Row(); expFill.Grow(); expRow.With(expFill);
+        expRow.With(BtnSized("升级", "level-up", 32, 19, () => { }));
 
-        /* 快捷按钮行。 */
-        Panel quick = Panel.Row(); quick.Class = "hero-quick"; quick.Pad(6); quick.Gap(4);
-        quick.Prefer(0, 28); side.With(quick);
-        quick.With(Btn("每日福利", "daily", () => { }));
-        quick.With(Btn("充值", "recharge", () => { }));
-        quick.With(Btn("刷新", "refresh", () => { BuildPage(); Refresh(); }));
+        /* 数值区：5 行 × 24；左列定宽 StatColW（右列正好起在第 133 逻辑像素），
+           第 4、5 行的右半是「每日福利 / 充值 刷新」——与数值行逐行对齐。 */
+        Panel grid = Panel.Column(); grid.Class = "hero-grid";
+        grid.Pad(0); grid.Gap(0);
+        grid.Prefer(0, Spec.StatRowH() * 5); side.With(grid);
+        Panel r1 = StatRow(grid);
+        heroHp = StatCell(r1, "生命：", "kv-hp", "0", true);
+        heroFame = StatCell(r1, "声望：", "kv-fame", "0", false);
+        Panel r2 = StatRow(grid);
+        heroMp = StatCell(r2, "法力：", "kv-mp", "0", true);
+        heroMerit = StatCell(r2, "战功：", "kv-merit", "0", false);
+        Panel r3 = StatRow(grid);
+        heroLv = StatCell(r3, "等级：", "kv-lv", "1级", true);
+        heroSpirit = StatCell(r3, "灵符：", "kv-spirit", "0", false);
+        Panel r4 = StatRow(grid);
+        heroGold = StatCell(r4, "金币：", "kv-gold", "0", true);
+        Panel q1 = Panel.Row(); q1.Grow(); q1.Gap(0); r4.With(q1);
+        Panel q1f = Panel.Row(); q1f.Grow(); q1.With(q1f);
+        q1.With(BtnSized("每日福利", "daily", 65, 19, () => { }));
+        Panel r5 = StatRow(grid);
+        heroYuan = StatCell(r5, "元宝：", "kv-yuan", "0", true);
+        Panel q2 = Panel.Row(); q2.Grow(); q2.Gap(Spec.Px(5)); r5.With(q2);
+        Panel q2f = Panel.Row(); q2f.Grow(); q2.With(q2f);
+        q2.With(BtnSized("充值", "recharge", 28, 19, () => { }));
+        q2.With(BtnSized("刷新", "refresh", 28, 19, () => { BuildPage(); Refresh(); }));
 
-        /* 信息滚动区。 */
-        Panel feedBox = Panel.Column(); feedBox.Class = "hero-feed"; feedBox.Pad(6); feedBox.Gap(2);
+        /* 分隔线 → 信息流（一直铺到底簇上沿）。 */
+        Panel sep = Panel.Row(); sep.Class = "side-sep";
+        sep.Prefer(0, Spec.SepH()); side.With(sep);
+        Panel feedBox = Panel.Column(); feedBox.Class = "hero-feed";
+        feedBox.Pad(0); feedBox.Gap(0);
         feedBox.Grow(); side.With(feedBox);
         newsFeed = Text("", "hero-feed-text", 0);
         newsFeed.Grow(); feedBox.With(newsFeed);
-
-        /* 底部状态行。 */
-        Panel foot = Panel.Row(); foot.Class = "hero-foot"; foot.Pad(6); foot.Gap(4);
-        foot.Prefer(0, 32); foot.DockBottom(); side.Add(foot);
-        foot.With(Btn("战斗统计", "statistics", () => { Navigate(26); }));
-        statusText = Text("状态：空闲中", "hero-kv", 0);
-        statusText.Grow(); foot.With(statusText);
     }
 
-    /* ---- 右侧聊天区 ---- */
+    /// 数值区一行（高 StatRowH；左右留白与经验行一致，行内两列对齐）。
+    Panel StatRow(Panel grid) {
+        Panel r = Panel.Row(); r.Class = "hero-row";
+        r.Padding(0, Spec.Px(7), 0, Spec.HeroPadL()); r.Gap(0);
+        r.Prefer(0, Spec.StatRowH()); grid.With(r);
+        return r;
+    }
+
+    /// 数值格：彩色标签（「生命：」）+ 白色数值。left=true 用定宽左列，
+    /// 否则占满余下宽度（右列的文字因此逐行对齐在 StatColW 处）。
+    Label StatCell(Panel row, string kw, string cls, string v, bool left) {
+        Panel cell = Panel.Row(); cell.Pad(0); cell.Gap(0);
+        if (left) { cell.Prefer(Spec.StatColW(), 0); } else { cell.Grow(); }
+        row.With(cell);
+        Label k = Text(kw, "hero-kv " + cls, 0);
+        k.Prefer(Spec.StatLabelW(), 0); cell.With(k);
+        Label val = Text(v, "hero-kv hero-vv", 0);
+        val.Grow(); cell.With(val);
+        return val;
+    }
+
+    /* ---- 右侧聊天区 ----
+       面板满高（内容 y 0..610）；底部输入行与左栏底簇同一水平线。 */
     Label chatText;
+    Panel chatPanel_;
     void BuildChat(Panel panel) {
-        panel.Class = "chat-panel"; panel.Pad(6); panel.Gap(4);
+        chatPanel_ = panel;
+        panel.Class = "chat-panel"; panel.Pad(Spec.Px(6)); panel.Gap(Spec.Px(4));
         chatText = Text("", "chat-text", 0);
         chatText.Grow(); panel.With(chatText);
-        Panel sendRow = Panel.Row(); sendRow.Gap(4); sendRow.Prefer(0, 28);
+        /* 输入行贴内容区底：尾部留白先加，后加的 DockBottom 才落在它上面
+           （停靠按加入顺序取剩余区）。 */
+        Panel tail = Panel.Column(); tail.Prefer(0, Spec.BotStatBottom());
+        tail.DockBottom(); panel.Add(tail);
+        Panel sendRow = Panel.Row(); sendRow.Class = "chat-send-row";
+        sendRow.Gap(Spec.Px(4)); sendRow.Prefer(0, Spec.ChatSendH());
         sendRow.DockBottom(); panel.Add(sendRow);
         Input box = new Input("说点什么"); box.Grow(); sendRow.With(box);
         sendRow.With(Btn("发送", "chat-send", () => { }));
     }
 
-    /* ---- 每帧刷新左栏数值 ---- */
+    /* ---- 每帧刷新左栏数值（标签是定色定宽的文字，只有数值段在变）---- */
     void Refresh() {
         JsonValue st = net.Self();
         if (st == null) { return; }
-        int hp = st.Int("hp", 0); int maxHp = st.Int("maxhp", 1);
-        if (heroHp != null) { heroHp.Text = "生命：" + Rules.N(hp); }
-        if (heroMp != null) { heroMp.Text = "法力：" + Rules.N(st.Int("mp", 0)); }
-        if (heroLv != null) { heroLv.Text = "等级：" + Rules.N(st.Int("level", 1)) + "级"; }
-        if (heroGold != null) { heroGold.Text = "金币：" + Rules.N(st.Int("gold", 0)); }
-        if (heroYuan != null) { heroYuan.Text = "元宝：" + Rules.N(st.Int("yuan", 0)); }
-        if (heroFame != null) { heroFame.Text = "声望：" + Rules.N(st.Int("fame", 0)); }
-        if (heroMerit != null) { heroMerit.Text = "战功：" + Rules.N(st.Int("merit", 0)); }
-        if (heroSpirit != null) { heroSpirit.Text = "灵符：" + Rules.N(st.Int("spirit", 0)); }
+        if (heroHp != null) { heroHp.Text = Rules.N(st.Int("hp", 0)); }
+        if (heroMp != null) { heroMp.Text = Rules.N(st.Int("mp", 0)); }
+        if (heroLv != null) { heroLv.Text = Rules.N(st.Int("level", 1)) + "级"; }
+        if (heroGold != null) { heroGold.Text = Rules.N(st.Int("gold", 0)); }
+        if (heroYuan != null) { heroYuan.Text = Rules.N(st.Int("yuan", 0)); }
+        if (heroFame != null) { heroFame.Text = Rules.N(st.Int("fame", 0)); }
+        if (heroMerit != null) { heroMerit.Text = Rules.N(st.Int("merit", 0)); }
+        if (heroSpirit != null) { heroSpirit.Text = Rules.N(st.Int("spirit", 0)); }
         if (heroName != null) { heroName.Text = st.Str("name", "无名"); }
         int exp = st.Int("exp", 0); int expNext = st.Int("expnext", 1);
         if (expBar != null) {
