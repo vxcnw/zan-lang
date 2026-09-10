@@ -96,6 +96,23 @@ powershell -File _scratch/recheck2.ps1 -OutDir D:/project/zan-lang/_scratch/shot
    全仓约定单行（separators=(',',':')）；pretty-print 过的 nutrients
    曾到 14.5 万行 1.17MB。改 option 用 Python json 重新序列化紧凑输出，
    diff 才能落在一行内可审。
+7. **ChartOption 新增列表字段要拷三处**：`Create()`、`Clone()` 之外还有
+   `ResolvedChart.DrawOption`（ChartResolved.zan 逐字段组装渲染用
+   option）——漏第三处的症状极阴险：解析探针（直接 FromJson 后读字段）
+   全对、渲染却回落缺省值。polar 落地时 angleAxes 漏拷 DrawOption，
+   startAngle=0 探针打印正常、渲染整图转 90°（ax=null 走缺省 90）。
+   新字段先 grep `o.polars = new List` 的三处落点再收工。
+8. **极坐标/新坐标系投影全程保持 ×1000 milliunit**：points 存的是
+   值×1000（pointG）。任何"先 PointV 除回整数再算"的写法都会双重
+   失真——量程推导把 0..0.5 的小数域炸成 0..5（line-polar2 花瓣缩成
+   点），角度 ×1000 当度数用再 mod 360 出锯齿螺旋（line-polar 心脏线
+   两轮返工的根因）。定点参与运算、除回放最后一步；非整度角配
+   SinDegX10/CosDegX10（整度值线性内插，1° 内曲率误差 <0.02%）。
+9. **ECharts 极坐标角度语义**（对源 polarCreator.ts 核过）：
+   startAngle = 轴值 0 所在的数学角（0=东、90=上，缺省 90），
+   逆时针为正；angleAxis extent = [startAngle, startAngle+360]；
+   屏幕 x = cx + r·cos(θ)，y = cy − r·sin(θ)（y 翻转）。
+   line-polar 官方是 r=5+5sinθ 的心脏线、cusp 朝下——不是圆。
 
 ## 已知刻意偏差（勿当 bug 修）
 
