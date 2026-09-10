@@ -1,0 +1,87 @@
+using System;
+using Gui;
+using Gui.Widget;
+using Legend;
+
+/// 通用「格子」组件——装备格 / 物品栏 / 掉落格 / 宝石位 / 技能图标全走这里。
+///
+/// 一个格子 = 外框（底色与边框由 CSS 类给）+ 图标 +（可选）左上角小字。
+/// 小字按原版语义取：装备是**强化等级**（原版背包格里的 +5/+10），
+/// 消耗品是**堆叠数量**（166/162）。同一个位置只显示一个。
+///
+/// 两条布局纪律（都是实测踩出来的）：
+///  1. 图标必须**撑满内容框**（`DockFill`），不能按外框尺寸 `Prefer`
+///     ——外框比内容框大一圈边框，按外框给尺寸的图标会压到格线上
+///     （掉落格实测：图标盖住格线，看着像格子大小不一）。
+///  2. 数量角标用 `DockManual + Place` **叠**在左上角；占一整行会把
+///     图标挤小，而原版是压在图标上的。
+///
+/// 格子只认「道具号 + 数量」，不认识背包/掉落/仓库这些来源——调用方
+/// 自己决定填什么，这样同一套皮在任何页面都不会走样。
+partial class LegendApp {
+    /// 图标相对外框的内缩：正好一个 CSS 边框宽（外框画在盒子边缘）。
+    static int SlotInset() { return Spec.Px(1); }
+
+    /// 道具图标路径：items.csv 的 picture → assets/item/NNNNN.png。
+    /// 00002.png 是 art.csv 里的空白占位图，缺图一律落它（画出来是空格）。
+    static string ItemArtPath(int picture) {
+        if (picture <= 0) { return "assets/item/00002.png"; }
+        string path = "assets/item/" + Rules.N(picture).PadLeft(5, "0") + ".png";
+        if (System.IO.File.Exists(path)) { return path; }
+        return "assets/item/00002.png";
+    }
+
+    /// 道具号 → 图标路径（按 items.csv 的 picture 列）。
+    static string ItemArtById(int itemId) {
+        if (itemId <= 0) { return "assets/item/00002.png"; }
+        return ItemArtPath(GameTables.current.items.At(itemId).Int("picture"));
+    }
+
+    /// 角标文案：装备看强化等级（+N），消耗品看堆叠数量。
+    static string SlotBadge(Equipment e, int count) {
+        if (e != null) {
+            if (e.upgrade > 0) { return "+" + Rules.N(e.upgrade); }
+            if (count > 1) { return Rules.N(count); }
+            return "";
+        }
+        if (count > 1) { return Rules.N(count); }
+        return "";
+    }
+
+    /// 空格子：只有外框（原版没道具的位置也是画了框的）。
+    static Panel SlotBox(string cls, int wDevice, int hDevice) {
+        Panel s = Panel.Row(); s.Class = cls;
+        s.Pad(0); s.Prefer(wDevice, hDevice);
+        return s;
+    }
+
+    /// 道具格子：外框 + 图标撑满内容框 + 左上角角标。
+    Panel ItemSlot(string cls, int wDevice, int hDevice,
+                   string artPath, string badge) {
+        Panel s = Panel.Row(); s.Class = cls;
+        s.Pad(SlotInset()); s.Prefer(wDevice, hDevice);
+        Image ic = new Image(artPath, "道具", "contain");
+        ic.DockFill(); s.Add(ic);
+        if (badge.Length > 0) {
+            Label t = Text(badge, "slot-badge", 0);
+            t.DockManual(); t.Place(SlotInset(), 0);
+            t.Prefer(0, Spec.Px(11));
+            s.Add(t);
+        }
+        return s;
+    }
+
+    /// 按道具号出格子（picture <= 0 出空格）。
+    Panel ItemSlotById(string cls, int wDevice, int hDevice, int itemId, int count) {
+        if (itemId <= 0) { return SlotBox(cls, wDevice, hDevice); }
+        return ItemSlot(cls, wDevice, hDevice, ItemArtById(itemId),
+            count > 1 ? Rules.N(count) : "");
+    }
+
+    /// 按装备对象出格子：e == null 出空格。图标走定义表，角标走强化等级。
+    Panel EquipSlot(string cls, int wDevice, int hDevice, Equipment e) {
+        if (e == null) { return SlotBox(cls, wDevice, hDevice); }
+        return ItemSlot(cls, wDevice, hDevice, ItemArtById(e.definitionId),
+            SlotBadge(e, 1));
+    }
+}

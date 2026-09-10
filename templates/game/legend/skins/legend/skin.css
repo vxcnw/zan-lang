@@ -326,3 +326,88 @@ button.tiny { font-size: var(--font-size-small); }
 .bag-skill-xp { color: var(--game-yellow); }
 .bag-skill-tp { color: var(--text-tertiary); }
 .bag-skill-lv { color: var(--game-cyan); font-weight: 700; }
+
+/* ===================== 场景页家族（幻境 / BOSS之家 / 押镖 / 秘境 / 世界BOSS）=====
+   取色与几何全部来自 REFERENCE_AUDIT.md §5.11（mir2/mir/幻境.png 实拍）。
+   CSS 里的数字是**逻辑像素**（引擎按设备缩放乘回 150%），行高/尺寸一般由
+   Spec + 代码钉死，这里只管配色与边框。 */
+/* 注意：这里**不写** `padding`。Panel.StylePadT() 不看 padSet，样式表
+   声明的 padding 会反过来把代码里的 Padding(上留白…) 顶掉（实测：
+   `.scene-rank { padding: 0 }` 一写，排行榜首行就贴到面板顶）。几何一律
+   由 Spec + 代码给，CSS 只管配色与边框。 */
+.scene-page { background: transparent; }
+.scene-panel { background: #1d2633; border: 1px #3d4755; }
+.scene-head, .scene-foot, .scene-mon-zone, .scene-mon, .scene-face-block {
+    background: transparent; }
+.scene-title { color: #f46e03; font-size: 24; font-weight: 700; }
+
+/* 玩家头像块：品红 2px 框 + 框下居中红字气血 + 字下更窄的红条
+   （原版 470/470 与 x 1008..1053 那条）。`.scene-center` 是本页唯一
+   能居中 `Label` 的手段——Label 永远左对齐（OnPaint 按 bx 画字），
+   只有 flex 容器的 justify-content 能把它的自然宽度摆到中间。 */
+.scene-center { display: flex; flex-direction: row; align-items: center;
+    justify-content: center; }
+.scene-face-frame { background: #000000; border: 2px #ff00d1; padding: 0; }
+.scene-face-hp { color: #ff0000; font-size: 12; text-align: center; }
+.scene-face-bar { background: #ff0000; }
+
+/* 怪物区：红字血条压在立绘上方。血字行用 flex —— 它要跟血条同一个左缘，
+   而 Label 自己不吃 Padding(left)（见 PageScene 注释），只能靠容器顶。 */
+.scene-hp-row { display: flex; flex-direction: row; align-items: center; }
+.scene-mon-hp { color: #ff0000; font-size: 12; text-align: center; }
+.scene-mon-bar { background: #ff0000; }
+
+/* 底部操作区 */
+.scene-record { color: #ee0000; font-size: 12; }
+.scene-hint { color: #c0c0c0; font-size: 12; }
+.scene-btn { background: #1f2936; border: 1px #404b5a; color: #02a4ef;
+    font-size: 12; }
+.scene-btn:hover { background: #26364a; border: 1px #5a6b80; color: #4ac0ff; }
+
+/* 「自动」钮：深底亮蓝框里套一个方框，与旁边三个按钮同一套皮 */
+.scene-toggle { background: #243040; border: 1px #404b5a; gap: 6;
+    font-size: 12; }
+.scene-toggle::box { width: 17; height: 17; background: #10161c;
+    border: 1px #232e3e; }
+.scene-toggle:checked::box { background: #10161c; border: 1px #232e3e; }
+.scene-toggle::check { color: #02a4ef; padding-left: 3; }
+.scene-toggle::label { color: #ffffff; }
+
+/* 「自动重置」复选框：只有方框 + 灰白文字，无边框 */
+.scene-check { background: #243040; border-width: 0; gap: 8; font-size: 12; }
+.scene-check::box { width: 17; height: 17; background: #10161c;
+    border: 1px #232e3e; }
+.scene-check:checked::box { background: #10161c; border: 1px #232e3e; }
+.scene-check::check { color: #c0c0c0; padding-left: 3; }
+.scene-check::label { color: #c0c0c0; }
+
+/* 掉落格：格边框就是分格线（原版一格 40×35 逻辑，边框棕灰） */
+.scene-loot { background: #171e29; border: 1px #3d4755; }
+.scene-loot-cell { background: #0a0a0a; border: 1px #42302d; }
+
+/* 排行榜：面板比场景面板暗一档（原版 #171e29 vs #1d2633） */
+/* 字号 11 是「整串必须显示完」与「贴近原版字高」的折中：原版那串
+   「龙卫——圣战（巅峰1500级）第6063层」实测 298 设备、字高 18；我们的
+   字体同样字高下横向要宽 5%、标签之间还多几个虚位，12 号要 328 设备，
+   而头像右侧只剩 309 —— 实测 12 号时第三段被截成「第6063…」，11 号
+   (设备 16.5) 收在 301，整串显示。 */
+.scene-rank { background: #171e29; border: 1px #3d4755; }
+.scene-rank-row { background: transparent; }
+.scene-rank-name, .scene-rank-lv { color: #d4d400; font-size: 11; }
+.scene-rank-floor { color: #00d400; font-size: 11; }
+.scene-rank-face { background: #000000; border: 2px #8e4474; }
+.scene-rank-face-1 { border: 2px #d4a500; }
+.scene-rank-face-2 { border: 2px #d400ab; }
+.scene-rank-face-3 { border: 2px #8e4474; }
+/* 层数血条：原版逐行换色（上→下：品红/暗红/墨绿/深青/钢蓝/青/紫/深蓝/暗蓝/灰蓝） */
+.scene-rank-bar { background: #a10f84; }
+.scene-rank-bar-0 { background: #a10f84; }
+.scene-rank-bar-1 { background: #890f0f; }
+.scene-rank-bar-2 { background: #065a16; }
+.scene-rank-bar-3 { background: #09453d; }
+.scene-rank-bar-4 { background: #096d9d; }
+.scene-rank-bar-5 { background: #008080; }
+.scene-rank-bar-6 { background: #484891; }
+.scene-rank-bar-7 { background: #0e3573; }
+.scene-rank-bar-8 { background: #13344d; }
+.scene-rank-bar-9 { background: #2a394d; }

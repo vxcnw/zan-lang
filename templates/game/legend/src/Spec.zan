@@ -211,4 +211,113 @@ class Spec {
     static int ArenaBtnW() { return Px(87); }
     static int ArenaBtnBoxH() { return Px(28); }    // 统计面板底部两个钮
     static int ArenaPadBot() { return Px(15); }     // 钮/提示行距下段底
+
+    /* ---- 场景页家族（幻境 2 / BOSS之家 3 / 押镖 4 / 秘境 12 / 世界BOSS 13）----
+       实测 mir2/mir/幻境.png（与地图页同一标尺：原图就是 150% 设备像素）。
+       边框实测线：竖 374/1102/1491，横 163/716/880，底排瓦片顶 900：
+
+           页面区 x 374..1491  y 163..900（高 737，瓦片行下留白 20）
+           ┌───────────────────────┬──────────────┐
+           │ 场景面板 728×553      │ 幻境排行      │
+           │  幻境N      头像+气血 │ 389 宽        │
+           │     怪物立绘+血条     │ 10 行 ×70.7   │
+           ├───────────────────────┤              │
+           │ 掉落面板 728×163      │              │
+           └───────────────────────┴──────────────┘
+             掉落面板底 880 → 页面底留白 20 设备到瓦片行
+
+       左面板内（相对面板顶 163）：
+         标题「幻境 1」       x 401..488  y 185..221（左 27 / 上 20 设备，字高 36）
+         玩家头像框           980..1081 × 183..282（右 21 / 上 20 设备，2 设备品红框）
+                             框下居中「470/470」红字 y 292..312
+         怪物血字「20/20」    704..748 × 434..450，血条 452..454（纯红，同宽）
+         怪物立绘             655..782 × 467..585（立绘底距底部操作区 13 设备）
+         自动重置（右对齐）   方框 972..996 × 604..629，整块右端 1084、y 601..632
+         提示（右对齐）       右端 1085，字 y 636..655
+         按钮行 y 667..702（36 设备高），右端 1087：
+             自动 717..792 / 挑战幻境 798..909 / 扫荡幻境 918..1020 / 说明 1029..1087
+         最高幻境记录（左）   x 403..557  y 677..695（与按钮行同高居中，左缩进 29）
+       掉落格：每格外框 60×52.7 设备（含 1 设备棕框）、行列间距 0，12 列 × 3 行，
+       格阵自面板内缘（左 377 起）铺满
+       排行榜行（相对面板顶）：首行顶 178，行距 70.7，行高 57（头像 57×57 含
+       2 设备框，左 12）；文字 x 1181 起、18 设备高；血条在文字下 13 设备、高 9、
+       自 x 1182 起，轨道最长 305 设备（实测 6063 层 = 298 设备 → 量程约 6200）。
+       榜头像框：第 1 名 #d4a500 金、第 2/3 名 #d400ab 品红、其余 #8e4474 暗品红。 */
+    static int SceneRankW() { return Px(259); }      // 389 设备：排行榜面板宽
+    static int SceneLootH() { return Px(109); }      // 163 设备：掉落面板高
+    static int SceneBotPad() { return Px(13); }      // 掉落面板底到瓦片行 20 设备
+    /// 标题行 / 头像块那一栏的高度。**必须**由头像块自己叠出来：head 是
+    /// 停靠行，行高小于子块时子块被裁（实测：气血字被砍掉下半截，只剩
+    /// 顶上几个像素）。怪物区靠它算顶，而怪物是贴底摆的，所以这里给多给
+    /// 少都不动立绘，只有写小了才会切字。
+    static int SceneHeadH() {
+        return SceneFaceTop() + SceneFaceH() + SceneFaceTextGap()
+            + SceneFaceTextH() + SceneFaceBarGap() + SceneFaceBarH();
+    }
+    static int SceneTitleInsetL() { return Px(18); } // 标题左 27 设备
+    static int SceneTitleInsetT() { return Px(13); } // 标题上 20 设备
+    static int SceneFaceW() { return Px(67); }       // 玩家头像框 100 设备
+    static int SceneFaceH() { return Px(64); }       // 96 设备
+    static int SceneFaceInset() { return Px(13); }   // 头像右上内边距 19 设备
+    static int SceneFaceTop() { return Px(13); }     // 头像框距面板顶 20 设备
+    static int SceneFaceTextGap() { return Px(9); }  // 框底到气血字 12 设备（280→292）
+    static int SceneFaceTextH() { return Px(12); }   // 气血字行 18 设备（字高 14）
+    static int SceneFaceBarGap() { return Px(2); }   // 气血字到血条 5 设备（305→310）
+    static int SceneFaceBarH() { return Px(2); }     // 血条 3 设备（310..312）
+    static int SceneFaceBarW() { return Px(31); }    // 血条 46 设备（x 1008..1053，比字窄）
+    static int SceneMonBoxW() { return Px(85); }     // 怪物立绘 128 设备
+    static int SceneMonBoxH() { return Px(78); }     // 117 设备
+    static int SceneMonHpTextH() { return Px(11); }  // 怪物血字行 16.5 设备（字高 15）
+    static int SceneMonBarGap() { return Px(2); }    // 血字到血条 3 设备（448→452）
+    static int SceneMonHpBarH() { return Px(2); }    // 怪物血条 3 设备
+    static int SceneMonHpW() { return Px(30); }      // 血字/血条宽 45 设备
+    static int SceneMonGap() { return Px(6); }       // 血条到立绘 9 设备
+    static int SceneMonBottom() { return Px(9); }    // 立绘底到面板左脚 13 设备
+    static int SceneFootH() {                     // 底部三行 + 下留白 = 119 设备
+        return SceneChkRowH() + SceneFootGap2() + SceneHintH()
+            + SceneFootGap1() + SceneBtnH() + SceneBtnInsetB();
+    }
+    static int SceneChkRowH() { return Px(20); }     // 自动重置行 30 设备
+    static int SceneHintH() { return Px(13); }       // 提示行 20 设备
+    static int SceneBtnH() { return Px(24); }        // 按钮 36 设备
+    static int SceneFootGap1() { return Px(8); }     // 提示到按钮 12 设备
+    static int SceneFootGap2() { return Px(4); }     // 自动重置到提示 6 设备
+    static int SceneBtnInsetB() { return Px(10); }   // 按钮行距面板底 15 设备
+    static int SceneBtnInsetR() { return Px(10); }   // 按钮行右端 1087（右 15 设备）
+    static int SceneBtnPadL() { return Px(19); }     // 「最高幻境记录」左缩进 29 设备
+    static int SceneHintInsetR() { return Px(11); }  // 提示右端 1085（右 17 设备）
+    static int SceneChkInsetR() { return Px(12); }   // 自动重置右端 1084
+    static int SceneBtnGap() { return Px(5); }       // 按钮间距 7.5 设备
+    static int SceneChkW() { return Px(51); }        // 「自动」钮 76 设备
+    static int SceneBtnChallengeW() { return Px(75); }  // 挑战幻境 112 设备
+    static int SceneBtnSweepW() { return Px(69); }   // 扫荡幻境 103 设备
+    static int SceneBtnHelpW() { return Px(39); }    // 说明 59 设备
+    static int SceneChkBox() { return Px(17); }      // 复选框方框 26 设备
+    static int SceneRankRows() { return 10; }        // 原版一屏 10 行
+    static int SceneRankPadT() { return Px(10); }    // 首行距面板顶 15 设备
+    static int SceneRankRowH() { return Px(35); }    // 行高 53 设备（= 头像框高）
+    static int SceneRankRowGap() { return Px(12); }  // 行距 18 设备（行距合计 70.7）
+    static int SceneRankFacePad() { return Px(9); }  // 榜头像左 14 设备
+    static int SceneRankFace() { return Px(35); }    // 榜头像框 53 设备
+    /// 头像框：边框 + 内衬各 2 逻辑像素。Image 自绘的图会盖住**自己**的
+    /// 边框，所以框一律由外层容器画（见 SceneFaceFrame/SceneRankPane）。
+    static int SceneFramePad() { return Px(2); }
+    static int SceneRankTextGap() { return Px(6); }  // 头像到文字 9 设备
+    static int SceneRankTextH() { return Px(12); }   // 文字行 18 设备
+    static int SceneRankTextT() { return Px(4); }    // 文字距行顶 6 设备
+    static int SceneRankBarGap() { return Px(8); }   // 文字到血条 13 设备
+    static int SceneRankBarH() { return Px(6); }     // 血条 9 设备
+    static int SceneRankBarMax() { return Px(203); } // 血条轨道 305 设备
+    /// 血条量程：实测 6063 层画了 298 设备 → 304.5×6063/6200 = 297.8，取 6200
+    /// 让榜首不满格（与截图一致）。balance.csv 的 max_floor=6000 是推层上限，
+    /// 不是这条榜的量程，两者别混。
+    static int SceneRankBarScale() { return 6200; }
+    static int SceneLootCellW() { return Px(40); }   // 格外框 60 设备（含 1 设备边框）
+    static int SceneLootCellH() { return Px(35); }   // 52.5 设备
+    static int SceneLootGapX() { return 0; }         // 分格线就是格边框，无额外间距
+    static int SceneLootGapY() { return 0; }
+    static int SceneLootCols() { return 12; }
+    static int SceneLootRows() { return 3; }
+    static int SceneLootPad() { return Px(1); }      // 格阵距面板内缘 1 设备
+    static int SceneLootCells() { return SceneLootCols() * SceneLootRows(); }
 }
