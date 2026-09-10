@@ -63,6 +63,13 @@ bool zan_is_zcomp_path(const char *p);
 int zan_gen_codegen(struct zan_ast_node *unit, struct zan_arena *arena,
                     struct zan_diag *diag, const char *stdlib_root);
 
+/* Hand over the texts of the generated sources merged by the latest
+ * zan_gen_codegen run (NULL-terminated-free: caller frees each element and
+ * the array) and clear the capture. The demand-driven stdlib pull-in seeds
+ * its second closure round with them, since generated classes reference
+ * stdlib types the user program never spells. */
+void zan_gen_take_source_texts(char ***texts, int *count);
+
 /* Fill `dir` with the generator cache directory (creating it), or return -1
  * when no user cache dir can be located. */
 int zan_gen_cache_dir(char *dir, size_t dir_size);

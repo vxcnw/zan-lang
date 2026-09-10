@@ -1,0 +1,333 @@
+using System;
+using Gui;
+using Gui.Widget;
+using Legend;
+
+/// 页 20「背包」——照原版逐像素还原。
+///
+/// 原版实测（mir2/mir/背包.png 整页 + 背包-天书/内功/宝石/技能.png 四张特写）：
+///   · 整页分**上下两段**，中间一条分隔线
+///   · 上段：左「人物立绘 + 环绕装备格」/ 中「6×6 = 36 格物品栏」/ 右「竖排 9 个功能钮」
+///   · 下段：顶部 6 个 tab —— 取出 / 说明 / 天书 / 内功 / 宝石 / 技能
+///   · 下段左侧固定：「法师(3)」槽位 + 战士/法师/道士 + 男/女 + 创建英雄/取消
+///
+/// 布局纪律：定宽格子一律用 `Panel.Row + Gap` 手排，
+/// 不用 `Grid.Of(n)`（它会把子项等分成容器宽，定宽卡片会被拉变形）。
+partial class LegendApp {
+    /// 下段当前 tab：0=取出 1=说明 2=天书 3=内功 4=宝石 5=技能
+    int bagTab = 0;
+
+    /* ---- 本页局部实测尺寸（Zan 类内无 const，用 static 函数）---- */
+    static int BagCell() { return 42; }   // 物品格边长
+    static int BagCols() { return 6; }    // 物品栏列数
+    static int BagRows() { return 6; }    // 物品栏行数
+    static int BagActW() { return 76; }   // 竖排功能钮宽
+    static int BagActH() { return 30; }   // 竖排功能钮高
+    static int BagTabW() { return 76; }   // 下段 tab 宽
+    static int BagTabH() { return 26; }   // 下段 tab 高
+
+    Panel bagLower;              // 下段容器（切 tab 只重建它）
+
+    void BuildBag() {
+        Panel page0 = Panel.Column(); page0.Class = "bag-page";
+        page0.Pad(0); page0.Gap(0); page0.Grow(); content.With(page0);
+
+        /* 上段：定高。 */
+        Panel top = Panel.Row(); top.Class = "bag-top";
+        top.Pad(6); top.Gap(8); top.Prefer(0, 366); page0.With(top);
+        BuildBagTop(top);
+
+        /* 下段：吃掉剩余高度。 */
+        bagLower = Panel.Row(); bagLower.Class = "bag-lower";
+        bagLower.Pad(6); bagLower.Gap(8); bagLower.Grow(); page0.With(bagLower);
+        BuildBagLower();
+    }
+
+    void RebuildBagLower() {
+        if (bagLower == null) { return; }
+        bagLower.RemoveAll();
+        BuildBagLower();
+    }
+
+    // =====================================================================
+    //  上段：立绘 + 物品栏 + 竖排功能钮
+    // =====================================================================
+    void BuildBagTop(Panel top) {
+        /* 左：人物立绘区（装备格用绝对定位压在立绘两侧，见 skin.css）。 */
+        Panel portrait = Panel.Row(); portrait.Class = "bag-portrait";
+        portrait.Pad(0); portrait.Prefer(235, 0); top.With(portrait);
+        Image man = new Image("assets/show/00001.png", "", "cover");
+        man.Class = "bag-man"; man.DockFill(); portrait.Add(man);
+
+        /* 左列 3 格（项链/手镯/戒指）。 */
+        Panel colL = Panel.Column(); colL.Class = "bag-slotcol bag-slotcol-l";
+        colL.Gap(4); colL.DockLeft(); portrait.Add(colL);
+        for (int i = 0; i < 3; i = i + 1) { colL.With(BagSlot(0)); }
+
+        /* 右列 3 格（勋章/宝石/腰带）。 */
+        Panel colR = Panel.Column(); colR.Class = "bag-slotcol bag-slotcol-r";
+        colR.Gap(4); colR.DockRight(); portrait.Add(colR);
+        for (int i = 0; i < 3; i = i + 1) { colR.With(BagSlot(0)); }
+
+        /* 中：金币条 + 6×6 物品栏。 */
+        Panel mid = Panel.Column(); mid.Gap(6); mid.Grow(); top.With(mid);
+        Panel money = Panel.Row(); money.Class = "bag-money";
+        money.Gap(6); money.Prefer(0, 28); mid.With(money);
+        money.With(Text("金币", "bag-money-label", 14));
+        money.With(Text("0", "bag-money-value", 14));
+
+        for (int r = 0; r < BagRows(); r = r + 1) {
+            Panel row = Panel.Row(); row.Gap(2); row.Prefer(0, BagCell() + 2); mid.With(row);
+            for (int c = 0; c < BagCols(); c = c + 1) {
+                row.With(BagCellView(r * BagCols() + c));
+            }
+        }
+
+        /* 右：竖排 9 个功能钮。 */
+        Panel acts = Panel.Column(); acts.Class = "bag-acts";
+        acts.Gap(4); acts.Prefer(BagActW(), 0); top.With(acts);
+        string[] labels = new string[] { "切换仓库", "入库(F)", "加锁", "使用(A)", "整理",
+                            "放入图鉴", "仓库3", "一键熔炼", "卖出(X)" };
+        for (int i = 0; i < 9; i = i + 1) {
+            Button b = Btn(labels[i], "bag-act", () => { });
+            b.Prefer(BagActW(), BagActH()); acts.With(b);
+        }
+    }
+
+    /// 一个空的装备格。
+    Panel BagSlot(int count) {
+        Panel c = Panel.Row(); c.Class = "bag-slot";
+        c.Pad(0); c.Prefer(BagCell(), BagCell());
+        c.Named("bag-slot-" + Rules.N(count));
+        return c;
+    }
+
+    /// 物品栏里第 i 格（行优先，0 起）。
+    Panel BagCellView(int i) {
+        Panel c = Panel.Row(); c.Class = "bag-cell";
+        c.Pad(0); c.Prefer(BagCell(), BagCell());
+        c.Named("bag-cell-" + Rules.N(i));
+        return c;
+    }
+
+    // =====================================================================
+    //  下段：6 个 tab + 内容 + 左侧建角面板
+    // =====================================================================
+    void BuildBagLower() {
+        /* 左侧：角色槽位 + 建角面板（固定，不随 tab 变）。 */
+        Panel left = Panel.Column(); left.Class = "bag-create";
+        left.Gap(6); left.Prefer(196, 0); bagLower.With(left);
+
+        Panel slotRow = Panel.Row(); slotRow.Gap(4); slotRow.Prefer(0, 28);
+        slotRow.With(Text("法师(3)", "bag-slot-tag", 14));
+        slotRow.With(Btn("创建", "bag-mini", () => { }));
+        slotRow.With(Btn("创建", "bag-mini", () => { }));
+        left.With(slotRow);
+
+        Panel jobs = Panel.Row(); jobs.Gap(6); jobs.Prefer(0, 62);
+        jobs.With(BagPickIcon("战士", 0));
+        jobs.With(BagPickIcon("法师", 1));
+        jobs.With(BagPickIcon("道士", 2));
+        left.With(jobs);
+
+        Panel sexes = Panel.Row(); sexes.Gap(6); sexes.Prefer(0, 62);
+        sexes.With(BagPickIcon("男", 3));
+        sexes.With(BagPickIcon("女", 4));
+        left.With(sexes);
+
+        Panel okRow = Panel.Row(); okRow.Gap(6); okRow.Prefer(0, 34);
+        okRow.With(Btn("创建英雄", "bag-primary", () => { }));
+        okRow.With(Btn("取消", "bag-plain", () => { }));
+        left.With(okRow);
+
+        /* 右侧：tab 条（右上角）+ 内容区。 */
+        Panel right = Panel.Column(); right.Gap(0); right.Grow(); bagLower.With(right);
+
+        Panel tabRow = Panel.Row(); tabRow.Class = "bag-tabs";
+        tabRow.Gap(0); tabRow.Prefer(0, BagTabH()); right.With(tabRow);
+        string[] names = new string[] { "取出", "说明", "天书", "内功", "宝石", "技能" };
+        for (int i = 0; i < 6; i = i + 1) {
+            int idx = i;
+            Button t = Btn(names[i], i == bagTab ? "bag-tab bag-tab-on" : "bag-tab", () => {
+                bagTab = idx; RebuildBagLower();
+            });
+            t.Prefer(BagTabW(), BagTabH()); tabRow.With(t);
+        }
+
+        Panel body = Panel.Column(); body.Class = "bag-tab-body";
+        body.Pad(0); body.Gap(0); body.Grow(); right.With(body);
+        if (bagTab == 0) { BuildBagTabTake(body); return; }
+        if (bagTab == 1) { BuildBagTabHelp(body); return; }
+        if (bagTab == 2) { BuildBagTabTianshu(body); return; }
+        if (bagTab == 3) { BuildBagTabNeigong(body); return; }
+        if (bagTab == 4) { BuildBagTabGem(body); return; }
+        BuildBagTabSkill(body);
+    }
+
+    /// 职业/性别选择图标（原版 64 宽图标 + 下方文字）。
+    Panel BagPickIcon(string name, int idx) {
+        Panel p = Panel.Column(); p.Class = "bag-pick";
+        p.Gap(2); p.Prefer(64, 0);
+        Panel box = Panel.Row(); box.Class = "bag-pick-box";
+        box.Pad(0); box.Prefer(64, 48); p.With(box);
+        p.With(Text(name, "bag-pick-name", 14));
+        p.OnClick(() => { });
+        return p;
+    }
+
+    // =====================================================================
+    //  下段 6 个 tab 的内容
+    // =====================================================================
+
+    /// 取出：2 行 × 5 格 + 每格下方「取出」钮。
+    void BuildBagTabTake(Panel host) {
+        Panel col = Panel.Column(); col.Pad(8); col.Gap(10); col.Grow(); host.With(col);
+        for (int r = 0; r < 2; r = r + 1) {
+            Panel row = Panel.Row(); row.Gap(10); row.Prefer(0, 74); col.With(row);
+            for (int c = 0; c < 5; c = c + 1) {
+                Panel cell = Panel.Column(); cell.Gap(4); cell.Prefer(90, 0);
+                Panel box = Panel.Row(); box.Class = "bag-slot";
+                box.Pad(0); box.Prefer(54, 42); cell.With(box);
+                cell.With(Btn("取出", "bag-mini", () => { }));
+                row.With(cell);
+            }
+        }
+    }
+
+    /// 说明：纯文本区。
+    void BuildBagTabHelp(Panel host) {
+        Panel col = Panel.Column(); col.Pad(8); col.Gap(6); col.Grow(); host.With(col);
+        col.With(Text("背包说明", "yellow strong", 16));
+        col.With(Text("左键选中格子，再点右侧功能钮操作。", "secondary", 14));
+        col.With(Text("仓库分 5 页，用「切换仓库」翻页。", "secondary", 14));
+        col.With(Text("「放入图鉴」会把选中的装备登记进神兵图鉴。", "secondary", 14));
+    }
+
+    /// 天书：2 行 × 5 格 + 每格「取出」钮；右侧属性面板。
+    void BuildBagTabTianshu(Panel host) {
+        Panel root0 = Panel.Row(); root0.Pad(8); root0.Gap(10); root0.Grow(); host.With(root0);
+
+        Panel left = Panel.Column(); left.Gap(10); left.Grow(); root0.With(left);
+        for (int r = 0; r < 2; r = r + 1) {
+            Panel row = Panel.Row(); row.Gap(10); row.Prefer(0, 74); left.With(row);
+            for (int c = 0; c < 5; c = c + 1) {
+                Panel cell = Panel.Column(); cell.Gap(4); cell.Prefer(90, 0);
+                Panel box = Panel.Row(); box.Class = "bag-slot";
+                box.Pad(0); box.Prefer(54, 42); cell.With(box);
+                cell.With(Btn("取出", "bag-mini", () => { }));
+                row.With(cell);
+            }
+        }
+
+        /* 右侧属性面板：攻击/魔法/道术/防御/魔防/负重。 */
+        Panel stats = Panel.Column(); stats.Class = "bag-stats";
+        stats.Gap(6); stats.Prefer(230, 0); root0.With(stats);
+        string[] keys = new string[] { "攻击", "魔法", "道术", "防御", "魔防" };
+        for (int i = 0; i < 5; i = i + 1) {
+            stats.With(BagStatRow(keys[i] + ":", "+0%"));
+        }
+        stats.With(BagStatRow("负重:", "0/0"));
+    }
+
+    /// 一行「标签: 值框」。
+    Panel BagStatRow(string k, string v) {
+        Panel r = Panel.Row(); r.Gap(6); r.Prefer(0, 30);
+        Label lk = Text(k, "bag-stat-k", 14); lk.Prefer(56, 0); r.With(lk);
+        Panel box = Panel.Row(); box.Class = "bag-stat-box";
+        box.Pad(0); box.Grow();
+        Label lv = Text(v, "bag-stat-v", 14); lv.Grow(); box.With(lv);
+        r.With(box);
+        return r;
+    }
+
+    /// 内功：左立绘 + 右侧 2 张卡（金钟罩 / 铁布衫）。
+    void BuildBagTabNeigong(Panel host) {
+        Panel root0 = Panel.Row(); root0.Pad(8); root0.Gap(10); root0.Grow(); host.With(root0);
+
+        Panel art = Panel.Row(); art.Class = "bag-neigong-art";
+        art.Pad(0); art.Prefer(300, 0); root0.With(art);
+        Image im = new Image("assets/show/00002.png", "", "cover");
+        im.DockFill(); art.Add(im);
+
+        Panel cards = Panel.Row(); cards.Gap(10); cards.Grow(); root0.With(cards);
+        cards.With(NeigongCard("金钟罩"));
+        cards.With(NeigongCard("铁布衫"));
+    }
+
+    Panel NeigongCard(string name) {
+        Panel c = Panel.Column(); c.Class = "bag-neigong";
+        c.Gap(6); c.Pad(8); c.Grow();
+        c.With(BagKv("内功:", name, "bag-nei-name"));
+        c.With(BagKv("等级:", "0", ""));
+        c.With(BagKv("效果:", "+0%防御", ""));
+        c.With(BagKv("战功:", "2.0000", ""));
+        c.With(BagKv("金币:", "1000.0000", ""));
+        Button up = Btn("升级", "bag-primary", () => { });
+        up.Prefer(0, 34); c.With(up);
+        return c;
+    }
+
+    /// 一行「键: 值」（值可高亮）。
+    Panel BagKv(string k, string v, string vcls) {
+        Panel r = Panel.Row(); r.Gap(6); r.Prefer(0, 28);
+        Label lk = Text(k, "bag-kv-k", 14); lk.Prefer(50, 0); r.With(lk);
+        Label lv = Text(v, vcls.Length > 0 ? vcls : "bag-kv-v", 14); lv.Grow(); r.With(lv);
+        return r;
+    }
+
+    /// 宝石：2 列 × 4 行，每行 = 装备类型图标 + 4 个锁位。
+    void BuildBagTabGem(Panel host) {
+        Panel root0 = Panel.Row(); root0.Pad(8); root0.Gap(14); root0.Grow(); host.With(root0);
+        for (int col = 0; col < 2; col = col + 1) {
+            Panel c = Panel.Column(); c.Gap(8); c.Grow(); root0.With(c);
+            for (int row = 0; row < 4; row = row + 1) {
+                Panel r = Panel.Row(); r.Gap(8); r.Prefer(0, 44);
+                Panel icon = Panel.Row(); icon.Class = "bag-gem-icon";
+                icon.Pad(0); icon.Prefer(38, 38); r.With(icon);
+                for (int s = 0; s < 4; s = s + 1) {
+                    Panel sok = Panel.Row(); sok.Class = "bag-gem-slot";
+                    sok.Pad(0); sok.Prefer(34, 34); r.With(sok);
+                }
+                c.With(r);
+            }
+        }
+    }
+
+    /// 技能：2 列 × 4 行。每项 = 图标 + 名称(0) + 进度条 + 经验/TP + Lv + 升级钮。
+    void BuildBagTabSkill(Panel host) {
+        Panel root0 = Panel.Row(); root0.Pad(8); root0.Gap(14); root0.Grow(); host.With(root0);
+        bool[] owned = new bool[] { true, true, true, true, true, true, false, false };
+        string[] names = new string[] { "强化攻击", "强化魔法", "强化道术", "强化生命",
+                           "强化防御", "强化魔防", "空", "空" };
+        for (int col = 0; col < 2; col = col + 1) {
+            Panel c = Panel.Column(); c.Gap(8); c.Grow(); root0.With(c);
+            for (int row = 0; row < 4; row = row + 1) {
+                int i = col * 4 + row;
+                c.With(BagSkillRow(names[i], owned[i]));
+            }
+        }
+    }
+
+    Panel BagSkillRow(string name, bool owned) {
+        Panel r = Panel.Row(); r.Class = "bag-skill";
+        r.Gap(8); r.Pad(4); r.Prefer(0, 50);
+
+        Panel icon = Panel.Row();
+        icon.Class = owned ? "bag-skill-icon" : "bag-skill-icon bag-empty";
+        icon.Pad(0); icon.Prefer(38, 38); r.With(icon);
+
+        Panel mid = Panel.Column(); mid.Gap(2); mid.Grow(); r.With(mid);
+        Panel line1 = Panel.Row(); line1.Gap(6); line1.Prefer(0, 18); mid.With(line1);
+        line1.With(Text(name + "(0)", "bag-skill-name", 14));
+        Progress bar = new Progress(owned ? 42 : 0, 2);
+        bar.Prefer(0, 8); bar.Grow(); mid.With(bar);
+        Panel line2 = Panel.Row(); line2.Gap(6); line2.Prefer(0, 18); mid.With(line2);
+        line2.With(Text(owned ? "106/250" : "0/100", "bag-skill-xp", 12));
+        line2.With(Text("TP:0", "bag-skill-tp", 12));
+
+        Panel right = Panel.Column(); right.Gap(2); right.Prefer(56, 0); r.With(right);
+        right.With(Text(owned ? "Lv.2" : "0/0", "bag-skill-lv", 14));
+        right.With(Btn("升级", "bag-mini", () => { }));
+        return r;
+    }
+}

@@ -1,0 +1,56 @@
+using System;
+using System.IO;
+using Gui;
+using Gui.Widget;
+using Gui.Backend;
+
+namespace Legend;
+
+/// 原版「迷你传奇」界面规格（全部逐像素实测，见 REFERENCE_AUDIT.md）。
+///
+/// 本文件是**唯一**的界面尺寸/配色来源。任何页面都不许自己写死像素值，
+/// 一律从这里取——这样「跟原版一致」这件事才有单一事实来源，改动也有
+/// 一个地方可查。原版客户区 1246×646，分区如下：
+///
+///     ┌──────────────────────────────────────────────────┐
+///     │ 顶部导航 y 0..110（2 行瓦片）                     │
+///     ├──────────┬─────────────────────┬────────────────┤
+///     │ 左栏     │  主区（每按钮一页） │  聊天区         │
+///     │ 0..249   │  251..1003          │  1004..1245     │
+///     ├──────────┴─────────────────────┴────────────────┤
+///     │ 底部导航 y 586..645                               │
+///     └──────────────────────────────────────────────────┘
+class Spec {
+    /* ---- 窗口 ---- */
+    static int WindowW() { return 1246; }
+    static int WindowH() { return 646; }
+
+    /* ---- 分区 ---- */
+    static int TopH() { return 111; }        // 顶部导航高（2 行）
+    static int BottomH() { return 60; }      // 底部导航高
+    static int LeftW() { return 250; }       // 左栏宽
+    static int ChatW() { return 242; }       // 聊天区宽
+    static int MainX() { return 251; }       // 主区左边界
+    static int MainW() { return 753; }       // 主区宽
+
+    /* ---- 配色（原版实拍取样）---- */
+    // 窗口底色：瓦片直接坐在它上面，无独立底板
+    static string BgBase() { return "#24303e"; }
+    // 导航文字：原版是青色，不是白
+    static string NavText() { return "#00a8f0"; }
+
+    /* ---- 地图传送页（页 0）---- */
+    static int MapCardW() { return 160; }    // = 地图素材原始宽
+    static int MapCardH() { return 70; }     // = 地图素材原始高
+    static int MapColGap() { return 20; }
+    static int MapRowGap() { return 15; }
+    static int MapCols() { return 4; }
+    static int MapRows() { return 5; }
+    static int MapPerPage() { return 20; }
+    static int MapOriginX() { return 271; }  // 卡阵起点（含主区左边距）
+    static int MapOriginY() { return 128; }
+
+    /* ---- 页码方块 ---- */
+    static int PagerSize() { return 26; }
+    static int PagerGap() { return 8; }
+}

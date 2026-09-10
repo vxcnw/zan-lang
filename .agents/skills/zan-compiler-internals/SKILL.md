@@ -1,6 +1,6 @@
 ---
 name: zan-compiler-internals
-description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑——Dict 内建布局契约（插入序 keys/values + 惰性哈希索引 + Remove 整体失效）、LLVM select 两臂都求值导致的死臂分配泄漏（用 branch+phi）、delegate 两形态与 wasm32 函数表索引撞 ZAN_CLOSURE_TAG 的根修定式（形状按 target_is_wasm32 条件化）、ARC 所有权判定内建优先于 extern 借用（GetString 误判=每 HTTP 请求泄一条请求头）、looks_like_var_decl 的内建关键字分派契约（rank specifier 必须容忍逗号）、交叉工具链 .o 重出配方（zig cc + build/ 暂存副本不会自动刷新）、可空值类型在字符串位的解包形状、编译器调试的 scratch 卫生（bisect 用 worktree 即用即删、A/B 对照复用固定目录名）。做或改 src/compiler/*、交叉运行时对象、conformance golden 时使用。
+description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑——Dict 内建布局契约（插入序 keys/values + 惰性哈希索引 + Remove 整体失效）、LLVM select 两臂都求值导致的死臂分配泄漏（用 branch+phi）、delegate 两形态与 wasm32 函数表索引撞 ZAN_CLOSURE_TAG 的根修定式（形状按 target_is_wasm32 条件化）、ARC 所有权判定内建优先于 extern 借用（GetString 误判=每 HTTP 请求泄一条请求头）、looks_like_var_decl 的内建关键字分派契约（rank specifier 必须容忍逗号）、stdlib 按需拉入的四坑（扩展宿主关键字接收者/方法名撞类名/泛型委托假名 T/#if 区域必须带宏扫描）、交叉工具链 .o 重出配方（zig cc + build/ 暂存副本不会自动刷新）、可空值类型在字符串位的解包形状、编译器调试的 scratch 卫生（bisect 用 worktree 即用即删、A/B 对照复用固定目录名）。做或改 src/compiler/*、交叉运行时对象、conformance golden 时使用。
 ---
 
 # zanc 编译器内部定式与坑
@@ -162,6 +162,43 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
   （0x7ffff7xxxxxx 段）；崩溃地址落在 mallocng 元数据检查
   （__malloc_allzerop）且 RSS 平台化后不重现，优先怀疑高压竞争而非
   Zan 侧 UAF——先用低速率复跑分型。
+
+## stdlib 按需拉入（demand-driven pull-in，2026-09-10）
+
+> 以前 `using Gui;` = 目录全量 glob + 传递 using 扫描到不动点，一个空窗口
+> 程序 parse 380 个文件、2.8s，且 stdlib 树里任何文件有语法错全体拖垮。
+> 现在目录内文件按"声明名被拼写"过滤后才 parse（`main.c` 的 pi_* 块），
+> 空窗口 269 文件、纯 hello 3 文件 0.3s。语义等价性靠 conformance 三件套
+> （pullin_shadow_same_name / pullin_extension_host / pullin_qualified_escape）
+> 钉死。
+
+- **词法级名字匹配的四个假阳性/假阴性坑，全踩过**：
+  - 扩展方法宿主是"不可见名字"（调用处只写 `s.CompareTo(...)`），必须当
+    锚点无条件拉入。识别形状是 `( this Type`——**Type 常是内建关键字
+    token**（`this string s` 的 string 是 TK_STRING 不是 IDENT），只认
+    IDENT 会漏掉所有内建类型扩展；`M(this.x)` / `M(this)` 是表达式不算。
+  - 方法名撞 stdlib 类名（用户方法 `Label()` vs `Gui.Widget.Label`）：
+    种子阶段"点号链根是命名空间段"才把链上名字当拉入信号；类型体内
+    `类型 + IDENT + (`/`{` 是方法/属性**声明**名，不标活。否则一个
+    `b.Label()` 级联拉进整个 Gui。
+  - 泛型委托 `delegate T Mapper<T>(T x)` 的名字 = `<>` **外**最后一个
+    IDENT；不跳泛型参数会把 "T" 铸成声明名，此后任何文件提到 T 全量
+    级联。
+  - 扫描必须带与真实 parse 相同的 `-D`/target 宏：`#if` 停用区里的引用
+    不进种子（ZanGen 的 Main 整个在 `#if ZAN_GEN_MAIN` 里，Gen* 类全靠
+    它引用）。
+- **用户同名类遮蔽**：用户自己 `class App` 时未限定 `App` 永远解析到用户
+  自己的，不拉 stdlib 同名文件；限定 `Gui.App` 仍拉。这是 stdlib 模板
+  （App/Window/Button 全是常见词）不级联的关键。
+- 门控：`--emit-symbols` 恒全量（IDE 索引要完整 stdlib），`ZAN_NO_PULLIN_FILTER=1`
+  回退旧行为，`ZAN_PULLIN_DEBUG=1` 打印每个文件的拉入原因（含命中名）。
+- 语义等价验证定式：同一程序 `ZAN_NO_PULLIN_FILTER=1` 开关两态编译运行
+  diff 输出；改拉入逻辑必须补 conformance 用例并跑 smoke+standard。
+- 顺带的实证：**prune 已保证未用代码不进二进制**（关 prune 只多 7KB），
+  "using Gui 导致 exe 10MB"是错觉——Gui 窗口 exe 的 1.6MB .text 是
+  GuiHost→App/Style/Fx 的活代码闭包 + Zan 运行时，与 unused 无关。
+- stdlib 文件引用跨命名空间类型必须写 using（ChartHost 曾裸写 `App`，
+  靠用户程序恰好也有 `class App` 才碰巧编译——prune 把它藏成了哑弹）。
 
 ## 编译器调试的 scratch 卫生（bisect / A-B 对照）
 

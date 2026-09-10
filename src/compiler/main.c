@@ -650,7 +650,778 @@ static void scan_using_tokens(const char *source, size_t len,
     zan_arena_free(arena);
 }
 
-/* ---- dump tokens ---- */
+/* ---- demand-driven stdlib pull-in ----
+ *
+ * The glob-everything scan above parses every *.zan under each used
+ * namespace even when the program names a handful of types (`using Gui;`
+ * parses ~370 files for one window). When the filter is active, globbed
+ * files join the parse only when something live can name them:
+ *
+ *   - every identifier token in the already-parsed sources seeds a worklist
+ *     of live names (a deliberate over-approximation: namespace segments,
+ *     member names and keywords only ever add candidates, never remove
+ *     them);
+ *   - a reached directory is scanned once with the real lexer for its
+ *     top-level declared type names, its `using` directives, an
+ *     extension-method marker and its own identifier set -- no parse, no
+ *     AST, so the scan is an order of magnitude cheaper than a parse;
+ *   - a file joins the parse when one of its top-level names is live, or
+ *     when it hosts extension methods (an extension call names the receiver
+ *     and the method, never the host class, so the host file needs its own
+ *     trigger);
+ *   - including a file flags its identifiers live and reaches its `using`
+ *     directories; the closure runs to a fixpoint before any file parses.
+ *
+ * Observable semantics are preserved: every name user code spells pulls the
+ * declaring file exactly as the full glob did, so simple-name collision
+ * mangling sees the same declaration pairs, and prune (which still runs)
+ * keeps everything transitively referenced. What disappears is the parse of
+ * files whose names appear nowhere reachable -- and with it the old
+ * failure mode where a syntax error in an unreachable stdlib file failed
+ * unrelated programs. Escape hatch: ZAN_NO_PULLIN_FILTER=1 restores the
+ * glob-everything scan; --emit-symbols always uses it (the IDE symbol index
+ * must describe the whole stdlib, not one program's slice). */
+
+static zan_arena_t *pi_arena = NULL;
+static int pi_filter_active = 0;
+
+typedef struct pi_name {
+    const char *str;
+    unsigned len;
+    int flagged;                /* live: some parsed source spells this name */
+    int user_decl;              /* declared as a top-level type by an input
+                                 * file: unqualified mentions in user code
+                                 * resolve to the user's own declaration, so
+                                 * they must not pull a same-named stdlib
+                                 * file (qualified `Ns.Name` mentions still
+                                 * do -- see pi_seed_source). */
+    int ns_root;                /* segment of a known namespace path */
+    struct pi_name *next;
+} pi_name_t;
+
+#define PI_BUCKETS 8192u
+static pi_name_t *pi_table[PI_BUCKETS];
+
+typedef struct pi_file {
+    char *path;
+    pi_name_t **top; int top_count, top_cap;      /* declared type names */
+    pi_name_t **idents; int ident_count, ident_cap; /* every identifier */
+    char **usings; int using_count, using_cap;    /* dotted subdirs */
+    int has_ext;                /* hosts an extension method */
+    int included;               /* joins the parse */
+    int parsed;                 /* already appended to the input list */
+    struct pi_file *dnext;
+} pi_file_t;
+
+typedef struct pi_dir {
+    char *subdir;               /* 'A/B/C' form, as written after `using` */
+    pi_file_t *files;
+    int file_count, file_cap;
+    int reached;                /* globbed + metadata-scanned */
+    struct pi_dir *next;
+} pi_dir_t;
+
+static pi_dir_t *pi_dirs_head = NULL;
+static pi_dir_t *pi_dirs_tail = NULL;
+
+/* The preprocessor environment the real parse will use. Seeding and the
+ * metadata scan MUST run with the same defines: a `#if WINDOWS` region's
+ * references are real references on Windows, and the generator's Main (in
+ * `#if ZAN_GEN_MAIN`) is the only thing that names its Gen* helpers. */
+static zan_target_t pi_target;
+static const char *const *pi_pp_defines = NULL;
+static int pi_pp_define_count = 0;
+static void zan_apply_lex_defines(zan_lexer_t *lex, zan_target_t target,
+                                  const char *const *pp_defines,
+                                  int pp_define_count);
+
+static unsigned pi_hash(const char *s, size_t len) {
+    unsigned h = 2166136261u;
+    for (size_t i = 0; i < len; i++) h = (h ^ (unsigned char)s[i]) * 16777619u;
+    return h;
+}
+
+static pi_name_t *pi_intern(const char *s, size_t len) {
+    unsigned b = pi_hash(s, len) & (PI_BUCKETS - 1);
+    for (pi_name_t *p = pi_table[b]; p; p = p->next)
+        if (p->len == len && memcmp(p->str, s, len) == 0) return p;
+    pi_name_t *p = (pi_name_t *)zan_arena_alloc(pi_arena, sizeof(*p));
+    if (!p) return NULL;
+    char *dup = (char *)zan_arena_alloc(pi_arena, len + 1);
+    if (!dup) return NULL;
+    memcpy(dup, s, len);
+    dup[len] = 0;
+    p->str = dup;
+    p->len = (unsigned)len;
+    p->flagged = 0;
+    p->next = pi_table[b];
+    pi_table[b] = p;
+    return p;
+}
+
+/* Growable per-file arrays backed by the pull-in arena (no realloc: copy). */
+static int pi_reserve(void *arr_p, int count, int *cap, size_t elem_sz) {
+    if (count < *cap) return 1;
+    int ncap = *cap ? *cap * 2 : 8;
+    void *grown = zan_arena_alloc(pi_arena, (size_t)ncap * elem_sz);
+    if (!grown) return 0;
+    memcpy(grown, *(void **)arr_p, (size_t)count * elem_sz);
+    *(void **)arr_p = grown;
+    *cap = ncap;
+    return 1;
+}
+
+static void pi_reach(const char *subdir) {
+    for (pi_dir_t *d = pi_dirs_head; d; d = d->next)
+        if (strcmp(d->subdir, subdir) == 0) return;
+    pi_dir_t *d = (pi_dir_t *)zan_arena_alloc(pi_arena, sizeof(*d));
+    if (!d) return;
+    size_t len = strlen(subdir);
+    char *dup = (char *)zan_arena_alloc(pi_arena, len + 1);
+    if (!dup) return;
+    memcpy(dup, subdir, len + 1);
+    d->subdir = dup;
+    d->files = NULL;
+    d->file_count = 0;
+    d->reached = 0;
+    d->next = NULL;
+    if (pi_dirs_tail) pi_dirs_tail->next = d;
+    else pi_dirs_head = d;
+    pi_dirs_tail = d;
+}
+
+static void pi_add_file(pi_dir_t *d, const char *path) {
+    if (!pi_reserve((void *)&d->files, d->file_count, &d->file_cap,
+                    sizeof(pi_file_t)))
+        return;
+    pi_file_t *f = &d->files[d->file_count++];
+    size_t len = strlen(path);
+    f->path = (char *)zan_arena_alloc(pi_arena, len + 1);
+    if (f->path) memcpy(f->path, path, len + 1);
+    f->top = NULL; f->top_count = 0; f->top_cap = 0;
+    f->idents = NULL; f->ident_count = 0; f->ident_cap = 0;
+    f->usings = NULL; f->using_count = 0; f->using_cap = 0;
+    f->has_ext = 0;
+    f->included = 0;
+    f->parsed = 0;
+    f->dnext = NULL;
+}
+
+/* Mirror of glob_stdlib_dir's platform halves, filling a pi_dir instead of
+ * the compiler's input list. `root` may be the stdlib root or a package dir
+ * (with an empty subdir). */
+static void pi_glob_into(pi_dir_t *d, const char *root, const char *subdir) {
+#ifdef _WIN32
+    char glob_path[1024];
+    if (subdir[0])
+        snprintf(glob_path, sizeof(glob_path), "%s\\%s\\*.zan", root, subdir);
+    else
+        snprintf(glob_path, sizeof(glob_path), "%s\\*.zan", root);
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(glob_path, &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        char mod_path[1024];
+        if (subdir[0])
+            snprintf(mod_path, sizeof(mod_path), "%s\\%s\\%s",
+                     root, subdir, fd.cFileName);
+        else
+            snprintf(mod_path, sizeof(mod_path), "%s\\%s", root, fd.cFileName);
+        pi_add_file(d, mod_path);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+#else
+    char dir_path[1024];
+    if (!resolve_stdlib_dir(root, subdir, dir_path, sizeof(dir_path)))
+        return;
+    DIR *dr = opendir(dir_path);
+    if (!dr) return;
+    struct dirent *ent;
+    while ((ent = readdir(dr)) != NULL) {
+        size_t nlen = strlen(ent->d_name);
+        if (nlen < 5 || strcmp(ent->d_name + nlen - 4, ".zan") != 0) continue;
+        char mod_path[1024];
+        snprintf(mod_path, sizeof(mod_path), "%s/%s", dir_path, ent->d_name);
+        pi_add_file(d, mod_path);
+    }
+    closedir(dr);
+#endif
+}
+
+/* Record a dotted `using A.B.C;` target (already in 'A/B/C' form) as a
+ * reached directory. Shared shape with scan_using_tokens's parser. */
+static void pi_note_using(pi_file_t *f, const char *subdir) {
+    if (!subdir[0]) return;
+    if (!pi_reserve((void *)&f->usings, f->using_count, &f->using_cap,
+                    sizeof(char *)))
+        return;
+    size_t len = strlen(subdir);
+    char *dup = (char *)zan_arena_alloc(pi_arena, len + 1);
+    if (!dup) return;
+    memcpy(dup, subdir, len + 1);
+    f->usings[f->using_count++] = dup;
+    pi_reach(dup);
+}
+
+static void pi_flag_ident(pi_file_t *f, const char *s, size_t len) {
+    pi_name_t *name = pi_intern(s, len);
+    if (!name) return;
+    if (!f) {
+        /* Seed pass: the name is spelled by already-parsed sources, so it
+         * is live right away. */
+        name->flagged = 1;
+        return;
+    }
+    if (!pi_reserve((void *)&f->idents, f->ident_count, &f->ident_cap,
+                    sizeof(pi_name_t *)))
+        return;
+    f->idents[f->ident_count++] = name;
+}
+
+/* Lex one globbed file for pull-in metadata: top-level declared type names
+ * (brace depth <= 1 covers the block `namespace X { ... }` spelling too),
+ * `using` directives, extension-method marker, and the full identifier set.
+ * A token-level pass cannot be a perfect declaration parser -- it does not
+ * need to be: missed names would only ever under-include, and the guard
+ * below keeps the generic-constraint spelling (`where T : class`) from
+ * minting bogus candidates. */
+static void pi_scan_file(pi_file_t *f) {
+    size_t len = 0;
+    char *src = read_file(f->path, &len);
+    if (!src) {
+        /* Unreadable: include it so the real parse reports the error the
+         * old full-glob path produced ("cannot read '<path>'"). */
+        f->included = 1;
+        return;
+    }
+    zan_arena_t *arena = zan_arena_new();
+    zan_diag_t *diag = zan_diag_new(arena);
+    zan_lexer_t lex;
+    zan_lexer_init(&lex, src, len, 0, arena, diag);
+    zan_apply_lex_defines(&lex, pi_target, pi_pp_defines, pi_pp_define_count);
+    int depth = 0;
+    zan_token_kind_t prev = TK_EOF;
+    for (;;) {
+        zan_token_t tok = zan_lexer_next(&lex);
+        if (tok.kind == TK_EOF) break;
+        switch (tok.kind) {
+        case TK_LBRACE:
+            depth++;
+            break;
+        case TK_RBRACE:
+            if (depth > 0) depth--;
+            break;
+        case TK_USING: {
+            char subdir[512];
+            size_t used = 0;
+            tok = zan_lexer_next(&lex);
+            if (tok.kind != TK_IDENT) { prev = TK_IDENT; continue; }
+            for (;;) {
+                if (used && used + 1 < sizeof(subdir)) subdir[used++] = '/';
+                if (used + tok.str_val.len >= sizeof(subdir)) break;
+                memcpy(subdir + used, tok.str_val.str, tok.str_val.len);
+                used += tok.str_val.len;
+                tok = zan_lexer_next(&lex);
+                if (tok.kind != TK_DOT) break;
+                tok = zan_lexer_next(&lex);
+                if (tok.kind != TK_IDENT) break;
+            }
+            subdir[used] = 0;
+            if (tok.kind == TK_SEMICOLON) pi_note_using(f, subdir);
+            prev = tok.kind;
+            continue;
+        }
+        case TK_CLASS:
+        case TK_STRUCT:
+        case TK_ENUM:
+        case TK_INTERFACE:
+            if (depth <= 1 && prev != TK_COLON && prev != TK_COMMA) {
+                zan_token_t next = zan_lexer_peek(&lex);
+                if (next.kind == TK_IDENT) {
+                    tok = zan_lexer_next(&lex);
+                    pi_name_t *name = pi_intern(tok.str_val.str,
+                                                tok.str_val.len);
+                    if (name &&
+                        pi_reserve((void *)&f->top, f->top_count, &f->top_cap,
+                                   sizeof(pi_name_t *)))
+                        f->top[f->top_count++] = name;
+                    prev = TK_IDENT;
+                    continue;
+                }
+            }
+            break;
+        case TK_DELEGATE:
+            /* `delegate ReturnType Name<T>(...)` -- the declared name is
+             * the last identifier outside angle brackets before the
+             * parameter list's '('; identifiers inside <...> are the
+             * delegate's own type parameters and must not mint names (a
+             * bare `T` top name would match every generic mention in every
+             * later file). */
+            if (depth <= 1 && prev != TK_COLON && prev != TK_COMMA) {
+                pi_name_t *name = NULL;
+                int angle = 0;
+                for (;;) {
+                    tok = zan_lexer_next(&lex);
+                    if (tok.kind == TK_EOF || tok.kind == TK_SEMICOLON)
+                        break;
+                    if (tok.kind == TK_LPAREN && angle == 0) break;
+                    if (tok.kind == TK_LESS) angle++;
+                    else if (tok.kind == TK_GREATER) { if (angle > 0) angle--; }
+                    else if (tok.kind == TK_IDENT && angle == 0)
+                        name = pi_intern(tok.str_val.str, tok.str_val.len);
+                }
+                if (name && tok.kind == TK_LPAREN &&
+                    pi_reserve((void *)&f->top, f->top_count, &f->top_cap,
+                               sizeof(pi_name_t *)))
+                    f->top[f->top_count++] = name;
+                /* identifiers inside the return type are references too */
+                prev = tok.kind;
+                continue;
+            }
+            break;
+        case TK_THIS: {
+            /* Extension-declaration shape: `( this Type name` -- `this`
+             * right after '(' AND followed by a type token. The receiver is
+             * frequently a builtin (`this string s`), where the type is a
+             * KEYWORD token, not an identifier. Expression mentions
+             * (`M(this.x)`, `M(this)`) have '.' / ')' after, and `this`
+             * inside an argument list has a non-'(' before, so they never
+             * trigger. */
+            zan_token_t next = zan_lexer_peek(&lex);
+            if (prev == TK_LPAREN && (next.kind == TK_IDENT ||
+                                      next.kind == TK_STRING ||
+                                      next.kind == TK_BOOL ||
+                                      next.kind == TK_CHAR ||
+                                      next.kind == TK_INT ||
+                                      next.kind == TK_LONG ||
+                                      next.kind == TK_SHORT ||
+                                      next.kind == TK_BYTE ||
+                                      next.kind == TK_DOUBLE ||
+                                      next.kind == TK_FLOAT ||
+                                      next.kind == TK_UINT ||
+                                      next.kind == TK_ULONG ||
+                                      next.kind == TK_NINT ||
+                                      next.kind == TK_OBJECT))
+                f->has_ext = 1;
+            break;
+        }
+        case TK_IDENT:
+            /* `record Name(...)` lowers to a class; the name is the next
+             * identifier, and 'record' itself is a contextual keyword. */
+            if (depth <= 1 && tok.str_val.len == 6 &&
+                memcmp(tok.str_val.str, "record", 6) == 0 &&
+                zan_lexer_peek(&lex).kind == TK_IDENT) {
+                tok = zan_lexer_next(&lex);
+                pi_name_t *name = pi_intern(tok.str_val.str, tok.str_val.len);
+                if (name &&
+                    pi_reserve((void *)&f->top, f->top_count, &f->top_cap,
+                               sizeof(pi_name_t *)))
+                    f->top[f->top_count++] = name;
+                prev = TK_IDENT;
+                continue;
+            }
+            pi_flag_ident(f, tok.str_val.str, tok.str_val.len);
+            break;
+        default:
+            break;
+        }
+        prev = tok.kind;
+    }
+    zan_arena_free(arena);
+    free(src);
+}
+
+/* Seed the live-name worklist and the reached-directory set from one
+ * fully-parsed source (user file, design translation or generator output).
+ * Identifiers become live, with one carve-out: a top-level type declared by
+ * an input file shadows its own name for every unqualified use in user
+ * code, so those mentions do not pull a same-named stdlib file -- otherwise
+ * the customary `class App` template drags in the whole Gui framework via
+ * stdlib Gui.App. Qualified (dotted) mentions still seed, preserving the
+ * rare `Gui.App`-style escapes to the shadowed type. */
+/* Token kinds a declaration's return type can start with, for the
+ * method/property-declaration shape check in pi_seed_source. */
+static int pi_typeish(zan_token_kind_t k) {
+    return k == TK_IDENT || k == TK_STRING || k == TK_BOOL || k == TK_CHAR ||
+           k == TK_INT || k == TK_LONG || k == TK_SHORT || k == TK_BYTE ||
+           k == TK_DOUBLE || k == TK_FLOAT || k == TK_UINT ||
+           k == TK_ULONG || k == TK_NINT || k == TK_OBJECT ||
+           k == TK_VOID;
+}
+
+static void pi_seed_source(const char *source, size_t len) {
+    zan_arena_t *arena = zan_arena_new();
+    zan_diag_t *diag = zan_diag_new(arena);
+    zan_lexer_t lex;
+
+    /* Pass 1: collect namespace roots -- segments of `using` targets and of
+     * the file's own `namespace` declaration. Pass 2 needs them to tell a
+     * namespace-qualified type (`Gui.App`, `System.String`) apart from a
+     * member access on a variable (`b.Label()`): only chains rooted at a
+     * namespace segment can name a pull-in candidate. The two passes must
+     * share one lexer config, and usings conventionally sit at the top of
+     * the file, but a second lex keeps the order irrelevant. */
+    for (int pass = 0; pass < 2; pass++) {
+        zan_lexer_init(&lex, source, len, 0, arena, diag);
+        zan_apply_lex_defines(&lex, pi_target, pi_pp_defines,
+                              pi_pp_define_count);
+        int depth = 0;
+        zan_token_kind_t prev = TK_EOF;
+        pi_name_t *chain = NULL;    /* first segment of the dotted chain */
+        for (;;) {
+            zan_token_t tok = zan_lexer_next(&lex);
+            if (tok.kind == TK_EOF) break;
+            switch (tok.kind) {
+            case TK_LBRACE:
+                depth++;
+                break;
+            case TK_RBRACE:
+                if (depth > 0) depth--;
+                break;
+            case TK_USING: {
+                char subdir[512];
+                size_t used = 0;
+                tok = zan_lexer_next(&lex);
+                if (tok.kind != TK_IDENT) { prev = TK_IDENT; continue; }
+                for (;;) {
+                    if (used && used + 1 < sizeof(subdir))
+                        subdir[used++] = '/';
+                    if (used + tok.str_val.len >= sizeof(subdir)) break;
+                    memcpy(subdir + used, tok.str_val.str, tok.str_val.len);
+                    used += tok.str_val.len;
+                    tok = zan_lexer_next(&lex);
+                    if (tok.kind != TK_DOT) break;
+                    tok = zan_lexer_next(&lex);
+                    if (tok.kind != TK_IDENT) break;
+                }
+                subdir[used] = 0;
+                if (tok.kind == TK_SEMICOLON && used > 0) {
+                    pi_reach(subdir);
+                    /* every segment is a namespace root for pass 2 */
+                    for (char *seg = subdir; *seg; ) {
+                        char *dot = strchr(seg, '/');
+                        if (dot) *dot = 0;
+                        pi_name_t *s = pi_intern(seg, strlen(seg));
+                        if (s) s->ns_root = 1;
+                        if (!dot) break;
+                        seg = dot + 1;
+                    }
+                }
+                prev = tok.kind;
+                chain = NULL;
+                continue;
+            }
+            case TK_NAMESPACE: {
+                /* the file's own namespace: its segments are roots too */
+                char nsname[512];
+                size_t used = 0;
+                tok = zan_lexer_next(&lex);
+                if (tok.kind != TK_IDENT) { prev = TK_IDENT; continue; }
+                for (;;) {
+                    if (used && used + 1 < sizeof(nsname))
+                        nsname[used++] = '/';
+                    if (used + tok.str_val.len >= sizeof(nsname)) break;
+                    memcpy(nsname + used, tok.str_val.str, tok.str_val.len);
+                    used += tok.str_val.len;
+                    tok = zan_lexer_next(&lex);
+                    if (tok.kind != TK_DOT) break;
+                    tok = zan_lexer_next(&lex);
+                    if (tok.kind != TK_IDENT) break;
+                }
+                nsname[used] = 0;
+                if (tok.kind == TK_SEMICOLON || tok.kind == TK_LBRACE) {
+                    for (char *seg = nsname; *seg; ) {
+                        char *dot = strchr(seg, '/');
+                        if (dot) *dot = 0;
+                        pi_name_t *s = pi_intern(seg, strlen(seg));
+                        if (s) s->ns_root = 1;
+                        if (!dot) break;
+                        seg = dot + 1;
+                    }
+                }
+                prev = tok.kind;
+                chain = NULL;
+                continue;
+            }
+            case TK_CLASS:
+            case TK_STRUCT:
+            case TK_ENUM:
+            case TK_INTERFACE:
+                if (depth <= 1 && prev != TK_COLON && prev != TK_COMMA &&
+                    pass == 1) {
+                    zan_token_t next = zan_lexer_peek(&lex);
+                    if (next.kind == TK_IDENT) {
+                        tok = zan_lexer_next(&lex);
+                        pi_name_t *name = pi_intern(tok.str_val.str,
+                                                    tok.str_val.len);
+                        if (name) name->user_decl = 1;
+                        prev = TK_IDENT;
+                        chain = NULL;
+                        continue;
+                    }
+                }
+                break;
+            case TK_DELEGATE:
+                if (depth <= 1 && prev != TK_COLON && prev != TK_COMMA &&
+                    pass == 1) {
+                    pi_name_t *name = NULL;
+                    int angle = 0;
+                    for (;;) {
+                        tok = zan_lexer_next(&lex);
+                        if (tok.kind == TK_EOF || tok.kind == TK_SEMICOLON)
+                            break;
+                        if (tok.kind == TK_LPAREN && angle == 0) break;
+                        if (tok.kind == TK_LESS) angle++;
+                        else if (tok.kind == TK_GREATER) {
+                            if (angle > 0) angle--;
+                        } else if (tok.kind == TK_IDENT && angle == 0)
+                            name = pi_intern(tok.str_val.str, tok.str_val.len);
+                    }
+                    if (name && tok.kind == TK_LPAREN) name->user_decl = 1;
+                    prev = tok.kind;
+                    chain = NULL;
+                    continue;
+                }
+                break;
+            case TK_IDENT:
+                /* `record Name(...)` lowers to a class. */
+                if (depth <= 1 && tok.str_val.len == 6 &&
+                    memcmp(tok.str_val.str, "record", 6) == 0 &&
+                    zan_lexer_peek(&lex).kind == TK_IDENT && pass == 1) {
+                    tok = zan_lexer_next(&lex);
+                    pi_name_t *name = pi_intern(tok.str_val.str,
+                                                tok.str_val.len);
+                    if (name) name->user_decl = 1;
+                    prev = TK_IDENT;
+                    chain = NULL;
+                    continue;
+                }
+                {
+                    pi_name_t *name = pi_intern(tok.str_val.str,
+                                                tok.str_val.len);
+                    if (pass == 1 && name) {
+                        if (prev != TK_DOT) {
+                            chain = name;
+                            zan_token_t next = zan_lexer_peek(&lex);
+                            if (depth >= 1 && pi_typeish(prev) &&
+                                (next.kind == TK_LPAREN ||
+                                 next.kind == TK_LBRACE)) {
+                                /* `string Label(` / `string Label {` inside
+                                 * a type body: a method or property
+                                 * DECLARATION. Method names collide with
+                                 * stdlib type names constantly (a widget
+                                 * named Label, a method named Label) and a
+                                 * declaration never references a stdlib
+                                 * type. `new Label(...)` keeps prev==TK_NEW,
+                                 * so real constructor calls still pull. */
+                            } else if (!name->user_decl) {
+                                name->flagged = 1;
+                            }
+                        } else if (chain && chain->ns_root) {
+                            /* `Ns.Segment` under a known namespace root. */
+                            name->flagged = 1;
+                        }
+                    }
+                }
+                break;
+            default:
+                chain = NULL;
+                break;
+            }
+            if (tok.kind != TK_DOT) chain = NULL;
+            prev = tok.kind;
+        }
+    }
+    zan_arena_free(arena);
+}
+
+/* Glob a reached directory (stdlib root + any package providing the
+ * namespace) and metadata-scan every file once. Bookkeeping mirrors
+ * auto_include_namespace so --list-missing and the install suggestion keep
+ * working: a namespace found nowhere is reported exactly as before. */
+static void pi_process_dir(pi_dir_t *d, const char *stdlib_root) {
+    if (d->reached) return;
+    d->reached = 1;
+    int found = 0;
+    int before = d->file_count;
+    pi_glob_into(d, stdlib_root, d->subdir);
+    if (d->file_count != before) found = 1;
+    char package_dirs[32][1024];
+    int package_count = zan_pkg_find_namespace(package_project_root, d->subdir,
+                                               package_dirs, 32);
+    if (package_count >= 32)
+        fprintf(stderr, "warning: namespace '%s' is provided by 32 or more "
+                        "installed packages; only the first 32 are compiled\n",
+                d->subdir);
+    for (int i = 0; i < package_count; i++) {
+        before = d->file_count;
+        pi_glob_into(d, package_dirs[i], "");
+        if (d->file_count != before) found = 1;
+    }
+    /* `using System;` imports compiler/runtime core names rather than a
+     * marketplace namespace; it must never become an install suggestion. */
+    if (!found && strcmp(d->subdir, "System") != 0 &&
+        !project_namespace_declared(d->subdir)) {
+        fprintf(stderr, "ZANPKG_MISSING namespace=%s\n", d->subdir);
+        missing_namespace_count++;
+    }
+    for (int i = 0; i < d->file_count; i++)
+        pi_scan_file(&d->files[i]);
+}
+
+/* One closure round over every reached directory: include files whose
+ * top-level names are live (or that host extension methods), flag their
+ * identifiers, reach their `using` directories. Returns 1 when anything
+ * changed. Newly reached dirs were appended to the list, so the walking
+ * pointer picks them up in the same or a later round. */
+static int pi_close_once(const char *stdlib_root) {
+    int changed = 0;
+    for (pi_dir_t *d = pi_dirs_head; d; d = d->next) {
+        if (!d->reached) pi_process_dir(d, stdlib_root);
+        for (int i = 0; i < d->file_count; i++) {
+            pi_file_t *f = &d->files[i];
+            if (f->included) continue;
+            int hit = f->has_ext;
+            const char *why = f->has_ext ? "ext" : NULL;
+            for (int k = 0; k < f->top_count && !hit; k++)
+                if (f->top[k]->flagged) { hit = 1; why = f->top[k]->str; }
+            if (!hit) continue;
+            f->included = 1;
+            if (getenv("ZAN_PULLIN_DEBUG") != NULL)
+                fprintf(stderr, "[pullin] incl %s because %s\n",
+                        f->path ? f->path : "?", why ? why : "?");
+            changed = 1;
+            for (int k = 0; k < f->ident_count; k++)
+                f->idents[k]->flagged = 1;
+            for (int k = 0; k < f->using_count; k++)
+                pi_reach(f->usings[k]);
+        }
+    }
+    return changed;
+}
+
+static void pi_close_all(const char *stdlib_root) {
+    while (pi_close_once(stdlib_root)) {}
+    if (getenv("ZAN_PULLIN_DEBUG") != NULL) {
+        for (pi_dir_t *d = pi_dirs_head; d; d = d->next)
+            for (int i = 0; i < d->file_count; i++)
+                fprintf(stderr, "[pullin] %s %s (top=%d, idents=%d)\n",
+                        d->files[i].included ? "INCL" : "skip",
+                        d->files[i].path ? d->files[i].path : "(null)",
+                        d->files[i].top_count, d->files[i].ident_count);
+    }
+}
+
+/* Append every included-but-unparsed file to the compiler's input list.
+ * Returns how many were appended (they sit at the tail, in walk order). */
+static int pi_append_included(const char ***files, int *count, int *cap) {
+    int before = *count;
+    for (pi_dir_t *d = pi_dirs_head; d; d = d->next)
+        for (int i = 0; i < d->file_count; i++) {
+            pi_file_t *f = &d->files[i];
+            if (f->included && !f->parsed && f->path) {
+                add_stdlib_input(files, count, cap, f->path);
+                f->parsed = 1;
+            }
+        }
+    return *count - before;
+}
+
+/* Apply the preprocessor environment every parse shares: platform macros
+ * for the *target* (== host unless --target was given, so cross-compiled
+ * sources see the destination OS/arch) plus the user's -D defines. Used by
+ * the main parse loop and by the demand-driven pull-in's secondary rounds. */
+static void zan_apply_lex_defines(zan_lexer_t *lex, zan_target_t target,
+                                  const char *const *pp_defines,
+                                  int pp_define_count) {
+    switch (target.os) {
+    case ZAN_OS_WINDOWS:
+        zan_lexer_define(lex, "WINDOWS", "1");
+        zan_lexer_define(lex, "WIN32", "1");
+        break;
+    case ZAN_OS_LINUX:
+        zan_lexer_define(lex, "LINUX", "1");
+        break;
+    case ZAN_OS_ANDROID:
+        /* Android is Linux-flavored (bionic): programs written for LINUX
+         * keep compiling, but ANDROID lets them pick the differences
+         * (no GUI driver, /data/local/tmp file conventions, ...). */
+        zan_lexer_define(lex, "LINUX", "1");
+        zan_lexer_define(lex, "ANDROID", "1");
+        break;
+    case ZAN_OS_OHOS:
+        /* OpenHarmony is musl-flavored like the linux-musl path, but OHOS
+         * marks it: no GUI driver yet and an hdc-based deployment flow,
+         * so programs can guard the differences with OHOS. */
+        zan_lexer_define(lex, "LINUX", "1");
+        zan_lexer_define(lex, "MUSL", "1");
+        zan_lexer_define(lex, "OHOS", "1");
+        break;
+    case ZAN_OS_MACOS:
+        zan_lexer_define(lex, "MACOS", "1");
+        zan_lexer_define(lex, "APPLE", "1");
+        break;
+    default:
+        break;
+    }
+    if (target.arch == ZAN_ARCH_AARCH64)
+        zan_lexer_define(lex, "ARM64", "1");
+    else if (target.arch == ZAN_ARCH_X86_64)
+        zan_lexer_define(lex, "X86_64", "1");
+    else if (target.arch == ZAN_ARCH_RISCV64)
+        zan_lexer_define(lex, "RISCV64", "1");
+    else if (target.arch == ZAN_ARCH_RISCV32)
+        zan_lexer_define(lex, "RISCV32", "1");
+    else if (target.arch == ZAN_ARCH_WASM32)
+        zan_lexer_define(lex, "WASM32", "1");
+    if (target.os == ZAN_OS_WASI)
+        zan_lexer_define(lex, "WASI", "1");
+    if (target.abi == ZAN_ABI_MUSL)
+        zan_lexer_define(lex, "MUSL", "1");
+    zan_lexer_define(lex, "ZAN", "1");
+    /* User -D defines */
+    for (int di = 0; di < pp_define_count; di++) {
+        char dname[64];
+        const char *dval = "1";
+        const char *eq = strchr(pp_defines[di], '=');
+        if (eq) {
+            int nl = (int)(eq - pp_defines[di]);
+            if (nl > 63) nl = 63;
+            memcpy(dname, pp_defines[di], nl);
+            dname[nl] = '\0';
+            dval = eq + 1;
+        } else {
+            strncpy(dname, pp_defines[di], 63);
+            dname[63] = '\0';
+        }
+        zan_lexer_define(lex, dname, dval);
+    }
+}
+
+/* Parse one extra file with the same preprocessor environment as the main
+ * parse loop and return its compilation unit (NULL when it cannot be read).
+ * Used by the demand-driven pull-in's post-generator round. */
+static zan_ast_node_t *parse_secondary_unit(const char *path,
+                                            zan_target_t target,
+                                            const char *const *pp_defines,
+                                            int pp_define_count,
+                                            zan_arena_t *arena,
+                                            zan_diag_t *diag) {
+    size_t slen = 0;
+    char *src = read_file(path, &slen);
+    if (!src) return NULL;
+    int file_id = diag->file_count;
+    zan_diag_add_file(diag, path, src);
+    zan_lexer_t lex;
+    zan_lexer_init(&lex, src, slen, file_id, arena, diag);
+    zan_apply_lex_defines(&lex, target, pp_defines, pp_define_count);
+    zan_parser_t parser;
+    zan_parser_init(&parser, &lex, arena, diag);
+    zan_ast_node_t *unit = zan_parser_parse(&parser);
+    free(src);
+    return unit;
+}
 
 static void dump_tokens(const char *source, size_t len, const char *filename) {
     zan_arena_t *arena = zan_arena_new();
@@ -2198,6 +2969,38 @@ int main(int argc, char **argv) {
         if (!design_outs) return 1;
         design_count = (size_t)input_count;
 
+        /* The IDE symbol index must describe the whole stdlib (a completion
+         * suggestion has to exist before any program references it), and
+         * ZAN_NO_PULLIN_FILTER is the A/B + bisect escape hatch; otherwise
+         * globbed namespaces parse on demand, filtered by the live-name
+         * closure described above the pull-in helpers. */
+        pi_filter_active = !emit_symbols_path &&
+                           getenv("ZAN_NO_PULLIN_FILTER") == NULL;
+        if (pi_filter_active) {
+            pi_arena = zan_arena_new();
+            pi_target = target;
+            pi_pp_defines = pp_defines;
+            pi_pp_define_count = pp_define_count;
+            for (int fi = 0; fi < input_count; fi++) {
+                /* A saved user component is generator data (consumed inside
+                 * zan_gen_design); its JSON has no identifiers to seed. */
+                if (zan_is_zcomp_path(input_files[fi])) continue;
+                size_t slen3 = 0;
+                char *src3 = read_file(input_files[fi], &slen3);
+                if (!src3) continue;
+                char *owned = NULL;
+                if ((size_t)fi < design_count && design_outs[fi]) {
+                    free(src3);
+                    src3 = strdup(design_outs[fi]);
+                    owned = src3;
+                    if (!src3) { fprintf(stderr, "error: out of memory\n"); return 1; }
+                }
+                pi_seed_source(src3, strlen(src3));
+                free(owned ? owned : src3);
+            }
+            pi_close_all(stdlib_root);
+            pi_append_included(&input_files, &input_count, &input_cap);
+        } else {
         /* Each file's `using` set never changes, so scan every file exactly
          * once: new files land at the end of the list and the next round picks
          * them up. Re-reading the whole list per round used to dominate
@@ -2230,6 +3033,7 @@ int main(int argc, char **argv) {
                 free(owned ? owned : src3);
             }
             scanned = round_end;
+        }
         }
     }
 
@@ -2333,68 +3137,7 @@ int main(int argc, char **argv) {
         zan_lexer_t lex;
         zan_lexer_init(&lex, src, slen, fi, arena, diag);
 
-        /* Auto-define platform macros for the *target* (== host unless
-         * --target was given), so cross-compiled sources see the destination
-         * OS/arch (e.g. LINUX instead of WINDOWS). */
-        switch (target.os) {
-        case ZAN_OS_WINDOWS:
-            zan_lexer_define(&lex, "WINDOWS", "1");
-            zan_lexer_define(&lex, "WIN32", "1");
-            break;
-        case ZAN_OS_LINUX:
-            zan_lexer_define(&lex, "LINUX", "1");
-            break;
-        case ZAN_OS_ANDROID:
-            /* Android is Linux-flavored (bionic): programs written for LINUX
-             * keep compiling, but ANDROID lets them pick the differences
-             * (no GUI driver, /data/local/tmp file conventions, ...). */
-            zan_lexer_define(&lex, "LINUX", "1");
-            zan_lexer_define(&lex, "ANDROID", "1");
-            break;
-        case ZAN_OS_OHOS:
-            /* OpenHarmony is musl-flavored like the linux-musl path, but OHOS
-             * marks it: no GUI driver yet and an hdc-based deployment flow,
-             * so programs can guard the differences with OHOS. */
-            zan_lexer_define(&lex, "LINUX", "1");
-            zan_lexer_define(&lex, "MUSL", "1");
-            zan_lexer_define(&lex, "OHOS", "1");
-            break;
-        case ZAN_OS_MACOS:
-            zan_lexer_define(&lex, "MACOS", "1");
-            zan_lexer_define(&lex, "APPLE", "1");
-            break;
-        default:
-            break;
-        }
-        if (target.arch == ZAN_ARCH_AARCH64)
-            zan_lexer_define(&lex, "ARM64", "1");
-        else if (target.arch == ZAN_ARCH_X86_64)
-            zan_lexer_define(&lex, "X86_64", "1");
-        else if (target.arch == ZAN_ARCH_RISCV64)
-            zan_lexer_define(&lex, "RISCV64", "1");
-        else if (target.arch == ZAN_ARCH_RISCV32)
-            zan_lexer_define(&lex, "RISCV32", "1");
-        else if (target.arch == ZAN_ARCH_WASM32)
-            zan_lexer_define(&lex, "WASM32", "1");
-        if (target.os == ZAN_OS_WASI)
-            zan_lexer_define(&lex, "WASI", "1");
-        if (target.abi == ZAN_ABI_MUSL)
-            zan_lexer_define(&lex, "MUSL", "1");
-        zan_lexer_define(&lex, "ZAN", "1");
-        /* User -D defines */
-        for (int di = 0; di < pp_define_count; di++) {
-            char dname[64]; const char *dval = "1";
-            const char *eq = strchr(pp_defines[di], '=');
-            if (eq) {
-                int nl = (int)(eq - pp_defines[di]);
-                if (nl > 63) nl = 63;
-                memcpy(dname, pp_defines[di], nl); dname[nl] = '\0';
-                dval = eq + 1;
-            } else {
-                strncpy(dname, pp_defines[di], 63); dname[63] = '\0';
-            }
-            zan_lexer_define(&lex, dname, dval);
-        }
+        zan_apply_lex_defines(&lex, target, pp_defines, pp_define_count);
 
         zan_parser_t parser;
         zan_parser_init(&parser, &lex, arena, diag);
@@ -2485,6 +3228,51 @@ int main(int argc, char **argv) {
             zan_arena_free(arena);
             free(source);
             return 1;
+        }
+        /* Demand-driven pull-in, second round: generated classes reference
+         * stdlib types the user program never spells (dbgen output binds the
+         * whole System.Data.Orm subtree -- OrmSelect/OrmMeta/OrmCol/...), so
+         * seed the live-name worklist with the generated texts and parse
+         * whatever new files the closure adds. The main parse loop has
+         * already run, so the fresh tail is parsed and merged right here,
+         * stamped stdlib-authored exactly like the primary loop does. */
+        if (pi_filter_active) {
+            char **gen_texts = NULL;
+            int gen_text_count = 0;
+            zan_gen_take_source_texts(&gen_texts, &gen_text_count);
+            for (int gi = 0; gi < gen_text_count; gi++) {
+                pi_seed_source(gen_texts[gi], strlen(gen_texts[gi]));
+                free(gen_texts[gi]);
+            }
+            free(gen_texts);
+            pi_close_all(resolved_stdlib_root);
+            int fresh = pi_append_included(&input_files, &input_count,
+                                           &input_cap);
+            for (int fi = input_count - fresh; fi < input_count; fi++) {
+                zan_ast_node_t *unit = parse_secondary_unit(
+                    input_files[fi], target, pp_defines, pp_define_count,
+                    arena, diag);
+                if (!unit) {
+                    fprintf(stderr, "error: cannot read '%s'\n",
+                            input_files[fi]);
+                    zan_arena_free(arena);
+                    free(source);
+                    return 1;
+                }
+                zan_nsresolve_stamp(unit, arena);
+                if (auto_stdlib && resolved_stdlib_root[0] &&
+                    zan_path_is_under(input_files[fi], resolved_stdlib_root)) {
+                    for (int k = 0; k < unit->comp_unit.decls.count; k++)
+                        if (unit->comp_unit.decls.items[k])
+                            unit->comp_unit.decls.items[k]->from_stdlib = 1;
+                }
+                for (int k = 0; k < unit->comp_unit.usings.count; k++)
+                    zan_ast_list_push(&ast->comp_unit.usings,
+                                      unit->comp_unit.usings.items[k], arena);
+                for (int k = 0; k < unit->comp_unit.decls.count; k++)
+                    zan_ast_list_push(&ast->comp_unit.decls,
+                                      unit->comp_unit.decls.items[k], arena);
+            }
         }
         /* Generators merged their generated classes into the unit above; run
          * nsresolve again so the new declarations' type references (Expr<T>,

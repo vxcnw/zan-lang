@@ -1,0 +1,18 @@
+// Conformance: demand-driven stdlib pull-in must keep the shadowing rule --
+// an unqualified mention of a name the user program declares resolves to
+// the user's own type, so the same-named stdlib class (Gui.Widget.Button)
+// neither breaks the build nor changes resolution when it is not pulled.
+using System;
+using Gui.Widget;
+
+class Button {
+    static int Main() {
+        Button b = new Button();
+        Console.WriteLine(b.Label());
+        return 0;
+    }
+
+    string Label() {
+        return "user-button";
+    }
+}

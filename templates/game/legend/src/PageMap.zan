@@ -1,0 +1,102 @@
+using System;
+using Gui;
+using Gui.Widget;
+using Legend;
+
+/// 页 0「地图传送」——照原版逐像素还原。
+///
+/// 原版实测（_scratch/minimir/pages2/map1.png，规格见 Spec / REFERENCE_AUDIT）：
+///   · 主体是一整块 4 列 × 5 行 = 20 张地图卡，一屏放完
+///   · 每卡 160×70（= 地图素材原始尺寸），列距 20、行距 15
+///   · 地图截图铺满整格，**图名压在卡片右上角**（白字黑描边）
+///   · 只有「当前所在」那张是彩色，其余 19 张一律灰度
+///   · 左下角一行方页码 [1] [2]（灰底灰框 + 蓝数字）
+///
+/// 原版这一页**没有**：价格、转生档位、气血天赋、进入/激活按钮、
+/// 图谱积分、左右翻页箭头、冲400补。一个都不要画。
+partial class LegendApp {
+    /* 地图卡素材路径：每张图有 3 档视觉（idx = (id-1)*3），
+       gray=true 取 _g 灰度版——灰度是素材自带的，不做运行时滤镜。 */
+    string MapThumbPath(int id, bool gray) {
+        int idx = (id - 1) * 3;
+        if (idx < 0) { idx = 0; }
+        string path = "assets/map/" + Rules.N(idx).PadLeft(5, "0")
+            + (gray ? "_g" : "") + ".jpg";
+        if (File.Exists(path)) { return path; }
+        return "assets/map/00000" + (gray ? "_g" : "") + ".jpg";
+    }
+
+    void BuildMapTravel() {
+        JsonValue st = net.Self();
+        int curMap = st != null ? st.Int("map", 1) : 1;
+        int unlocked = st != null && st.Int("mapUnlocked", 0) > 0
+            ? st.Int("mapUnlocked", 0) : 1;
+        int total = net.MapCount();
+        if (total <= 0) { total = 35; }
+
+        int per = Spec.MapPerPage();
+        int pages = (total + per - 1) / per; if (pages < 1) { pages = 1; }
+        if (mapPage >= pages) { mapPage = pages - 1; }
+        if (mapPage < 0) { mapPage = 0; }
+
+        Panel body = Panel.Column(); body.Class = "map-page";
+        body.Pad(0); body.Gap(0); body.Grow(); content.With(body);
+
+        int from = mapPage * per;
+        int to = total < from + per ? total : from + per;
+
+        /* 卡阵：每行 4 张定宽卡片（不能用 Grid.Of(4)，那会等分拉伸卡片）。 */
+        Panel wall = Panel.Column(); wall.Class = "map-wall";
+        wall.Gap(Spec.MapRowGap()); wall.Grow(); body.With(wall);
+        int rows = (to - from + Spec.MapCols() - 1) / Spec.MapCols();
+        for (int r = 0; r < rows; r = r + 1) {
+            Panel row = Panel.Row(); row.Class = "map-row"; row.Gap(Spec.MapColGap());
+            row.Grow(); wall.With(row);
+            for (int c = 0; c < Spec.MapCols(); c = c + 1) {
+                int i = from + r * Spec.MapCols() + c;
+                if (i >= to) { break; }
+                row.With(MapCard(i, curMap, unlocked));
+            }
+        }
+
+        /* 左下页码方块（原版两个数字方块，不是箭头）。 */
+        Panel pager = Panel.Row(); pager.Class = "map-pager";
+        pager.Gap(Spec.PagerGap()); pager.Prefer(0, Spec.PagerSize());
+        body.With(pager);
+        for (int p = 0; p < pages; p = p + 1) {
+            int pg = p;
+            Panel box = Panel.Row(); box.Class = pg == mapPage
+                ? "map-pageno map-pageno-on" : "map-pageno";
+            box.Prefer(Spec.PagerSize(), Spec.PagerSize());
+            box.Named("map-page-" + Rules.N(pg + 1));
+            Label num = Text(Rules.N(pg + 1), "map-pageno-text", 0);
+            num.Grow(); box.With(num);
+            box.OnClick(() => { mapPage = pg; BuildPage(); Refresh(); });
+            pager.With(box);
+        }
+    }
+
+    /* 一张地图卡：截图铺满 + 图名压右上角 + 整卡可点。 */
+    Panel MapCard(int i, int curMap, int unlocked) {
+        JsonValue mp = net.MapAt(i);
+        int id = mp != null ? mp.Int("id", i + 1) : i + 1;
+        string name = mp != null ? mp.Str("name", "地图") : "地图";
+        bool here = id == curMap;
+        bool open = id <= unlocked;
+
+        /* 原版卡片 = 160×70 定宽定高。 */
+        Panel card = Panel.Row(); card.Class = here ? "map-tile map-tile-here"
+            : open ? "map-tile map-tile-open" : "map-tile";
+        card.Pad(0); card.Gap(0);
+        card.Prefer(Spec.MapCardW(), Spec.MapCardH());
+        card.Named("map-card-" + Rules.N(id));
+        Image thumb = new Image(MapThumbPath(id, !here), name, "cover");
+        thumb.Grow(); card.With(thumb);
+        Label nm = Text(name, "map-name-over", 0);
+        nm.Named("map-name-" + Rules.N(id)); card.With(nm);
+
+        int mid = id;
+        card.OnClick(() => { net.MoveTo(mid); BuildPage(); Refresh(); });
+        return card;
+    }
+}

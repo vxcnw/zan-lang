@@ -648,6 +648,8 @@ stdlib/
 
 `using System.Collections.Generic;` 按命名空间路径解析到 `stdlib/` 下的目录或文件。编译器选项 `--stdlib-path <dir>` 指定根目录，`--auto-stdlib` 自动查找。包（第三方命名空间）经 `--package-install` / `--package-scope` 安装到项目作用域或全局作用域。
 
+一个 `using` 命中一个**目录**；目录内的 `.zan` 文件按需编译（demand-driven pull-in）：编译器只 parse 声明名被程序实际拼写的文件（用户代码遮蔽的简单名除外，如自带的 `class App` 不会拉入 stdlib 的同名文件；限定名 `Gui.App` 与扩展方法宿主仍会拉入）。未被引用的文件不参与 parse——其中的语法错误不会拖垮无关程序。参考实现见 `src/compiler/main.c` 的 demand-driven stdlib pull-in 块；`ZAN_NO_PULLIN_FILTER=1` 可回退全量 glob 行为，`--emit-symbols` 恒用全量（IDE 索引需要完整 stdlib）。
+
 ### 8.2 Non-Intrusive Design
 
 - Standard library modules are loaded **only when imported** (not preloaded)

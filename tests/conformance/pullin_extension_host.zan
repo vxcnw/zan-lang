@@ -1,0 +1,13 @@
+// Conformance: extension methods are resolved by receiver, never by the
+// host class name, so the pull-in must include the file hosting them
+// (System.StringExtensions) even though nothing spells its name.
+using System;
+
+class Program {
+    static int Main() {
+        string s = "mango";
+        Console.WriteLine(s.CompareTo("mango"));
+        Console.WriteLine(s.CompareTo("apple"));
+        return 0;
+    }
+}

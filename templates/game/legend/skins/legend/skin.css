@@ -1,3 +1,7 @@
+/* 迷你传奇皮肤 —— 照原版逐像素还原。
+   所有颜色/尺寸的事实来源是 REFERENCE_AUDIT.md；
+   页面代码只写 CSS 类名，不写死像素。 */
+
 :root {
  --primary: #009de0;
  --primary-hover: #25bcf4;
@@ -23,6 +27,8 @@
  --font-size-medium: 14;
  --font-size-large: 16;
  --font-size-huge: 20;
+
+ /* 原版游戏色（从截图取色） */
  --game-yellow: #ffff00;
  --game-green: #00dd00;
  --game-cyan: #00dddd;
@@ -31,43 +37,47 @@
  --game-magenta: #ed00ed;
  --game-purple: #8872f0;
  --game-pink: #e075b9;
+
+ /* 原版界面结构色 */
+ --game-panel: #0b0e14;
+ --game-panel-2: #10141c;
+ --game-line: #2a3348;
+ --game-head: #1b2740;
+ --game-head-text: #7ab8ff;
+ --game-row-a: #0d1524;
+ --game-row-b: #111a2e;
+ --game-row-me: #4a1a3a;
+ --game-tab-on: #1a3a5c;
+ --game-btn-a: #e8a020;
+ --game-btn-b: #c87810;
+ --game-slot: #0a0c12;
+ --game-slot-line: #3a4055;
+ --game-slot-gold: #6a5a30;
 }
-button { color: var(--primary); background: #202c39; border: 1px var(--border-primary); border-radius: 0; padding: 2px 4px; }
-button.small { font-size: var(--font-size-medium); }
-button.tiny { font-size: var(--font-size-small); }
-.navtile { display: flex; flex-direction: row; align-items: center; background: #1f2936; border: 1px #444e5c; border-radius: 0; }
+
+/* ===================== 全局骨架 ===================== */
+.legend-root { background: #24303e; }
+grid { column-gap: 0; row-gap: 0; padding: 0; }
+progress { font-size: var(--font-size-tiny); }
+image { background: transparent; border-width: 0; }
+
+.page-surface, .battlefield { background: #1e2633; }
+.sidebar, .profile, .feed, .chat-panel, .rank-panel {
+    background: #171e29; border: 1px var(--border-primary); }
+.frame { background: var(--bg-surface); border: 1px #256489; }
+
+/* ===================== 顶部/底部导航 ===================== */
+.navtile { display: flex; flex-direction: row; align-items: center;
+    background: #1f2936; border: 1px #444e5c; border-radius: 0; }
 .navtile:hover { background: #26374a; border-color: var(--primary); }
 .navicon { flex-shrink: 0; }
 .navtext { flex: 1 1 0; min-width: 0; color: #00a8f0; font-size: var(--font-size-tiny); }
 .navtile-active { background: #26374a; border-color: #bda36a; }
 .navtile-active .navtext { align-self: center; color: #f1d592; }
 .navigation-grid { column-gap: 4px; row-gap: 4px; }
-.page-surface, .battlefield { background: #1e2633; }
-.sidebar, .profile, .feed, .chat-panel, .rank-panel { background: #171e29; border: 1px var(--border-primary); }
-.frame { background: var(--bg-surface); border: 1px #256489; }
-.item-cell { background: #08090b; border: 1px #3c454d; }
-.item-selected { background: #182938; border: 1px var(--game-yellow); }
-.item-locked { background: #10151d; border: 1px #29323b; }
-.paperdoll { background: #0c0d0e; border: 1px #256489; }
-.paperdoll-canvas { background: transparent; overflow: hidden; }
-.paperdoll-layer { background: transparent; }
-.map-tile { background: #172330; border: 1px #3b4956; }
-.map-tile-here { background: #1a2531; border: 1px var(--game-yellow); }
-/* 解锁未所在：蓝框，悬停变金框（原版交互）。 */
-.map-tile-open { background: #172330; border: 1px #4d9fdc; }
-.map-tile-open:hover { border: 1px var(--game-yellow); }
-.map-name { color: #ffffff; font-size: var(--font-size-small); }
-/* 地图内页战斗场景底：深色照原版暗蓝灰。 */
-.boss-scene { background: #0d131c; border: 1px #29323b; }
-/* 建角页职业/性别块：默认无底无框（图标自带原版石底），选中才金边。*/
-.jobtile { background: transparent; border: 1px transparent; align-items: center; }
-.jobtile-active { background: #182938; border: 1px var(--game-yellow); align-items: center; }
-.align-start { align-items: flex-start; }
-/* 原版底条无独立底板：瓦片直接坐在窗口底色 #243040 上。 */
 .bottom-nav { background: transparent; border: 1px transparent; }
-.table-head { background: #10273b; }
-.table-row { background: #18232f; }
-.table-alt { background: #202e3c; }
+
+/* ===================== 通用颜色/字号 ===================== */
 .yellow { color: var(--game-yellow); }
 .green { color: var(--game-green); }
 .cyan { color: var(--game-cyan); }
@@ -80,17 +90,136 @@ button.tiny { font-size: var(--font-size-small); }
 .strong { font-weight: 700; }
 .tiny { font-size: var(--font-size-tiny); }
 .small { font-size: var(--font-size-small); }
-.battle-title { font-size: var(--font-size-huge); font-weight: 700; color: var(--game-orange); }
+.medium { font-size: var(--font-size-medium); }
+.large { font-size: var(--font-size-large); }
+.title { font-size: var(--font-size-huge); font-weight: 700; }
 .secondary { color: var(--text-secondary); }
+.battle-title { font-size: var(--font-size-huge); font-weight: 700; color: var(--game-orange); }
+.align-start { align-items: flex-start; }
 
-.legend-root { background: #24303e; }
-grid { column-gap: 0; row-gap: 0; padding: 0; }
-progress { font-size: var(--font-size-tiny); }
+/* ===================== 通用按钮 ===================== */
+button { color: var(--primary); background: #202c39; border: 1px var(--border-primary);
+    border-radius: 0; padding: 2px 4px; }
+button.small { font-size: var(--font-size-medium); }
+button.tiny { font-size: var(--font-size-small); }
+/* 主按钮：橙黄渐变（升级/购买/挑战/开始） */
+.btn-primary, .bag-primary, .bag-act {
+    background: #c87810; border: 1px #e8a020; color: #1a1206; font-weight: 700; }
+.btn-primary:hover, .bag-primary:hover, .bag-act:hover { background: #e8a020; }
+/* 次按钮：深蓝底浅蓝字（说明/上页/下页） */
+.btn-plain, .bag-plain, .bag-mini {
+    background: #1a3a5c; border: 1px #2a5580; color: #9cc8f0; }
+.btn-plain:hover, .bag-plain:hover, .bag-mini:hover { background: #234d78; }
 
-image { background: transparent; border-width: 0; }
+/* ===================== 表格 ===================== */
+.table-head { background: var(--game-head); color: var(--game-head-text); }
+.table-row { background: var(--game-row-a); }
+.table-alt { background: var(--game-row-b); }
+.table-me { background: var(--game-row-me); }
 
-/* Keep the track inside its measured box; HP text has its own row. */
-progress.error::track { background: #101821; border-radius: 2px; }
-progress.error::fill { background: #c94b48; border-radius: 2px; }
+/* ===================== 通用格子 ===================== */
+.item-cell { background: var(--game-slot); border: 1px var(--game-slot-line); }
+.item-selected { background: #182938; border: 1px var(--game-yellow); }
+.item-locked { background: #10151d; border: 1px #29323b; }
+.paperdoll { background: #0c0d0e; border: 1px #256489; }
+.paperdoll-canvas { background: transparent; overflow: hidden; }
+.paperdoll-layer { background: transparent; }
 
-.map-grid { column-gap: 12px; row-gap: 14px; padding: 6px 4px 2px 4px; }
+/* ===================== 地图传送页（页 0）=====================
+   4 列 × 5 行 = 20 张地图卡。卡片 = 地图素材原始 160×70，
+   列距 20、行距 15。图名压在卡片内上方居中（白字黑描边）。
+   左下角一行方页码，灰底灰框+蓝字，没有箭头/价格/转生档。 */
+.map-page { background: transparent; padding: 8px; }
+.map-wall { background: transparent; padding: 0; }
+.map-row { background: transparent; padding: 0; }
+.map-tile { background: #172330; border: 1px #3b4956; border-radius: 3px;
+    position: relative; width: 160px; height: 70px; padding: 0; overflow: hidden; }
+.map-tile-here { border: 1px #5c8cb8; }
+.map-tile-open { border: 1px #4d7fa8; }
+.map-tile-open:hover { border: 1px #7fb0d8; }
+/* 压在卡片内上方居中的图名：白字（黑描边由 text-shadow 给）。 */
+.map-name-over { color: #ffffff; font-size: var(--font-size-tiny);
+    position: absolute; top: 1px; left: 0; right: 0; text-align: center;
+    text-shadow: 1px 1px 0 #000000, -1px -1px 0 #000000,
+                 1px -1px 0 #000000, -1px 1px 0 #000000; }
+.map-pager { background: transparent; border-width: 0; padding: 0 0 0 4px; }
+.map-pageno { background: #202832; border: 1px #6b7581; color: #3fb7e8;
+    font-size: var(--font-size-small); align-items: center; text-align: center; }
+.map-pageno-on { background: #26313d; border: 1px #8a949f; color: #4fc8ff; }
+.map-pageno-text { color: #3fb7e8; font-size: var(--font-size-small); text-align: center; }
+
+/* 场景页（幻境/秘境/BOSS之家/世界BOSS/押镖/挂机主界面） */
+.boss-scene { background: #0d131c; border: 1px #29323b; }
+.scene-tag { background: #f1c40f; color: #1a1206; font-weight: 700;
+    padding: 1px 6px; border-radius: 2px; }
+
+/* ===================== 背包页（页 20）=====================
+   上段：立绘(235) + 装备环格 + 6×6 物品栏 + 竖排 9 钮
+   下段：左建角面板(196) + 右 6 tab + 内容 */
+.bag-page { background: #1e2633; padding: 0; }
+.bag-top { background: #1a2230; border-bottom: 1px #2a3348; }
+
+/* 人物立绘区（装备格压在两侧，绝对定位） */
+.bag-portrait { background: #0c0d0e; border: 1px #256489; position: relative; }
+.bag-man { background: transparent; }
+.bag-slotcol { background: transparent; padding: 4px; }
+.bag-slotcol-l { position: absolute; left: 4px; top: 4px; }
+.bag-slotcol-r { position: absolute; right: 4px; top: 4px; }
+
+/* 金币小条 */
+.bag-money { background: transparent; padding: 0 4px; align-items: center; }
+.bag-money-label { color: var(--game-cyan); }
+.bag-money-value { color: var(--game-yellow); font-weight: 700; }
+
+/* 物品格 */
+.bag-cell { background: var(--game-slot); border: 1px var(--game-slot-line); }
+.bag-cell:hover { border: 1px var(--game-yellow); }
+.bag-slot { background: var(--game-slot); border: 1px var(--game-slot-gold); }
+.bag-count { color: #ffffff; font-size: var(--font-size-tiny); }
+
+/* 竖排 9 功能钮 */
+.bag-acts { background: transparent; }
+
+/* 下段 */
+.bag-lower { background: #161d28; border-top: 1px #2a3348; }
+.bag-create { background: #1a2230; border: 1px #2a3348; padding: 6px; }
+.bag-slot-tag { color: #9cc8f0; }
+.bag-pick { background: transparent; align-items: center; }
+.bag-pick-box { background: #0c0d0e; border: 1px #3a4055; }
+.bag-pick:hover .bag-pick-box { border: 1px var(--game-yellow); }
+.bag-pick-name { color: var(--game-yellow); text-align: center; }
+
+/* 6 个平铺 tab */
+.bag-tabs { background: transparent; padding: 0; }
+.bag-tab { background: #16202c; border: 1px #2a3348; color: #a8b8d0;
+    font-size: var(--font-size-small); }
+.bag-tab:hover { background: #1e2c3c; }
+.bag-tab-on { background: var(--game-tab-on); border: 1px #5c8cb8; color: #ffffff; }
+.bag-tab-body { background: #10141c; border: 1px #2a3348; }
+
+/* 天书 tab：右侧属性面板 */
+.bag-stats { background: #161d28; border: 1px #2a3348; padding: 8px; }
+.bag-stat-k { color: var(--game-green); }
+.bag-stat-box { background: #0c1420; border: 1px #2a3348; padding: 0 6px;
+    align-items: center; }
+.bag-stat-v { color: var(--game-cyan); font-weight: 700; }
+
+/* 内功 tab */
+.bag-neigong-art { background: #0c0d0e; border: 1px #256489; }
+.bag-neigong { background: #161d28; border: 1px #2a3348; }
+.bag-nei-name { color: var(--game-magenta); font-weight: 700; }
+.bag-kv-k { color: var(--game-green); }
+.bag-kv-v { color: var(--game-cyan); font-weight: 700; }
+
+/* 宝石 tab */
+.bag-gem-icon { background: #0c0d0e; border: 1px var(--game-slot-gold); }
+.bag-gem-slot { background: var(--game-slot); border: 1px var(--game-slot-line); }
+
+/* 技能 tab */
+.bag-skill { background: #161d28; border: 1px #2a3348; }
+.bag-skill-icon { background: #0c0d0e; border: 1px var(--game-slot-gold); }
+.bag-skill-icon.bag-empty { background: #0a0e14; border: 1px #29323b; }
+.bag-skill-name { color: #c4c9d0; }
+.bag-skill-xp { color: var(--game-yellow); }
+.bag-skill-tp { color: var(--text-tertiary); }
+.bag-skill-lv { color: var(--game-cyan); font-weight: 700; }

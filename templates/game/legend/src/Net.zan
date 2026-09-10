@@ -244,21 +244,21 @@ class GameNet {
     int RealmCount() { return this.realms != null && this.realms.IsArray() ? this.realms.Count() : 0; }
     int MobCount() { return this.mobs != null && this.mobs.IsArray() ? this.mobs.Count() : 0; }
     int MapCount() { return this.maps != null && this.maps.IsArray() ? this.maps.Count() : 0; }
-    JsonValue RealmAt(int i) { return this.realms.At(i); }
-    JsonValue MobAt(int i) { return this.mobs.At(i); }
-    JsonValue MapAt(int i) { return this.maps.At(i); }
+    JsonValue RealmAt(int i) { return this.realms != null ? this.realms.At(i) : null; }
+    JsonValue MobAt(int i) { return this.mobs != null ? this.mobs.At(i) : null; }
+    JsonValue MapAt(int i) { return this.maps != null ? this.maps.At(i) : null; }
     int BossCount() { return this.bosses != null && this.bosses.IsArray() ? this.bosses.Count() : 0; }
-    JsonValue BossAt(int i) { return this.bosses.At(i); }
+    JsonValue BossAt(int i) { return this.bosses != null ? this.bosses.At(i) : null; }
     int ShopCount() { return this.shop != null && this.shop.IsArray() ? this.shop.Count() : 0; }
-    JsonValue ShopAt(int i) { return this.shop.At(i); }
+    JsonValue ShopAt(int i) { return this.shop != null ? this.shop.At(i) : null; }
     int RankCount() { return this.rank != null && this.rank.IsArray() ? this.rank.Count() : 0; }
-    JsonValue RankAt(int i) { return this.rank.At(i); }
+    JsonValue RankAt(int i) { return this.rank != null ? this.rank.At(i) : null; }
     JsonValue Codex() { return this.codex; }
     JsonValue WBoss() { return this.wboss; }
     int AnnounceCount() { return this.announces != null && this.announces.IsArray() ? this.announces.Count() : 0; }
-    JsonValue AnnounceAt(int i) { return this.announces.At(i); }
+    JsonValue AnnounceAt(int i) { return this.announces != null ? this.announces.At(i) : null; }
     int BagCount() { return this.bag != null && this.bag.IsArray() ? this.bag.Count() : 0; }
-    JsonValue BagAt(int i) { return this.bag.At(i); }
+    JsonValue BagAt(int i) { return this.bag != null ? this.bag.At(i) : null; }
     string RealmName() { return this.realmName; }
     /* 当前/想要进入的区服 id（登录窗建角步用它记玩家的选择）。 */
     int RealmId() { return this.realmId; }
@@ -353,6 +353,7 @@ class GameNet {
         JsonValue mob = null;
         for (int i = 0; i < this.MobCount(); i = i + 1) {
             JsonValue mo = this.MobAt(i);
+            if (mo == null) { continue; }
             if (mo.Int("tpl", 0) != this.autoMob) { continue; }
             if (mob == null || mo.Int("alive", 0) == 1) {
                 mob = mo;
@@ -1055,7 +1056,7 @@ class GameNet {
        删除角色。 */
     JsonValue chars; bool charsReady;
     int CharCount() { return this.chars != null && this.chars.IsArray() ? this.chars.Count() : 0; }
-    JsonValue CharAt(int i) { return this.chars.At(i); }
+    JsonValue CharAt(int i) { return this.chars != null ? this.chars.At(i) : null; }
     bool CharsReady() { return this.charsReady; }
     void RefreshChars(int realmId) {
         this.chars = null; this.charsReady = false;

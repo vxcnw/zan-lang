@@ -1,0 +1,13 @@
+// Conformance: a qualified mention (`Gui.App`) must still reach the stdlib
+// type even when the user program shadows the simple name with its own
+// `class App` -- the pull-in's shadow carve-out only covers unqualified use.
+using System;
+using Gui;
+
+class App {
+    static int Main() {
+        Gui.App a = null;
+        Console.WriteLine(a == null);
+        return 0;
+    }
+}

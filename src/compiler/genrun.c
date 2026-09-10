@@ -34,6 +34,24 @@
 
 int zan_gen_enabled = 1;
 
+/* Captured texts of the generator-produced sources from the latest codegen
+ * run (filled by zan_merge_sources). main.c re-seeds the demand-driven
+ * stdlib pull-in with them: generated classes reference stdlib types the
+ * user program never spells (OrmSelect/OrmMeta/...), so the declaring files
+ * must join the parse even though no user token names them. Consumed via
+ * zan_gen_take_source_texts, which hands over and clears the capture. */
+static char **g_gen_texts = NULL;
+static int g_gen_text_count = 0;
+static int g_gen_text_cap = 0;
+
+void zan_gen_take_source_texts(char ***texts, int *count) {
+    *texts = g_gen_texts;
+    *count = g_gen_text_count;
+    g_gen_texts = NULL;
+    g_gen_text_count = 0;
+    g_gen_text_cap = 0;
+}
+
 #ifdef _WIN32
 #define GEN_DIR_SEP_STR "\\"
 #define GEN_EXE_SUFFIX ".exe"
@@ -999,6 +1017,19 @@ static void zan_merge_sources(zan_ast_node_t *unit, json_value *sources,
         json_value *src = sources->as.arr.items[i];
         const char *text = json_get_str(json_obj_get(src, "text"));
         if (!text) continue;
+        /* Capture for the demand-driven pull-in's second round (freed by
+         * the consumer in zan_gen_take_source_texts). */
+        if (g_gen_text_count == g_gen_text_cap) {
+            int ncap = g_gen_text_cap ? g_gen_text_cap * 2 : 4;
+            char **grown = (char **)realloc(g_gen_texts,
+                                            (size_t)ncap * sizeof(*grown));
+            if (grown) {
+                g_gen_texts = grown;
+                g_gen_text_cap = ncap;
+            }
+        }
+        if (g_gen_text_count < g_gen_text_cap)
+            g_gen_texts[g_gen_text_count++] = strdup(text);
         zan_lexer_t lex;
         zan_lexer_init(&lex, text, strlen(text), 0, arena, diag);
         zan_parser_t gp;
