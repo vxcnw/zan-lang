@@ -902,6 +902,8 @@ static void pi_scan_file(pi_file_t *f) {
     zan_apply_lex_defines(&lex, pi_target, pi_pp_defines, pi_pp_define_count);
     int depth = 0;
     zan_token_kind_t prev = TK_EOF;
+    pi_name_t *last_id = NULL;  /* previous chain segment (Task.WhenAll
+                                 * mirror below reads it) */
     for (;;) {
         zan_token_t tok = zan_lexer_next(&lex);
         if (tok.kind == TK_EOF) break;
@@ -1021,7 +1023,18 @@ static void pi_scan_file(pi_file_t *f) {
                 prev = TK_IDENT;
                 continue;
             }
+            pi_name_t *cur_id = pi_intern(tok.str_val.str,
+                                          tok.str_val.len);
+            if (prev != TK_DOT) last_id = cur_id;
             pi_flag_ident(f, tok.str_val.str, tok.str_val.len);
+            /* Mirror the parser's Task.WhenAll/WhenAny -> TaskJoin rewrite
+             * (desugar_task_join): the call survives in this file's own
+             * references as TaskJoin, so the closure must pull its file. */
+            if (prev == TK_DOT && last_id && last_id->len == 4 &&
+                memcmp(last_id->str, "Task", 4) == 0 && tok.str_val.len == 7 &&
+                (memcmp(tok.str_val.str, "WhenAll", 7) == 0 ||
+                 memcmp(tok.str_val.str, "WhenAny", 7) == 0))
+                pi_flag_ident(f, "TaskJoin", 8);
             break;
         default:
             break;
@@ -1221,6 +1234,17 @@ static void pi_seed_source(const char *source, size_t len) {
                         } else if (chain && chain->ns_root) {
                             /* `Ns.Segment` under a known namespace root. */
                             name->flagged = 1;
+                        } else if (chain && chain->len == 4 &&
+                                   memcmp(chain->str, "Task", 4) == 0 &&
+                                   name->len == 7 &&
+                                   (memcmp(name->str, "WhenAll", 7) == 0 ||
+                                    memcmp(name->str, "WhenAny", 7) == 0)) {
+                            /* parser desugars Task.WhenAll/WhenAny to class
+                             * TaskJoin (desugar_task_join in parser.c); the
+                             * seed sees the pre-desugar spelling, so mirror
+                             * the rewrite or TaskJoin.zan is never pulled. */
+                            pi_name_t *tj = pi_intern("TaskJoin", 8);
+                            if (tj) tj->flagged = 1;
                         }
                     }
                 }
