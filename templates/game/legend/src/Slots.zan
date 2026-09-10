@@ -37,15 +37,21 @@ partial class LegendApp {
         return ItemArtPath(GameTables.current.items.At(itemId).Int("picture"));
     }
 
-    /// 角标文案：装备看强化等级（+N），消耗品看堆叠数量。
+    /// 角标文案：装备 +强化 优先，其次 ×堆叠（原版背包格里 `+5` 黄、`166` 白）。
     static string SlotBadge(Equipment e, int count) {
         if (e != null) {
             if (e.upgrade > 0) { return "+" + Rules.N(e.upgrade); }
+            if (e.coefficient > 1) { return Rules.N(e.coefficient); }
             if (count > 1) { return Rules.N(count); }
             return "";
         }
         if (count > 1) { return Rules.N(count); }
         return "";
+    }
+
+    /// 角标配色：强化黄、堆叠白（原版实测）。
+    static string SlotBadgeCls(Equipment e) {
+        return (e != null && e.upgrade > 0) ? "slot-badge slot-badge-up" : "slot-badge";
     }
 
     /// 空格子：只有外框（原版没道具的位置也是画了框的）。
@@ -69,6 +75,67 @@ partial class LegendApp {
             s.Add(t);
         }
         return s;
+    }
+
+    /// **只叠道具**的格位——底图（立绘整图 / 物品栏整图）里已经画好格框时用。
+    /// 自带底色或边框会把底图的框盖掉，所以这里只有图标 + 角标，透明底。
+    Panel SlotArt(int wDevice, int hDevice, string artPath, string badge, string badgeCls) {
+        Panel s = Panel.Row(); s.Pad(0); s.Prefer(wDevice, hDevice);
+        if (artPath.Length > 0) {
+            Image ic = new Image(artPath, "道具", "contain");
+            ic.DockFill(); s.Add(ic);
+        }
+        if (badge.Length > 0) {
+            Label t = Text(badge, badgeCls.Length > 0 ? badgeCls : "slot-badge", 0);
+            t.DockManual(); t.Place(0, 0);
+            t.Prefer(0, Spec.Px(11));
+            s.Add(t);
+        }
+        return s;
+    }
+
+    /// 装备对象 → 叠在立绘空格框里的道具（e == null 就是纯空框，什么都不加）。
+    Panel EquipArt(int wDevice, int hDevice, Equipment e) {
+        if (e == null) { return SlotArt(wDevice, hDevice, "", "", ""); }
+        return SlotArt(wDevice, hDevice, ItemArtById(e.definitionId),
+            SlotBadge(e, 1), SlotBadgeCls(e));
+    }
+
+    /// **带格框精灵**的格子：底 = `00211.png`（原版通用物品格子，45×43
+    /// 石质斜边），叠道具图标 + 左上角角标。物品栏 / 取出格 / 宝石格 /
+    /// 技能格全用它——原版这些格子的像素就是这张图拉伸出来的。
+    Panel SpriteCell(string cls, int wDevice, int hDevice,
+                     string artPath, string badge, string badgeCls) {
+        Panel s = Panel.Row();
+        if (cls.Length > 0) { s.Class = cls; }
+        s.Pad(0); s.Prefer(wDevice, hDevice);
+        Image bg = new Image(CellEmptyPath(), "格底", "stretch");
+        bg.DockFill(); s.Add(bg);
+        if (artPath.Length > 0) {
+            Image ic = new Image(artPath, "道具", "contain");
+            ic.DockFill(); s.Add(ic);
+        }
+        if (badge.Length > 0) {
+            Label t = Text(badge, badgeCls.Length > 0 ? badgeCls : "slot-badge", 0);
+            t.DockManual(); t.Place(0, 0);
+            t.Prefer(0, Spec.Px(11));
+            s.Add(t);
+        }
+        return s;
+    }
+
+    /// 装备对象 → 带格框精灵的格子（e == null 就是纯空格框）。
+    Panel EquipCell(string cls, int wDevice, int hDevice, Equipment e) {
+        if (e == null) { return SpriteCell(cls, wDevice, hDevice, "", "", ""); }
+        return SpriteCell(cls, wDevice, hDevice, ItemArtById(e.definitionId),
+            SlotBadge(e, 1), SlotBadgeCls(e));
+    }
+
+    /// 道具号 → 带格框精灵的格子（itemId <= 0 出空格框）。
+    Panel ItemCellById(string cls, int wDevice, int hDevice, int itemId, int count) {
+        if (itemId <= 0) { return SpriteCell(cls, wDevice, hDevice, "", "", ""); }
+        return SpriteCell(cls, wDevice, hDevice, ItemArtById(itemId),
+            count > 1 ? Rules.N(count) : "", "slot-badge");
     }
 
     /// 按道具号出格子（picture <= 0 出空格）。
@@ -99,6 +166,9 @@ partial class LegendApp {
     static string BagGridPath() { return "assets/ui/00083.jpg"; }
     static string TableGridPath() { return "assets/ui/00082.jpg"; }
     static string CellEmptyPath() { return "assets/ui/00211.png"; }
+    /// 未开孔位的锁精灵（宝石页每行 4 个锁位用它，实测原版就是挂在
+    /// 格子上的锁，不是空框）。
+    static string LockPath() { return "assets/ui/00255.png"; }
     static string BigRarityPath(int quality) {
         int n = 61;
         if (quality == 2) { n = 62; }

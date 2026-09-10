@@ -35,13 +35,6 @@ partial class LegendApp {
     int lastNetKey = -1;   // 联机数据版本：变了才整页重建（旧版心跳逻辑）
     long lastTick; long lastSave;
 
-    /* 装备格金边动画相位：每 100ms 加 1，到 8 取模。每个格用
-       GoldSlotClass(idx) 算当前帧的 CSS 类，相位差由 (idx + phase) % 8 决定
-       ——8 帧一圈、行进 100ms/帧、整圈 800ms 与原版节奏对齐。Repaint 走
-       form.Every(100, ...) → Refresh()。Slots.zan 里的静态金边工厂要读它，
-       所以它必须 static。 */
-    static int goldPhase = 0;
-
     /* ---- 左栏控件（每帧刷新）---- */
     Label heroName; Label heroTitle; Label heroGuild;
     Label heroHp; Label heroMp; Label heroLv; Label heroGold; Label heroYuan;
@@ -111,7 +104,11 @@ partial class LegendApp {
                     /* 先重建再记尺寸：重建抛异常时尺寸不会被记下，下一个
                        刻度还会再试——记在重建之前会让这次失败被永久吞掉，
                        窗口停在不居中（甚至缩成半屏）的旧布局上。 */
-                    BuildPage();
+                    try { BuildPage(); } catch (Exception e) {
+                        if (UiDriver.Active()) {
+                            try { UiDriver.SetProbe("rebuild-err", e.ToString()); } catch (Exception e2) { }
+                        }
+                    }
                     Refresh();
                     lastClientW = app.ClientWidth();
                     lastClientH = app.ClientHeight();
@@ -123,18 +120,6 @@ partial class LegendApp {
                     try { UiDriver.SetProbe("rebuild-err", e.ToString()); } catch (Exception e2) { }
                 }
             }
-        });
-        form.Every(100, () => {
-            goldPhase = (goldPhase + 1) & 7;
-            /* BuildPage 重建会丢掉输入焦点/光标，所以只在「当前页是含
-               金边装备格的页」时才重建——避免点开的输入框被吞。背包页
-               与 BOSS之家/押镖（装备格在场景里）都带金边格，这里直接
-               简单粗暴走 BuildPage；后续如果发现丢焦点严重，再加 page
-               维度的 gate。 */
-            if (UiDriver.Active()) {
-                UiDriver.SetProbe("goldPhase", Rules.N(goldPhase) + " page=" + Rules.N(page));
-            }
-            if (page == 3 || page == 4 || page == 20) { BuildPage(); }
         });
         form.Every(1000, () => {
             try {

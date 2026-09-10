@@ -260,15 +260,18 @@ button.tiny { font-size: var(--font-size-small); }
    上段：立绘(235) + 装备环格 + 6×6 物品栏 + 竖排 9 钮
    下段：左建角面板(196) + 右 6 tab + 内容 */
 .bag-page { background: #1e2633; padding: 0; }
-/* 上下两段都要 flex + row 才会让中间子项的 Grow 真的分配剩余空间——
-   默认停靠布局只按 StyleWidth 摆位，不分剩余宽度（皮肤 css 注释里
-   写过的同一个坑，nav-row / scene-center / scene-hp-row 都有，这里
-   bag-top / bag-lower 也要补）。 */
-.bag-top, .bag-lower { display: flex; flex-direction: row; }
-.bag-top { background: #1a2230; border-bottom: 1px #2a3348; }
+/* 上下两段都要 flex 才会让中间子项的 Grow 真的分配剩余空间——默认停靠
+   布局只按 StyleWidth 摆位，不分剩余宽度（皮肤 css 注释里写过的同一个坑，
+   nav-row / scene-center / scene-hp-row 都有，这里也要补）。
+   **方向必须分开写**：bag-top 是 Row、bag-lower 是 Column，一条
+   `flex-direction: row` 会把下段压成横排（tab 行被拉满高、body 挤到右边）。 */
+.bag-top { display: flex; flex-direction: row; background: #1a2230;
+    border-bottom: 1px #2a3348; }
+.bag-lower { display: flex; flex-direction: column; }
 
-/* 人物立绘区（装备格压在两侧，绝对定位） */
-.bag-portrait { background: #0c0d0e; border: 1px #256489; position: relative; }
+/* 人物立绘区：底图 `00009.jpg` 已烘好 12 个空格框，装备只叠道具
+   （Slots.zan 的 EquipArt），所以这里不画格框、不加内边距。 */
+.bag-portrait { background: #0c0d0e; border: 1px #256489; }
 .bag-man { background: transparent; }
 .bag-slotcol { background: transparent; padding: 4px; }
 .bag-slotcol-l { position: absolute; left: 4px; top: 4px; }
@@ -279,25 +282,39 @@ button.tiny { font-size: var(--font-size-small); }
 .bag-money-label { color: var(--game-cyan); }
 .bag-money-value { color: var(--game-yellow); font-weight: 700; }
 
-/* 物品格 */
-.bag-cell { background: var(--game-slot); border: 1px var(--game-slot-line); }
-.bag-cell:hover { border: 1px var(--game-yellow); }
+/* 格子角标：堆叠数量白、强化等级黄。原版 背包.png 实测：物品栏格子里
+   `166` 白字、`+5` 黄字，都在格的左上角（Slots.zan 的 ItemSlot/EquipArt）。 */
+.slot-badge { color: #ffffff; font-size: var(--font-size-tiny); }
+.slot-badge-up { color: #ffd24a; }
 
-/* 物品格：6×6 物品栏用细金边（#6a5a30 一像素），与原版 背包-技能.png
-   内格子 1:1。原版没有逐格呼吸动画——5 张不同色精灵是品级色，不是
-   动画帧。 */
-.bag-cell { background: var(--game-slot); border: 1px var(--game-slot-line); }
-.bag-cell:hover { border: 1px var(--game-yellow); }
-/* 装备环格（人物立绘两侧 6 个大格）：粗金边，比物品格亮一档。 */
-.bag-slot { background: var(--game-slot); border: 2px var(--game-slot-gold); }
-.bag-slot:hover { border: 2px var(--game-yellow); }
+/* 物品格：格框由**素材**画（Slots.zan 的 SpriteCell 铺 00211.png），
+   这里只把皮肤自带的底/边框去掉，不然会在素材框外再套一圈自绘框。 */
+.bag-cell { background: transparent; }
+/* 物品栏阵列：列距/行距由 Spec.BagCellGap* 的 gap 控制。 */
+.bag-grid { background: transparent; }
+
+/* 物品格：6×6 物品栏的格框**由素材画**（Slots.zan 的 SpriteCell 铺
+   `00211.png` 通用物品格子），皮肤这里只把自带的底/边框去掉——不然会在
+   素材框外再套一圈自绘框，看着像双框。原版没有逐格呼吸动画：5 张不同色
+   精灵是品级色，不是动画帧。 */
+.bag-cell { background: transparent; }
+.bag-cell:hover { background: transparent; }
+.bag-slot { background: transparent; }
+.bag-slot:hover { background: transparent; }
 
 .bag-count { color: #ffffff; font-size: var(--font-size-tiny); }
 
-/* 竖排 9 功能钮（精灵底 + 文字）。文字居中、蓝调，跟原版一致。 */
+/* 竖排 8 功能钮：逐行扫原图（x 656..742，y 177..552）实测每钮都是
+   **平涂矩形 + 2 设备边框**——顶/底边框行 (59,69,82)=#3b4552 成对出现
+   （177/212、221/255、274/308…），钮内 (31,41,54)=#1f2936，钮与钮之间
+   露出页底 (29,38,51)。钮高 36、钮距 5，第 7 钮（一键熔炼）前有 45 设备
+   空档。文字亮青蓝，核心色实测 #03a7fa。
+   素材包里 00021..00026 是带尾巴的气泡提示框，不是它，别拿错。 */
 .bag-acts { background: transparent; }
-.bag-act { background: transparent; }
-.bag-act-label { color: #ffffff; font-size: 11; text-align: center;
+.bag-act { background: #1f2936; border: 2px #3b4552; color: #2aa8f5;
+    font-size: 12; }
+.bag-act:hover { background: #26313f; border: 2px #4f6d8c; }
+.bag-act-label { color: #2aa8f5; font-size: 12; text-align: center;
     background: transparent; }
 
 /* 下段 */
@@ -310,12 +327,47 @@ button.tiny { font-size: var(--font-size-small); }
 .bag-pick-name { color: var(--game-yellow); text-align: center; }
 
 /* 6 个平铺 tab */
-.bag-tabs { background: transparent; padding: 0; }
+.bag-tabs { display: flex; flex-direction: row; background: transparent; padding: 0; }
 .bag-tab { background: #16202c; border: 1px #2a3348; color: #a8b8d0;
     font-size: var(--font-size-small); }
 .bag-tab:hover { background: #1e2c3c; }
 .bag-tab-on { background: var(--game-tab-on); border: 1px #5c8cb8; color: #ffffff; }
-.bag-tab-body { background: #10141c; border: 1px #2a3348; }
+/* 下段内容容器：**必须显式 flex**——停靠路径把 `Grow()`（dock==5）的子项
+   排到最后、共享同一块剩余矩形，所以「左面板 + 撑满的内容」这种组合在
+   停靠路径下会把内容挤到左面板右边去并互相重叠。凡是有 Grow 子项的行
+   都挂这三个类之一。 */
+.bag-body { display: flex; flex-direction: row; }
+.bag-grp { display: flex; flex-direction: row; align-items: center; }
+.bag-cards { display: flex; flex-direction: row; }
+/* 撑满剩余空间：**flex 容器里 `Grow()` 不管用**——Control.StyleGrow() 读的是
+   CSS `flex-grow`，代码的 Grow() 只设 dock=5（只有停靠路径认）。所以凡是在
+   flex 容器里要撑满的子项，都得挂这个类。 */
+.bag-fill { flex-grow: 1; }
+.bag-tab-body { display: flex; flex-direction: row; background: #10141c;
+    border: 1px #2a3348; }
+
+/* 取出表（左战斗属性 + 右 4×2 空位）—— 原版实测配色 */
+.bag-row-r { display: flex; flex-direction: row; justify-content: flex-end; }
+.bag-tab-name { color: #ffffff; font-size: 15; }
+.bag-tab-xp { color: #e8c04a; font-size: 14; }
+.bag-tab-num { color: #ffffff; font-size: 15; }
+.bag-tab-tp { color: #1ec8e0; font-size: 14; }
+.bag-up { background: #1f2936; border: 1px #3b4552; color: #ffffff;
+    font-size: 13; }
+.bag-up:hover { background: #2a3646; border: 1px #5c8cb8; }
+/* 空位格里的问号（原版是字体画的占位符） */
+.bag-q-mark { color: #1a1a1a; font-size: 20; font-weight: 700; }
+
+/* 战斗属性面板（取出/说明页左列）：标签按原版六色 */
+.bag-fight { background: #161d28; border: 1px #2a3348; }
+.bag-fight-title { color: #e8c8a0; font-size: 16; }
+.bag-fight-a { color: #12c6d8; }
+.bag-fight-b { color: #2a7ff0; }
+.bag-fight-c { color: #22c84a; }
+.bag-fight-d { color: #e8d020; }
+.bag-fight-e { color: #d81a9a; }
+.bag-fight-f { color: #e88010; }
+.bag-fight-v { color: #e8e8e8; }
 
 /* 天书 tab：右侧属性面板 */
 .bag-stats { background: #161d28; border: 1px #2a3348; padding: 8px; }
@@ -336,7 +388,8 @@ button.tiny { font-size: var(--font-size-small); }
 .bag-gem-slot { background: var(--game-slot); border: 1px var(--game-slot-line); }
 
 /* 技能 tab */
-.bag-skill { background: #161d28; border: 1px #2a3348; }
+.bag-skill { display: flex; flex-direction: row; background: #161d28;
+    border: 1px #2a3348; }
 .bag-skill-icon { background: #0c0d0e; border: 1px var(--game-slot-gold); }
 .bag-skill-icon.bag-empty { background: #0a0e14; border: 1px #29323b; }
 .bag-skill-name { color: #c4c9d0; }

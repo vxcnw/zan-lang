@@ -320,4 +320,72 @@ class Spec {
     static int SceneLootRows() { return 3; }
     static int SceneLootPad() { return Px(1); }      // 格阵距面板内缘 1 设备
     static int SceneLootCells() { return SceneLootCols() * SceneLootRows(); }
+
+    /* ---- 背包页（页 20）----
+       实测原图 背包.png（1.5× 截图，窗口 1871×971；本页在截图里占
+       x 373..1117，右侧是当时被拖宽的聊天区——原版是定宽面板左对齐，
+       多出来的宽度是背景，所以这里也一律写定宽、靠左排，不拉伸）。
+
+       上段三段横排（设备像素）：立绘 252×375 / 功能钮列 78 宽 / 物品栏
+       6 列 × 7 行（格 57×47，列距 60、行距 53.6）。立绘用整图
+       `assets/ui/00009.jpg`（168×250 原生 = 252×375 设备，1:1），
+       图里已经把 12 个空格框压好，所以装备只叠道具、不再自己画框。 */
+    static int BagTopH() { return Px(250); }        // 上段 375 设备（= 立绘图高）
+    static int BagPortraitW() { return Px(168); }   // 00009.jpg 原生宽 = 252 设备
+    static int BagSlotW() { return Px(35); }        // 装备格 52.5 设备（原图框内 35×31）
+    static int BagSlotH() { return Px(31); }        // 46.5 设备
+    static int BagActW() { return Px(57); }         // 功能钮 87 设备（实测框 656..742）
+    static int BagActH() { return Px(24); }         // 钮高 36 设备（实测顶/底边框 177..213）
+    static int BagActGap() { return Px(4); }        // 钮距 6 设备（实测 5）
+    static int BagActBigGap() { return Px(30); }    // 「放入图鉴」「一键熔炼」之间 45 设备空档
+    static int BagCellW() { return Px(38); }        // 物品格 57 设备
+    static int BagCellH() { return Px(31); }        // 47 设备
+    static int BagCellGapX() { return Px(2); }      // 列距 3 设备 → 节距 60
+    static int BagCellGapY() { return Px(4); }      // 行距 6 设备 → 节距 53（实测 52.4）
+    /// 物品栏列数/行数：实测原图竖线 x = 758 + 59.7k（k=0..12）→ 12 列到
+    /// 1474，横线 y = 180 + 52.4k（k=0..7）→ 7 行到 545。
+    /// **与底图 `00083.jpg` 的格数一一对应**（488×249 里就是 12×7 = 84 格，
+    /// 逐条线扫过：竖线 3/42/83/…/483 共 12 格、横线 36/70/…/245 共 7 格），
+    /// 所以整图 stretch 到 715×364 时格子正好重合。
+    static int BagCols() { return 12; }
+    static int BagRows() { return 7; }
+    static int BagBlockGap() { return Px(9); }      // 立绘/钮列/物品栏之间 13 设备（实测 11/15）
+    static int BagGridW() { return Px(477); }       // 物品栏整图宽 715 设备（实测 758..1474）
+    static int BagGridH() { return Px(243); }       // 物品栏整图高 364 设备（实测 180..545）
+    static int BagPagePad() { return Px(13); }      // 背包面板距内容区左缘 20 设备
+    /* ---- 下段（tab 行 / 战斗属性面板 / 取出表）实测 ----
+       tab 行横贯整窗：左「法师(3) 创建 创建」、右 6 tab，右端收在 1450。
+       6 个 tab 占 1030..1450 = 420 设备 → 每个 70。 */
+    static int BagTabW() { return Px(47); }         // tab 宽 70 设备
+    static int BagTabH() { return Px(20); }         // tab 高 30 设备
+    static int BagHeroTabW() { return Px(57); }     // 「法师(3)」85 设备
+    static int BagTabSep() { return Px(7); }        // 左三 tab 之间 10 设备
+    static int BagFightW() { return Px(183); }      // 战斗属性面板 275 设备（实测 385..660）
+    static int BagCreateW() { return Px(140); }     // 建角面板 210 设备
+    static int BagRowH() { return Px(49); }         // 取出表行高 73 设备
+    static int BagRowGap() { return Px(27); }       // 两组之间 40 设备
+    static int BagGroupW() { return Px(243); }      // 一组 365 设备
+    static int BagLowCellW() { return Px(40); }     // 表内格 60 设备
+    static int BagLowCellH() { return Px(37); }     // 55 设备
+    static int BagUpW() { return Px(33); }          // 升级钮 50 设备
+    static int BagUpH() { return Px(27); }          // 40 设备
+    /// 12 个装备格在立绘图上的落点（原生 168×250 坐标 = 逻辑像素）。
+    /// 左列/右列/底行各 4 格环绕立绘，右下与左下角格与底行共用
+    /// （原版就是这种环绕摆法；框已烘在底图上，见上）。
+    static int BagEquipX(int i) {
+        if (i < 4) { return Px(129); }              // 右列
+        if (i < 8) { return Px(4); }                // 左列
+        return Px(4 + (i - 8) * 42);                // 底行 4/46/88/129
+    }
+    static int BagEquipY(int i) {
+        if (i == 0) { return Px(46); }
+        if (i == 1) { return Px(83); }
+        if (i == 2) { return Px(134); }
+        if (i == 3) { return Px(173); }
+        if (i == 4) { return Px(54); }
+        if (i == 5) { return Px(93); }
+        if (i == 6) { return Px(132); }
+        if (i == 7) { return Px(171); }
+        return Px(210);                             // 底行 y
+    }
 }
