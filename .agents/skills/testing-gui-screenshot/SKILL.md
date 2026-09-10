@@ -70,6 +70,17 @@ CJK titles.
   independently verified the target is foreground and unoccluded for the whole
   shot; it grabs whatever overlaps that rect. Don't trust pixels from a run
   where the target lost focus.
+- Hand-rolled capture scripts must stay ASCII-only too (2026-09: an inline
+  EnumWindows filter matching title `"黄金矿工"` never fired — PowerShell 5.1
+  reads a BOM-less .ps1 as ANSI, so the CJK literal mojibaked at runtime and
+  the poll loop timed out with `WINDOW MISS`). Locate the window by **PID +
+  window class** instead of a CJK title: Zan GUI windows are class
+  `ZanGuiApp`, an ASCII-exact match.
+- `(Get-Process <name>).MainWindowHandle` is a race for console-subsystem game
+  exes: queried before the GUI window exists, it binds to the **console**
+  window, and maximize+PrintWindow then capture a black console with a
+  scrollbar (2026-09: gk probe shot). EnumWindows filtered by pid + class
+  `ZanGuiApp`, never MainWindowHandle.
 - If your harness has app-scoped capture (e.g. ZCode computer-use:
   `get_app_state(app_ref={pid}, include_screenshot=true)`, after
   `list_windows`), that is window-scoped and background-safe — prefer it and
