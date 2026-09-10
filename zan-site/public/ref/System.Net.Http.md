@@ -32,39 +32,77 @@ shutdown 系统调用，不包含 await。
 
 - static bool sweeping=false;
 
+- static int activeCount=0;
+
 - static long nowMs=0;
 
-- static int Arm(nint sock, int timeoutMs)
-  - 注册一个连接并返回其槽位；
-    截止时间被禁用（timeoutMs <= 0）时返回 -1。
+- static HttpDeadlineToken Arm(nint sock, int timeoutMs)
+  - 注册一个连接并返回带 generation 的 token；
+    截止时间被禁用（timeoutMs <= 0）时返回 null。
 
-- static void Touch(int slot, int timeoutMs)
-  - 为某个槽位重启时间窗口（每个请求调用一次）。
+- static HttpDeadlineToken Arm(nint sock, int timeoutMs, int totalMs)
+  - 注册阶段 deadline，并可附带从 Arm 时刻起的 total budget。
+    totalMs <= 0 表示不设总预算。
 
-- static bool Expired(int slot)
-  - 当扫描器已对该槽位执行挂断时返回 true，即唤醒
-    归属者读取的是截止时间而非对端。需要报告
-    超时的调用方（HTTP 客户端）必须在 Disarm 之前查询。
+- static void Touch(HttpDeadlineToken token, int timeoutMs)
+  - 为 token 重启阶段窗口。阶段预算为非正值时仍保留
+    total deadline；不能因为关闭某一阶段而把总截止时间一并关闭。
 
-- static void Disarm(int slot)
-  - 连接结束时释放槽位。
+- static bool Expired(HttpDeadlineToken token)
+  - 当扫描器已对 token 执行挂断时返回 true。
+    必须在 Disarm 前查询。
+
+- static void Disarm(HttpDeadlineToken token)
+  - 连接结束时释放 token；重复释放安全，旧 token 不能释放新连接。
 
 - static bool SweepOnce()
-
-- static void StopSweeping()
+  - 单次扫描：刷新粗粒度时钟并对过期连接执行挂断
+    （shutdown 而非 close，见类文档）。返回是否仍有活动 token。
 
 - static async void Sweep()
+  - 每秒扫描一次的常驻协程；只在有活动 token 时存活。
+    SweepOnce 返回 false 后仍需在锁内再确认一次 activeCount，
+    避免 Arm 与扫描器退出之间丢失唤醒。
 
 
 ## HttpDeadlineSlot (class)
 
+槽位表中的一条：连接套接字、阶段/总截止时间与 generation。
+
 - nint sock;
 
-- int deadline;
+- long deadline;
+
+- int generation;
+
+- bool active;
 
 - bool fired;
 
-- HttpDeadlineSlot(nint sock, int deadline)
+- long totalDeadline;
+
+- HttpDeadlineSlot(nint sock, long deadline)
+  - 新槽位：generation 从 1 起，槽位复用时递增。
+
+
+## HttpDeadlineToken (class)
+
+Arm 返回的截止时间句柄：记录槽位下标与 generation，供 Disarm 使用。
+
+- int slot;
+
+- int generation;
+
+- bool disarmed;
+
+- HttpDeadlineToken(int slot, int generation)
+  - token 记录槽位下标与创建时的 generation，
+    用于槽位复用后旧 token 不再误操作新连接。
+
+- ~HttpDeadlineToken()
+  - 传输异常可能在到达显式清理点之前就把请求展开掉。
+    析构只是兜底；正常路径仍然显式 Disarm。Disarm 幂等，
+    两条路径都安全。
 
 
 ## HttpFramer (class)
@@ -109,8 +147,10 @@ f.Consume(f.RequestBytes());                     // 只丢弃本请求
 - int wireBytes;
 
 - HttpFramer()
+  - 私有构造：用 `Create` / `CreateTls` 创建。
 
 - static HttpFramer Create(nint sock)
+  - 为明文套接字创建拆包器（64KB 复用接收缓冲）。
 
 - static HttpFramer CreateTls(TlsStream stream)
   - 从 TLS 连接拆包：除了字节源不同，定界规则与明文
@@ -134,6 +174,13 @@ f.Consume(f.RequestBytes());                     // 只丢弃本请求
 - int HeaderEnd()
   - 头部结束空行之后的下标（即正文首字节的位置），
     空行尚未到达时返回 -1。同时识别 CRLF 与单独 LF 分隔。
+
+- async int FillHead(int maxHeaderBytes)
+  - 头部读取专用的受限接收（不能调用无上限的 Fill：一次
+    64KB 的 recv 可能把 maxHeaderBytes 直接冲过头，随后才检查已经
+    太迟）。只接收仍在 cap 内的字节，并在追加后再次核验，保证恶意
+    头不会先进入待处理缓冲。返回收到的字节数；超限返回 -431，
+    对端关闭返回 0。
 
 - async int ReadHead(int maxHeaderBytes)
   - 一直接收，直到完整的头部块到齐。
@@ -176,16 +223,20 @@ f.Consume(f.RequestBytes());                     // 只丢弃本请求
     累积，因此块里的 NUL 不会截断正文；累计长度超过
     <paramref name="maxBodyBytes"/> 立即拒绝，避免用无限多个小块
     撑爆内存。畸形的长度行按 400 拒绝——不能猜，猜错就等于把
-    剩余字节当成下一条请求（走私）。
+    剩余字节当成下一条请求（走私）。等待 LF 的字节同样有上限
+    （8KB）：一条不终止的"长度行"不计入正文限额，若无上限，
+    单条连接就能把待处理缓冲喂到任意大小。
 
 - async int SkipTrailer(int from)
   - 跳过结束块之后的 trailer 头部，返回其后的线路下标；
-    对端中途关闭返回 -1。
+    对端中途关闭返回 -1。单行超过 8KB 按 -1（畸形）处理：trailer
+    行与长度行一样不受正文限额约束，必须自带上限。
 
 - int IndexOfLf(int from)
   - 从 <paramref name="from"/> 起第一个 LF 的下标，没有则 -1。
 
 - static int HexVal(int c)
+  - 十六进制字符的数值；非十六进制字符返回 -1。
 
 - void Dispose()
   - 归还接收缓冲区并释放待处理缓冲区。连接关闭时调用；
@@ -230,6 +281,21 @@ HTTP 请求的表示与解析器。
 - int parseStatus;
 
 - HttpRequest()
+  - 私有构造：HTTP/1.1 keep-alive 的默认状态，由 Parse 使用。
+
+- static bool IsOws(int c)
+  - 是否为可选空白（SP / HTAB，RFC 7230 OWS）。
+
+- static int TrimOwsStart(string raw, int start, int stop)
+  - [start, stop) 起点跳过 RFC 7230 OWS（SP / HTAB）。
+
+- static int TrimOwsStop(string raw, int start, int stop)
+  - [start, stop) 终点回退 RFC 7230 OWS（SP / HTAB）。
+
+- static bool FinalTransferChunked(string raw, int start, int stop)
+  - Transfer-Encoding 是逗号分隔的 token 列表；只有最后一个
+    token 为 chunked 时才可由 HttpFramer 解码。token 之间的 OWS 合法，
+    其它编码不被静默忽略，避免把未定界的字节当成下一条请求。
 
 - static HttpRequest Parse(string raw)
   - 把原始 HTTP 请求字符串解析为 HttpRequest。
@@ -304,6 +370,7 @@ HTTP 响应的构建器与解析器。
 - bool keepAlive;
 
 - HttpResponse()
+  - 私有构造：200 / keep-alive 的默认状态，由各静态工厂使用。
 
 - static HttpResponse Ok(string body)
   - 用给定正文创建 200 OK 响应。
@@ -324,14 +391,23 @@ HTTP 响应的构建器与解析器。
 - bool IsBinary()
   - 正文是否为二进制缓冲区。
 
+- static bool HasCrlf(string s)
+  - 字符串是否含 CR/LF（头部注入检查用）。
+
 - static HttpResponse Redirect(string url)
-  - 创建重定向响应。
+  - 创建重定向响应。Location 不允许注入折行；非法值
+    被保守拒绝，不产生一个可被下游解释的重定向头。
 
 - static HttpResponse NotFound()
   - 创建 404 Not Found 响应。
 
 - static HttpResponse ServerError(string message)
-  - 创建 500 Internal Server Error 响应。
+  - 创建 500 Internal Server Error 响应。message 原样进入
+    HTML 正文，先做 HTML 转义：消息里常含异常文本、URL 或用户
+    输入片段，未转义就是把反射型 XSS 内置在错误页里。
+
+- static string EscapeHtmlText(string text)
+  - 最小 HTML 实体转义（& < > " '），供内嵌消息进正文用。
 
 - static HttpResponse WithStatus(int code, string text, string body)
   - 用自定义状态码创建响应。
@@ -340,7 +416,12 @@ HTTP 响应的构建器与解析器。
   - 主动释放响应持有的头部存储。
 
 - HttpResponse SetHeader(string name, string headerValue)
-  - 设置响应头。
+  - 设置响应头。名称和值均禁止 CR/LF，避免注入
+    额外字段或响应体；非法输入保持响应可序列化但不添加该头。
+
+- string GetHeader(string name)
+  - Returns one response header by name. Header names are
+    case-insensitive as required by HTTP; an absent header returns "".
 
 - HttpResponse SetContentType(string ct)
   - 设置 content type。
@@ -355,6 +436,15 @@ HTTP 响应的构建器与解析器。
 - string Build()
   - 将响应序列化为原始 HTTP 响应字符串。仅适用于文本正文；
     二进制正文请用 `BuildHeaders` + <c>bodyBytes</c>。
+
+- static bool IsOws(int c)
+  - 是否为可选空白（SP / HTAB，RFC 7230 OWS）。
+
+- static int TrimOwsStart(string s, int start, int stop)
+  - [start, stop) 起点跳过 OWS，返回首个非 OWS 字节下标。
+
+- static int TrimOwsStop(string s, int start, int stop)
+  - [start, stop) 终点回退 OWS，返回尾后第一个非 OWS 下标。
 
 - static HttpResponse Parse(string raw)
   - 解析原始 HTTP 响应（客户端用法）。
@@ -372,6 +462,7 @@ HTTP 响应的构建器与解析器。
 - string response;
 
 - HttpRoute(string method, string path, string response)
+  - 私有构造：由 HttpRouter 的注册方法创建。
 
 
 ## HttpRouter (class)
@@ -381,6 +472,7 @@ HTTP 响应的构建器与解析器。
 - List<HttpRoute> routes;
 
 - HttpRouter()
+  - 创建空路由表。
 
 - HttpRouter Get(string path, string responseBody)
   - 注册一条 GET 路由。
@@ -446,6 +538,7 @@ HTTP/1.1 帧解析与限制在 stdlib 中的唯一实现；Worker 的 "http" 协
 - HttpRequestHandler requestHandler;
 
 - HttpServer(string host, int port)
+  - 创建未启动的服务器；用 OnRequest / Workers 等配置后调用 Start。
 
 - HttpServer SetMaxConnections(int max)
   - 设置最大并发连接数。
@@ -487,9 +580,12 @@ HTTP/1.1 帧解析与限制在 stdlib 中的唯一实现；Worker 的 "http" 协
     而非忙等。
 
 - static async void RejectOverloaded(nint clientSock)
+  - 超过 maxConnections 时对下游回 503（Connection: close）并关闭。
 
 - async void HandleConnection(nint clientSock)
-  - 处理单个客户端连接。
+  - 处理单个客户端连接。连接计数必须在 finally 中归还：
+    处理器抛出的异常会跳过顺序清理，泄漏的计数会让服务器在
+    maxConnections 处永久 503。
 
 - static async void ServeConnection(nint clientSock, HttpRequestHandler handler, int maxHeaderBytes, int maxRequestBytes, int timeoutMs)
   - 将一个 HTTP/1.1 连接服务到底：帧解析（分段
@@ -518,6 +614,14 @@ HTTP/1.1 帧解析与限制在 stdlib 中的唯一实现；Worker 的 "http" 协
     （如 WebSocket 端口先读握手头部）交回 HTTP 循环：拆包器连同
     其中未消费的字节一并交接，无需把字节转成字符串再放回——
     二进制正文在这一步转换里会被 NUL 截断。
+
+- static async int ServeFramedCore(nint clientSock, HttpRequestHandler handler, HttpFramer framer, int maxHeaderBytes, int maxRequestBytes, int timeoutMs, HttpDeadlineToken watch)
+  - HTTP 连接循环本体：读头块 → 解析 → 读正文 → 分发
+    处理器 → 按字节长度发响应，keep-alive 循环；431/413/400/501
+    拒绝响应在此统一发送并关闭连接。
+
+- static async int ServeFramedInner(nint clientSock, HttpRequestHandler handler, HttpFramer framer, int maxHeaderBytes, int maxRequestBytes, int timeoutMs, HttpDeadlineToken watch, TcpClient client)
+  - ServeFramedCore 的循环体；释放见 ServeFramedCore 的 finally。
 
 - void Stop()
   - 停止服务器。

@@ -14,6 +14,7 @@
 - int overflowPage;
 
 - BLeafEntry(string key, string val, int overflowPage)
+  - 构造一条记录。
 
 
 ## BNode (class)
@@ -31,10 +32,13 @@
 - List<int> children;
 
 - BNode(bool isLeaf)
+  - 构造空节点（叶子或内部）。
 
 - static BNode Leaf()
+  - 空叶子节点。
 
 - static BNode Internal()
+  - 空内部节点。
 
 - BNode Copy()
   - 独立副本。从已提交页面解码出的节点
@@ -83,26 +87,33 @@
 - NodeCache nodeCache;
 
 - BTree()
+  - 私有构造；统一经 `Open` 创建。
 
 - static BTree Open(Pager pager)
   - 打开 pager 中存储的树；新数据库会创建空根节点
     。
 
 - string GetError()
+  - 打开失败原因；无错为空串。
 
 - int RootId()
+  - 当前根页 id（0 = 空树）。
 
 - void Sync()
   - 当 pager 采纳了另一进程的提交时丢弃已解码的节点：
     页面 id 现在可能存放了不同的内容。
 
 - static void InsEntry(List<BLeafEntry> l, int idx, BLeafEntry v)
+  - 在下标 idx 处插入叶子条目（其余右移）。
 
 - static void InsStr(List<string> l, int idx, string v)
+  - 在下标 idx 处插入字符串（其余右移）。
 
 - static void InsInt(List<int> l, int idx, int v)
+  - 在下标 idx 处插入整数（其余右移）。
 
 - static int Compare(string a, string b)
+  - 按无符号字节序比较两串（页内有序性与扫描都依赖它）。
 
 - string ReadChain(int firstPage)
   - 将整条 overflow 链读回为一个字符串。
@@ -116,8 +127,11 @@
     没有快照引用前仍保持可读。
 
 - BNode ReadNode(int pageId)
+  - 读取（或取自缓存）并解码一个节点页；旧版 TYPE_LEAF 与
+    当前 TYPE_LEAF2 都能解。
 
 - static int EncodedSize(BNode n)
+  - 节点编码后的字节数（据此决定是否分裂）。
 
 - void WriteNode(int pageId, BNode n)
   - 把节点编码进属于当前事务的页面
@@ -148,6 +162,7 @@
     （单元素列表）。
 
 - bool Contains(string key)
+  - 键是否存在。
 
 - void Put(string key, string val)
   - 在当前进行中的写入事务里插入或替换 key -> val
@@ -186,8 +201,11 @@
     并返回被删除的键数量。
 
 - int DeleteMatching(string startKey, string endKey, int mode)
+  - 两种删除模式共用的实现（`DeleteRange` 与
+    `DeletePrefix` 的入口）；mode 决定区间语义。
 
 - static bool InRange(string key, string startKey, string endKey, int mode)
+  - key 是否落在当前模式定义的区间内。
 
 - int PruneNode(int pageId, string startKey, string endKey, int mode, List<int> removed)
   - 删除一个子树内的区间。返回（可能是
@@ -205,6 +223,7 @@
     条目计数，因此值永远不会被解码。
 
 - int CountNode(int pageId)
+  - 递归统计子树的键数（只读页头计数，不解码值）。
 
 
 ## Collection (class)
@@ -241,8 +260,10 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
 - [DllImport("crt", EntryPoint="memchr")]static extern nint MemChr(nint p, int c, long n);
 
 - Collection()
+  - 仅初始化空字段；真正的构造走 `Attach`。
 
 - static Collection Attach(KvStore kv, AsyncRwLock rw, string name)
+  - 绑定到底层 KvStore 的一个命名空间，并加载索引列表与字段名字典。
 
 - void SyncMeta()
   - 当数据库更新到新版本（即其他进程已提交）时，重新读取缓存的元数据（字段名字典、索引
@@ -254,23 +275,31 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
     才发生。
 
 - string Name()
+  - 集合名。
 
 - static int ID_DIGITS=6;
 
 - static string PadId(int id)
+  - 把 id 编码为定宽 6 位 base-64 数字（'?'..'~'）：字节序即数值序，
+    且不含 0x00、':' 与 '\t'，不破坏 B+Tree 顺序与键分隔。
 
 - static int UnpadId(string s)
   - PadId 的逆操作。
 
 - string DocKey(int id)
+  - 文档正文键 c:{name}:{id(定宽)}。
 
 - string SeqKey()
+  - 自增 id 序列键。
 
 - string IdxMetaKey()
+  - 索引字段列表元数据键（逗号分隔）。
 
 - string KeysMetaKey()
+  - 字段名字典元数据键（JSON 数组）。
 
 - string IdxPosKey(string field)
+  - 批量索引构建游标键；键不存在即表示该索引已构建完成。
 
 - string IdxPrefix(string field, string val)
   - 同一索引字段所有条目共享的前缀。字段用
@@ -278,12 +307,16 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
     对每个条目零开销。
 
 - string IdxKey(string field, string val, int id)
+  - 完整二级索引条目键：`IdxPrefix` 加定宽 id。
 
 - void LoadIndexMeta()
+  - 从元数据键加载索引字段列表（逗号分隔；空则无索引）。
 
 - void LoadKeyDict()
+  - 从元数据键的 JSON 数组加载字段名字典。
 
 - int KeyId(string k)
+  - 字段名的 1 起始字典 id；首次出现时追加进字典并标记待持久化（须在 kv 事务内）。
 
 - int KeyIdOf(string k)
   - 字段名的字典 id；若该集合从未
@@ -291,14 +324,23 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
     因此可在读取路径安全使用。
 
 - string KeyName(int id)
+  - 字典 id 反查字段名；越界时返回 "?" 加 id（不抛错）。
 
 - void PersistKeyDict()
+  - 字典有变更时把整个字典写回元数据键（须在 kv 事务内）。
 
 - static bool IsIntStr(string s)
+  - 字符串是否为纯十进制整数（可带负号，至多 18 位以留在 varint 范围内）。
 
-- static int ParseI64(string s)
+- static long ParseI64(string s)
+  - 解析带符号的十进制整数为 64 位。用它替代 Convert.ToInt，因为后者
+    目前降级为 C 的 atoi（声明返回 i64），因此无法
+    符号扩展——负数及大于 2^31 的值会以零扩展的
+    垃圾数据返回。累加器必须是 long：IsIntStr 放行最长 18 位，
+    epoch 毫秒时间戳（13 位，>2^31）此前在 int 里静默回绕后落盘。
 
 - void WriteVal(ByteBuffer b, JsonValue v)
+  - 按上方标签表把一个 JsonValue 写入记录；对象键写作字典 id（须在 kv 事务内）。
 
 - string EncodeDoc(JsonValue doc)
   - 将文档序列化为紧凑的二进制记录：一个 'B'
@@ -308,6 +350,7 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
     会与正文一起持久化。
 
 - JsonValue ReadVal(ByteBuffer b)
+  - 从记录中读取 `WriteVal` 写出的一个值并还原为 JsonValue。
 
 - static int IdOfKey(string key)
   - 键尾随数字中编码的 id。行键和
@@ -315,6 +358,7 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
     id 的某个数字可能恰好像分隔符。
 
 - static string IdFromKey(string key)
+  - `IdOfKey` 的字符串形式。
 
 - ByteBuffer OpenRecord(string body)
   - 将二进制记录正文（见 EncodeDoc）解码回
@@ -337,12 +381,17 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
     没有该字段时返回 null。
 
 - JsonValue DecodeDoc(string body)
+  - 把存储的二进制记录（见 `EncodeDoc`）解码回 JsonValue 对象；
+    "_id" 由调用方从行键附加。
 
 - void AddIndexEntries(int id, JsonValue doc)
+  - 为每个已索引字段写入该文档的二级索引条目（须在 kv 事务内）。
 
 - void RemoveIndexEntries(int id, JsonValue doc)
+  - 删除一篇文档的全部二级索引条目；doc 为 null（文档已不存在）时无事可做。
 
 - int NextId()
+  - 读取并推进自增 id 序列，返回新分配的 id（须在 kv 事务内）。
 
 - int Insert(JsonValue doc)
   - 存储新文档，分配并返回其 _id
@@ -356,6 +405,7 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
   - 返回文档；不存在则返回 null。
 
 - bool Exists(int id)
+  - 文档 id 是否存在。
 
 - bool Update(int id, JsonValue doc)
   - 替换现有文档；id 不存在时返回 false。
@@ -365,8 +415,10 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
     序列越过该 id，避免后续插入冲突。
 
 - bool DeleteById(int id)
+  - 删除文档及其索引条目；返回该 id 是否原本存在。
 
 - void PersistIndexMeta()
+  - 把索引字段列表写回元数据键（须在 kv 事务内）。
 
 - void EnsureIndex(string field)
   - 为字段创建（或重建）二级索引，按有界批次
@@ -397,6 +449,7 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
     索引绝不会产生不完整的结果。
 
 - bool HasIndex(string field)
+  - 字段是否已在索引列表中（含批量构建尚未完成的）。
 
 - bool IndexReady(string field)
   - 当字段已被索引且其批次构建
@@ -430,12 +483,16 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
   - 对集合启动流畅的 LINQ 风格查询。
 
 - async JsonValue FindByIdAsync(int id)
+  - `FindById` 的协程版本：在共享读写锁的读侧执行。
 
 - async int InsertAsync(JsonValue doc)
+  - `Insert` 的协程版本：在共享读写锁的写侧执行。
 
 - async bool UpdateAsync(int id, JsonValue doc)
+  - `Update` 的协程版本：在共享读写锁的写侧执行。
 
 - async bool DeleteByIdAsync(int id)
+  - `DeleteById` 的协程版本：在共享读写锁的写侧执行。
 
 - async bool UpdateAtomic(int id, DocUpdater fn)
   - 对单篇文档的原子读改写：fn 在
@@ -495,6 +552,7 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
 - [DllImport("crt", EntryPoint="kill")]static extern int KillSignal(int pid, int sig);
 
 - DbRegistry()
+  - 私有构造；统一经 `Attach` 创建。
 
 - static string NameOf(string path)
   - 从数据库路径派生共享内存名称（只取文件名，
@@ -506,6 +564,8 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
     数据库文件的注册表。
 
 - bool IsShared()
+  - 共享内存注册表是否可用；不可用时（如平台不支持）所有
+    发布/查询方法退化为单进程语义。
 
 - int Processes()
   - 当前打开该数据库的进程数。
@@ -516,15 +576,20 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
     （注册表出现后未提交过任何内容时为 0）。
 
 - void PublishTxn(long txnid)
+  - 写入者在提交后发布新的事务 id（注册表不可用时无操作）。
 
 - bool LockWrite()
   - 阻塞直到本进程获得唯一的写入者槽位。
 
 - void UnlockWrite()
+  - 释放写入互斥锁；未持有时无操作。
 
 - long HashOfSlot(int index)
+  - 第 index 个读取者槽位的哈希键。
 
 - bool Alive(int otherPid)
+  - 进程是否存活：pid 0 视为死亡、本进程恒存活；
+    Windows 用 OpenProcess 探测，POSIX 用 kill(pid, 0)。
 
 - void ClaimSlot()
   - 为本进程认领一个读取者槽位，复用
@@ -540,6 +605,8 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
     不动；更旧的页面则可复用。
 
 - void Close()
+  - 释放写锁、撤销本进程的读取者槽位、递减进程计数，
+    并关闭共享内存与锁文件。
 
 
 ## DocQuery (class)
@@ -582,8 +649,10 @@ List<JsonValue> adults = users.Query()
 - int takeN;
 
 - DocQuery()
+  - 私有构造；统一经 `Of` 创建。
 
 - static DocQuery Of(Collection col)
+  - 为集合创建一个空查询。
 
 - DocQuery Where(DocPredicate pred)
   - Lambda 过滤器；多次调用彼此 AND。
@@ -597,26 +666,37 @@ List<JsonValue> adults = users.Query()
   - 字段的整数等值约束。
 
 - DocQuery OrderByInt(DocIntKey key)
+  - 按整数键升序排序（再次调用覆盖先前排序设置）。
 
 - DocQuery OrderByIntDesc(DocIntKey key)
+  - 按整数键降序排序。
 
 - DocQuery OrderByStr(DocStrKey key)
+  - 按字符串键升序排序。
 
 - DocQuery OrderByStrDesc(DocStrKey key)
+  - 按字符串键降序排序。
 
 - DocQuery Skip(int n)
+  - 跳过前 n 条（分页）。
 
 - DocQuery Take(int n)
+  - 最多返回 n 条（0 = 不限）。
 
 - List<JsonValue> Candidates()
+  - 候选集：有索引等值用索引；否则用第一个等值约束做字段扫描
+    缩小范围；再否则取整个集合。
 
 - bool MatchesRest(JsonValue d)
+  - 检查余下的等值约束与 lambda 过滤器
+    （首个等值约束已由 `Candidates` 的扫描应用）。
 
 - bool EqAppliedByScan()
   - 当候选集已经应用了第一个等值
     过滤器时为 true，重复检查将浪费工作。
 
 - bool Matches(JsonValue d)
+  - 检查全部等值约束与 lambda 过滤器。
 
 - void SortDocs(List<JsonValue> docs)
   - 对预计算的键做自底向上归并排序：O(n log n)，稳定。
@@ -645,6 +725,7 @@ List<JsonValue> adults = users.Query()
 - string val;
 
 - EqFilter(string field, string val)
+  - 私有构造；经 `DocQuery.WhereEq` 创建。
 
 
 ## KvEntry (class)
@@ -656,6 +737,7 @@ List<JsonValue> adults = users.Query()
 - string val;
 
 - KvEntry(string key, string val)
+  - 构造一条记录。
 
 
 ## KvStore (class)
@@ -701,8 +783,10 @@ db.Close();
   - 以显式页缓存容量打开（页大小为 4 KB）。
 
 - bool IsOpen()
+  - 是否处于打开状态（打开无错误且底层 Pager 可用）。
 
 - string GetError()
+  - 最近一次打开失败的错误文本；Open 失败时由它给出原因。
 
 - void SetSyncEvery(int n)
   - 数据页 fsync 频率：1 = 每次提交（默认），N = 每
@@ -717,6 +801,7 @@ db.Close();
     空间增长的这两个数字。
 
 - int FreePages()
+  - 空闲列表中的页数（已删除但可复用的空间）。
 
 - int PageWrites()
   - 自该句柄打开以来写入磁盘的页数：写放大
@@ -730,11 +815,13 @@ db.Close();
     其仍可见的页面在此期间不会被复用。
 
 - void EndSnapshot()
+  - 结束快照：释放对旧版本页面的引用，使其可被复用。
 
 - string Get(string key)
   - 返回值；不存在时返回 ""（参见 Contains）。
 
 - bool Contains(string key)
+  - 键是否存在（与 Get("") 无法区分「值为空串」不同）。
 
 - void Put(string key, string val)
   - 插入或替换一个键。除非处于
@@ -775,11 +862,13 @@ db.Close();
   - 所有带给定前缀的键（例如 "user:"）。
 
 - int Count()
+  - 键的总数（遍历整棵树统计）。
 
 - void Checkpoint()
   - 将迄今写入的所有内容强制落盘到稳定存储。
 
 - void Close()
+  - 关闭底层存储与进程内读写锁。
 
 - async string GetAsync(string key)
   - 共享锁读取；可安全地与并发写入共存。
@@ -788,6 +877,7 @@ db.Close();
   - 独占锁写入并自动提交。
 
 - async bool DeleteAsync(string key)
+  - 独占锁删除一个键；返回键此前是否存在。
 
 - async string UpdateAtomic(string key, KvUpdater fn)
   - 原子读改写：fn 在写临界区内看到
@@ -816,19 +906,23 @@ db.Close();
 - List<BNode> nodes;
 
 - NodeCache(int cap)
+  - 以固定容量构建（槽位数约为容量的 4 倍、取 2 的幂）。
 
 - int FindSlot(int pageId)
+  - 开放寻址探测：命中返回槽位，未命中返回 -(空槽 + 1)。
 
 - BNode Get(int pageId)
   - 缓存的节点，没有则返回 null。
 
 - void Put(int pageId, BNode n)
+  - 缓存解码节点；容量已满时整体清空再插入。
 
 - void Remove(int pageId)
   - 忘记某个页面：它的 id 即将存放不同的内容
     （写时复制或 free-list 复用），过期的解码结果不能继续存在。
 
 - void Clear()
+  - 清空缓存（快照推进或容量回收时）。
 
 
 ## PageCache (class)
@@ -858,22 +952,31 @@ db.Close();
 - int count;
 
 - PageCache(int cap)
+  - 以固定页数容量构建（槽位数为容量的 2 倍向上取 2 的幂）。
 
 - int Count()
+  - 缓存中的页数。
 
 - int FindSlot(int pageId)
+  - 页 id 的槽位；未命中返回 -1。
 
 - int FindInsertSlot(int pageId)
+  - 找到首个空槽或墓碑槽（插入用）。
 
 - void LruUnlink(int slot)
+  - 从 LRU 链摘除槽位。
 
 - void LruPushFront(int slot)
+  - 把槽位推到 LRU 链头（最近使用）。
 
 - bool Has(int pageId)
+  - 页是否在缓存中。
 
 - ByteBuffer Get(int pageId)
+  - 取页缓冲区并把它标记为最近使用；未命中返回小占位缓冲。
 
 - void SetPinned(int pageId, bool p)
+  - 设置/清除页的钉住标志。
 
 - void UnpinAll()
   - 解除全部钉住（事务结束时调用）。
@@ -887,8 +990,10 @@ db.Close();
     内容可能属于已不存在的版本）。
 
 - int EvictableSlot()
+  - LRU 尾部起找第一个未钉住的槽位；全部钉住时为 -1。
 
 - void Grow()
+  - 槽位数翻倍并重散列（保留钉住状态与 LRU 顺序）。
 
 - void Put(int pageId, ByteBuffer buf, bool pin)
   - 插入一页并接管 buf 的所有权；满了时驱逐 LRU
@@ -954,13 +1059,16 @@ f.Close();
 - [DllImport("crt", EntryPoint="flock")]static extern int FlockFd(int fd, int op);
 
 - PageFile()
+  - 私有构造；统一经 `Open` 创建。
 
 - static PageFile Open(string path)
   - 为随机读写打开（或创建）一个文件。
 
 - bool IsOpen()
+  - 文件是否成功打开。
 
 - string GetError()
+  - 最近一次操作的错误描述（无错为空串）。
 
 - int ReadAt(long offset, ByteBuffer buf, int count)
   - 从 offset 处读取 count 字节到 buf（先清空 buf）。
@@ -994,8 +1102,11 @@ f.Close();
     退出，锁由操作系统释放，因此崩溃的写入者不会卡死数据库。
 
 - bool Unlock()
+  - 释放 LockExclusive 取得的锁；成功返回 true。
 
 - void Close()
+  - 关闭文件。进程退出时操作系统会兜底释放，但显式关闭
+    能及时让出锁与句柄。
 
 
 ## PageIdSet (class)
@@ -1011,18 +1122,26 @@ f.Close();
 - List<int> keys;
 
 - PageIdSet()
+  - 空、256 槽的集合。
 
 - int Count()
+  - 集合内的页数。
 
 - int SlotOf(int pageId)
+  - 开放寻址探测：命中返回槽位，未命中返回
+    -(空槽位 + 1)（供 `Add` 就地写入）。
 
 - bool Has(int pageId)
+  - 页 id 是否在集合中。
 
 - void Grow()
+  - 槽位数翻倍并重散列。
 
 - void Add(int pageId)
+  - 加入一页（已存在时无操作）；装载因子过半先扩容。
 
 - void Clear()
+  - 清空集合（保留槽位容量）。
 
 
 ## Pager (class)
@@ -1057,6 +1176,8 @@ pager.Commit();                          // fsync data, then meta
 - static int FREE_PER_PAGE=255;
 
 - static int PageIdOf(long stored)
+  - 把存储的 64 位页号收窄为 32 位 id；超出
+    [0, 2^31-1] 视为损坏，返回 0。
 
 - PageFile file;
 
@@ -1103,21 +1224,28 @@ pager.Commit();                          // fsync data, then meta
 - bool cacheDirty;
 
 - Pager()
+  - 私有构造；统一经 `Open` 创建。
 
 - static Pager Open(string path, int cacheCapacity)
   - 打开数据库文件（不存在则创建）。
 
 - bool IsOpen()
+  - 打开是否成功（原因见 `GetError`）。
 
 - string GetError()
+  - 最近一次失败的错误文本；无错为空串。
 
 - int PageCount()
+  - 文件中的页总数（含两枚 meta 页）。
 
 - long CommitId()
+  - 本句柄当前快照的事务 id。
 
 - int RootId()
+  - B+Tree 根页 id。
 
 - void SetRoot(int id)
+  - 设置新根（提交时随 meta 页一起持久化）。
 
 - int FreePages()
   - 空闲链表上的页数加上已可复用的页数
@@ -1139,6 +1267,9 @@ pager.Commit();                          // fsync data, then meta
     丢失”换取吞吐量——但绝不会损坏数据库。
 
 - void WriteMeta(long newTxn)
+  - 把 meta 字段写成交替的两枚 meta 页之一（由新事务 id 奇偶
+    决定槽位），CRC 覆盖前 META_FIELDS 字节。不 fsync（由
+    `Commit` 统一做）。
 
 - long ReadMetaSlot(int slot, ByteBuffer h)
   - 读取一个 meta 页；返回其事务 id，若页
@@ -1165,6 +1296,7 @@ pager.Commit();                          // fsync data, then meta
     因为快照已移动。并清除该标志。
 
 - void LoadFreeList()
+  - 惰性加载持久化的空闲链表（首读后缓存）。
 
 - void ReclaimFree()
   - 将无存活读者可达的空闲页移入
@@ -1182,12 +1314,14 @@ pager.Commit();                          // fsync data, then meta
     什么都不做。
 
 - void EndRead()
+  - 结束读快照：最外层退出时撤销快照发布。
 
 - bool BeginWrite()
   - 占用唯一的写者槽位（阻塞）并在最新已提交快照上
     开始写事务。可嵌套。
 
 - bool InWrite()
+  - 当前是否处于写事务中（含嵌套）。
 
 - bool IsFresh(int pageId)
   - 当页属于当前运行中的写事务时为 true
@@ -1231,9 +1365,13 @@ pager.Commit();                          // fsync data, then meta
   - 将迄今写入的所有内容强制刷入稳定存储。
 
 - void Close()
+  - 回滚写事务并按序关闭注册表与文件。
 
 
 ## PendingWalPage (class)
+
+恢复扫描中暂存的一个事务页帧：页号加页镜像，等提交记录
+确认事务完整后再写入主文件。
 
 - int id;
 
@@ -1258,10 +1396,13 @@ u32 crc32     载荷的 CRC32
 payload       载荷，payloadLen 字节（页镜像；提交记录没有）
 
 - static int FRAME_PAGE=1;
+  - 帧类型码：页帧。
 
 - static int FRAME_COMMIT=2;
+  - 帧类型码：提交记录（事务的持久化点）。
 
 - static int HEADER_LEN=20;
+  - 帧头长度（字节）：u32 type + u64 id + u32 len + u32 crc。
 
 - PageFile file;
 
@@ -1272,8 +1413,10 @@ payload       载荷，payloadLen 字节（页镜像；提交记录没有）
 - Wal()
 
 - static Wal Open(string path, int pageSize)
+  - 打开（必要时创建）指定路径的 WAL 文件。
 
 - bool IsOpen()
+  - 底层文件是否成功打开。
 
 - long Size()
   - 当前 WAL 文件大小（字节）。
@@ -1294,6 +1437,7 @@ payload       载荷，payloadLen 字节（页镜像；提交记录没有）
   - 截断 WAL（主文件检查点成功后调用）。
 
 - void Close()
+  - 关闭并删除 WAL 文件。
 
 
 ## ZanDatabase (class)
@@ -1329,10 +1473,14 @@ db.Close();
     每次提交都 fsync。
 
 - static ZanDatabase Open(string path, int cachePages)
+  - 以显式页缓存容量打开（不存在则创建）；打开失败时
+    `IsOpen` 为 false，原因见 `GetError`。
 
 - bool IsOpen()
+  - 打开是否成功（失败原因见 `GetError`）。
 
 - string GetError()
+  - 打开失败的错误文本；成功时为空串。
 
 - void SetSyncEvery(int n)
   - fsync 频率：1 = 每次提交，N = 分组提交。
@@ -1347,10 +1495,13 @@ db.Close();
   - 将后续写入批量合并为一次原子提交。
 
 - bool Commit()
+  - 提交 `Begin` 以来的全部写入；返回是否成功落盘。
 
 - void Checkpoint()
+  - 将迄今写入的内容强制落盘到稳定存储。
 
 - void Close()
+  - 关闭底层存储与读写锁。
 
 
 ## JsonValue (delegate)

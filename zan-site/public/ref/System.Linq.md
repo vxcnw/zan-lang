@@ -203,13 +203,13 @@ InvalidOperationException，与 C# 一致；*OrDefault 变体
 - static List<T> OrderByKeysStrDescending<T>(this List<T> src, List<string> keys)
   - 按预先计算的字符串键列表稳定排序（降序）。
 
-- static List<T> MergeSortKeysInt<T>(List<T> src, List<int> ka, int sign)
+- static List<T> MergeSortKeysInt<T>(List<T> src, List<int> keys, int sign)
 
-- static List<T> MergeSortKeysLong<T>(List<T> src, List<long> ka, int sign)
+- static List<T> MergeSortKeysLong<T>(List<T> src, List<long> keys, int sign)
 
-- static List<T> MergeSortKeysStr<T>(List<T> src, List<string> ka, bool desc)
+- static List<T> MergeSortKeysStr<T>(List<T> src, List<string> keys, bool desc)
 
-- static List<T> MergeSortKeysNum<T>(List<T> src, List<double> ka, bool desc)
+- static List<T> MergeSortKeysNum<T>(List<T> src, List<double> keys, bool desc)
 
 - static List <Grouping<T>> GroupBy<T>(this List<T> src, KeySelector<T> key)
   - 按整数键对元素分组。Grouping.IntKey 保存
@@ -301,6 +301,7 @@ InvalidOperationException，与 C# 一致；*OrDefault 变体
   - text 匹配 SQL LIKE 模式（'%'/'_'）时返回 true。
 
 - static bool LikeAt(string t, int ti, string p, int pi)
+  - LikeMatch 的递归体：'%' 尝试消耗任意长度，'_' 匹配单个字符。
 
 - static List<T> In<T>(this List<T> src, List<T> values)
   - SQL IN：保留 values 中存在的元素（使用 ==）。
@@ -324,10 +325,13 @@ InvalidOperationException，与 C# 一致；*OrDefault 变体
 <c>Expr<T></c> 参数的方法会以表达式树形式接收 lambda。
 
 - public ExprNode Root;
+  - 表达式树的根节点；未构造时为 null。
 
 - public Expr()
+  - 空包装：Root 为 null（经 `From` 装入树）。
 
 - static Expr<T> From(ExprNode root)
+  - 以给定的根节点包装成一个 Expr<T>。
 
 
 ## ExprNode (class)
@@ -349,45 +353,62 @@ lambda 参数本身作为接收方时为 null；B = 参数）
 5 = 非（A = 操作数）
 
 - public int Kind;
+  - 节点类型（见类注释的 0-5 编号）。
 
 - public string Name;
+  - 成员/运算符/方法/参数名（按 Kind 取义）。
 
 - public ExprNode A;
+  - 第一个操作数（接收方/函数体等）。
 
 - public ExprNode B;
+  - 第二个操作数（右操作数/调用参数）。
 
 - public int TVal;
   - 常量负载类型：0 = int，1 = double，2 = string，3 = bool。
 
 - public int IVal;
+  - TVal=0 时的整数值。
 
 - public double DVal;
+  - TVal=1 时的浮点值。
 
 - public string SVal;
+  - TVal=2 时的字符串值。
 
 - public bool BVal;
+  - TVal=3 时的布尔值。
 
 - public ExprNode()
+  - 空节点：全字段取默认值（等 Static 工厂逐个赋值）。
 
 - static ExprNode Member(string n)
+  - 构造成员访问节点（Kind 0）。
 
 - static ExprNode Const(int v)
+  - 构造 int 常量节点（Kind 1，TVal 0）。
 
 - static ExprNode Const(double v)
+  - 构造 double 常量节点（Kind 1，TVal 1）。
 
 - static ExprNode Const(string s)
+  - 构造 string 常量节点（Kind 1，TVal 2）。
 
 - static ExprNode Const(bool v)
+  - 构造 bool 常量节点（Kind 1，TVal 3）。
 
 - static ExprNode Binary(string op, ExprNode l, ExprNode r)
+  - 构造二元运算节点（Kind 2；op 见类注释的运算符表）。
 
 - static ExprNode Call(string fn, ExprNode recv, ExprNode arg)
   - 3 = 调用（Name = 方法名；A = 接收方树，当
     lambda 参数本身作为接收方时为 null；B = 单个参数树）。
 
 - static ExprNode Lambda(string p, ExprNode body)
+  - 构造 lambda 节点（Kind 4；p 为参数名）。
 
 - static ExprNode Not(ExprNode x)
+  - 构造逻辑非节点（Kind 5）。
 
 
 ## Grouping (class)
@@ -401,8 +422,10 @@ GroupBy 产生的一组结果：key 及其元素。
   - 使用 GroupBy(KeySelector) 分组时的整数键。
 
 - public List<T> Items;
+  - 组内元素（按出现顺序）。
 
 - public Grouping()
+  - 空组：键为空串、元素列表为空。
 
 
 ## A (delegate)

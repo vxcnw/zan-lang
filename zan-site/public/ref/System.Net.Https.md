@@ -27,6 +27,8 @@ await server.Start();
 
 - int activeConnections;
 
+- int maxConnections;
+
 - int maxRequestBytes;
 
 - int maxHeaderBytes;
@@ -36,6 +38,7 @@ await server.Start();
 - HttpRequestHandler requestHandler;
 
 - HttpsServer(string host, int port)
+  - 私有构造：默认限额与 30 秒超时；用 `Create` 创建。
 
 - static HttpsServer Create(string host, int port, string certFile, string keyFile)
   - 从 PEM 证书链与 PEM 私钥创建 HTTPS 服务器；
@@ -59,12 +62,23 @@ await server.Start();
   - 启动 HTTPS 服务器事件循环。持续运行，在协程上
     接受并处理连接。
 
+- HttpsServer SetMaxConnections(int max)
+  - 设置最大并发连接数；超过上限的连接立即关闭（回 503 之前
+    不做 TLS 握手——每个 TLS 连接都持有 SSL/BIO 与缓冲，必须像
+    HttpServer 一样设闸）。
+
 - void Stop()
-  - 停止接受新连接。
+  - 停止接受新连接：关闭监听套接字让挂起在
+    AcceptAsync 上的协程立即返回（只置 running 标志要等到
+    下一条连接到达才会生效）。已建立的连接自然收尾。
 
 - async void HandleConnection(nint clientSock)
   - 对一个客户端连接执行 TLS 握手，随后用与
     `HttpServer.HandleConnection` 相同的帧解析
     服务其上的 HTTP/1.1 请求（支持 keep-alive 与流水线）。
 
+- async void HandleConnectionInner(nint clientSock)
+  - HandleConnection 的服务体；计数归还见 HandleConnection 的 finally。
+
 - async HttpResponse ProcessRequest(HttpRequest request)
+  - 分发到 OnRequest 注册的处理器；未注册时返回占位页。

@@ -90,8 +90,13 @@ new DbParams().Add(name));
     分配一份新的托管副本。
 
 - static string ToDollarParams(string sql)
-  - 将 `?` 占位符（单引号字面量之外）改写为
-    libpq 的位置参数 $1..$n 形式，使所有驱动统一使用 `?` 语法。
+  - 将 `?` 占位符（SQL 结构位置）改写为 libpq 的
+    位置参数 $1..$n 形式，使所有驱动统一使用 `?` 语法。
+    上下文感知：字符串字面量、转义引号、双引号标识符、
+    行/块注释以及美元引用（$$..$$ / $tag$..$tag$）内部的
+    `?` 一律原样保留——此前无脑改写，
+    SELECT * FROM t WHERE note = 'a?b' 会变成 $1 参数错位、
+    注释里的示例 SQL 直接破坏语句。
 
 - static byte[]BuildParamBlock(DbParams prms, List <byte[]> keepAlive)
   - 为 PQexecParams 构建 char** paramValues 块：一个
@@ -103,6 +108,7 @@ new DbParams().Add(name));
   - 将 TUPLES_OK 的 PGresult 复制为 DbResult（NULL 单元格变为 ""）。
 
 - PgConnection()
+  - 私有构造；统一经 `Open`/`OpenAsync` 创建。
 
 - static PgConnection Open(string conninfo)
   - 从 libpq conninfo 字符串打开连接。
@@ -175,18 +181,25 @@ new DbParams().Add(name));
   - 开始一个事务。
 
 - async int ExecuteAsync(string sql, DbParams prms)
+  - `ExecuteParamsAsync` 的接口命名别名。
 
 - async string ExecuteScalarAsync(string sql)
+  - `ExecuteScalar(string)` 的协程版本。
 
 - async string ExecuteScalarAsync(string sql, DbParams prms)
+  - `ExecuteScalar(string, DbParams)` 的协程版本。
 
 - async bool BeginTransactionAsync()
+  - 协程版事务：执行 BEGIN，恒返回 true。
 
 - async bool CommitAsync()
+  - 协程版提交：执行 COMMIT，恒返回 true。
 
 - async bool RollbackAsync()
+  - 协程版回滚：执行 ROLLBACK，恒返回 true。
 
 - void BeginTransaction()
+  - 开始一个事务（执行 BEGIN）。
 
 - void Commit()
   - 提交当前事务。
@@ -233,10 +246,13 @@ pool.Release(db);
   - 基于 host/port/database/user/password 的连接池。
 
 - static string BuildConninfo(string host, int port, string database, string user, string password)
+  - 把 host/port/database/user/password 拼成 libpq conninfo 字符串。
 
 - async IDbConnection ConnectAsync()
+  - 执行非阻塞握手打开一个新连接（由 IO reactor 驱动）。
 
 - int GetProvider()
+  - 池的 provider id（恒为 `DbProvider.PostgreSQL`）。
 
 
 ## PgPool (class)
@@ -264,12 +280,15 @@ pool.Close();
 - PgPool(string conninfo, int maxSize)
 
 - PgPool(string host, int port, string database, string user, string password, int maxSize):this("host="+host+" port="+Convert.ToString(port)+" dbname="+database+" user="+user+" password="+password, maxSize)
+  - 以主机/端口/库/用户/密码构造连接池（内部拼成 conninfo）。
 
 - async PgConnection OpenOne()
+  - 新建一条物理连接（池扩容时由 AcquireAsync 调用）；失败返回 null。
 
 - async PgConnection AcquireAsync()
   - 借出连接：优先复用空闲连接，
-    未达上限则新建，否则挂起协程直到有连接被归还。
+    未达上限则新建，否则挂起协程直到有连接被归还。饱和等待有
+    硬上限（见 `PoolWait`）：超时返回 null，绝不定死。
     连接池关闭后返回 null。
 
 - void Release(PgConnection c)

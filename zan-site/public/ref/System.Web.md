@@ -1,6 +1,6 @@
 # System.Web
 
-> 源码: `stdlib/System/Web/ApiDocs.zan`, `stdlib/System/Web/Attributes.zan`, `stdlib/System/Web/Controller.zan`, `stdlib/System/Web/HttpContext.zan`, `stdlib/System/Web/Menu.zan`, `stdlib/System/Web/Router.zan`, `stdlib/System/Web/Security.zan`, `stdlib/System/Web/StaticFiles.zan`, `stdlib/System/Web/Validate.zan`, `stdlib/System/Web/View.zan`, `stdlib/System/Web/WebApp.zan`
+> 源码: `stdlib/System/Web/ApiDocs.zan`, `stdlib/System/Web/Attributes.zan`, `stdlib/System/Web/Controller.zan`, `stdlib/System/Web/HttpContext.zan`, `stdlib/System/Web/Menu.zan`, `stdlib/System/Web/Router.zan`, `stdlib/System/Web/Security.zan`, `stdlib/System/Web/StaticFiles.zan`, `stdlib/System/Web/Validate.zan`, `stdlib/System/Web/View.zan`, `stdlib/System/Web/WebApp.zan`, `stdlib/System/Web/WsSession.zan`
 
 
 ## ApiDocs (class)
@@ -28,6 +28,7 @@ disagree with the endpoint that runs.
     Both are public: they describe the surface, not the data.
 
 - static void Mount(WebApp app)
+  - 等价 Mount(app, "/api/docs")。
 
 - static void MountSpec(WebApp app, string path)
   - Registers only GET <path>.json, for applications that
@@ -35,11 +36,13 @@ disagree with the endpoint that runs.
     the machine-readable document without a second UI in the menu.
 
 - static async void Spec(HttpContext ctx)
+  - GET <path>.json 处理器：no-store 输出 OpenAPI 文档。
 
 - static string Q(string s)
   - A JSON string literal, quotes included.
 
 - static async void Page(HttpContext ctx)
+  - GET <path> 处理器：输出离线 UI 页面。
 
 - static string SpecJson(WebApp host)
   - The OpenAPI 3.0 document for every registered route.
@@ -49,6 +52,9 @@ disagree with the endpoint that runs.
     conversion in one place in case the router's syntax ever diverges.
 
 - static void Operation(StringBuilder sb, Route rt)
+  - 把一条路由写成一个 OpenAPI operation：summary/operationId/tags、
+    x-login/x-auth/x-menu 徽标、parameters 与 requestBody（写请求的
+    非 path 参数归入表单体）、responses。
 
 - static void Responses(StringBuilder sb, Route rt)
   - What the endpoint answers with, per status.
@@ -60,10 +66,13 @@ disagree with the endpoint that runs.
     generator produces when nobody tells it anything.
 
 - static void EnvelopeSchema(StringBuilder sb)
+  - {"code","msg","data"} 统一信封的 schema 字面量。
 
 - static void ErrorResponse(StringBuilder sb, string status, string desc, string code, string msg)
+  - 追加一个错误状态响应（信封 schema + 示例）。
 
 - static void ParamJson(StringBuilder sb, ApiParam p)
+  - 一个 OpenAPI parameter 对象（in 取 path/query）。
 
 - static string Tag(Route rt)
   - Tag = the controller half of "Controller.Action", falling back to
@@ -76,10 +85,13 @@ disagree with the endpoint that runs.
     is useless exactly where docs matter (an air-gapped deployment).
 
 - static string Shell()
+  - 文档页 HTML 外壳（内联 CSS 与 JS，无外部依赖）。
 
 - static string Css()
+  - 内联样式（亮/暗双色，随系统偏好）。
 
 - static string Js()
+  - 内联脚本：fetch docs.json，收集/排序/渲染接口卡片，搜索框即时过滤。
 
 
 ## ApiEnvelope (class)
@@ -109,12 +121,16 @@ carried status, so no action has to describe the same 400 twice.
 - int status;
 
 - string code;
+  - 业务错误码（"0003" = 缺失或非法参数）。
 
 - ApiError(int status, string code, string message)
+  - 构造受控中止：status 为应答状态码，code 为业务错误码。
 
 - int Status()
+  - 应答用的 HTTP 状态码。
 
 - string Code()
+  - 业务错误码。
 
 - static string Reason(int status)
   - The standard reason phrase for a status code. The status line is
@@ -145,24 +161,32 @@ to keep in sync and no way for the docs to drift from the handler.
 - bool required;
 
 - string def;
+  - 源码中书写的字面默认值（无默认值时为 ""）。
 
 - string desc;
+  - Need(label, ...) 传入的标签；In() 时为 ""。
 
 - string source;
 
 - ApiParam(string name, string type, bool required, string def, string desc, string source)
 
 - string Name()
+  - 参数名。
 
 - string Type()
+  - 参数类型（"string" | "int" | "long" | "number" | "bool"）。
 
 - bool Required()
+  - 是否必填。
 
 - string Default()
+  - 默认值（无则 ""）。
 
 - string Desc()
+  - 参数说明（Need 的标签）。
 
 - string Source()
+  - 参数来源（"path" | "query"，query 覆盖 form/query/body 字段）。
 
 - string JsonType()
   - OpenAPI JSON type for this parameter.
@@ -204,6 +228,7 @@ project's per-controller hooks).
 - HttpContext ctx;
 
 - string uid;
+  - 已解析的登录主体 id（匿名时为 ""）。
 
 - string __viewKey;
 
@@ -263,26 +288,40 @@ project's per-controller hooks).
   - Controller-level teardown hook; override as needed.
 
 - HttpContext Ctx()
+  - 本实例绑定的请求上下文。
 
 - bool IsLogin()
+  - 本次请求是否已解析出登录用户。
 
 - string In(string name)
+  - 过滤后的参数（trim + 去控制符；route → query → form 合并）。
+
+- string InRaw(string name)
+  - 原始未过滤值：多行语义字段专用，渲染转义由调用方负责。
 
 - string InText(string name)
+  - 过滤并 HTML 转义的参数（可直接渲染进页面）。
 
 - int InInt(string name, int def)
+  - 过滤后的整型；缺失/非法取 def（严格整串解析）。
 
 - long InLong(string name, long def)
+  - 过滤后的 64 位整型；规则同 InInt。
 
 - double InDouble(string name, double def)
+  - 过滤后的数值；缺失/非法取 def。
 
 - bool InBool(string name, bool def)
+  - 布尔参数："1/true/on/yes" 真，"0/false/off/no" 假，其余 def。
 
 - bool HasIn(string name)
+  - 参数是否在 form/query/route 任一处出现。
 
 - string Param(string name)
+  - 路由参数（{param} 段）。
 
 - string Body()
+  - 原始请求正文。
 
 - string Need(string name, string label)
   - Required text parameter; aborts with 400/0003 when empty.
@@ -331,12 +370,19 @@ project's per-controller hooks).
     in the body, where it belongs.
 
 - void Json(string json)
+  - 以 application/json 应答。
 
 - void Text(string text)
+  - 以 text/plain 应答。
 
 - void Html(string html)
+  - 以 text/html 应答。
 
 - void __SetView(string key)
+  - The router injects this action's view id ("<Module>.<Controller>.<Action>") via
+    __SetView before the action runs, so View(data) renders the .html that
+    sits next to this controller (<Module>/View/<Controller>.<Action>.html)
+    with zero wiring -- no per-action template name to pass.
 
 - void View(ViewData data)
   - Render this action's co-located template.
@@ -351,6 +397,52 @@ project's per-controller hooks).
 
 - void ViewOf(string name, ViewData data)
   - Render an explicitly named template instead of the convention one.
+
+
+## Csrf (class)
+
+CSRF 防护（opt-in）：double-submit cookie。注册一行：
+app.Before(Csrf.Guard);
+
+语义：
+- 安全方法（GET/HEAD/OPTIONS）不拦截；首次访问补发随机 token
+cookie（不带 HttpOnly——浏览器脚本必须读它、回显到
+X-CSRF-Token 头或 _csrf 表单字段；SameSite=Lax 保留，本身就是
+第一道防线）。
+- 不安全方法要求 X-CSRF-Token（或 _csrf 字段）与 cookie 逐字节
+相等；缺失或不匹配 → 403 并短路（返回 false，路由不再执行）。
+- 比较走常时路径（按最大长度累积异或），不因首个差异字节提前
+返回。
+- token 无状态（16 随机字节的 hex），重启/多 worker 之间均有效，
+服务端不需要存储与过期清扫。
+- 豁免：自带签名校验的回调路由用 `Csrf.Skip` 登记
+前缀。
+
+- static string CookieName="csrf_token";
+
+- static string HeaderName="X-CSRF-Token";
+
+- static string FormName="_csrf";
+
+- static List<string> skips;
+
+- static void Skip(string prefix)
+  - 登记豁免前缀：路径以其开头即不拦截。用于支付回调、
+    webhook 等自带签名校验、调用方不可能持有 cookie 的路由。
+
+- static bool Skipped(string path)
+  - 路径是否命中任一豁免前缀。
+
+- static bool Guard(HttpContext ctx)
+  - Before 钩子本体。返回 false 表示已写好 403 响应，
+    管线短路。
+
+- static string NewToken()
+  - 新 token：16 随机字节的 hex（128 位熵）。
+
+- static bool ConstantTimeEquals(string a, string b)
+  - 常时比较：按较长一方的长度累积异或，长度不等直接计入差异位，
+    不因首个差异字节提前返回。
 
 
 ## CustomAttribute (class)
@@ -374,24 +466,31 @@ scope / streamed upload).
 - =false;
 
 - CustomAuthorization Authorization{ get set}
+  - 鉴权级别；未赋值即 Unknown（按 None 处理）。
 
 - string Component{ get set}
+  - 前端组件名（构造默认 "vlist/index.vue"）。
 
 - string Icon{ get set}
+  - 菜单图标（构造默认 "mdi:antenna"）。
 
 - int ApiMax{ get set}
+  - 每秒限流上限（默认 1000）。
 
 - =1000;
 
 - ContentTypes ContentType{ get set}
+  - 响应内容类型（默认 ApplicationJson）。
 
 - =ContentTypes.ApplicationJson;
 
 - string Lock{ get set}
+  - 请求锁维度："" 无 | "user" | "global"（同 Route.Lock）。
 
 - ="";
 
 - bool Upload{ get set}
+  - 请求体流式落盘（同 Route.Upload）。
 
 - =false;
 
@@ -428,6 +527,7 @@ Replace / IndexOf), matching the rest of the framework, so it stays correct
 on binary-safe, byte-length strings.
 
 - static bool IsSpace(string c)
+  - 是否空白符：空格 / TAB / CR / LF。
 
 - static string Clean(string s)
   - Trim surrounding whitespace and drop CR/LF (TAB -> space) so a
@@ -438,6 +538,7 @@ on binary-safe, byte-length strings.
     for any value that will be rendered back into HTML.
 
 - static int DigitValue(int c)
+  - '0'–'9' 映射 0–9，其余 -1。
 
 - static int ToInt(string s, int def)
   - Parses a (cleaned) decimal integer, returning def on any
@@ -472,13 +573,16 @@ Everything is compile-time checked -- no reflection, no string dispatch.
 - Hooks()
 
 - void Before(HookFn fn)
+  - 注册 before 钩子。
 
 - void After(AfterFn fn)
+  - 注册 after 钩子。
 
 - bool RunBefore(HttpContext ctx)
   - Runs before-hooks in order; false = request short-circuited.
 
 - void RunAfter(HttpContext ctx, long elapsedUs)
+  - 按注册顺序执行全部 after 钩子（不可短路）。
 
 
 ## HttpContext (class)
@@ -503,16 +607,24 @@ so ARC reclaims everything without a request-scoped pool.
 - StrMap form;
 
 - string uid;
+  - 已登录的主体 id（匿名时为 ""）。
 
 - string routeAction;
+  - 命中路由的动作名（"Users.Save"）。
 
 - string routePattern;
 
 - int routeSlot;
+  - 命中路由的下标（O(1) 按路由记账）；非路由（如资源）为 -1。
 
 - string uploadPath;
+  - 已落盘的 multipart 正文路径（无则为 ""）。
 
 - long uploadSize;
+
+- JsonValue jsonBody;
+
+- bool jsonParsed;
 
 - int status;
 
@@ -541,31 +653,98 @@ so ARC reclaims everything without a request-scoped pool.
 - long framesBytes;
 
 - HttpContext(HttpRequest req, string remoteIp)
+  - 构造请求上下文：解析 query，并对 POST/PUT/PATCH 的 urlencoded 或
+    multipart 正文做一次表单解析。连接循环里正文是构造之后才缓冲齐
+    的，那里会经 ParseFormBody 再解析一次；空正文不会重复解析。
 
 - string RemoteIp()
+  - 客户端 IP 文本（点分 IPv4）。
 
 - long RemoteIpLong()
+  - 对端 IPv4 的整数形式（Socket.Ipv4ToLong）。
 
 - static void ParseFormBody(HttpRequest req, HttpContext ctx)
-  - buffering (the initial parse only saw the first packet).
+  - Parses the urlencoded form body again, now that the body has
+    finished
+    buffering (the initial parse only saw the first packet).
+
+- static void ParseMultipartFields(HttpRequest req, HttpContext ctx)
+  - multipart/form-data 的文本字段进 form 表。浏览器在同一张
+    表单里混排文本输入与文件输入，此前只有 urlencoded 的字段被解析，
+    multipart 请求里的文本字段在服务端不可见。文件部件不在这里展开：
+    流式上传路径的正文已整体落盘（WebApp.StreamBodyToFile），内存路径
+    的文件部件由处理器按需取用——只有带 filename= 的部件被跳过，
+    其余部件的值原样进入 form（multipart 值不做百分号解码）。
+    与 ParseFormBody 一样先 Clear：构造函数可能已按首个 TCP 分段的
+    部分正文解析过一次，正文缓冲齐后的二次解析必须整体重放，
+    不能把不完整的字段值留在表里。
+
+- static string DispositionName(string head)
+  - 部件 Content-Disposition 里的 name 值；带 filename= 的
+    部件是文件，返回空串让调用方跳过（文件字节不能混进 form 表）。
+
+- static int FindFrom(string hay, string needle, int from)
+  - 从 from 起查找子串首次出现，返回下标；无则 -1。
+
+- static int FindNoCaseFrom(string hay, string needle, int from)
+  - 同 FindFrom，但 ASCII 大小写不敏感。
 
 - string Param(string name)
+  - 路由参数（{param} 段匹配到的值）。
 
 - string Query(string name)
+  - query string 参数。
 
 - string Form(string name)
+  - 表单字段（urlencoded 或 multipart 的文本字段）。
 
 - string Body()
+  - 原始请求正文。
+
+- JsonValue JsonBody()
+  - Request body as JSON, parsed once and cached. Returns null
+    for an empty body. Lenient parse: a malformed body yields whatever
+    partial tree the reader recovered rather than an exception — callers
+    validating user input should still check the fields they read.
+
+- string InputString(string name)
+  - 按 route → query → form 顺序取原始字符串（未过滤）；
+    三处都缺时返回空串。
+
+- int InputInt(string name, int dflt)
+  - 按合并顺序取整型；缺失、非整数或溢出时返回
+    `dflt`。"42"、"-7"、"+7" 合法；"12abc"、"2.5"、"" 不合法。
+
+- long InputLong(string name, long dflt)
+  - 按合并顺序取 64 位整型；规则同 InputInt。
+
+- bool InputBool(string name, bool dflt)
+  - 按合并顺序取布尔："1"/"true"/"on"/"yes"
+    （大小写不敏感）为真，"0"/"false"/"off"/"no" 为假，
+    其余返回 `dflt`。
+
+- static int ParseIntStrict(string v, int dflt)
+  - 严格十进制解析：可选 +/- 前缀、其余必须全为数字、
+    整串消费、int 范围校验；任何一条不满足返回 `dflt`。
+
+- static bool AsciiEq(string a, string b)
+  - ASCII 大小写不敏感等值（布尔词表用）。
+
+- static long ParseLongStrict(string v, long dflt)
+  - 严格 64 位解析，规则同 ParseIntStrict；累加中途变负（64 位回绕）
+    视为解析失败。
 
 - string Header(string name)
+  - 按名取请求头；不存在返回 ""。
 
 - string Cookie(string name)
   - Reads one cookie from the Cookie header, or "".
 
 - bool IsAjax()
+  - X-Requested-With 恰为 XMLHttpRequest（仅认这两种大小写写法）时为真。
 
 - string InRaw(string name)
-  - Raw, UNFILTERED value (form -> query -> route param). Only use
+  - Raw, UNFILTERED value (route param -> query -> form). Only use
     when you deliberately need the untouched bytes.
 
 - string In(string name)
@@ -577,9 +756,13 @@ so ARC reclaims everything without a request-scoped pool.
 
 - int InInt(string name, int def)
   - Filtered integer with a fallback for missing/invalid input.
+    Full-consumption strict parse with range check: "12abc", "2.5" and
+    out-of-range values all fall to `def` (an atoi-style prefix parse
+    would accept "12abc" as 12, and an unchecked accumulator would wrap).
 
 - long InLong(string name, long def)
   - Filtered long with a fallback for missing/invalid input.
+    Same strict rules as InInt, widened to 64 bits.
 
 - double InDouble(string name, double def)
   - Filtered number with a fallback for missing/invalid input.
@@ -592,6 +775,7 @@ so ARC reclaims everything without a request-scoped pool.
   - True when the parameter is present in form, query or route.
 
 - HttpContext Status(int code, string text)
+  - 设置状态码与原因短语（可链式）。
 
 - static string HeaderSafe(string s)
   - A header name or value with CR, LF and NUL removed. Applied at
@@ -602,12 +786,23 @@ so ARC reclaims everything without a request-scoped pool.
     splitting).
 
 - HttpContext SetHeader(string name, string val)
+  - 追加响应头；名称与值都经 HeaderSafe 清洗（可链式）。
 
 - HttpContext SetCookie(string name, string val, int maxAgeSeconds)
+  - 设置 HttpOnly + SameSite=Lax 的会话 cookie（可链式）。
+
+- HttpContext SetCookieJs(string name, string val, int maxAgeSeconds)
+  - Sets a JS-readable cookie (no HttpOnly). The only
+    legitimate use is the CSRF double-submit token: the browser script
+    must read the cookie to echo it in X-CSRF-Token, so it cannot be
+    HttpOnly. SameSite=Lax stays, which is itself the first line of
+    defense. Everything else should use `SetCookie`.
 
 - void Html(string html)
+  - 以 text/html; charset=utf-8 应答并结束本请求。
 
 - void Text(string text)
+  - 以 text/plain; charset=utf-8 应答并结束本请求。
 
 - void Binary(string mime, byte[]data, int len)
   - Answers with `len` raw bytes of `data`. The only way to serve
@@ -622,6 +817,7 @@ so ARC reclaims everything without a request-scoped pool.
   - Response body size in bytes, whichever form it takes.
 
 - void Json(string json)
+  - 以 application/json 应答并结束本请求。
 
 - void Download(string fileName, string mime, string body)
   - Answers with a file the browser saves rather than renders. The
@@ -635,9 +831,46 @@ so ARC reclaims everything without a request-scoped pool.
     never by string concatenation.
 
 - void Redirect(string url)
+  - 302 跳转：Location 经 HeaderSafe 清洗，正文为空。
 
 - void __Attach(TcpClient client)
   - Serializes the response into a raw HTTP/1.1 message.
+
+- nint ClientSock()
+  - The live connection's socket, for handlers that must manage
+    their own deadlines (an SSE stream that legitimately stays silent for
+    minutes while the upstream model thinks). Returns 0 before __Attach.
+
+- HttpDeadlineToken deadlineSlot;
+  - The per-request deadline slot this connection rides on. A
+    long-lived stream handler must Touch it periodically (see
+    ClientStreamWatch): the connection sweeper shuts sockets down at the
+    deadline even mid-stream, which used to cut every SSE response that
+    ran past the server's request timeout (default 30s) — the exact
+    "upstream never finished but the client got dropped" signature.
+    null when the connection predates deadline tracking.
+
+- int streamIdleMs;
+
+- HttpFramer framer;
+
+- HttpDeadlineToken DeadlineSlot()
+  - 本连接挂载的期限槽（长流处理器须定期 Touch，见 deadlineSlot 字段说明）。
+
+- void __SetDeadlineSlot(HttpDeadlineToken slot, int idleMs)
+  - 由连接循环注入期限槽与空闲窗口（应用的 requestTimeoutMs）。
+
+- void __SetFramer(HttpFramer framer)
+  - 由连接循环注入定界缓冲（WS 升级时从中切出管线其后的帧字节）。
+
+- void TouchDeadline(int timeoutMs)
+  - Re-arms this connection's request deadline for another full
+    window. A streaming handler calls this every time it has evidence the
+    stream is alive — data relayed, or a keep-alive ping accepted. Without
+    it the connection sweeper shuts the socket down at requestTimeoutMs
+    (default 30s) regardless of stream health, which is why long SSE
+    relays used to die mid-answer with "client disconnected".
+    No-op when the connection carries no deadline.
 
 - bool Hijacked()
   - Whether this request took the connection over.
@@ -652,12 +885,20 @@ so ARC reclaims everything without a request-scoped pool.
     connection that is meant to stay open.
 
 - long FrameBytes()
+  - 该连接累计推出的帧字节数（流式连接的流量度量）。
 
 - async bool SseOpen()
   - Answers the `text/event-stream` handshake and takes the
     connection over. Everything after this is written by the handler with
     SseSend / SsePing; the loop it runs ends when the subscriber goes away
     (a send fails). false = no connection to stream on.
+
+- async bool SendAllTcp(string data)
+  - 循环直到整段写出。TcpClient.SendAsync 是单次非阻塞
+    send：TCP 背压下（慢订阅者 + 快上游——繁忙转发的常态）它经常
+    短写，此前按 frame.Length 记账等于把没发出去的事件当已送达，
+    下一事件从半帧中间开始——浏览器收到的补全是坏 JSON。
+    false = 对端已断开。
 
 - async bool SseSend(string name, string data)
   - Pushes one event. `name` "" sends the default "message" event.
@@ -668,7 +909,34 @@ so ARC reclaims everything without a request-scoped pool.
   - Comment line, used as a keep-alive so idle proxies do not drop
     the stream.
 
+- bool IsWebSocketRequest()
+  - Whether this request asks to upgrade to WebSocket: an
+    Upgrade header whose token list contains "websocket" (case
+    insensitive) plus a non-empty Sec-WebSocket-Key. Anything else is an
+    ordinary request and goes down the normal response path.
+
+- async WsSession WsUpgrade()
+  - Completes the RFC 6455 handshake and hands the connection to
+    a `WsSession`. The upgrade runs AFTER routing and
+    authorization, so a WebSocket session on the MVC port inherits the
+    route's full permission semantics — the part a standalone WS port
+    cannot give you.
+    
+    Session lifetime follows the SSE hijack contract: the handler that
+    called WsUpgrade owns the connection until it returns; the connection
+    loop then sees hijacked and tears down without writing a response.
+    null = not an upgrade request (answer normally) or the 101 write
+    failed (peer gone).
+    
+    An idle session is cut by the connection sweeper at the request
+    timeout. Recv/Send re-arm the deadline automatically on activity; a
+    session that may go quiet should be kept alive with periodic Ping()
+    pushes.
+
 - string BuildResponse(bool keepAlive)
+  - 序列化为完整 HTTP/1.1 报文：状态行、Content-Type/Length、依
+    keepAlive 的 Connection 头、Server 头，再接已清洗的自定义头。
+    字节正文不并入（防 NUL 截断），由调用方按 BodyLength 另行发送。
 
 - static string Itoa(int v)
   - Decimal formatting for the response line without going
@@ -677,14 +945,18 @@ so ARC reclaims everything without a request-scoped pool.
     from the builder append.
 
 - static string Digit(int d)
+  - 单个十进制数字的字面量（d 取 0–9）。
 
 - static bool StartsWith(string s, string prefix)
+  - 前缀判断（大小写敏感）。
 
 - static void ParsePairs(string s, StrMap into)
   - Parses "a=1&b=2" pairs (URL-decoded) into a StrMap.
 
 
 ## HttpDeleteAttribute (class)
+
+Restricts the action to DELETE requests.
 
 
 ## HttpGetAttribute (class)
@@ -694,11 +966,17 @@ HTTP verb selectors (default GET when none is present).
 
 ## HttpPatchAttribute (class)
 
+Restricts the action to PATCH requests.
+
 
 ## HttpPostAttribute (class)
 
+Restricts the action to POST requests.
+
 
 ## HttpPutAttribute (class)
+
+Restricts the action to PUT requests.
 
 
 ## ListQuery (class)
@@ -731,14 +1009,19 @@ OrderBy(a => a.column) that the compiler checks.
 - ListQuery()
 
 - int Page()
+  - 页码（从 1 起）。
 
 - int Limit()
+  - 每页行数（钳制在 [1, max]）。
 
 - string Order()
+  - 排序键（由控制器映射到具体列）。
 
 - bool Desc()
+  - 是否降序（仅 `?dir=asc` 得到升序）。
 
 - string Kw()
+  - 搜索文本（未搜索时为 ""）。
 
 - int Skip()
   - Rows to skip for this page, for Skip(q.Skip()).
@@ -766,6 +1049,8 @@ serialized JSON -- the rows are typed models, and serializing them is the
 caller's business.
 
 - static string Json(string itemsJson, int total, ListQuery q)
+  - 列表响应 JSON（{"items","total","page","limit","pages"}）；
+    items 是已序列化的行 JSON，空时输出 []。
 
 
 ## LockLease (class)
@@ -786,6 +1071,10 @@ free -- no OS mutex needed.
 
 ## LockManager (class)
 
+请求锁的租约表（匿名共享内存）：一个键同一时刻只有一个持有者，拿
+不到租约的请求由调用方回答 429。经 SharedTable.TryAcquireLease 加锁
+（30 秒租约窗口）、ReleaseLease 释放；表未就绪的管理器不发放租约。
+
 - SharedTable table;
 
 - long ownerSequence;
@@ -794,17 +1083,13 @@ free -- no OS mutex needed.
 
 - LockManager()
 
-- static SharedTable NewTable(string name)
-
-- static LockManager Named(string name)
-  - Locks in a NAMED shared table: created by whichever process gets
-    there first and opened by the rest, and reachable by name from outside
-    the server.
+- static SharedTable NewTable()
+  - 新建锁表：65536 键位，单列 owner。
 
 - static LockManager Owned()
   - Locks in anonymous shared memory this process owns: no name for
-    another server on the machine to collide with, and workers reach the same
-    leases through `OsHandle` / `Attach`.
+    another server on the machine to collide with or reach into, and workers
+    get the same leases through `OsHandle` / `Attach`.
 
 - static LockManager Attach(long osHandle)
   - Locks in the anonymous table another process created and handed
@@ -813,14 +1098,19 @@ free -- no OS mutex needed.
     let through unprotected.
 
 - long OsHandle()
-  - The handle a worker needs to map this manager's table, or 0 when
-    the table is named (found by name instead) or was never created.
+  - The handle a worker needs to map this manager's table, or 0
+    when no table was created.
 
 - static string KeyFor(Route route, string principal)
+  - 依 [Lock] 维度构锁键："user" → "u:<principal>:<路由键>"
+    （匿名者记 _anon_），"global" → "g:<路由键>"；未声明锁维度
+    返回空串。
 
 - LockLease TryAcquire(string key)
+  - 取租约：键为空、表未就绪或键已被持有都返回 null。
 
 - void Release(LockLease lease)
+  - 释放租约（须为本持有者）；lease 为 null 或表未就绪时静默返回。
 
 
 ## MenuBuilder (class)
@@ -909,6 +1199,7 @@ appear.
     equal entries where they were.
 
 - static bool Before(MenuNode a, MenuNode b)
+  - 排序键：节注册序 → 节名字典序 → URL 字典序。
 
 
 ## MenuNode (class)
@@ -937,14 +1228,19 @@ One navigation entry, already decided for a particular principal.
 - MenuNode()
 
 - string Title()
+  - Menu text (the action's [Description]).
 
 - string Path()
+  - Entry URL.
 
 - string Group()
+  - Section segment this entry sits under ("system").
 
 - string Icon()
+  - Icon name ([Custom(Icon=...)]), "" when none.
 
 - bool Active()
+  - Whether the current request URL is this entry.
 
 
 ## MenuNodeDoc (class)
@@ -979,13 +1275,10 @@ wall-clock seconds. Single-threaded event loop => no locking needed.
 - int windowMs;
 
 - RateLimiter(int windowMs)
+  - 构造限流器；windowMs 为固定窗口宽度（毫秒），非正数忽略。
 
-- static SharedTable NewTable(string name)
-
-- static RateLimiter Named(string name, int windowMs)
-  - A limiter on a NAMED shared table: created by whichever process
-    gets there first and opened by the rest, and reachable by name from
-    outside the server.
+- static SharedTable NewTable()
+  - 新建计数表：65536 个键位，每键 count 与 window_start 两列。
 
 - static RateLimiter Owned(int windowMs)
   - A limiter on anonymous shared memory this process owns: no name
@@ -999,12 +1292,15 @@ wall-clock seconds. Single-threaded event loop => no locking needed.
     silently letting a limited route run unlimited.
 
 - long OsHandle()
-  - The handle a worker needs to map this limiter's table, or 0 when
-    the table is named (found by name instead) or was never created.
+  - The handle a worker needs to map this limiter's table, or 0
+    when no table was created.
 
 - bool Allow(string key, int limit)
+  - 本窗口内 key 是否仍允许通过：limit<=0 恒允许；表未就绪一律拒绝
+    （fail closed，被限流的路由不会悄悄放开）。
 
 - int CountOf(string key)
+  - key 当前窗口已计的请求数；表未就绪返回 0。
 
 
 ## Route (class)
@@ -1026,8 +1322,10 @@ registration time, so matching a request never re-parses the pattern:
 - string action;
 
 - string title;
+  - [Title] 人类可读标题（菜单文案 / 文档）。
 
 - int rateLimit;
+  - [Custom(ApiMax=n)] 每秒请求上限；0（默认）不限——限流须显式声明。
 
 - string rateScope;
 
@@ -1040,44 +1338,60 @@ registration time, so matching a request never re-parses the pattern:
 - bool streamUpload;
 
 - bool inMenu;
+  - [Menu] 在管理菜单展示本路由；节与文案来自 URL 和 [Description]。
 
 - List<ApiParam> docParams;
 
 - StrMap meta;
+  - 自由属性表（Rank/ApiMax/Component/Icon/ContentType/...）。
 
 - int idx;
 
 - Route(string method, string pattern, HttpHandler handler)
+  - 构造路由：模式立即按 '/' 预切分为段。
 
 - Route Named(string action)
+  - 动作名（"Controller.Method"，文档/菜单/诊断用）。
 
 - Route Title(string title)
+  - 标题（菜单文案 / 文档 summary）。
 
 - Route Limit(int maxPerWindow)
+  - 每秒限流上限；0 不限流。
 
 - Route LimitBy(int maxPerWindow, string scope)
+  - 同时设限流上限与维度（"route"/"uid"/"ip"）。
 
 - Route RateBy(string scope)
+  - 只设限流维度不改上限。
 
 - Route Login()
+  - 要求已解析的登录用户（未登录 401）。
 
 - Route Auth()
+  - 要求登录 + 对 `action` 的权限（无权 403）；蕴含 Login。
 
 - Route Lock(string scope)
+  - 请求锁维度："" 无 | "user" 用户级 | "global" 全局。
 
 - Route Upload()
+  - 请求体流式写盘而非驻留内存（大文件上传）。
 
 - Route Menu()
+  - 在管理菜单中展示本路由（节与文案来自 URL 和 [Description]）。
 
 - Route Meta(string key, string val)
+  - 写入自由属性（Rank/ApiMax/Component/Icon/ContentType/...）。
 
 - Route Param(string name, string type, bool required, string def, string desc, string source)
   - Declares one request parameter (emitted by the compiler from the
     action body). `source` is "path" for a {segment} and "query" otherwise.
 
 - string MetaGet(string key)
+  - 读自由属性；缺失返回空串。
 
 - string Key()
+  - 预计算的 "METHOD pattern"（每请求统计/锁键）。
 
 
 ## RouteAttribute (class)
@@ -1136,23 +1450,23 @@ handful of string compares with zero allocation.
   - Registered routes, in registration order.
 
 - Route Add(string method, string pattern, HttpHandler handler)
+  - 注册一条路由并返回 Route（可继续 fluent 配置）。
+    无 {param} 段的路由进静态桶并建哈希索引，其余进动态桶。
 
 - void HashRouteKeys()
+  - Rows are addressed by the hash of the route key, so hash every key once
+    here instead of on the request path.
 
-- SharedTable NewStatsTable(string name)
+- SharedTable NewStatsTable()
+  - 新建统计表：每路由一行，hits 与 total_us 两列（容量为路由数+4）。
 
 - void SeedStats(SharedTable t)
-
-- void InitStats(string name)
-  - Create (master/single-process) or open (worker) a NAMED shared
-    route stats table -- for a deployment that wants the table reachable by
-    name. Call after all routes are registered and before the first request;
-    name must be unique per server instance (WebApp builds one with
-    SharedName). Every process calls this, and Create falls back to Open when
-    the master has already made the table.
+  - The process that creates the table seeds every route row, so a worker can
+    Increment on a pre-existing row without triggering a capacity-limited
+    auto-create under concurrent first requests.
 
 - void InitStatsShared()
-  - The default: create the stats table as anonymous shared memory
+  - Create the stats table as anonymous shared memory
     owned by this server. It has no name for anything on the machine to
     collide with or read, and the workers get it from the master through
     `StatsOsHandle` / `AttachStats`, so it must be
@@ -1160,7 +1474,7 @@ handful of string compares with zero allocation.
 
 - long StatsOsHandle()
   - The handle a worker needs to map the anonymous stats table, or 0
-    when there is no such table (none created, or a named one).
+    when there is no such table (none was created).
 
 - void AttachStats(long osHandle)
   - Worker side: map the anonymous stats table the master created
@@ -1187,12 +1501,16 @@ handful of string compares with zero allocation.
   - Stats() as a JSON array.
 
 - Route Get(string pattern, HttpHandler handler)
+  - GET 快捷（= Add("GET", ...)）。
 
 - Route Post(string pattern, HttpHandler handler)
+  - POST 快捷。
 
 - Route Put(string pattern, HttpHandler handler)
+  - PUT 快捷。
 
 - Route Delete(string pattern, HttpHandler handler)
+  - DELETE 快捷。
 
 - static int HashKey(string method, string path)
   - FNV-1a over "method path" without building the key string.
@@ -1217,16 +1535,21 @@ handful of string compares with zero allocation.
     (drives a 405 Method Not Allowed instead of 404).
 
 - static bool IsStatic(string pattern)
+  - 模式不含 {param} 段（即无 '{'）时为静态路由。
 
 - static bool MatchSegs(List<string> pat, List<string> segs, StrMap into)
+  - 段数相等且逐段相等；{param} 段匹配任意段并把值写入 into。
 
 - static List<string> SplitPath(string path)
+  - 按 '/' 切分并去掉空段（"/a//b/" -> ["a","b"]）。
 
 
 ## RowList (class)
 
 Named values for a render: string variables plus named lists of row maps
 (for {{#each}} blocks).
+
+具名行集合：一个 {{#each}} 列表的数据源。
 
 - string name;
 
@@ -1251,6 +1574,14 @@ or a database without touching the hook contract.
     that rehashes while another thread is reading corrupts the table, and
     the count that makes the token unique must be read under the same lock
     as the insert.
+    
+    Tokens are 32 CSPRNG bytes (RtlGenRandom / /dev/urandom) hex-encoded:
+    256 bits of entropy an attacker cannot guess or forge. The previous
+    scheme ("t" + wall-clock seconds + uid + map count) had zero entropy --
+    anyone who knew a user's uid and could guess the second their session
+    started owned that session. On CSPRNG failure we refuse to issue
+    rather than mint something predictable; when the map grows past its
+    flood cap it is cleared instead of growing without bound.
 
 - string UserOf(string token)
   - Returns the uid for a bearer token / cookie, or "".
@@ -1324,46 +1655,46 @@ images and fonts survive the trip.
     hidden files in one pass.
 
 - static string ContentType(string rel)
+  - 按扩展名（小写化后）映射 Content-Type；未知类型为
+    application/octet-stream。
 
 - static string Extension(string rel)
+  - 末段最后一个 '.' 之后的扩展名（小写）；无扩展名或以 '.' 结尾为空串。
 
 
 ## StrMap (class)
 
-Ordered string-to-string map on parallel lists. Small and predictable:
-route params / query / form / headers per request stay tiny, so linear
-lookup beats a hash table while keeping zero extra allocations.
+String-to-string map backed by the builtin Dictionary (a hash index over
+insertion-ordered parallel buffers): Set/Has/Get/GetOr are O(1) amortized
+where the old parallel-lists version scanned linearly. Route params /
+query / form per request stay tiny, but Sessions.tokens and the template
+caches grow with load, and that is where the O(n) scans showed up.
 
-The backing lists are created on the first Set: most requests never touch
-their route params, query, form or state map, and an empty map that costs
+The backing dict is created on the first Set: most requests never touch
+their route params, query, form or state map, and a null map that costs
 nothing keeps the per-request allocation count down.
 
-- List<string> keys;
-
-- List<string> vals;
+- Dictionary <string, string> map;
 
 - StrMap()
 
 - int Count()
-
-- string KeyAt(int i)
-
-- string ValAt(int i)
-
-- int IndexOfKey(string key)
-  - Position of `key`, or -1. Callers that would otherwise do
-    Has() followed by Get() use this to scan the map once (template
-    rendering resolves every variable through here).
+  - 键数；尚未写入过为 0。
 
 - void Set(string key, string val)
+  - 写入键值（首次写入时才创建底层字典）。
 
 - bool Has(string key)
+  - 是否含该键。
 
 - string Get(string key)
+  - 取值；缺失返回空串。
 
 - string GetOr(string key, string def)
+  - 取值；缺失返回 def。
 
 - void Clear()
+  - 释放底层字典（回到未创建状态）。
 
 
 ## VNode (class)
@@ -1377,6 +1708,8 @@ tags and no substring copies on the request path.
 - string text;
 
 - List<VNode> body;
+
+- List<VNode> elseBody;
 
 - VNode(int kind, string text)
 
@@ -1401,12 +1734,16 @@ characters, ExtAllowed enforces an extension whitelist.
 - Validator()
 
 - Validator Require(string val, string field)
+  - 值为空记一条 "<field> is required"（可链式）。
 
 - bool Ok()
+  - 尚无任何错误时为真。
 
 - Validator MaxLen(string val, int max, string field)
+  - 长度超过 max 记错误（可链式）。
 
 - Validator MinLen(string val, int min, string field)
+  - 非空且长度不足 min 记错误；空值跳过（可链式）。
 
 - Validator IsInt(string val, string field)
   - Digits only (optional leading minus).
@@ -1418,9 +1755,8 @@ characters, ExtAllowed enforces an extension whitelist.
   - Multi-character substring search (string.Contains only
     supports single characters reliably).
 
-- bool Ok()
-
 - string ErrorsJson()
+  - 错误列表的 JSON 数组。
 
 - static string SafeFileName(string name)
   - Reduces a client-supplied file name to a safe base name:
@@ -1445,6 +1781,7 @@ Syntax:
 {{name}}                  HTML-escaped variable
 {{{name}}}                raw (unescaped) variable
 {{#if name}}...{{/if}}    emitted when var is non-empty and not "0"
+{{#if name}}...{{else}}...{{/if}}   else branch when var is falsy
 {{#each name}}...{{/each}} repeated per row; {{key}} reads row fields
 layout.html + {{content}} wraps every RenderPage() body
 
@@ -1465,10 +1802,18 @@ layout.html + {{content}} wraps every RenderPage() body
     follows the controller, mirroring the reference project layout).
 
 - void LoadAll()
+  - 清缓存并重读视图目录下全部模板（devReload 打开时每次渲染前调用）。
 
 - void Put(string key, string body)
+  - Store a template under `key`, compiled once so renders never re-parse.
 
 - void LoadRec(string d, string prefix)
+  - Recursively load templates, keying each by its module-qualified path so
+    that same-named controllers in different modules don't collide. A file
+    <Module>/View/<Controller>.<Action>.html becomes the key
+    "<Module>.<Controller>.<Action>" (the "View" path segment is skipped),
+    which matches the key the compiler-generated router injects via
+    __SetView. layout.html stays reachable under the bare "layout" key.
 
 - string Render(string name, ViewData data)
   - Renders a template by name from the in-memory cache.
@@ -1493,21 +1838,43 @@ layout.html + {{content}} wraps every RenderPage() body
     load time; the scanning and slicing here never happens on a render.
 
 - static void Emit(List<VNode> nodes, ViewData data, StrMap row, List<VNode> content, StringBuilder sb)
+  - Walk a compiled template, appending to `sb`. `content` are the page nodes
+    that fill a layout's {{content}} hole; without them (a plain Render) the
+    placeholder resolves by precedence: a same-named variable (row field or
+    ViewData) interpolates escaped; only when nothing resolves is it emitted
+    unchanged, matching the old text-substitution behavior (Bug#2).
 
 - static string Lookup(string key, ViewData data, StrMap row)
+  - Row fields shadow the global ViewData. Each map is probed once
+    (Dictionary lookup is a hash probe, so there is no double walk to
+    avoid any more).
+
+- static bool HasVar(string key, ViewData data, StrMap row)
+  - 该名字当前是否可解析（行字段或 ViewData 里有它）；只判存在，不取值。
 
 - static string HtmlEscape(string s)
   - Escapes < > & " so variables are XSS-safe by default.
 
 - static int Find(string hay, string needle, int from)
+  - 从 from 起查找子串（原生 IndexOf；from<=0 从头找）。
 
 - static int FindTag(string tpl, string closeTag, int from)
   - Finds a closing tag, skipping nested blocks of the same kind.
 
+- static int FindElse(string tpl, int from, int end)
+  - Finds a same-level {{else}} within [from, end): nested
+    if/each blocks are skipped by depth counting, so an {{else}} inside
+    an inner {{#if}}/{{#each}} belongs to that inner block, not to the
+    caller's. Returns the position of the opening brace, or -1.
+
 - static string Trim(string s)
+  - 去除首尾 ASCII 空格。
 
 
 ## ViewData (class)
+
+一次渲染的命名值集合：字符串变量（{{name}}）加具名行列表
+（{{#each name}}）。
 
 - StrMap vars;
 
@@ -1516,10 +1883,13 @@ layout.html + {{content}} wraps every RenderPage() body
 - ViewData()
 
 - ViewData Set(string key, string val)
+  - 设置字符串变量（可链式）。
 
 - List<StrMap> AddList(string name)
+  - 新增具名行列表并返回其行（直接追加行即为填充数据）。
 
 - List<StrMap> ListOf(string name)
+  - 取具名行列表；没有则 null。
 
 
 ## WebApp (class)
@@ -1551,8 +1921,6 @@ when the request completes.
 
 - TcpListener listener;
 
-- string scope;
-
 - Router router;
 
 - Hooks hooks;
@@ -1572,12 +1940,15 @@ when the request completes.
 - ServerMetrics metrics;
 
 - int maxBodyBytes;
+  - 内存请求体上限（字节），超出回答 413。
 
 - int maxUploadBytes;
+  - 流式上传上限（字节），只作用于 [Upload] 路由。
 
 - int requestTimeoutMs;
 
 - int maxConnections;
+  - 并发连接上限（0 = 不设上限；超限回答 503 并关闭）。
 
 - string uploadDir;
 
@@ -1586,6 +1957,7 @@ when the request completes.
 - string loginPath;
 
 - int globalLimit;
+  - 全局每秒请求上限（0 = 不限；超限 429）。
 
 - AtomicInt totalRequests;
 
@@ -1596,16 +1968,25 @@ when the request completes.
 - static WebApp active;
 
 - WebApp(string host, int port)
+  - 构造应用服务器并填入默认配置：请求体上限 2MB、流式上传上限
+    512MB、请求超时 30s、并发连接上限 10000、上传目录 uploads；
+    共享表（限流/锁/路由统计）由 InitShared 在派生 worker 之前创建，
+    不在这里。
 
 - string Host()
+  - 监听主机地址。
 
 - int Port()
+  - 监听端口。
 
 - WebApp Views(string dir)
+  - 加载视图目录（编译进内存）并返回自身。
 
 - WebApp MaxBody(int bytes)
+  - 内存请求体上限（字节），超出回答 413。
 
 - WebApp MaxUpload(int bytes)
+  - 流式上传上限（字节），只作用于 [Upload] 路由，超出回答 413。
 
 - WebApp Timeout(int ms)
   - How long one request may take to arrive and be served before
@@ -1620,8 +2001,10 @@ when the request completes.
     the cap.
 
 - WebApp UploadDir(string dir)
+  - 流式上传的落盘目录（默认 uploads）。
 
 - WebApp GlobalLimit(int perSecond)
+  - 全局每秒请求上限，按 uid（匿名时按对端 IP）计；0 不限，超限 429。
 
 - WebApp LoginPath(string path)
   - The sign-in page a navigation is sent to when the route needs a
@@ -1629,37 +2012,12 @@ when the request completes.
     the JSON body, which is what an API-only server wants.
 
 - WebApp ReusePort(bool on)
-
-- WebApp Scope(string name)
-  - Names this app instance for shared memory: every table it names
-    is then "zan.web.<name>.<part>", and the framework's own rate,
-    lock and route tables become named tables too instead of the anonymous
-    ones the master hands down to its workers. Only a deployment that wants
-    those tables reachable by name needs this. Set it before starting the
-    server, and to the same value in every process of one server; use a
-    distinct name per deployed server on the machine.
-
-- string Scope()
-
-- string SharedName(string part)
-  - The shared-memory name of one part of this app:
-    "zan.web.shop.perm.roles". The single place these names are built, so an
-    application's own tables are namespaced with the framework's instead of
-    inventing a prefix. Without `Scope` the identity of the
-    executable stands in (Worker.AppId): two copies in two directories are
-    two servers and share nothing, the same copy started again is the same
-    server, and moving the service to another port changes none of it.
-
-- string ScopeName()
-
-- void InitStats(string name)
-  - Initialise cross-process route stats. Call after all routes are
-    registered and before starting the server or running workers. Safe to
-    call in every process: the first call creates the shared table; subsequent
-    calls (workers) open it. name must be unique per server instance --
-    `SharedName` is what produces one.
+  - 多进程部署时以 SO_REUSEPORT 监听，由内核把连接分发给各 worker。
 
 - void InitStats()
+  - Initialise cross-process route stats. Called by InitShared;
+    safe to call in every process -- a worker maps the master's table via
+    `AttachShared` instead of creating one.
 
 - static const string ShareRate="WEB_RATE";
 
@@ -1675,18 +2033,26 @@ when the request completes.
     set. Idempotent.
 
 - bool AttachShared()
+  - Worker 侧：映射主进程创建并下发的各表。主进程与单进程服务没有
+    可继承句柄，返回 false，由它们自己建表。
 
 - RateLimiter Limiter()
+  - 按需创建；拥有各表的进程已在 InitShared 里提前建好。
 
 - LockManager Locks()
+  - 按需创建请求锁管理器；worker 进程由 AttachShared 映射主进程下发的表。
 
 - WebApp Before(HookFn fn)
+  - 注册 before 钩子（按注册顺序执行；返回 false 短路请求）。
 
 - WebApp After(AfterFn fn)
+  - 注册 after 钩子（请求结束后按注册顺序执行，收微秒耗时）。
 
 - WebApp AuthResolver(AuthFn fn)
+  - 安装 token→用户解析器；未安装时用内置 Sessions 表解析。
 
 - WebApp PermissionResolver(PermissionFn fn)
+  - 安装权限解析器；未安装时"任何已登录用户"即被允许。
 
 - Route Map(string method, string pattern, HttpHandler h)
   - Generic route registration used by the compiler-generated
@@ -1694,14 +2060,19 @@ when the request completes.
     chained.
 
 - Route Get(string pattern, HttpHandler h)
+  - 注册 GET 路由（= Map("GET", ...)）。
 
 - Route Post(string pattern, HttpHandler h)
+  - 注册 POST 路由。
 
 - Route Put(string pattern, HttpHandler h)
+  - 注册 PUT 路由。
 
 - Route Delete(string pattern, HttpHandler h)
+  - 注册 DELETE 路由。
 
 - string RenderPage(string name, ViewData data)
+  - 渲染模板并套最近的布局；未加载视图时返回空串。
 
 - string RenderFragment(string name, ViewData data)
   - Renders a template WITHOUT its layout. This is what an
@@ -1709,6 +2080,7 @@ when the request completes.
     sending it again would replace the page instead of the panel.
 
 - static int NowSeconds()
+  - 墙钟秒（CRT time），上传文件名与错误日志时间戳用。
 
 - static string Redact(string s)
   - Trims a message before it reaches the error log so one runaway
@@ -1726,6 +2098,7 @@ when the request completes.
     coroutine scheduler drives the server: `int r = await app.Start();`
 
 - void Stop()
+  - 置停标志并关闭监听 socket，accept 循环随之退出。
 
 - static void SetActive(WebApp app)
   - Registers the app that ServeSock hands connections to. Called
@@ -1749,6 +2122,19 @@ when the request completes.
     at once. Claim first, then hand the slot back if it was over the line.
 
 - async void HandleConnection(nint clientSock)
+  - 一条 keep-alive 连接的完整生命周期：读入并定界请求头（超 64KB 回
+    431）→ 解析（定界失败按 parseStatus 回 400/501）→ 流式上传落盘或
+    缓冲内存正文（超限 413）→ 解析表单 → Dispatch → 写回应答，直到
+    对端断开或非 keep-alive 为止。每个请求重置一次空闲期限（防
+    slowloris）；SSE/WS 劫持的连接由 handler 接管，循环随即结束。
+    清理走 finally：即便管线里有未被 catch 的异常展开到这一层，
+    deadline 槽位、framer 缓冲、套接字与连接计数也必须归位。
+
+- async void HandleConnectionInner(nint clientSock)
+  - HandleConnection 的主体：watch/framer/client 三个局部资源
+    在这里创建，正常结束路径统一清理；套接字本身的 Close 由
+    HandleConnection 的 finally 负责（ShutdownBoth 无法替代——
+    劫持连接之后的收尾也要真正释放描述符）。
 
 - async string StreamBodyToFile(nint sock, HttpFramer framer, HttpRequest request)
   - Streams the request body into a server-named file under
@@ -1770,6 +2156,10 @@ when the request completes.
     every fast endpoint as "0 ms".
 
 - async string DispatchInner(HttpContext ctx, Route route, bool keepAlive, long startUs)
+  - 认证之后的请求管线，按序：全局限流 → before 钩子 → 404/405 →
+    填路由元数据 → 路由限流 → 登录/权限门 → [Lock] 请求锁 → handler。
+    ApiError 变成它携带的应答；其余异常记录后回答 500，handler 结束
+    时仍未写应答的也兜底 500。
 
 - bool WantsPage(HttpContext ctx)
   - Whether this request is a browser navigation that should be sent
@@ -1804,8 +2194,12 @@ when the request completes.
     start or stop.
 
 - static string SimpleResponse(int code, string text, string msg)
+  - 构造一条完整的 HTTP/1.1 JSON 应答字符串（Connection: close），
+    用于 HttpContext 尚不存在的早期拒绝（413/431/503、定界失败）。
 
 - static int FindHeaderEnd(string raw)
+  - 报文中头部块的结束位置（"\n\n" 或 "\n\r\n" 之后的首下标）；
+    没有空行返回 -1。
 
 
 ## WebAppStatusDoc (class)
@@ -1829,8 +2223,10 @@ App) so it does not collide with Gui.App.
 - static WebApp instance;
 
 - static void Use(WebApp app)
+  - 登记当前应用（main 启动时调用一次）。
 
 - static WebApp Current()
+  - 当前应用；未设置时为 null。
 
 
 ## WebServer (class)
@@ -1855,6 +2251,8 @@ channel (Windows).
   - Same as `Run`, but the process also answers the
     command line: `start`, `start -d`, `stop`, `restart`, `reload`,
     `status`. Use this from Main when the app is deployed as a service.
+    Command mode always keeps a supervising master, even with one
+    worker.
 
 - static async int RunCommand(WebApp app, int count, bool daemon)
   - Same as `RunCommand`, with <paramref name="daemon"/>
@@ -1862,6 +2260,89 @@ channel (Windows).
     without the command line repeating it.
 
 - static void Prepare(WebApp app, int count, bool daemon)
+  - 多进程路径的公共装配：初始化共享表、登记活动应用，再建一个
+    `count` worker 的 Worker，把 ServeSock 接为原始连接回调，使
+    路由/钩子/上传管线与单进程完全一致；daemon 时以守护进程运行。
+
+
+## WsSession (class)
+
+Server side of a WebSocket session on the MVC port, created by
+`HttpContext.WsUpgrade`. One object owns the upgraded
+connection: Recv() is the only way to read (ping/pong/close/fragment
+reassembly are handled inside, so a handler never sees protocol
+noise), Send* push to the peer without any inbound message first —
+the server-push shape a notification channel needs and the echo-style
+frame loops cannot express.
+
+Concurrency model is one handler loop: Recv parks on the reactor until
+a complete message arrives; pushes happen between Recv calls. Two
+tasks pushing one session would interleave frame bytes — keep a
+session on one loop (a hub that fans out to many sessions pushes each
+session from one place).
+
+Deadline: every Recv/Send re-arms the connection deadline, so an
+active session lives as long as it talks. A session that may go quiet
+(a notification bell waiting for events) must push Ping()
+periodically or the connection sweeper cuts it at the request timeout.
+
+Send failures set Open() to false and the loop exits; the handler
+returning ends the session the same way the SSE hijack does.
+
+- TcpClient client;
+
+- WsReader reader;
+
+- WsWriter writer;
+
+- WsAssembler asm;
+
+- HttpContext ctx;
+
+- bool open;
+
+- int lastOpcode;
+
+- WsSession(TcpClient client, WsReader reader, WsWriter writer, WsAssembler asm, HttpContext ctx)
+
+- bool Open()
+  - Whether the session can still carry frames. False after a
+    Close handshake, a protocol error, or a failed send.
+
+- int LastOpcode()
+  - The opcode (WsOpcode.Text / WsOpcode.Binary) of the message
+    Recv returned last.
+
+- async string Recv()
+  - Reads the next complete data message (fragmented messages
+    are reassembled first). Control frames are answered inside: Ping
+    becomes a queued Pong, Pong is dropped, Close is echoed and ends
+    the session. Protocol violations and oversized messages close with
+    1002/1009. Returns null when the session is over (peer close, EOF,
+    protocol error) — stop the loop.
+
+- async bool SendText(string message)
+  - Pushes one text message. false = the peer is gone; stop the
+    loop (Open() is now false too).
+
+- async bool SendBinary(string data, int len)
+  - Pushes one binary message. `data` is a byte string that may
+    contain NUL bytes; `len` is its exact length (never strlen).
+
+- async bool Ping()
+  - Pushes a Ping. Doubles as the keep-alive for sessions that
+    may go quiet: the write both probes the peer (a dead socket fails
+    here) and re-arms the connection deadline.
+
+- async void Close(int code)
+  - Closes politely with a status code (1000 normal, 1002
+    protocol error, 1009 too big). Idempotent; Open() is false after.
+
+- async bool FlushOut()
+  - 把写缓冲里挂起的帧推到对端；失败即关闭会话并返回 false。
+
+- void Touch()
+  - 经升级来源的 HttpContext 续期连接空闲窗口；独立构造的会话无操作。
 
 
 ## bool (delegate)

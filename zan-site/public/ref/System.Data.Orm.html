@@ -32,7 +32,7 @@
       <img class="hero-mascot" src="/mascot.png" alt=""/>
       <p class="kicker" style="text-align:left"><span class="zh">知识库 · 标准库参考</span><span class="en">API reference</span></p>
       <h1 class="grad">System.Data.Orm</h1>
-      <p class="lede"><span class="zh">16 个类型 · 完整签名由 stdlib 源码提取</span><span class="en">16 types · extracted from stdlib source</span></p>
+      <p class="lede"><span class="zh">27 个类型 · 完整签名由 stdlib 源码提取</span><span class="en">27 types · extracted from stdlib source</span></p>
       <p style="font-size:13.5px;color:var(--muted);margin:6px 0 0">
         <span class="zh">指南正文以中文编写；导航与界面文案提供英文切换。英文原文请抓取对应 .md 或见仓库 docs/。</span>
         <span class="en">This guide is written in Chinese; the navigation Chrome switches to English. Fetch the .md copy for the raw text.</span>
@@ -47,13 +47,15 @@
     <aside class="wiki-side doc-side">
       <div class="searchbox"><svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         <input id="docSearch" placeholder="筛选目录…" aria-label="filter"></div>
-      <details class="nsgrp" open><summary>System · 55</summary>
+      <details class="nsgrp" open><summary>System · 58</summary>
 <a href="/ref/System">System</a>
 <a href="/ref/System.Automation">System.Automation</a>
 <a href="/ref/System.Collections">System.Collections</a>
 <a href="/ref/System.Collections.Generic">System.Collections.Generic</a>
+<a href="/ref/System.Commercial">System.Commercial</a>
 <a href="/ref/System.Compiler">System.Compiler</a>
 <a href="/ref/System.Data">System.Data</a>
+<a href="/ref/System.Data.Excel">System.Data.Excel</a>
 <a href="/ref/System.Data.Firebird">System.Data.Firebird</a>
 <a href="/ref/System.Data.MySql">System.Data.MySql</a>
 <a href="/ref/System.Data.Orm" class="active">System.Data.Orm</a>
@@ -69,6 +71,7 @@
 <a href="/ref/System.Globalization">System.Globalization</a>
 <a href="/ref/System.IO">System.IO</a>
 <a href="/ref/System.IO.Compression">System.IO.Compression</a>
+<a href="/ref/System.IO.Watch">System.IO.Watch</a>
 <a href="/ref/System.Input">System.Input</a>
 <a href="/ref/System.Json">System.Json</a>
 <a href="/ref/System.Knowledge">System.Knowledge</a>
@@ -76,6 +79,7 @@
 <a href="/ref/System.Management">System.Management</a>
 <a href="/ref/System.Net">System.Net</a>
 <a href="/ref/System.Net.Coap">System.Net.Coap</a>
+<a href="/ref/System.Net.External">System.Net.External</a>
 <a href="/ref/System.Net.Http">System.Net.Http</a>
 <a href="/ref/System.Net.Http.Client">System.Net.Http.Client</a>
 <a href="/ref/System.Net.Http.Download">System.Net.Http.Download</a>
@@ -84,7 +88,6 @@
 <a href="/ref/System.Net.Modbus">System.Net.Modbus</a>
 <a href="/ref/System.Net.Mqtt">System.Net.Mqtt</a>
 <a href="/ref/System.Net.Ntp">System.Net.Ntp</a>
-<a href="/ref/System.Net.Rpc">System.Net.Rpc</a>
 <a href="/ref/System.Net.Sip">System.Net.Sip</a>
 <a href="/ref/System.Net.Sockets">System.Net.Sockets</a>
 <a href="/ref/System.Net.Sse">System.Net.Sse</a>
@@ -123,13 +126,13 @@
 <a href="/ref/Game.Arcade2D">Game.Arcade2D</a>
 <a href="/ref/Game.Arpg">Game.Arpg</a>
 <a href="/ref/Game.Arpg.Data">Game.Arpg.Data</a>
-<a href="/ref/Game.Arpg.Fonts">Game.Arpg.Fonts</a>
 <a href="/ref/Game.Board">Game.Board</a>
 <a href="/ref/Game.Cards">Game.Cards</a>
 <a href="/ref/Game.Core">Game.Core</a>
 <a href="/ref/Game.Foundation">Game.Foundation</a>
-<a href="/ref/Game.Foundation.Sdl">Game.Foundation.Sdl</a>
-<a href="/ref/Game.Render">Game.Render</a>
+<a href="/ref/Game.Foundation.Gui">Game.Foundation.Gui</a>
+<a href="/ref/Game.Idle">Game.Idle</a>
+<a href="/ref/Game.Kit">Game.Kit</a>
 <a href="/ref/Game.Scene">Game.Scene</a>
 </details>
 <details class="nsgrp"><summary>Sdk · 57</summary>
@@ -191,15 +194,12 @@
 <a href="/ref/Sdk.Wechat.Work">Sdk.Wechat.Work</a>
 <a href="/ref/Sdk.Wechat.WxOpen">Sdk.Wechat.WxOpen</a>
 </details>
-<details class="nsgrp" open><summary>SDL3 · 1</summary>
-<a href="/ref/SDL3">SDL3</a>
-</details>
 <details class="nsgrp"><summary>Platform · 1</summary>
 <a href="/ref/Platform">Platform</a>
 </details>
     </aside>
     <div class="wiki-main">
-      <div class="note"><p><span class="zh">源码文件：</span><code class="inline">stdlib/System/Data/Orm/DbSchema.zan</code>, <code class="inline">stdlib/System/Data/Orm/DbTable.zan</code>, <code class="inline">stdlib/System/Data/Orm/ExprSql.zan</code>, <code class="inline">stdlib/System/Data/Orm/Model.zan</code>, <code class="inline">stdlib/System/Data/Orm/QueryBuilder.zan</code></p></div>
+      <div class="note"><p><span class="zh">源码文件：</span><code class="inline">stdlib/System/Data/Orm/DbSchema.zan</code>, <code class="inline">stdlib/System/Data/Orm/DbTable.zan</code>, <code class="inline">stdlib/System/Data/Orm/ExprSql.zan</code>, <code class="inline">stdlib/System/Data/Orm/IOrmRows.zan</code>, <code class="inline">stdlib/System/Data/Orm/Model.zan</code>, <code class="inline">stdlib/System/Data/Orm/OrmDialect.zan</code>, <code class="inline">stdlib/System/Data/Orm/OrmInsert.zan</code>, <code class="inline">stdlib/System/Data/Orm/OrmMeta.zan</code>, <code class="inline">stdlib/System/Data/Orm/OrmSelect.zan</code>, <code class="inline">stdlib/System/Data/Orm/OrmSync.zan</code>, <code class="inline">stdlib/System/Data/Orm/OrmWrite.zan</code>, <code class="inline">stdlib/System/Data/Orm/QueryBuilder.zan</code></p></div>
 <div class="api"><div class="api-head"><span class="ns">DbColumnDef</span><span class="tag">class</span></div>
 <div class="api-body">
 <div class="mdoc">一列的逻辑定义：列名、逻辑类型、宽度、可空性、默认值，
@@ -431,6 +431,7 @@ SQL 文本由 <code>QueryBuilder</code> 生成 —— 调用方只描述
 <div class="mdoc">删除符合条件的行，返回删除行数。</div>
 </li>
 <li class=""><code class="sig">async DbResult run(string columns)</code>
+<div class="mdoc">执行 SELECT：套用已设置的 Limit/Offset 后按给定列清单查询。</div>
 </li>
 </ul>
 </div></div>
@@ -477,9 +478,19 @@ not: !expr
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">Migration(string name, string up, string down)</code>
+<div class="mdoc">保存迁移名与 UP/DOWN SQL；外部经 <code>New</code> 构造。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
+<li class=""><code class="sig">static Migration New(string name, string up, string down)</code>
+<div class="mdoc">创建一条迁移。</div>
+</li>
+<li class=""><code class="sig">static int Exec(IDbExecutor db, string sql)</code>
+<div class="mdoc">执行一条迁移语句；执行器以负数报告失败时抛出
+<code>DbException</code>——迁移绝不能悄悄落空，
+否则记录表照样登记，失败被永久掩盖（内置驱动语句失败
+本就直接抛，这里给不抛异常的自定义执行器兜底）。</div>
+</li>
 <li class=""><code class="sig">void Up(IDbExecutor db)</code>
 <div class="mdoc">执行迁移（运行 UP SQL）。</div>
 </li>
@@ -542,6 +553,7 @@ userModel.Delete(db).Where(&quot;id = 1&quot;).Execute();</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">Model(string tableName)</code>
+<div class="mdoc">以已校验的表名初始化空模型；外部入口是 <code>Define</code>。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -625,20 +637,29 @@ userModel.Delete(db).Where(&quot;id = 1&quot;).Execute();</div>
 <div class="mdoc">索引 i 处的列类型（含 NOT NULL / PRIMARY KEY 后缀）。</div>
 </li>
 <li class=""><code class="sig">static bool EqIgnoreCase(string a, string b)</code>
+<div class="mdoc">忽略 ASCII 大小写比较两个字符串。</div>
 </li>
 <li class=""><code class="sig">static int ColIndex(DbResult r, string name)</code>
+<div class="mdoc">按列名（忽略大小写）在查询结果中找下标；未找到返回 -1。</div>
 </li>
 <li class=""><code class="sig">static void FillFromSqlite(Model m, IDbExecutor db, string t)</code>
+<div class="mdoc">用 PRAGMA table_info 把 SQLite 表内省进模型。</div>
 </li>
 <li class=""><code class="sig">static void FillFromMysql(Model m, IDbExecutor db, string t)</code>
+<div class="mdoc">用 SHOW COLUMNS 把 MySQL/MariaDB 表内省进模型。</div>
 </li>
 <li class=""><code class="sig">static void FillFromInformationSchema(Model m, IDbExecutor db, string t)</code>
+<div class="mdoc">用 information_schema.columns 内省表（PG / SQL Server 等 ANSI 目录），
+主键尽力从目录补取。</div>
 </li>
 <li class=""><code class="sig">static void FillFromTdengine(Model m, IDbExecutor db, string t)</code>
+<div class="mdoc">用 DESCRIBE 内省 TDengine 表；首行 timestamp 列视作主键。</div>
 </li>
 <li class=""><code class="sig">static string PrimaryKeyFromCatalog(IDbExecutor db, string t)</code>
+<div class="mdoc">从 ANSI 目录查表的主键列名；无主键或查询失败时返回空串。</div>
 </li>
 <li class=""><code class="sig">void AddIntrospected(string name, string type, bool isPk, bool notNull)</code>
+<div class="mdoc">追加内省得到的列，按需附加 PRIMARY KEY / NOT NULL 后缀。</div>
 </li>
 <li class=""><code class="sig">static Model FromTable(IDbExecutor db, string tableName)</code>
 <div class="mdoc">通过反射现有表结构来构建 Model（即
@@ -649,8 +670,10 @@ DESCRIBE，其余情况回退到 ANSI information_schema
 CreateTable() 能够往返重建。</div>
 </li>
 <li class=""><code class="sig">static string StripMods(string type)</code>
+<div class="mdoc">去掉类型文本尾部的 PRIMARY KEY / NOT NULL / UNIQUE 修饰。</div>
 </li>
 <li class=""><code class="sig">static int IndexOfSub(string s, string sub)</code>
+<div class="mdoc">朴素子串查找，返回首个下标；未找到返回 -1。</div>
 </li>
 <li class=""><code class="sig">string ToDefineCode()</code>
 <div class="mdoc">生成重建该模型的 Zan 源码，形式为
@@ -671,6 +694,7 @@ Model.Define(...) 链式调用——方便从现有表
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">ModelCell(string key, string val)</code>
+<div class="mdoc">构造一个键值单元格。</div>
 </li>
 </ul>
 </div></div>
@@ -687,6 +711,7 @@ NOT NULL / PRIMARY KEY / DEFAULT 等后缀）。用一个实体代替并行的
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">ModelColumn(string name, string type)</code>
+<div class="mdoc">保存列名与完整类型文本（类型文本经 RequireDdlType 校验）。</div>
 </li>
 </ul>
 </div></div>
@@ -701,19 +726,24 @@ NOT NULL / PRIMARY KEY / DEFAULT 等后缀）。用一个实体代替并行的
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">ModelDelete(IDbExecutor db, string tableName)</code>
+<div class="mdoc">记录执行器，条件构建复用 <code>QueryBuilder</code>。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">static ModelDelete New(IDbExecutor db, string tableName)</code>
+<div class="mdoc">为表开启 DELETE 构建。</div>
 </li>
 <li class=""><code class="sig">ModelDelete Where(string condition)</code>
+<div class="mdoc">追加原始条件（AND 连接）。</div>
 </li>
 <li class=""><code class="sig">ModelDelete WhereEq(string column, string val)</code>
+<div class="mdoc">追加 column = ?（绑定值）。</div>
 </li>
 <li class=""><code class="sig">int Execute()</code>
 <div class="mdoc">执行 DELETE 并返回受影响的行数。</div>
 </li>
 <li class=""><code class="sig">int ExecuteAsync()</code>
+<div class="mdoc"><code>Execute</code> 的包装方法。</div>
 </li>
 </ul>
 </div></div>
@@ -730,22 +760,30 @@ NOT NULL / PRIMARY KEY / DEFAULT 等后缀）。用一个实体代替并行的
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">ModelQuery(IDbExecutor db, string tableName)</code>
+<div class="mdoc">记录执行器与表名，条件构建复用 <code>QueryBuilder</code>。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">static ModelQuery NewSelect(IDbExecutor db, string tableName)</code>
+<div class="mdoc">为表开启 SELECT 构建。</div>
 </li>
 <li class=""><code class="sig">ModelQuery Where(string condition)</code>
+<div class="mdoc">追加原始条件（AND 连接）。</div>
 </li>
 <li class=""><code class="sig">ModelQuery WhereEq(string column, string val)</code>
+<div class="mdoc">追加 column = ?（绑定值）。</div>
 </li>
 <li class=""><code class="sig">ModelQuery WhereEqInt(string column, int val)</code>
+<div class="mdoc">追加 column = ?（绑定整数）。</div>
 </li>
 <li class=""><code class="sig">ModelQuery OrderBy(string column)</code>
+<div class="mdoc">按列升序排序。</div>
 </li>
 <li class=""><code class="sig">ModelQuery OrderByDesc(string column)</code>
+<div class="mdoc">按列降序排序。</div>
 </li>
 <li class=""><code class="sig">ModelQuery OrderByDescending(string column)</code>
+<div class="mdoc"><code>OrderByDesc</code> 的别名。</div>
 </li>
 <li class=""><code class="sig">ModelQuery WhereLike(string column, string pattern)</code>
 <div class="mdoc">添加 <code>column LIKE ?</code>，使用绑定模式。</div>
@@ -795,8 +833,10 @@ NOT NULL / PRIMARY KEY / DEFAULT 等后缀）。用一个实体代替并行的
 <div class="mdoc">至少有一行匹配时返回 true。</div>
 </li>
 <li class=""><code class="sig">ModelQuery Limit(int count)</code>
+<div class="mdoc">设置 LIMIT。</div>
 </li>
 <li class=""><code class="sig">ModelQuery Offset(int count)</code>
+<div class="mdoc">设置 OFFSET。</div>
 </li>
 <li class=""><code class="sig">List&lt;ModelRow&gt; Execute()</code>
 <div class="mdoc">执行查询并返回 ModelRow 列表。</div>
@@ -821,6 +861,7 @@ NOT NULL / PRIMARY KEY / DEFAULT 等后缀）。用一个实体代替并行的
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">ModelRow()</code>
+<div class="mdoc">构造空行。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -867,23 +908,878 @@ NOT NULL / PRIMARY KEY / DEFAULT 等后缀）。用一个实体代替并行的
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">ModelUpdate(IDbExecutor db, string tableName)</code>
+<div class="mdoc">记录执行器，条件与赋值构建复用 <code>QueryBuilder</code>。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">static ModelUpdate New(IDbExecutor db, string tableName)</code>
+<div class="mdoc">为表开启 UPDATE 构建。</div>
 </li>
 <li class=""><code class="sig">ModelUpdate Set(string column, string val)</code>
+<div class="mdoc">设置 column = ?（绑定值）。</div>
 </li>
 <li class=""><code class="sig">ModelUpdate SetInt(string column, int val)</code>
+<div class="mdoc">设置 column = ?（绑定整数）。</div>
 </li>
 <li class=""><code class="sig">ModelUpdate Where(string condition)</code>
+<div class="mdoc">追加原始条件（AND 连接）。</div>
 </li>
 <li class=""><code class="sig">ModelUpdate WhereEq(string column, string val)</code>
+<div class="mdoc">追加 column = ?（绑定值）。</div>
 </li>
 <li class=""><code class="sig">int Execute()</code>
 <div class="mdoc">执行 UPDATE 并返回受影响的行数。</div>
 </li>
 <li class=""><code class="sig">int ExecuteAsync()</code>
+<div class="mdoc"><code>Execute</code> 的包装方法。</div>
+</li>
+</ul>
+</div></div>
+<div class="api"><div class="api-head"><span class="ns">OrmCol</span><span class="tag">class</span></div>
+<div class="api-body">
+<div class="mdoc">一个实体列的运行期描述。编译期只发射这些描述（表名、列名、
+字段名、类型码、主键/自增/长度），SQL 文本、参数绑定与行映射
+全部由本目录下的共享实现按描述完成 —— 实体和列增加时只多几行
+元数据，不再多出一份 SQL 拼装代码。
+
+Kind 与编译期 &lt;c&gt;DbField.Kind&lt;/c&gt; 一致：0 int、1 double、
+2 bool、3 string、4 enum；&lt;c&gt;I64&lt;/c&gt; 区分 64 位整数列。</div>
+<h5 class="cat">字段</h5><ul class="sig">
+<li class=""><code class="sig">string Col;</code>
+</li>
+<li class=""><code class="sig">string Field;</code>
+</li>
+<li class=""><code class="sig">int Kind;</code>
+</li>
+<li class=""><code class="sig">bool I64;</code>
+</li>
+<li class=""><code class="sig">bool IsPk;</code>
+</li>
+<li class=""><code class="sig">bool IsIdent;</code>
+</li>
+<li class=""><code class="sig">bool NotNull;</code>
+</li>
+<li class=""><code class="sig">int StrLen;</code>
+</li>
+</ul>
+<h5 class="cat">构造</h5><ul class="sig">
+<li class=""><code class="sig">OrmCol(string col, string field, int kind, bool i64, bool pk, bool ident, bool notNull, int len)</code>
+</li>
+</ul>
+<h5 class="cat">方法</h5><ul class="sig">
+<li class=""><code class="sig">int TyCode()</code>
+<div class="mdoc">DDL 类型码（<code>OrmDialect.Ty</code>）：
+0 int、1 double、2 bool、3 string、4 bigint。</div>
+</li>
+<li class=""><code class="sig">int PKind()</code>
+<div class="mdoc">动态值按列声明类型转换时用的 DbParams 类型码。</div>
+</li>
+</ul>
+</div></div>
+<div class="api"><div class="api-head"><span class="ns">OrmDelete</span><span class="tag">class</span></div>
+<div class="api-body">
+<div class="mdoc">类型化 DELETE 的运行期实现：条件片段 + 绑定值。
+没有条件时不执行（不生成全表删除）。</div>
+<h5 class="cat">字段</h5><ul class="sig">
+<li class=""><code class="sig">IDbExecutor db;</code>
+</li>
+<li class=""><code class="sig">OrmMeta meta;</code>
+</li>
+<li class=""><code class="sig">string tbl;</code>
+</li>
+<li class=""><code class="sig">string w;</code>
+</li>
+<li class=""><code class="sig">DbParams ps;</code>
+</li>
+<li class=""><code class="sig">bool on;</code>
+</li>
+</ul>
+<h5 class="cat">构造</h5><ul class="sig">
+<li class=""><code class="sig">OrmDelete(IDbExecutor db, OrmMeta meta)</code>
+<div class="mdoc">私有构造；统一经 <code>Create</code> 创建。</div>
+</li>
+</ul>
+<h5 class="cat">方法</h5><ul class="sig">
+<li class=""><code class="sig">static OrmDelete Create(IDbExecutor db, OrmMeta meta)</code>
+<div class="mdoc">为实体创建一个空 DELETE 构造器。</div>
+</li>
+<li class=""><code class="sig">void AsTable(string t)</code>
+<div class="mdoc">改写到另一张表（标识符校验，防注入）。</div>
+</li>
+<li class=""><code class="sig">void CondBegin(bool c)</code>
+<div class="mdoc">条件开关：false 期间 W/P* 收集的片段全部失效（ORM 内部
+按条件组合调用，应用层一般不直接用）。</div>
+</li>
+<li class=""><code class="sig">void CondEnd()</code>
+<div class="mdoc">结束条件区间，恢复片段收集。</div>
+</li>
+<li class=""><code class="sig">void W(string f)</code>
+<div class="mdoc">WHERE 片段：多个片段以 AND 连接。</div>
+</li>
+<li class=""><code class="sig">void WhereDict(DbValues v)</code>
+<div class="mdoc">字典键值批量进 WHERE（等值条件，列名经元数据校验）。</div>
+</li>
+<li class=""><code class="sig">void P(string v)</code>
+<div class="mdoc">WHERE 参数：与 W 片段中占位符的出现顺序一致。</div>
+</li>
+<li class=""><code class="sig">void Pi(int v)</code>
+<div class="mdoc">WHERE 整数参数。</div>
+</li>
+<li class=""><code class="sig">void Pl(long v)</code>
+<div class="mdoc">WHERE 64 位整数参数。</div>
+</li>
+<li class=""><code class="sig">void Pd(double v)</code>
+<div class="mdoc">WHERE 浮点参数。</div>
+</li>
+<li class=""><code class="sig">void InI(List&lt;int&gt; vs)</code>
+<div class="mdoc">IN 列表参数（配合 W 片段里的 &quot;col IN (?)&quot;）。</div>
+</li>
+<li class=""><code class="sig">void InL(List&lt;long&gt; vs)</code>
+<div class="mdoc"><code>InI</code> 的 long 版本。</div>
+</li>
+<li class=""><code class="sig">void InS(List&lt;string&gt; vs)</code>
+<div class="mdoc"><code>InI</code> 的 string 版本。</div>
+</li>
+<li class=""><code class="sig">void InD(List&lt;double&gt; vs)</code>
+<div class="mdoc"><code>InI</code> 的 double 版本。</div>
+</li>
+<li class=""><code class="sig">int ExecuteAffrows()</code>
+<div class="mdoc">执行 DELETE 并返回受影响行数；无 WHERE 时不执行（不生成
+全表删除）。</div>
+</li>
+<li class=""><code class="sig">async int ExecuteAffrowsAsync()</code>
+<div class="mdoc">异步执行 DELETE。</div>
+</li>
+</ul>
+</div></div>
+<div class="api"><div class="api-head"><span class="ns">OrmDialect</span><span class="tag">class</span></div>
+<div class="api-body">
+<div class="mdoc">方言与目录探测：列类型、upsert 写法、表/列/索引存在性、自增值。
+以前这些文本由代码生成器抄进每个用户产物，现在只有这一份实现，
+改 SQL 规则只改这里。</div>
+<h5 class="cat">方法</h5><ul class="sig">
+<li class=""><code class="sig">static string Marks(int n)</code>
+<div class="mdoc"><code>?, ?, ?</code> —— n 个占位符（n 为 0 时是 NULL）。</div>
+</li>
+<li class=""><code class="sig">static bool Has(List&lt;string&gt; l, string v)</code>
+<div class="mdoc">列表是否包含某值。</div>
+</li>
+<li class=""><code class="sig">static string Unalias(string f)</code>
+<div class="mdoc">WHERE 片段里的 <code>t.</code> 别名在 UPDATE/DELETE 上不成立。</div>
+</li>
+<li class=""><code class="sig">static DbParams Cat(DbParams a, DbParams b)</code>
+<div class="mdoc">两段参数按顺序合成一段（SET 在前、WHERE 在后）。</div>
+</li>
+<li class=""><code class="sig">static void CopyInto(DbParams src, DbParams dst)</code>
+<div class="mdoc">按各自的类型码把参数逐个复制到 dst。</div>
+</li>
+<li class=""><code class="sig">static string ConflictHead(int p, List&lt;string&gt; keys, bool nop)</code>
+<div class="mdoc">upsert 的冲突头：各家写法不同（ON CONFLICT /
+ON DUPLICATE KEY / MERGE 前的 ON ...）。</div>
+</li>
+<li class=""><code class="sig">static string Excl(int p, string c, int md)</code>
+<div class="mdoc">冲突时一列的新值：直接覆盖（0）、累加（1）、
+取大（2）、取小（3）。</div>
+</li>
+<li class=""><code class="sig">static int Mode(List&lt;string&gt; acc, List&lt;string&gt; mx, List&lt;string&gt; mn, string c)</code>
+<div class="mdoc">列 c 的冲突更新模式码：累加 1、取大 2、取小 3、覆盖 0
+（与 <code>Excl</code> 的 md 对应）。</div>
+</li>
+<li class=""><code class="sig">static string LastIdSql(IDbExecutor db)</code>
+<div class="mdoc">刚插入行的自增值。没有会话级「最后自增 id」的
+引擎（Firebird 用 INSERT … RETURNING 读生成器，TDengine
+没有自增列）直接抛错，而不是发出别的方言的 SQL 让
+服务器报一条费解的错。</div>
+</li>
+<li class=""><code class="sig">static int LastId(IDbExecutor db)</code>
+<div class="mdoc">查询刚插入行的自增值；无行时为 0。</div>
+</li>
+<li class=""><code class="sig">static async int LastIdAsync(IDbExecutor db)</code>
+<div class="mdoc"><code>LastId</code> 的异步版本。</div>
+</li>
+<li class=""><code class="sig">static string OwnScope(int p)</code>
+<div class="mdoc">目录探测的库/schema 作用域过滤子句（限定在连接自己的库，按 provider 给出）。</div>
+</li>
+<li class=""><code class="sig">static bool HasInformationSchema(int p)</code>
+<div class="mdoc">该 provider 是否提供 information_schema 目录。</div>
+</li>
+<li class=""><code class="sig">static string HasTableSql(IDbExecutor db)</code>
+<div class="mdoc">表存在性探测 SQL（SQLite 查 sqlite_master、Firebird 查
+RDB$RELATIONS、其余查 information_schema，均带参数占位符）；
+不支持目录探测的 provider 直接抛错。</div>
+</li>
+<li class=""><code class="sig">static bool HasTable(IDbExecutor db, string t)</code>
+<div class="mdoc">表是否存在。</div>
+</li>
+<li class=""><code class="sig">static async bool HasTableAsync(IDbExecutor db, string t)</code>
+<div class="mdoc"><code>HasTable</code> 的异步版本。</div>
+</li>
+<li class=""><code class="sig">static string ColsSql(int p)</code>
+<div class="mdoc">information_schema 列名查询（限自身库/schema）。</div>
+</li>
+<li class=""><code class="sig">static List&lt;string&gt; Cols(IDbExecutor db, string t)</code>
+<div class="mdoc">表现有的列名清单：SQLite 走 PRAGMA table_info，Firebird 走
+RDB$RELATION_FIELDS（并截掉 CHAR(31) 的尾部空格），
+其余走 information_schema；不支持的 provider 抛错。</div>
+</li>
+<li class=""><code class="sig">static async List&lt;string&gt; ColsAsync(IDbExecutor db, string t)</code>
+<div class="mdoc"><code>Cols</code> 的异步版本。</div>
+</li>
+<li class=""><code class="sig">static string HasIndexSql(int p)</code>
+<div class="mdoc">二级索引存在性探测 SQL（按方言给出，带参数占位符）。</div>
+</li>
+<li class=""><code class="sig">static DbParams IndexProbeParams(int p, string nm, string t)</code>
+<div class="mdoc"><code>HasIndexSql</code> 对应的探测参数：
+按表名一起比对的方言为 (索引名, 表名)，其余为 (索引名)。</div>
+</li>
+<li class=""><code class="sig">static string IndexDdl(int p, string nm, string t, string cols, bool uniq)</code>
+<div class="mdoc">CREATE [UNIQUE] INDEX 语句文本。</div>
+</li>
+<li class=""><code class="sig">static void EnsureIndex(IDbExecutor db, string nm, string t, string cols, bool uniq)</code>
+<div class="mdoc">索引不存在时创建；DDL 失败（负返回值）抛
+<code>DbException</code>。</div>
+</li>
+<li class=""><code class="sig">static async void EnsureIndexAsync(IDbExecutor db, string nm, string t, string cols, bool uniq)</code>
+<div class="mdoc"><code>EnsureIndex</code> 的异步版本。</div>
+</li>
+<li class=""><code class="sig">static string Ty(int p, int kind, bool pk, bool ident, int len)</code>
+<div class="mdoc">列的 DDL 类型。kind：0 int/enum、1 double、2 bool、
+3 string、4 64 位整数。</div>
+</li>
+</ul>
+</div></div>
+<div class="api"><div class="api-head"><span class="ns">OrmIndex</span><span class="tag">class</span></div>
+<div class="api-body">
+<div class="mdoc">实体上声明的二级索引。</div>
+<h5 class="cat">字段</h5><ul class="sig">
+<li class=""><code class="sig">string Name;</code>
+</li>
+<li class=""><code class="sig">string Cols;</code>
+</li>
+<li class=""><code class="sig">bool Unique;</code>
+</li>
+</ul>
+<h5 class="cat">构造</h5><ul class="sig">
+<li class=""><code class="sig">OrmIndex(string name, string cols, bool uniq)</code>
+</li>
+</ul>
+</div></div>
+<div class="api"><div class="api-head"><span class="ns">OrmInsert</span><span class="tag">class</span></div>
+<div class="api-body">
+<div class="mdoc">类型化 INSERT 的运行期实现：实体行与动态列（DbValues）两条来源，
+Only/Skip 决定的列集合在运行期成形，upsert 子句按方言拼装。</div>
+<h5 class="cat">字段</h5><ul class="sig">
+<li class=""><code class="sig">IDbExecutor db;</code>
+</li>
+<li class=""><code class="sig">OrmMeta meta;</code>
+</li>
+<li class=""><code class="sig">string tbl;</code>
+</li>
+<li class=""><code class="sig">IOrmRows rows;</code>
+</li>
+<li class=""><code class="sig">List&lt;DbValues&gt; dicts;</code>
+</li>
+<li class=""><code class="sig">List&lt;string&gt; only;</code>
+</li>
+<li class=""><code class="sig">List&lt;string&gt; skip;</code>
+</li>
+<li class=""><code class="sig">List&lt;string&gt; conf;</code>
+</li>
+<li class=""><code class="sig">List&lt;string&gt; acc;</code>
+</li>
+<li class=""><code class="sig">List&lt;string&gt; gmx;</code>
+</li>
+<li class=""><code class="sig">List&lt;string&gt; gmn;</code>
+</li>
+<li class=""><code class="sig">bool upsert;</code>
+</li>
+<li class=""><code class="sig">bool nop;</code>
+</li>
+<li class=""><code class="sig">string sql;</code>
+</li>
+<li class=""><code class="sig">DbParams bound;</code>
+</li>
+</ul>
+<h5 class="cat">构造</h5><ul class="sig">
+<li class=""><code class="sig">OrmInsert(IDbExecutor db, OrmMeta meta)</code>
+<div class="mdoc">私有构造；统一经 <code>Create</code> 创建。</div>
+</li>
+</ul>
+<h5 class="cat">方法</h5><ul class="sig">
+<li class=""><code class="sig">static OrmInsert Create(IDbExecutor db, OrmMeta meta)</code>
+<div class="mdoc">为实体创建一个空的 INSERT 构造器。</div>
+</li>
+<li class=""><code class="sig">void AsTable(string t)</code>
+<div class="mdoc">改写到另一张表（标识符校验，防注入）。</div>
+</li>
+<li class=""><code class="sig">void SetRows(IOrmRows rows)</code>
+<div class="mdoc">实体行来源：由编译期为该实体发的取值口提供。</div>
+</li>
+<li class=""><code class="sig">int RowCount()</code>
+<div class="mdoc">实体行数。</div>
+</li>
+<li class=""><code class="sig">void AddDict(DbValues v)</code>
+<div class="mdoc">追加一行动态列（列名经元数据校验，未知列抛异常）。</div>
+</li>
+<li class=""><code class="sig">void Only(string c)</code>
+<div class="mdoc">只插入该列（可多次调用，与 Skip 互斥语义）。</div>
+</li>
+<li class=""><code class="sig">void Skip(string c)</code>
+<div class="mdoc">跳过该列（可多次调用）。</div>
+</li>
+<li class=""><code class="sig">void OC(string c)</code>
+<div class="mdoc">upsert：冲突时把该列更新为新值；键列缺省取主键。</div>
+</li>
+<li class=""><code class="sig">void ACC(string c)</code>
+<div class="mdoc">upsert：冲突时该列累加（counter 语义）。</div>
+</li>
+<li class=""><code class="sig">void GMX(string c)</code>
+<div class="mdoc">upsert：冲突时该列取更大值（GREATEST/max）。</div>
+</li>
+<li class=""><code class="sig">void GMN(string c)</code>
+<div class="mdoc">upsert：冲突时该列取更小值。</div>
+</li>
+<li class=""><code class="sig">void NOP()</code>
+<div class="mdoc">upsert：冲突时什么都不改（DO NOTHING）。</div>
+</li>
+<li class=""><code class="sig">int DictCount()</code>
+<div class="mdoc">动态列行数。</div>
+</li>
+<li class=""><code class="sig">bool Use(string c, bool identity)</code>
+<div class="mdoc">这一列是否进语句：Only 优先，其次自增列不写，
+最后看 Skip。</div>
+</li>
+<li class=""><code class="sig">List&lt;OrmCol&gt; used()</code>
+<div class="mdoc">依 Only / 自增列 / Skip 规则选出参与语句的列集合。</div>
+</li>
+<li class=""><code class="sig">string colList(List&lt;OrmCol&gt; cols)</code>
+<div class="mdoc">把列集合拼成逗号分隔的列名清单。</div>
+</li>
+<li class=""><code class="sig">string Conflict()</code>
+<div class="mdoc">冲突子句。键列缺省取实体主键；方言差异
+（excluded 对 VALUES()、GREATEST 对 max）在 OrmDialect 里解决。</div>
+</li>
+<li class=""><code class="sig">int BuildDicts()</code>
+<div class="mdoc">动态列写入：所有行按第一行的列形状对齐，缺的列写
+NULL，值按列声明类型绑定。</div>
+</li>
+<li class=""><code class="sig">int BuildRows()</code>
+<div class="mdoc">实体行写入：列集合成形一次，每行按同一集合绑定。</div>
+</li>
+<li class=""><code class="sig">int ExecuteDicts()</code>
+<div class="mdoc">执行动态列 INSERT，返回受影响行数。</div>
+</li>
+<li class=""><code class="sig">async int ExecuteDictsAsync()</code>
+<div class="mdoc">异步执行动态列 INSERT。</div>
+</li>
+<li class=""><code class="sig">int ExecuteAffrows()</code>
+<div class="mdoc">执行插入（动态列优先，否则实体行），返回受影响行数。</div>
+</li>
+<li class=""><code class="sig">async int ExecuteAffrowsAsync()</code>
+<div class="mdoc">异步执行插入。</div>
+</li>
+<li class=""><code class="sig">int ExecuteIdentity()</code>
+<div class="mdoc">插入单行并取自增主键值（0 = 插入失败或无自增列）。</div>
+</li>
+<li class=""><code class="sig">async int ExecuteIdentityAsync()</code>
+<div class="mdoc">异步插入并取自增主键值。</div>
+</li>
+</ul>
+</div></div>
+<div class="api"><div class="api-head"><span class="ns">OrmMeta</span><span class="tag">class</span></div>
+<div class="api-body">
+<div class="mdoc">一个实体的全部运行期元数据。生成的代码为每个实体建一次并缓存，
+之后所有 SELECT/INSERT/UPDATE/DELETE/CodeFirst 都读它。</div>
+<h5 class="cat">字段</h5><ul class="sig">
+<li class=""><code class="sig">string Entity;</code>
+</li>
+<li class=""><code class="sig">string Table;</code>
+</li>
+<li class=""><code class="sig">List&lt;OrmCol&gt; Cols;</code>
+</li>
+<li class=""><code class="sig">List&lt;OrmNav&gt; Navs;</code>
+</li>
+<li class=""><code class="sig">List&lt;OrmIndex&gt; Idx;</code>
+</li>
+<li class=""><code class="sig">Dict &lt;string, OrmCol&gt; byCol;</code>
+</li>
+<li class=""><code class="sig">string selList;</code>
+</li>
+<li class=""><code class="sig">bool frozen;</code>
+</li>
+</ul>
+<h5 class="cat">构造</h5><ul class="sig">
+<li class=""><code class="sig">OrmMeta(string entity, string table)</code>
+</li>
+</ul>
+<h5 class="cat">方法</h5><ul class="sig">
+<li class=""><code class="sig">static OrmMeta Of(string entity, string table)</code>
+<div class="mdoc">新建一个实体的元数据。</div>
+</li>
+<li class=""><code class="sig">OrmMeta Seal()</code>
+<div class="mdoc">封存元数据：<code>Seal</code> 之后的构建调用一律
+抛异常。生成的代码在元数据建成并发布到静态缓存前调用它，
+保证运行期描述不会被后续代码悄悄改形。</div>
+</li>
+<li class=""><code class="sig">void CheckNotFrozen()</code>
+<div class="mdoc">封存后的构建调用统一经此拒绝。</div>
+</li>
+<li class=""><code class="sig">OrmMeta Col(string col, string field, int kind, bool i64, bool pk, bool ident, bool notNull, int len)</code>
+<div class="mdoc">追加一列（按实体字段声明顺序）。</div>
+</li>
+<li class=""><code class="sig">OrmNav Nav(string field, string table)</code>
+<div class="mdoc">追加一个导航字段，返回它以便继续追加它的列。</div>
+</li>
+<li class=""><code class="sig">OrmMeta Index(string name, string cols, bool uniq)</code>
+<div class="mdoc">追加一条索引声明。</div>
+</li>
+<li class=""><code class="sig">OrmCol Find(string c)</code>
+<div class="mdoc">列描述，不存在时为 null。</div>
+</li>
+<li class=""><code class="sig">bool Has(string c)</code>
+<div class="mdoc">列是否属于本实体。</div>
+</li>
+<li class=""><code class="sig">int KindOf(string c)</code>
+<div class="mdoc">列的声明类型（DbParams.Kind*），不存在时 KindNull。</div>
+</li>
+<li class=""><code class="sig">string Require(string c)</code>
+<div class="mdoc">校验列名属于本实体，动态列集合的唯一入口。</div>
+</li>
+<li class=""><code class="sig">string SelectList()</code>
+<div class="mdoc"><code>t.a, t.b</code> —— 实体自身列的 SELECT 片段（缓存）。</div>
+</li>
+<li class=""><code class="sig">List&lt;string&gt; PkCols()</code>
+<div class="mdoc">主键列名（声明顺序）。</div>
+</li>
+<li class=""><code class="sig">OrmCol PkCol()</code>
+<div class="mdoc">UPDATE ... WHERE 用的定位列：最后一个主键列，
+没有主键时为 null（与实体链的既有语义一致）。</div>
+</li>
+<li class=""><code class="sig">string PkList()</code>
+<div class="mdoc">复合主键的表级约束列清单（两列及以上才有；
+identity 列自带 PRIMARY KEY，不参与）。</div>
+</li>
+</ul>
+</div></div>
+<div class="api"><div class="api-head"><span class="ns">OrmNav</span><span class="tag">class</span></div>
+<div class="api-body">
+<div class="mdoc">导航字段（<code>[Column]</code> 之外的实体引用）的连接描述：
+连接 <code>LEFT JOIN &lt;Table&gt; j_&lt;Field&gt; ON t.&lt;Field&gt;Id = j_&lt;Field&gt;.id</code>，
+被包含时它的列跟在实体自身列之后。</div>
+<h5 class="cat">字段</h5><ul class="sig">
+<li class=""><code class="sig">string Field;</code>
+</li>
+<li class=""><code class="sig">string Table;</code>
+</li>
+<li class=""><code class="sig">List&lt;OrmCol&gt; Cols;</code>
+</li>
+<li class=""><code class="sig">int PkAt;</code>
+</li>
+</ul>
+<h5 class="cat">构造</h5><ul class="sig">
+<li class=""><code class="sig">OrmNav(string field, string table)</code>
+</li>
+</ul>
+<h5 class="cat">方法</h5><ul class="sig">
+<li class=""><code class="sig">OrmNav Col(string col, string field, int kind, bool i64)</code>
+<div class="mdoc">追加一列被连接实体的列。</div>
+</li>
+<li class=""><code class="sig">string SelectList()</code>
+<div class="mdoc"><code>j_&lt;Field&gt;.a, j_&lt;Field&gt;.b</code> —— 连接列的 SELECT 片段。</div>
+</li>
+<li class=""><code class="sig">string Join()</code>
+<div class="mdoc">连接子句。</div>
+</li>
+</ul>
+</div></div>
+<div class="api"><div class="api-head"><span class="ns">OrmSelect</span><span class="tag">class</span></div>
+<div class="api-body">
+<div class="mdoc">类型化 SELECT 链的运行期实现：条件片段、绑定值、分组、排序、
+分页、连接与终端 SQL 都在这里，一份实现服务所有实体。生成的
+<code>__DbQ_&lt;E&gt;</code> 只是它的类型化门面（转发 + 用实体类型收口结果）。</div>
+<h5 class="cat">字段</h5><ul class="sig">
+<li class=""><code class="sig">IDbExecutor db;</code>
+</li>
+<li class=""><code class="sig">OrmMeta meta;</code>
+</li>
+<li class=""><code class="sig">string tbl;</code>
+</li>
+<li class=""><code class="sig">string w;</code>
+</li>
+<li class=""><code class="sig">DbParams ps;</code>
+</li>
+<li class=""><code class="sig">string ob;</code>
+</li>
+<li class=""><code class="sig">string gb;</code>
+</li>
+<li class=""><code class="sig">string h;</code>
+</li>
+<li class=""><code class="sig">bool distinct;</code>
+</li>
+<li class=""><code class="sig">int limN;</code>
+</li>
+<li class=""><code class="sig">int offN;</code>
+</li>
+<li class=""><code class="sig">bool on;</code>
+</li>
+<li class=""><code class="sig">List&lt;bool&gt; navOn;</code>
+</li>
+</ul>
+<h5 class="cat">构造</h5><ul class="sig">
+<li class=""><code class="sig">OrmSelect(IDbExecutor db, OrmMeta meta)</code>
+<div class="mdoc">私有构造；统一经 <code>Create</code> 创建。</div>
+</li>
+</ul>
+<h5 class="cat">方法</h5><ul class="sig">
+<li class=""><code class="sig">static OrmSelect Create(IDbExecutor db, OrmMeta meta)</code>
+<div class="mdoc">为实体创建一个空 SELECT 链。</div>
+</li>
+<li class=""><code class="sig">OrmMeta Meta()</code>
+<div class="mdoc">实体元数据（类型化门面读取列信息用）。</div>
+</li>
+<li class=""><code class="sig">DbParams Params()</code>
+<div class="mdoc">当前积累的 WHERE 参数（类型化门面直接执行时复用）。</div>
+</li>
+<li class=""><code class="sig">string GroupKey()</code>
+<div class="mdoc">分组键（类型化门面按分组取值用）。</div>
+</li>
+<li class=""><code class="sig">bool NavOn(int i)</code>
+<div class="mdoc">第 i 个导航字段是否被包含。</div>
+</li>
+<li class=""><code class="sig">void W(string f)</code>
+<div class="mdoc">WHERE 片段：多个片段以 AND 连接（列名一般带 &quot;t.&quot; 别名）。</div>
+</li>
+<li class=""><code class="sig">void WExpr(ExprNode root)</code>
+<div class="mdoc">lambda 降级出的表达式树：SQL 片段与绑定值都由
+<code>ExprSql</code> 产出。</div>
+</li>
+<li class=""><code class="sig">void WhereDict(DbValues v)</code>
+<div class="mdoc">动态列集合等值条件：列名按实体校验，值按列声明类型
+绑定。</div>
+</li>
+<li class=""><code class="sig">void CondBegin(bool c)</code>
+<div class="mdoc">条件开关：false 期间 W/P* 收集的片段全部失效（ORM 内部
+按条件组合调用）。</div>
+</li>
+<li class=""><code class="sig">void CondEnd()</code>
+<div class="mdoc">结束条件区间，恢复片段收集。</div>
+</li>
+<li class=""><code class="sig">void AsTable(string t)</code>
+<div class="mdoc">查另一张表（标识符校验，防注入）。</div>
+</li>
+<li class=""><code class="sig">void P(string v)</code>
+<div class="mdoc">WHERE 参数：与 W 片段中占位符的出现顺序一致。</div>
+</li>
+<li class=""><code class="sig">void Pi(int v)</code>
+<div class="mdoc">WHERE 整数参数。</div>
+</li>
+<li class=""><code class="sig">void Pl(long v)</code>
+<div class="mdoc">WHERE 64 位整数参数。</div>
+</li>
+<li class=""><code class="sig">void Pd(double v)</code>
+<div class="mdoc">WHERE 浮点参数。</div>
+</li>
+<li class=""><code class="sig">void InI(List&lt;int&gt; vs)</code>
+<div class="mdoc">IN 列表参数（配合 W 片段里的 &quot;t.col IN (?)&quot;）。</div>
+</li>
+<li class=""><code class="sig">void InL(List&lt;long&gt; vs)</code>
+<div class="mdoc"><code>InI</code> 的 long 版本。</div>
+</li>
+<li class=""><code class="sig">void InS(List&lt;string&gt; vs)</code>
+<div class="mdoc"><code>InI</code> 的 string 版本。</div>
+</li>
+<li class=""><code class="sig">void InD(List&lt;double&gt; vs)</code>
+<div class="mdoc"><code>InI</code> 的 double 版本。</div>
+</li>
+<li class=""><code class="sig">void OB(string col)</code>
+<div class="mdoc">ORDER BY 追加一列（升序）。</div>
+</li>
+<li class=""><code class="sig">void OBD(string col)</code>
+<div class="mdoc">ORDER BY 追加一列（降序）。</div>
+</li>
+<li class=""><code class="sig">void GB(string col)</code>
+<div class="mdoc">GROUP BY 单列。</div>
+</li>
+<li class=""><code class="sig">void OBK()</code>
+<div class="mdoc">便捷：按分组键排序（升序）。</div>
+</li>
+<li class=""><code class="sig">void OBDK()</code>
+<div class="mdoc">便捷：按分组键排序（降序）。</div>
+</li>
+<li class=""><code class="sig">void H(string f)</code>
+<div class="mdoc">HAVING 片段：多个片段以 AND 连接。</div>
+</li>
+<li class=""><code class="sig">void DISTINCT()</code>
+<div class="mdoc">SELECT DISTINCT。</div>
+</li>
+<li class=""><code class="sig">void Take(int n)</code>
+<div class="mdoc">LIMIT n。</div>
+</li>
+<li class=""><code class="sig">void SkipN(int n)</code>
+<div class="mdoc">OFFSET n。</div>
+</li>
+<li class=""><code class="sig">void Page(int index, int size)</code>
+<div class="mdoc">1 起始的分页（换算成 LIMIT/OFFSET，方言在 BuildSelect 处理）。</div>
+</li>
+<li class=""><code class="sig">void Include(int i)</code>
+<div class="mdoc">包含第 i 个导航字段（LEFT JOIN + 它的列）。</div>
+</li>
+<li class=""><code class="sig">int NavAt(int i)</code>
+<div class="mdoc">被包含的导航字段在结果里的起始列号。</div>
+</li>
+<li class=""><code class="sig">void tail(StringBuilder sb)</code>
+<div class="mdoc">把 WHERE/GROUP BY/HAVING/ORDER BY 片段追加到 SELECT 文本之后。</div>
+</li>
+<li class=""><code class="sig">string BuildSelect()</code>
+<div class="mdoc">实体行的 SELECT。分页写法按方言：SQL Server/Oracle 用
+OFFSET ... FETCH（且必须有 ORDER BY）。</div>
+</li>
+<li class=""><code class="sig">DbResult Rows()</code>
+<div class="mdoc">执行实体行查询。</div>
+</li>
+<li class=""><code class="sig">async DbResult RowsAsync()</code>
+<div class="mdoc">异步执行实体行查询。</div>
+</li>
+<li class=""><code class="sig">string BuildCol(string col)</code>
+<div class="mdoc">单列/投影的 SELECT（分页在 DTO 版里按 LIMIT/OFFSET）。</div>
+</li>
+<li class=""><code class="sig">string BuildDto(string cols)</code>
+<div class="mdoc">投影 SELECT 的语句文本（固定 LIMIT/OFFSET 分页写法）。</div>
+</li>
+<li class=""><code class="sig">List&lt;string&gt; MapCol(DbResult r)</code>
+<div class="mdoc">把结果集第一列抽成字符串列表。</div>
+</li>
+<li class=""><code class="sig">List&lt;string&gt; ToListCol(string col)</code>
+<div class="mdoc">执行单列查询并返回字符串列表。</div>
+</li>
+<li class=""><code class="sig">async List&lt;string&gt; ToListColAsync(string col)</code>
+<div class="mdoc"><code>ToListCol</code> 的异步版本。</div>
+</li>
+<li class=""><code class="sig">DbResult Dto(string cols)</code>
+<div class="mdoc">执行投影查询（DTO 列表，LIMIT/OFFSET 分页）。</div>
+</li>
+<li class=""><code class="sig">async DbResult DtoAsync(string cols)</code>
+<div class="mdoc">异步执行投影查询。</div>
+</li>
+<li class=""><code class="sig">void One()</code>
+<div class="mdoc">只取一行（LIMIT 1）。</div>
+</li>
+<li class=""><code class="sig">string BuildCount()</code>
+<div class="mdoc">分组后的行数：分组键上的 COUNT 要套一层子查询。
+派生表必须带别名——MySQL/PostgreSQL/SQL Server 对无别名
+的子查询直接报语法错。</div>
+</li>
+<li class=""><code class="sig">string BuildAgg(string expr)</code>
+<div class="mdoc">聚合 SELECT 的语句文本（表达式如 &quot;COUNT(*)&quot;、&quot;SUM(t.n)&quot;），
+复用 WHERE/GROUP BY/HAVING，忽略排序与分页。</div>
+</li>
+<li class=""><code class="sig">DbResult AggR(string expr)</code>
+<div class="mdoc">执行聚合查询，返回原始结果集。</div>
+</li>
+<li class=""><code class="sig">async DbResult AggRAsync(string expr)</code>
+<div class="mdoc"><code>AggR</code> 的异步版本。</div>
+</li>
+<li class=""><code class="sig">int AggI(string expr)</code>
+<div class="mdoc">聚合结果取 int；无行时为 0。</div>
+</li>
+<li class=""><code class="sig">long AggL(string expr)</code>
+<div class="mdoc">聚合结果取 long；无行时为 0。</div>
+</li>
+<li class=""><code class="sig">double AggD(string expr)</code>
+<div class="mdoc">聚合结果取 double；无行时为 0.0。</div>
+</li>
+<li class=""><code class="sig">async int AggIAsync(string expr)</code>
+<div class="mdoc"><code>AggI</code> 的异步版本。</div>
+</li>
+<li class=""><code class="sig">async long AggLAsync(string expr)</code>
+<div class="mdoc"><code>AggL</code> 的异步版本。</div>
+</li>
+<li class=""><code class="sig">async double AggDAsync(string expr)</code>
+<div class="mdoc"><code>AggD</code> 的异步版本。</div>
+</li>
+<li class=""><code class="sig">int Count()</code>
+<div class="mdoc">匹配的行数（分组查询时数分组数）。</div>
+</li>
+<li class=""><code class="sig">async int CountAsync()</code>
+<div class="mdoc">异步行数。</div>
+</li>
+<li class=""><code class="sig">bool Any()</code>
+<div class="mdoc">是否存在匹配行。</div>
+</li>
+<li class=""><code class="sig">async bool AnyAsync()</code>
+<div class="mdoc">异步判断是否存在匹配行。</div>
+</li>
+</ul>
+</div></div>
+<div class="api"><div class="api-head"><span class="ns">OrmSync</span><span class="tag">class</span></div>
+<div class="api-body">
+<div class="mdoc">CodeFirst：缺表建表、缺列加列、缺索引补索引。DDL 从实体元数据
+直接算出来，同步与异步两条路径共用同一段文本构造。</div>
+<h5 class="cat">方法</h5><ul class="sig">
+<li class=""><code class="sig">static string CreateDdl(int p, OrmMeta m, string t)</code>
+<div class="mdoc">CREATE TABLE 语句。复合主键写成表级约束（列定义里
+不能各自带 PRIMARY KEY）。</div>
+</li>
+<li class=""><code class="sig">static string AddColDdl(int p, OrmCol c, string t)</code>
+<div class="mdoc">ALTER TABLE ... ADD COLUMN 语句（新列不带主键/自增修饰）。</div>
+</li>
+<li class=""><code class="sig">static void ExecDdl(IDbExecutor db, string ddl)</code>
+<div class="mdoc">执行一条 DDL；执行器以负数报告失败（内置驱动
+语句失败会直接抛 DbException，这里给不抛异常的
+自定义执行器兜底）时同样抛出，绝不让建表/加列悄悄落空。</div>
+</li>
+<li class=""><code class="sig">static async void ExecDdlAsync(IDbExecutor db, string ddl)</code>
+<div class="mdoc"><code>ExecDdl</code> 的协程版本，失败约定相同。</div>
+</li>
+<li class=""><code class="sig">static void Sync(IDbExecutor db, OrmMeta m)</code>
+<div class="mdoc">同步路径的 schema 同步：缺表则建表并建全部索引；表已存在时
+逐列比对、缺列加列，最后补齐索引（幂等，可重复调用）。</div>
+</li>
+<li class=""><code class="sig">static async void SyncAsync(IDbExecutor db, OrmMeta m)</code>
+<div class="mdoc"><code>Sync</code> 的协程版本。</div>
+</li>
+<li class=""><code class="sig">static void Indexes(IDbExecutor db, OrmMeta m, string t)</code>
+<div class="mdoc">按元数据补齐实体声明的全部索引（EnsureIndex 幂等）。</div>
+</li>
+<li class=""><code class="sig">static async void IndexesAsync(IDbExecutor db, OrmMeta m, string t)</code>
+<div class="mdoc"><code>Indexes</code> 的协程版本。</div>
+</li>
+</ul>
+</div></div>
+<div class="api"><div class="api-head"><span class="ns">OrmUpdate</span><span class="tag">class</span></div>
+<div class="api-body">
+<div class="mdoc">类型化 UPDATE 的运行期实现：SET 片段与 WHERE 片段各自带一段参数，
+执行时按 SET→WHERE 的顺序合并。实体整体更新（SetSource）在执行
+时按元数据展开：非主键列进 SET，主键列进 WHERE。</div>
+<h5 class="cat">字段</h5><ul class="sig">
+<li class=""><code class="sig">IDbExecutor db;</code>
+</li>
+<li class=""><code class="sig">OrmMeta meta;</code>
+</li>
+<li class=""><code class="sig">string tbl;</code>
+</li>
+<li class=""><code class="sig">IOrmRows src;</code>
+</li>
+<li class=""><code class="sig">List&lt;string&gt; only;</code>
+</li>
+<li class=""><code class="sig">List&lt;string&gt; skip;</code>
+</li>
+<li class=""><code class="sig">string sets;</code>
+</li>
+<li class=""><code class="sig">DbParams sp;</code>
+</li>
+<li class=""><code class="sig">string w;</code>
+</li>
+<li class=""><code class="sig">DbParams wp;</code>
+</li>
+<li class=""><code class="sig">bool on;</code>
+</li>
+</ul>
+<h5 class="cat">构造</h5><ul class="sig">
+<li class=""><code class="sig">OrmUpdate(IDbExecutor db, OrmMeta meta)</code>
+<div class="mdoc">私有构造；统一经 <code>Create</code> 创建。</div>
+</li>
+</ul>
+<h5 class="cat">方法</h5><ul class="sig">
+<li class=""><code class="sig">static OrmUpdate Create(IDbExecutor db, OrmMeta meta)</code>
+<div class="mdoc">为实体创建一个空 UPDATE 构造器。</div>
+</li>
+<li class=""><code class="sig">void AsTable(string t)</code>
+<div class="mdoc">改写到另一张表（标识符校验，防注入）。</div>
+</li>
+<li class=""><code class="sig">void Only(string c)</code>
+<div class="mdoc">只更新该列（与 Skip 互斥语义，可多次调用）。</div>
+</li>
+<li class=""><code class="sig">void Skip(string c)</code>
+<div class="mdoc">跳过该列（可多次调用）。</div>
+</li>
+<li class=""><code class="sig">void SetSource(IOrmRows rows)</code>
+<div class="mdoc">实体整体更新的值来源（取第一行）。</div>
+</li>
+<li class=""><code class="sig">void CondBegin(bool c)</code>
+<div class="mdoc">条件开关：false 期间 W/P* 收集的片段全部失效（ORM 内部
+按条件组合调用，应用层一般不直接用）。</div>
+</li>
+<li class=""><code class="sig">void CondEnd()</code>
+<div class="mdoc">结束条件区间，恢复片段收集。</div>
+</li>
+<li class=""><code class="sig">bool Use(string c)</code>
+<div class="mdoc">该列是否进 SET：Only 优先，其次非 Skip。</div>
+</li>
+<li class=""><code class="sig">void Frag(string f)</code>
+<div class="mdoc">追加一段 SET 片段（片段间以逗号连接）。</div>
+</li>
+<li class=""><code class="sig">void SetI(string c, int v)</code>
+<div class="mdoc">SET 片段：追加一个 &quot;col = ?&quot; 并把值排入 SET 参数区。</div>
+</li>
+<li class=""><code class="sig">void SetL(string c, long v)</code>
+<div class="mdoc"><code>SetI</code> 的 long 版本。</div>
+</li>
+<li class=""><code class="sig">void SetD(string c, double v)</code>
+<div class="mdoc"><code>SetI</code> 的 double 版本。</div>
+</li>
+<li class=""><code class="sig">void SetS(string c, string v)</code>
+<div class="mdoc"><code>SetI</code> 的 string 版本。</div>
+</li>
+<li class=""><code class="sig">void SetB(string c, bool v)</code>
+<div class="mdoc">布尔值写整型 0/1。</div>
+</li>
+<li class=""><code class="sig">void SetIncrI(string c, int v)</code>
+<div class="mdoc">自增片段：&quot;col = col + ?&quot;（数据库侧原值累加）。</div>
+</li>
+<li class=""><code class="sig">void SetIncrL(string c, long v)</code>
+<div class="mdoc"><code>SetIncrI</code> 的 long 版本。</div>
+</li>
+<li class=""><code class="sig">void SetIncrD(string c, double v)</code>
+<div class="mdoc"><code>SetIncrI</code> 的 double 版本。</div>
+</li>
+<li class=""><code class="sig">void SetDict(DbValues v)</code>
+<div class="mdoc">字典键值批量进 SET（列名经元数据校验，按列类型绑定）。</div>
+</li>
+<li class=""><code class="sig">void W(string f)</code>
+<div class="mdoc">WHERE 片段：多个片段以 AND 连接。</div>
+</li>
+<li class=""><code class="sig">void WhereDict(DbValues v)</code>
+<div class="mdoc">字典键值批量进 WHERE（等值条件）。</div>
+</li>
+<li class=""><code class="sig">void P(string v)</code>
+<div class="mdoc">WHERE 参数：与 W 片段中占位符的出现顺序一致。</div>
+</li>
+<li class=""><code class="sig">void Pi(int v)</code>
+<div class="mdoc">WHERE 整数参数。</div>
+</li>
+<li class=""><code class="sig">void Pl(long v)</code>
+<div class="mdoc">WHERE 64 位整数参数。</div>
+</li>
+<li class=""><code class="sig">void Pd(double v)</code>
+<div class="mdoc">WHERE 浮点参数。</div>
+</li>
+<li class=""><code class="sig">void InI(List&lt;int&gt; vs)</code>
+<div class="mdoc">IN 列表参数（配合 W 片段里的 &quot;col IN (?)&quot;）。</div>
+</li>
+<li class=""><code class="sig">void InL(List&lt;long&gt; vs)</code>
+<div class="mdoc"><code>InI</code> 的 long 版本。</div>
+</li>
+<li class=""><code class="sig">void InS(List&lt;string&gt; vs)</code>
+<div class="mdoc"><code>InI</code> 的 string 版本。</div>
+</li>
+<li class=""><code class="sig">void InD(List&lt;double&gt; vs)</code>
+<div class="mdoc"><code>InI</code> 的 double 版本。</div>
+</li>
+<li class=""><code class="sig">void ApplySource()</code>
+<div class="mdoc">实体整体更新：列在执行时展开，Only/Skip 的链顺序
+任意；定位列取实体主键（含复合主键），没有主键则无法定位、
+什么也不做。</div>
+</li>
+<li class=""><code class="sig">string BuildUpdate()</code>
+<div class="mdoc">生成 UPDATE 语句；无 SET 或无 WHERE 时返回 &quot;&quot;
+（绝无全表更新）。</div>
+</li>
+<li class=""><code class="sig">int ExecuteAffrows()</code>
+<div class="mdoc">执行并返回受影响行数。</div>
+</li>
+<li class=""><code class="sig">async int ExecuteAffrowsAsync()</code>
+<div class="mdoc">异步执行并返回受影响行数。</div>
 </li>
 </ul>
 </div></div>
@@ -892,19 +1788,14 @@ NOT NULL / PRIMARY KEY / DEFAULT 等后缀）。用一个实体代替并行的
 <div class="mdoc">仿 FreeSQL 的流式 SQL 查询构建器。
 支持通过方法链执行 SELECT、INSERT、UPDATE、DELETE。
 
-用法：
-QueryBuilder qb = QueryBuilder.From(&quot;users&quot;);
-string sql = qb.Where(&quot;age &gt; 18&quot;).OrderBy(&quot;name&quot;).Limit(10).BuildSelect(&quot;*&quot;);
-
-string insertSql = QueryBuilder.InsertInto(&quot;users&quot;)
-.Set(&quot;name&quot;, &quot;Alice&quot;).Set(&quot;age&quot;, &quot;30&quot;).BuildInsert();
-
-string updateSql = QueryBuilder.Update(&quot;users&quot;)
-.Set(&quot;name&quot;, &quot;Bob&quot;).Where(&quot;id = 1&quot;).BuildUpdate();
-
-参数化模式（推荐——值永远不会进入 SQL 文本）：
-QueryBuilder qb = QueryBuilder.From(&quot;users&quot;).WhereEq(&quot;name&quot;, name);
+用法（全部走 <code>?</code> 占位符 + DbParams——值永远不会进入 SQL 文本，
+由 DbConnection 以驱动级参数绑定上线）：
+QueryBuilder qb = QueryBuilder.From(&quot;users&quot;).WhereEq(&quot;age&quot;, 18);
 DbResult r = db.Query(qb.BuildSelectParams(&quot;*&quot;), qb.SelectParams());
+
+string sql = QueryBuilder.InsertInto(&quot;users&quot;)
+.Set(&quot;name&quot;, &quot;Alice&quot;).BuildInsertParams();
+db.Execute(sql, qb.InsertParams());
 
 标识符（表、列、ORDER BY / GROUP BY 目标）会按
 [A-Za-z_][A-Za-z0-9_.]* 校验；非法标识符抛出 Exception。
@@ -947,6 +1838,13 @@ DbResult r = db.Query(qb.BuildSelectParams(&quot;*&quot;), qb.SelectParams());
 </li>
 <li class=""><code class="sig">static string RequireIdent(string s)</code>
 <div class="mdoc">s 是安全标识符时原样返回；否则抛出异常。</div>
+</li>
+<li class=""><code class="sig">static string RequireDdlType(string s)</code>
+<div class="mdoc">s 是安全的 DDL 类型文本时原样返回；否则抛出异常。
+允许字母、数字、下划线、空格、括号和逗号——足以表达
+<code>INTEGER</code>、<code>VARCHAR(255)</code>、<code>NUMERIC(10,2)</code>、<code>DOUBLE PRECISION</code>
+这类类型，而引号、分号、注释符等注入通道一律拒绝。
+列类型文本会拼接进 CREATE TABLE，必须过这道检查。</div>
 </li>
 <li class=""><code class="sig">static QueryBuilder From(string table)</code>
 <div class="mdoc">创建从某表 SELECT 的查询构建器。</div>
@@ -1053,13 +1951,14 @@ DbResult r = db.Query(qb.BuildSelectParams(&quot;*&quot;), qb.SelectParams());
 <div class="mdoc">设置 HAVING 子句。</div>
 </li>
 <li class=""><code class="sig">QueryBuilder Join(string table, string on)</code>
-<div class="mdoc">添加 JOIN 子句。</div>
+<div class="mdoc">添加 JOIN 子句。表名经过标识符校验；
+<code>on</code> 是自由条件表达式，引用外部输入时须自行参数化。</div>
 </li>
 <li class=""><code class="sig">QueryBuilder LeftJoin(string table, string on)</code>
-<div class="mdoc">添加 LEFT JOIN 子句。</div>
+<div class="mdoc">添加 LEFT JOIN 子句。表名经过标识符校验。</div>
 </li>
 <li class=""><code class="sig">QueryBuilder RightJoin(string table, string on)</code>
-<div class="mdoc">添加 RIGHT JOIN 子句。</div>
+<div class="mdoc">添加 RIGHT JOIN 子句。表名经过标识符校验。</div>
 </li>
 <li class=""><code class="sig">QueryBuilder Limit(int count)</code>
 <div class="mdoc">设置 LIMIT。</div>
@@ -1085,6 +1984,10 @@ DbResult r = db.Query(qb.BuildSelectParams(&quot;*&quot;), qb.SelectParams());
 <li class=""><code class="sig">QueryBuilder SetInt(string column, int val)</code>
 <div class="mdoc">设置整数形式的 column=value 对。</div>
 </li>
+<li class=""><code class="sig">void AppendClauses(StringBuilder sb)</code>
+<div class="mdoc">把 JOIN/WHERE/GROUP BY/HAVING/ORDER BY/LIMIT/OFFSET
+子句追加到 sb（占位符原样保留，参数由调用方随 SQL 一起传）。</div>
+</li>
 <li class=""><code class="sig">string BuildSelectParams(string columns)</code>
 <div class="mdoc">构建带 <code>?</code> 占位符的 SELECT（参见 SelectParams()）。</div>
 </li>
@@ -1106,31 +2009,11 @@ DbResult r = db.Query(qb.BuildSelectParams(&quot;*&quot;), qb.SelectParams());
 <li class=""><code class="sig">string BuildDeleteParams()</code>
 <div class="mdoc">构建带 <code>?</code> 占位符的 DELETE（参见 SelectParams()）。</div>
 </li>
-<li class=""><code class="sig">string BuildSelect(string columns)</code>
-<div class="mdoc">构建 SELECT 查询（旧版：参数内联）。</div>
-</li>
-<li class=""><code class="sig">string BuildSelect(string columns, bool keepPlaceholders)</code>
-</li>
-<li class=""><code class="sig">string BuildCount()</code>
-<div class="mdoc">构建 SELECT COUNT 查询。</div>
-</li>
-<li class=""><code class="sig">string BuildInsert()</code>
-<div class="mdoc">构建 INSERT 查询。</div>
-</li>
-<li class=""><code class="sig">string BuildUpdate()</code>
-<div class="mdoc">构建 UPDATE 查询。</div>
-</li>
-<li class=""><code class="sig">string BuildDelete()</code>
-<div class="mdoc">构建 DELETE 查询（旧版：参数内联）。</div>
-</li>
-<li class=""><code class="sig">static string InlineParams(string sql, DbParams prms)</code>
-<div class="mdoc">将 <code>?</code> 占位符（引号字面量之外）替换为
-带引号、已转义的参数值，供旧版纯字符串执行使用。</div>
-</li>
-<li class=""><code class="sig">void AppendClauses(StringBuilder sb)</code>
-</li>
-<li class=""><code class="sig">static string EscapeString(string val)</code>
-<div class="mdoc">转义字符串中的单引号以确保 SQL 安全。</div>
+<li class=""><code class="sig">static string EscapeDdlLiteral(string val)</code>
+<div class="mdoc">DDL 字面量转义（单引号加倍）。只允许用于
+CREATE TABLE 的 DEFAULT 子句这类无法参数化的位置——
+所有 DML 一律走 <code>?</code> + DbParams 驱动级绑定，
+不要用本方法拼接查询值。</div>
 </li>
 </ul>
 </div></div>
@@ -1162,6 +2045,23 @@ QuestDB、DuckDB、Firebird 3+）
 <li class=""><code class="sig">static int SqlServer=1;</code>
 </li>
 <li class=""><code class="sig">static int Oracle=2;</code>
+</li>
+</ul>
+</div></div>
+<div class="api"><div class="api-head"><span class="ns">IOrmRows</span><span class="tag">interface</span></div>
+<div class="api-body">
+<div class="mdoc">实体行的取值口：共享实现只按列元数据要值，不认识实体类型。
+
+反射读写字段只在「静态类型就是实体」的地方成立（<code>object</code> 接收者拿不回
+具体类型），所以按列元数据循环取值的那几行由编译期给每个实体发一份，
+实现这个接口；代码量与字段数无关，加字段只多一行元数据。
+参数绑定、SQL 构造、结果映射的规则仍只有共享实现这一份。</div>
+<h5 class="cat">方法</h5><ul class="sig">
+<li class=""><code class="sig">int RowCount();</code>
+<div class="mdoc">待写入的行数。</div>
+</li>
+<li class=""><code class="sig">void BindCol(int row, OrmCol c, DbParams ps);</code>
+<div class="mdoc">把第 row 行的 c 列按声明类型追加为一个参数。</div>
 </li>
 </ul>
 </div></div>

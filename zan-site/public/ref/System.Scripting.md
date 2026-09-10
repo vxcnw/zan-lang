@@ -11,7 +11,7 @@ Zan 的进程内 Lua 嵌入（Lua 5.3 / 5.4）。
 （LoadLibrary/GetProcAddress）在运行期解析所有入口点，因此
 从未用到 <c>System.Scripting</c> 的程序不会链接 Lua；
 没有 Lua 的机器只会得到 `Lua.IsAvailable` == false，
-而不是加载失败。这与 SDL3 等其他可选
+而不是加载失败。这与 `Python` 等其他可选
 原生依赖的处理方式一致。
 
 using System.Scripting;
@@ -70,6 +70,8 @@ p["lang"] = "Lua";
 - static nint addr_close;
 
 - static nint addr_loadstring;
+
+- static nint addr_loadbufferx;
 
 - static nint addr_pcallk;
 
@@ -155,6 +157,10 @@ p["lang"] = "Lua";
 
 - static void Exec(string code)
   - 执行一段 Lua 代码（编译或运行出错时抛出异常）。
+
+- static void ExecBytes(byte[]chunk, string chunkName)
+  - 执行一段字节缓冲里的 Lua chunk（源码或 <c>luac</c> 字节码，
+    见 `LoadBytes`）。编译失败或运行出错时抛出异常。
 
 - static LuaValue Eval(string code)
   - 求值一个 Lua 表达式并返回结果，如
@@ -257,34 +263,59 @@ p["lang"] = "Lua";
   - 回调返回 nil。
 
 - static void EnsureReady()
+  - 未初始化时自动 Initialize。
 
 - static void OpenState()
+  - 创建 lua_State、打开标准库，并把注册表槽位分配器复位到 1000。
 
 - static void SetTop(int n)
+  - lua_settop：把栈高设为 n。
 
 - static void Load(string code)
+  - 编译一段代码并把生成的 chunk 压栈（编译失败时抛出异常）。
+
+- static void LoadBytes(byte[]chunk, string chunkName)
+  - 编译一段字节缓冲（源码或 <c>luac</c> 字节码）并把生成的
+    chunk 压栈（编译失败时抛出异常）。缓冲在加载后被立即清零，
+    供"密文随包、明文只在内存存活一瞬"的内嵌脚本方案使用。
+    字节码必须与运行时主次版本一致（5.4.x）。
 
 - static void Protected(int nargs, int nres, int mark, string what)
+  - 保护调用栈顶的 chunk/函数：出错时把栈恢复到 mark 再抛异常，
+    因此调用方看不到半截的栈。
 
 - static void Fail(string prefix)
+  - 读走栈顶的错误消息、清栈并抛出。消息在单独的帧里取出，
+    因为 `throw` 不会释放存活局部变量
+    （见 docs/bugs/throw-leaks-live-locals.md）。
 
 - static string TopString()
+  - 栈顶值的错误消息；非 string/number 时返回占位文案。
 
 - static void PushPath(string name, int mark)
+  - 把点分路径解析出的值压栈（"string.upper" -> 全局 string 的 upper）。
 
 - static bool TryResolve()
+  - 定位并加载可用的 Lua 动态库、解析全部入口点；成功后缓存结果。
 
 - static bool ResolveSymbols()
+  - 解析全部入口点地址；关键符号缺失时返回 false。
+    5.3 之前没有 lua_geti/lua_seti：退回 raw 访问（无 __index）。
 
 - static void FreeModule()
+  - 卸载运行时并清空全部符号地址（状态须已先经 Finalize 关闭）。
 
 - static long StoreTop()
+  - 把栈顶的值移入一个新的注册表槽位（弹出该值），返回槽位号。
 
 - static void PushSlot(long slot)
+  - 把槽位里的值压栈（槽位 0 表示 nil）。
 
 - static void DropSlot(long slot)
+  - 释放槽位（置 nil，让 Lua 的 GC 可以回收该值）。
 
 - static int TypeOfSlot(long slot)
+  - 槽位值的 lua_type；槽位 0 即 TNIL。
 
 
 ## LuaValue (class)
@@ -302,6 +333,7 @@ nil 值的槽位号为 0，不占用注册表。
   - 把栈顶的值移进注册表并包装（弹出栈顶）。
 
 - ~LuaValue()
+  - ARC 回收包装时释放注册表槽位，Lua 的 GC 随后回收该值。
 
 - long Slot()
   - 注册表槽位号（nil 为 0）。
@@ -372,22 +404,31 @@ nil 值的槽位号为 0，不占用注册表。
     降级启用；标量重载自动封送 string/double/long/bool 参数。
 
 - static LuaValue op_call(LuaValue self, double a)
+  - 运算符重载：fn(a)，a 封送为 double。
 
 - static LuaValue op_call(LuaValue self, long a)
+  - 运算符重载：fn(a)，a 封送为 long。
 
 - static LuaValue op_call(LuaValue self, bool a)
+  - 运算符重载：fn(a)，a 封送为 bool。
 
 - static LuaValue op_call(LuaValue self, LuaValue a)
+  - 运算符重载：fn(a)，a 为另一个 LuaValue。
 
 - static LuaValue op_call(LuaValue self, params double[]args)
+  - 运算符重载：fn(a, b, ...)，参数逐一封送为 double。
 
 - static LuaValue op_call(LuaValue self, params long[]args)
+  - 运算符重载：fn(a, b, ...)，参数逐一封送为 long。
 
 - static LuaValue op_call(LuaValue self, params string[]args)
+  - 运算符重载：fn(a, b, ...)，参数逐一封送为 string。
 
 - static LuaValue op_call(LuaValue self, params bool[]args)
+  - 运算符重载：fn(a, b, ...)，参数逐一封送为 bool。
 
 - static LuaValue op_call(LuaValue self, params LuaValue[]args)
+  - 运算符重载：fn(a, b, ...)，参数均为 LuaValue。
 
 - static LuaValue op_index(LuaValue self, long index)
   - 运算符重载：<c>t[2]</c>，同 `At`。
@@ -413,12 +454,9 @@ nil 值的槽位号为 0，不占用注册表。
 `delegate double LuaNumFn(nint L, int idx, nint isnum);`
 
 
-## double (delegate)
-
-`delegate double PyDoubleFn(nint obj);`
-
-
 ## int (delegate)
+
+lua_CFunction 回调形式：int (*)(lua_State*)。
 
 `delegate int LuaCFunction(nint L);`
 
@@ -436,6 +474,11 @@ nil 值的槽位号为 0，不占用注册表。
 ## int (delegate)
 
 `delegate int LuaLoadFn(nint L, string code);`
+
+
+## int (delegate)
+
+`delegate int LuaLoadBufFn(nint L, string buf, long sz, string chunkName, string mode);`
 
 
 ## int (delegate)
@@ -463,46 +506,6 @@ nil 值的槽位号为 0，不占用注册表。
 `delegate int LuaNextFn(nint L, int idx);`
 
 
-## int (delegate)
-
-`delegate int PyIntFn();`
-
-
-## int (delegate)
-
-`delegate int PyIntStrFn(string s);`
-
-
-## int (delegate)
-
-`delegate int PyNint3RetFn(nint a, nint b, nint c);`
-
-
-## int (delegate)
-
-`delegate int PyTupleSetFn(nint t, long i, nint v);`
-
-
-## int (delegate)
-
-`delegate int PySetAttrFn(nint obj, string name, nint val);`
-
-
-## int (delegate)
-
-`delegate int PyListSetFn(nint list, long index, nint v);`
-
-
-## int (delegate)
-
-`delegate int PyDictNextFn(nint dict, nint pos, nint keyOut, nint valOut);`
-
-
-## int (delegate)
-
-`delegate int PyDictSetStrFn(nint dict, string key, nint val);`
-
-
 ## long (delegate)
 
 `delegate long LuaIntegerFn(nint L, int idx, nint isnum);`
@@ -511,21 +514,6 @@ nil 值的槽位号为 0，不占用注册表。
 ## long (delegate)
 
 `delegate long LuaRawLenFn(nint L, int idx);`
-
-
-## long (delegate)
-
-`delegate long PyLongFn(nint obj);`
-
-
-## long (delegate)
-
-`delegate long PyListSizeFn(nint list);`
-
-
-## long (delegate)
-
-`delegate long PyDictSizeFn(nint dict);`
 
 
 ## nint (delegate)
@@ -538,94 +526,9 @@ nil 值的槽位号为 0，不占用注册表。
 `delegate nint LuaPushStrFn(nint L, string s);`
 
 
-## nint (delegate)
-
-`delegate nint PyCFunction(nint self, nint args);`
-
-
-## nint (delegate)
-
-`delegate nint PyNintStrFn(string s);`
-
-
-## nint (delegate)
-
-`delegate nint PyNint1Fn(nint a);`
-
-
-## nint (delegate)
-
-`delegate nint PyNint2Fn(nint a, nint b, nint c);`
-
-
-## nint (delegate)
-
-`delegate nint PyNintPairFn(nint a, nint b);`
-
-
-## nint (delegate)
-
-`delegate nint PyAttrFn(nint obj, string name);`
-
-
-## nint (delegate)
-
-`delegate nint PyDoubleRetFn(double v);`
-
-
-## nint (delegate)
-
-`delegate nint PyLongRetFn(long v);`
-
-
-## nint (delegate)
-
-`delegate nint PyTupleNewFn(long size);`
-
-
-## nint (delegate)
-
-`delegate nint PyTupleGetFn(nint t, long i);`
-
-
-## nint (delegate)
-
-`delegate nint PyBoolRetFn(int v);`
-
-
-## nint (delegate)
-
-`delegate nint PyCfuncNewFn(nint def, nint self);`
-
-
-## nint (delegate)
-
-`delegate nint PyRunStringFn(string code, int start, nint globals, nint locals);`
-
-
-## nint (delegate)
-
-`delegate nint PyListGetFn(nint list, long index);`
-
-
-## nint (delegate)
-
-`delegate nint PyListNewFn(long size);`
-
-
-## nint (delegate)
-
-`delegate nint PyDictNewFn();`
-
-
 ## string (delegate)
 
 `delegate string LuaToStrFn(nint L, int idx, nint len);`
-
-
-## string (delegate)
-
-`delegate string PyStrRetFn(nint obj);`
 
 
 ## void (delegate)
@@ -671,13 +574,3 @@ nil 值的槽位号为 0，不占用注册表。
 ## void (delegate)
 
 `delegate void LuaCreateTableFn(nint L, int narr, int nrec);`
-
-
-## void (delegate)
-
-`delegate void PyVoidFn();`
-
-
-## void (delegate)
-
-`delegate void PyVoid1Fn(nint a);`

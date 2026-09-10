@@ -40,8 +40,13 @@ SipMessage reg = await c.RegisterAsync("alice", 3600);
     WWW-Authenticate 质询交由调用方处理。超时返回 null。
 
 - void AddCommon(SipMessage req, string aor, string method)
+  - 填入每个请求都必须包含的头部（RFC 3261 8.1.1）：
+    Via（随机 branch）、Max-Forwards、From/To、Call-ID、CSeq。
 
 - async SipMessage TransactAsync(SipMessage req)
+  - 非 INVITE 客户端事务：500ms 起重传并翻倍至 4s，
+    32s 后放弃（Timer E/F）。临时 1xx 响应不重启计时器、直接跳过；
+    首个最终（>=200）响应生效。超时返回 null。
 
 
 ## SipMessage (class)
@@ -67,6 +72,7 @@ SipClient 中，媒体（RTP/SDP 协商）不在范围内。
 - string body;
 
 - SipMessage()
+  - 私有构造：空消息，由 `Request` / `Parse` 填充。
 
 - static SipMessage Request(string method, string uri)
   - 创建请求消息。
@@ -78,6 +84,7 @@ SipClient 中，媒体（RTP/SDP 协商）不在范围内。
   - 头部（名称不区分大小写）的第一个值，没有则返回 ""。
 
 - static bool NameEq(string a, string b)
+  - 头部名 ASCII 大小写不敏感相等比较。
 
 - string Serialize()
   - 序列化为线上形式（头部 + CRLF CRLF + 正文）。
@@ -87,5 +94,9 @@ SipClient 中，媒体（RTP/SDP 协商）不在范围内。
   - 解析线上消息；起始行不是 SIP 时返回 null。
 
 - static int FindChar(string s, int c, int from)
+  - 从 <paramref name="from"/> 起第一个字节 <paramref name="c"/> 的下标，
+    不存在时返回 -1。
 
 - static int FindCrlf(string s, int from)
+  - 从 <paramref name="from"/> 起第一个 CRLF 的下标，
+    不存在时返回 -1。

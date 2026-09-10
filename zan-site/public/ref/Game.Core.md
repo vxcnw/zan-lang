@@ -1,6 +1,6 @@
 # Game.Core
 
-> 源码: `stdlib/Game/Core/Anim.zan`, `stdlib/Game/Core/App.zan`
+> 源码: `stdlib/Game/Core/Anim.zan`
 
 
 ## AnimClip (class)
@@ -36,22 +36,31 @@ Mir 式布局：先是方向 0 的全部帧，再是方向 1，……）。
   - 从磁盘上的 `.anim` 文件加载片段（失败返回 null）。
 
 - string Image()
+  - 帧表图片条目/路径（`.anim` 的 image 字段，默认空串）。
 
 - int Base()
+  - 多动作帧表中该动作的首帧（`.anim` 的 base 字段）。
 
 - int FrameW()
+  - 帧单元宽（0 = 未知，从帧表推导）。
 
 - int FrameH()
+  - 帧单元高（0 = 未知，从帧表推导）。
 
 - int Dirs()
+  - 方向数量（构造时小于 1 钳制为 1；经典 Mir 移动为 8）。
 
 - int FramesPerDir()
+  - 每个方向的帧数（构造时小于 1 钳制为 1）。
 
 - int Fps()
+  - 播放帧率（FPS，构造时小于 1 钳制为 1）。
 
 - int LoopMode()
+  - 循环模式：0 播放一次，1 循环，2 循环片段。
 
 - int LoopStart()
+  - 循环片段（模式 2）的首帧（钳制在 [0, framesPerDir-1]）。
 
 
 ## AnimPlayer (class)
@@ -83,10 +92,13 @@ loopStart..末尾——例如施法前摇后接持续施法）。
     转身的角色不会重新开始步伐。
 
 - int Dir()
+  - 当前朝向（0..dirs-1，SetDir 已归一化）。
 
 - bool Done()
+  - once 模式片段是否已停在最后一帧；循环片段恒为 false。
 
 - int Frame()
+  - 当前方向内的帧索引（0..framesPerDir-1）。
 
 - void Update(int dtMs)
   - 按流逝毫秒推进。
@@ -94,46 +106,3 @@ loopStart..末尾——例如施法前摇后接持续施法）。
 - int SheetFrame()
   - 当前朝向与位置在帧表中的绝对帧索引
     ：base + dir * framesPerDir + frame。
-
-
-## App (class)
-
-Game.* 引擎的类型无关应用宿主：持有 SDL3 窗口和
-一个 `SdlGpu` 渲染器，泵送事件队列并驱动简单的
-帧循环。更上层的框架（Game.Arpg、Game.Zgm）构建于其上。
-
-- SdlWindow window;
-
-- SdlGpu gpu;
-
-- int width;
-
-- int height;
-
-- bool running;
-
-- App(string title, int width, int height)
-  - 初始化 SDL，打开可调整大小的窗口和 GPU 上下文。
-
-- bool IsValid()
-
-- SdlGpu Gpu()
-
-- SdlWindow Window()
-
-- int Width()
-
-- int Height()
-
-- bool IsRunning()
-
-- void Stop()
-
-- void Pump()
-  - 排空待处理事件；收到退出事件时请求关闭。
-
-- int Ticks()
-
-- void Delay(int milliseconds)
-
-- void Shutdown()

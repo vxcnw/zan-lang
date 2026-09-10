@@ -1,6 +1,6 @@
 # Gui.Component
 
-> 源码: `stdlib/Gui/Component/ChatView.zan`, `stdlib/Gui/Component/ConsoleView.zan`, `stdlib/Gui/Component/Dock.zan`, `stdlib/Gui/Component/FilePicker.zan`, `stdlib/Gui/Component/FileTree.zan`, `stdlib/Gui/Component/GraphView.zan`, `stdlib/Gui/Component/LogView.zan`, `stdlib/Gui/Component/PivotTable.zan`, `stdlib/Gui/Component/PropertyGrid.zan`, `stdlib/Gui/Component/SessionList.zan`
+> 源码: `stdlib/Gui/Component/ChatView.zan`, `stdlib/Gui/Component/ConsoleView.zan`, `stdlib/Gui/Component/Dock.zan`, `stdlib/Gui/Component/FilePicker.zan`, `stdlib/Gui/Component/FileTree.zan`, `stdlib/Gui/Component/GraphView.zan`, `stdlib/Gui/Component/LogView.zan`, `stdlib/Gui/Component/PropertyGrid.zan`, `stdlib/Gui/Component/Ribbon.zan`, `stdlib/Gui/Component/SessionList.zan`
 
 
 ## ChatMessage (class)
@@ -39,8 +39,10 @@
     每一拍只改正文，因此显示的是「这一轮开始说话的时间」。
 
 - static ChatMessage Create(string role, string text)
+  - 一条普通消息：无思考、无信封，时间戳取当前 UTC 时刻。
 
 - static ChatMessage CreateWithReason(string role, string text, string reason)
+  - 带思考过程的普通消息。
 
 - static ChatMessage CreateFrom(string role, string text, string agent, string to, string kind, string taskId, int progress)
   - 一条带信封的团队消息。
@@ -58,6 +60,7 @@
 - string tagCls;
 
 - static ChatSpeaker Of(string name, int tint, string tagCls)
+  - 组装一位发言者外观。
 
 
 ## ChatStrings (class)
@@ -153,10 +156,14 @@ code-behind 只调用 `Bind` / `SetBusy`。
 - Label emptyLbl;
 
 - ChatView()
+  - 空视图：英文默认文案，常驻的记录网格与空态提示都已建好
+    （是否显示由每帧绘制决定）。
 
 - override string Kind()
+  - 控件类型标识（序列化/设计器用）。
 
 - override string StyleType()
+  - 覆写：CSS 类型选择器名（"log"）。
 
 - ChatView Bind(List<ChatMessage> msgs)
   - 绑定调用方的消息列表（实时视图，不拷贝）。
@@ -189,6 +196,9 @@ code-behind 只调用 `Bind` / `SetBusy`。
   - 当前选中的文本（未选中则 ""）。
 
 - override void OnPaint(App app)
+  - 绘制：按有无消息在记录网格与空态提示间切换；消费滚轮、做
+    增量重排（受时间预算约束），把排好的行、滚动、选区与折叠
+    状态交给常驻的 StyledText 呈现。
 
 - void TakeWheel(App app)
   - 指针在记录上时滚轮滚动。
@@ -212,6 +222,7 @@ code-behind 只调用 `Bind` / `SetBusy`。
     切片就可能超出预算。
 
 - static bool HasInt(List<int> xs, int v)
+  - 列表是否含有 `v`。
 
 - static int RoleCode(string role)
   - 发言者编码，用于整块着色：0 我 / 1 助手 / 2 工具 / 3 错误。
@@ -265,6 +276,7 @@ code-behind 只调用 `Bind` / `SetBusy`。
   - 与 `data` 平行的行颜色（0 = 主题默认），可为空列表。
 
 - LogState st;
+  - 滚动与选择状态（渲染共用一份，宿主可经 State() 持久化或复位）。
 
 - string Empty;
   - 无行时居中显示的提示（"" 则不绘制）。
@@ -273,10 +285,13 @@ code-behind 只调用 `Bind` / `SetBusy`。
   - false 时只绘制，不处理滚轮/选择（嵌入的小日志条）。
 
 - ConsoleView()
+  - 构造空视图：未绑定行，活动模式（滚轮/选择可用）。
 
 - override string Kind()
+  - 控件类型标识（"ConsoleView"）。
 
 - override string StyleType()
+  - 样式类别（沿用 LogView 的 "log"，两者皮肤一致）。
 
 - ConsoleView Bind(List<string> lines)
   - 绑定调用方的行列表（实时视图，不拷贝）。
@@ -285,6 +300,7 @@ code-behind 只调用 `Bind` / `SetBusy`。
   - 绑定与行平行的颜色列表。
 
 - ConsoleView EmptyText(string text)
+  - 无行时的提示文案（"" 不显示）。
 
 - ConsoleView Passive()
   - 只读日志条：不接受滚轮与拖拽选择。
@@ -298,7 +314,11 @@ code-behind 只调用 `Bind` / `SetBusy`。
 - string SelectedText()
   - 当前选中的文本（无选择时为 ""）。
 
+- override List<PropSpec> Props()
+  - 覆写：设计器属性（空态文案与只读开关；数据经 Bind 在代码侧给）。
+
 - override void OnPaint(App app)
+  - 绘制：整体委托给 LogView.Render（含滚轮、尾部滚动与选择）。
 
 
 ## DockGroup (class)
@@ -333,6 +353,7 @@ code-behind 只调用 `Bind` / `SetBusy`。
 - Rect body;
 
 - DockGroup(int side, int weight)
+  - `weight` 是交叉轴的初始占比（各组具体化尺寸前生效）。
 
 
 ## DockHost (class)
@@ -413,6 +434,12 @@ if (dock.TakeChanged()) { File.WriteAllText(layoutPath, dock.SaveLayout()); }
 
 - string emptyMenuLabel;
 
+- int stripSentinelSeq;
+  - 触摸长按开菜单的哨兵一次性闸门：EventKind 跨帧滞留
+    （动画帧回读旧值），哨兵若每帧都补记会把 longPressFired
+    反复清零，释放帧就再也读不到"刚长按过"。按事件序号
+    只在真正的新按压帧记一次。
+
 - List<string> switchIds;
   - Ribbon 面板开关：它们对应的 id 以及在
     宿主命令列表中的起始位置（见 AddSwitches）。
@@ -437,8 +464,10 @@ if (dock.TakeChanged()) { File.WriteAllText(layoutPath, dock.SaveLayout()); }
 - int headerH;
 
 - DockHost()
+  - 空布局：无面板、无分组，尺寸未定（首帧取默认值）。
 
 - DockPanel Find(string id)
+  - 按 id 查面板；未注册为 null。
 
 - int GroupOf(string id)
   - 包含 `id` 的组索引；面板已关闭时为 -1。
@@ -454,6 +483,7 @@ if (dock.TakeChanged()) { File.WriteAllText(layoutPath, dock.SaveLayout()); }
     屏幕上只有调用方自己的文档标签栏）。
 
 - DockGroup LastGroupOf(int side)
+  - `side` 侧最后一个组（无组为 null）——Register/Show 的并入目标。
 
 - void SetWeight(string id, int weight)
   - 为包含 `id` 的组设置其所在侧交叉轴的初始占比
@@ -464,6 +494,7 @@ if (dock.TakeChanged()) { File.WriteAllText(layoutPath, dock.SaveLayout()); }
   - 设置某一侧的像素尺寸（左右为宽度，底部为高度）。
 
 - bool Visible(string id)
+  - 面板当前是否可见（未隐藏且上次布局分到了非零内容区）。
 
 - Rect Content(string id)
   - 上一次 Begin() 解析出的内容矩形。隐藏（或未激活）的
@@ -476,6 +507,7 @@ if (dock.TakeChanged()) { File.WriteAllText(layoutPath, dock.SaveLayout()); }
     可以不加守卫：它只是画在屏幕外而已。
 
 - string Title(string id)
+  - 面板标题（未注册为 ""）。
 
 - void SetTitle(string id, string title)
   - 重命名面板标题（例如跟随 UI 语言切换）。
@@ -490,6 +522,8 @@ if (dock.TakeChanged()) { File.WriteAllText(layoutPath, dock.SaveLayout()); }
   - 附加到每个开关提示的本地化"点击作用"说明。
 
 - string SwitchTip(DockPanel p)
+  - 开关的悬停提示：面板描述与「点击会隐藏/显示」说明按行拼接
+    （缺哪段就省哪段）。
 
 - int AddSwitches(List<RibbonCmd> cmds)
   - 为每个可关闭面板向 ribbon 命令列表追加一个图标开关——
@@ -541,14 +575,17 @@ if (dock.TakeChanged()) { File.WriteAllText(layoutPath, dock.SaveLayout()); }
   - 同侧第 `at` 个分组在 groups 列表中的插入位置。
 
 - int GroupWithKey(int key)
+  - 按 key 找组的下标；不存在为 -1。
 
 - void Detach(string id)
+  - 把面板移出所在组并把它选中后的活动标签修好；组空了就解散。
 
 - void ShowOn(string id, int side)
   - 重新停靠已关闭的面板：若 `side` 上有打开的组则并入其中，
     否则在该侧新建组。同时选中该面板。
 
 - bool IsHidden(string id)
+  - 面板是否处于关闭（隐藏）状态；未注册视为隐藏。
 
 - void Toggle(string id)
   - 面板的显示/隐藏开关——"面板"工具栏按钮所驱动的内容。
@@ -558,6 +595,7 @@ if (dock.TakeChanged()) { File.WriteAllText(layoutPath, dock.SaveLayout()); }
     标签序号，原分组已经空掉被移除就在同侧原来的位置重建它。
 
 - int IndexIn(DockGroup g, string id)
+  - `id` 在组内的标签序号（不在组内为 0）。
 
 - List<string> HiddenIds()
   - 所有已关闭面板的 id，按注册顺序——供"恢复面板"菜单
@@ -576,8 +614,10 @@ if (dock.TakeChanged()) { File.WriteAllText(layoutPath, dock.SaveLayout()); }
     提示应持久化 SaveLayout()。
 
 - int PersistLogical(int px)
+  - 物理像素 → 逻辑像素（按 dpiScale 折算，用于序列化，跨 DPI 搬运）。
 
 - int PersistPhysical(int logical)
+  - 逻辑像素 → 物理像素（LoadLayout 恢复时按当前 DPI 折算回）。
 
 - string SaveLayout()
   - 将各侧、组和隐藏面板序列化为一行，例如
@@ -593,21 +633,28 @@ if (dock.TakeChanged()) { File.WriteAllText(layoutPath, dock.SaveLayout()); }
     （调用方此时保留默认设置）。
 
 - static int SideOfIn(List<DockGroup> gs, string id)
+  - `id` 在 `gs` 这组布局里的所在侧；找不到为 Left。
 
 - static bool ListHas(List<string> xs, string v)
+  - 列表是否含有 `v`。
 
 - static bool HasPrefix(string s, string p)
+  - 前缀测试。
 
 - static string After(string s, int n)
+  - 去掉前 n 个字符；不足 n 时为 ""。
 
 - static List<string> SplitOn(string s, string sep)
   - 按单字符分隔符拆分，丢弃空段。
 
 - bool SideHasVisible(int side)
+  - 该侧是否有任一可见分组（决定布局时该侧是否占空间）。
 
 - bool GroupHasVisible(DockGroup g)
+  - 组内是否有任一未隐藏的面板。
 
 - List<DockGroup> VisibleGroups(int side)
+  - 该侧含可见面板的分组（按列表顺序）。
 
 - void Begin(App app, Rect a)
   - 在 `a` 内布置整个停靠区，绘制分隔手柄和每个
@@ -631,6 +678,8 @@ if (dock.TakeChanged()) { File.WriteAllText(layoutPath, dock.SaveLayout()); }
     关闭的面板一个条目，选中即将其停靠回原位置。
 
 - void RegisterClipped(App app, int id, int rx, int ry, int rw, int rh, int clipX, int clipW)
+  - 注册命中区前先按组的横向裁剪收拢矩形（标签条可能被裁出组外）；
+    完全落在裁剪外时不注册。
 
 - void End(App app)
   - 结束一帧：标签拖拽期间解析放置
@@ -647,8 +696,10 @@ if (dock.TakeChanged()) { File.WriteAllText(layoutPath, dock.SaveLayout()); }
   - 0 = 中部，1 = 左带，2 = 右带，3 = 顶带，4 = 底带。
 
 - static Rect HalfRect(Rect r, int zone)
+  - `zone` 所指那一半的矩形（新建组的放置提示）。
 
 - static int SideForZone(int zone)
+  - 边缘带 → 宿主侧：1=左、2=右、4=下，其余（含顶带）归中央。
 
 - Rect SideStrip(App app, int side)
   - 某一侧将占据的条带，用作侧边停靠的放置提示。
@@ -657,13 +708,19 @@ if (dock.TakeChanged()) { File.WriteAllText(layoutPath, dock.SaveLayout()); }
   - `g` 在其所在侧各组中的位置。
 
 - int SideCount(int side)
+  - 该侧当前的分组数（新组排在末尾用）。
 
 - int InsertPos(int side, int k)
   - 新组成为 `side` 的第 `k` 组时的全局索引。
 
 - void ApplyDrop()
+  - 松开时执行放置：dropKind=1 把面板并入目标组（目标组若因
+    Detach 解散则中止）；dropKind=2 在 `dropSide` 第 `dropIndex`
+    处新建组——但该侧原本只剩被拖面板自己那一个组时退化为
+    重排序，不拆组。两种都会更新面板 home 并置 changed。
 
 - int IndexOfKey(int key)
+  - 按 key 找组（ApplyDrop 在 Detach 后重找目标组用）；无则 -1。
 
 - bool Dragging()
   - 标签正在拖拽时为 true——宿主可以抑制自己本帧的
@@ -708,6 +765,7 @@ if (dock.TakeChanged()) { File.WriteAllText(layoutPath, dock.SaveLayout()); }
 - Rect body;
 
 - DockPanel(string id, string title, bool closable)
+  - 图标默认 "grid"，初始停靠边为左侧。
 
 
 ## DockSide (class)
@@ -717,12 +775,16 @@ Left/Right 是通高列，Bottom 是中央区域下方的条，
 Center 是其他所有面板围绕停靠的区域。
 
 - static int Left()
+  - 左侧通高列。
 
 - static int Right()
+  - 右侧通高列。
 
 - static int Bottom()
+  - 中央区域下方的横向条。
 
 - static int Center()
+  - 其他面板围绕停靠的中央区域。
 
 
 ## FileFilter (class)
@@ -741,7 +803,11 @@ Center 是其他所有面板围绕停靠的区域。
 
 可复用的应用内路径选择器，承载于独立 GUI 窗口。
 
-- static int lang=1;
+- static string lang="zh";
+
+- [DllImport("zan_gui")]static extern string zan_gui_android_files_dir();
+  - Android 上应用私有 files 目录（SDL Activity 持有，经驱动导出）。
+    进程 cwd 是 "/" 且列根目录被 SELinux 拒绝，这里作为默认浏览起点。
 
 - Input pathInput;
 
@@ -760,6 +826,12 @@ Center 是其他所有面板围绕停靠的区域。
 - SignalBool showHidden;
 
 - App popup;
+
+- bool inlineMode;
+  - Android 降级标志：SDL 只有一个 activity 窗口，第二个 OS 窗口
+    创建后不可见，对话框永远弹不出来。inlineMode=true 时选择器改由
+    宿主窗口内的全屏模态承载（RenderOverlay），事件也走宿主，
+    OwnsWindow 恒 false。
 
 - bool open;
 
@@ -787,9 +859,29 @@ Center 是其他所有面板围绕停靠的区域。
 
 - string selectedPath;
 
+- List<string> selectedPaths;
+  - 多选模式（BeginOpenFileMulti / BeginOpenFileFiltersMulti）：
+    Ctrl+点击把文件行加入/移出本集合，Shift+点击从锚点行扩展；
+    确认后经 SelectedPaths() 读回（升序、与列表同序）。单选模式
+    恒空，行为与历史版本完全一致。
+
+- int anchorIdx;
+  - Shift+点击范围选择的锚点（列表索引，-1 = 无锚点）。
+
+- bool allowMulti;
+
+- int maxSelect;
+  - 多选数量上限（0 = 不限）：Ctrl+点击加选与 Shift+点击范围扩展
+    在达到上限后拒绝新增并提示；窗口内状态区实时显示「已选 x/N」。
+
 - string statusText;
 
 - string lastFilter;
+
+- string lastDir;
+  - 上一次浏览的目录：Begin 未给 initial 时从这里续起，生命周期内
+    连续打开不再每次回到默认目录。Begin 解析出有效目录与 Navigate
+    成功时更新。
 
 - List<string> expanded;
 
@@ -829,6 +921,9 @@ Center 是其他所有面板围绕停靠的区域。
   - 筛选框，首次渲染时按当前界面语言建好并复用。
 
 - static string T(string en, string zh)
+  - 双语文案改走键式查找（System.Globalization.Lang）：英文原文
+    作键、内置中文为缺省串。宿主已 Lang.LoadDir 时语言包整句
+    覆盖；未加载（code 空）回退缺省串，行为与之前一致。
 
 - static string Normalize(string path)
 
@@ -879,28 +974,72 @@ Center 是其他所有面板围绕停靠的区域。
 - void BeginOpenFileFilters(string initial, List<FileFilter> items, string dialogTitle)
   - 带显式扩展名过滤器集合的打开文件对话框。
 
+- void BeginOpenFileMulti(string initial, string extension, string dialogTitle)
+  - 多选打开文件对话框：Ctrl+点击切换选中，Shift+点击范围选择，
+    确认后经 SelectedPaths() 读回全部选中路径。
+
+- void SetMaxSelect(int n)
+  - 多选数量上限（0 = 不限）。达到上限后再点新行拒绝加入并在
+    状态区提示；宿主（如 Upload 的 Max）用它把上限透传进弹窗。
+
+- int MaxSelect()
+  - 当前多选数量上限（0 = 不限）。测试钉语义用。
+
+- void BeginOpenFileFiltersMulti(string initial, List<FileFilter> items, string dialogTitle)
+  - 多选 + 显式扩展名过滤器集合的打开文件对话框。
+
 - static string FirstExt(string pattern)
   - ";" 分隔模式中的第一个扩展名（模式为空则为 ""）。
 
 - static bool ContainsText(string text, string needle)
   - 名称过滤框的不区分大小写子串测试（"" 匹配所有）。
 
+- static string FilterTokenToSuffix(string ext)
+  - 模式 token → 可做字面后缀比较的形态：剥掉通配 "*"
+    （"*.png"→".png"、"png"→".png"、"."→"."）。EndsWith 是字面
+    比较，"*" 留在里面会让每个文件都匹配不上——过滤器一选
+    「接受的文件」列表就全空，即此根因。
+
 - bool MatchesCurrentFilter(string name)
   - `name` 通过当前所选过滤器时为 true。空模式
     （所有文件）匹配一切；否则 ";" 分隔的
     任一扩展名匹配即可。
 
+- bool PatternMatches(string name, string pattern)
+  - ";" 分隔模式的任一 token 命中即 true；空模式匹配一切。
+
 - void BeginSaveFile(string initial, string extension, string defaultName, string dialogTitle)
 
 - void ApplySkin(int index)
 
+- int SkinIndex()
+  - 当前皮肤索引（0 = 默认暗色）。测试与宿主同步检查用。
+
 - bool IsOpen()
+
+- bool WindowModeOpen()
+  - 弹窗是否以独立 OS 窗口承载。inlineMode（Android/无第二窗口环境）
+    时恒 false：OS 窗口从未创建，内容随宿主帧经 RenderOverlay 绘制，
+    宿主事件泵不应为它改变轮询/阻塞节奏（对照 IsOpen，后者在两种
+    模式下都为 true）。
 
 - bool NeedsRedraw()
 
 - bool OwnsWindow(nint hwnd)
 
+- nint PopupWindowHandle()
+  - 弹窗的原生窗口句柄（未开为 0）。宿主焦点管理与路由测试用；
+    非属主判定请用 OwnsWindow（0 不与任何真实句柄冲突）。
+
 - string SelectedPath()
+
+- List<string> SelectedPaths()
+  - 多选确认后的全部选中路径（升序、与列表展示同序）。单选模式
+    返回空列表；单选宿主请继续读 SelectedPath()。
+
+- string LastDirectory()
+  - 生命周期内记住的上一次浏览目录（Begin 未传 initial 时续用）。
+    测试钉住「连续打开不再回到默认目录」的语义。
 
 - string CurrentDirectory()
 
@@ -908,15 +1047,37 @@ Center 是其他所有面板围绕停靠的区域。
 
 - void Finish(int action)
 
+- bool InMultiSelection(int idx, List<string> paths)
+  - `idx` 行在多选集合里时为 true。列表行每帧重建（names/paths
+    是 RenderContent 的局部量），这里按路径字符串比较——多选集合
+    存的本来就是路径。
+
+- void RemoveSelectedPath(string path)
+  - 从多选集合摘除一条路径（List<string> 无 Remove 成员，
+    手写摘除保持索引连续）。
+
 - void Close()
 
 - bool ApplyEvent(nint evHwnd)
+
+- void SweepClosed()
+  - 程序化 Close（Finish(2)）留下的 popup 引用在这里收尾：宿主在
+    TakeResult != 0 的那一轮（弹窗刚关闭）调用一次，销毁 OS 窗口并
+    清空引用，OwnsWindow 随即回到 false。用户点叉的路径走
+    ApplyEvent 的 kind 8 分支，不需要这步。
 
 - int TakeResult()
 
 - void Navigate(string dir)
 
 - void RenderWindow()
+
+- void RenderOverlay(App host)
+  - inlineMode（Android/无第二窗口环境）的绘制入口：宿主在自己的
+    渲染回调里（页面之上、每帧一次，Layer.Render 同款时机）调用。
+    先铺变暗遮罩并吞掉其下命中，再复用 RenderContent 的即时模式
+    主体——它按传入 app 的画布尺寸与 ContentTop 自适应，全屏承载。
+    桌面（窗口模式）本函数是 no-op，宿主可以无条件调用。
 
 - void RenderContent(App app)
 
@@ -952,8 +1113,10 @@ PathFilter.Any().Skip(".build"), true, true));
 可以把浮层、菜单锚到节点上。
 
 - string id;
+  - 调用方命名的稳定 id；deps 引用与 SelectId/IndexOfId 都用它。
 
 - string title;
+  - 卡片标题文本。
 
 - string tag;
   - 负责人之类的短标签，画在标题下方。
@@ -965,6 +1128,7 @@ PathFilter.Any().Skip(".build"), true, true));
   - 状态短语（进行中 / 待办 / 阻塞…）。
 
 - string stateClass;
+  - 状态短语的语义类（`primary`/`success`…），由皮肤取色。
 
 - int progress;
   - 0..100 的进度；负数表示这个节点不显示进度条。
@@ -990,19 +1154,26 @@ PathFilter.Any().Skip(".build"), true, true));
 - int lh;
 
 - static GraphNode Of(string id, string title)
+  - 构造节点：id/title 必填；progress = -1（不显示进度条），
+    未完成、无前置。
 
 - GraphNode After(string depId)
   - 声明一个前置节点。
 
 - GraphNode WithTag(string text, string cls)
+  - 设置负责人短标签及其语义类（链式）。
 
 - GraphNode WithState(string text, string cls)
+  - 设置状态短语及其语义类（链式）。
 
 - GraphNode WithProgress(int pct)
+  - 设置进度（0..100；负数隐藏进度条）。链式。
 
 - GraphNode WithPayload(string p)
+  - 附带调用方 payload（图不解释其内容）。链式。
 
 - GraphNode Finished()
+  - 标记完成（后继节点据此解锁）。链式。
 
 
 ## GraphView (class)
@@ -1071,21 +1242,28 @@ Activate，而是触发 Blocked，让宿主说明还差哪一步。
   - 节点被右键点击时（读 ContextRow / ContextX / ContextY）。
 
 - void InitGraph()
+  - 构造内部状态：空数据、未选中、默认卡片模板与四个交互事件。
 
 - GraphView()
+  - 默认构造：节点卡片用内置标准控件拼装。
 
 - GraphView(GraphCardOf template)
   - 自定义节点卡片。
 
 - override string Kind()
+  - 控件类型标识（序列化/设计器用）。
 
 - override string StyleType()
+  - 覆写：CSS 类型选择器名（"graph"）。
 
 - override List<PropSpec> Props()
+  - 覆写：返回设计器属性清单（empty/class）。
 
 - override List<string> Events()
+  - 覆写：公共事件之外提供 "Select"/"Activate"/"Blocked"/"Context"。
 
 - override void BindEvent(string evt, Action a)
+  - 覆写：四个语义事件各挂对应 UiEvent，其余按名称走通用路由。
 
 - GraphView Bind(List<GraphNode> nodes)
   - 绑定调用方的节点列表；不复制任何内容。
@@ -1097,26 +1275,37 @@ Activate，而是触发 Blocked，让宿主说明还差哪一步。
   - 共享调用方的选择信号，供在列表重建后保持选择的宿主使用。
 
 - GraphView EmptyText(string text)
+  - 设置空图提示文案（链式）。
 
 - GraphView OnSelect(Action a)
+  - 订阅选中/激活/拦截/右键事件（链式；组文档覆盖以下四个）。
 
 - GraphView OnActivate(Action a)
+  - 订阅激活事件：双击未锁定节点时触发（锁定节点走 Blocked）。
 
 - GraphView OnBlocked(Action a)
+  - 订阅拦截事件：双击锁定的节点时触发，由宿主提示还差哪一步。
 
 - GraphView OnContext(Action a)
+  - 订阅右键事件：右键按下节点时触发。
 
 - int Count()
+  - 节点总数。
 
 - bool Has(int row)
+  - 行号是否在节点列表范围内。
 
 - GraphNode NodeAt(int row)
+  - 第 row 行的节点（越界行为未定义，调用方先用 Has 判断）。
 
 - List<GraphNode> Nodes()
+  - 底层节点列表（调用方的引用，未复制）。
 
 - int SelectedIndex()
+  - 当前选中行号；未选中为 -1。
 
 - bool HasSelection()
+  - 是否有有效选中。
 
 - GraphNode Selected()
   - 选中的节点；仅在 HasSelection() 时有效。
@@ -1125,10 +1314,13 @@ Activate，而是触发 Blocked，让宿主说明还差哪一步。
   - 事件处理器涉及的节点行号与指针位置。
 
 - int ContextX()
+  - 最近一次节点点击/右键记录的指针 X（app 坐标）。
 
 - int ContextY()
+  - 最近一次节点点击/右键记录的指针 Y（app 坐标）。
 
 - int IndexOfId(string id)
+  - 按 id 查节点行号；空 id 或未命中返回 -1。
 
 - void SelectId(string id)
   - 按 id 选中节点，并触发 Select（宿主恢复上次选择时用）。
@@ -1139,6 +1331,7 @@ Activate，而是触发 Blocked，让宿主说明还差哪一步。
   - 取消选择。不触发 Select（没有节点可读），只清掉高亮。
 
 - static int IndexOf(List<GraphNode> ns, string id)
+  - 按 id 线性查找行号；空 id 或未命中返回 -1。
 
 - List<string> PendingDeps(int row)
   - `row` 的前置里还没做完的那些 id。空表示它可以开工了。
@@ -1154,6 +1347,7 @@ Activate，而是触发 Blocked，让宿主说明还差哪一步。
     会同层相连），而不是无限递归下去。
 
 - bool Templated()
+  - 是否使用调用方提供的自定义卡片模板。
 
 - void BuildCards(App app)
   - 每个节点一张卡片。卡片是本控件的子节点，因此由框架测量、
@@ -1171,22 +1365,28 @@ Activate，而是触发 Blocked，让宿主说明还差哪一步。
   - 锁标记：前置没做完时显示的标准标签（默认卡片专用）。
 
 - int Gap(App app)
+  - 节点卡片间距（皮肤 graph 件的 gap，缺省 gapLarge）。
 
 - int CardWidth(App app, int areaW)
   - 所有卡片统一宽度：图要读的是层次，宽度参差不齐会让同层
     的卡片看着像不同的东西。取最宽的那张，再收进可用宽度。
 
 - int CardHeight(App app)
+  - 所有卡片统一高度：取最高的那张（下限 48px 的缩放值）。
 
 - int Layout(App app, int areaX, int areaY, int areaW)
   - 按层排布，写回每个节点的矩形，返回内容总高度。`areaX/areaY`
     是内容区左上角（已含滚动偏移）。
 
 - override void OnMeasure(App app)
+  - 覆写：按需重建节点卡片后量出流式布局的首选高度。
 
 - override void OnPaint(App app)
+  - 覆写：画表面、空态提示，流式摆放节点卡片与连线并在溢出时
+    画纵向滚动条，处理滚动与节点命中。
 
 - int ScrollOffset(App app, int contentH)
+  - 处理滚轮并把滚动位置钳在内容范围内，返回当前偏移。
 
 - void PaintEdges(App app)
   - 依赖连线：前置卡片底边中点 -> 本节点顶边中点，走折线，末端
@@ -1207,6 +1407,7 @@ Activate，而是触发 Blocked，让宿主说明还差哪一步。
   - 选中与滚动只改画布自己那块像素，损伤限定在控件矩形内。
 
 - void PaintEmpty(App app)
+  - 空图提示（Empty 为空串时不画）。
 
 
 ## LogState (class)
@@ -1231,11 +1432,13 @@ LogView 的滚动和文本选择状态，由调用方持有，
 - LogState()
 
 - void ClearSelection()
+  - 取消选择（保留滚动位置）。
 
 - bool HasSelection()
   - 选择至少跨越一个字符时为 true。
 
 - void Reset()
+  - 回到最新一行并取消选择。
 
 
 ## LogView (class)
@@ -1246,8 +1449,10 @@ LogView 的滚动和文本选择状态，由调用方持有，
 调用方提供，视图无需知道自己在记录什么。
 
 - static int RowHeight(App app)
+  - 每行高度（逻辑像素，绘制时按 DPI 缩放）。
 
 - static int Padding(App app)
+  - 视图四周留白（逻辑像素）。
 
 - static int VisibleRows(App app, int h)
   - 高度为 `h` 的视图中能容纳的行数。
@@ -1276,95 +1481,6 @@ LogView 的滚动和文本选择状态，由调用方持有，
   - 日志主体的滚轮、滚动条拖拽和拖拽选择。
 
 
-## PivotAgg (class)
-
-单个透视单元格或合计的聚合累加器（求和/计数/最大/最小）。
-取代旧的 sum/cnt/mx/mn 平行列表约定。
-
-- int sum;
-
-- int cnt;
-
-- int mx;
-
-- int mn;
-
-- PivotAgg()
-
-- void Add(int v)
-
-- int Value(int aggType)
-
-
-## PivotConfig (class)
-
-PivotTable 交叉表（cross-tabulation）的配置。
-rowField  ：列索引，其不同取值成为透视表的行
-colField  ：列索引，其不同取值成为透视表的列
-valueField：数值列索引，在每个交叉点处聚合
-aggType   ：0 求和，1 计数，2 平均，3 最大，4 最小
-
-单个度量可内联给出（valueField/aggType）。若要多个
-度量并排显示，请调用 AddValue(...) 一次或多次；此时内联的
-value 被忽略，每个 colKey 在两级列标题下展开为每个度量
-一个子列。
-
-- int rowField;
-
-- int colField;
-
-- int valueField;
-
-- int aggType;
-
-- string rowTitle;
-
-- string colTitle;
-
-- string valueTitle;
-
-- List<PivotMeasure> measures;
-
-- PivotConfig(int rowField, int colField, int valueField, int aggType)
-
-- static PivotConfig AddValue(PivotConfig p, int field, int agg, string title)
-  - 添加一个度量（数值字段 + 聚合方式）。流式：返回配置本身。
-
-
-## PivotMeasure (class)
-
-一个已解析的度量：读取哪一列、如何聚合以及它的
-显示标题。取代旧的 field/agg/title 平行列表。
-
-- int field;
-
-- int agg;
-
-- string title;
-
-- PivotMeasure(int f, int a, string tt)
-
-
-## PivotTable (class)
-
-交叉表/透视表。按两个字段对原始 DataRows 分组，并在每个
-行列交叉点聚合一个或多个数值度量，带行
-合计、列合计和总计。聚合每帧运行（每个轴上的
-不同键数量预计不会太多）。
-
-- static string AggName(int a)
-
-- static int AggValue(int s, int n, int mx, int mn, int a)
-
-- static string MeasureLabel(int agg, string title)
-
-- static List<string> SortedDistinct(List<DataRow> rows, int field)
-
-- static void DrawNum(Canvas c, int cx, int cy, int cw, int rowH, int pad, string val, int color, int fs)
-
-- static void Render(App app, int x, int y, int viewW, int viewH, List<DataRow> rows, PivotConfig cfg)
-
-
 ## PropertyGrid (class)
 
 属性表：把一组 PropSpec 画成可编辑的属性行，值直接读写 spec 绑定
@@ -1378,19 +1494,18 @@ grid.RenderInside(app, new Rect(x, y, w, h));
 3 SelectBox，5 分组标题（PropSpec.Section，只有文字没有编辑器）。
 
 - List<PropSpec> data;
+  - 当前绑定的属性行（Bind 每帧灌入，不拷贝）。
 
 - List<Input> texts;
   - 每行一个编辑器（按行索引对齐，未用到的槽为 null）。
-
-- List<SignalString> textSigs;
+    编辑器由属性协议驱动（GetProp/SetProp/GetText/SetText），
+    不再持有任何外部信号——动态宿主没有编译期字段可绑。
 
 - List<Switch> flags;
-
-- List<SignalBool> flagSigs;
+  - 开关行的编辑器（按行索引对齐，非开关行为 null）。
 
 - List<SelectBox> picks;
-
-- List<SignalInt> pickSigs;
+  - 下拉行的编辑器（按行索引对齐，非下拉行为 null）。
 
 - List<int> minusIds;
   - 整数属性行的 -/+ 步进按钮稳定控件 id（按行索引对齐，
@@ -1405,6 +1520,7 @@ grid.RenderInside(app, new Rect(x, y, w, h));
   - 当前绑定对象的标识，变化时重建编辑器。
 
 - SignalInt scroll;
+  - 纵向滚动偏移（像素）。
 
 - string Empty;
   - 没有属性时显示的文本（"" 不画）。
@@ -1413,23 +1529,29 @@ grid.RenderInside(app, new Rect(x, y, w, h));
   - 某一行被用户改动后触发（读 ChangedKey 得知是哪一个）。
 
 - int hitRow;
+  - 最近被用户改动的行号（-1 = 尚无改动；Rebuild 后复位）。
 
 - PropertyGrid()
+  - 构造空属性表：未绑定任何行，空态文本为 ""（不画）。
 
 - override string Kind()
+  - 控件类型标识（"PropertyGrid"）。
 
 - PropertyGrid OnChange(Action a)
+  - 订阅属性改动事件（回调里读 ChangedKey/ChangedRow）。
 
 - int ChangedRow()
   - 最近被用户改动的行号 / 属性键。
 
 - string ChangedKey()
+  - 最近被用户改动的属性键（无效时为 ""）。
 
 - void Bind(string k, List<PropSpec> specs)
   - 绑定一组属性。`k` 标识当前对象（如 "Field:btn0"）：它变化时
     才重建编辑器，否则沿用现有的，输入焦点和光标不会每帧丢失。
 
 - void Rebuild()
+  - 强制丢弃现有编辑器并按当前 specs 重建（切对象后 Bind 会自动调）。
 
 - int IndexOfValue(PropSpec p, string val)
   - 枚举值（可能存的是序号，也可能是选项文本）对应的选项下标。
@@ -1439,6 +1561,7 @@ grid.RenderInside(app, new Rect(x, y, w, h));
     绑定到字符串的存选项文本。
 
 - static bool IsNumber(string s)
+  - 整数属性编辑器判可解析（允许前导 -）。
 
 - string Editor(int i)
   - 编辑器当前值的字符串形式（与 PropSpec.Read 同一种表示）。
@@ -1461,17 +1584,94 @@ grid.RenderInside(app, new Rect(x, y, w, h));
     返回本帧是否被点击。
 
 - int RowHeight(App app)
+  - 单行高度（逻辑像素，绘制时按 DPI 缩放）。
 
 - int ContentHeight(App app)
   - 全部行的高度（宿主据此在自己的滚动区里给出槽位）。
 
 - override void OnMeasure(App app)
+  - 布局测量：首选高度 = 全部行高之和。
 
 - override void OnPaint(App app)
+  - 绘制：处理滚轮并钳制滚动偏移，逐行画标签与编辑器
+    （整数行带 -/+ 步进按钮），每行做一次双向同步；
+    悬停行有说明时请求气泡提示，内容溢出时画纵向滚动条。
 
 - override List<string> Events()
+  - 控件事件清单：公共事件之外提供 "Change"。
 
 - override void BindEvent(string evt, Action a)
+  - 绑定事件："Change" 接 UiEvent，其余按名称走通用路由。
+
+
+## Ribbon (class)
+
+彩色低多边形飘带背景动画 —— 经典网页彩带（ribbon.js）的移植，
+作为 Gui 组件库的一员供应用直接声明使用：
+
+Ribbon ribbon = new Ribbon(3);
+// 每帧一次：
+ribbon.Render(app, x, y, w, h, 40);
+
+每条飘带预生成一串三角形分段（p1/p2/p3 顶点），整体从矩形
+一侧流向另一侧；每个分段按 sin(phase) 淡入淡出，相位追上后
+整条飘带结束、补一条新飘带，保持恒定条数。组件自包含：
+按 App 帧时钟推进相位（与调用频率无关），绘制始终裁剪在
+矩形内部（顶点越界安全），尺寸变化时按新尺寸重新生成，
+并自行重排动画帧——调用方不需要管理计时或重绘。
+alphaPercent 建议取 26~90（对应原版 colorAlpha 0.1~0.35）。
+
+- class Sec
+  - 单个分段：三角形 p1->p2->p3，phase 0..2π 驱动 sin 透明度。
+
+- List <List<Sec>> ribbons;
+
+- Random rng;
+
+- int ribbonCount=3;
+
+- int colorSat=80;
+
+- int colorLum=60;
+
+- int colorCycle=6;
+
+- double alpha=0.25;
+
+- double horizSpeed=200;
+
+- double speed=1.6;
+
+- int w;
+
+- int h;
+
+- int lastMs=-1;
+
+- public Ribbon(int bandCount)
+  - 构造：bandCount 条飘带。
+
+- public void SetSpeed(double factor)
+  - 选择飘带速度倍率（1 = 原版网页步进；默认 1.6 更快）。
+
+- public void Render(App app, int x, int y, int w, int h, int alphaPercent)
+  - 每帧声明一次：推进动画并绘制在 [x,y,w,h] 内部，
+    随后自行续接动画帧。调用方先铺好自己的不透明底色。
+
+- List<Sec> NewRibbon()
+  - 预生成一条完整飘带（从左/右边缘流向另一侧）。
+
+- bool RibbonDone(List<Sec> ribbon)
+  - 飘带是否全部淡出。
+
+- void DrawSection(Canvas c, Sec s, int ox, int oy)
+  - 画一个分段：纯绘制（相位推进在 Render 中按时间统一做）。
+
+- static void FillTriangle(Canvas c, int x0, int y0, int x1, int y1, int x2, int y2, int color)
+  - 扫描线填充三角形（半透明色逐行 FillRect，跨行重心插值）。
+
+- static int Hsl(int hh, int ss, int ll)
+  - HSL(0..360, 0..100, 0..100) -> 0xRRGGBB。
 
 
 ## SessionList (class)
@@ -1490,23 +1690,31 @@ if (a.selected >= 0) { ... }
 if (a.deleted >= 0) { ... }
 
 - Input search;
+  - 顶部搜索框（文本同时供宿主过滤自己的数据用）。
 
 - SignalInt scroll;
+  - 列表滚动偏移（像素）。
 
 - Button newBtn;
+  - 顶部"新建"按钮。
 
 - string emptyText;
+  - 无行匹配当前搜索时居中绘制的文本（"" = 不显示）。
 
 - bool showArchived;
   - 底部开关：归档行在开启前保持隐藏。
 
 - string archiveTip;
+  - 归档框的悬停提示（"" = 无）。
 
 - string deleteTip;
+  - 删除叉号的悬停提示（"" = 无）。
 
 - string archivedLabel;
+  - 底部归档开关的标签（如 "Archived"）。
 
 - string renameTip;
+  - 重命名框的悬停提示（"" = 无）。
 
 - int editing;
   - 行内重命名：正在编辑的行（-1 表示无）及其字段。从第一条消息
@@ -1514,10 +1722,13 @@ if (a.deleted >= 0) { ... }
     聊天叫什么。
 
 - Input rename;
+  - 行内重命名输入框。
 
 - bool takeFocus;
+  - 重命名框刚打开的那一帧把焦点交给它。
 
 - SessionList(string searchHint, string newLabel)
+  - `searchHint` 搜索框占位文本；`newLabel` "新建"按钮文案。
 
 - SessionList Labels(string archive, string delete, string archived)
   - 每行归档/删除点击区域以及底部开关的标签，
@@ -1536,10 +1747,14 @@ if (a.deleted >= 0) { ... }
   - 当前搜索文本，宿主也可据此过滤自己的状态。
 
 - static int RowH(App app)
+  - 每行高度（逻辑像素，绘制时按 DPI 缩放）。
 
 - static int Fold(int b)
+  - 对 UTF-8 字节的不区分 ASCII 大小写的子串测试：只有 A-Z 折叠，
+    因此中文标题精确匹配，拉丁查询忽略大小写。
 
 - static bool CiContains(string hay, string needle)
+  - ASCII 大小写不敏感的子串测试（`Fold` 折叠后比对）。
 
 - SessionListAction Render(App app, int x, int y, int w, int h, List<string> titles, int cur)
   - 在给定矩形中绘制整个侧边栏，并返回被点击的内容。
@@ -1569,8 +1784,10 @@ SessionList 在单帧内报告的内容：切换、删除或新建聊天点击�
 - string title;
 
 - static SessionListAction None()
+  - 无任何交互发生（所有索引 -1、created=false）。
 
 - bool Any()
+  - 本帧有交互需要宿主处理时为 true。
 
 
 ## ChatSpeaker (delegate)

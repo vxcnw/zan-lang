@@ -47,13 +47,15 @@
     <aside class="wiki-side doc-side">
       <div class="searchbox"><svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         <input id="docSearch" placeholder="筛选目录…" aria-label="filter"></div>
-      <details class="nsgrp" open><summary>System · 55</summary>
+      <details class="nsgrp" open><summary>System · 58</summary>
 <a href="/ref/System">System</a>
 <a href="/ref/System.Automation">System.Automation</a>
 <a href="/ref/System.Collections">System.Collections</a>
 <a href="/ref/System.Collections.Generic">System.Collections.Generic</a>
+<a href="/ref/System.Commercial">System.Commercial</a>
 <a href="/ref/System.Compiler">System.Compiler</a>
 <a href="/ref/System.Data">System.Data</a>
+<a href="/ref/System.Data.Excel">System.Data.Excel</a>
 <a href="/ref/System.Data.Firebird">System.Data.Firebird</a>
 <a href="/ref/System.Data.MySql">System.Data.MySql</a>
 <a href="/ref/System.Data.Orm">System.Data.Orm</a>
@@ -69,6 +71,7 @@
 <a href="/ref/System.Globalization">System.Globalization</a>
 <a href="/ref/System.IO">System.IO</a>
 <a href="/ref/System.IO.Compression">System.IO.Compression</a>
+<a href="/ref/System.IO.Watch">System.IO.Watch</a>
 <a href="/ref/System.Input">System.Input</a>
 <a href="/ref/System.Json">System.Json</a>
 <a href="/ref/System.Knowledge">System.Knowledge</a>
@@ -76,6 +79,7 @@
 <a href="/ref/System.Management">System.Management</a>
 <a href="/ref/System.Net">System.Net</a>
 <a href="/ref/System.Net.Coap">System.Net.Coap</a>
+<a href="/ref/System.Net.External">System.Net.External</a>
 <a href="/ref/System.Net.Http">System.Net.Http</a>
 <a href="/ref/System.Net.Http.Client">System.Net.Http.Client</a>
 <a href="/ref/System.Net.Http.Download">System.Net.Http.Download</a>
@@ -84,7 +88,6 @@
 <a href="/ref/System.Net.Modbus">System.Net.Modbus</a>
 <a href="/ref/System.Net.Mqtt">System.Net.Mqtt</a>
 <a href="/ref/System.Net.Ntp">System.Net.Ntp</a>
-<a href="/ref/System.Net.Rpc">System.Net.Rpc</a>
 <a href="/ref/System.Net.Sip">System.Net.Sip</a>
 <a href="/ref/System.Net.Sockets" class="active">System.Net.Sockets</a>
 <a href="/ref/System.Net.Sse">System.Net.Sse</a>
@@ -123,13 +126,13 @@
 <a href="/ref/Game.Arcade2D">Game.Arcade2D</a>
 <a href="/ref/Game.Arpg">Game.Arpg</a>
 <a href="/ref/Game.Arpg.Data">Game.Arpg.Data</a>
-<a href="/ref/Game.Arpg.Fonts">Game.Arpg.Fonts</a>
 <a href="/ref/Game.Board">Game.Board</a>
 <a href="/ref/Game.Cards">Game.Cards</a>
 <a href="/ref/Game.Core">Game.Core</a>
 <a href="/ref/Game.Foundation">Game.Foundation</a>
-<a href="/ref/Game.Foundation.Sdl">Game.Foundation.Sdl</a>
-<a href="/ref/Game.Render">Game.Render</a>
+<a href="/ref/Game.Foundation.Gui">Game.Foundation.Gui</a>
+<a href="/ref/Game.Idle">Game.Idle</a>
+<a href="/ref/Game.Kit">Game.Kit</a>
 <a href="/ref/Game.Scene">Game.Scene</a>
 </details>
 <details class="nsgrp"><summary>Sdk · 57</summary>
@@ -190,9 +193,6 @@
 <a href="/ref/Sdk.Wechat.TenPay">Sdk.Wechat.TenPay</a>
 <a href="/ref/Sdk.Wechat.Work">Sdk.Wechat.Work</a>
 <a href="/ref/Sdk.Wechat.WxOpen">Sdk.Wechat.WxOpen</a>
-</details>
-<details class="nsgrp" open><summary>SDL3 · 1</summary>
-<a href="/ref/SDL3">SDL3</a>
 </details>
 <details class="nsgrp"><summary>Platform · 1</summary>
 <a href="/ref/Platform">Platform</a>
@@ -326,22 +326,31 @@ Windows 使用 Winsock2，Linux/macOS 使用 BSD 套接字（libc）。</div>
 <li class=""><code class="sig">[DllImport(&quot;ws2_32&quot;, EntryPoint=&quot;WSAGetLastError&quot;)]static extern int WinLastError();</code>
 </li>
 <li class=""><code class="sig">static int SysClose(nint s)</code>
+<div class="mdoc">关闭套接字（closesocket 直转发，收完整 SOCKET 句柄）。</div>
 </li>
 <li class=""><code class="sig">static int SysShutdown(nint s, int how)</code>
+<div class="mdoc">关闭收发（shutdown 直转发，收完整 SOCKET 句柄）。</div>
 </li>
 <li class=""><code class="sig">static int SysBind(nint s, string addr, int addrlen)</code>
+<div class="mdoc">绑定地址（bind 直转发，收完整 SOCKET 句柄）。</div>
 </li>
 <li class=""><code class="sig">static int SysListen(nint s, int backlog)</code>
+<div class="mdoc">开始监听（listen 直转发，收完整 SOCKET 句柄）。</div>
 </li>
 <li class=""><code class="sig">static nint SysAccept(nint s, string addr, string addrlen)</code>
+<div class="mdoc">接受连接（accept 直转发，收完整 SOCKET 句柄）。</div>
 </li>
 <li class=""><code class="sig">static int SysConnect(nint s, string addr, int addrlen)</code>
+<div class="mdoc">发起连接（connect 直转发，收完整 SOCKET 句柄）。</div>
 </li>
 <li class=""><code class="sig">static int SysSetSockOpt(nint s, int level, int optname, string optval, int optlen)</code>
+<div class="mdoc">设置套接字选项（setsockopt 直转发，收完整 SOCKET 句柄）。</div>
 </li>
 <li class=""><code class="sig">static int SysSendTo(nint s, string buf, int len, int flags, string to, int tolen)</code>
+<div class="mdoc">UDP 发送数据报（sendto 直转发，收完整 SOCKET 句柄）。</div>
 </li>
 <li class=""><code class="sig">static int SysRecvFrom(nint s, string buf, int len, int flags, string from, string fromlen)</code>
+<div class="mdoc">UDP 接收数据报（recvfrom 直转发，收完整 SOCKET 句柄）。</div>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;)]static extern int socket(int af, int type, int protocol);</code>
 </li>
@@ -377,9 +386,38 @@ Windows 使用 Winsock2，Linux/macOS 使用 BSD 套接字（libc）。</div>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;)]static extern int fcntl(int fd, int cmd, int arg);</code>
 </li>
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;__errno&quot;)]static extern nint NativeErrnoLocation();</code>
+</li>
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;__errno_location&quot;)]static extern nint NativeErrnoLocation();</code>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;__error&quot;)]static extern nint NativeErrnoLocation();</code>
+</li>
+<li class=""><code class="sig">static int SysClose(nint s)</code>
+<div class="mdoc">关闭套接字（句柄在此截断为 int fd 传给 close）。</div>
+</li>
+<li class=""><code class="sig">static int SysShutdown(nint s, int how)</code>
+<div class="mdoc">关闭收发（句柄截断为 int fd 传给 shutdown）。</div>
+</li>
+<li class=""><code class="sig">static int SysBind(nint s, string addr, int addrlen)</code>
+<div class="mdoc">绑定地址（句柄截断为 int fd 传给 bind）。</div>
+</li>
+<li class=""><code class="sig">static int SysListen(nint s, int backlog)</code>
+<div class="mdoc">开始监听（句柄截断为 int fd 传给 listen）。</div>
+</li>
+<li class=""><code class="sig">static nint SysAccept(nint s, string addr, string addrlen)</code>
+<div class="mdoc">接受连接（句柄截断为 int fd 传给 accept）。</div>
+</li>
+<li class=""><code class="sig">static int SysConnect(nint s, string addr, int addrlen)</code>
+<div class="mdoc">发起连接（句柄截断为 int fd 传给 connect）。</div>
+</li>
+<li class=""><code class="sig">static int SysSetSockOpt(nint s, int level, int optname, string optval, int optlen)</code>
+<div class="mdoc">设置套接字选项（句柄截断为 int fd 传给 setsockopt）。</div>
+</li>
+<li class=""><code class="sig">static int SysSendTo(nint s, string buf, int len, int flags, string to, int tolen)</code>
+<div class="mdoc">UDP 发送数据报（句柄截断为 int fd 传给 sendto）。</div>
+</li>
+<li class=""><code class="sig">static int SysRecvFrom(nint s, string buf, int len, int flags, string from, string fromlen)</code>
+<div class="mdoc">UDP 接收数据报（句柄截断为 int fd 传给 recvfrom）。</div>
 </li>
 <li class=""><code class="sig">static int SysClose(nint s)</code>
 </li>
@@ -399,11 +437,45 @@ Windows 使用 Winsock2，Linux/macOS 使用 BSD 套接字（libc）。</div>
 </li>
 <li class=""><code class="sig">static int SysRecvFrom(nint s, string buf, int len, int flags, string from, string fromlen)</code>
 </li>
+<li class=""><code class="sig">static int NativeResolveIpv4(string hostname)</code>
+</li>
+<li class=""><code class="sig">static int NativeResolveSockAddr(string name, int port, byte[]buf, int cap)</code>
+</li>
+<li class=""><code class="sig">static int NativeResolveAll(string name, int port, byte[]buf, int cap)</code>
+</li>
+<li class=""><code class="sig">static async long NativeResolveAllAsync2(nint name, int port, nint buf, int cap)</code>
+</li>
+<li class=""><code class="sig">static int NativeSockAddrFamily(nint sa, int len)</code>
+</li>
+<li class=""><code class="sig">static int NativeSockAddrIsSafe(nint sa, int len, int allowLoopback)</code>
+</li>
+<li class=""><code class="sig">static async long NativeConnectSockAddr2(nint sock, nint sa, int len, int timeoutMs)</code>
+</li>
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;zan_io_resolve_ipv4&quot;)]static extern int NativeResolveIpv4(string hostname);</code>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;zan_io_resolve_sa&quot;)]static extern int NativeResolveSockAddr(string name, int port, byte[]buf, int cap);</code>
 </li>
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;zan_io_resolve_all&quot;)]static extern int NativeResolveAll(string name, int port, byte[]buf, int cap);</code>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;zan_io_resolve_all_async&quot;)]static extern long NativeResolveAllAsync2(nint name, int port, nint buf, int cap);</code>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;zan_io_sockaddr_family&quot;)]static extern int NativeSockAddrFamily(nint sa, int len);</code>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;zan_io_sockaddr_is_safe&quot;)]static extern int NativeSockAddrIsSafe(nint sa, int len, int allowLoopback);</code>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;zan_io_connect_sa&quot;)]static extern long NativeConnectSockAddr2(nint sock, nint sa, int len, int timeoutMs);</code>
+</li>
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;zan_io_sockaddr_ip_str&quot;)]static extern string NativeSockAddrIp(byte[]sa);</code>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;zan_io_sockaddr_ip_str_into&quot;)]static extern int NativeSockAddrIpInto(byte[]sa, nint buf, int cap);</code>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;zan_io_socket_peer_ip_into&quot;)]static extern int NativePeerIpInto(nint sock, nint buf, int cap);</code>
+</li>
+<li class=""><code class="sig">static string IpTextFromNative(nint buf, int n)</code>
+<div class="mdoc">从临时原生缓冲取出拷贝好的地址文本并释放缓冲。</div>
+</li>
+<li class=""><code class="sig">static string SockAddrIpText(byte[]sa)</code>
+<div class="mdoc">sockaddr → 地址文本（拷贝语义，可安全跨 await 持有）。</div>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;)]static extern long strlen(string str);</code>
 </li>
@@ -414,6 +486,10 @@ Windows 使用 Winsock2，Linux/macOS 使用 BSD 套接字（libc）。</div>
 </li>
 <li class=""><code class="sig">static void Cleanup()</code>
 <div class="mdoc">清理套接字子系统。</div>
+</li>
+<li class=""><code class="sig">static ushort htons(ushort hostshort)</code>
+</li>
+<li class=""><code class="sig">static int inet_addr(string cp)</code>
 </li>
 <li class=""><code class="sig">static nint CreateTcp()</code>
 <div class="mdoc">创建 TCP 套接字。</div>
@@ -482,6 +558,29 @@ IPv6），即无需 DNS 解析即可直接构建 sockaddr。</div>
 事件循环），字面量 IP 走同步快路径。供 ConnectAsync /
 SendToAsync 使用。</div>
 </li>
+<li class=""><code class="sig">static int ResolveAll(string host, int port, byte[]records)</code>
+<div class="mdoc">同步解析全部地址候选到调用方提供的固定缓冲区。
+每条记录占 32 字节，前 16/28 字节为 sockaddr，其余清零；返回
+候选数，失败返回 0。</div>
+</li>
+<li class=""><code class="sig">static async int ResolveAllAsync(string host, int port, byte[]records)</code>
+<div class="mdoc">异步解析全部地址候选到调用方提供的固定缓冲区。返回候选
+数，失败返回 0；解析失败绝不伪造 0.0.0.0。</div>
+</li>
+<li class=""><code class="sig">static int SockAddrFamily(byte[]record, int len)</code>
+<div class="mdoc">返回 sockaddr 记录的地址族常量（平台原生值）。</div>
+</li>
+<li class=""><code class="sig">static bool SockAddrIsSafe(byte[]record, int len, bool allowLoopback)</code>
+<div class="mdoc">该 sockaddr 是否为可安全连接的常规地址（非未指定/组播）；
+allowLoopback 决定环回地址是否放行。</div>
+</li>
+<li class=""><code class="sig">static bool IsV6Family(int family)</code>
+<div class="mdoc">该地址族常量是否为 IPv6（AF_INET6 的平台取值不同）。</div>
+</li>
+<li class=""><code class="sig">static async int ConnectSockAddrAsync(nint sock, byte[]record, int len, int timeoutMs)</code>
+<div class="mdoc">对一个已经解析出的 sockaddr 做精确异步连接。仅传递
+二进制地址给 runtime，不会再次按主机名解析。</div>
+</li>
 <li class=""><code class="sig">static byte[]BuildSockAddrResolved(int ipAddr, int port)</code>
 <div class="mdoc">从已解析的 IPv4 整数地址构建 sockaddr_in（字节序与
 &lt;c&gt;inet_addr&lt;/c&gt; 一致）。供异步连接复用——解析已在
@@ -520,6 +619,12 @@ reactor 的可写就绪唤醒可能早于挂起的连接
 在后台线程执行，不会阻塞事件循环。</div>
 </li>
 <li class=""><code class="sig">static async int ConnectAsync(nint sock, string ip, int port)</code>
+<div class="mdoc">连接到 <code>ip:port</code>，默认截止 120 秒。黑洞地址永远不会
+唤醒 reactor——旧实现在这里以 Task.Delay(1) 死循环轮询，
+永久挂起协程并烧 CPU；现在与带超时的重载共用同一条
+退避轮询路径，超时返回 -3（套接字留给调用方关闭）。
+需要不同时限的调用方请用四参重载（timeoutMs &lt;= 0 表示
+真正无截止）。</div>
 </li>
 <li class=""><code class="sig">static async int ConnectAsync(nint sock, string ip, int port, int timeoutMs)</code>
 <div class="mdoc">受 &lt;paramref name=&quot;timeoutMs&quot;/&gt; 限制的 ConnectAsync：在时限内
@@ -580,6 +685,7 @@ reactor 的可写就绪唤醒可能早于挂起的连接
 静态变量赋值会被按值捕获。</div>
 </li>
 <li class=""><code class="sig">static void MarkRecvTimeout(bool timedOut)</code>
+<div class="mdoc">更新 LastRecvTimedOut 报告的标志（见带超时 RecvAsync）。</div>
 </li>
 <li class=""><code class="sig">static async int RecvIntoAsync(nint sock, string buf, int bufSize)</code>
 <div class="mdoc">挂起直到可读，然后最多接收 &lt;paramref
@@ -648,6 +754,10 @@ cref=&quot;BuildSockAddrAsync&quot;/&gt;），不会阻塞事件循环。</div>
 否则返回原主机名。</div>
 </li>
 <li class=""><code class="sig">static string RemoteIp(nint sock)</code>
+<div class="mdoc">远端 IP 地址文本。拷贝语义：返回的托管字符串拥有自己的
+字节，不受线程共享格式化缓冲或 await 后协程迁移的影响
+（此前直接采纳原生指针，WebApp 存下 ctx.RemoteIp 后会被
+下一个连接的调用悄悄改写——限流键因此被污染）。</div>
 </li>
 <li class=""><code class="sig">static int LastSocketError()</code>
 <div class="mdoc">最近一次失败的套接字系统调用的平台错误码：
@@ -656,17 +766,26 @@ Windows 的 WSAGetLastError，POSIX 的 errno。供失败路径
 被静默吞掉，调用方只知道操作失败了。</div>
 </li>
 <li class=""><code class="sig">static void CaptureLastError()</code>
+<div class="mdoc">失败检查点处立即捕获平台错误码（见 lastError 上的说明）。</div>
 </li>
 <li class=""><code class="sig">static bool LastResolveFailed()</code>
+<div class="mdoc">最近一次解析是否失败（BuildSockAddrAsync / ConnectAsync 置位）。</div>
 </li>
 <li class=""><code class="sig">static void MarkResolveFailed(bool failed)</code>
+<div class="mdoc">更新 LastResolveFailed 报告的标志。</div>
 </li>
 <li class=""><code class="sig">static long Ipv4ToLong(string ip)</code>
+<div class="mdoc">IPv4 文本 → 整数（字节序与 &lt;c&gt;inet_addr&lt;/c&gt; 一致，第一段在低
+字节），再按点分十进制的高位在前重排为 0..4294967295；
+解析失败返回 -1（255.255.255.255 例外，inet_addr 对它返回 -1
+但它是合法地址）。</div>
 </li>
 <li class=""><code class="sig">static string LongToIpv4(long ipValue)</code>
+<div class="mdoc">Ipv4ToLong 的逆变换：0..4294967295 → 点分十进制；越界返回 &quot;&quot;。</div>
 </li>
 <li class=""><code class="sig">static bool IsOpen(nint sock)</code>
-<div class="mdoc">已被关闭（例如监听器被 Stop() 关闭）。</div>
+<div class="mdoc">套接字是否仍然存活；false 表示
+已被关闭（例如监听器被 Stop() 关闭）。</div>
 </li>
 <li class=""><code class="sig">static bool IsReadable(nint sock)</code>
 <div class="mdoc">用 select() 以零超时检查套接字是否可读。</div>
@@ -705,6 +824,8 @@ Windows 的 WSAGetLastError，POSIX 的 errno。供失败路径
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">TcpClient()</code>
+<div class="mdoc">内部构造：句柄 -1（未连接），接收缓冲默认 64KB；经
+Connect/ConnectAsync/FromSocket 使用。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -728,6 +849,10 @@ TlsStream 中包装连接）。</div>
 null（用 LastConnectTimedOut 区分两种情况）。非正超时
 表示&quot;不设截止时间&quot;。</div>
 </li>
+<li class=""><code class="sig">static async TcpClient ConnectAsync(string host, int port, int timeoutMs, bool allowLoopback)</code>
+<div class="mdoc">连接到已由调用方明确允许的本地或远程目标。DNS 解析完成后
+每个候选地址先做二进制安全审核，再以同一 sockaddr 发起连接。</div>
+</li>
 <li class=""><code class="sig">static bool LastConnectTimedOut()</code>
 <div class="mdoc">本线程最近一次 ConnectAsync 是因超时放弃
 而非被拒绝时为 true。通过同步辅助函数写入，
@@ -735,10 +860,15 @@ null（用 LastConnectTimedOut 区分两种情况）。非正超时
 更新永远到不了调用方。</div>
 </li>
 <li class=""><code class="sig">static void MarkConnectTimeout(bool timedOut)</code>
+<div class="mdoc">更新 LastConnectTimedOut 报告的标志（在异步方法内直接给静态
+变量赋值会被按值捕获，见 LastConnectTimedOut 上的说明）。</div>
 </li>
 <li class=""><code class="sig">static bool LastConnectResolveFailed()</code>
+<div class="mdoc">最近一次 ConnectAsync 是否因 DNS 解析失败（或候选地址全部被
+安全审核拒绝）而返回 null；与超时标志互斥使用。</div>
 </li>
 <li class=""><code class="sig">static void MarkConnectResolveFailed(bool failed)</code>
+<div class="mdoc">更新 LastConnectResolveFailed 报告的标志。</div>
 </li>
 <li class=""><code class="sig">static TcpClient Connect(string host, int port)</code>
 <div class="mdoc">同步连接远程主机。</div>
@@ -868,7 +998,12 @@ socket/bind/listen 在 <code>Start</code> 里做，所以直接对
 挂起。这里补上一次 Start（失败照常抛 SocketException）。</div>
 </li>
 <li class=""><code class="sig">void Stop()</code>
-<div class="mdoc">停止监听器。</div>
+<div class="mdoc">停止监听器。Windows 上必须先对句柄做 CancelIoEx
+再关闭：closesocket 自己不会给挂起的 AcceptEx 投递完成包，
+accept 里的协程会带着整条服务端对象链永远挂起（泄漏探测在
+退出时全部记为仍可达）。CancelIoEx 让挂起的 accept 立刻以
+-1 复位——与 POSIX 侧 dead-fd sweep 的语义一致；recv 版的
+同样机制见 <code>Socket.ShutdownBoth</code> 的注释。</div>
 </li>
 <li class=""><code class="sig">bool IsRunning()</code>
 <div class="mdoc">返回监听器是否正在运行。</div>
@@ -912,13 +1047,16 @@ await udp.SendToAsync(&quot;Hello&quot;, &quot;127.0.0.1&quot;, 9999);</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">UdpClient()</code>
+<div class="mdoc">内部构造：创建非阻塞 UDP 套接字，不绑定本地地址；
+经 Bind() 使用。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;)]static extern long strlen(string str);</code>
 </li>
 <li class=""><code class="sig">static UdpClient Bind(string host, int port)</code>
-<div class="mdoc">创建绑定到本地地址和端口的 UDP 套接字。</div>
+<div class="mdoc">创建绑定到本地地址和端口的 UDP 套接字。
+绑定失败（端口被占用等）返回 null。</div>
 </li>
 <li class=""><code class="sig">int SendTo(string data, string ip, int port)</code>
 <div class="mdoc">向指定地址发送数据报。</div>
@@ -950,7 +1088,7 @@ reactor 上挂起直到可写。用于二进制数据报：字符串
 <div class="mdoc">使用默认缓冲区大小接收。</div>
 </li>
 <li class=""><code class="sig">void Close()</code>
-<div class="mdoc">关闭 UDP 套接字。</div>
+<div class="mdoc">关闭 UDP 套接字（幂等）。关闭后 IsBound 为 false。</div>
 </li>
 <li class=""><code class="sig">nint GetSocket()</code>
 <div class="mdoc">返回底层套接字句柄。</div>

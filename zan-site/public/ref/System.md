@@ -1,6 +1,6 @@
 # System
 
-> 源码: `stdlib/System/Binding.zan`, `stdlib/System/ConsoleColor.zan`, `stdlib/System/DateTime.zan`, `stdlib/System/Exception.zan`, `stdlib/System/Guid.zan`, `stdlib/System/IDisposable.zan`, `stdlib/System/Interop.zan`, `stdlib/System/ListExtensions.zan`, `stdlib/System/MessageBox.zan`, `stdlib/System/NativeMemory.zan`, `stdlib/System/Random.zan`, `stdlib/System/StringExtensions.zan`, `stdlib/System/TaskJoin.zan`, `stdlib/System/TimeSpan.zan`, `stdlib/System/ZanVersion.zan`
+> 源码: `stdlib/System/Audio.zan`, `stdlib/System/Binding.zan`, `stdlib/System/ConsoleColor.zan`, `stdlib/System/DateTime.zan`, `stdlib/System/Exception.zan`, `stdlib/System/Guid.zan`, `stdlib/System/IDisposable.zan`, `stdlib/System/Interop.zan`, `stdlib/System/ListExtensions.zan`, `stdlib/System/NativeMemory.zan`, `stdlib/System/Random.zan`, `stdlib/System/RandomNumberGenerator.zan`, `stdlib/System/Stopwatch.zan`, `stdlib/System/StringExtensions.zan`, `stdlib/System/TaskJoin.zan`, `stdlib/System/TimeSpan.zan`, `stdlib/System/ZanVersion.zan`
 
 
 ## ArgumentException (class)
@@ -8,6 +8,175 @@
 当传给方法的参数无效时抛出。
 
 - public ArgumentException(string message)
+  - 以描述参数无效原因的消息构造。
+
+
+## Audio (class)
+
+原生音频设备：一次打开，之后所有声音都混到这一个设备上。
+
+零依赖原生实现（WASAPI 先行），取代原 SDL3 的音频桥。
+`AudioClip` 是解码好的采样（WAV/OGG），
+`AudioVoice` 是它的一次播放；同一个 clip 可以同时起多个
+voice（叠加音效），混音由运行时后台线程完成。
+
+- static bool Open()
+  - 打开默认播放设备（已打开时直接返回 true）。
+
+- static bool IsOpen()
+  - 播放设备已打开时为真。
+
+- static void SetVolume(double volume)
+  - 主音量（0..1，可放大到 1 以上）。对已经在响的声音同样
+    生效，所以静音/淡出立即听得到。
+
+- static double Volume()
+  - 当前主音量（0..1）。
+
+- static string DriverName()
+  - 原生音频后端名（Windows 上是 "wasapi"；其他平台的
+    原生后端尚未落地，返回空串）。
+
+- static int ActiveVoices()
+  - 还在响的声音数：一次性音效播完即回收，不用调用方登记。
+
+- static void StopAll()
+  - 立刻停掉所有声音（切场景/退出时用）。
+
+- static void Close()
+  - 关闭设备，并停掉设备上剩下的声音。
+
+- static string LastError()
+  - 最近一次失败的原因（设备打开失败/解码失败等）；
+    没有失败记录时为空串。
+
+
+## AudioClip (class)
+
+加载到内存的采样（s16 PCM）。`Play` 每次返回
+一个新的 `AudioVoice`，所以同一个 clip 可以叠着响。
+
+- nint handle;
+
+- static AudioClip LoadWav(string path)
+  - 加载 WAV 文件（PCM 8/16/24/32 位与 32 位浮点，含
+    WAVE_FORMAT_EXTENSIBLE）。失败时返回的对象 IsValid() 为 false
+    （原因见 <c>Audio.LastError()</c>），不返回 null。
+
+- static AudioClip LoadOgg(string path)
+  - 加载 OGG Vorbis 文件（背景音乐）。失败时返回的对象
+    IsValid() 为 false，不返回 null。
+
+- static AudioClip LoadWavFromMem(string data, int len)
+  - 从内存字节解析 WAV。<paramref name="data"/> 是完整的
+    WAV 文件字节（如从加密资源包解密出来的内容），全程不落盘。
+    字节只在本次调用内同步读取（PCM 会被拷出），返回后即可释放
+    缓冲区，不转移所有权。失败时返回的对象 IsValid() 为 false
+    （原因见 <c>Audio.LastError()</c>），不返回 null。
+
+- static AudioClip LoadOggFromMem(string data, int len)
+  - 从内存字节解码 OGG Vorbis（背景音乐）。字节只在本次
+    调用内同步读取（PCM 会被拷出），返回后即可释放缓冲区。
+    失败时返回的对象 IsValid() 为 false。
+
+- bool IsValid()
+  - 加载成功时为真（失败时为假对象，不返回 null）。
+
+- int Frequency()
+  - 采样率（Hz）。
+
+- int Channels()
+  - 声道数（1 单声道、2 立体声）。
+
+- int DurationMs()
+  - 时长（毫秒）。
+
+- AudioVoice Play()
+  - 用默认音量播一次。
+
+- AudioVoice Play(double gain, int loop)
+  - 播一次。<paramref name="gain"/> 是这一个声音的音量，
+    <paramref name="loop"/> 非 0 表示循环（背景音乐）。
+
+- AudioVoice PlayLooping(double gain)
+  - 循环播放，直到 `AudioVoice.Stop`。
+
+- void Close()
+  - 释放采样，并停掉还在读它的声音。
+
+
+## AudioNative (class)
+
+zan_audio 原生桥（音频随 zan_gui 运行时导出）。
+
+- [DllImport("zan_gui")]static extern int zan_audio_open();
+
+- [DllImport("zan_gui")]static extern void zan_audio_close();
+
+- [DllImport("zan_gui")]static extern int zan_audio_is_open();
+
+- [DllImport("zan_gui")]static extern void zan_audio_set_volume(double volume);
+
+- [DllImport("zan_gui")]static extern double zan_audio_volume();
+
+- [DllImport("zan_gui")]static extern string zan_audio_driver_name();
+
+- [DllImport("zan_gui")]static extern int zan_audio_active_voices();
+
+- [DllImport("zan_gui")]static extern void zan_audio_stop_all();
+
+- [DllImport("zan_gui")]static extern string zan_audio_last_error();
+
+- [DllImport("zan_gui")]static extern nint zan_audio_load_wav(string path);
+
+- [DllImport("zan_gui")]static extern nint zan_audio_load_ogg(string path);
+
+- [DllImport("zan_gui")]static extern nint zan_audio_load_wav_mem(string data, int len);
+
+- [DllImport("zan_gui")]static extern nint zan_audio_load_ogg_mem(string data, int len);
+
+- [DllImport("zan_gui")]static extern void zan_audio_free_clip(nint clip);
+
+- [DllImport("zan_gui")]static extern int zan_audio_clip_frequency(nint clip);
+
+- [DllImport("zan_gui")]static extern int zan_audio_clip_channels(nint clip);
+
+- [DllImport("zan_gui")]static extern int zan_audio_clip_duration_ms(nint clip);
+
+- [DllImport("zan_gui")]static extern long zan_audio_play(nint clip, double gain, int loop);
+
+- [DllImport("zan_gui")]static extern int zan_audio_voice_playing(long voice);
+
+- [DllImport("zan_gui")]static extern void zan_audio_voice_stop(long voice);
+
+- [DllImport("zan_gui")]static extern void zan_audio_voice_set_gain(long voice, double gain);
+
+
+## AudioVoice (class)
+
+一次播放（voice）。
+
+句柄带世代号：声音播完后句柄失效，`IsPlaying` 老实返回
+false、`Stop` 什么也不做，因此一个存活时间比声音长的
+AudioVoice 变量是安全的，不会碰到被回收的槽位。
+
+- long handle;
+
+- static AudioVoice Of(long handle)
+  - 包装一个原生 voice 句柄；0 表示没起来的声音，此时对象
+    依然可用（IsPlaying 为 false），调用方不需要判空。
+
+- bool IsValid()
+  - 声音是否成功起播（设备没开、voice 池满时为 false）。
+
+- bool IsPlaying()
+  - 声音仍在响时为真；播完或已 Stop 即 false（句柄按世代号失效）。
+
+- void SetGain(double gain)
+  - 这一个声音的音量（会再乘上主音量）。
+
+- void Stop()
+  - 停掉这一个声音并使句柄失效；对已失效句柄无操作。
 
 
 ## Binding (class)
@@ -70,31 +239,43 @@ Com.Release(shell);
     从不接触 COM 的程序既不会加载也不依赖它。
 
 - static nint ole;
+  - 已解析的 ole32.dll 句柄（0 为未加载）。
 
 - static int comTls=Com.AllocComTls();
+  - 保存"本线程 COM 已初始化"的 TLS 槽号；-1 表示分配失败。
 
 - static int AllocComTls()
+  - 分配记录 COM 初始化状态的 TLS 槽；失败返回 -1。
 
 - static int ComTls()
+  - 记录"本线程 COM 已初始化"的 TLS 槽号（-1 表示分配失败）。
 
 - static bool ComInitialized()
+  - 当前线程是否已通过本类初始化过 COM。
 
 - static bool SetComInitialized(bool initialized)
+  - 设置本线程的 COM 初始化标志；TLS 不可用时返回 false。
 
 - static int CoInit(nint reserved, int flags)
+  - CoInitializeEx 包装；入口缺失返回 -1。
 
 - static void CoUninit()
+  - CoUninitialize 包装；入口缺失时忽略。
 
 - static int CoCreate(nint clsid, nint outer, int ctx, nint iid, nint result)
+  - CoCreateInstance 包装；入口缺失返回 -1。
 
 - static void TaskFree(nint p)
+  - CoTaskMemFree 包装；入口缺失时忽略。
 
 - static int SlotQueryInterface()
   - IUnknown vtable 布局，所有 COM 接口共用。
 
 - static int SlotAddRef()
+  - IUnknown vtable 槽位 1：AddRef（引用计数 +1）。
 
 - static int SlotRelease()
+  - IUnknown vtable 槽位 2：Release（引用计数 -1，归零自毁）。
 
 - static int Apartment()
   - COINIT_APARTMENTTHREADED——UI/WebView2 对象所需的模式。
@@ -103,6 +284,7 @@ Com.Release(shell);
   - CLSCTX_INPROC_SERVER.
 
 - static bool Ok(int hr)
+  - HRESULT 是否成功（非负即成功，含 S_FALSE）。
 
 - static int Initialize()
   - 在调用线程上初始化 COM。S_FALSE 表示成功，且
@@ -116,10 +298,13 @@ Com.Release(shell);
     16 字节 GUID（前三个字段为小端，符合 COM 预期）。
 
 - static int Hex(string s, int off, int len)
+  - 取 s 中 off 起 len 个十六进制字符的整数值（非法字符按 0）。
 
 - static int Digit(string ch)
+  - 单个十六进制字符的数值；非法字符按 0。
 
 - static void FreeGuid(nint g)
+  - 释放 Guid() 分配的 16 字节。
 
 - static nint Create(string clsid, string iid)
   - 使用文本 GUID 调用 CoCreateInstance；类不可用时返回 0。
@@ -133,14 +318,19 @@ Com.Release(shell);
     优雅降级，而不是跳到地址零。
 
 - static int Call1(nint iface, int index, nint a)
+  - 同 Call0，多一个指针参数；槽位为空返回 E_FAIL。
 
 - static int Call2(nint iface, int index, nint a, nint b)
+  - 同 Call0，多两个指针参数；槽位为空返回 E_FAIL。
 
 - static int Call3(nint iface, int index, nint a, nint b, nint c)
+  - 同 Call0，多三个指针参数；槽位为空返回 E_FAIL。
 
 - static int Call4(nint iface, int index, nint a, nint b, nint c, nint d)
+  - 同 Call0，多四个指针参数；槽位为空返回 E_FAIL。
 
 - static int Call5(nint iface, int index, nint a, nint b, nint c, nint d, nint e)
+  - 同 Call0，多五个指针参数；槽位为空返回 E_FAIL。
 
 - static int Fail()
   - E_FAIL.
@@ -163,6 +353,7 @@ Com.Release(shell);
     持有引用，使其在调用结束后依然存活。
 
 - static void Release(nint iface)
+  - 平衡 Keep/Query/Create 得到的引用：调用 IUnknown.Release 槽位。
 
 - static void Free(nint p)
   - 释放被调用者用 CoTaskMemAlloc 分配的缓冲区（字符串
@@ -190,14 +381,19 @@ nint handler = v.Build();
 通过传入的 `self` 指针读回。
 
 - nint vtbl;
+  - vtable 内存。
 
 - nint obj;
+  - Build() 分配的对象指针（0 为未构建）。
 
 - int slots;
+  - vtable 容量（槽数）。
 
 - int count;
+  - 已填充的槽数。
 
 - static ComVtbl Create(int slots)
+  - 创建可容纳 slots 个条目的 vtable。
 
 - ComVtbl Add(nint method)
   - 追加下一个 vtable 条目；超过 `slots` 的多余条目会被忽略。
@@ -210,8 +406,11 @@ nint handler = v.Build();
   - 由调用者持有、随对象携带的状态字。
 
 - static int State(nint self)
+  - 静态 handler 侧：从回调收到的 self 指针读回 SetState 写入的
+    状态字。
 
 - void Destroy()
+  - 释放对象与 vtable 内存（Build 之后调用才有效）。
 
 
 ## DateTime (class)
@@ -240,20 +439,28 @@ Unix 纪元（1970-01-01 00:00:00 UTC）以来的秒数。
 - [DllImport("crt", EntryPoint="timegm")]static extern long plat_timegm(nint tm);
 
 - long epoch;
+  - 自 1970-01-01T00:00:00Z 以来的秒数。
 
 - int year;
+  - 年。
 
 - int month;
+  - 月，1..12。
 
 - int day;
+  - 日，1..31。
 
 - int hour;
+  - 时，0..23。
 
 - int minute;
+  - 分，0..59。
 
 - int second;
+  - 秒，0..59。
 
 - int dayOfWeek;
+  - 星期几，0=星期日 .. 6=星期六。
 
 - DateTime(long unixSeconds)
   - 根据 Unix 时间戳（秒，UTC）构造时刻。
@@ -301,16 +508,22 @@ Unix 纪元（1970-01-01 00:00:00 UTC）以来的秒数。
   - <paramref name="year"/> 是否为公历闰年。
 
 - int Year()
+  - 年。
 
 - int Month()
+  - 月（1..12）。
 
 - int Day()
+  - 日（1..31）。
 
 - int Hour()
+  - 时（0..23）。
 
 - int Minute()
+  - 分（0..59）。
 
 - int Second()
+  - 秒（0..59）。
 
 - int DayOfWeek()
   - 星期几，0=星期日 .. 6=星期六。
@@ -319,21 +532,28 @@ Unix 纪元（1970-01-01 00:00:00 UTC）以来的秒数。
   - Unix 纪元以来的秒数（UTC）。
 
 - DateTime AddSeconds(long n)
+  - 加 n 秒。
 
 - DateTime AddMinutes(long n)
+  - 加 n 分钟。
 
 - DateTime AddHours(long n)
+  - 加 n 小时。
 
 - DateTime AddDays(long n)
+  - 加 n 天。
 
 - TimeSpan Subtract(DateTime other)
   - 此时刻与 <paramref name="other"/> 之间的间隔。
 
 - bool Equals(DateTime other)
+  - 同一时刻（纪元秒相等）。
 
 - bool IsBefore(DateTime other)
+  - 早于 other。
 
 - bool IsAfter(DateTime other)
+  - 晚于 other。
 
 - string ToString()
   - 类 ISO 文本："YYYY-MM-DD HH:MM:SS"。
@@ -343,6 +563,17 @@ Unix 纪元（1970-01-01 00:00:00 UTC）以来的秒数。
 
 - string ToTimeString()
   - 仅时间："HH:MM:SS"。
+
+- static DateTime ParseDate(string value)
+  - 解析严格的 "YYYY-MM-DD" 为当天 00:00:00；长度、分隔符或
+    取值非法（月 1..12、日不超过当月天数）返回 null。年份须
+    四位数字，供文本输入与属性面板回传使用。
+
+- static int ParseDigits(string s, int at, int count)
+  - 解析 `at` 起 `count` 位十进制数字；含非数字返回 -1。
+
+- static int Digit(string c)
+  - 十进制数字字符的值，非数字返回 -1。
 
 - static string Pad2(long n)
   - 将 0..99 的值补零到两位。
@@ -363,10 +594,13 @@ Unix 纪元（1970-01-01 00:00:00 UTC）以来的秒数。
 <c>throw new Exception("...")</c> 抛出，并由 <c>catch (Exception e)</c> 捕获。
 
 - public string Message;
+  - 人类可读的异常消息。
 
 - public Exception(string message)
+  - 以人类可读的消息构造异常。
 
 - public string ToString()
+  - 消息文本即字符串形式。
 
 
 ## FileNotFoundException (class)
@@ -374,6 +608,7 @@ Unix 纪元（1970-01-01 00:00:00 UTC）以来的秒数。
 当必须存在的文件无法打开时抛出。
 
 - public FileNotFoundException(string message)
+  - 以描述缺失文件的消息构造。
 
 
 ## Guid (class)
@@ -406,8 +641,10 @@ bool same = Guid.Equals(g, g2);
   - 将 16 字节格式化为规范 GUID 字符串。
 
 - static int CodeOf(string ch)
+  - 首字符的字节值；空串返回 0。
 
 - public string text;
+  - 规范的小写 36 字符文本形式。
 
 
 ## HttpRequestException (class)
@@ -416,6 +653,7 @@ bool same = Guid.Equals(g, g2);
 （连接失败、TLS 握手失败）。
 
 - public HttpRequestException(string message)
+  - 以描述请求失败原因的消息构造。
 
 
 ## IOException (class)
@@ -423,6 +661,7 @@ bool same = Guid.Equals(g, g2);
 当 I/O 操作（打开、读取、写入、复制）失败时抛出。
 
 - public IOException(string message)
+  - 以描述 I/O 失败原因的消息构造。
 
 
 ## Interop (class)
@@ -462,6 +701,7 @@ box(0, Wide.Of("hi"), Wide.Of("zan"), 0);
     不能只写一次硬编码常量。
 
 - static string lastError="";
+  - 最近一次 Load/Symbol 失败的原因文本。
 
 - static string LastError()
   - 上次失败加载的原生加载器错误文本（dlerror / Win32 错误码）；
@@ -475,6 +715,7 @@ box(0, Wide.Of("hi"), Wide.Of("zan"), 0);
     （一种以 ABI 兼容方式探测新运行时特性的做法）。
 
 - static void Unload(nint mod)
+  - 卸载共享库；句柄为 0 时忽略。
 
 - static nint Entry(string name, string entry)
   - 一步加载 `name` 并解析 `entry`；任一失败返回 0。
@@ -492,6 +733,7 @@ box(0, Wide.Of("hi"), Wide.Of("zan"), 0);
 状态无效时抛出（例如对空序列调用 First()）。
 
 - public InvalidOperationException(string message)
+  - 以描述无效操作原因的消息构造。
 
 
 ## JsonException (class)
@@ -499,6 +741,7 @@ box(0, Wide.Of("hi"), Wide.Of("zan"), 0);
 当 JSON 文本格式错误时抛出（JsonValue.Parse）。
 
 - public JsonException(string message)
+  - 以描述 JSON 格式错误的消息构造。
 
 
 ## ListExtensions (class)
@@ -526,53 +769,6 @@ box(0, Wide.Of("hi"), Wide.Of("zan"), 0);
 
 - static void Sort(this List<string> src)
   - 原地按序数升序排序字符串。
-
-
-## MessageBox (class)
-
-桌面提示框。Windows 用 MessageBoxA；Linux 用 zenity 或 kdialog；
-macOS 用 osascript 的 display dialog。返回值沿用 Win32 的
-IDOK=1 / IDCANCEL=2 / IDYES=6 / IDNO=7，因此三个平台的判断代码一致。
-
-提示文本与标题都通过临时文件/参数文件传给后端，不拼进 shell 命令，
-因此内容里的引号和 `$(...)` 不会被解释。
-
-- [DllImport("user32")]static extern int MessageBoxA(nint hwnd, string text, string caption, int flags);
-
-- static int Ok()
-  - IDOK。
-
-- static int Cancel()
-  - IDCANCEL。
-
-- static int Yes()
-  - IDYES。
-
-- static int No()
-  - IDNO。
-
-- static int Show(string text, string caption)
-  - 只有"确定"的提示框；始终返回 IDOK。
-
-- static int ShowYesNo(string text, string caption)
-  - 是/否提示框；返回 IDYES 或 IDNO。
-
-- static int ShowOkCancel(string text, string caption)
-  - 确定/取消提示框；返回 IDOK 或 IDCANCEL。
-
-- static bool Posix(string text, string caption, int kind)
-  - kind: 0 = 只有确定，1 = 是/否，2 = 确定/取消。
-    返回用户是否选择了肯定按钮。
-
-- static bool Have(string tool)
-
-- static string Sanitize(string s)
-  - 标题要进单引号命令行，因此去掉单引号（标题是短标签，
-    丢掉引号比冒被解释的风险好）。
-
-- static string OsaQuote(string s)
-
-- static bool RunOsa(string script)
 
 
 ## NativeMemory (class)
@@ -632,6 +828,7 @@ ByteBuffer.Raw() 之类的固定缓冲区），并且不能在
 不做事。
 
 - public PlatformNotSupportedException(string message)
+  - 以描述平台不支持原因的消息构造。
 
 
 ## Pump (class)
@@ -642,16 +839,22 @@ ByteBuffer.Raw() 之类的固定缓冲区），并且不能在
 回调而不死锁 UI 线程。
 
 - static nint user32;
+  - 惰性解析出的 user32.dll 句柄与四个入口地址（0 为未加载/失败）。
 
 - static nint peek;
+  - PeekMessageW 入口。
 
 - static nint translate;
+  - TranslateMessage 入口。
 
 - static nint dispatch;
+  - DispatchMessageW 入口。
 
 - static nint sleep;
+  - kernel32 Sleep 入口。
 
 - static void Resolve()
+  - 惰性解析 user32/kernel32 的入口（只做一次）。
 
 - static void Drain()
   - 排空当前线程上所有已排队的消息。
@@ -670,10 +873,13 @@ ByteBuffer.Raw() 之类的固定缓冲区），并且不能在
 - PumpGate()
 
 - void Signal()
+  - 标记完成。
 
 - bool IsDone()
+  - 是否已完成。
 
 - void Reset()
+  - 复位为未完成。
 
 
 ## Random (class)
@@ -681,11 +887,12 @@ ByteBuffer.Raw() 之类的固定缓冲区），并且不能在
 通用（非加密）伪随机数生成器。
 使用 64 位线性同余序列（Knuth MMIX 常数）；
 速度快，可由种子复现，但绝不能用于安全用途——参见
-<c>System.Security.Cryptography.RandomNumberGenerator</c>。
+<c>System.RandomNumberGenerator</c>。
 
 - [DllImport("crt")]static extern long time(nint ptr);
 
 - long state;
+  - LCG 状态（构造与 Seeded 都保证非 0）。
 
 - Random()
   - 以当前时间作为种子。
@@ -712,6 +919,32 @@ ByteBuffer.Raw() 之类的固定缓冲区），并且不能在
   - 伪随机布尔值。
 
 
+## RandomNumberGenerator (class)
+
+跨平台的加密安全随机字节。
+Windows 使用系统 CSPRNG（RtlGenRandom / SystemFunction036）；POSIX 从
+/dev/urandom 读取（Linux、macOS、BSD）。无弱回退：请求
+N 字节却得到更少字节的调用方会收到明确失败（null / 字节数不足），
+绝不会返回可预测或未初始化的数据。
+
+- [DllImport("advapi32")]static extern int SystemFunction036(string buf, int len);
+
+- [DllImport("crt", EntryPoint="fopen")]static extern nint urandOpen(string path, string mode);
+
+- [DllImport("crt", EntryPoint="fread")]static extern long urandRead(string buf, long size, long count, nint fp);
+
+- [DllImport("crt", EntryPoint="fclose")]static extern int urandClose(nint fp);
+
+- static int Fill(string buf, int n)
+  - 用安全随机数据填充 buf 的前 n 字节。
+    返回实际写入的字节数（成功时为 n，失败时更少）。
+
+- static byte[]GetBytes(int n)
+  - 分配含 n 个安全随机字节的缓冲区（n+1 字节，末尾的
+    零字节使其可在期望 NUL 结尾字符串的场景中使用）。
+    若系统 CSPRNG 无法提供 n 字节，则返回 null。
+
+
 ## RegexBudgetException (class)
 
 当正则匹配用尽回溯步骤预算时抛出。病态模式
@@ -719,6 +952,7 @@ ByteBuffer.Raw() 之类的固定缓冲区），并且不能在
 超时伪装成"无匹配"。
 
 - public RegexBudgetException(string message)
+  - 以描述预算耗尽的消息构造。
 
 
 ## SocketException (class)
@@ -729,8 +963,83 @@ WSAGetLastError / POSIX 的 errno）。<paramref name="code"/> 以
 数值形式携带同一错误码，供程序检查而非解析消息文本。
 
 - public int code;
+  - 平台错误码（Windows 的 WSAGetLastError / POSIX 的 errno）。
 
 - public SocketException(int code, string message)
+  - 以平台错误码与消息构造。
+
+
+## Stopwatch (class)
+
+高分辨率计时器。Windows 上使用 QueryPerformanceCounter，
+POSIX 上使用 clock_gettime(CLOCK_MONOTONIC) —— 两者都不受墙钟时间
+变化（NTP 同步、手动改时）影响，计时结果保持准确。
+
+Stopwatch sw = new Stopwatch();
+sw.Start();
+... work ...
+sw.Stop();
+long ms = sw.ElapsedMilliseconds();
+
+- [DllImport("kernel32", EntryPoint="QueryPerformanceFrequency")]static extern int PlatQueryPerformanceFrequency(nint freq);
+
+- [DllImport("kernel32", EntryPoint="QueryPerformanceCounter")]static extern int PlatQueryPerformanceCounter(nint count);
+
+- [DllImport("crt", EntryPoint="zan_monotonic_ns")]static extern long ZanMonotonicNs();
+
+- long startTicks;
+  - 最近一次 Start 时的单调时钟读数（频率单位）。
+
+- long accumulated;
+  - Start 与 Stop 之间的 tick 数（频率单位）
+
+- bool running;
+  - 计时进行中。
+
+- static Stopwatch StartNew()
+  - 开始（或继续）计时，可安全重复调用。
+
+- void Start()
+  - 开始（或继续）计时。
+
+- void Stop()
+  - 停止计时；多次 Start/Stop 的耗时会累加。
+
+- void Reset()
+  - 重置累计时间（运行中则同时停止）。
+
+- void Restart()
+  - 重新开始：清零并启动。
+
+- double ElapsedMilliseconds()
+  - 总耗时（毫秒，双精度）。
+    计时器可能仍在运行；读数包含当前累计值。
+
+- double ElapsedSeconds()
+  - 总耗时（秒，双精度）。
+
+- long ElapsedTicks()
+  - 以原始频率单位表示的耗时（参见 `Frequency`）。
+
+- bool IsRunning()
+  - 计时器运行中返回 true。
+
+- static long Frequency()
+  - 高分辨率时钟每秒的 tick 数。
+
+- static long GetMicroseconds()
+  - 单调微秒读数。不分配内存，能分辨单个请求，因此可用在请求
+    处理路径上（超时、截止时间比较）。
+
+- static long GetMilliseconds()
+  - 单调毫秒读数。语义同 `GetMicroseconds`。
+
+- static long MonoScaled(long unit)
+  - tick 数换算到每秒 `unit` 份的单位。先除后乘：Windows 的 QPC 频率是
+    10MHz 量级，直接 `ticks * 1000000` 在机器开机约 11 天后就会溢出 i64。
+
+- static long NowTicks()
+  - 当前单调时钟读数（频率单位）。
 
 
 ## StringExtensions (class)
@@ -848,42 +1157,59 @@ int i = await Task.WhenAny(hs);      // 最先完成者的下标
 <c>From*</c> 工厂方法产生。
 
 - long total;
+  - 带符号的总秒数。
 
 - TimeSpan(long seconds)
   - 从带符号的秒数构造一个时间间隔。
 
 - static TimeSpan FromSeconds(long s)
+  - 从秒数构造：`FromSeconds(90)` = 1 分 30 秒。
 
 - static TimeSpan FromMinutes(long m)
+  - 从分钟数构造。
 
 - static TimeSpan FromHours(long h)
+  - 从小时数构造。
 
 - static TimeSpan FromDays(long d)
+  - 从天数构造。
 
 - long TotalSeconds()
+  - 整个间隔的秒数（带符号，精度无损）。
 
 - long TotalMinutes()
+  - 整分钟数，向零截断：90 秒 = 1。
 
 - long TotalHours()
+  - 整小时数，向零截断。
 
 - long TotalDays()
+  - 整天数，向零截断。
 
 - int Days()
+  - 天分量（日历式拆分，恒非负）：
+    -1.5 天 = Days 1 + 负号（见 TotalSeconds）。
 
 - int Hours()
+  - 小时分量（0-23，恒非负）。
 
 - int Minutes()
+  - 分钟分量（0-59，恒非负）。
 
 - int Seconds()
+  - 秒分量（0-59，恒非负）。
 
 - bool IsNegative()
   - 时间间隔为负时返回 true。
 
 - TimeSpan Add(TimeSpan other)
+  - 两间隔相加。
 
 - TimeSpan Subtract(TimeSpan other)
+  - 本间隔减 other。
 
 - TimeSpan Negate()
+  - 取反（正变负）。
 
 - string ToString()
   - 文本格式为 "[-][D.]HH:MM:SS"。
@@ -903,6 +1229,7 @@ Wide.Free(w);
 - [DllImport("kernel32", EntryPoint="WideCharToMultiByte")]static extern int ToMulti(int page, int flags, nint wide, int wideLen, nint mb, int mbLen, nint defChar, nint usedDef);
 
 - static int Utf8()
+  - 代码页 CP_UTF8（65001）。
 
 - static nint Of(string s)
   - 分配 `s` 的 NUL 结尾 UTF-16 副本。用 Free() 释放。
@@ -914,6 +1241,7 @@ Wide.Free(w);
   - 宽字符缓冲区中 NUL 终止符前的 UTF-16 码元数量。
 
 - static void Free(nint p)
+  - 释放 Of() 分配的缓冲区（即 NativeMemory.Free）。
 
 
 ## ZanVersion (class)
@@ -937,20 +1265,29 @@ Wide.Free(w);
 
 ## int (delegate)
 
+GetEnvironmentVariableW 的调用形式（name/buf 为宽字符指针，
+size 为缓冲区的 UTF-16 码元容量，返回写入的码元数）。
+
 `delegate int GetEnvironmentVariableWFn(nint name, nint buf, int size);`
 
 
 ## int (delegate)
+
+PeekMessageW 的调用形式（remove 非 0 时从队列取走消息）。
 
 `delegate int PeekMessageFn(nint msg, nint hwnd, int min, int max, int remove);`
 
 
 ## int (delegate)
 
+TranslateMessage 的调用形式。
+
 `delegate int TranslateMessageFn(nint msg);`
 
 
 ## int (delegate)
+
+Win32 Sleep 的调用形式（毫秒）。
 
 `delegate int SleepFn(int ms);`
 
@@ -960,61 +1297,84 @@ Wide.Free(w);
 vtable 方法的调用形式：每个 COM 方法都把接口
 指针作为第一个参数并返回 HRESULT，宽于
 寄存器的参数（RECT、结构体出参）以地址传递。
+ComCall0Fn 到 ComCall5Fn 依次带 0 到 5 个指针参数。
 
 `delegate int ComCall0Fn(nint self);`
 
 
 ## int (delegate)
 
+1 个指针参数的 COM 方法形式。
+
 `delegate int ComCall1Fn(nint self, nint a);`
 
 
 ## int (delegate)
+
+2 个指针参数的 COM 方法形式。
 
 `delegate int ComCall2Fn(nint self, nint a, nint b);`
 
 
 ## int (delegate)
 
+3 个指针参数的 COM 方法形式。
+
 `delegate int ComCall3Fn(nint self, nint a, nint b, nint c);`
 
 
 ## int (delegate)
+
+4 个指针参数的 COM 方法形式。
 
 `delegate int ComCall4Fn(nint self, nint a, nint b, nint c, nint d);`
 
 
 ## int (delegate)
 
+5 个指针参数的 COM 方法形式。
+
 `delegate int ComCall5Fn(nint self, nint a, nint b, nint c, nint d, nint e);`
 
 
 ## int (delegate)
+
+CoInitializeEx 的调用形式（返回 HRESULT）。
 
 `delegate int CoInitializeExFn(nint reserved, int flags);`
 
 
 ## int (delegate)
 
+TlsAlloc 的调用形式（返回 TLS 槽号）。
+
 `delegate int TlsAllocFn();`
 
 
 ## int (delegate)
+
+TlsSetValue 的调用形式（成功返回非 0）。
 
 `delegate int TlsSetValueFn(int index, nint data);`
 
 
 ## int (delegate)
 
+CoCreateInstance 的调用形式（返回 HRESULT）。
+
 `delegate int CoCreateInstanceFn(nint clsid, nint outer, int ctx, nint iid, nint result);`
 
 
 ## nint (delegate)
 
+DispatchMessageW 的调用形式。
+
 `delegate nint DispatchMessageFn(nint msg);`
 
 
 ## nint (delegate)
+
+TlsGetValue 的调用形式。
 
 `delegate nint TlsGetValueFn(int index);`
 
@@ -1026,10 +1386,14 @@ vtable 方法的调用形式：每个 COM 方法都把接口
 
 ## void (delegate)
 
+CoUninitialize 的调用形式。
+
 `delegate void CoUninitializeFn();`
 
 
 ## void (delegate)
+
+CoTaskMemFree 的调用形式。
 
 `delegate void CoTaskMemFreeFn(nint p);`
 
@@ -1075,4 +1439,8 @@ Console.BackgroundColor；运行时将其映射为 ANSI SGR 转义序列。
 
 ## IDisposable (interface)
 
+标准释放契约：持有原生资源的对象实现它，`using` 语句
+在作用域结束时调用 `Dispose`。
+
 - void Dispose();
+  - 释放对象持有的资源。

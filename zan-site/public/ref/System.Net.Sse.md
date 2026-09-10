@@ -22,6 +22,7 @@ SseEvent e = await c.NextAsync();
     其 IsConnected() 为 false。
 
 - bool IsConnected()
+  - 握手是否成功（连接失败或服务器拒绝该流时为 false）。
 
 - async SseEvent NextAsync()
   - 阻塞（挂起协程）直到下一条完整事件
@@ -33,12 +34,13 @@ SseEvent e = await c.NextAsync();
     没有 event/data/id 字段（纯注释）时返回 null。
 
 - void Close()
+  - 关闭连接并标记断开（幂等）。
 
 
 ## SseConnection (class)
 
-服务器端一条已接受的 SSE 订阅者连接。通过
-SseServer.AcceptAsync 在 HTTP 握手后取得；用
+服务器端一条已接受的 SSE 订阅者连接。Worker.HandleSse
+完成 HTTP 握手后传给 onSseSubscriber；用
 SendAsync/SendDataAsync 推送事件，最后以 Close 收尾。
 
 - TcpClient client;
@@ -48,15 +50,18 @@ SendAsync/SendDataAsync 推送事件，最后以 Close 收尾。
 - bool open;
 
 - static SseConnection Of(TcpClient client, string path)
+  - 私有工厂：Worker 完成 SSE 握手后构造。
 
 - string Path()
   - 订阅者请求的路径（如 "/events"）。
 
 - bool IsOpen()
+  - 连接是否仍可写（发送失败或 Close 后为 false）。
 
 - async int SendAsync(string eventName, string data)
   - 发送具名事件。data 中的每个 '\n' 都会变成独立的
     `data:` 行，保证多行负载在线上格式中不被破坏。
+    返回值 <= 0 表示订阅者已断开。
 
 - async int SendDataAsync(string data)
   - 发送匿名（"message"）事件。
@@ -65,6 +70,7 @@ SendAsync/SendDataAsync 推送事件，最后以 Close 收尾。
   - 发送一条 SSE 注释行，可用作 keep-alive 心跳。
 
 - void Close()
+  - 关闭底层连接并标记断开。
 
 
 ## SseEvent (class)
@@ -80,42 +86,16 @@ SendAsync/SendDataAsync 推送事件，最后以 Close 收尾。
 - string id;
 
 - SseEvent()
+  - 私有构造：空事件，由 ParseBlock 填充。
 
 - string Name()
   - 事件名（流未设置时默认为 "message"）。
 
 - string Data()
+  - 负载文本（多行 data 以 '\n' 连接）。
 
 - string Id()
-
-
-## SseServer (class)
-
-极简 Server-Sent Events 服务器：接受 HTTP GET 订阅者，响应
-`text/event-stream` 握手，并交回一个 SseConnection 供
-应用推送事件。
-
-SseServer srv = new SseServer("127.0.0.1", 8080);
-srv.Start();
-SseConnection c = await srv.AcceptAsync();
-await c.SendAsync("tick", "hello");
-
-- TcpListener listener;
-
-- bool running;
-
-- SseServer(string host, int port)
-
-- void Start()
-
-- int GetPort()
-
-- async SseConnection AcceptAsync()
-  - 等待下一个订阅者，读取其 HTTP 请求头，
-    并完成 event-stream 握手。客户端在握手中途断开时
-    返回 null。
-
-- void Stop()
+  - last-event id（流未提供时为空串）。
 
 
 ## SseText (class)

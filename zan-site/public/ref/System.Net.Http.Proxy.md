@@ -21,12 +21,15 @@ http/https。
 
 - bool closed;
 
-- FwdChannel(nint sock, TlsStream tls, TlsContext ctx)
+- int idleMs;
 
-- static FwdChannel OfSocket(nint sock)
+- FwdChannel(nint sock, TlsStream tls, TlsContext ctx, int idleMs)
+  - 私有构造：用 `OfSocket` / `OfTls` 创建。
+
+- static FwdChannel OfSocket(nint sock, int idleMs)
   - 明文 TCP 链路。
 
-- static FwdChannel OfTls(nint sock, TlsStream tls, TlsContext ctx)
+- static FwdChannel OfTls(nint sock, TlsStream tls, TlsContext ctx, int idleMs)
   - TLS 链路；`ctx` 由本链路持有，关闭时释放。
 
 - async string RecvAsync(int max)
@@ -40,6 +43,7 @@ http/https。
   - 关闭链路（幂等）。TLS 链路同时释放流与上下文。
 
 - bool IsClosed()
+  - 链路是否已关闭。
 
 - nint Sock()
   - 底层套接字（连接池用它做零阻塞的存活检查）。
@@ -76,6 +80,8 @@ http/https。
 - long misses;
 
 - FwdPool(int maxIdle, int idleMs)
+  - 创建空池：空闲链路上限 <paramref name="maxIdle"/> 条、
+    空闲存活 <paramref name="idleMs"/> 毫秒。
 
 - FwdChannel Take()
   - 取一条可用的空闲链路，没有则返回 null（调用方新建）。
@@ -113,6 +119,7 @@ http/https。
 - int chunkBytes;
 
 - FwdReader(FwdChannel ch, int chunkBytes)
+  - <paramref name="chunkBytes"/> 为单批读取与转发的块大小（字节）。
 
 - async bool FillAsync()
   - 再读一批到缓冲；对端关闭时返回 false。
@@ -134,6 +141,7 @@ http/https。
   - 取走并清空缓冲（不再读取）。
 
 - bool AtEof()
+  - 对端已关闭且缓冲取尽——链路已读到 EOF，不可再复用。
 
 - bool Drained()
   - 缓冲已空且对端未关闭——即这条链路正好停在一帧的
@@ -198,6 +206,8 @@ Upgrade 与 CONNECT 仍照旧方式用完即关。用
 
 - TcpListener listener;
 
+- int recvIdleMs;
+
 - FwdPool pool;
 
 - int maxIdleUp;
@@ -210,11 +220,15 @@ Upgrade 与 CONNECT 仍照旧方式用完即关。用
     明文 http，缺端口时 https 用 443、http 用 80）。
 
 - void ParseUpstream(string upstream)
+  - 解析 upstream 字符串为上游 host、port 与 TLS 标志
+    （协议前缀与显式端口优先，缺省按构造器文档）。
 
 - HttpForwarder SetTimeout(int ms)
   - 空闲超时（毫秒）：两个方向都这么久没有字节
     才判定链路失效。流式响应之间的静默间隔可能很长，
-    因此默认 5 分钟。
+    因此默认 5 分钟。同时更新明文链路的接收截止——
+    此前该值只作用于连接建立，注释承诺的空闲判定从未生效，
+    慢速客户端/卡死上游会永久占用协程与套接字。
 
 - HttpForwarder SetChunkBytes(int bytes)
   - 单次搬运的块大小（字节）。
@@ -255,8 +269,10 @@ Upgrade 与 CONNECT 仍照旧方式用完即关。用
     一路慢速流式响应不会挡住其他连接。运行期间不返回。
 
 - static async void RejectBusy(nint clientSock)
+  - 超过并发上限时对下游回 503 并关闭。
 
 - async void Serve(nint clientSock)
+  - 单条下游连接的生命周期：转发一次后递减并发计数。
 
 - async void ServeOnce(nint clientSock)
   - 转发一个下游连接：读请求头 → 连上游 → 边收边转
@@ -325,6 +341,8 @@ Upgrade 与 CONNECT 仍照旧方式用完即关。用
     WhenAll 不会卡在半关闭的链路上。
 
 - static async void PumpUntilClose(FwdChannel src, FwdChannel dst, int chunkBytes)
+  - 隧道单向的搬运：读到 EOF 或写失败即退出并关闭两端，
+    让另一方向也随之收到 EOF。
 
 - static List<string> HeadLines(string head)
   - 头块按行切分（不含各行 CRLF，也不含结束空行）。
@@ -337,6 +355,9 @@ Upgrade 与 CONNECT 仍照旧方式用完即关。用
 
 - static string LowerName(string line)
   - 头部行的字段名（小写）；不是头部行时返回空串。
+    冒号前含空格/制表符的行（如 "Transfer-Encoding :"）返回空串——
+    这种混淆名此前会绕过所有 TE/逐跳判定后被原样转发，是教科书级
+    走私向量；RFC 7230 要求拒收。
 
 - static string HeaderValueOfLine(string line)
   - 头部行的字段值（两端空白已去除）。
@@ -360,23 +381,32 @@ Upgrade 与 CONNECT 仍照旧方式用完即关。用
 - static bool IsBodyFramingValid(string head, bool isRequest)
   - 检查请求/响应头块的正文定界是否合法。
     非法定界（TE+CL 冲突、非 chunked 的 TE、chunked 不在最后、
-    非法 Content-Length）返回 false，调用方应返回 400。
+    非法/重复的 Content-Length、冒号前含空白的混淆字段名）
+    返回 false，调用方应返回 400。
 
 - static List<string> SplitCsv(string s)
   - 按 ',' 拆分 TE/CL 等逗号分隔值，并 trim 每项。
 
 - static long ParseChunkSize(string line)
   - 分块长度行（十六进制，可带 ";ext"）的字节数；
-    非法时返回 -1。
+    非法时返回 -1。位数超过 13 即按非法处理：13 位十六进制已覆盖
+    8TiB，合法分块远小于此，无上限的累加会回绕出小正数值，
+    把转发器的分块定界悄悄打乱。
 
 - static int ParseInt(string s)
+  - 解析前导十进制数字（ParseUpstream 的端口用）；无数字时为 0。
 
 - static string Lower(string s)
+  - ASCII 大写转小写。
 
 - static string Trim(string s)
+  - 去除两端的空格/制表符/CRLF。
 
 - static bool StartsWith(string s, string prefix)
+  - 是否以 `prefix` 开头。
 
 - static int IndexOf(string hay, string needle, int from)
+  - 从 <paramref name="from"/> 起查找子串首次出现的下标；未找到为 -1。
 
 - static int LastIndexOf(string hay, string needle)
+  - 子串最后一次出现的下标；未找到为 -1。

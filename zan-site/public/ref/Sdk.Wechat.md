@@ -110,6 +110,8 @@ AES 解密后的明文消息 + 尾部 appId。
 
 - string clientPrivateKeyFile;
 
+- ExternalCallPolicy callPolicy;
+
 - public WechatApiTransport(string host)
 
 - WechatApiTransport Server(string host, int port)
@@ -117,6 +119,10 @@ AES 解密后的明文消息 + 尾部 appId。
 - WechatApiTransport Timeout(int ms)
 
 - WechatApiTransport SetClientCertificate(string certFile, string keyFile)
+
+- WechatApiTransport SetCallPolicy(ExternalCallPolicy policy)
+
+- ExternalCallPolicy CallPolicy()
 
 - static string BuildPath(string path, string query)
 
@@ -172,6 +178,8 @@ AccessToken 在实例内缓存：未过期直接返回，过期才重新请求
 
 - int timeoutMs;
 
+- ExternalCallPolicy callPolicy;
+
 - string accessToken;
 
 - long accessTokenExpireUnix;
@@ -184,6 +192,10 @@ AccessToken 在实例内缓存：未过期直接返回，过期才重新请求
 
 - WechatClient Timeout(int ms)
   - 请求超时（毫秒），默认 30000。
+
+- WechatClient SetCallPolicy(ExternalCallPolicy policy)
+
+- ExternalCallPolicy CallPolicy()
 
 - WechatClient SetAccessToken(string token, int expiresIn)
   - 手动注入已有 access_token（例如从外部缓存读入），并设置剩余有效秒数。

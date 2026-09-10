@@ -53,8 +53,10 @@ C# 风格的事件聚合器。组件用 On() 将委托订阅到命名事件，
     null 以在调用线程同步调用处理器。
 
 - int IndexOf(string evt)
+  - 事件槽下标，未订阅过该事件时返回 -1。
 
 - NamedEventSlot SlotFor(string evt)
+  - 返回事件的槽，尚不存在时先创建。
 
 - void On(string evt, Action handler)
   - 将处理器订阅到事件（类似 `evt += handler`）。

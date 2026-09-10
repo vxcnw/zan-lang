@@ -1,6 +1,6 @@
 # System.Data.MySql
 
-> 源码: `stdlib/System/Data/MySql/MySqlConnection.zan`, `stdlib/System/Data/MySql/MySqlConnector.zan`, `stdlib/System/Data/MySql/MySqlPool.zan`, `stdlib/System/Data/MySql/MySqlSyncConnection.zan`
+> 源码: `stdlib/System/Data/MySql/MySqlConnection.zan`, `stdlib/System/Data/MySql/MySqlConnector.zan`, `stdlib/System/Data/MySql/MySqlPool.zan`, `stdlib/System/Data/MySql/MySqlSyncConnection.zan`, `stdlib/System/Data/MySql/MySqlWire.zan`
 
 
 ## MySqlAsyncConnector (class)
@@ -37,8 +37,10 @@ finally { pool.Release(db); }
   - 基于 host/port/database/user/password 的非阻塞连接池。
 
 - async IDbConnection ConnectAsync()
+  - 在 reactor 上执行握手打开一个协程化连接。
 
 - int GetProvider()
+  - 池的 provider id（恒为 `DbProvider.MySQL`）。
 
 
 ## MySqlConnection (class)
@@ -88,6 +90,7 @@ db.Close();
 - List<PreparedStmt> stmtCache;
 
 - MySqlConnection()
+  - 空连接；外部经 `OpenParamsAsync` 构造。
 
 - async int recvExact(byte[]dst, int off, int need)
   - 恰好读取 <paramref name="need"/> 个字节到
@@ -95,29 +98,18 @@ db.Close();
     reactor 上分段读取间挂起。返回实际读到的字节数（对端关闭时 < need，
     不足）。
 
-- async byte[]readPacket()
+- internal async byte[]readPacket()
   - 读取一个协议数据包，返回其负载，并将长度写入
     <c>lastLen</c>（负载是二进制，从不当作
     NUL 结尾的字符串读取）。同时设置 <c>lastSeq</c>。连接关闭时返回 null。
 
-- async int writePacket(string payload, int len, int seq)
+- internal async int writePacket(string payload, int len, int seq)
   - 以给定序列号写入一个协议数据包（4 字节头 + 负载）
     ，二进制安全（按长度发送）。
 
-- static string bytesToStr(string buf, int off, int len)
+- bool isEof(byte[]pkt)
   - 将缓冲区中 <paramref name="len"/> 个字节复制到新的
     Zan 字符串。
-
-- static long readLenenc(string buf, List<int> cur)
-  - 在游标 <c>cur[0]</c> 处解码长度编码整数，
-    并推进游标。NULL 标记（0xFB）返回 -1；八字节形式
-    携带 64 位计数，因此返回 <c>long</c>。
-
-- static string readLenencStr(string buf, List<int> cur)
-  - 在游标 <c>cur[0]</c> 处解码长度编码字符串，
-    并推进游标。NULL（0xFB）返回 ""。
-
-- bool isEof(byte[]pkt)
 
 - static byte[]scramble41(string pw, string nonce20)
   - caching_sha2_password 快速认证加扰：
@@ -130,32 +122,31 @@ db.Close();
     缓冲区。
 
 - static byte[]authToken(string plugin, string pw, string nonce20, List<int> outLen)
+  - 按服务器要求的认证插件生成令牌：空密码返回空令牌；
+    caching_sha2_password 走 scramble41，mysql_native_password 走
+    scrambleNative；其他插件返回 null（outLen 置 -1）。
 
 - static byte[]genSeed(int n)
+  - 取 n 字节加密随机数（完整认证的 RSA-OAEP 随机种子）。
 
-- static int findSub(string h, int hlen, string ndl, int nlen, int from)
+- static byte[]pemToDer(string pem, int pemLen, List<int> outLen)
   - 从 <paramref name="from"/> 起在 haystack 中查找 needle；
     返回其索引或 -1。
 
-- static byte[]pemToDer(string pem, int pemLen, List<int> outLen)
-  - 从 PEM 公钥中提取 DER SubjectPublicKeyInfo。
-    outLen[0] 接收 DER 长度；找不到 PEM 主体则返回 null。
-
-- static int readDerLen(string der, List<int> c)
-  - 在游标 c[0] 处读取 DER 长度，并将 c[0] 推进过它。
-
 - static byte[]fullAuthCipher(string der, int derLen, string obf, int obfLen, string seed, List<int> kOut)
-  - 解析 RSA SubjectPublicKeyInfo，并用 RSA OAEP-SHA1
-    （MySQL 完整认证填充）加密 <paramref name="obf"/>。kOut[0] 接收模数
-    字节长度（即密文长度）。
+  - 在游标 c[0] 处读取 DER 长度，并将 c[0] 推进过它。
 
 - static async MySqlConnection OpenParamsAsync(string host, int port, string database, string user, string password)
   - 使用原生线协议打开协程化的 MySQL/MariaDB 连接
     。
 
-- async bool doConnect(string host, int port, string db, string user, string pw)
+- internal async bool doConnect(string host, int port, string db, string user, string pw)
+  - 完整握手与认证（协程版）：解析握手包、发送握手响应，
+    处理 OK / ERR / AuthMoreData（快速成功与 RSA 全量认证）/
+    AuthSwitch。返回认证是否成功；失败原因写入 lastError。
 
-- async int comQuery(string sql)
+- internal async int comQuery(string sql)
+  - 发送 COM_QUERY 文本查询。
 
 - async DbResult QueryAsync(string sql)
   - 执行查询并返回完整结果集。非 SELECT
@@ -176,32 +167,20 @@ db.Close();
   - 第一行第一列以字符串返回（无行时返回 ""
     ）。
 
-- static int writeLenenc(string buf, int pos, int v)
+- static string readBinValue(string buf, List<int> cur, int type, int flags)
   - 在 pos 处写入长度编码整数；返回新的 pos。
 
-- static double pow2(int e)
-  - 以 double 返回 2^e（e 可为负）。
-
-- static string ieeeToText(int sign, int exp, long mant, int expBias, int mantBits)
-  - 从尾数/指数/符号字段解码 IEEE-754 值。
-
-- static string pad2(int v)
-
-- static string readBinValue(string buf, List<int> cur, int type, int flags)
-  - 在游标 cur[0] 处读取给定列类型的一个二进制协议值，
-    读取后推进游标，返回其文本形式。
-
-- async bool stmtPrepare(string sql, List<int> outIds)
+- internal async bool stmtPrepare(string sql, List<int> outIds)
   - 预编译 sql；成功后填写 out[0]=stmtId、out[1]=numCols、
     out[2]=numParams 并返回 true。跳过 prepare 响应中
     的参数/列定义包。
 
-- async int stmtExecute(int stmtId, DbParams prms)
+- internal async int stmtExecute(int stmtId, DbParams prms)
   - 发送带类型化二进制参数的 COM_STMT_EXECUTE：
     整数用 LONGLONG，文本/浮点用 VAR_STRING（长度编码，
     服务器将文本转换到列类型），NULL 通过 null bitmap 标记。
 
-- async int stmtClose(int stmtId)
+- internal async int stmtClose(int stmtId)
   - 关闭服务端预编译语句（发完即忘）。
 
 - int stmtCacheFind(string sql)
@@ -233,18 +212,23 @@ db.Close();
     让生成的 ORM 终端在所有驱动上调用同一方法名。
 
 - async int ExecuteAsync(string sql, DbParams prms)
+  - 接口的参数化执行形式，转发 `ExecuteParamsAsync`。
 
 - async string ExecuteScalarAsync(string sql, DbParams prms)
+  - 接口的参数化标量形式，转发 `ExecuteScalarParamsAsync`。
 
 - async bool BeginTransactionAsync()
   - MySQL 的事务控制，与其他语句一样在 reactor 上执行
     。
 
 - async bool CommitAsync()
+  - 提交当前事务（COMMIT），恒返回 true。
 
 - async bool RollbackAsync()
+  - 回滚当前事务（ROLLBACK），恒返回 true。
 
 - int GetProvider()
+  - 驱动标识，恒为 `DbProvider.MySQL`。
 
 - static DbException Sync()
   - 该契约的同步部分在此无法兑现：此驱动的每一步
@@ -257,22 +241,31 @@ db.Close();
     。
 
 - DbResult Query(string sql)
+  - 同步接口不可用：协程化驱动上阻塞等待会死锁（见 `Sync`）。
 
 - DbResult Query(string sql, DbParams prms)
+  - 同步接口不可用：协程化驱动上阻塞等待会死锁（见 `Sync`）。
 
 - int Execute(string sql)
+  - 同步接口不可用：协程化驱动上阻塞等待会死锁（见 `Sync`）。
 
 - int Execute(string sql, DbParams prms)
+  - 同步接口不可用：协程化驱动上阻塞等待会死锁（见 `Sync`）。
 
 - string ExecuteScalar(string sql)
+  - 同步接口不可用：协程化驱动上阻塞等待会死锁（见 `Sync`）。
 
 - string ExecuteScalar(string sql, DbParams prms)
+  - 同步接口不可用：协程化驱动上阻塞等待会死锁（见 `Sync`）。
 
 - void BeginTransaction()
+  - 同步接口不可用：协程化驱动上阻塞等待会死锁（见 `Sync`）。
 
 - void Commit()
+  - 同步接口不可用：协程化驱动上阻塞等待会死锁（见 `Sync`）。
 
 - void Rollback()
+  - 同步接口不可用：协程化驱动上阻塞等待会死锁（见 `Sync`）。
 
 - string GetError()
   - 此连接上记录的最后一条错误信息。
@@ -319,8 +312,10 @@ finally { pool.Release(db); }
   - 基于 host/port/database/user/password 的连接池。
 
 - async IDbConnection ConnectAsync()
+  - 打开一个同步线协议连接（执行语句时阻塞工作线程等待服务器）。
 
 - int GetProvider()
+  - 池的 provider id（恒为 `DbProvider.MySQL`）。
 
 
 ## MySqlPool (class)
@@ -361,10 +356,13 @@ pool.Close();
 - MySqlPool(string host, int port, string database, string user, string password, int maxSize)
 
 - async MySqlConnection OpenOne()
+  - 新建一条 MySQL 连接（池的建连回调）。
 
 - async MySqlConnection AcquireAsync()
   - 借出一个连接：复用空闲的，未达上限则新建，
-    否则挂起协程直到有连接被释放。
+    否则挂起协程直到有连接被释放。饱和等待有硬上限
+    （见 `PoolWait`）：超时返回 null——嵌套租借或漏归还
+    只会退化成个别请求拿不到连接，绝不会把协程永久停在门上。
     连接池关闭后返回 null。
 
 - void Release(MySqlConnection c)
@@ -426,6 +424,7 @@ db.Close();
 - List<PreparedStmt> stmtCache;
 
 - MySqlSyncConnection()
+  - 空连接；外部经 `OpenParams` 构造。
 
 - int recvExact(byte[]dst, int off, int need)
   - 将 <paramref name="need"/> 字节读入
@@ -439,19 +438,9 @@ db.Close();
 - int writePacket(string payload, int len, int seq)
   - 写入一个协议数据包（4 字节包头 + 有效载荷）。
 
-- static string bytesToStr(string buf, int off, int len)
+- bool isEof(byte[]pkt)
   - 将缓冲区中的 <paramref name="len"/> 字节复制到新的
     Zan 字符串。
-
-- static long readLenenc(string buf, List<int> cur)
-  - 在游标 <c>cur[0]</c> 处解码长度编码整数，
-    并推进游标；NULL 标记（0xFB）返回 -1。
-
-- static string readLenencStr(string buf, List<int> cur)
-  - 在游标 <c>cur[0]</c> 处解码长度编码字符串。
-    NULL（0xFB）返回空字符串。
-
-- bool isEof(byte[]pkt)
 
 - static byte[]scramble41(string pw, string nonce20)
   - caching_sha2_password 快速认证混淆：
@@ -462,89 +451,126 @@ db.Close();
     SHA1(pw) XOR SHA1( nonce . SHA1(SHA1(pw)) )，20 字节。
 
 - static byte[]authToken(string plugin, string pw, string nonce20, List<int> outLen)
+  - 按服务器要求的认证插件生成令牌：空密码返回空令牌；
+    caching_sha2_password 走 scramble41，mysql_native_password 走
+    scrambleNative；其他插件返回 null（outLen 置 -1）。
 
 - static byte[]genSeed(int n)
-
-- static int findSub(string h, int hlen, string ndl, int nlen, int from)
+  - 取 n 字节加密随机数（RSA 全量认证的 OAEP seed）。
 
 - static byte[]pemToDer(string pem, int pemLen, List<int> outLen)
-
-- static int readDerLen(string der, List<int> c)
+  - 剥掉 PEM 头尾与换行后 base64 解码，返回服务器公钥的 DER 编码。
 
 - static byte[]fullAuthCipher(string der, int derLen, string obf, int obfLen, string seed, List<int> kOut)
+  - 解析 DER 公钥中的模数 n 与指数 e，用 RSA-OAEP 加密
+    （XOR nonce 混淆后的密码 + NUL），模数长度写入 kOut。
 
 - static MySqlSyncConnection OpenParams(string host, int port, string database, string user, string password)
   - 使用 wire 协议在阻塞套接字上打开原生 MySQL/MariaDB 连接。
-    失败时返回 null；`GetError` 携带
-    失败原因。
+    成功时连接已通过握手认证；失败时返回的对象 connected=false，
+    `GetError` 携带失败原因。常规入口是
+    `DbConnection.OpenMySQL` 工厂，本方法用于显式构造。
 
 - bool doConnect(string host, int port, string db, string user, string pw)
+  - 完整握手与认证：解析握手包（含 auth-switch / RSA 全量认证）、
+    发送握手响应并等待结果。返回认证是否成功；失败原因写入 lastError。
 
 - int comQuery(string sql)
+  - 发送 COM_QUERY 文本查询。
 
 - DbResult querySync(string sql)
-
-- static int writeLenenc(string buf, int pos, int v)
-
-- static double pow2(int e)
-
-- static string ieeeToText(int sign, int exp, long mant, int expBias, int mantBits)
-
-- static string pad2(int v)
+  - 执行 COM_QUERY 并收集文本结果集；语句出错或连接断开时
+    hadError=true 且结果为空。SELECT 的行数记入 lastAffected。
 
 - static string readBinValue(string buf, List<int> cur, int type, int flags)
+  - 按列类型解码二进制协议行值，返回其文本形式（整型带符号处理，
+    日期/时间/浮点按 wire 格式渲染，其余按 lenenc 字符串）。
 
 - bool stmtPrepare(string sql, List<int> outIds)
+  - 发送 COM_STMT_PREPARE；成功时把语句 id、列数、参数数依次写入 outIds，
+    并读掉随后的参数/列定义包。
 
 - int stmtExecute(int stmtId, DbParams prms)
+  - 发送 COM_STMT_EXECUTE：NULL 位图、每参数类型（NULL/8 字节整数/
+    lenenc 文本）与二进制参数值。
 
 - int stmtClose(int stmtId)
+  - 发送 COM_STMT_CLOSE，释放服务器端的语句句柄。
 
 - int stmtCacheFind(string sql)
+  - 按 SQL 文本在语句缓存中查下标；未命中返回 -1。
 
 - void stmtCacheAdd(string sql, int stmtId)
+  - 把语句加入缓存；满 32 条时先关闭并淘汰最旧的一条。
 
 - void stmtCacheRemove(int stmtId)
+  - 按语句 id 把出错/失效的语句从缓存移除。
 
 - DbResult queryParams(string sql, DbParams prms)
+  - 参数化查询：SQL 首次出现时预编译并缓存句柄，随后 COM_STMT_EXECUTE
+    执行并解码二进制结果集；语句出错时 hadError=true 并从缓存剔除。
 
 - DbResult Query(string sql, DbParams prms)
+  - 带参数的查询：走 COM_STMT_PREPARE / COM_STMT_EXECUTE
+    二进制协议，值带外传输、注入免疫。SQL 文本首次出现时预编译并
+    缓存（每连接最多 32 条，超出后 LRU 淘汰并关闭最旧语句），同一
+    SQL 再次执行直接复用服务器语句句柄。
 
 - int Execute(string sql, DbParams prms)
+  - 执行语句，返回受影响行数；语句出错时返回 -1
+    （错误详情见 `GetError`）。受 CLIENT_FOUND_ROWS
+    影响，UPDATE/DELETE 报告匹配行数（值未变也算命中）。
 
 - DbResult Query(string sql)
+  - 无参数查询，走 COM_QUERY 文本协议。SELECT 返回结果集，
+    行数记入受影响行数；出错时结果为空且 hadError=true。
 
 - int Execute(string sql)
+  - 执行语句，返回受影响行数（语义同带参版本）；
+    出错时返回 -1。
 
 - string ExecuteScalar(string sql)
+  - 取结果集第一行第一列的值（字符串形式）；无行或值为
+    NULL 时返回 ""。
 
 - string ExecuteScalar(string sql, DbParams prms)
+  - 带参数的 ExecuteScalar（语义同无参版本）。
 
 - int GetProvider()
+  - 驱动标识，恒为 `DbProvider.MySQL`。
 
 - string GetError()
   - 此连接上记录的最后一条错误消息。
 
 - async DbResult QueryAsync(string sql)
-  - 在当前会话上开启事务。
+  - 在当前会话上开启事务（START TRANSACTION）。
 
 - async DbResult QueryAsync(string sql, DbParams prms)
+  - `Query` 的协程孪生：本驱动 IO 为同步，直接转发。
 
 - async int ExecuteAsync(string sql)
+  - `Execute` 的协程孪生：本驱动 IO 为同步，直接转发。
 
 - async int ExecuteAsync(string sql, DbParams prms)
+  - `Execute` 的协程孪生：本驱动 IO 为同步，直接转发。
 
 - async string ExecuteScalarAsync(string sql)
+  - `ExecuteScalar` 的协程孪生：本驱动 IO 为同步，直接转发。
 
 - async string ExecuteScalarAsync(string sql, DbParams prms)
+  - `ExecuteScalar` 的协程孪生：本驱动 IO 为同步，直接转发。
 
 - async bool BeginTransactionAsync()
+  - `BeginTransaction` 的协程孪生，恒返回 true。
 
 - async bool CommitAsync()
+  - `Commit` 的协程孪生，恒返回 true。
 
 - async bool RollbackAsync()
+  - `Rollback` 的协程孪生，恒返回 true。
 
 - void BeginTransaction()
+  - 在当前会话上开启事务（START TRANSACTION）。
 
 - void Commit()
   - 提交当前事务。
@@ -553,8 +579,54 @@ db.Close();
   - 回滚当前事务。
 
 - bool IsConnected()
+  - 连接是否仍处于打开状态。查询中途服务器断开也会把
+    状态置为 false。
 
 - void Close()
+  - 关闭套接字并清空预编译语句缓存。重复调用安全；
+    未连接时也只做缓存清理。
+
+
+## MySqlWire (class)
+
+MySQL 线格式纯函数库：async 与 sync 连接双胞胎共享的
+字节解析/编码工具。只做纯变换、无 IO 无状态——从两份逐字节
+一致的副本合并而来（stdlib 去重 批D-1）。
+
+- static string bytesToStr(string buf, int off, int len)
+  - 把缓冲区 <c>[off, off+len)</c> 的字节原样拷出并转为字符串；
+    len <= 0 时返回空串。
+
+- static long readLenenc(string buf, List<int> cur)
+  - 读取 MySQL length-encoded 整数（1/3/4/9 字节形式，小端）；
+    首字节 0xFB（NULL 标记）返回 -1，游标仍前进 1。
+
+- static string readLenencStr(string buf, List<int> cur)
+  - 读取 length-encoded 字符串：先读长度再取字节；
+    0xFB（NULL）返回空串并把游标前进 1。
+
+- static int findSub(string h, int hlen, string ndl, int nlen, int from)
+  - 在 <c>h[0..hlen)</c> 中自 <c>from</c> 起查找字节串
+    <c>ndl</c>，返回匹配下标；找不到返回 -1。
+
+- static int readDerLen(string der, List<int> c)
+  - 读取 DER/ASN.1 长度字段（短形式，或 0x80|n 长形式后随 n 个
+    大端长度字节）；<c>c</c> 为游标。
+
+- static int writeLenenc(string buf, int pos, int v)
+  - 写入 length-encoded 整数：<251 为 1 字节；<65536 为
+    0xFC + 2 字节小端；否则为 0xFD + 3 字节小端
+    （不产生 8 字节形式，因此有效上限 2^24−1）。返回新游标。
+
+- static double pow2(int e)
+  - 返回 2 的 e 次幂（循环乘除，避免依赖数学库）。
+
+- static string pad2(int v)
+  - 两位零填充的十进制数（时间字段格式化用）。
+
+- static string ieeeToText(int sign, int exp, long mant, int expBias, int mantBits)
+  - 由 IEEE 754 位型（符号、指数、尾数、指数偏置、尾数位数）
+    还原浮点数的十进制文本；零（exp=0 且 mant=0）直接返回 "0"。
 
 
 ## PreparedStmt (class)
@@ -567,3 +639,4 @@ db.Close();
 - int id;
 
 - PreparedStmt(string sql, int id)
+  - 保存 SQL 文本与服务端语句 id。

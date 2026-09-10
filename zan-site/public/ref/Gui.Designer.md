@@ -16,6 +16,9 @@
     一一对应：Ribbon 返回的是被点命令的全局序号。
 
 - void RenderRibbon(App app, Canvas c, Theme t, int x, int y, int w)
+  - 渲染窗口顶部的功能区：按当前选择与布局模式组装五组命令并
+    控制可用性，命令排完剩下的空档够时在右端补只读状态（布局
+    模型 / 设计尺寸 / 缩放），命中的动作码交给 RunRibbon 执行。
 
 - void RunRibbon(App app, string act)
   - 执行功能区命令。动作码与 RenderRibbon 里登记的
@@ -40,6 +43,8 @@
     （主选中项所在框的边）。
 
 - void AlignSel(int mode)
+  - 把单个字段对齐到所属框（父容器的内容框，顶层为设计窗口）：
+    mode 0-2 左/水平居中/右，3-5 上/垂直居中/下，坐标钳制非负。
 
 - void RenderForm(App app, Canvas c, Theme t, int cx, int cy, int cw, int ch)
   - 表单（自动吸附）和自由窗口共用同一块设计画布：抓手平移、
@@ -59,11 +64,16 @@
 - int KidInsetX(FormField f)
   - 容器内容框相对容器矩形的偏移（设计空间）。自由画布上
     运行时给容器 Pad(0)、子级按自己的停靠边铺满整块，所以只有
-    Tabs 需要让出标签条；再多让 6/26 就是设计器比运行时矮一
-    截、子级整体右下偏移的来源。流式布局仍是 6/26（与
-    LayoutFlowKids 一致）。
+    Tabs 需要让出标签条（横排让高 26，纵排让宽 TabRailW）；
+    再多让 6 就是设计器比运行时缩一截、子级整体偏移的来源。
+    流式布局一致。
 
 - int KidInsetY(FormField f)
+  - KidInsetX 的纵向对应：Tabs 横排让出标签条（26），纵排只剩
+    装饰边距（6），自由画布为 0。
+
+- static int TabRailW()
+  - 纵向 Tabs 左侧轨道宽（设计像素，运行时 trackW 的未缩放宽）。
 
 - int FlowFieldH(FormField f)
   - 一个字段在流式布局里的高度（宽度须已确定）。容器
@@ -120,9 +130,11 @@
 - static string TabPageTitle(FormField f, int i)
   - 第 i 页的页签标题（没写选项时是 "Tab i"）。
 
-- void RenderTabStrip(App app, Canvas c, Theme t, FormField f, int ex, int ey, int ew, int psMilli, int active)
+- void RenderTabStrip(App app, Canvas c, Theme t, FormField f, int ex, int ey, int ew, int eh, int psMilli, int active)
   - 画 Tabs 容器的标签条（跟随画布缩放），并把每个页签的屏幕
-    矩形登记到 tabHits，供画布的指针处理切页。
+    矩形登记到 tabHits，供画布的指针处理切页。纵向（tabOrient
+    == 1）画成左侧轨道：整列页签、活动项左缘高亮，与运行时
+    RenderVertical 同构。
 
 - TabHeaderHit PickTabHeader(int mx, int my)
   - 指针位置上的页签（后画的在上层），没有则 null。
@@ -136,9 +148,54 @@
   - `tabFilter >= 0` 时只看该标签页下的子级——看不见的页里的
     组件也点不中。
 
+- int AbsOriginX(FormField f)
+  - `f` 的父内容框在设计空间的绝对原点：自由画布子级的 fx/fy
+    是父相对坐标，拖拽基必须能按父链随时重算——框选、撤销、
+    换父之后 freeSelPX/freeSelPY 里存的旧值都可能是错的。
+
+- int AbsOriginY(FormField f)
+
+- void SyncFreeSelBase()
+  - 按当前 sel 重算拖拽基（父内容框原点）。基过去只在
+    FreePick 直接命中时顺带写入——框选、撤销或代码置选中之后
+    基还是旧值，嵌套子级一拖就按画布原点算，组件“瞬移”出容器。
+
+- bool IsAncestorOf(FormField anc, FormField f)
+  - `anc` 是否是 `f` 的严格祖先容器。
+
+- int ContOriginX(FormField cont)
+  - `cont` 的内容框在设计空间的绝对原点——它的子级 fx/fy 的
+    参考基（cont == null 不适用，调用方自取 0）。
+
+- int ContOriginY(FormField cont)
+
+- void FreeReparentSel(FormField cont)
+  - 自由画布拖拽收尾：把选中组件换父到 `cont`（null = 顶层），
+    拖进/拖出容器在松手这一刻生效。fx/fy 按新旧父内容框基
+    换算，组件的视觉位置不动；落进 Tabs/SplitPanel 时进正在
+    看的那页，与流式 DropField 同约定。
+
+- void DrawFreeDropHi(App app, Canvas c, int ox, int oy, int psMilli, FormField hi)
+  - 自由画布拖拽落点预告：给容器 `hi`（FreeDropContainer 解析
+    的结果，null = 无）画描边，提示松手会放进哪个容器。
+
+- void MarqueeCollect(List<FormField> lst, int px, int py, int selL, int selT, int selR, int selB, List<FormField> got)
+  - 框选收集：递归收集与设计空间矩形相交的可见组件（含容器
+    内的子组件）。px/py 为父链累计原点；Tabs 只看当前显示的
+    标签页——看不见的页里的组件也框不中，与点选一致。
+
+- bool HasAncestorIn(FormField f, List<FormField> got)
+  - `f` 的某个祖先是否也在 `got` 里——框选时容器和它的子级
+    同时相交只留容器：拖动父级本来就带着子级，两组一起选
+    会把子级移两次。
+
 - static int FreeHandleX(int hn, int ex, int ew)
+  - 第 hn 号调整大小手柄（0 左上 1 上 2 右上 3 右 4 右下 5 下
+    6 左下 7 左）的 X：右手柄贴右边、左手柄贴左边，上/下手柄取中线。
 
 - static int FreeHandleY(int hn, int ey, int eh)
+  - 第 hn 号手柄的 Y：上手柄（0/1/2）贴顶边、下手柄（4/5/6）
+    贴底边，左/右手柄取中线。
 
 - int FreeSnapTol(App app, int psMilli)
   - 磁吸阈值：屏幕上约 6px 换算回设计像素，于是任何显示/视图缩放下手感一致
@@ -182,14 +239,23 @@
     新元素以光标为中心；光标下有容器则成为它的子级。
 
 - int DefaultFreeW(FormField f)
+  - 新拖入自由画布组件的默认宽度：表格/时间线/树/图表等宽组件
+    与 Tabs 320，标题及外壳类（工具条/状态栏等沿边铺满的）480，
+    其余 200。
 
 - int DefaultFreeH(FormField f)
+  - 新拖入自由画布组件的默认高度：直接取字段的行数单位。
 
 - void DrawLabel(App app, Canvas c, Theme t, FormField f, int lx, int ly, int lw, int align)
+  - 画字段的标签文本：必填字段前置红色星号（hideStar 时省略），
+    align 为 1 时右对齐到给定宽度，其余左对齐。
 
 - int PvS(App app, int v)
+  - 预览度量换算：把 v 按画布缩放（pvScale 千分比）折算成屏幕
+    像素；已夹在 BeginCtrlZoom 里时度量自带缩放，直接走 app.Scale。
 
 - int PvFont(int fsz)
+  - PvS 的字号版：乘 pvScale（BeginCtrlZoom 里跳过）并钳制下限 7。
 
 - void PreviewControl(App app, Canvas c, Theme t, FormField f, int x, int y, int w, int avail)
   - 绘制字段输入控件的非交互预览。
@@ -209,6 +275,9 @@
     换行的容器在设计器里也能完整显示。
 
 - void PvCtrl(App app, Control ctl, int x, int y, int w, int h)
+  - 在给定矩形里渲染一个保留式控件的实时预览：量测、按给定矩形
+    排布、渲染，全程夹在 BeginCtrlZoom/EndCtrlZoom 里随画布等比
+    缩放（PvCtrlAuto 是高度按测量结果重排的版本）。
 
 - void BeginCtrlZoom(App app)
   - 进入真控件等比缩放：按视图缩放（winZoom，50%–200%）临时放大/缩小
@@ -223,13 +292,16 @@
     一致。这些类型不把标题嵌进控件（标题由 DrawLabel 单独绘制），
     故不会重复。返回 true 表示已处理。
 
-- static string ChartKindName(int k)
-  - 图表类型的人类可读名称（Chart 字段把类型存在 uiState 中）。
+- static string ChartKindAlias(int k)
+  - 旧 uiState 图型序号（0 柱状 .. 7 散点）到 SampleOf 别名
+    字符串的映射（存量设计稿的直通行还没有 "type" 时回退用）。
 
 - void PreviewChart(App app, Canvas c, Theme t, FormField f, int x, int y, int w, int avail)
-  - Chart 组件的预览。图表类型保存在字段的
-    uiState 中（0 柱状图 .. 7 散点图），因此一个面板条目即可组合出
-    stdlib Chart 控件提供的所有图表类型。
+  - Chart 组件的画布预览。类型优先取直通行（extra["props"] 的
+    "type"，ECharts 注册表字符串/别名，经 ChartHost.SampleOf 现拼
+    示例——与生成代码 ChartHost.SetProp("type") 同一份示例数据，
+    设计器所见即发布窗体初见）；旧设计稿类型存 uiState
+    （0 柱状 .. 7 散点），回退映射。
 
 - void PreviewTable(App app, Canvas c, Theme t, FormField f, int x, int y, int w, int avail)
   - 渲染表格字段的紧凑非交互预览：由字段选项（其列）构建的
@@ -239,6 +311,7 @@
   - 水平渲染单选/复选字段选项的预览。
 
 - void Box(App app, Canvas c, Theme t, int x, int y, int w, int h)
+  - 画预览里单行输入框的底：圆角填充 + 边框，各仿画控件共用。
 
 
 ## Designer (class)
@@ -247,6 +320,9 @@
 同步）和设计 JSON 序列化。
 
 - void RenderInspector(App app, Canvas c, Theme t, int x, int y, int w, int h)
+  - 渲染右侧检查器面板：目标名 + 属性/事件选项卡对，可滚动主体
+    按选项卡分派到 RenderEventsTab / RenderWindowProps /
+    RenderFieldProps（滚轮滚动，内容高度取上一帧测量值）。
 
 - void SyncEditors(FormField f)
   - 选区变化时重置选项 / 事件编辑器（普通属性行直接
@@ -278,6 +354,7 @@
   - 表格列选项的数据字段键（未声明时为 ""）。
 
 - static int IndexOfColon(string s)
+  - s 中第一个冒号的下标，没有则 -1（"标题:字段" 约定的分隔符）。
 
 - List<PropSpec> WindowSpecs()
   - 根 Window 的属性列表：窗口装饰（标题 / 尺寸 / 标志）以及
@@ -286,6 +363,12 @@
 - int RenderWindowProps(App app, Canvas c, Theme t, int ix, int iy, int iw)
   - 根 Window 的属性选项卡：属性行交给 PropertyGrid，
     这里只留「保存为组件」和自定义形状的只读提示。
+
+- void ApplyDevice(DeviceProfile dp)
+  - 应用目标设备画像选择（属性面板 device 行的差量落点）：
+    锁定类设备把画布切到画像视口（允许横竖屏时保持当前
+    方向）并关掉 resizable——移动端运行时窗口就是整块表面；
+    桌面恢复自由尺寸（device 清空，即文档缺省）。
 
 - int RenderEventsTab(App app, Canvas c, Theme t, int ix, int iy, int iw)
   - 事件选项卡：当前目标（窗口根或选中组件）的所有事件，
@@ -296,8 +379,10 @@
   - 根 Window 的可设计事件（生命周期/尺寸/焦点/键盘）。
 
 - string WinGetHandler(string ev)
+  - 根 Window 的事件 ev 已绑定的处理器名，没绑过为 ""。
 
 - void WinSetHandler(string ev, string h)
+  - 设置根 Window 事件 ev 的处理器名；winEvents 里没有该键时追加。
 
 - static string EventCategory(string ev)
   - 事件名的逻辑类别，事件选项卡据此把长列表
@@ -316,6 +401,8 @@
     小写类型键，因此小写查询即可）。
 
 - void RenderStatus(App app, Canvas c, Theme t, int x, int y, int w)
+  - 渲染底部状态栏：组件总数、当前选中、活动容器（Tabs 带页号）、
+    当前缩放（含「适应」）和最近一条提示消息。
 
 - string SaveJson()
   - 把整个表单序列化为人类可编辑的 JSON 文档：表单
@@ -339,11 +426,33 @@
     `kids`，使 JSON 往返包含所有设计器事件绑定、选项和
     子节点。读取器（FieldFromJson）与此键集镜像对应。
 
-- void LoadJson(string s)
+- void ApplyJson(string s)
   - 根据 SaveJson 生成（或
     手写/工具生成的）JSON 设计文档重建表单。用真正的 JSON 解析器读取，因此任意
     合法格式——美化打印、紧凑、或键乱序——加载结果都一致，
     而不依赖每行一个键的布局。
+    把一份设计 JSON 恢复到模型上。Undo/Redo 走这里：历史栈就
+    是这两个操作自己的工作对象，历史上 LoadJson 无条件清栈，
+    Ctrl+Z 只能退一步、Ctrl+Y 永远落空。打开新文档用 LoadJson。
+
+- void LoadJson(string s)
+  - 打开/换入一份新文档：恢复模型后清空撤销/重做历史——快照
+    是整份设计 JSON，不清理的话，上一个文档的撤销会把别的设计
+    灌进当前画布并在帧末落盘覆盖本文件（IDE 所有 .zform 标签页
+    共用一个设计器单例）。JSON 抽屉 Apply 也走这里，行为一致。
+    解析失败（loadError）保持历史，与旧行为一致。
+
+- void ResetHistoryLocked()
+  - 载入新文档时清空撤销/重做历史：快照是整份设计 JSON，
+    不清理的话，上一个文档的撤销会把别的设计灌进当前画布
+    并在帧末落盘覆盖本文件（IDE 所有 .zform 标签页共用一个
+    设计器单例）。JSON 抽屉 Apply 也走这里，行为一致。
+
+- bool loadError;
+  - 上一次 LoadJson 是否失败（文档损坏被拒绝）。宿主（IDE）
+    据此提示；失败时表单被清空，lastError 带原因。
+
+- string lastError;
 
 - List<FormField> ParseComponentFields(string s)
   - 仅解析设计 JSON 的 "fields" 数组到一个新列表，用于
@@ -361,6 +470,11 @@
     几何，任何「反序列化到模型再序列化回去」的写法都会静默丢掉
     其余键——控件会全部退化成默认 Input。
     返回 true 表示文档被改动。
+
+- static bool RetargetDoc(JsonValue doc, int devW, int devH, string devId)
+  - RetargetDoc 带目标设备画像 id（"" = 桌面自由尺寸，不写键）：
+    锁定类画像把 device 写进文档、关掉 resizable（移动端运行时
+    窗口就是整块表面），圆表盘画像顺带声明 winRound。
 
 - static void FitFieldsToCanvas(JsonValue fields, int boxW, int boxH, int margin)
   - 把每个字段的绝对矩形夹进 boxW x boxH，边距 margin。容器的 kids
@@ -385,10 +499,18 @@
   - 字段总数（含嵌套容器子级）；加载后为唯一名计数器
     提供初始值。
 
+- bool UsedFieldName(FormField except, string nn)
+  - nn 是否已被 except（含其子级）之外的其它组件占用。
+    重名会让编译期投影生成重复字段，提交前拒绝。
+
+- bool FieldNameIn(List<FormField> lst, FormField except, string nn)
+  - UsedFieldName 的递归实现：在 lst（含各级容器子级）里查
+    除 except 之外是否有组件叫 nn。
+
 
 ## Designer (class)
 
-- static int lang;
+- static string lang="en";
 
 - List<FormField> fields;
 
@@ -476,6 +598,17 @@
   - 自由画布上的附加选中项（Ctrl+点击 / 框选），
     `sel` 是其中的主选中项（手柄和检查器跟着它）。
 
+- List<string> undoStack;
+  - 整份设计 JSON 快照（最多 60 份）：任何修改前压栈，
+    撤销时把当前快照压回重做栈再载入栈顶。和场景设计器
+    同一套模型——SaveJson/LoadJson 就是文档的完整往返。
+
+- List<string> redoStack;
+
+- List<string> clipFields;
+  - 剪贴板：复制选中项的 FieldJson 片段，粘贴时重建
+    （容器连子级一起）。
+
 - bool freeHand;
 
 - bool freeMarquee;
@@ -561,29 +694,21 @@
 
 - int inspKeySeq;
 
-- SignalString optSig;
-
 - Input optInput;
 
-- SignalString optFieldSig;
-
 - Input optFieldInput;
-
-- SignalString evtSig;
 
 - Input evtInput;
 
 - string evtEditing;
 
-- SignalString formNameSig;
-
 - Input formNameInput;
-
-- SignalString submitSig;
 
 - Input submitInput;
 
-- SignalString winTitleSig;
+- string winTitle;
+  - 窗口标题的唯一真相（普通字段）：标题输入框经 `data` 绑定、
+    PropertyGrid 的 title 行经 PropSpec.str 指到同一字段。
 
 - Input winTitleInput;
 
@@ -619,11 +744,20 @@
 
 - int winPosY;
 
+- string device;
+  - 目标设备画像 id（DeviceProfile，"" = 桌面自由尺寸）。锁定类
+    画像下 winW/winH 由画像给出，属性面板不再提供宽高输入，
+    只保留画像允许的横竖屏切换。
+
+- int devSelIdx;
+  - device/方向在属性面板里的镜像下标：每帧从模型同步，
+    PropertyGrid 经绑定写回，渲染后与模型差量即用户改动。
+
+- int devOrient;
+
 - List<EventBinding> winEvents;
 
 - string winEvtEditing;
-
-- SignalString filterSig;
 
 - Input filterInput;
 
@@ -634,8 +768,6 @@
 - List<string> bindVars;
 
 - bool bindPickOpen;
-
-- SignalString jsonSig;
 
 - TextArea jsonArea;
 
@@ -649,6 +781,30 @@
 
 - bool saveCompRequested;
 
+- List<string> pvCompKeys;
+
+- List<Control> pvCompCtls;
+
+- int pvCompGen;
+
+- string compPropFor;
+
+- List<string> compPropKeys;
+
+- List<string> compPropLabels;
+
+- List<string> compPropDefs;
+
+- string compPropEditFor;
+
+- List<Input> compPropInputs;
+
+- List<string> compPropShadow;
+
+- bool openCompRequested;
+
+- string openCompName;
+
 - void SetLayoutMode(int mode)
   - 切换被设计窗口的布局模型。宿主在打开一份设计时
     调用（.zform 里存了 layoutMode），设计器自己不提供
@@ -659,11 +815,13 @@
     免得它们全叠在原点。
 
 - static string T(string en, string zh)
-  - 按当前 UI 语言选取字符串。
+  - 按当前 UI 语言选取字符串：键式查找（System.Globalization.Lang），
+    英文原文作键、内置中文为缺省串；语言包未加载时回退缺省串。
 
 - Designer()
 
 - void ScrollPaletteToEnd()
+  - 把工具箱滚到末尾。
 
 - void Seed(App app)
   - 可选的示例内容，让新建的设计器不是空表单——
@@ -689,16 +847,72 @@
 
 - void SetUserComponents(List<UserComponent> comps)
   - 宿主 IDE 提供项目保存的用户组件（每个组件一个实体，
-    来自 components/*.zcomp）。
+    来自 components/*.zcomp）。组件文档可能随时被重新加载
+    或保存，引用节点据此作废预览缓存。
+
+- string UserCompJson(string name)
+  - 组件名对应的 .zcomp 文档原文；不存在返回 ""。
 
 - bool ConsumeSaveComponent()
   - 用户请求把当前设计保存为可复用组件后，恰好返回一次 true；
     宿主 IDE 持久化它并重新加载列表。
 
+- string FormNameText()
+  - 表单名称输入框的当前文本（宿主保存组件时用作文件名）。
+
+- string ConsumeOpenComponent()
+  - 双击引用节点后恰好返回一次组件名（"" 表示无请求）；宿主
+    打开 components/<名>.zcomp 文档本身供编辑。
+
 - void AddUserComponent(int k)
-  - 在表单上实例化一个已保存的用户组件：单容器
-    设计直接原样插入，其余情况用名为组件名的
-    Card 包裹（WinForms UserControl 风格）。
+  - 在表单上放置一个已保存用户组件的**引用**节点：.zform 里
+    只写 {"kind":名,"ref":名,...}——组件设计的每次进化自动
+    跟随所有实例（WinForms UserControl 语义），要改内部就打开
+    组件本身，检查器提供「解包为内联副本」作逃生门。默认矩形
+    取组件文档自己的画布尺寸（winW/winH），缺省 240x一行高。
+    画布预览按组件文档用 FormBuilder 建真控件渲染。
+
+- void UnpackUserComponent(FormField f)
+  - 「解包为内联副本」：把引用节点换成组件文档的字段树
+    （单容器文档直接换成那个容器，多字段的包一层同名
+    Card），首节点继承引用的矩形/停靠/跨度。解包后的副本
+    与组件脱钩，之后组件进化不再跟随。
+
+- void EnsureCompPropDecls(string compName)
+  - 组件文档根上声明的对外属性（"props":[{key,label,kind,
+    target,prop,def}]，v1 只消费 text 型），解析进并行表缓存，
+    缓存键为 组件名|代次。组件没声明或文档缺失时表为空。
+
+- static string CompPropValue(FormField f, string key, string def)
+  - 引用节点实例值读/写：存 f.extra 的 "props" 直通对象
+    （"props" 不在 IsModeledKey 里，SaveJson/LoadJson 原样
+    透传，GenForm 展开时落给目标内部控件）。
+
+- static void SetCompPropValue(FormField f, string key, string val)
+
+- static List<string> BuiltinPropRows(string kind)
+  - 内置组件的直通属性行：kind → "键|双语标签" 列表。值存
+    f.extra["props"]——与引用节点实例值同一张直通表，GenForm
+    泛化发射 SetProp、画布预览经 ApplyFieldProps 落到真控件。
+    只列设计期有意义的形态/展示属性；运行态开关（如 Countdown
+    的 active）不进来。没有行的 kind 返回 null。
+
+- static void ApplyFieldProps(Control ctl, FormField f)
+  - 把字段 extra["props"] 直通表落到真控件上（画布预览用）：
+    预览件每帧新建，逐键 SetProp；控件不认的键走基类 fallback
+    退化为样式类，无副作用。
+
+- void ApplyCompProps(Control root, JsonValue compRoot, FormField f)
+  - 预览树上应用组件属性：与运行期注册表（UserComponentRegistry.
+    ApplyProps）共用同一语义——实例值优先，缺省取声明里的 def，
+    落到目标控件（预览树按组件文档原名查找）。实例值存
+    f.extra 的 "props" 直通对象。
+
+- Control PvCompCtl(FormField f, int w, int h)
+  - 引用节点画布预览的构建缓存：组件文档只在代次变化时
+    重建（SetUserComponents / 尺寸变化 / 实例属性变化），
+    其余帧复用整棵 FormBuilder 树只重渲染。找不到组件或
+    解析失败返回 null，调用方退回占位块。
 
 - void AddCustomField(string kind)
   - 按 ProjectComponents tag 添加发现的项目自定义组件
@@ -708,14 +922,17 @@
   - 当 `inner` 位于 `owner` 子树的任意位置时返回 true。
 
 - bool ContainsRef(List<FormField> lst, FormField target)
+  - 列表中是否含该组件引用。
 
 - int IndexIn(List<FormField> lst, FormField f)
+  - 组件在列表中的下标，不存在时 -1。
 
 - FormField ParentContainerOf(FormField target)
   - 把 `target` 作为子级的容器；若 target 是
     顶层字段（或未找到）则返回 null。递归查找。
 
 - FormField FindOwner(List<FormField> lst, FormField target)
+  - 递归查找把 target 作为直接子级的容器，找不到返回 null。
 
 - List<FormField> ListRemove(List<FormField> lst, FormField target)
   - 重建不含 `target` 的 `lst`（列表中间位置的 RemoveAt 在其他地方使用，
@@ -726,6 +943,7 @@
     运行时在列表中间 Insert 会溢出缓冲区并破坏堆）。
 
 - void MoveSel(int delta)
+  - 把选中项在同级列表内上/下移动 delta 个位置（先压撤销栈）。
 
 - void InsertFieldAt(int at, FormField nf)
   - 插入 `nf`，使其最终位于顶层列表的 `at` 索引处。
@@ -734,8 +952,10 @@
   - 组件是否在多选里（主选中项或附加项）。
 
 - void ToggleExtraSel(FormField f)
+  - 把组件加入/移出多选的附加选中项（Ctrl+点击）。
 
 - void ClearExtraSel()
+  - 清空多选的附加选中项。
 
 - void SizeSelGroup(int mode)
   - 把多选里其余成员的宽/高设成主选中项的（0=等宽，1=等高），
@@ -747,6 +967,40 @@
 - void DuplicateSel()
   - 复制选中项，副本偏移一点并成为新的选中项。
 
+- void PushUndo()
+  - 记录当前设计；在任何修改前调用。当前状态和栈顶相同
+    （上一次压栈后设计没真正变过）时不重复压栈。
+
+- void PopUndoIfUnchanged()
+  - 拖拽/缩放结束（或任何「压了栈但没改成」的操作收尾）时调用：
+    设计和栈顶一致说明这次操作没有实际改动，把栈顶退掉，
+    免得 Ctrl+Z 第一脚踩空。
+
+- void Undo()
+  - 撤销：当前设计压入重做栈，载入撤销栈顶；栈空时仅提示。
+    恢复快照必须走 ApplyJson——LoadJson 会清空两个历史栈，
+    一步撤销之后整个历史就没了。
+
+- void Redo()
+  - 重做：当前设计压入撤销栈，载入重做栈顶；栈空时仅提示。
+
+- void CopySel()
+  - 复制选中项（含多选）为 FieldJson 片段列表；无选中时仅提示。
+
+- void RenameFresh(FormField f)
+  - 粘贴的组件整组换新名字（含容器子级），避免和原组件、
+    以及代码后置里的字段撞名。
+
+- void PasteClip()
+  - 粘贴到原父容器（没有选中就贴到顶层），整组偏移 16px，
+    贴完的组成为新的选中组。
+
+- void NudgeSel(int dx, int dy)
+  - 方向键微调整个多选组（自由布局；Shift=1px）。
+
+- void NudgeOne(FormField f, int dx, int dy)
+  - 单个组件按像素增量微调并钳制到非负坐标。
+
 - void ToggleLockSel()
   - 锁定/解锁整个多选：以主选中项的状态取反，其余成员跟随，
     这样一组组件的锁定状态始终一致。
@@ -757,8 +1011,13 @@
     保证多选里的每一个都被删掉（而不是只删主选中项）。
 
 - void DeleteSel()
+  - 删除主选中项，并清掉多选与可能引用它的交互状态
+    （避免悬空引用崩溃）。
 
 - void Render(App app, int x, int y, int w, int h)
+  - 每帧入口：把进程级 WidgetId 计数器固定到设计器专用基值
+    （800000）后绘制整个设计器，完成即恢复，使即时模式控件
+    每帧获得稳定 id（hover/press/click 都按 id 关联）。
 
 - void RenderHostPanels(App app, Rect toolRect, Rect propRect)
   - 宿主把组件面板和属性面板画进自己的 dock 面板里。调用
@@ -766,6 +1025,9 @@
     不再排版。id 基值和 Render 分开，避免两趟互相错位。
 
 - void RenderPinned(App app, int x, int y, int w, int h)
+  - 设计器本体的一帧：功能区、画布（或 JSON 抽屉）、组件托盘、
+    左右面板与状态栏；处理键盘快捷键、拖拽收尾、工具箱
+    tooltip、拖拽幽灵块与缩放下拉菜单。
 
 - void RenderJsonPanel(App app, Canvas c, Theme t, int x, int y, int w, int h)
   - 开启 JSON 时替代画布显示的可编辑 JSON 抽屉。
@@ -778,21 +1040,26 @@
     只负责喂数据和处理「选中 = 添加 / 按下 = 开始拖拽」。
 
 - void EnsurePalette()
+  - 惰性创建工具箱 TreeView，并在过滤串或用户组件数量变化时重建节点。
 
 - void BuildPalette(string q)
   - 重建工具箱节点。过滤串非空时是一层扁平的匹配结果，
     否则是按类别分组的两层树。
 
 - void PalGroup(string title, int lo, int hi)
+  - 添加一个分组目录及其 [lo, hi) 类型区间内的组件叶子。
 
 - void PalDir(string title)
+  - 添加一个分组目录节点（折叠状态按标题跨帧记忆）。
 
 - void PalLeaf(string label, string icon, int kind, string custom, int depth)
+  - 添加一个组件叶子节点（palKind/palCustom 与行下标一一对应）。
 
 - int PalLeafRow()
   - 事件涉及的行是组件叶子时返回其下标，否则返回 -1。
 
 - int UserCompIndex(string name)
+  - 按名查找用户组件下标，不存在时 -1。
 
 - void PalActivate()
   - 单击工具箱里的组件即添加一个；随后清掉选中，
@@ -815,10 +1082,13 @@
   - 已折叠的分组标题。折叠状态按标题记住，跨帧保留。
 
 - void PalToggleFold(string title)
+  - 切换分组标题的折叠记忆。
 
 - static List<string> ListRemoveStr(List<string> src, int idx)
+  - 重建不含 idx 处元素的字符串列表（与 ListMove 同一规避）。
 
 - bool InRect(int mx, int my, int x, int y, int w, int h)
+  - 点是否在矩形内（含右/下边界）。
 
 - void RenderTray(App app, Canvas c, Theme t, int x, int y, int w, int h)
   - WinForms 风格组件托盘：表单上的每个非可视组件

@@ -47,13 +47,15 @@
     <aside class="wiki-side doc-side">
       <div class="searchbox"><svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         <input id="docSearch" placeholder="筛选目录…" aria-label="filter"></div>
-      <details class="nsgrp" open><summary>System · 55</summary>
+      <details class="nsgrp" open><summary>System · 58</summary>
 <a href="/ref/System">System</a>
 <a href="/ref/System.Automation">System.Automation</a>
 <a href="/ref/System.Collections">System.Collections</a>
 <a href="/ref/System.Collections.Generic">System.Collections.Generic</a>
+<a href="/ref/System.Commercial">System.Commercial</a>
 <a href="/ref/System.Compiler">System.Compiler</a>
 <a href="/ref/System.Data">System.Data</a>
+<a href="/ref/System.Data.Excel">System.Data.Excel</a>
 <a href="/ref/System.Data.Firebird">System.Data.Firebird</a>
 <a href="/ref/System.Data.MySql">System.Data.MySql</a>
 <a href="/ref/System.Data.Orm">System.Data.Orm</a>
@@ -69,6 +71,7 @@
 <a href="/ref/System.Globalization">System.Globalization</a>
 <a href="/ref/System.IO">System.IO</a>
 <a href="/ref/System.IO.Compression">System.IO.Compression</a>
+<a href="/ref/System.IO.Watch">System.IO.Watch</a>
 <a href="/ref/System.Input">System.Input</a>
 <a href="/ref/System.Json">System.Json</a>
 <a href="/ref/System.Knowledge">System.Knowledge</a>
@@ -76,6 +79,7 @@
 <a href="/ref/System.Management">System.Management</a>
 <a href="/ref/System.Net">System.Net</a>
 <a href="/ref/System.Net.Coap">System.Net.Coap</a>
+<a href="/ref/System.Net.External">System.Net.External</a>
 <a href="/ref/System.Net.Http">System.Net.Http</a>
 <a href="/ref/System.Net.Http.Client">System.Net.Http.Client</a>
 <a href="/ref/System.Net.Http.Download">System.Net.Http.Download</a>
@@ -84,7 +88,6 @@
 <a href="/ref/System.Net.Modbus">System.Net.Modbus</a>
 <a href="/ref/System.Net.Mqtt">System.Net.Mqtt</a>
 <a href="/ref/System.Net.Ntp">System.Net.Ntp</a>
-<a href="/ref/System.Net.Rpc">System.Net.Rpc</a>
 <a href="/ref/System.Net.Sip">System.Net.Sip</a>
 <a href="/ref/System.Net.Sockets">System.Net.Sockets</a>
 <a href="/ref/System.Net.Sse">System.Net.Sse</a>
@@ -123,13 +126,13 @@
 <a href="/ref/Game.Arcade2D">Game.Arcade2D</a>
 <a href="/ref/Game.Arpg">Game.Arpg</a>
 <a href="/ref/Game.Arpg.Data">Game.Arpg.Data</a>
-<a href="/ref/Game.Arpg.Fonts">Game.Arpg.Fonts</a>
 <a href="/ref/Game.Board">Game.Board</a>
 <a href="/ref/Game.Cards">Game.Cards</a>
 <a href="/ref/Game.Core">Game.Core</a>
 <a href="/ref/Game.Foundation">Game.Foundation</a>
-<a href="/ref/Game.Foundation.Sdl">Game.Foundation.Sdl</a>
-<a href="/ref/Game.Render">Game.Render</a>
+<a href="/ref/Game.Foundation.Gui">Game.Foundation.Gui</a>
+<a href="/ref/Game.Idle">Game.Idle</a>
+<a href="/ref/Game.Kit">Game.Kit</a>
 <a href="/ref/Game.Scene">Game.Scene</a>
 </details>
 <details class="nsgrp"><summary>Sdk · 57</summary>
@@ -191,9 +194,6 @@
 <a href="/ref/Sdk.Wechat.Work">Sdk.Wechat.Work</a>
 <a href="/ref/Sdk.Wechat.WxOpen">Sdk.Wechat.WxOpen</a>
 </details>
-<details class="nsgrp" open><summary>SDL3 · 1</summary>
-<a href="/ref/SDL3">SDL3</a>
-</details>
 <details class="nsgrp"><summary>Platform · 1</summary>
 <a href="/ref/Platform">Platform</a>
 </details>
@@ -218,16 +218,19 @@ http/https。
 </li>
 <li class=""><code class="sig">bool closed;</code>
 </li>
+<li class=""><code class="sig">int idleMs;</code>
+</li>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
-<li class=""><code class="sig">FwdChannel(nint sock, TlsStream tls, TlsContext ctx)</code>
+<li class=""><code class="sig">FwdChannel(nint sock, TlsStream tls, TlsContext ctx, int idleMs)</code>
+<div class="mdoc">私有构造：用 <code>OfSocket</code> / <code>OfTls</code> 创建。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
-<li class=""><code class="sig">static FwdChannel OfSocket(nint sock)</code>
+<li class=""><code class="sig">static FwdChannel OfSocket(nint sock, int idleMs)</code>
 <div class="mdoc">明文 TCP 链路。</div>
 </li>
-<li class=""><code class="sig">static FwdChannel OfTls(nint sock, TlsStream tls, TlsContext ctx)</code>
+<li class=""><code class="sig">static FwdChannel OfTls(nint sock, TlsStream tls, TlsContext ctx, int idleMs)</code>
 <div class="mdoc">TLS 链路；<code>ctx</code> 由本链路持有，关闭时释放。</div>
 </li>
 <li class=""><code class="sig">async string RecvAsync(int max)</code>
@@ -241,6 +244,7 @@ http/https。
 <div class="mdoc">关闭链路（幂等）。TLS 链路同时释放流与上下文。</div>
 </li>
 <li class=""><code class="sig">bool IsClosed()</code>
+<div class="mdoc">链路是否已关闭。</div>
 </li>
 <li class=""><code class="sig">nint Sock()</code>
 <div class="mdoc">底层套接字（连接池用它做零阻塞的存活检查）。</div>
@@ -280,6 +284,8 @@ http/https。
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">FwdPool(int maxIdle, int idleMs)</code>
+<div class="mdoc">创建空池：空闲链路上限 &lt;paramref name=&quot;maxIdle&quot;/&gt; 条、
+空闲存活 &lt;paramref name=&quot;idleMs&quot;/&gt; 毫秒。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -322,6 +328,7 @@ http/https。
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">FwdReader(FwdChannel ch, int chunkBytes)</code>
+<div class="mdoc">&lt;paramref name=&quot;chunkBytes&quot;/&gt; 为单批读取与转发的块大小（字节）。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -345,6 +352,7 @@ http/https。
 <div class="mdoc">取走并清空缓冲（不再读取）。</div>
 </li>
 <li class=""><code class="sig">bool AtEof()</code>
+<div class="mdoc">对端已关闭且缓冲取尽——链路已读到 EOF，不可再复用。</div>
 </li>
 <li class=""><code class="sig">bool Drained()</code>
 <div class="mdoc">缓冲已空且对端未关闭——即这条链路正好停在一帧的
@@ -410,6 +418,8 @@ Upgrade 与 CONNECT 仍照旧方式用完即关。用
 </li>
 <li class=""><code class="sig">TcpListener listener;</code>
 </li>
+<li class=""><code class="sig">int recvIdleMs;</code>
+</li>
 <li class=""><code class="sig">FwdPool pool;</code>
 </li>
 <li class=""><code class="sig">int maxIdleUp;</code>
@@ -426,11 +436,15 @@ Upgrade 与 CONNECT 仍照旧方式用完即关。用
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">void ParseUpstream(string upstream)</code>
+<div class="mdoc">解析 upstream 字符串为上游 host、port 与 TLS 标志
+（协议前缀与显式端口优先，缺省按构造器文档）。</div>
 </li>
 <li class=""><code class="sig">HttpForwarder SetTimeout(int ms)</code>
 <div class="mdoc">空闲超时（毫秒）：两个方向都这么久没有字节
 才判定链路失效。流式响应之间的静默间隔可能很长，
-因此默认 5 分钟。</div>
+因此默认 5 分钟。同时更新明文链路的接收截止——
+此前该值只作用于连接建立，注释承诺的空闲判定从未生效，
+慢速客户端/卡死上游会永久占用协程与套接字。</div>
 </li>
 <li class=""><code class="sig">HttpForwarder SetChunkBytes(int bytes)</code>
 <div class="mdoc">单次搬运的块大小（字节）。</div>
@@ -471,8 +485,10 @@ close”的旧行为（上游对 keep-alive 处理有问题时的逃生口）。
 一路慢速流式响应不会挡住其他连接。运行期间不返回。</div>
 </li>
 <li class=""><code class="sig">static async void RejectBusy(nint clientSock)</code>
+<div class="mdoc">超过并发上限时对下游回 503 并关闭。</div>
 </li>
 <li class=""><code class="sig">async void Serve(nint clientSock)</code>
+<div class="mdoc">单条下游连接的生命周期：转发一次后递减并发计数。</div>
 </li>
 <li class=""><code class="sig">async void ServeOnce(nint clientSock)</code>
 <div class="mdoc">转发一个下游连接：读请求头 → 连上游 → 边收边转
@@ -541,6 +557,8 @@ Content-Length: n         —— 精确转发 n 字节；
 WhenAll 不会卡在半关闭的链路上。</div>
 </li>
 <li class=""><code class="sig">static async void PumpUntilClose(FwdChannel src, FwdChannel dst, int chunkBytes)</code>
+<div class="mdoc">隧道单向的搬运：读到 EOF 或写失败即退出并关闭两端，
+让另一方向也随之收到 EOF。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; HeadLines(string head)</code>
 <div class="mdoc">头块按行切分（不含各行 CRLF，也不含结束空行）。</div>
@@ -552,7 +570,10 @@ WhenAll 不会卡在半关闭的链路上。</div>
 <div class="mdoc">状态行的状态码，无法解析时返回 0。</div>
 </li>
 <li class=""><code class="sig">static string LowerName(string line)</code>
-<div class="mdoc">头部行的字段名（小写）；不是头部行时返回空串。</div>
+<div class="mdoc">头部行的字段名（小写）；不是头部行时返回空串。
+冒号前含空格/制表符的行（如 &quot;Transfer-Encoding :&quot;）返回空串——
+这种混淆名此前会绕过所有 TE/逐跳判定后被原样转发，是教科书级
+走私向量；RFC 7230 要求拒收。</div>
 </li>
 <li class=""><code class="sig">static string HeaderValueOfLine(string line)</code>
 <div class="mdoc">头部行的字段值（两端空白已去除）。</div>
@@ -576,26 +597,35 @@ WhenAll 不会卡在半关闭的链路上。</div>
 <li class=""><code class="sig">static bool IsBodyFramingValid(string head, bool isRequest)</code>
 <div class="mdoc">检查请求/响应头块的正文定界是否合法。
 非法定界（TE+CL 冲突、非 chunked 的 TE、chunked 不在最后、
-非法 Content-Length）返回 false，调用方应返回 400。</div>
+非法/重复的 Content-Length、冒号前含空白的混淆字段名）
+返回 false，调用方应返回 400。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; SplitCsv(string s)</code>
 <div class="mdoc">按 &#x27;,&#x27; 拆分 TE/CL 等逗号分隔值，并 trim 每项。</div>
 </li>
 <li class=""><code class="sig">static long ParseChunkSize(string line)</code>
 <div class="mdoc">分块长度行（十六进制，可带 &quot;;ext&quot;）的字节数；
-非法时返回 -1。</div>
+非法时返回 -1。位数超过 13 即按非法处理：13 位十六进制已覆盖
+8TiB，合法分块远小于此，无上限的累加会回绕出小正数值，
+把转发器的分块定界悄悄打乱。</div>
 </li>
 <li class=""><code class="sig">static int ParseInt(string s)</code>
+<div class="mdoc">解析前导十进制数字（ParseUpstream 的端口用）；无数字时为 0。</div>
 </li>
 <li class=""><code class="sig">static string Lower(string s)</code>
+<div class="mdoc">ASCII 大写转小写。</div>
 </li>
 <li class=""><code class="sig">static string Trim(string s)</code>
+<div class="mdoc">去除两端的空格/制表符/CRLF。</div>
 </li>
 <li class=""><code class="sig">static bool StartsWith(string s, string prefix)</code>
+<div class="mdoc">是否以 <code>prefix</code> 开头。</div>
 </li>
 <li class=""><code class="sig">static int IndexOf(string hay, string needle, int from)</code>
+<div class="mdoc">从 &lt;paramref name=&quot;from&quot;/&gt; 起查找子串首次出现的下标；未找到为 -1。</div>
 </li>
 <li class=""><code class="sig">static int LastIndexOf(string hay, string needle)</code>
+<div class="mdoc">子串最后一次出现的下标；未找到为 -1。</div>
 </li>
 </ul>
 </div></div>

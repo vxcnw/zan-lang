@@ -27,6 +27,7 @@ CEF 官方构建索引里的一个归档条目。
   - 归档字节数。
 
 - CefArchive()
+  - 全空的归档条目。
 
 - string Path()
   - 该归档的请求路径（"+" 已按 URL 规则转义）。
@@ -152,6 +153,11 @@ driver 自己再 dlopen CefRuntime 装好的 libcef，并在调用任何版本�
   - 加载 driver 并解析全部入口点。<paramref name="cefVersion"/>
     是运行时的 CEF 版本（""=未知，按最新变体处理），用来在 109 与最新
     两个变体之间挑选。幂等。
+    
+    <para>线程安全：本类没加锁；Zan 的 GUI/脚本进程一般只有一个 UI 线程调
+    `Work`，多线程同时进 <c>Resolve</c> 会重复 dlopen + 重复
+    解析并可能 <c>Interop.Unload</c> 对方正在用的句柄。不要在多线程下
+    首次触发 CEF。</para>
 
 - static List<string> Candidates(string cefVersion)
   - 按平台命名规则和 CEF 分支列出候选 driver 路径：先按
@@ -171,39 +177,59 @@ driver 自己再 dlopen CefRuntime 装好的 libcef，并在调用任何版本�
     个进程占着、覆盖不掉），都不会被加载到。
 
 - static string Fingerprint(string name)
+  - 内嵌资源名 "zan-drivers/<fp>/<file>" 中的 <fp>（构建指纹段）；
+    没有两段路径时为 "unknown"。
 
 - static bool ResolveSymbols()
+  - 解析 driver 的全部导出符号到 addr_*；任一缺失即返回 false，
+    并把缺的符号名记进 Error()。
 
 - static string missing="";
 
 - static nint Sym(string name)
+  - 解析单个导出符号；缺失时记下符号名并返回 0（加载即判失败）。
 
 - static int ExecuteProcess(string runtimeDir, string cefVersion, string switches)
   - 本进程是 Chromium helper（render/gpu/utility）时跑完并返回
     其退出码；是浏览器进程时返回 -1，调用方继续往下走。
+    
+    <para>注意三个参数的不对称：<paramref name="cefVersion"/> 只用于
+    `Resolve` 在本进程里挑 driver 变体（109 vs 当前），不传到底层
+    <c>zan_cef_execute_process</c>——那是个二参 C 导出（runtimeDir, switches），
+    版本信息已经在 <c>Resolve</c> 阶段由 driver 端 <c>cef_api_hash</c> 校验过了。
+    这里写三参只是为了让调用方不重复读 ready marker；保留这个签名不动，避免
+    ABI 变更。</para>
 
 - static bool Init(string runtimeDir, string cefVersion, string cachePath, string helperPath, string locale, string switches, bool windowless)
   - 初始化 CEF 浏览器进程（driver 变体按 CEF 版本选）。
 
 - static bool Ready()
+  - CEF 浏览器进程已初始化且未 shutdown。
 
 - static void Work()
   - 推一轮 CEF 消息循环（每帧从宿主 UI 线程调用）。
 
 - static void Shutdown()
+  - 关闭全部浏览器并 shutdown CEF（进程退出前调用一次，不可逆）。
 
 - static int Create(nint parent, int x, int y, int w, int h, string url)
+  - 以 (x,y,w,h) 在 `parent` 内创建浏览器并立即导航到 `url`，返回句柄
+    （driver 未加载/失败为 0）。
 
 - static void Close(int h)
+  - 关闭并销毁浏览器；句柄之后失效。
 
 - static bool Alive(int h)
+  - 浏览器是否仍然存活（无效句柄为 false）。
 
 - static nint Window(int h)
   - 浏览器的原生窗口句柄（HWND / X11 Window），无则 0。
 
 - static void SetBounds(int h, int x, int y, int w, int hh)
+  - 把浏览器摆到父窗口客户区坐标 (x,y,w,hh)。
 
 - static void SetVisible(int h, bool visible)
+  - 显示或隐藏浏览器。
 
 - static void ApplyClip(int h, string spec)
   - 把本帧未被遮挡的区域下发给原生窗口。签名匹配
@@ -211,33 +237,46 @@ driver 自己再 dlopen CefRuntime 装好的 libcef，并在调用任何版本�
     （委托是纯函数指针，所以这里是静态方法）。
 
 - static void SetFocus(int h, bool focus)
+  - 把键盘焦点交给（focus=false 时收回自）浏览器。
 
 - static void Navigate(int h, string url)
+  - 导航到 URL。
 
 - static void Back(int h)
+  - 历史后退一页。
 
 - static void Forward(int h)
+  - 历史前进一页。
 
 - static void Stop(int h)
+  - 停止当前加载。
 
 - static void Reload(int h, bool ignoreCache)
+  - 重新加载；ignoreCache=true 绕过缓存（Ctrl+F5 语义）。
 
 - static bool CanGoBack(int h)
+  - 能否后退。
 
 - static bool CanGoForward(int h)
+  - 能否前进。
 
 - static bool IsLoading(int h)
+  - 是否正在加载。
 
 - static int NavSeq(int h)
+  - 每次导航/源变化自增的序号（控件轮询它发现 URL/标题可能变了）。
 
 - static int LastStatus(int h)
+  - 最近一次导航完成的状态码（无导航为 0）。
 
 - static int LastErrorCode(int h)
   - 最近一次加载失败的 CEF 错误码（成功为 0）。
 
 - static string GetUrl(int h)
+  - 当前 URL（无页面为 ""）。
 
 - static string GetTitle(int h)
+  - 当前页面标题（无页面为 ""）。
 
 - static void ExecuteJs(int h, string code, string scriptUrl, int startLine)
   - 在主框架里执行 JavaScript（无返回值；要取结果走 CDP 的
@@ -247,11 +286,13 @@ driver 自己再 dlopen CefRuntime 装好的 libcef，并在调用任何版本�
   - 发一条 CDP 命令，返回其消息 id（失败 0）。
 
 - static int CdpPending(int h)
+  - 队列里还没取走的 CDP 消息条数。
 
 - static int CdpDropped(int h)
   - 因为 Zan 侧没有及时取走而被丢掉的消息数（队列有界）。
 
 - static bool CdpAttached(int h)
+  - DevTools 域是否已附接（CdpSend 送达的前提）。
 
 - static string CdpTake(int h)
   - 取走一条 CDP 消息（结果或事件的原始 JSON），空队列为 ""。
@@ -267,22 +308,32 @@ driver 自己再 dlopen CefRuntime 装好的 libcef，并在调用任何版本�
   - Chromium 的缩放级：0 = 100%，每 +1 乘 1.2。
 
 - static double GetZoom(int h)
+  - 当前缩放级（0 = 100%，每 +1 乘 1.2）。
 
 - static void Find(int h, string text, bool forward, bool matchCase, bool findNext)
+  - 页内查找：forward=false 向上、matchCase 区分大小写；findNext=false
+    开始新查找，true 在既有查找里继续步进。
 
 - static void StopFind(int h, bool clearSelection)
+  - 结束页内查找；clearSelection=true 时同时清掉高亮选区。
 
 - static void Print(int h)
+  - 弹出系统打印对话框，打印当前页面。
 
 - static void ShowDevTools(int h)
+  - 打开本浏览器的 DevTools 窗口（CDP 附接的前提）。
 
 - static void CloseDevTools(int h)
+  - 关闭 DevTools 窗口。
 
 - static void CallVoid(nint addr, int h)
+  - 调用「句柄 → void」形态的 driver 导出（未解析或地址为 0 时跳过）。
 
 - static int CallInt(nint addr, int h)
+  - 调用「句柄 → int」形态的 driver 导出（未解析或地址为 0 时返回 0）。
 
 - static string CallStr(nint addr, int h)
+  - 调用「句柄 → string」形态的 driver 导出（未解析或地址为 0 时返回 ""）。
 
 
 ## CefBootstrap (class)
@@ -322,6 +373,17 @@ return 0;
     消息循环并直接退出进程（不返回）；是浏览器进程时什么都不做。
     必须是 Main 的第一句：Chromium 用同一个可执行文件启动子进程，
     helper 分支不能走到宿主程序自己的逻辑里。
+    
+    <para>配置继承：helper 进程是 <c>exec</c> 出来的新进程，`CefOptions`
+    那个进程内静态状态（<c>current</c>）在父进程设的 <c>Use(...)</c> 不会被
+    helper 看到。helper 走的是环境变量 / 浏览器进程透传的 ENV：
+    <c>ZAN_CEF_RUNTIME</c> / <c>ZAN_CEF_PROFILE</c> / <c>ZAN_CEF_CACHE</c> /
+    <c>ZAN_CEF_DRIVER</c> / <c>ZAN_CEF_SWITCHES</c> / <c>ZAN_CEF_LOCALE</c> /
+    <c>ZAN_CEF_HELPER</c> / <c>ZAN_CEF_DOWNLOAD_UI</c> / <c>ZAN_CEF_NO_DCOMP</c> /
+    <c>ZAN_CEF_MIRROR</c> / <c>ZAN_CEF_ARCHIVE</c>，再加上浏览器进程
+    <c>zc_export_helper_env</c> 在子进程起来前 <c>setenv</c> 的
+    <c>ZAN_CEF_HELPER_RUNTIME/SWITCHES/DRIVER</c>（macOS/Linux 有效；
+    Windows helper 就是自己，不需要这三条）。</para>
 
 - static string LocalRuntimeDir()
   - 不联网地找出本机已装好的运行时目录（helper 进程用；
@@ -459,6 +521,7 @@ IsSupported() 为 false，Render 画一个画布内占位符（说明原因）�
   - 加载开始或结束时触发（IsLoading() 指示是哪种）。
 
 - CefBrowser()
+  - 全默认状态：未创建、乐观地假定 CEF 可用。
 
 - bool IsSupported()
   - 原生浏览器可用（CEF 已启动且这个视图创建成功）时为 true。
@@ -471,12 +534,18 @@ IsSupported() 为 false，Render 画一个画布内占位符（说明原因）�
   - 响应式当前 URL/文档标题（每次导航后更新）。
 
 - SignalString Title()
+  - 响应式当前文档标题（每次导航后更新）。
 
 - string CurrentUrl()
+  - 当前 URL 的字符串形式。
 
 - string CurrentTitle()
+  - 当前文档标题的字符串形式。
 
 - void EnsureCreated(App app, int x, int y, int w, int h)
+  - 首次 Render 时创建原生浏览器（用的是首帧矩形与挂起的 URL）。
+    CEF 尚未启动时不标记 created，下一帧重试——「运行时下载完成后
+    自动出现」依赖这一点；创建失败则永久回退占位符。
 
 - void Navigate(string target)
   - 导航到 URL。无协议的裸主机名视为 https://。
@@ -485,21 +554,28 @@ IsSupported() 为 false，Render 画一个画布内占位符（说明原因）�
   - 加载内存中的 HTML 字符串（走 data: URL，因此适合中小片段）。
 
 - void Back()
+  - 历史后退一页（未创建为空操作）。
 
 - void Forward()
+  - 历史前进一页。
 
 - void Stop()
+  - 停止当前加载。
 
 - void Reload()
+  - 重新加载当前页（走缓存）。
 
 - void ReloadIgnoreCache()
   - 忽略缓存的强制刷新（Ctrl+F5）。
 
 - bool CanGoBack()
+  - 能否后退（未创建为 false）。
 
 - bool CanGoForward()
+  - 能否前进（未创建为 false）。
 
 - bool IsLoading()
+  - 是否正在加载（未创建为 false）。
 
 - int LastStatus()
   - 最近一次主框架响应的 HTTP 状态码（无响应或非 HTTP 时为 0）。
@@ -550,18 +626,23 @@ IsSupported() 为 false，Render 画一个画布内占位符（说明原因）�
   - 缩放级别：0 = 100%，每 +1 乘 1.2（Ctrl+滚轮的那一档），可为负。
 
 - double Zoom()
+  - 当前缩放级（未创建为 0）。
 
 - void ZoomIn()
+  - 放大一档。
 
 - void ZoomOut()
+  - 缩小一档。
 
 - void ResetZoom()
+  - 回到 100%。
 
 - void Find(string text, bool forward, bool matchCase, bool findNext)
   - 页内查找并高亮。第一次调用 findNext 传 false（开一次新搜索），之后
     传 true 在同一批命中之间前后跳；`StopFind` 收尾。
 
 - void StopFind(bool clearSelection)
+  - 结束 `Find`：clearSelection=true 同时清掉高亮选区。
 
 - void Print()
   - 打开系统打印对话框。要无对话框地导出 PDF 用
@@ -571,6 +652,7 @@ IsSupported() 为 false，Render 画一个画布内占位符（说明原因）�
   - DevTools 开/关（CEF 自己的窗口）。
 
 - void CloseDevTools()
+  - 关闭 DevTools 窗口。
 
 - void AllowPopupWindows()
   - 弹窗（window.open / target=_blank / 中键点击）交给 CEF 自己开一个
@@ -585,6 +667,8 @@ IsSupported() 为 false，Render 画一个画布内占位符（说明原因）�
     `Render` 里（UI 线程）被调用。
 
 - void SetPopupPolicy(int policy, CefPopupFn handler)
+  - 直接设置弹窗策略（0 = CEF 自开 / 1 = 拦掉 / 2 = 交宿主回调）；
+    一般经 AllowPopupWindows / BlockPopups / OnPopup 使用。
 
 - string TakeCdpMessage()
   - 取走一条 CDP 消息（命令回复或事件的原始 JSON），空队列为 ""。
@@ -626,18 +710,28 @@ IsSupported() 为 false，Render 画一个画布内占位符（说明原因）�
     CEF 不可用时画一个占位符（说明原因）。
 
 - static void PaintPlaceholder(App app, int x, int y, int w, int h)
+  - CEF 不可用时的画布内占位：图标加一行说明文字。
 
 - static string PlaceholderText()
+  - 占位符文案：优先给出 CefHost 记下的失败原因，否则提示启动步骤。
 
 - static string Normalize(string target)
+  - 导航目标补全：没有协议前缀的裸地址加 `https://`。
 
 - static bool HasScheme(string s)
+  - 是否带协议前缀（"://"，或 data:/about: 这类无 // 的 scheme）。
 
 - static string UrlEscape(string s)
   - data: URL 里必须转义的字符（其余按 UTF-8 原样传，Chromium 接受）。
 
 - static string JsonString(string s)
   - 把字符串包成 JSON 字面量（CDP 参数拼装用）。
+    
+    控制字符按 JSON 规范用 `\u00XX` 转义，而不是像以前那样静默换成空格——
+    旧行为会让 NUL / 0x01-0x1F 被吃掉、CDF 收到的 expression 是错的。
+
+- static string HexDigit(int n)
+  - 数字 0-15 转小写十六进制字符（JSON 转义用）。
 
 
 ## CefBrowserBox (class)
@@ -665,56 +759,78 @@ box.View().NavComplete += () => { ... };
 - bool navigated;
 
 - CefBrowserBox()
+  - 默认构造：无起始地址。
 
 - CefBrowser View()
   - 底层原生浏览器：历史、JS、CDP、事件都在它上面。
+    本控件唯一拥有的 CefBrowser 实例。
 
 - void SetStartUrl(string u)
-  - 起始地址（设计属性 `url`，.zform 里也可写成 `placeholder`）。
-    首帧之前设置只改起始地址；之后设置等同于导航。
+  - 起始地址（设计属性 `url`，.zform 里也可写成
+    `placeholder`）。首帧之前设置只记录起始地址，待首次绘制时
+    导航一次；首帧之后设置立即等同于 Navigate。
 
 - string StartUrl()
+  - 当前设置的起始地址。
 
 - void Navigate(string target)
+  - 立即导航到 target（与 SetStartUrl 不同，不等首帧）。
 
 - void Back()
+  - 历史后退一页（转发到底层浏览器）。
 
 - void Forward()
+  - 历史前进一页。
 
 - void Reload()
+  - 重新加载当前页。
 
 - void Stop()
+  - 停止当前加载。
 
 - bool CanGoBack()
+  - 能否后退。
 
 - bool CanGoForward()
+  - 能否前进。
 
 - bool IsLoading()
+  - 是否正在加载。
 
 - int LastStatus()
+  - 最近一次响应的 HTTP 状态码（无为 0）。
 
 - string CurrentUrl()
+  - 当前 URL 快照。
 
 - string CurrentTitle()
+  - 当前文档标题快照。
 
 - void Hide()
   - 隐藏原生浏览器（本控件不再上屏时调用；隐藏的标签页由 NativeLayer
     自动兜底，这里供宿主显式收起）。
 
 - void Destroy()
-  - 关闭原生浏览器（关闭标签页时调用），并把控件从树上摘下。
+  - 关闭原生浏览器（关闭标签页时调用），并把控件从树上
+    摘下。销毁后不要再 Render 本控件。
 
 - override string Kind()
+  - 控件类型标识（"CefBrowserBox"）。
 
 - override List<PropSpec> Props()
+  - 设计器属性：起始地址（"url"）。
 
 - override List<string> Events()
+  - 控件事件清单：公共事件外加四个导航语义事件。
 
 - override void BindEvent(string evt, Action a)
   - 浏览器的语义事件挂在原生视图上，设计里的 `onNavComplete` 之类
     因此直接落到它的 UiEvent，宿主不必自己接线。
 
 - override void OnPaint(App app)
+  - 绘制：零尺寸时隐藏原生浏览器；首帧前先消费起始地址（原生
+    浏览器在 Render 里才创建，创建时会消费这次挂起的导航），然后
+    每帧驱动底层浏览器。
 
 
 ## CefCdp (class)
@@ -754,6 +870,7 @@ cdp.Send("Page.captureScreenshot", "{}", (result) => { ... });
 - int unrouted;
 
 - CefCdp(CefBrowser browser)
+  - 构造绑定到某浏览器的空路由（由 `CefBrowser.Cdp` 创建）。
 
 - void On(string eventName, CdpEventFn handler)
   - 订阅一个 CDP 事件（如 `Network.responseReceived`）。可以对同
@@ -782,11 +899,15 @@ cdp.Send("Page.captureScreenshot", "{}", (result) => { ... });
     后者会一直涨）。
 
 - int Unrouted()
+  - 没有任何订阅者接手的消息数（订阅名写错时会一直涨）。
 
 - void Pump()
   - 抽干队列并分派。幂等，未创建/空队列时是空操作。
 
 - void Dispatch(string msg)
+  - 分派一条消息：带 `method` 的事件按订阅名广播（每条订阅各调
+    一次，再交给 OnAny），带 `id` 的命令回复按 id 找到一次性回调
+    调用并移除。两类都对不上时计入 Unrouted。
 
 - static string Raw(string json, string key)
   - 顶层键的原始值（字符串带引号、对象/数组原样），没有为 ""。
@@ -802,11 +923,15 @@ cdp.Send("Page.captureScreenshot", "{}", (result) => { ... });
     找不到成对的起始引号返回 -1。
 
 - static int SkipWs(string json, int i)
+  - 跳过 `json[i..]` 开头的空白（空格/制表/换行），返回第一个
+    非空白字符的下标（全是空白时为长度）。
 
 - static string ValueAt(string json, int start)
   - 从 <paramref name="start"/> 起读一个 JSON 值的原文。
 
 - static string Unescape(string s)
+  - 还原 JSON 字符串值的转义序列（\n、\r、\t、\"、\\ 等；
+    未知转义保留转义后那个字符本身），无转义时原样返回。
 
 
 ## CefCookies (class)
@@ -984,6 +1109,8 @@ web.Reload();          // 注入脚本对「下一个」文档生效，当前页
     `Browser.getVersion` 记下来。
 
 - CefFingerprint(CefCdp channel)
+  - 构造全空的指纹：所有字段都是「不改」默认，由
+    `CefBrowser.Fingerprint` 创建。
 
 - void UseWindowsChrome(string version)
   - 一份桌面 Windows Chrome 的常见取值：调完再按需改字段。
@@ -999,6 +1126,9 @@ web.Reload();          // 注入脚本对「下一个」文档生效，当前页
     与注入脚本）。已经加载的页面同样要刷一下才回原样。
 
 - void SendUserAgent()
+  - 下发 UA 覆盖：带品牌/版本时走 `Emulation.setUserAgentOverride`
+    （随带 Client Hints 元数据），否则走 `Network.setUserAgentOverride`
+    老接口。
 
 - string Metadata()
   - Client Hints 元数据：品牌列表按 Chromium 的做法带上
@@ -1009,10 +1139,18 @@ web.Reload();          // 注入脚本对「下一个」文档生效，当前页
     脚本之前跑，且每个新文档都跑一遍（iframe 也算）。
 
 - string LanguagesJs()
+  - 补 `navigator.languages` 的脚本片段：有 languages 列表用列表，
+    否则用单个 locale；getter 返回副本防外部改写。
 
 - string WebglJs()
+  - 补 WebGL vendor/renderer 的脚本片段：包住 1.x/2.x 两个上下文原型的
+    getParameter，debug 扩展（37445/37446）与标准（7936/7937）两套参数号
+    都返回伪装值，其余参数透传原实现。
 
 - string CanvasJs()
+  - canvas 噪声的脚本片段：以线性同余生成可复现伪随机数（不依赖
+    Math.random），包住 toDataURL/toBlob/getImageData，读像素前给红色
+    通道加 ±N 抖动并钳制到 [0,255]。
 
 - static string Ratio(int percent)
   - 百分数转小数串：150 → `1.5`，100 → `1`，225 → `2.25`。
@@ -1094,18 +1232,32 @@ CEF 的进程级生命周期：浏览器进程初始化、每帧消息循环、�
 
 - static string ProfileDir(string dir)
   - 浏览器进程的 CEF profile 目录（Cookie/缓存/localStorage），
-    形如 `<缓存>/Zan/Cache/profile1`。
+    形如 `<缓存>/Zan/Cache/profileN`。
     `CefOptions.profileDir` / ZAN_CEF_PROFILE 指定了就照用。
     
     一个 Chromium profile 同时只能属于一个活进程：第二份副本指向同一个
-    目录，`cef_initialize` 直接失败。桌面工具被开两份是常态，所以按槽位
-    分配——第一份 `profile1`，同时开的第二份 `profile2`，依此类推；编号
-    而不是按 pid，重启后还能找回自己那份登录态。
+    目录，`cef_initialize` 直接失败。桌面工具被开两份是常态，所以要按
+    槽位分配。
+    
+    槽位不是「第一个空槽」而是按可执行文件完整路径散列出的首选槽位
+    （`PreferredSlot`）：同一份程序每次启动都回到同一个
+    profile，磁盘上的登录态跟着自己走，重启后不用重新登录；只有首选
+    槽位被占（同一路径真多开）才顺位找空槽，此时靠宿主自己的 Cookie
+    备份兜住登录态。
     
     占用判定是 profile 目录里 <c>lockfile</c> 的系统级独占锁
     （`File.TryLock`）：锁随持有进程退出（含被杀、崩溃）由内核
-    释放，所以 `profile2` 一空出来，下一次启动就接着用 `profile2`，既不会
-    一直往上加号，也没有需要清理的陈旧标记。
+    释放，所以槽位一空出来，下一次启动就接着用，既不会一直往上加号，
+    也没有需要清理的陈旧标记。
+
+- static long TryTake(string dir)
+  - 创建槽位目录并抢它的锁，抢到返回锁句柄，被占返回 0。
+
+- static int PreferredSlot(int max)
+  - 本进程的首选 profile 槽位（1..max）：按可执行文件完整路径
+    散列。路径不变就永远算出同一个槽位，登录态在磁盘上的家因此稳定；
+    不同目录的安装各归各的槽。Windows 路径不区分大小写与斜杠方向，
+    散列前先归一（\ → /、A-Z → a-z）。
 
 - static string Switches()
   - 追加到每个 Chromium 进程命令行的开关，取自
@@ -1130,6 +1282,8 @@ CEF 的进程级生命周期：浏览器进程初始化、每帧消息循环、�
     时为 ""。
 
 - static string ParentDir(string path)
+  - 路径的父目录（最后一个 / 或 \ 之前的部分）；没有分隔符时
+    返回 "."。
 
 - static bool Start(string dir, string helperPath)
   - 用已经装好的运行时目录初始化 CEF（不联网）。
@@ -1158,6 +1312,7 @@ CEF 的进程级生命周期：浏览器进程初始化、每帧消息循环、�
 - string prefix;
 
 - CefHttpEndpoint()
+  - 全空端点。
 
 
 ## CefOptions (class)
@@ -1181,6 +1336,16 @@ await CefBootstrap.StartAsync();
 因此把某项留空不会把环境变量顶掉。CEF 一个进程只初始化一次，所以
 要在 `CefBootstrap.RunHelper` 之前就 `Use`——
 helper 子进程也要按同一份配置找运行时。
+
+<para>**helper 进程是 exec 出来的全新进程**，本类里的 <c>current</c>
+静态字段在浏览器进程调 <c>Use(...)</c> 的赋值不会被 helper 继承——helper
+只能靠环境变量（<c>ZAN_CEF_RUNTIME</c> / <c>ZAN_CEF_PROFILE</c> /
+<c>ZAN_CEF_CACHE</c> / <c>ZAN_CEF_DRIVER</c> / <c>ZAN_CEF_SWITCHES</c> /
+<c>ZAN_CEF_LOCALE</c> / <c>ZAN_CEF_HELPER</c> / <c>ZAN_CEF_DOWNLOAD_UI</c> /
+<c>ZAN_CEF_NO_DCOMP</c> / <c>ZAN_CEF_MIRROR</c> / <c>ZAN_CEF_ARCHIVE</c>）
+拼回同一份配置。所以一个既给浏览器又给 helper 用的程序，关键路径要么
+走环境变量、要么在调用 `CefBootstrap.RunHelper` 之前就把这些
+变量 <c>setenv</c> 进进程环境。</para>
 
 - string runtimeDir;
   - 已装好的 CEF 运行时目录（对应 ZAN_CEF_RUNTIME）。
@@ -1243,6 +1408,8 @@ helper 子进程也要按同一份配置找运行时。
 - static CefOptions current;
 
 - CefOptions()
+  - 构造全默认配置：所有路径为空（走环境变量/默认值）、
+    开关为空、DComp 开启、自举进度窗开启。
 
 - static void Use(CefOptions options)
   - 让后续所有 CEF 调用使用这份配置。
@@ -1255,20 +1422,30 @@ helper 子进程也要按同一份配置找运行时。
   - 显式配置优先，其次环境变量，都没有则 ""。
 
 - static string RuntimeDir()
+  - 生效的运行时目录（`runtimeDir` 或 ZAN_CEF_RUNTIME，
+    显式优先）。
 
 - static string CacheRoot()
+  - 生效的缓存根目录（`cacheRoot` 或 ZAN_CEF_CACHE）。
 
 - static string MirrorBase()
+  - 生效的镜像基址（`mirrorBase` 或 ZAN_CEF_MIRROR）。
 
 - static string ArchivePath()
+  - 生效的离线归档路径（`archivePath` 或 ZAN_CEF_ARCHIVE）。
 
 - static string ProfileDir()
+  - 生效的 profile 目录（`profileDir` 或 ZAN_CEF_PROFILE）。
 
 - static string DriverPath()
+  - 生效的 driver 路径（`driverPath` 或 ZAN_CEF_DRIVER）。
 
 - static string Locale()
+  - 生效的界面语言（`locale` 或 ZAN_CEF_LOCALE）。
 
 - static string HelperPath()
+  - 生效的 helper 可执行文件（`helperPath` 或
+    ZAN_CEF_HELPER）。
 
 - static bool DownloadUi()
   - 是否启用自举进度窗。配置字段优先于
@@ -1282,8 +1459,12 @@ helper 子进程也要按同一份配置找运行时。
     分号时整串改用分号分隔，否则带逗号的开关值会被拆开。
 
 - static bool NoDcomp()
+  - 是否禁用 DirectComposition：配置字段为 true，或环境变量
+    ZAN_CEF_NO_DCOMP 设为非 "0" 非空值时为 true。
 
 - static string Join(string left, string right)
+  - 拼接两段开关列表：任一段为空直接返回另一段；任一段含分号
+    用分号连接，否则用逗号。
 
 
 ## CefPage (class)
@@ -1392,6 +1573,7 @@ if (dir == "") { Console.WriteLine(CefRuntime.Error()); }
   - 最近一次失败的原因，成功时为 ""。
 
 - static void Fail(string msg)
+  - 记录失败原因（随后经 `Error` 汇报给调用方）。
 
 - static string Platform()
   - 官方平台标识（"windows64" / "linux64" / "macosarm64" …），
@@ -1471,9 +1653,25 @@ if (dir == "") { Console.WriteLine(CefRuntime.Error()); }
 - static string ArchiveUrl(CefArchive a)
   - 归档完整 URL（文件名中的 "+" 继续按 URL 规则转义）。
 
+- static ExternalCallPolicy NetworkPolicy(int responseBytes, int totalMs)
+  - CEF 自举的网络预算：仅 HTTPS，限制响应体与总耗时，且不
+    自动跟随重定向或重试。镜像即使来自配置也不能放宽传输边界。
+
+- static ExternalCallPolicy IndexPolicy()
+  - 索引下载的预算：响应体上限 16 MiB、总超时 60s。
+
+- static ExternalCallPolicy ArchivePolicy()
+  - 归档下载的预算：响应体上限 512 MiB、总超时 120s。
+
+- static bool IsSecureEndpoint(CefHttpEndpoint endpoint)
+  - 按 CEF 的官方/镜像地址检查策略。CEF 自举没有本地明文
+    下载例外，因此这里始终只接受 HTTPS。
+
 - static string DownloadEscapeHint()
+  - 下载失败错误信息末尾追加的补救提示（镜像 / 本地归档）。
 
 - static string Sha1EscapeHint()
+  - SHA-1 校验失败错误信息末尾追加的提示（提醒核对镜像文件）。
 
 - static async bool FetchIndexAsync(string destPath)
   - 把官方构建索引下载到 <paramref name="destPath"/>，
@@ -1491,6 +1689,7 @@ if (dir == "") { Console.WriteLine(CefRuntime.Error()); }
   - 版本对象里的文件名是否属于别的平台。
 
 - static string PrefixNote(string versionPrefix)
+  - 失败提示的后缀：给出未满足的版本前缀要求（空前缀返回 ""）。
 
 - static CefArchive ReadLocalArchive(string path)
   - 读取本机归档并校验其平台、版本和已知摘要。
@@ -1582,10 +1781,14 @@ if (dir == "") { Console.WriteLine(CefRuntime.Error()); }
   - 比较两个目录名里的版本，a 是否比 b 新（按点分数字段）。
 
 - static int ParseInt(string s)
+  - 取前导十进制数字组成的整数；一个数字都没有返回 -1。
 
 - static string Slashes(string p)
+  - 反斜杠归一为正斜杠并去掉尾部斜杠（根 "/" 保留）。
 
 - static string ParentDir(string path)
+  - 路径的父目录（最后一个分隔符之前的部分）；没有分隔符或
+    分隔符在首位时返回 "."。
 
 - static int PrevBrace(string s, int from)
   - from 之前最近的一个 '{'。

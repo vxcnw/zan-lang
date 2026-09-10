@@ -47,13 +47,15 @@
     <aside class="wiki-side doc-side">
       <div class="searchbox"><svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         <input id="docSearch" placeholder="筛选目录…" aria-label="filter"></div>
-      <details class="nsgrp" open><summary>System · 55</summary>
+      <details class="nsgrp" open><summary>System · 58</summary>
 <a href="/ref/System">System</a>
 <a href="/ref/System.Automation">System.Automation</a>
 <a href="/ref/System.Collections">System.Collections</a>
 <a href="/ref/System.Collections.Generic">System.Collections.Generic</a>
+<a href="/ref/System.Commercial">System.Commercial</a>
 <a href="/ref/System.Compiler">System.Compiler</a>
 <a href="/ref/System.Data">System.Data</a>
+<a href="/ref/System.Data.Excel">System.Data.Excel</a>
 <a href="/ref/System.Data.Firebird">System.Data.Firebird</a>
 <a href="/ref/System.Data.MySql">System.Data.MySql</a>
 <a href="/ref/System.Data.Orm">System.Data.Orm</a>
@@ -69,6 +71,7 @@
 <a href="/ref/System.Globalization">System.Globalization</a>
 <a href="/ref/System.IO">System.IO</a>
 <a href="/ref/System.IO.Compression">System.IO.Compression</a>
+<a href="/ref/System.IO.Watch">System.IO.Watch</a>
 <a href="/ref/System.Input">System.Input</a>
 <a href="/ref/System.Json">System.Json</a>
 <a href="/ref/System.Knowledge">System.Knowledge</a>
@@ -76,6 +79,7 @@
 <a href="/ref/System.Management" class="active">System.Management</a>
 <a href="/ref/System.Net">System.Net</a>
 <a href="/ref/System.Net.Coap">System.Net.Coap</a>
+<a href="/ref/System.Net.External">System.Net.External</a>
 <a href="/ref/System.Net.Http">System.Net.Http</a>
 <a href="/ref/System.Net.Http.Client">System.Net.Http.Client</a>
 <a href="/ref/System.Net.Http.Download">System.Net.Http.Download</a>
@@ -84,7 +88,6 @@
 <a href="/ref/System.Net.Modbus">System.Net.Modbus</a>
 <a href="/ref/System.Net.Mqtt">System.Net.Mqtt</a>
 <a href="/ref/System.Net.Ntp">System.Net.Ntp</a>
-<a href="/ref/System.Net.Rpc">System.Net.Rpc</a>
 <a href="/ref/System.Net.Sip">System.Net.Sip</a>
 <a href="/ref/System.Net.Sockets">System.Net.Sockets</a>
 <a href="/ref/System.Net.Sse">System.Net.Sse</a>
@@ -123,13 +126,13 @@
 <a href="/ref/Game.Arcade2D">Game.Arcade2D</a>
 <a href="/ref/Game.Arpg">Game.Arpg</a>
 <a href="/ref/Game.Arpg.Data">Game.Arpg.Data</a>
-<a href="/ref/Game.Arpg.Fonts">Game.Arpg.Fonts</a>
 <a href="/ref/Game.Board">Game.Board</a>
 <a href="/ref/Game.Cards">Game.Cards</a>
 <a href="/ref/Game.Core">Game.Core</a>
 <a href="/ref/Game.Foundation">Game.Foundation</a>
-<a href="/ref/Game.Foundation.Sdl">Game.Foundation.Sdl</a>
-<a href="/ref/Game.Render">Game.Render</a>
+<a href="/ref/Game.Foundation.Gui">Game.Foundation.Gui</a>
+<a href="/ref/Game.Idle">Game.Idle</a>
+<a href="/ref/Game.Kit">Game.Kit</a>
 <a href="/ref/Game.Scene">Game.Scene</a>
 </details>
 <details class="nsgrp"><summary>Sdk · 57</summary>
@@ -191,9 +194,6 @@
 <a href="/ref/Sdk.Wechat.Work">Sdk.Wechat.Work</a>
 <a href="/ref/Sdk.Wechat.WxOpen">Sdk.Wechat.WxOpen</a>
 </details>
-<details class="nsgrp" open><summary>SDL3 · 1</summary>
-<a href="/ref/SDL3">SDL3</a>
-</details>
 <details class="nsgrp"><summary>Platform · 1</summary>
 <a href="/ref/Platform">Platform</a>
 </details>
@@ -247,6 +247,7 @@ PlatformNotSupportedException.</div>
 <div class="mdoc">/proc 的 key: value 文件中（冒号后）第一个 <code>field</code> 的值。</div>
 </li>
 <li class=""><code class="sig">static int CountCpuLines()</code>
+<div class="mdoc">统计 /proc/cpuinfo 中 processor 行数；读取失败时至少返回 1。</div>
 </li>
 <li class=""><code class="sig">static long[]CpuJiffies()</code>
 <div class="mdoc">[0] = 总 jiffies，[1] = 空闲 jiffies（来自 /proc/stat 第一行）。</div>
@@ -276,22 +277,34 @@ className 是总线名，hardwareIds 是 MODALIAS，classGuid 总为 &quot;&quot
 IOKit/ioreg），仍抛出 PlatformNotSupportedException。</div>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">static List&lt;DeviceInfo&gt; Present()</code>
-<div class="mdoc">枚举所有安装类中当前存在的设备。</div>
+<div class="mdoc">枚举所有安装类中当前存在的设备。Windows 上失败或无
+设备时返回空列表；Linux 同 All()；macOS 抛
+PlatformNotSupportedException。</div>
 </li>
 <li class=""><code class="sig">static List&lt;DeviceInfo&gt; All()</code>
-<div class="mdoc">枚举所有安装类中存在和不存在的设备。</div>
+<div class="mdoc">枚举所有安装类中存在和不存在的设备。仅 Windows 有
+区别（All() 还包含历史幽灵设备节点）；Linux sysfs 只暴露当前
+存在的设备，All() 与 Present() 结果相同。</div>
 </li>
 <li class=""><code class="sig">static List&lt;DeviceInfo&gt; List(bool presentOnly)</code>
-<div class="mdoc">枚举所有安装类，可选择仅返回
-当前存在的设备。</div>
+<div class="mdoc">枚举所有安装类。presentOnly=true 等价 Present()，
+false 等价 All()。macOS 抛 PlatformNotSupportedException。</div>
 </li>
 <li class=""><code class="sig">static List&lt;DeviceInfo&gt; SysfsList()</code>
+<div class="mdoc">枚举 /sys/bus/&lt;bus&gt;/devices/*。每个节点的 uevent 是内核向
+udev 报告的 KEY=VALUE 列表（SUBSYSTEM/DRIVER/MODALIAS 等），
+另外 vendor/device/product/manufacturer 等属性是单行文本文件。</div>
 </li>
 <li class=""><code class="sig">static string SysfsUevent(string dir, string key)</code>
+<div class="mdoc">读 uevent 里 <code>key=</code> 的值；不存在时返回 &quot;&quot;。</div>
 </li>
 <li class=""><code class="sig">static string SysfsFirst(string dir, string names)</code>
+<div class="mdoc">按逗号分隔的候选顺序读第一个存在的属性文件。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; ParseMultiString(nint payload, int bytes)</code>
+<div class="mdoc">解析 REG_MULTI_SZ 负载，不越界读取。格式错误的值
+（字节数为奇数、缺少字符串终止符或末尾列表终止符）整体拒绝、
+返回空列表，而不是返回部分结果。</div>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;setupapi&quot;, EntryPoint=&quot;SetupDiGetClassDevsW&quot;)]static extern nint SetupDiGetClassDevsW(nint classGuid, nint enumerator, nint parent, int flags);</code>
 </li>
@@ -304,35 +317,59 @@ IOKit/ioreg），仍抛出 PlatformNotSupportedException。</div>
 <li class=""><code class="sig">[DllImport(&quot;setupapi&quot;, EntryPoint=&quot;SetupDiDestroyDeviceInfoList&quot;)]static extern int SetupDiDestroyDeviceInfoList(nint devs);</code>
 </li>
 <li class=""><code class="sig">static List&lt;DeviceInfo&gt; WinList(bool presentOnly)</code>
+<div class="mdoc">Windows 实现：SetupDiGetClassDevsW 一次枚举所有安装类；
+句柄无效（失败）返回空列表。</div>
 </li>
 <li class=""><code class="sig">static string InstanceId(nint devs, nint data)</code>
+<div class="mdoc">两段式读取设备实例 ID（先取所需字符数再读缓冲）；失败返回 &quot;&quot;。</div>
 </li>
 <li class=""><code class="sig">static string StringProperty(nint devs, nint data, int property)</code>
+<div class="mdoc">读 REG_SZ / REG_EXPAND_SZ 型设备属性；属性缺失或类型不符返回 &quot;&quot;。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; MultiStringProperty(nint devs, nint data, int property)</code>
+<div class="mdoc">读 REG_MULTI_SZ 型设备属性；属性缺失或类型不符返回空列表。</div>
 </li>
 <li class=""><code class="sig">static nint PropertyBuffer(nint devs, nint data, int property)</code>
+<div class="mdoc">返回一个分配块，包含 [type:int, byteCount:int, payload...]，
+属性不存在时返回 0。SetupAPI 在首次零缓冲区调用时
+报告精确的负载大小，避免固定大小截断。</div>
 </li>
 </ul>
 </div></div>
 <div class="api"><div class="api-head"><span class="ns">DeviceInfo</span><span class="tag">class</span></div>
 <div class="api-body">
 <div class="mdoc">单个设备的只读信息（Windows 即插即用设备或
-Linux sysfs 设备节点）。</div>
+Linux sysfs 设备节点）。各字段可能为空串（属性不存在时），
+不抛异常。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">public string instanceId;</code>
+<div class="mdoc">设备实例标识。Windows 为即插即用实例 ID
+（如 &quot;USB\VID_046D&amp;PID_C52B\...&quot;）；Linux 为 &quot;总线/节点名&quot;
+（如 &quot;usb/1-1.2&quot;）。</div>
 </li>
 <li class=""><code class="sig">public string classGuid;</code>
+<div class="mdoc">Windows 设备安装类 GUID 字符串（如
+&quot;{4d36e967-...}&quot;）；Linux 没有对应概念，恒为 &quot;&quot;。</div>
 </li>
 <li class=""><code class="sig">public string className;</code>
+<div class="mdoc">Windows 设备安装类名（如 &quot;DiskDrive&quot;）；Linux 为
+sysfs 总线名（如 &quot;usb&quot;、&quot;pci&quot;、&quot;platform&quot;）。</div>
 </li>
 <li class=""><code class="sig">public string friendlyName;</code>
+<div class="mdoc">人类可读名称。Windows 为 FriendlyName；Linux 依次取
+product/name/model/of_node name 属性，全缺时用 sysfs 节点名。</div>
 </li>
 <li class=""><code class="sig">public string description;</code>
+<div class="mdoc">设备描述。Windows 为 DeviceDesc；Linux 为驱动名
+（uevent DRIVER，退而取 DEVTYPE），全缺时退回 friendlyName。</div>
 </li>
 <li class=""><code class="sig">public string manufacturer;</code>
+<div class="mdoc">厂商。Windows 为 Mfg 属性；Linux 取 manufacturer 或
+vendor 属性文件。</div>
 </li>
 <li class=""><code class="sig">public List&lt;string&gt; hardwareIds;</code>
+<div class="mdoc">硬件标识。Windows 为 HARDWAREID 多串列表（可多条）；
+Linux 为 uevent 的 MODALIAS 单元素列表。</div>
 </li>
 </ul>
 </div></div>
@@ -343,10 +380,13 @@ Linux sysfs 设备节点）。</div>
 字节。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">public string name;</code>
+<div class="mdoc">盘符（&quot;C:&quot;）（Windows）或挂载点（&quot;/&quot;）（Linux）。</div>
 </li>
 <li class=""><code class="sig">public long totalBytes;</code>
+<div class="mdoc">文件系统总容量（字节）；查询失败时为 0。</div>
 </li>
 <li class=""><code class="sig">public long freeBytes;</code>
+<div class="mdoc">全部空闲字节（含 root 保留块）。</div>
 </li>
 <li class=""><code class="sig">public long availBytes;</code>
 <div class="mdoc">普通用户可用的字节数（不含保留块）。</div>
@@ -354,6 +394,7 @@ Linux sysfs 设备节点）。</div>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">public int UsagePercent()</code>
+<div class="mdoc">已用百分比（0-100，向下取整）；容量未知或已用为负时钳制为 0。</div>
 </li>
 </ul>
 </div></div>
@@ -415,11 +456,13 @@ Modes:
 <div class="mdoc">一行里的刷新率（四舍五入到整数 Hz；拿不到时为 0）。</div>
 </li>
 <li class=""><code class="sig">static bool IsDigit(int c)</code>
+<div class="mdoc">是否 ASCII 数字。</div>
 </li>
 <li class=""><code class="sig">static List&lt;int&gt; Ints(string line)</code>
 <div class="mdoc">一行里的所有十进制整数（按出现顺序）。</div>
 </li>
 <li class=""><code class="sig">static int FirstInt(string line)</code>
+<div class="mdoc">一行里的第一个整数；没有则 0。</div>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;user32&quot;, EntryPoint=&quot;GetSystemMetrics&quot;)]static extern int WinGetSystemMetrics(int index);</code>
 </li>
@@ -432,6 +475,8 @@ Modes:
 <li class=""><code class="sig">[DllImport(&quot;user32&quot;, EntryPoint=&quot;MonitorFromPoint&quot;)]static extern nint WinMonitorFromPoint(nint pt, int flags);</code>
 </li>
 <li class=""><code class="sig">static int WinMonitorProc(nint monitor, nint hdc, nint rect, nint data)</code>
+<div class="mdoc">枚举回调：读 MONITORINFOEXW 与该屏当前 DEVMODEW 组装 DisplayInfo；
+返回 1 继续枚举。结果写入 monitorResults。</div>
 </li>
 <li class=""><code class="sig">static int WinMode(int mode, int offset)</code>
 <div class="mdoc">读取主屏当前 DEVMODEW 的 DWORD 字段。</div>
@@ -444,17 +489,22 @@ Modes:
 颜色深度。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">public int index;</code>
+<div class="mdoc">枚举序号（0 = 主屏）。</div>
 </li>
 <li class=""><code class="sig">public string name;</code>
+<div class="mdoc">系统设备名（Windows 为 &quot;\\.\DISPLAY1&quot; 等；其他平台为描述性名称）。</div>
 </li>
 <li class=""><code class="sig">public int width;</code>
+<div class="mdoc">宽度（像素）。</div>
 </li>
 <li class=""><code class="sig">public int height;</code>
+<div class="mdoc">高度（像素）。</div>
 </li>
 <li class=""><code class="sig">public int x;</code>
 <div class="mdoc">该显示器在虚拟桌面里的左上角坐标。</div>
 </li>
 <li class=""><code class="sig">public int y;</code>
+<div class="mdoc">该显示器在虚拟桌面里的左上角 Y 坐标。</div>
 </li>
 <li class=""><code class="sig">public bool primary;</code>
 <div class="mdoc">是否为主显示器。</div>
@@ -479,17 +529,24 @@ PlatformNotSupportedException.</div>
 <li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;GlobalMemoryStatusEx&quot;)]static extern int GlobalMemoryStatusEx(nint buf);</code>
 </li>
 <li class=""><code class="sig">static MemoryStatus WinStatus()</code>
+<div class="mdoc">Windows 实现：GlobalMemoryStatusEx；调用失败时各字段保持 0。</div>
 </li>
 <li class=""><code class="sig">static MemoryStatus LinuxStatus()</code>
+<div class="mdoc">Linux 实现：解析 /proc/meminfo；/proc/meminfo 读不到时抛
+PlatformNotSupportedException。totalVirtual/availVirtual 为
+物理 + 交换的估算值（Linux 无直接对应）。</div>
 </li>
 <li class=""><code class="sig">static long KbField(string txt, string key)</code>
 <div class="mdoc">从 /proc/meminfo 文本中取第一个 <code>key</code> 的 kB 值，缺失时为 0。</div>
 </li>
 <li class=""><code class="sig">static int IndexOf(string hay, string needle, int from)</code>
+<div class="mdoc">从 <code>from</code> 起查找 <code>needle</code> 的首次出现，找不到返回 -1。</div>
 </li>
 <li class=""><code class="sig">static long ParseLong(string s)</code>
+<div class="mdoc">十进制解析为 long；空串或含非数字返回 0（注意与其他文件解析器的 -1 约定不同）。</div>
 </li>
 <li class=""><code class="sig">static int CodeOf(string ch)</code>
+<div class="mdoc">取 <code>ch</code> 编码后首字节的值（用于判断 ASCII 数字）。</div>
 </li>
 </ul>
 </div></div>
@@ -499,16 +556,22 @@ PlatformNotSupportedException.</div>
 来自 /proc/meminfo；Windows 来自 GlobalMemoryStatusEx。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">public long totalPhys;</code>
+<div class="mdoc">物理内存总量（字节）。</div>
 </li>
 <li class=""><code class="sig">public long availPhys;</code>
+<div class="mdoc">可用物理内存（字节）。</div>
 </li>
 <li class=""><code class="sig">public long totalPageFile;</code>
+<div class="mdoc">提交上限（物理 + 页面文件）（字节）。</div>
 </li>
 <li class=""><code class="sig">public long availPageFile;</code>
+<div class="mdoc">当前可提交量（字节）。</div>
 </li>
 <li class=""><code class="sig">public long totalVirtual;</code>
+<div class="mdoc">本进程可用虚拟地址空间总量的系统视图（字节；Linux 为物理+交换的估算）。</div>
 </li>
 <li class=""><code class="sig">public long availVirtual;</code>
+<div class="mdoc">剩余虚拟内存（字节）。</div>
 </li>
 <li class=""><code class="sig">public int usagePercent;</code>
 <div class="mdoc">物理内存使用率（0..100）。</div>
@@ -535,22 +598,30 @@ PlatformNotSupportedException.</div>
 <li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;GetSystemPowerStatus&quot;)]static extern int WinGetSystemPowerStatus(nint buf);</code>
 </li>
 <li class=""><code class="sig">static PowerStatus WinStatus()</code>
+<div class="mdoc">Windows 实现：解析 GetSystemPowerStatus 的 SYSTEM_POWER_STATUS；
+无电池或数值未知时 percent/life 为 -1。</div>
 </li>
 <li class=""><code class="sig">static PowerStatus LinuxStatus()</code>
+<div class="mdoc">Linux 实现：读 /sys/class/power_supply 的第一个 BAT* 电源；
+没有电池时 onBattery=false 且 percent/life 为 -1。</div>
 </li>
 <li class=""><code class="sig">static string SysField(string field)</code>
 <div class="mdoc">第一个 BAT* 电源：从 /sys/class/power_supply 读取 <code>field</code>。</div>
 </li>
 <li class=""><code class="sig">static string SysClass(string field)</code>
+<div class="mdoc">读第一个可用电池（BAT0 优先）的 <code>field</code> 属性；全缺时返回 &quot;&quot;。</div>
 </li>
 <li class=""><code class="sig">static string SysField2(string field)</code>
 <div class="mdoc">BAT0 不存在时依次尝试 BAT1..BAT9。</div>
 </li>
 <li class=""><code class="sig">static int SysInt(string field)</code>
+<div class="mdoc">读数字属性；缺失或非法时为 -1。</div>
 </li>
 <li class=""><code class="sig">static int ParseInt(string s)</code>
+<div class="mdoc">十进制解析为 int；空串或含非数字返回 -1。</div>
 </li>
 <li class=""><code class="sig">static int CodeOf(string ch)</code>
+<div class="mdoc">取 <code>ch</code> 编码后首字节的值（用于判断 ASCII 数字）。</div>
 </li>
 </ul>
 </div></div>
@@ -583,30 +654,40 @@ int n = Registry.GetDword(k, &quot;Count&quot;);
 Registry.CloseKey(k);</div>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">static nint Hkcr()</code>
-<div class="mdoc">根键句柄（advapi32 预定义键）。</div>
+<div class="mdoc">根键句柄 HKEY_CLASSES_ROOT（advapi32 预定义键）。</div>
 </li>
 <li class=""><code class="sig">static nint Hkcu()</code>
+<div class="mdoc">根键句柄 HKEY_CURRENT_USER。</div>
 </li>
 <li class=""><code class="sig">static nint Hklm()</code>
+<div class="mdoc">根键句柄 HKEY_LOCAL_MACHINE。</div>
 </li>
 <li class=""><code class="sig">static nint Hkusers()</code>
+<div class="mdoc">根键句柄 HKEY_USERS。</div>
 </li>
 <li class=""><code class="sig">static nint HkcurrentConfig()</code>
+<div class="mdoc">根键句柄 HKEY_CURRENT_CONFIG。</div>
 </li>
 <li class=""><code class="sig">static int TypeNone()</code>
-<div class="mdoc">值类型常量（reg.h）。</div>
+<div class="mdoc">值类型常量 REG_NONE（reg.h）。</div>
 </li>
 <li class=""><code class="sig">static int TypeSz()</code>
+<div class="mdoc">值类型常量 REG_SZ。</div>
 </li>
 <li class=""><code class="sig">static int TypeExpandSz()</code>
+<div class="mdoc">值类型常量 REG_EXPAND_SZ。</div>
 </li>
 <li class=""><code class="sig">static int TypeBinary()</code>
+<div class="mdoc">值类型常量 REG_BINARY。</div>
 </li>
 <li class=""><code class="sig">static int TypeDword()</code>
+<div class="mdoc">值类型常量 REG_DWORD。</div>
 </li>
 <li class=""><code class="sig">static int TypeMultiSz()</code>
+<div class="mdoc">值类型常量 REG_MULTI_SZ。</div>
 </li>
 <li class=""><code class="sig">static int TypeQword()</code>
+<div class="mdoc">值类型常量 REG_QWORD。</div>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;advapi32&quot;, EntryPoint=&quot;RegOpenKeyExW&quot;)]static extern int RegOpenKeyExW(nint hKey, nint subKey, int options, int access, nint result);</code>
 </li>
@@ -688,10 +769,13 @@ Vista+ 上会因 ERROR_ACCESS_DENIED 拒绝非空键树）。</div>
 用带类型的 getter 进行解码。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">public string name;</code>
+<div class="mdoc">值名；键的默认（未命名）值为 &quot;&quot;。</div>
 </li>
 <li class=""><code class="sig">public int type;</code>
+<div class="mdoc">值类型（<code>Registry</code> 的 Type* 常量之一）。</div>
 </li>
 <li class=""><code class="sig">public byte[]data;</code>
+<div class="mdoc">原始字节负载，按 <code>type</code> 解释。</div>
 </li>
 </ul>
 </div></div>
@@ -721,21 +805,28 @@ overlay...）。</div>
 <li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;GetDiskFreeSpaceExW&quot;)]static extern int WinGetDiskFreeSpaceExW(nint dir, nint avail, nint total, nint free);</code>
 </li>
 <li class=""><code class="sig">static List&lt;DiskUsage&gt; WinDrives()</code>
+<div class="mdoc">Windows 实现：枚举逻辑驱动器，只保留固定/可移动盘中有容量的。</div>
 </li>
 <li class=""><code class="sig">static int WideLen(nint p)</code>
+<div class="mdoc">宽缓冲区中 NUL 终止符之前的 UTF-16 码元数（不含终止符）。</div>
 </li>
 <li class=""><code class="sig">static DiskUsage WinUsage(string root)</code>
+<div class="mdoc">Windows 实现：GetDiskFreeSpaceExW；调用失败时三个字节数保持 0。</div>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;statvfs&quot;)]static extern int StatvfsCall(nint path, nint stat);</code>
 </li>
 <li class=""><code class="sig">static List&lt;DiskUsage&gt; LinuxDrives()</code>
+<div class="mdoc">Linux 实现：解析 /proc/mounts，对每个真实文件系统挂载点调 statvfs；
+/proc/mounts 读不到返回空列表。</div>
 </li>
 <li class=""><code class="sig">static bool IsRealFs(string fstype)</code>
 <div class="mdoc">对具有真实磁盘容量的文件系统返回 True。</div>
 </li>
 <li class=""><code class="sig">static DiskUsage Statvfs(string path)</code>
+<div class="mdoc">Linux 实现：statvfs 读取挂载点容量；调用失败时三个字节数保持 0。</div>
 </li>
 <li class=""><code class="sig">static int IndexOf(string hay, string needle, int from)</code>
+<div class="mdoc">从 <code>from</code> 起查找 <code>needle</code> 的首次出现，找不到返回 -1。</div>
 </li>
 </ul>
 </div></div>
@@ -781,19 +872,26 @@ overlay...）。</div>
 <li class=""><code class="sig">[DllImport(&quot;ntdll&quot;, EntryPoint=&quot;RtlGetVersion&quot;)]static extern int WinRtlGetVersion(nint info);</code>
 </li>
 <li class=""><code class="sig">static string WinOsName()</code>
+<div class="mdoc">Windows 实现：RtlGetVersion 版本块映射为产品名（按 build 区分
+Win10/11），后接 Service Pack 名。</div>
 </li>
 <li class=""><code class="sig">static string WinKernelVersion()</code>
+<div class="mdoc">Windows 实现：&quot;major.minor.build&quot; 形式；RtlGetVersion 失败返回 &quot;&quot;。</div>
 </li>
 <li class=""><code class="sig">static string OsRelease(string key)</code>
 <div class="mdoc">/etc/os-release 中第一个 <code>key=&quot;value&quot;</code> 条目（已去除引号）。</div>
 </li>
 <li class=""><code class="sig">static string ProcText(string path)</code>
+<div class="mdoc">读取文本文件；读不到（路径不存在、权限不足）返回 &quot;&quot;。</div>
 </li>
 <li class=""><code class="sig">static int IndexOf(string hay, string needle, int from)</code>
+<div class="mdoc">从 <code>from</code> 起查找 <code>needle</code> 的首次出现，找不到返回 -1。</div>
 </li>
 <li class=""><code class="sig">static long ParseLong(string s)</code>
+<div class="mdoc">十进制解析为 long；空串或含非数字返回 -1。</div>
 </li>
 <li class=""><code class="sig">static int CodeOf(string ch)</code>
+<div class="mdoc">取 <code>ch</code> 编码后首字节的值（用于判断 ASCII 数字）。</div>
 </li>
 </ul>
 </div></div>
@@ -805,12 +903,16 @@ overlay...）。</div>
 程序；仅由 Get() 填充（列表视图省略它）。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">public string name;</code>
+<div class="mdoc">完整任务路径（Windows）或任务名 / &quot;cron:&lt;行号&gt;&quot;（POSIX）。</div>
 </li>
 <li class=""><code class="sig">public string nextRun;</code>
+<div class="mdoc">下次运行时间的操作系统文本表示。</div>
 </li>
 <li class=""><code class="sig">public string status;</code>
+<div class="mdoc">操作系统状态文本（&quot;Ready&quot;、&quot;Running&quot;、&quot;Disabled&quot;...）。</div>
 </li>
 <li class=""><code class="sig">public string command;</code>
+<div class="mdoc">任务运行的程序（含参数）；仅 Get() 填充，List() 留空。</div>
 </li>
 </ul>
 </div></div>
@@ -856,51 +958,77 @@ WEEKLY、ONCE 和 MONTHLY 还需要时间 &quot;HH:MM&quot;（以及可选的日
 <div class="mdoc">立即运行任务。运行被接受时返回 True。</div>
 </li>
 <li class=""><code class="sig">static bool End(string name)</code>
-<div class="mdoc">停止正在运行的任务。停止被接受时返回 True。</div>
+<div class="mdoc">停止正在运行的任务。POSIX 上按命令行 pkill 匹配；
+任务未在运行也返回 true（与 schtasks /end 语义一致）。</div>
 </li>
 <li class=""><code class="sig">static string Marker(string name)</code>
+<div class="mdoc">本类写入的条目前的标记行。</div>
 </li>
 <li class=""><code class="sig">static string MarkerName(string line)</code>
+<div class="mdoc">行是标记行时返回任务名，否则返回 &quot;&quot;。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; CrontabLines()</code>
+<div class="mdoc">当前用户的 crontab 全部行；没有 crontab 时返回空列表。</div>
 </li>
 <li class=""><code class="sig">static bool WriteCrontab(List&lt;string&gt; lines)</code>
+<div class="mdoc">把行列表整体写回当前用户的 crontab（经临时文件加
+<code>crontab &lt;file&gt;</code>）；任一步失败返回 false。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; WithoutTask(List&lt;string&gt; lines, string name)</code>
+<div class="mdoc">从 crontab 行列表中移除任务 <code>name</code>：删掉标记行与紧随的 cron 行，其余行保留。</div>
 </li>
 <li class=""><code class="sig">static string CronExpr(string trigger, string time)</code>
+<div class="mdoc">schtasks 的 /sc 值映射到 cron 表达式；无等价表达
+（ONLOGON/ONIDLE/ONCE 或时间非法）返回 &quot;&quot;。</div>
 </li>
 <li class=""><code class="sig">static int TimePart(string time, int index)</code>
+<div class="mdoc">从 &quot;HH:MM&quot; 取第 <code>index</code> 个字段（0=小时，1=分钟）；无效时返回 -1。</div>
 </li>
 <li class=""><code class="sig">static int ParseInt(string s)</code>
+<div class="mdoc">十进制解析为 int；空串或含非数字返回 -1。</div>
 </li>
 <li class=""><code class="sig">static string Upper(string s)</code>
+<div class="mdoc">ASCII 字母转大写，其余字符原样保留。</div>
 </li>
 <li class=""><code class="sig">static string CronSchedule(string line)</code>
+<div class="mdoc">cron 行的调度字段：要么 &quot;@reboot&quot; 这类 @形式，要么前五个时间字段。</div>
 </li>
 <li class=""><code class="sig">static string CronCommand(string line)</code>
+<div class="mdoc">cron 行的命令部分（时间字段之后的剩余文本）。</div>
 </li>
 <li class=""><code class="sig">static string FieldSplit(string line, int count, bool head)</code>
+<div class="mdoc">取前 <code>count</code> 个空白分隔字段（head=true），或它们后面的剩余部分。</div>
 </li>
 <li class=""><code class="sig">static bool IsSpace(int ch)</code>
+<div class="mdoc">是否空白字符（空格或制表）。</div>
 </li>
 <li class=""><code class="sig">static string ShellQuote(string s)</code>
+<div class="mdoc">单引号引用：内部的 &#x27; 拆成 &#x27;\&#x27;&#x27; 以保持字面量。</div>
 </li>
 <li class=""><code class="sig">static bool SchtasksOk(string cmd)</code>
+<div class="mdoc">运行 schtasks 命令并按输出判断成败（含 &quot;ERROR&quot;/&quot;Error&quot; 行即失败）。</div>
 </li>
 <li class=""><code class="sig">static string Quote(string s)</code>
+<div class="mdoc">双引号包裹（schtasks /tn /tr 参数用）。</div>
 </li>
 <li class=""><code class="sig">static string AfterColon(string line)</code>
+<div class="mdoc">第一个冒号之后的所有内容，去掉两端空白。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; ParseCsv(string line)</code>
+<div class="mdoc">解析一行 CSV：&quot;a&quot;,&quot;b&quot;,&quot;c&quot; -&gt; [a, b, c]。带引号的字段可能
+包含逗号；成对引号（&quot;&quot;）表示字面引号。</div>
 </li>
 <li class=""><code class="sig">static string FirstNonEmpty(List&lt;string&gt; lines)</code>
+<div class="mdoc">返回第一条非空行；全是空行时返回 null。</div>
 </li>
 <li class=""><code class="sig">static bool StartsWith(string s, string prefix)</code>
+<div class="mdoc"><code>s</code> 是否以 <code>prefix</code> 开头（区分大小写）。</div>
 </li>
 <li class=""><code class="sig">static string Trim(string s)</code>
+<div class="mdoc">去掉两端空白（空格/制表/回车/换行）。</div>
 </li>
 <li class=""><code class="sig">static int IndexOf(string hay, string needle, int from)</code>
+<div class="mdoc">从 <code>from</code> 起查找 <code>needle</code> 的首次出现，找不到返回 -1。</div>
 </li>
 </ul>
 </div></div>

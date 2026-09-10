@@ -22,6 +22,11 @@ TDengine 的 REST 没有客户端语句协议，因此 `?`
 TDengine 没有事务，因此这里没有 Begin/Commit
 等操作可用。
 
+语句失败（服务端报错、无法到达 taosAdapter、占位符
+个数不匹配）时抛出 `DbException`，
+携带 taosAdapter 响应中的错误码；空结果集总意味着
+「无行」。错误文本仍可通过 GetError() 获取。
+
 用法：
 TDengineConnection db = TDengineConnection.Open("127.0.0.1", 6041,
 "root", "taosdata", "demo");
@@ -43,9 +48,13 @@ db.Close();
 
 - string lastError;
 
+- int lastCode;
+
 - int affected;
 
 - TDengineConnection()
+  - 私有构造；统一经 `Open`/`OpenToken`/
+    `OpenAsync` 创建。
 
 - static TDengineConnection Open(string host, int port, string user, string password)
   - 使用 HTTP Basic 凭据打开连接，不
@@ -120,6 +129,7 @@ db.Close();
     解除分块，并记录非 200 状态码。
 
 - string Unreachable()
+  - 无法到达 taosAdapter 时的错误文本。
 
 - string Post(string sql)
   - 发送一条语句并返回响应 body，请求无法完成时
@@ -132,8 +142,13 @@ db.Close();
 
 - bool Failed(JsonValue root)
   - 响应报告服务端错误时返回 true；
-    错误描述保存在 lastError 中。3.x 的（`code` != 0）
-    和 2.x 的（`status` == "error"）都会被识别。
+    错误描述保存在 lastError 中，错误码保存在 lastCode 中。
+    3.x 的（`code` != 0）和 2.x 的（`status` == "error"）
+    都会被识别。
+
+- void Fail()
+  - 抛出记录的失败，携带 taosAdapter 自身的
+    错误码，调用方无需解析消息即可分支处理。
 
 - DbResult Decode(string body)
   - 将一个 `/rest/sql` 响应文档转换为结果集，
@@ -141,18 +156,23 @@ db.Close();
     并区分 JSON null 与空字符串。
 
 - DbResult Query(string sql)
-  - 执行查询并返回结果集。
+  - 执行查询并返回结果集。服务器报错或无法到达
+    taosAdapter 时抛出 `DbException`，
+    因此空结果总意味着「无行」；错误信息仍可通过
+    `GetError` 获取。
 
 - DbResult Query(string sql, DbParams prms)
   - 执行查询，其中 `?` 占位符从
-    <paramref name="prms"/> 填充。
+    <paramref name="prms"/> 填充。占位符个数不匹配时
+    抛出 `DbException`。
 
 - int Execute(string sql)
-  - 执行语句并返回受影响的行数，失败返回 -1
-    。
+  - 执行语句并返回受影响的行数。失败时抛出
+    `DbException`。
 
 - int Execute(string sql, DbParams prms)
-  - 执行带参数的语句。
+  - 执行带参数的语句。占位符个数不匹配或语句
+    失败时抛出 `DbException`。
 
 - string ExecuteScalar(string sql)
   - 第一行第一列的值，否则返回 ""。
@@ -161,16 +181,20 @@ db.Close();
   - 参数化查询第一行第一列的值。
 
 - async DbResult QueryAsync(string sql)
-  - 查询，不阻塞 worker 线程。
+  - 查询，不阻塞 worker 线程。失败时抛出
+    `DbException`。
 
 - async DbResult QueryAsync(string sql, DbParams prms)
-  - 参数化查询，不阻塞 worker 线程。
+  - 参数化查询，不阻塞 worker 线程。占位符个数
+    不匹配时抛出 `DbException`。
 
 - async int ExecuteAsync(string sql)
-  - 执行语句，不阻塞 worker 线程。
+  - 执行语句，不阻塞 worker 线程。失败时抛出
+    `DbException`。
 
 - async int ExecuteAsync(string sql, DbParams prms)
-  - 执行参数化语句，不阻塞 worker 线程。
+  - 执行参数化语句，不阻塞 worker 线程。失败时
+    抛出 `DbException`。
 
 - async string ExecuteScalarAsync(string sql)
   - 第一行第一列的值，不阻塞。
@@ -182,8 +206,10 @@ db.Close();
   - 空操作：TDengine 没有事务。参见 BeginTransaction。
 
 - async bool CommitAsync()
+  - 空操作：无事务，恒返回 true。
 
 - async bool RollbackAsync()
+  - 空操作：无事务，恒返回 true。
 
 - int AffectedRows()
   - 上一条语句影响的行数。
@@ -205,6 +231,7 @@ db.Close();
   - 空操作：TDengine 没有事务，因此无法撤销任何操作。
 
 - bool IsConnected()
+  - 打开时 adapter 正常响应（凭据校验通过）且未调用 Close。
 
 - void Close()
   - 释放连接状态。REST 协议是无状态的，因此
@@ -254,8 +281,11 @@ pool.Release(db);
   - 使用 token 认证的连接池。
 
 - async IDbConnection ConnectAsync()
+  - 打开一个新"连接"（端点 + 认证头）：token 非空走 token 认证，
+    否则走用户名/密码认证。
 
 - int GetProvider()
+  - 池的 provider id（恒为 `DbProvider.TDengine`）。
 
 
 ## TDenginePool (class)
@@ -293,12 +323,15 @@ pool.Close();
 - TDenginePool(string host, int port, string user, string password, string token, string database, int maxSize)
 
 - TDenginePool(string host, int port, string token, string database, int maxSize):this(host, port, "", "", token, database, maxSize)
+  - 令牌登录形式的构造，委托给完整构造（无用户名/密码）。
 
 - async TDengineConnection OpenOne()
+  - 新建一个连接：有 token 走令牌登录，否则用户名/密码。
 
 - async TDengineConnection AcquireAsync()
   - 借出一个连接：复用空闲连接，未达上限则新建，
-    否则挂起协程，直到有连接被归还。
+    否则挂起协程，直到有连接被归还。饱和等待有硬上限
+    （见 `PoolWait`）：超时返回 null，绝不定死。
     池已关闭后返回 null。
 
 - void Release(TDengineConnection c)

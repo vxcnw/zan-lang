@@ -72,6 +72,7 @@ DownloadDialog dlg = DownloadDialog.Show(app, "系统检查更新", job);
 - Button cancelBtn;
 
 - DownloadDialog()
+  - 默认中文文案、无任务；控件在 BuildUi 时才建。
 
 - static DownloadDialog Show(App parent, string title, DownloadJob j)
   - 开一个跟着 <paramref name="j"/> 的进度窗。任务可以先
@@ -102,21 +103,29 @@ DownloadDialog dlg = DownloadDialog.Show(app, "系统检查更新", job);
   - 覆盖界面文案（宿主自己管界面语言时用）。
 
 - void Open(App parent)
+  - 登记为当前窗口、构建界面并在 `parent` 内打开（Show 的实现步）。
 
 - void BuildUi()
+  - 构建界面：固定的进度行/提示行/按钮停靠在底部先拿走高度，
+    说明文字放进可滚动区（长文本滚看不挤压后面的行）。
 
 - static Panel HeaderRow(Label title, Label value)
   - 一行“标题 …… 右对齐的值”。
 
 - override string Title()
+  - 窗口标题：返回构造时设置的 caption。
 
 - override int Width()
+  - 窗口宽度：固定 520。
 
 - override int Height()
+  - 窗口高度：固定 320。
 
 - override bool ShowMaximize()
+  - 不显示最大化按钮。
 
 - override int IdBase()
+  - 控件命中 id 基址：880000。
 
 - override void OnCloseRequested()
   - 关窗不取消任务：worker 线程照旧把更新装完（标题下那句

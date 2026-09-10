@@ -47,13 +47,15 @@
     <aside class="wiki-side doc-side">
       <div class="searchbox"><svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         <input id="docSearch" placeholder="筛选目录…" aria-label="filter"></div>
-      <details class="nsgrp" open><summary>System · 55</summary>
+      <details class="nsgrp" open><summary>System · 58</summary>
 <a href="/ref/System">System</a>
 <a href="/ref/System.Automation">System.Automation</a>
 <a href="/ref/System.Collections">System.Collections</a>
 <a href="/ref/System.Collections.Generic">System.Collections.Generic</a>
+<a href="/ref/System.Commercial">System.Commercial</a>
 <a href="/ref/System.Compiler">System.Compiler</a>
 <a href="/ref/System.Data">System.Data</a>
+<a href="/ref/System.Data.Excel">System.Data.Excel</a>
 <a href="/ref/System.Data.Firebird">System.Data.Firebird</a>
 <a href="/ref/System.Data.MySql">System.Data.MySql</a>
 <a href="/ref/System.Data.Orm">System.Data.Orm</a>
@@ -69,6 +71,7 @@
 <a href="/ref/System.Globalization">System.Globalization</a>
 <a href="/ref/System.IO">System.IO</a>
 <a href="/ref/System.IO.Compression">System.IO.Compression</a>
+<a href="/ref/System.IO.Watch">System.IO.Watch</a>
 <a href="/ref/System.Input">System.Input</a>
 <a href="/ref/System.Json">System.Json</a>
 <a href="/ref/System.Knowledge">System.Knowledge</a>
@@ -76,6 +79,7 @@
 <a href="/ref/System.Management">System.Management</a>
 <a href="/ref/System.Net">System.Net</a>
 <a href="/ref/System.Net.Coap">System.Net.Coap</a>
+<a href="/ref/System.Net.External">System.Net.External</a>
 <a href="/ref/System.Net.Http">System.Net.Http</a>
 <a href="/ref/System.Net.Http.Client">System.Net.Http.Client</a>
 <a href="/ref/System.Net.Http.Download">System.Net.Http.Download</a>
@@ -84,7 +88,6 @@
 <a href="/ref/System.Net.Modbus">System.Net.Modbus</a>
 <a href="/ref/System.Net.Mqtt">System.Net.Mqtt</a>
 <a href="/ref/System.Net.Ntp">System.Net.Ntp</a>
-<a href="/ref/System.Net.Rpc">System.Net.Rpc</a>
 <a href="/ref/System.Net.Sip">System.Net.Sip</a>
 <a href="/ref/System.Net.Sockets">System.Net.Sockets</a>
 <a href="/ref/System.Net.Sse">System.Net.Sse</a>
@@ -123,13 +126,13 @@
 <a href="/ref/Game.Arcade2D">Game.Arcade2D</a>
 <a href="/ref/Game.Arpg">Game.Arpg</a>
 <a href="/ref/Game.Arpg.Data">Game.Arpg.Data</a>
-<a href="/ref/Game.Arpg.Fonts">Game.Arpg.Fonts</a>
 <a href="/ref/Game.Board">Game.Board</a>
 <a href="/ref/Game.Cards">Game.Cards</a>
 <a href="/ref/Game.Core">Game.Core</a>
 <a href="/ref/Game.Foundation">Game.Foundation</a>
-<a href="/ref/Game.Foundation.Sdl">Game.Foundation.Sdl</a>
-<a href="/ref/Game.Render">Game.Render</a>
+<a href="/ref/Game.Foundation.Gui">Game.Foundation.Gui</a>
+<a href="/ref/Game.Idle">Game.Idle</a>
+<a href="/ref/Game.Kit">Game.Kit</a>
 <a href="/ref/Game.Scene">Game.Scene</a>
 </details>
 <details class="nsgrp"><summary>Sdk · 57</summary>
@@ -191,9 +194,6 @@
 <a href="/ref/Sdk.Wechat.Work">Sdk.Wechat.Work</a>
 <a href="/ref/Sdk.Wechat.WxOpen">Sdk.Wechat.WxOpen</a>
 </details>
-<details class="nsgrp" open><summary>SDL3 · 1</summary>
-<a href="/ref/SDL3">SDL3</a>
-</details>
 <details class="nsgrp"><summary>Platform · 1</summary>
 <a href="/ref/Platform">Platform</a>
 </details>
@@ -226,6 +226,7 @@
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">CefArchive()</code>
+<div class="mdoc">全空的归档条目。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -357,7 +358,12 @@ driver 自己再 dlopen CefRuntime 装好的 libcef，并在调用任何版本�
 <li class=""><code class="sig">static bool Resolve(string cefVersion)</code>
 <div class="mdoc">加载 driver 并解析全部入口点。&lt;paramref name=&quot;cefVersion&quot;/&gt;
 是运行时的 CEF 版本（&quot;&quot;=未知，按最新变体处理），用来在 109 与最新
-两个变体之间挑选。幂等。</div>
+两个变体之间挑选。幂等。
+
+&lt;para&gt;线程安全：本类没加锁；Zan 的 GUI/脚本进程一般只有一个 UI 线程调
+<code>Work</code>，多线程同时进 &lt;c&gt;Resolve&lt;/c&gt; 会重复 dlopen + 重复
+解析并可能 &lt;c&gt;Interop.Unload&lt;/c&gt; 对方正在用的句柄。不要在多线程下
+首次触发 CEF。&lt;/para&gt;</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; Candidates(string cefVersion)</code>
 <div class="mdoc">按平台命名规则和 CEF 分支列出候选 driver 路径：先按
@@ -377,37 +383,57 @@ ZAN_CEF_DRIVER 指定的绝对路径，再是可执行文件同目录（--publis
 个进程占着、覆盖不掉），都不会被加载到。</div>
 </li>
 <li class=""><code class="sig">static string Fingerprint(string name)</code>
+<div class="mdoc">内嵌资源名 &quot;zan-drivers/&lt;fp&gt;/&lt;file&gt;&quot; 中的 &lt;fp&gt;（构建指纹段）；
+没有两段路径时为 &quot;unknown&quot;。</div>
 </li>
 <li class=""><code class="sig">static bool ResolveSymbols()</code>
+<div class="mdoc">解析 driver 的全部导出符号到 addr_*；任一缺失即返回 false，
+并把缺的符号名记进 Error()。</div>
 </li>
 <li class=""><code class="sig">static nint Sym(string name)</code>
+<div class="mdoc">解析单个导出符号；缺失时记下符号名并返回 0（加载即判失败）。</div>
 </li>
 <li class=""><code class="sig">static int ExecuteProcess(string runtimeDir, string cefVersion, string switches)</code>
 <div class="mdoc">本进程是 Chromium helper（render/gpu/utility）时跑完并返回
-其退出码；是浏览器进程时返回 -1，调用方继续往下走。</div>
+其退出码；是浏览器进程时返回 -1，调用方继续往下走。
+
+&lt;para&gt;注意三个参数的不对称：&lt;paramref name=&quot;cefVersion&quot;/&gt; 只用于
+<code>Resolve</code> 在本进程里挑 driver 变体（109 vs 当前），不传到底层
+&lt;c&gt;zan_cef_execute_process&lt;/c&gt;——那是个二参 C 导出（runtimeDir, switches），
+版本信息已经在 &lt;c&gt;Resolve&lt;/c&gt; 阶段由 driver 端 &lt;c&gt;cef_api_hash&lt;/c&gt; 校验过了。
+这里写三参只是为了让调用方不重复读 ready marker；保留这个签名不动，避免
+ABI 变更。&lt;/para&gt;</div>
 </li>
 <li class=""><code class="sig">static bool Init(string runtimeDir, string cefVersion, string cachePath, string helperPath, string locale, string switches, bool windowless)</code>
 <div class="mdoc">初始化 CEF 浏览器进程（driver 变体按 CEF 版本选）。</div>
 </li>
 <li class=""><code class="sig">static bool Ready()</code>
+<div class="mdoc">CEF 浏览器进程已初始化且未 shutdown。</div>
 </li>
 <li class=""><code class="sig">static void Work()</code>
 <div class="mdoc">推一轮 CEF 消息循环（每帧从宿主 UI 线程调用）。</div>
 </li>
 <li class=""><code class="sig">static void Shutdown()</code>
+<div class="mdoc">关闭全部浏览器并 shutdown CEF（进程退出前调用一次，不可逆）。</div>
 </li>
 <li class=""><code class="sig">static int Create(nint parent, int x, int y, int w, int h, string url)</code>
+<div class="mdoc">以 (x,y,w,h) 在 <code>parent</code> 内创建浏览器并立即导航到 <code>url</code>，返回句柄
+（driver 未加载/失败为 0）。</div>
 </li>
 <li class=""><code class="sig">static void Close(int h)</code>
+<div class="mdoc">关闭并销毁浏览器；句柄之后失效。</div>
 </li>
 <li class=""><code class="sig">static bool Alive(int h)</code>
+<div class="mdoc">浏览器是否仍然存活（无效句柄为 false）。</div>
 </li>
 <li class=""><code class="sig">static nint Window(int h)</code>
 <div class="mdoc">浏览器的原生窗口句柄（HWND / X11 Window），无则 0。</div>
 </li>
 <li class=""><code class="sig">static void SetBounds(int h, int x, int y, int w, int hh)</code>
+<div class="mdoc">把浏览器摆到父窗口客户区坐标 (x,y,w,hh)。</div>
 </li>
 <li class=""><code class="sig">static void SetVisible(int h, bool visible)</code>
+<div class="mdoc">显示或隐藏浏览器。</div>
 </li>
 <li class=""><code class="sig">static void ApplyClip(int h, string spec)</code>
 <div class="mdoc">把本帧未被遮挡的区域下发给原生窗口。签名匹配
@@ -415,33 +441,46 @@ Gui.NativeClipFn，由 CefBrowser.Render 登记给 App，帧末统一回调
 （委托是纯函数指针，所以这里是静态方法）。</div>
 </li>
 <li class=""><code class="sig">static void SetFocus(int h, bool focus)</code>
+<div class="mdoc">把键盘焦点交给（focus=false 时收回自）浏览器。</div>
 </li>
 <li class=""><code class="sig">static void Navigate(int h, string url)</code>
+<div class="mdoc">导航到 URL。</div>
 </li>
 <li class=""><code class="sig">static void Back(int h)</code>
+<div class="mdoc">历史后退一页。</div>
 </li>
 <li class=""><code class="sig">static void Forward(int h)</code>
+<div class="mdoc">历史前进一页。</div>
 </li>
 <li class=""><code class="sig">static void Stop(int h)</code>
+<div class="mdoc">停止当前加载。</div>
 </li>
 <li class=""><code class="sig">static void Reload(int h, bool ignoreCache)</code>
+<div class="mdoc">重新加载；ignoreCache=true 绕过缓存（Ctrl+F5 语义）。</div>
 </li>
 <li class=""><code class="sig">static bool CanGoBack(int h)</code>
+<div class="mdoc">能否后退。</div>
 </li>
 <li class=""><code class="sig">static bool CanGoForward(int h)</code>
+<div class="mdoc">能否前进。</div>
 </li>
 <li class=""><code class="sig">static bool IsLoading(int h)</code>
+<div class="mdoc">是否正在加载。</div>
 </li>
 <li class=""><code class="sig">static int NavSeq(int h)</code>
+<div class="mdoc">每次导航/源变化自增的序号（控件轮询它发现 URL/标题可能变了）。</div>
 </li>
 <li class=""><code class="sig">static int LastStatus(int h)</code>
+<div class="mdoc">最近一次导航完成的状态码（无导航为 0）。</div>
 </li>
 <li class=""><code class="sig">static int LastErrorCode(int h)</code>
 <div class="mdoc">最近一次加载失败的 CEF 错误码（成功为 0）。</div>
 </li>
 <li class=""><code class="sig">static string GetUrl(int h)</code>
+<div class="mdoc">当前 URL（无页面为 &quot;&quot;）。</div>
 </li>
 <li class=""><code class="sig">static string GetTitle(int h)</code>
+<div class="mdoc">当前页面标题（无页面为 &quot;&quot;）。</div>
 </li>
 <li class=""><code class="sig">static void ExecuteJs(int h, string code, string scriptUrl, int startLine)</code>
 <div class="mdoc">在主框架里执行 JavaScript（无返回值；要取结果走 CDP 的
@@ -451,11 +490,13 @@ Runtime.evaluate）。</div>
 <div class="mdoc">发一条 CDP 命令，返回其消息 id（失败 0）。</div>
 </li>
 <li class=""><code class="sig">static int CdpPending(int h)</code>
+<div class="mdoc">队列里还没取走的 CDP 消息条数。</div>
 </li>
 <li class=""><code class="sig">static int CdpDropped(int h)</code>
 <div class="mdoc">因为 Zan 侧没有及时取走而被丢掉的消息数（队列有界）。</div>
 </li>
 <li class=""><code class="sig">static bool CdpAttached(int h)</code>
+<div class="mdoc">DevTools 域是否已附接（CdpSend 送达的前提）。</div>
 </li>
 <li class=""><code class="sig">static string CdpTake(int h)</code>
 <div class="mdoc">取走一条 CDP 消息（结果或事件的原始 JSON），空队列为 &quot;&quot;。</div>
@@ -471,22 +512,32 @@ Runtime.evaluate）。</div>
 <div class="mdoc">Chromium 的缩放级：0 = 100%，每 +1 乘 1.2。</div>
 </li>
 <li class=""><code class="sig">static double GetZoom(int h)</code>
+<div class="mdoc">当前缩放级（0 = 100%，每 +1 乘 1.2）。</div>
 </li>
 <li class=""><code class="sig">static void Find(int h, string text, bool forward, bool matchCase, bool findNext)</code>
+<div class="mdoc">页内查找：forward=false 向上、matchCase 区分大小写；findNext=false
+开始新查找，true 在既有查找里继续步进。</div>
 </li>
 <li class=""><code class="sig">static void StopFind(int h, bool clearSelection)</code>
+<div class="mdoc">结束页内查找；clearSelection=true 时同时清掉高亮选区。</div>
 </li>
 <li class=""><code class="sig">static void Print(int h)</code>
+<div class="mdoc">弹出系统打印对话框，打印当前页面。</div>
 </li>
 <li class=""><code class="sig">static void ShowDevTools(int h)</code>
+<div class="mdoc">打开本浏览器的 DevTools 窗口（CDP 附接的前提）。</div>
 </li>
 <li class=""><code class="sig">static void CloseDevTools(int h)</code>
+<div class="mdoc">关闭 DevTools 窗口。</div>
 </li>
 <li class=""><code class="sig">static void CallVoid(nint addr, int h)</code>
+<div class="mdoc">调用「句柄 → void」形态的 driver 导出（未解析或地址为 0 时跳过）。</div>
 </li>
 <li class=""><code class="sig">static int CallInt(nint addr, int h)</code>
+<div class="mdoc">调用「句柄 → int」形态的 driver 导出（未解析或地址为 0 时返回 0）。</div>
 </li>
 <li class=""><code class="sig">static string CallStr(nint addr, int h)</code>
+<div class="mdoc">调用「句柄 → string」形态的 driver 导出（未解析或地址为 0 时返回 &quot;&quot;）。</div>
 </li>
 </ul>
 </div></div>
@@ -526,7 +577,18 @@ return 0;
 <div class="mdoc">本进程若是 Chromium helper（render/gpu/utility），跑完它的
 消息循环并直接退出进程（不返回）；是浏览器进程时什么都不做。
 必须是 Main 的第一句：Chromium 用同一个可执行文件启动子进程，
-helper 分支不能走到宿主程序自己的逻辑里。</div>
+helper 分支不能走到宿主程序自己的逻辑里。
+
+&lt;para&gt;配置继承：helper 进程是 &lt;c&gt;exec&lt;/c&gt; 出来的新进程，<code>CefOptions</code>
+那个进程内静态状态（&lt;c&gt;current&lt;/c&gt;）在父进程设的 &lt;c&gt;Use(...)&lt;/c&gt; 不会被
+helper 看到。helper 走的是环境变量 / 浏览器进程透传的 ENV：
+&lt;c&gt;ZAN_CEF_RUNTIME&lt;/c&gt; / &lt;c&gt;ZAN_CEF_PROFILE&lt;/c&gt; / &lt;c&gt;ZAN_CEF_CACHE&lt;/c&gt; /
+&lt;c&gt;ZAN_CEF_DRIVER&lt;/c&gt; / &lt;c&gt;ZAN_CEF_SWITCHES&lt;/c&gt; / &lt;c&gt;ZAN_CEF_LOCALE&lt;/c&gt; /
+&lt;c&gt;ZAN_CEF_HELPER&lt;/c&gt; / &lt;c&gt;ZAN_CEF_DOWNLOAD_UI&lt;/c&gt; / &lt;c&gt;ZAN_CEF_NO_DCOMP&lt;/c&gt; /
+&lt;c&gt;ZAN_CEF_MIRROR&lt;/c&gt; / &lt;c&gt;ZAN_CEF_ARCHIVE&lt;/c&gt;，再加上浏览器进程
+&lt;c&gt;zc_export_helper_env&lt;/c&gt; 在子进程起来前 &lt;c&gt;setenv&lt;/c&gt; 的
+&lt;c&gt;ZAN_CEF_HELPER_RUNTIME/SWITCHES/DRIVER&lt;/c&gt;（macOS/Linux 有效；
+Windows helper 就是自己，不需要这三条）。&lt;/para&gt;</div>
 </li>
 <li class=""><code class="sig">static string LocalRuntimeDir()</code>
 <div class="mdoc">不联网地找出本机已装好的运行时目录（helper 进程用；
@@ -659,6 +721,7 @@ IsSupported() 为 false，Render 画一个画布内占位符（说明原因）�
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">CefBrowser()</code>
+<div class="mdoc">全默认状态：未创建、乐观地假定 CEF 可用。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -681,12 +744,18 @@ Win32，CEF 自己的 set_focus 只管引擎内部。</div>
 <div class="mdoc">响应式当前 URL/文档标题（每次导航后更新）。</div>
 </li>
 <li class=""><code class="sig">SignalString Title()</code>
+<div class="mdoc">响应式当前文档标题（每次导航后更新）。</div>
 </li>
 <li class=""><code class="sig">string CurrentUrl()</code>
+<div class="mdoc">当前 URL 的字符串形式。</div>
 </li>
 <li class=""><code class="sig">string CurrentTitle()</code>
+<div class="mdoc">当前文档标题的字符串形式。</div>
 </li>
 <li class=""><code class="sig">void EnsureCreated(App app, int x, int y, int w, int h)</code>
+<div class="mdoc">首次 Render 时创建原生浏览器（用的是首帧矩形与挂起的 URL）。
+CEF 尚未启动时不标记 created，下一帧重试——「运行时下载完成后
+自动出现」依赖这一点；创建失败则永久回退占位符。</div>
 </li>
 <li class=""><code class="sig">void Navigate(string target)</code>
 <div class="mdoc">导航到 URL。无协议的裸主机名视为 https://。</div>
@@ -695,21 +764,28 @@ Win32，CEF 自己的 set_focus 只管引擎内部。</div>
 <div class="mdoc">加载内存中的 HTML 字符串（走 data: URL，因此适合中小片段）。</div>
 </li>
 <li class=""><code class="sig">void Back()</code>
+<div class="mdoc">历史后退一页（未创建为空操作）。</div>
 </li>
 <li class=""><code class="sig">void Forward()</code>
+<div class="mdoc">历史前进一页。</div>
 </li>
 <li class=""><code class="sig">void Stop()</code>
+<div class="mdoc">停止当前加载。</div>
 </li>
 <li class=""><code class="sig">void Reload()</code>
+<div class="mdoc">重新加载当前页（走缓存）。</div>
 </li>
 <li class=""><code class="sig">void ReloadIgnoreCache()</code>
 <div class="mdoc">忽略缓存的强制刷新（Ctrl+F5）。</div>
 </li>
 <li class=""><code class="sig">bool CanGoBack()</code>
+<div class="mdoc">能否后退（未创建为 false）。</div>
 </li>
 <li class=""><code class="sig">bool CanGoForward()</code>
+<div class="mdoc">能否前进（未创建为 false）。</div>
 </li>
 <li class=""><code class="sig">bool IsLoading()</code>
+<div class="mdoc">是否正在加载（未创建为 false）。</div>
 </li>
 <li class=""><code class="sig">int LastStatus()</code>
 <div class="mdoc">最近一次主框架响应的 HTTP 状态码（无响应或非 HTTP 时为 0）。</div>
@@ -760,18 +836,23 @@ Runtime.evaluate 的回复出现在 <code>TakeCdpMessage</code> 里。</div>
 <div class="mdoc">缩放级别：0 = 100%，每 +1 乘 1.2（Ctrl+滚轮的那一档），可为负。</div>
 </li>
 <li class=""><code class="sig">double Zoom()</code>
+<div class="mdoc">当前缩放级（未创建为 0）。</div>
 </li>
 <li class=""><code class="sig">void ZoomIn()</code>
+<div class="mdoc">放大一档。</div>
 </li>
 <li class=""><code class="sig">void ZoomOut()</code>
+<div class="mdoc">缩小一档。</div>
 </li>
 <li class=""><code class="sig">void ResetZoom()</code>
+<div class="mdoc">回到 100%。</div>
 </li>
 <li class=""><code class="sig">void Find(string text, bool forward, bool matchCase, bool findNext)</code>
 <div class="mdoc">页内查找并高亮。第一次调用 findNext 传 false（开一次新搜索），之后
 传 true 在同一批命中之间前后跳；<code>StopFind</code> 收尾。</div>
 </li>
 <li class=""><code class="sig">void StopFind(bool clearSelection)</code>
+<div class="mdoc">结束 <code>Find</code>：clearSelection=true 同时清掉高亮选区。</div>
 </li>
 <li class=""><code class="sig">void Print()</code>
 <div class="mdoc">打开系统打印对话框。要无对话框地导出 PDF 用
@@ -781,6 +862,7 @@ Runtime.evaluate 的回复出现在 <code>TakeCdpMessage</code> 里。</div>
 <div class="mdoc">DevTools 开/关（CEF 自己的窗口）。</div>
 </li>
 <li class=""><code class="sig">void CloseDevTools()</code>
+<div class="mdoc">关闭 DevTools 窗口。</div>
 </li>
 <li class=""><code class="sig">void AllowPopupWindows()</code>
 <div class="mdoc">弹窗（window.open / target=_blank / 中键点击）交给 CEF 自己开一个
@@ -795,6 +877,8 @@ Runtime.evaluate 的回复出现在 <code>TakeCdpMessage</code> 里。</div>
 <code>Render</code> 里（UI 线程）被调用。</div>
 </li>
 <li class=""><code class="sig">void SetPopupPolicy(int policy, CefPopupFn handler)</code>
+<div class="mdoc">直接设置弹窗策略（0 = CEF 自开 / 1 = 拦掉 / 2 = 交宿主回调）；
+一般经 AllowPopupWindows / BlockPopups / OnPopup 使用。</div>
 </li>
 <li class=""><code class="sig">string TakeCdpMessage()</code>
 <div class="mdoc">取走一条 CDP 消息（命令回复或事件的原始 JSON），空队列为 &quot;&quot;。</div>
@@ -836,18 +920,28 @@ NavStart / LoadingChanged / TitleChanged / NavComplete。浏览器跑在
 CEF 不可用时画一个占位符（说明原因）。</div>
 </li>
 <li class=""><code class="sig">static void PaintPlaceholder(App app, int x, int y, int w, int h)</code>
+<div class="mdoc">CEF 不可用时的画布内占位：图标加一行说明文字。</div>
 </li>
 <li class=""><code class="sig">static string PlaceholderText()</code>
+<div class="mdoc">占位符文案：优先给出 CefHost 记下的失败原因，否则提示启动步骤。</div>
 </li>
 <li class=""><code class="sig">static string Normalize(string target)</code>
+<div class="mdoc">导航目标补全：没有协议前缀的裸地址加 <code>https://</code>。</div>
 </li>
 <li class=""><code class="sig">static bool HasScheme(string s)</code>
+<div class="mdoc">是否带协议前缀（&quot;://&quot;，或 data:/about: 这类无 // 的 scheme）。</div>
 </li>
 <li class=""><code class="sig">static string UrlEscape(string s)</code>
 <div class="mdoc">data: URL 里必须转义的字符（其余按 UTF-8 原样传，Chromium 接受）。</div>
 </li>
 <li class=""><code class="sig">static string JsonString(string s)</code>
-<div class="mdoc">把字符串包成 JSON 字面量（CDP 参数拼装用）。</div>
+<div class="mdoc">把字符串包成 JSON 字面量（CDP 参数拼装用）。
+
+控制字符按 JSON 规范用 <code>\u00XX</code> 转义，而不是像以前那样静默换成空格——
+旧行为会让 NUL / 0x01-0x1F 被吃掉、CDF 收到的 expression 是错的。</div>
+</li>
+<li class=""><code class="sig">static string HexDigit(int n)</code>
+<div class="mdoc">数字 0-15 转小写十六进制字符（JSON 转义用）。</div>
 </li>
 </ul>
 </div></div>
@@ -878,58 +972,80 @@ box.View().NavComplete += () =&gt; { ... };
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">CefBrowserBox()</code>
+<div class="mdoc">默认构造：无起始地址。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">CefBrowser View()</code>
-<div class="mdoc">底层原生浏览器：历史、JS、CDP、事件都在它上面。</div>
+<div class="mdoc">底层原生浏览器：历史、JS、CDP、事件都在它上面。
+本控件唯一拥有的 CefBrowser 实例。</div>
 </li>
 <li class=""><code class="sig">void SetStartUrl(string u)</code>
-<div class="mdoc">起始地址（设计属性 <code>url</code>，.zform 里也可写成 <code>placeholder</code>）。
-首帧之前设置只改起始地址；之后设置等同于导航。</div>
+<div class="mdoc">起始地址（设计属性 <code>url</code>，.zform 里也可写成
+<code>placeholder</code>）。首帧之前设置只记录起始地址，待首次绘制时
+导航一次；首帧之后设置立即等同于 Navigate。</div>
 </li>
 <li class=""><code class="sig">string StartUrl()</code>
+<div class="mdoc">当前设置的起始地址。</div>
 </li>
 <li class=""><code class="sig">void Navigate(string target)</code>
+<div class="mdoc">立即导航到 target（与 SetStartUrl 不同，不等首帧）。</div>
 </li>
 <li class=""><code class="sig">void Back()</code>
+<div class="mdoc">历史后退一页（转发到底层浏览器）。</div>
 </li>
 <li class=""><code class="sig">void Forward()</code>
+<div class="mdoc">历史前进一页。</div>
 </li>
 <li class=""><code class="sig">void Reload()</code>
+<div class="mdoc">重新加载当前页。</div>
 </li>
 <li class=""><code class="sig">void Stop()</code>
+<div class="mdoc">停止当前加载。</div>
 </li>
 <li class=""><code class="sig">bool CanGoBack()</code>
+<div class="mdoc">能否后退。</div>
 </li>
 <li class=""><code class="sig">bool CanGoForward()</code>
+<div class="mdoc">能否前进。</div>
 </li>
 <li class=""><code class="sig">bool IsLoading()</code>
+<div class="mdoc">是否正在加载。</div>
 </li>
 <li class=""><code class="sig">int LastStatus()</code>
+<div class="mdoc">最近一次响应的 HTTP 状态码（无为 0）。</div>
 </li>
 <li class=""><code class="sig">string CurrentUrl()</code>
+<div class="mdoc">当前 URL 快照。</div>
 </li>
 <li class=""><code class="sig">string CurrentTitle()</code>
+<div class="mdoc">当前文档标题快照。</div>
 </li>
 <li class=""><code class="sig">void Hide()</code>
 <div class="mdoc">隐藏原生浏览器（本控件不再上屏时调用；隐藏的标签页由 NativeLayer
 自动兜底，这里供宿主显式收起）。</div>
 </li>
 <li class=""><code class="sig">void Destroy()</code>
-<div class="mdoc">关闭原生浏览器（关闭标签页时调用），并把控件从树上摘下。</div>
+<div class="mdoc">关闭原生浏览器（关闭标签页时调用），并把控件从树上
+摘下。销毁后不要再 Render 本控件。</div>
 </li>
 <li class=""><code class="sig">override string Kind()</code>
+<div class="mdoc">控件类型标识（&quot;CefBrowserBox&quot;）。</div>
 </li>
 <li class=""><code class="sig">override List&lt;PropSpec&gt; Props()</code>
+<div class="mdoc">设计器属性：起始地址（&quot;url&quot;）。</div>
 </li>
 <li class=""><code class="sig">override List&lt;string&gt; Events()</code>
+<div class="mdoc">控件事件清单：公共事件外加四个导航语义事件。</div>
 </li>
 <li class=""><code class="sig">override void BindEvent(string evt, Action a)</code>
 <div class="mdoc">浏览器的语义事件挂在原生视图上，设计里的 <code>onNavComplete</code> 之类
 因此直接落到它的 UiEvent，宿主不必自己接线。</div>
 </li>
 <li class=""><code class="sig">override void OnPaint(App app)</code>
+<div class="mdoc">绘制：零尺寸时隐藏原生浏览器；首帧前先消费起始地址（原生
+浏览器在 Render 里才创建，创建时会消费这次挂起的导航），然后
+每帧驱动底层浏览器。</div>
 </li>
 </ul>
 </div></div>
@@ -972,6 +1088,7 @@ cdp.Send(&quot;Page.captureScreenshot&quot;, &quot;{}&quot;, (result) =&gt; { ..
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">CefCdp(CefBrowser browser)</code>
+<div class="mdoc">构造绑定到某浏览器的空路由（由 <code>CefBrowser.Cdp</code> 创建）。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -1002,11 +1119,15 @@ cdp.Send(&quot;Page.captureScreenshot&quot;, &quot;{}&quot;, (result) =&gt; { ..
 后者会一直涨）。</div>
 </li>
 <li class=""><code class="sig">int Unrouted()</code>
+<div class="mdoc">没有任何订阅者接手的消息数（订阅名写错时会一直涨）。</div>
 </li>
 <li class=""><code class="sig">void Pump()</code>
 <div class="mdoc">抽干队列并分派。幂等，未创建/空队列时是空操作。</div>
 </li>
 <li class=""><code class="sig">void Dispatch(string msg)</code>
+<div class="mdoc">分派一条消息：带 <code>method</code> 的事件按订阅名广播（每条订阅各调
+一次，再交给 OnAny），带 <code>id</code> 的命令回复按 id 找到一次性回调
+调用并移除。两类都对不上时计入 Unrouted。</div>
 </li>
 <li class=""><code class="sig">static string Raw(string json, string key)</code>
 <div class="mdoc">顶层键的原始值（字符串带引号、对象/数组原样），没有为 &quot;&quot;。</div>
@@ -1022,11 +1143,15 @@ cdp.Send(&quot;Page.captureScreenshot&quot;, &quot;{}&quot;, (result) =&gt; { ..
 找不到成对的起始引号返回 -1。</div>
 </li>
 <li class=""><code class="sig">static int SkipWs(string json, int i)</code>
+<div class="mdoc">跳过 <code>json[i..]</code> 开头的空白（空格/制表/换行），返回第一个
+非空白字符的下标（全是空白时为长度）。</div>
 </li>
 <li class=""><code class="sig">static string ValueAt(string json, int start)</code>
 <div class="mdoc">从 &lt;paramref name=&quot;start&quot;/&gt; 起读一个 JSON 值的原文。</div>
 </li>
 <li class=""><code class="sig">static string Unescape(string s)</code>
+<div class="mdoc">还原 JSON 字符串值的转义序列（\n、\r、\t、\&quot;、\\ 等；
+未知转义保留转义后那个字符本身），无转义时原样返回。</div>
 </li>
 </ul>
 </div></div>
@@ -1212,6 +1337,8 @@ web.Reload();          // 注入脚本对「下一个」文档生效，当前页
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">CefFingerprint(CefCdp channel)</code>
+<div class="mdoc">构造全空的指纹：所有字段都是「不改」默认，由
+<code>CefBrowser.Fingerprint</code> 创建。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -1229,6 +1356,9 @@ web.Reload();          // 注入脚本对「下一个」文档生效，当前页
 与注入脚本）。已经加载的页面同样要刷一下才回原样。</div>
 </li>
 <li class=""><code class="sig">void SendUserAgent()</code>
+<div class="mdoc">下发 UA 覆盖：带品牌/版本时走 <code>Emulation.setUserAgentOverride</code>
+（随带 Client Hints 元数据），否则走 <code>Network.setUserAgentOverride</code>
+老接口。</div>
 </li>
 <li class=""><code class="sig">string Metadata()</code>
 <div class="mdoc">Client Hints 元数据：品牌列表按 Chromium 的做法带上
@@ -1239,10 +1369,18 @@ web.Reload();          // 注入脚本对「下一个」文档生效，当前页
 脚本之前跑，且每个新文档都跑一遍（iframe 也算）。</div>
 </li>
 <li class=""><code class="sig">string LanguagesJs()</code>
+<div class="mdoc">补 <code>navigator.languages</code> 的脚本片段：有 languages 列表用列表，
+否则用单个 locale；getter 返回副本防外部改写。</div>
 </li>
 <li class=""><code class="sig">string WebglJs()</code>
+<div class="mdoc">补 WebGL vendor/renderer 的脚本片段：包住 1.x/2.x 两个上下文原型的
+getParameter，debug 扩展（37445/37446）与标准（7936/7937）两套参数号
+都返回伪装值，其余参数透传原实现。</div>
 </li>
 <li class=""><code class="sig">string CanvasJs()</code>
+<div class="mdoc">canvas 噪声的脚本片段：以线性同余生成可复现伪随机数（不依赖
+Math.random），包住 toDataURL/toBlob/getImageData，读像素前给红色
+通道加 ±N 抖动并钳制到 [0,255]。</div>
 </li>
 <li class=""><code class="sig">static string Ratio(int percent)</code>
 <div class="mdoc">百分数转小数串：150 → <code>1.5</code>，100 → <code>1</code>，225 → <code>2.25</code>。
@@ -1327,18 +1465,32 @@ user-data-dir 里写同名文件，抢同一个名字会把它的文件锁掉。
 </li>
 <li class=""><code class="sig">static string ProfileDir(string dir)</code>
 <div class="mdoc">浏览器进程的 CEF profile 目录（Cookie/缓存/localStorage），
-形如 <code>&lt;缓存&gt;/Zan/Cache/profile1</code>。
+形如 <code>&lt;缓存&gt;/Zan/Cache/profileN</code>。
 <code>CefOptions.profileDir</code> / ZAN_CEF_PROFILE 指定了就照用。
 
 一个 Chromium profile 同时只能属于一个活进程：第二份副本指向同一个
-目录，<code>cef_initialize</code> 直接失败。桌面工具被开两份是常态，所以按槽位
-分配——第一份 <code>profile1</code>，同时开的第二份 <code>profile2</code>，依此类推；编号
-而不是按 pid，重启后还能找回自己那份登录态。
+目录，<code>cef_initialize</code> 直接失败。桌面工具被开两份是常态，所以要按
+槽位分配。
+
+槽位不是「第一个空槽」而是按可执行文件完整路径散列出的首选槽位
+（<code>PreferredSlot</code>）：同一份程序每次启动都回到同一个
+profile，磁盘上的登录态跟着自己走，重启后不用重新登录；只有首选
+槽位被占（同一路径真多开）才顺位找空槽，此时靠宿主自己的 Cookie
+备份兜住登录态。
 
 占用判定是 profile 目录里 &lt;c&gt;lockfile&lt;/c&gt; 的系统级独占锁
 （<code>File.TryLock</code>）：锁随持有进程退出（含被杀、崩溃）由内核
-释放，所以 <code>profile2</code> 一空出来，下一次启动就接着用 <code>profile2</code>，既不会
-一直往上加号，也没有需要清理的陈旧标记。</div>
+释放，所以槽位一空出来，下一次启动就接着用，既不会一直往上加号，
+也没有需要清理的陈旧标记。</div>
+</li>
+<li class=""><code class="sig">static long TryTake(string dir)</code>
+<div class="mdoc">创建槽位目录并抢它的锁，抢到返回锁句柄，被占返回 0。</div>
+</li>
+<li class=""><code class="sig">static int PreferredSlot(int max)</code>
+<div class="mdoc">本进程的首选 profile 槽位（1..max）：按可执行文件完整路径
+散列。路径不变就永远算出同一个槽位，登录态在磁盘上的家因此稳定；
+不同目录的安装各归各的槽。Windows 路径不区分大小写与斜杠方向，
+散列前先归一（\ → /、A-Z → a-z）。</div>
 </li>
 <li class=""><code class="sig">static string Switches()</code>
 <div class="mdoc">追加到每个 Chromium 进程命令行的开关，取自
@@ -1363,6 +1515,8 @@ LSUIElement），有它就走它。</div>
 时为 &quot;&quot;。</div>
 </li>
 <li class=""><code class="sig">static string ParentDir(string path)</code>
+<div class="mdoc">路径的父目录（最后一个 / 或 \ 之前的部分）；没有分隔符时
+返回 &quot;.&quot;。</div>
 </li>
 <li class=""><code class="sig">static bool Start(string dir, string helperPath)</code>
 <div class="mdoc">用已经装好的运行时目录初始化 CEF（不联网）。
@@ -1394,6 +1548,7 @@ LSUIElement），有它就走它。</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">CefHttpEndpoint()</code>
+<div class="mdoc">全空端点。</div>
 </li>
 </ul>
 </div></div>
@@ -1417,7 +1572,17 @@ await CefBootstrap.StartAsync();
 优先级：显式设过的字段 &gt; 环境变量 &gt; 默认值。空字符串表示「没设」，
 因此把某项留空不会把环境变量顶掉。CEF 一个进程只初始化一次，所以
 要在 <code>CefBootstrap.RunHelper</code> 之前就 <code>Use</code>——
-helper 子进程也要按同一份配置找运行时。</div>
+helper 子进程也要按同一份配置找运行时。
+
+&lt;para&gt;**helper 进程是 exec 出来的全新进程**，本类里的 &lt;c&gt;current&lt;/c&gt;
+静态字段在浏览器进程调 &lt;c&gt;Use(...)&lt;/c&gt; 的赋值不会被 helper 继承——helper
+只能靠环境变量（&lt;c&gt;ZAN_CEF_RUNTIME&lt;/c&gt; / &lt;c&gt;ZAN_CEF_PROFILE&lt;/c&gt; /
+&lt;c&gt;ZAN_CEF_CACHE&lt;/c&gt; / &lt;c&gt;ZAN_CEF_DRIVER&lt;/c&gt; / &lt;c&gt;ZAN_CEF_SWITCHES&lt;/c&gt; /
+&lt;c&gt;ZAN_CEF_LOCALE&lt;/c&gt; / &lt;c&gt;ZAN_CEF_HELPER&lt;/c&gt; / &lt;c&gt;ZAN_CEF_DOWNLOAD_UI&lt;/c&gt; /
+&lt;c&gt;ZAN_CEF_NO_DCOMP&lt;/c&gt; / &lt;c&gt;ZAN_CEF_MIRROR&lt;/c&gt; / &lt;c&gt;ZAN_CEF_ARCHIVE&lt;/c&gt;）
+拼回同一份配置。所以一个既给浏览器又给 helper 用的程序，关键路径要么
+走环境变量、要么在调用 <code>CefBootstrap.RunHelper</code> 之前就把这些
+变量 &lt;c&gt;setenv&lt;/c&gt; 进进程环境。&lt;/para&gt;</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">string runtimeDir;</code>
 <div class="mdoc">已装好的 CEF 运行时目录（对应 ZAN_CEF_RUNTIME）。
@@ -1482,6 +1647,8 @@ ZAN_CEF_LOCALE）。&quot;&quot;=Chromium 按系统决定。</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">CefOptions()</code>
+<div class="mdoc">构造全默认配置：所有路径为空（走环境变量/默认值）、
+开关为空、DComp 开启、自举进度窗开启。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -1496,20 +1663,30 @@ ZAN_CEF_LOCALE）。&quot;&quot;=Chromium 按系统决定。</div>
 <div class="mdoc">显式配置优先，其次环境变量，都没有则 &quot;&quot;。</div>
 </li>
 <li class=""><code class="sig">static string RuntimeDir()</code>
+<div class="mdoc">生效的运行时目录（<code>runtimeDir</code> 或 ZAN_CEF_RUNTIME，
+显式优先）。</div>
 </li>
 <li class=""><code class="sig">static string CacheRoot()</code>
+<div class="mdoc">生效的缓存根目录（<code>cacheRoot</code> 或 ZAN_CEF_CACHE）。</div>
 </li>
 <li class=""><code class="sig">static string MirrorBase()</code>
+<div class="mdoc">生效的镜像基址（<code>mirrorBase</code> 或 ZAN_CEF_MIRROR）。</div>
 </li>
 <li class=""><code class="sig">static string ArchivePath()</code>
+<div class="mdoc">生效的离线归档路径（<code>archivePath</code> 或 ZAN_CEF_ARCHIVE）。</div>
 </li>
 <li class=""><code class="sig">static string ProfileDir()</code>
+<div class="mdoc">生效的 profile 目录（<code>profileDir</code> 或 ZAN_CEF_PROFILE）。</div>
 </li>
 <li class=""><code class="sig">static string DriverPath()</code>
+<div class="mdoc">生效的 driver 路径（<code>driverPath</code> 或 ZAN_CEF_DRIVER）。</div>
 </li>
 <li class=""><code class="sig">static string Locale()</code>
+<div class="mdoc">生效的界面语言（<code>locale</code> 或 ZAN_CEF_LOCALE）。</div>
 </li>
 <li class=""><code class="sig">static string HelperPath()</code>
+<div class="mdoc">生效的 helper 可执行文件（<code>helperPath</code> 或
+ZAN_CEF_HELPER）。</div>
 </li>
 <li class=""><code class="sig">static bool DownloadUi()</code>
 <div class="mdoc">是否启用自举进度窗。配置字段优先于
@@ -1523,8 +1700,12 @@ ZAN_CEF_DOWNLOAD_UI；因此代码里设为 false 后，环境变量不能重新
 分号时整串改用分号分隔，否则带逗号的开关值会被拆开。</div>
 </li>
 <li class=""><code class="sig">static bool NoDcomp()</code>
+<div class="mdoc">是否禁用 DirectComposition：配置字段为 true，或环境变量
+ZAN_CEF_NO_DCOMP 设为非 &quot;0&quot; 非空值时为 true。</div>
 </li>
 <li class=""><code class="sig">static string Join(string left, string right)</code>
+<div class="mdoc">拼接两段开关列表：任一段为空直接返回另一段；任一段含分号
+用分号连接，否则用逗号。</div>
 </li>
 </ul>
 </div></div>
@@ -1647,6 +1828,7 @@ Interop 的 CefHost 共用同一个名字）。</div>
 <div class="mdoc">最近一次失败的原因，成功时为 &quot;&quot;。</div>
 </li>
 <li class=""><code class="sig">static void Fail(string msg)</code>
+<div class="mdoc">记录失败原因（随后经 <code>Error</code> 汇报给调用方）。</div>
 </li>
 <li class=""><code class="sig">static string Platform()</code>
 <div class="mdoc">官方平台标识（&quot;windows64&quot; / &quot;linux64&quot; / &quot;macosarm64&quot; …），
@@ -1726,9 +1908,25 @@ native 侧 CefSettings.framework_dir_path 用的是同一个路径）。</div>
 <li class=""><code class="sig">static string ArchiveUrl(CefArchive a)</code>
 <div class="mdoc">归档完整 URL（文件名中的 &quot;+&quot; 继续按 URL 规则转义）。</div>
 </li>
+<li class=""><code class="sig">static ExternalCallPolicy NetworkPolicy(int responseBytes, int totalMs)</code>
+<div class="mdoc">CEF 自举的网络预算：仅 HTTPS，限制响应体与总耗时，且不
+自动跟随重定向或重试。镜像即使来自配置也不能放宽传输边界。</div>
+</li>
+<li class=""><code class="sig">static ExternalCallPolicy IndexPolicy()</code>
+<div class="mdoc">索引下载的预算：响应体上限 16 MiB、总超时 60s。</div>
+</li>
+<li class=""><code class="sig">static ExternalCallPolicy ArchivePolicy()</code>
+<div class="mdoc">归档下载的预算：响应体上限 512 MiB、总超时 120s。</div>
+</li>
+<li class=""><code class="sig">static bool IsSecureEndpoint(CefHttpEndpoint endpoint)</code>
+<div class="mdoc">按 CEF 的官方/镜像地址检查策略。CEF 自举没有本地明文
+下载例外，因此这里始终只接受 HTTPS。</div>
+</li>
 <li class=""><code class="sig">static string DownloadEscapeHint()</code>
+<div class="mdoc">下载失败错误信息末尾追加的补救提示（镜像 / 本地归档）。</div>
 </li>
 <li class=""><code class="sig">static string Sha1EscapeHint()</code>
+<div class="mdoc">SHA-1 校验失败错误信息末尾追加的提示（提醒核对镜像文件）。</div>
 </li>
 <li class=""><code class="sig">static async bool FetchIndexAsync(string destPath)</code>
 <div class="mdoc">把官方构建索引下载到 &lt;paramref name=&quot;destPath&quot;/&gt;，
@@ -1746,6 +1944,7 @@ native 侧 CefSettings.framework_dir_path 用的是同一个路径）。</div>
 <div class="mdoc">版本对象里的文件名是否属于别的平台。</div>
 </li>
 <li class=""><code class="sig">static string PrefixNote(string versionPrefix)</code>
+<div class="mdoc">失败提示的后缀：给出未满足的版本前缀要求（空前缀返回 &quot;&quot;）。</div>
 </li>
 <li class=""><code class="sig">static CefArchive ReadLocalArchive(string path)</code>
 <div class="mdoc">读取本机归档并校验其平台、版本和已知摘要。</div>
@@ -1831,10 +2030,14 @@ DownloadJob.Error。</div>
 <div class="mdoc">比较两个目录名里的版本，a 是否比 b 新（按点分数字段）。</div>
 </li>
 <li class=""><code class="sig">static int ParseInt(string s)</code>
+<div class="mdoc">取前导十进制数字组成的整数；一个数字都没有返回 -1。</div>
 </li>
 <li class=""><code class="sig">static string Slashes(string p)</code>
+<div class="mdoc">反斜杠归一为正斜杠并去掉尾部斜杠（根 &quot;/&quot; 保留）。</div>
 </li>
 <li class=""><code class="sig">static string ParentDir(string path)</code>
+<div class="mdoc">路径的父目录（最后一个分隔符之前的部分）；没有分隔符或
+分隔符在首位时返回 &quot;.&quot;。</div>
 </li>
 <li class=""><code class="sig">static int PrevBrace(string s, int from)</code>
 <div class="mdoc">from 之前最近的一个 &#x27;{&#x27;。</div>

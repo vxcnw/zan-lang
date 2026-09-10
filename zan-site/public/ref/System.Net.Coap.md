@@ -49,8 +49,14 @@ CoapResponse w = await c.PutAsync("actuators/led", "on");
   - DELETE 一个资源路径。
 
 - byte[]BuildRequest(int code, string path, string payload, int msgId, int tok, List<int> outLen)
+  - 构建一个 CON 请求数据报：4 字节头部、2 字节 token、
+    Uri-Path 选项（按 '/' 分隔的每个段一个），然后是 0xFF + payload。
+    实际长度写入 <paramref name="outLen"/>[0]。
 
 - static CoapResponse ParseResponse(byte[]d, int n, int msgId, int tok)
+  - 解析响应数据报（<paramref name="d"/> 中有
+    <paramref name="n"/> 个有效字节）。数据报不属于本次请求
+    （message id 与 token 均不匹配）或只是空 ACK 时返回 null。
 
 - async CoapResponse RequestAsync(int code, string path, string payload)
   - 发送一个可确认请求并等待匹配的
@@ -62,13 +68,17 @@ CoapResponse w = await c.PutAsync("actuators/led", "on");
 
 CoAP 方法/响应码（RFC 7252 第 12.1 节）。
 
-- static int GET=1;
+- static const int GET=1;
+  - GET（0.01）。
 
-- static int POST=2;
+- static const int POST=2;
+  - POST（0.02）。
 
-- static int PUT=3;
+- static const int PUT=3;
+  - PUT（0.03）。
 
-- static int DELETE=4;
+- static const int DELETE=4;
+  - DELETE（0.04）。
 
 
 ## CoapResponse (class)
@@ -85,8 +95,10 @@ CoAP 方法/响应码（RFC 7252 第 12.1 节）。
 - bool ok;
 
 - CoapResponse(int code, string payload)
+  - 私有构造：ok 按 code 是否属于 2.xx 类判定。
 
 - string CodeText()
   - 响应码的 "2.05" 式带点渲染。
 
 - static string Two(int v)
+  - 两位十进制渲染（detail 部分不足两位补零）。

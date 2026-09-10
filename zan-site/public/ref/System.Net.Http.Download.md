@@ -14,6 +14,9 @@
 
 - bool tls;
 
+- string targetUrl;
+  - ExternalTarget 规范化后的完整 URL；真正连接前再按策略复核。
+
 - string path;
   - 请求行里的路径（含查询串），如 "/app/plus2.exe"。
 
@@ -36,13 +39,16 @@
   - 自定义安装步骤，null = 按扩展名走默认解压。
 
 - DownloadItem()
+  - 内部构造：默认 https 443；经 FromUrl 使用。
 
 - static DownloadItem FromUrl(string url, string localPath)
   - 从 `http(s)://host[:port]/path` 建一个条目；URL 解析不出
     主机时返回 null。
 
 - bool SetUrl(string url)
-  - 解析 URL 到 host/port/tls/path，成功返回 true。
+  - 解析 URL 到 host/port/tls/path，成功返回 true。解析本身只负责
+    拒绝畸形目标；HTTPS、私网和 loopback 的远程策略在真正建连前由
+    `ExternalTargetPolicy` 复核，这样离线模型 fixture 仍能解析本地 URL。
 
 - DownloadItem WithSha1(string hex)
   - 要校验的 SHA-1（40 位十六进制）；可链式调用。
@@ -77,6 +83,7 @@
   - HttpClient 写进度用的伴生文件。
 
 - static string LastSegment(string p)
+  - 路径的最后一段（文件名）。
 
 
 ## DownloadJob (class)
@@ -106,12 +113,15 @@ HttpClient 把 "已收/总计" 写进伴生进度文件，读的那一侧（GUI 
 
 - static nint sLock;
 
-- static string sLock;
+- static nint sLock;
 
 - static AtomicInt sCancel;
   - 取消标志。原子而非受锁，因为 HttpClient 的探针每 64 KB 问一次。
 
 - List<DownloadItem> items;
+
+- ExternalCallPolicy callPolicy;
+  - 每个 worker 请求绑定的外部调用预算；null = 使用下载默认预算。
 
 - DownloadPrepareFn prepare;
   - 开跑前补齐条目的回调，null = 条目已经齐了。
@@ -139,13 +149,20 @@ HttpClient 把 "已收/总计" 写进伴生进度文件，读的那一侧（GUI 
 - DownloadJob()
 
 - static void EnsureShared()
+  - 惰性初始化进程级任务队列、锁与取消标志。
 
 - static void Lock()
+  - 锁住进程级共享状态（首次使用时先惰性初始化）。
 
 - static void Unlock()
+  - 解锁进程级共享状态（与 Lock 配对）。
 
 - DownloadJob Add(DownloadItem it)
   - 加入一个待下载条目（<c>Start()</c> 之前）。
+
+- DownloadJob SetCallPolicy(ExternalCallPolicy policy)
+  - 设置每次下载请求的外部调用预算；可链式调用。任务开始时会
+    快照该策略，因此开跑后修改调用方持有的策略不会改变在途任务。
 
 - DownloadJob SetPrepare(DownloadPrepareFn fn)
   - 把「有哪些文件要下」的决定推迟到工作线程上：<c>Start()</c>
@@ -156,6 +173,7 @@ HttpClient 把 "已收/总计" 写进伴生进度文件，读的那一侧（GUI 
   - 条目数。
 
 - DownloadItem ItemAt(int i)
+  - 第 i 个条目；越界返回 null。
 
 - bool Start()
   - 在工作线程上开始处理。返回 false = 线程起不来（此时任务
@@ -178,6 +196,13 @@ HttpClient 把 "已收/总计" 写进伴生进度文件，读的那一侧（GUI 
   - 整个任务在工作线程上的主体。每个条目：下载 → 校验 →
     解压安装。任何一步失败就带着原因收工，后面的条目不再处理。
 
+- static ExternalCallPolicy DefaultCallPolicy()
+  - 下载默认预算：总超时 120s，响应/流上限各 256 MiB。
+
+- static ExternalCallPolicy SnapshotPolicy(ExternalCallPolicy source)
+  - 把调用方给定的策略复制成独立快照（未给时用 DefaultCallPolicy），
+    开跑后修改原策略不影响在途任务。
+
 - async long FetchAsync(DownloadItem it)
   - 一个条目的传输，断点续传由 HttpClient 负责。
 
@@ -186,14 +211,19 @@ HttpClient 把 "已收/总计" 写进伴生进度文件，读的那一侧（GUI 
     其余扩展名直接复制过去。
 
 - void Begin(int i, DownloadItem it)
+  - 开始处理第 i 个条目（阶段置为 Download，记录条目名）。
 
 - void SetStage(int s)
+  - 在锁下改写当前阶段。
 
 - void SetFail(string msg)
+  - 以失败收工：保存当前阶段到 failedStage，记录原因。
 
 - void SetError(string msg)
+  - 在锁下更新错误文本（不改变阶段，用于取消等非失败终态）。
 
 - void Finish()
+  - 收工：清除 running 标志。
 
 - bool Running()
   - 任务是否还在跑（worker 线程尚未收工）。
@@ -245,6 +275,7 @@ HttpClient 把 "已收/总计" 写进伴生进度文件，读的那一侧（GUI 
   - 十倍定点数写成一位小数。
 
 - static string ParentDir(string path)
+  - 路径的目录部分（兼容 / 与 \ 分隔符）；无分隔符返回 "."。
 
 
 ## DownloadStage (class)
@@ -253,19 +284,26 @@ HttpClient 把 "已收/总计" 写进伴生进度文件，读的那一侧（GUI 
 `Gui.Component.Downloader.DownloadDialog` 把它翻成一行
 提示文字，无界面的调用方用它判断结局。
 
-- static int Idle=0;
+- static const int Idle=0;
+  - 刚创建，尚未开跑。
 
-- static int Download=1;
+- static const int Download=1;
+  - 正在传输某个条目。
 
-- static int Verify=2;
+- static const int Verify=2;
+  - 正在核对 SHA-1。
 
-- static int Extract=3;
+- static const int Extract=3;
+  - 正在解压/安装。
 
-- static int Done=4;
+- static const int Done=4;
+  - 全部条目成功。
 
-- static int Failed=5;
+- static const int Failed=5;
+  - 失败收工（原因见 DownloadJob.Error）。
 
-- static int Cancelled=6;
+- static const int Cancelled=6;
+  - 被调用方取消。
 
 - static string Text(int stage)
   - 阶段的中文提示；宿主自己管界面语言时不用它，直接按阶段码

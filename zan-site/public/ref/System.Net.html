@@ -32,7 +32,7 @@
       <img class="hero-mascot" src="/mascot.png" alt=""/>
       <p class="kicker" style="text-align:left"><span class="zh">知识库 · 标准库参考</span><span class="en">API reference</span></p>
       <h1 class="grad">System.Net</h1>
-      <p class="lede"><span class="zh">18 个类型 · 完整签名由 stdlib 源码提取</span><span class="en">18 types · extracted from stdlib source</span></p>
+      <p class="lede"><span class="zh">15 个类型 · 完整签名由 stdlib 源码提取</span><span class="en">15 types · extracted from stdlib source</span></p>
       <p style="font-size:13.5px;color:var(--muted);margin:6px 0 0">
         <span class="zh">指南正文以中文编写；导航与界面文案提供英文切换。英文原文请抓取对应 .md 或见仓库 docs/。</span>
         <span class="en">This guide is written in Chinese; the navigation Chrome switches to English. Fetch the .md copy for the raw text.</span>
@@ -47,13 +47,15 @@
     <aside class="wiki-side doc-side">
       <div class="searchbox"><svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         <input id="docSearch" placeholder="筛选目录…" aria-label="filter"></div>
-      <details class="nsgrp" open><summary>System · 55</summary>
+      <details class="nsgrp" open><summary>System · 58</summary>
 <a href="/ref/System">System</a>
 <a href="/ref/System.Automation">System.Automation</a>
 <a href="/ref/System.Collections">System.Collections</a>
 <a href="/ref/System.Collections.Generic">System.Collections.Generic</a>
+<a href="/ref/System.Commercial">System.Commercial</a>
 <a href="/ref/System.Compiler">System.Compiler</a>
 <a href="/ref/System.Data">System.Data</a>
+<a href="/ref/System.Data.Excel">System.Data.Excel</a>
 <a href="/ref/System.Data.Firebird">System.Data.Firebird</a>
 <a href="/ref/System.Data.MySql">System.Data.MySql</a>
 <a href="/ref/System.Data.Orm">System.Data.Orm</a>
@@ -69,6 +71,7 @@
 <a href="/ref/System.Globalization">System.Globalization</a>
 <a href="/ref/System.IO">System.IO</a>
 <a href="/ref/System.IO.Compression">System.IO.Compression</a>
+<a href="/ref/System.IO.Watch">System.IO.Watch</a>
 <a href="/ref/System.Input">System.Input</a>
 <a href="/ref/System.Json">System.Json</a>
 <a href="/ref/System.Knowledge">System.Knowledge</a>
@@ -76,6 +79,7 @@
 <a href="/ref/System.Management">System.Management</a>
 <a href="/ref/System.Net" class="active">System.Net</a>
 <a href="/ref/System.Net.Coap">System.Net.Coap</a>
+<a href="/ref/System.Net.External">System.Net.External</a>
 <a href="/ref/System.Net.Http">System.Net.Http</a>
 <a href="/ref/System.Net.Http.Client">System.Net.Http.Client</a>
 <a href="/ref/System.Net.Http.Download">System.Net.Http.Download</a>
@@ -84,7 +88,6 @@
 <a href="/ref/System.Net.Modbus">System.Net.Modbus</a>
 <a href="/ref/System.Net.Mqtt">System.Net.Mqtt</a>
 <a href="/ref/System.Net.Ntp">System.Net.Ntp</a>
-<a href="/ref/System.Net.Rpc">System.Net.Rpc</a>
 <a href="/ref/System.Net.Sip">System.Net.Sip</a>
 <a href="/ref/System.Net.Sockets">System.Net.Sockets</a>
 <a href="/ref/System.Net.Sse">System.Net.Sse</a>
@@ -123,13 +126,13 @@
 <a href="/ref/Game.Arcade2D">Game.Arcade2D</a>
 <a href="/ref/Game.Arpg">Game.Arpg</a>
 <a href="/ref/Game.Arpg.Data">Game.Arpg.Data</a>
-<a href="/ref/Game.Arpg.Fonts">Game.Arpg.Fonts</a>
 <a href="/ref/Game.Board">Game.Board</a>
 <a href="/ref/Game.Cards">Game.Cards</a>
 <a href="/ref/Game.Core">Game.Core</a>
 <a href="/ref/Game.Foundation">Game.Foundation</a>
-<a href="/ref/Game.Foundation.Sdl">Game.Foundation.Sdl</a>
-<a href="/ref/Game.Render">Game.Render</a>
+<a href="/ref/Game.Foundation.Gui">Game.Foundation.Gui</a>
+<a href="/ref/Game.Idle">Game.Idle</a>
+<a href="/ref/Game.Kit">Game.Kit</a>
 <a href="/ref/Game.Scene">Game.Scene</a>
 </details>
 <details class="nsgrp"><summary>Sdk · 57</summary>
@@ -191,9 +194,6 @@
 <a href="/ref/Sdk.Wechat.Work">Sdk.Wechat.Work</a>
 <a href="/ref/Sdk.Wechat.WxOpen">Sdk.Wechat.WxOpen</a>
 </details>
-<details class="nsgrp" open><summary>SDL3 · 1</summary>
-<a href="/ref/SDL3">SDL3</a>
-</details>
 <details class="nsgrp"><summary>Platform · 1</summary>
 <a href="/ref/Platform">Platform</a>
 </details>
@@ -216,6 +216,7 @@
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">BannerService(string name, string listen, string procs, string status)</code>
+<div class="mdoc">私有构造：由 <code>ServerBanner.Service</code> 创建。</div>
 </li>
 </ul>
 </div></div>
@@ -235,44 +236,57 @@ connection for shutdown after the current callback returns.</div>
 </li>
 <li class=""><code class="sig">bool closed;</code>
 </li>
+<li class=""><code class="sig">WsWriter wsWriter;</code>
+</li>
+<li class=""><code class="sig">TcpClient wsClient;</code>
+</li>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">Connection(int id, nint sock, string protocol)</code>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;)]static extern long strlen(string str);</code>
+</li>
 <li class=""><code class="sig">void SetData(string data)</code>
 <div class="mdoc">Arbitrary per-connection state for the application.</div>
 </li>
 <li class=""><code class="sig">string GetData()</code>
+<div class="mdoc">取该连接的自定义应用数据（SetData 设置的值）。</div>
 </li>
 <li class=""><code class="sig">int GetId()</code>
+<div class="mdoc">连接 id（进程内自增，唯一）。</div>
 </li>
 <li class=""><code class="sig">nint GetSocket()</code>
+<div class="mdoc">底层 socket 句柄。</div>
 </li>
 <li class=""><code class="sig">string GetProtocol()</code>
+<div class="mdoc">连接所属协议名（如 &quot;http&quot;、&quot;websocket&quot;、&quot;tcp&quot;）。</div>
 </li>
 <li class=""><code class="sig">void Send(string data)</code>
 <div class="mdoc">Queues raw bytes to the peer (fire-and-forget; usable from
-synchronous callbacks). For &quot;websocket&quot; workers, prefer returning the
-reply from onMessage so it is framed; Send writes raw bytes.</div>
+synchronous callbacks). For &quot;websocket&quot; workers, prefer Push (framed)
+or returning the reply from onMessage; Send writes raw bytes.</div>
 </li>
 <li class=""><code class="sig">async int SendAsync(string data)</code>
 <div class="mdoc">Sends data and suspends until it is written.</div>
+</li>
+<li class=""><code class="sig">async bool Push(string data)</code>
+<div class="mdoc">WebSocket push：把一条 Text 帧排进该连接的出站缓冲并立即
+写出（服务端帧不掩码）。可从任何回调上下文调用——包括 onOpen 里
+主动欢迎、定时器里广播等没有入站消息先行的场景，这正是与&quot;从
+onMessage 返回应答&quot;的区别。连接已关或非 WS 连接返回 false。
+帧序与帧循环共用同一缓冲，Append 到 Flush 之间不让出，天然一致。</div>
+</li>
+<li class=""><code class="sig">async bool PushBinary(string data, int len)</code>
+<div class="mdoc">WebSocket 二进制 push：<code>data</code> 可含 NUL，<code>len</code> 为精确
+字节数（绝不 strlen）。语义同 Push。</div>
 </li>
 <li class=""><code class="sig">void Close()</code>
 <div class="mdoc">Marks the connection to be closed by its worker loop.</div>
 </li>
 <li class=""><code class="sig">bool IsClosed()</code>
-</li>
-</ul>
-</div></div>
-<div class="api"><div class="api-head"><span class="ns">Dns</span><span class="tag">class</span></div>
-<div class="api-body">
-<div class="mdoc">DNS 解析工具。</div>
-<h5 class="cat">方法</h5><ul class="sig">
-<li class=""><code class="sig">static string Resolve(string hostname)</code>
-<div class="mdoc">将主机名解析为 IP 地址。</div>
+<div class="mdoc">连接是否已被标记关闭（实际关闭由 worker 循环执行）。</div>
 </li>
 </ul>
 </div></div>
@@ -280,11 +294,11 @@ reply from onMessage so it is framed; Send writes raw bytes.</div>
 <div class="api-body">
 <div class="mdoc">IP 地址工具。</div>
 <h5 class="cat">字段</h5><ul class="sig">
-<li class=""><code class="sig">static string Any=&quot;0.0.0.0&quot;;</code>
+<li class=""><code class="sig">static const string Any=&quot;0.0.0.0&quot;;</code>
 </li>
-<li class=""><code class="sig">static string Loopback=&quot;127.0.0.1&quot;;</code>
+<li class=""><code class="sig">static const string Loopback=&quot;127.0.0.1&quot;;</code>
 </li>
-<li class=""><code class="sig">static string Broadcast=&quot;255.255.255.255&quot;;</code>
+<li class=""><code class="sig">static const string Broadcast=&quot;255.255.255.255&quot;;</code>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -300,16 +314,22 @@ GetAdaptersAddresses 支撑（直接解析原生 x64 ABI 布局）；
 Linux/macOS 上由 getifaddrs 支撑（运行时 zan_plat_net_interfaces）。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">public string name;</code>
+<div class="mdoc">适配器名（Windows 为 FriendlyName）。</div>
 </li>
 <li class=""><code class="sig">public string description;</code>
+<div class="mdoc">适配器描述；POSIX 上与 name 相同（运行时只报一列）。</div>
 </li>
 <li class=""><code class="sig">public int index;</code>
+<div class="mdoc">接口索引。</div>
 </li>
 <li class=""><code class="sig">public bool up;</code>
+<div class="mdoc">接口是否处于 up（OperStatus 1）。</div>
 </li>
 <li class=""><code class="sig">public string macAddress;</code>
+<div class="mdoc">MAC 地址（冒号分隔十六进制；无则为空）。</div>
 </li>
 <li class=""><code class="sig">public List&lt;string&gt; ipAddresses;</code>
+<div class="mdoc">单播地址列表（IPv4 点分十进制 / IPv6 十六进制组）。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -320,22 +340,35 @@ Linux/macOS 上由 getifaddrs 支撑（运行时 zan_plat_net_interfaces）。</
 <div class="mdoc">返回本机已知的所有适配器。</div>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;zan_plat_net_interfaces&quot;)]static extern string NativeInterfaces();</code>
+<div class="mdoc">运行时接口枚举，每行一个适配器：
+name \t index \t up \t mac \t addr[,addr...]。</div>
 </li>
 <li class=""><code class="sig">static List&lt;NetworkInterface&gt; ReadPosix()</code>
+<div class="mdoc">解析 getifaddrs 文本输出为适配器列表；
+列数不足或空行跳过，地址为空时 ipAddresses 为空列表。</div>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;iphlpapi&quot;, EntryPoint=&quot;GetAdaptersAddresses&quot;)]static extern int GetAdaptersAddresses(int family, int flags, nint reserved, nint addresses, nint size);</code>
 </li>
 <li class=""><code class="sig">static List&lt;NetworkInterface&gt; ReadWindows()</code>
+<div class="mdoc">GetAdaptersAddresses 直读：缓冲不足（rc 111）按返回的
+实际大小重试最多 4 次；非 0 结局返回已收集的空表。</div>
 </li>
 <li class=""><code class="sig">static string ReadMac(nint bytes, int length)</code>
+<div class="mdoc">物理地址字节序列格式化为冒号分隔的大写十六进制
+（最多 8 字节）。</div>
 </li>
 <li class=""><code class="sig">static string ReadAddress(nint sockaddr, int length)</code>
+<div class="mdoc">sockaddr 格式化为地址文本：AF_INET（2）为点分 IPv4，
+AF_INET6（23）为 8 组冒号分隔十六进制；其余家族返回空串。</div>
 </li>
 <li class=""><code class="sig">static string HexByte(int number)</code>
+<div class="mdoc">字节为两位大写十六进制。</div>
 </li>
 <li class=""><code class="sig">static string HexWord(int number)</code>
+<div class="mdoc">16 位值为去前导零的大写十六进制（全零输出 &quot;0&quot;）。</div>
 </li>
 <li class=""><code class="sig">static string HexDigit(int number)</code>
+<div class="mdoc">0-15 为单个大写十六进制字符。</div>
 </li>
 </ul>
 </div></div>
@@ -350,9 +383,16 @@ Windows 上直接调 iphlpapi；Linux/macOS 上走运行时的 ICMP socket
 <div class="mdoc">发送 IPv4 echo 请求，超时 4 秒。</div>
 </li>
 <li class=""><code class="sig">static PingReply Send(string address, int timeoutMs)</code>
-<div class="mdoc">发送 IPv4 echo 请求并返回类型化回复。</div>
+<div class="mdoc">发送 IPv4 echo 请求并返回类型化回复。
+发送 IPv4 echo 请求并等待应答，最多
+&lt;paramref name=&quot;timeoutMs&quot;/&gt; 毫秒（负值按 0 处理）。地址不是
+合法 IPv4 时抛 ArgumentException（Windows 侧对广播地址
+&quot;255.255.255.255&quot; 网开一面）；非 Windows 下 socket/权限错误
+映射为 <code>PingStatus.Error</code>。</div>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;zan_plat_icmp_ping&quot;)]static extern int NativeIcmpPing(string address, int timeoutMs);</code>
+<div class="mdoc">平台 ICMP 实现：返回往返毫秒（&gt;= 0），或
+-1 超时 / -2 不可达 / -3 socket 或权限错误 / -4 地址无法解析。</div>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;iphlpapi&quot;, EntryPoint=&quot;IcmpCreateFile&quot;)]static extern nint IcmpCreateFile();</code>
 </li>
@@ -361,12 +401,17 @@ Windows 上直接调 iphlpapi；Linux/macOS 上走运行时的 ICMP socket
 <li class=""><code class="sig">[DllImport(&quot;iphlpapi&quot;, EntryPoint=&quot;IcmpCloseHandle&quot;)]static extern int IcmpCloseHandle(nint handle);</code>
 </li>
 <li class=""><code class="sig">static PingStatus MapStatus(int status)</code>
+<div class="mdoc">把 Windows IP_STATUS 码映射为 <code>PingStatus</code>。</div>
 </li>
 <li class=""><code class="sig">static int ParseIPv4(string text)</code>
+<div class="mdoc">点分 IPv4 解析为 Windows IPAddr——网络序字节按小端
+解释的 DWORD（因此 127.0.0.1 变成 0x0100007f）。非法格式返回 -1。</div>
 </li>
 <li class=""><code class="sig">static int Digit(string ch)</code>
+<div class="mdoc">单字符十进制数字；&quot;0&quot; 与非 1-9 字符都返回 0。</div>
 </li>
 <li class=""><code class="sig">static string FormatIPv4(int packed)</code>
+<div class="mdoc">IPAddr DWORD 还原为点分十进制。</div>
 </li>
 </ul>
 </div></div>
@@ -375,16 +420,21 @@ Windows 上直接调 iphlpapi；Linux/macOS 上走运行时的 ICMP socket
 <div class="mdoc">一条 ICMP echo 结果。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">public PingStatus status;</code>
+<div class="mdoc">应答状态。</div>
 </li>
 <li class=""><code class="sig">public string address;</code>
+<div class="mdoc">应答方地址（Windows 取自应答，可能异于请求串）。</div>
 </li>
 <li class=""><code class="sig">public int roundtripTime;</code>
+<div class="mdoc">往返时间（毫秒）。</div>
 </li>
 <li class=""><code class="sig">public int dataSize;</code>
+<div class="mdoc">应答携带的数据字节数。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">public bool IsSuccess()</code>
+<div class="mdoc">是否成功收到应答。</div>
 </li>
 <li class=""><code class="sig">public void Dispose()</code>
 <div class="mdoc">主动释放 reply 持有的文本。</div>
@@ -428,12 +478,14 @@ new ServerBanner(&quot;ZAN WEB&quot;, &quot;SERVICES&quot;)
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">static int Width()</code>
+<div class="mdoc">横幅总宽度（列）。</div>
 </li>
 <li class=""><code class="sig">ServerBanner Mode(string m)</code>
 <div class="mdoc">进程的布局方式，如 &quot;single process&quot; 或 &quot;master + 4
 workers&quot;。</div>
 </li>
 <li class=""><code class="sig">ServerBanner Service(string name, string listen, string procs, string status)</code>
+<div class="mdoc">在 SERVICES 表登记一行：服务名、监听地址、进程数、状态。</div>
 </li>
 <li class=""><code class="sig">ServerBanner Info(string name, string detail)</code>
 <div class="mdoc">一项配置设置而非服务（路由数、会话存储、
@@ -453,47 +505,7 @@ workers&quot;。</div>
 <div class="mdoc">整宽分隔线，给定 <code>title</code> 时以它为中心。</div>
 </li>
 <li class=""><code class="sig">void Print()</code>
-</li>
-</ul>
-</div></div>
-<div class="api"><div class="api-head"><span class="ns">SocketHttpClient</span><span class="tag">class</span></div>
-<div class="api-body">
-<div class="mdoc">保留在 System.Net 下的旧版纯套接字 HTTP 客户端。受维护的
-客户端位于 System.Net.Http.HttpClient；本类更名为
-SocketHttpClient，以避免 System.Net 与 System.Net.Http
-模块一起编译时（例如通过
-同时引入两者的 Worker 模块）出现重复类型声明。</div>
-<h5 class="cat">方法</h5><ul class="sig">
-<li class=""><code class="sig">static string Get(string host, int port, string path)</code>
-<div class="mdoc">执行简单的 GET 请求并返回响应体。</div>
-</li>
-<li class=""><code class="sig">static string Post(string host, int port, string path, string body)</code>
-<div class="mdoc">执行简单的 POST 请求。</div>
-</li>
-</ul>
-</div></div>
-<div class="api"><div class="api-head"><span class="ns">TcpSocket</span><span class="tag">class</span></div>
-<div class="api-body">
-<div class="mdoc">跨平台 TCP 套接字封装。
-取代仅支持 Windows 的 Winsock2 TcpSocket。</div>
-<h5 class="cat">方法</h5><ul class="sig">
-<li class=""><code class="sig">static void Initialize()</code>
-<div class="mdoc">初始化套接字子系统。</div>
-</li>
-<li class=""><code class="sig">static nint Create()</code>
-<div class="mdoc">创建 TCP 套接字，返回套接字句柄。</div>
-</li>
-<li class=""><code class="sig">static int Send(nint sock, string data)</code>
-<div class="mdoc">在已连接的套接字上发送数据。</div>
-</li>
-<li class=""><code class="sig">static string Receive(nint sock, int bufSize)</code>
-<div class="mdoc">从套接字接收数据到缓冲区。</div>
-</li>
-<li class=""><code class="sig">static void Close(nint sock)</code>
-<div class="mdoc">关闭套接字。</div>
-</li>
-<li class=""><code class="sig">static void Cleanup()</code>
-<div class="mdoc">清理套接字子系统。</div>
+<div class="mdoc">把横幅整块打印到标准输出（启动时调用一次）。</div>
 </li>
 </ul>
 </div></div>
@@ -569,26 +581,42 @@ largest count of any registered Worker decides how many worker
 processes RunAll launches; 1 (default) = serve in-process.</div>
 </li>
 <li class=""><code class="sig">ConnectionHandler onConnect;</code>
+<div class="mdoc">TCP 连接建立后调用（tcp 协议；可 await I/O）。</div>
 </li>
 <li class=""><code class="sig">MessageHandler onMessage;</code>
+<div class="mdoc">收到一条完整入站消息后调用；返回串作为应答回发，返回 &quot;&quot; 不回发。</div>
 </li>
 <li class=""><code class="sig">ConnectionCloseHandler onClose;</code>
+<div class="mdoc">连接关闭（对端断开或 conn.Close() 生效）后调用。</div>
 </li>
 <li class=""><code class="sig">HttpRequestHandler onHttpRequest;</code>
+<div class="mdoc">每个解析完成的 HTTP 请求调用，返回响应对象。</div>
 </li>
 <li class=""><code class="sig">DatagramHandler onUdpMessage;</code>
+<div class="mdoc">每个完整 UDP 数据报调用；返回串回发给发送方，返回 &quot;&quot; 不回发。</div>
 </li>
 <li class=""><code class="sig">SseSubscriberHandler onSseSubscriber;</code>
+<div class="mdoc">SSE 订阅者握手完成后调用；应用持有 SseConnection 主动推事件。</div>
 </li>
 <li class=""><code class="sig">RawConnHandler onRawConnection;</code>
+<div class="mdoc">设置后接管该 Worker 的整条连接：socket 交给回调自主驱动，
+绕过内建协议处理与连接数闸门。</div>
 </li>
 <li class=""><code class="sig">ConnectionHandler onOpen;</code>
+<div class="mdoc">onConnect 的 WebSocket 叫法（连接已建立）。</div>
 </li>
 <li class=""><code class="sig">MessageHandler onReceive;</code>
+<div class="mdoc">onMessage 的 TCP 叫法（收到字节）。</div>
 </li>
 <li class=""><code class="sig">DatagramHandler onPacket;</code>
+<div class="mdoc">onUdpMessage 的 UDP 叫法（收到数据报）。</div>
 </li>
 <li class=""><code class="sig">HttpRequestHandler onRequest;</code>
+<div class="mdoc">onHttpRequest 的 HTTP 叫法（请求已解析）。</div>
+</li>
+<li class=""><code class="sig">List&lt;Connection&gt; wsConns;</code>
+</li>
+<li class=""><code class="sig">static nint wsRegLock=0;</code>
 </li>
 <li class=""><code class="sig">static bool daemonize=false;</code>
 </li>
@@ -673,6 +701,8 @@ build from before the token answers).</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">Worker(string protocol, string host, int port)</code>
+<div class="mdoc">按协议、监听地址与端口构造 Worker 并注册进全局 Worker 列表；
+经 Listen() 使用。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -685,14 +715,19 @@ build from before the token answers).</div>
 <li class=""><code class="sig">static List&lt;TcpClient&gt; wkChannels=new List&lt;TcpClient&gt;();</code>
 </li>
 <li class=""><code class="sig">static AtomicInt statRequests=new AtomicInt(0);</code>
+<div class="mdoc">本进程累计服务的请求/消息数（workerman 风格 <code>status</code> 统计）。</div>
 </li>
 <li class=""><code class="sig">static void BumpStat()</code>
+<div class="mdoc">静态上下文里的计数自增；实例 async 方法中直接自增会被按值捕获而丢失。</div>
 </li>
 <li class=""><code class="sig">static AtomicInt statSent=new AtomicInt(0);</code>
+<div class="mdoc">本进程累计发回对端的消息/帧/数据报数。</div>
 </li>
 <li class=""><code class="sig">static void BumpSent()</code>
+<div class="mdoc">发送计数自增（同 BumpStat 的静态上下文约束）。</div>
 </li>
 <li class=""><code class="sig">static int LiveConnections()</code>
+<div class="mdoc">本进程所有 Worker 的在线连接总数。</div>
 </li>
 <li class=""><code class="sig">static List&lt;long&gt; stPrevReq=new List&lt;long&gt;();</code>
 </li>
@@ -700,7 +735,10 @@ build from before the token answers).</div>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;)]static extern void exit(int code);</code>
 </li>
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;)]static extern long strlen(string str);</code>
+</li>
 <li class=""><code class="sig">static void Dbg(string msg)</code>
+<div class="mdoc">调试跟踪输出：SetDebug(true) 时打印 master/worker 交接与握手轨迹。</div>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;)]static extern int _flushall();</code>
 </li>
@@ -714,14 +752,41 @@ build from before the token answers).</div>
 <li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;SetEnvironmentVariableW&quot;)]static extern int SetEnvironmentVariableW(nint name, nint val);</code>
 </li>
 <li class=""><code class="sig">ConnectionHandler OpenHandler()</code>
+<div class="mdoc">onOpen 与 onConnect 中已设置的那个（别名归一）。</div>
 </li>
 <li class=""><code class="sig">MessageHandler MessageHandlerOf()</code>
+<div class="mdoc">onMessage 与 onReceive 中已设置的那个。</div>
 </li>
 <li class=""><code class="sig">DatagramHandler PacketHandler()</code>
+<div class="mdoc">onPacket 与 onUdpMessage 中已设置的那个。</div>
 </li>
 <li class=""><code class="sig">HttpRequestHandler RequestHandler()</code>
+<div class="mdoc">onRequest 与 onHttpRequest 中已设置的那个。</div>
+</li>
+<li class=""><code class="sig">static void WsRegInit()</code>
+<div class="mdoc">惰性创建 WebSocket 注册表用的互斥锁。</div>
+</li>
+<li class=""><code class="sig">void WsConnAdd(Connection conn)</code>
+<div class="mdoc">Upgrade 成功后由 HandleWebSocket 调用（单线程 accept 路径）。</div>
+</li>
+<li class=""><code class="sig">void WsConnRemove(Connection conn)</code>
+<div class="mdoc">连接结束后由 HandleWebSocket 调用。</div>
+</li>
+<li class=""><code class="sig">int WsConnCount()</code>
+<div class="mdoc">本 Worker 当前在线 WebSocket 连接数（进程内）。</div>
+</li>
+<li class=""><code class="sig">Connection WsConnById(int id)</code>
+<div class="mdoc">按连接 id 取在线连接；不存在（已断开）返回 null。
+用于定时器等无引用上下文里找回连接后 conn.Push(...)。</div>
+</li>
+<li class=""><code class="sig">async int WsBroadcast(string data)</code>
+<div class="mdoc">向所有在线 WebSocket 连接广播一条 Text 帧，返回成功
+投递数。快照在锁内拷出、Push 在锁外执行——Push 是 await 点，
+决不能持锁挂起。断开的连接由其帧循环稍后自行移除。</div>
 </li>
 <li class=""><code class="sig">bool HasWsHandlers()</code>
+<div class="mdoc">Whether this worker can serve WebSocket connections, i.e. whether an HTTP
+port should honour an Upgrade request instead of answering it as HTTP.</div>
 </li>
 <li class=""><code class="sig">static Worker Listen(string address)</code>
 <div class="mdoc">Creates a Worker from an address like &quot;http://0.0.0.0:8080&quot;.</div>
@@ -783,14 +848,19 @@ unbounded log nor with a directory of thousands of entries.</div>
 logging to a file is disabled.</div>
 </li>
 <li class=""><code class="sig">static void EnsureMasterLog()</code>
+<div class="mdoc">master 启动初期：应用未自配 Log 时按 logDir/logPattern 配置日志，确保监督事件落盘。</div>
 </li>
 <li class=""><code class="sig">static void EnsureLogDir()</code>
+<div class="mdoc">确保当前日志文件所在目录存在（每次 spawn 前调用）。</div>
 </li>
 <li class=""><code class="sig">static int MaxCount()</code>
+<div class="mdoc">所有注册 Worker 中最大的 worker 进程数。</div>
 </li>
 <li class=""><code class="sig">static int ControlPort()</code>
+<div class="mdoc">控制端口取值顺序：显式指定 &gt; 环境变量 ZAN_CTL_PORT &gt; 首 Worker 端口+10000（无 Worker 时 19999）。</div>
 </li>
 <li class=""><code class="sig">static string AppId()</code>
+<div class="mdoc">服务器实例标识：自身可执行文件路径的哈希（同副本重启即同实例，与端口无关）。</div>
 </li>
 <li class=""><code class="sig">static string CtlPortFile()</code>
 <div class="mdoc">The default control port is derived from the service port, so an
@@ -800,26 +870,40 @@ another port and records the one it claimed here, so stop/status/reload
 still find it.</div>
 </li>
 <li class=""><code class="sig">static void RecordControlPort()</code>
+<div class="mdoc">master 把实际认领的控制端口与实例令牌写入记录文件，供 stop/status/reload 寻址。</div>
 </li>
 <li class=""><code class="sig">static void ForgetControlPort()</code>
+<div class="mdoc">停机时删除控制端口记录文件。</div>
 </li>
 <li class=""><code class="sig">static int RecordedControlPort()</code>
 <div class="mdoc">The port a running instance recorded, or 0 when there is no usable
 record. Only for the CLI side: the master writes the file.</div>
 </li>
 <li class=""><code class="sig">static string CtlToken()</code>
+<div class="mdoc">本实例令牌（&quot;&lt;pid&gt;-&lt;unix秒&gt;&quot;），用于甄别控制端口应答者是否本实例的 master。</div>
 </li>
 <li class=""><code class="sig">static string RecordedCtlToken()</code>
 <div class="mdoc">The token of the instance that recorded the control port, or &quot;&quot; when
 there is no record.</div>
 </li>
 <li class=""><code class="sig">static string TrimEol(string s)</code>
+<div class="mdoc">去除字符串尾部的换行、空格与制表符。</div>
 </li>
 <li class=""><code class="sig">static nint BindCtl(int port, bool reuse)</code>
+<div class="mdoc">Binds the control socket on one port. Returns the socket, or -1 with the
+reason in lastCtlErr.</div>
 </li>
 <li class=""><code class="sig">static async nint ClaimControlPort()</code>
+<div class="mdoc">Claims a control port for this instance: the wanted one if it is free, a
+reclaimed leftover from a previous run, or -- unless the port was named
+explicitly -- the next free port after it. Returns the bound socket and
+leaves ControlPort() reporting the port actually claimed, or -1.</div>
 </li>
 <li class=""><code class="sig">static nint MoveOffControlPort(int want, string wantErr)</code>
+<div class="mdoc">The control port is internal: only this master and its own workers ever
+connect to it, and they are told which port to use. So an unrelated
+program sitting on the derived default is no reason to refuse to start --
+move to the next free port and record it for stop/status/reload.</div>
 </li>
 <li class=""><code class="sig">static async void RunCommand()</code>
 <div class="mdoc">Runs the process-management command line, workerman-style:
@@ -840,15 +924,21 @@ where signals are not available.
 Start commands never return; the others exit when the master answers.</div>
 </li>
 <li class=""><code class="sig">static async void SendCommand(string cmd)</code>
+<div class="mdoc">Sends one command line to the running master and prints its answer. The
+running instance may have moved off the derived port, so its record wins
+over the default -- unless the port was named on the command line.</div>
 </li>
 <li class=""><code class="sig">static async void RunAll()</code>
-<div class="mdoc">Runs every registered Worker. Never returns. In the master
-process with count &gt; 1 this spawns and supervises worker processes;
-in a worker process (or with count == 1) it serves connections.</div>
+<div class="mdoc">Runs every registered Worker. Never returns. Command-mode
+servers always use a supervising master, including a single worker;
+direct RunAll callers keep the lightweight single-process path when
+count is 1.</div>
 </li>
 <li class=""><code class="sig">static string Pad(string s, int width)</code>
+<div class="mdoc">状态屏文本按宽度左对齐补空格（委托 ServerBanner.Pad）。</div>
 </li>
 <li class=""><code class="sig">static string Rule(string title)</code>
+<div class="mdoc">状态屏分隔线（委托 ServerBanner.Rule）。</div>
 </li>
 <li class=""><code class="sig">static void PrintBanner(int procs)</code>
 <div class="mdoc">Prints the workerman-style start-up screen: version line, then
@@ -856,10 +946,14 @@ one row per listener with protocol, address, process count and
 state.</div>
 </li>
 <li class=""><code class="sig">static string StatsKey(int wid)</code>
+<div class="mdoc">统计表行键：wid&gt;0 为 &quot;w&lt;id&gt;&quot;，否则 &quot;self&quot;。</div>
 </li>
 <li class=""><code class="sig">static SharedTable StatsTable(int procs)</code>
+<div class="mdoc">构造跨进程统计共享表的列布局（pid/recv/sent/conns/cpu/rss）。</div>
 </li>
 <li class=""><code class="sig">static void StatsSeed(SharedTable t, int procs)</code>
+<div class="mdoc">Seeds the rows so a worker&#x27;s first publish writes into an existing row
+instead of racing to create one.</div>
 </li>
 <li class=""><code class="sig">static void StatsCreate(int procs)</code>
 <div class="mdoc">Master (or single process): create the stats table, one row per process.
@@ -867,22 +961,29 @@ Must run before the first worker is spawned -- a worker can only be given
 a handle that already exists.</div>
 </li>
 <li class=""><code class="sig">static void StatsDestroy()</code>
+<div class="mdoc">Master only, on the way out. The kernel would reclaim the memory anyway
+once the last worker holding it is gone -- there is no name and no file to
+clean up -- but dropping it here means a master that keeps running after
+its workers (a failed start) is not sitting on a mapping.</div>
 </li>
 <li class=""><code class="sig">static void StatsAttach()</code>
+<div class="mdoc">Worker side: map the table the master created and handed down. Nothing to
+attach to (a stats table that failed to be created, or an executable run
+as a worker by something other than our master) leaves the worker without
+one, which only costs it its row in <code>status</code>.</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; shareNames=new List&lt;string&gt;();</code>
 </li>
 <li class=""><code class="sig">static List&lt;long&gt; shareHandles=new List&lt;long&gt;();</code>
 </li>
 <li class=""><code class="sig">static string ShareEnv(string name)</code>
+<div class="mdoc">共享表句柄经环境变量传递时的变量名（ZAN_SHARE_&lt;name&gt;）。</div>
 </li>
 <li class=""><code class="sig">static void ShareHandle(string name, long osHandle)</code>
 <div class="mdoc">Hands an anonymous shared table down to every worker this
 master spawns, under &lt;paramref name=&quot;name&quot;/&gt;. Must be called before the
 first worker starts: a child only inherits handles that already existed.
-A handle of 0 -- a table that is named rather than anonymous, or one that
-could not be created -- shares nothing, which leaves the worker to open
-the table by name as it otherwise would.</div>
+A handle of 0 -- one that could not be created -- shares nothing.</div>
 </li>
 <li class=""><code class="sig">static long InheritedHandle(string name)</code>
 <div class="mdoc">Worker side: the handle the master shared under this name, or 0
@@ -892,27 +993,39 @@ in a process that was not spawned as a worker of such a master.</div>
 <div class="mdoc">Publishes this process&#x27;s counters into its row.</div>
 </li>
 <li class=""><code class="sig">static async void StatsPublishLoop()</code>
+<div class="mdoc">后台循环：每 2 秒把本进程计数器发布进统计表。</div>
 </li>
 <li class=""><code class="sig">static long StatsRead(int wid, string column)</code>
+<div class="mdoc">读取指定 worker 行的统计列；统计表不可用时返回 0。</div>
 </li>
 <li class=""><code class="sig">static string Usage()</code>
 <div class="mdoc">The command line a CLI-driven server answers.</div>
 </li>
 <li class=""><code class="sig">static void StopAll()</code>
-<div class="mdoc">Stops all workers in this process (single-process mode).</div>
+<div class="mdoc">Stops all workers in this process (single-process mode);
+worker processes are managed by the master instead.</div>
 </li>
 <li class=""><code class="sig">void Stop()</code>
+<div class="mdoc">Requests this worker&#x27;s event loop to exit after the current
+iteration; the running coroutine is not interrupted.</div>
 </li>
 <li class=""><code class="sig">void AddConn()</code>
+<div class="mdoc">连接计数 +1（包装一层以便集中丢弃原子自增的返回值）。</div>
 </li>
 <li class=""><code class="sig">void DropConn()</code>
+<div class="mdoc">连接计数 -1。</div>
 </li>
 <li class=""><code class="sig">int GetConnectionCount()</code>
+<div class="mdoc">当前活连接数（本进程视角；多进程时其他 worker 的
+连接不计入）。</div>
 </li>
 <li class=""><code class="sig">static void SetWorkerEnv(string name, string val)</code>
 <div class="mdoc">Sets inherited worker settings without narrowing UTF-8 paths through the Windows ANSI code page.</div>
 </li>
 <li class=""><code class="sig">static void SpawnChild(int wid)</code>
+<div class="mdoc">Master 派生一个 worker 子进程（wid 从 1 起）：经环境变量（Windows）或
+命令行前缀（POSIX）传递 worker id、控制端口、统计表句柄、日志目录与
+共享表句柄；总派生数受 maxTotalSpawns 硬上限保护。</div>
 </li>
 <li class=""><code class="sig">static List&lt;int&gt; chIdx=new List&lt;int&gt;();</code>
 </li>
@@ -926,59 +1039,113 @@ immediately: any later socket call -- even a successful close --
 overwrites the platform error.</div>
 </li>
 <li class=""><code class="sig">static string BindFailure(Worker w)</code>
+<div class="mdoc">监听绑定失败的完整错误信息；端口被占用时给出可操作的两种处理建议。</div>
 </li>
 <li class=""><code class="sig">static bool IsAddrInUse(int err)</code>
+<div class="mdoc">平台错误号是否表示&quot;地址已被占用&quot;（WSA 10048 / macOS 48 / Linux 98）。</div>
 </li>
 <li class=""><code class="sig">static async int ProbeControlPort()</code>
+<div class="mdoc">向控制端口发 PING 并按应答（含令牌核对）返回 CTL_FREE/CTL_OURS/CTL_FOREIGN/CTL_UNKNOWN。</div>
 </li>
 <li class=""><code class="sig">static async void RunAsMaster(int procs)</code>
+<div class="mdoc">master 主流程：先认领控制端口（fork 炸弹防护），再绑定监听、建统计表、派生并监督 procs 个 worker。</div>
 </li>
 <li class=""><code class="sig">static async void MasterAcceptLoop(int idx, nint sock)</code>
+<div class="mdoc">Windows：listener idx 的 master 接受循环，事件驱动 accept 后把连接轮流移交 worker。</div>
 </li>
 <li class=""><code class="sig">static int PickChannel(int idx)</code>
+<div class="mdoc">Round-robin pick of a live channel serving listener <code>idx</code>; -1 if none.</div>
 </li>
 <li class=""><code class="sig">static void DropChannel(int slot)</code>
+<div class="mdoc">关闭并移除一个失效的 handoff 通道（worker 已死/ACK 失败）。</div>
 </li>
 <li class=""><code class="sig">static async void HandoffClient(int idx, nint c)</code>
+<div class="mdoc">Duplicates accepted socket <code>c</code> into a worker process and closes the
+master&#x27;s copy once the worker ACKs that it rebuilt the socket.</div>
 </li>
 <li class=""><code class="sig">static async void HandleWorkerControl(nint sock)</code>
+<div class="mdoc">处理一条控制端口连接。首行是握手：&quot;HELLO &lt;pid&gt; &lt;wid&gt;&quot;（控制/存活
+连接）、&quot;CHAN &lt;pid&gt; &lt;listenerIdx&gt;&quot;（Windows 交接通道），CLI 的单词
+命令 PING/STOP/RELOAD/STATUS 也在此分流。HELLO 连接随后作为存活
+监视长驻：对端关闭即视为 worker 退出，延迟 1s 后重启（stopping
+置位时不重启，避免停机后复活）。</div>
 </li>
 <li class=""><code class="sig">static void DropCtl(TcpClient conn)</code>
+<div class="mdoc">worker 退出后将其控制连接从存活表中移除。</div>
 </li>
 <li class=""><code class="sig">static async void HandleCliCommand(TcpClient conn, string cmd)</code>
+<div class="mdoc">Master side of <code>app stop|reload|status</code>.
+
+stop:   ask every worker to quit (each finishes what it is serving),
+wait for their control connections to close, then exit.
+reload: ask them to quit one at a time; the supervisor respawns each one,
+so the port is served throughout.
+status: send back the same table the foreground master prints.</div>
 </li>
 <li class=""><code class="sig">static async void StopWorkersAndExit()</code>
+<div class="mdoc">依次向所有 worker 发 QUIT，等待它们的控制连接关闭（上限 30s）后
+清理端口记录与统计表并 exit(0)。</div>
 </li>
 <li class=""><code class="sig">static async void ReloadWorkers()</code>
+<div class="mdoc">Replaces the workers one at a time: each is asked to quit, finishes what
+it is serving and exits, the supervisor respawns it, and only then is the
+next one touched -- so the listener is served throughout.</div>
 </li>
 <li class=""><code class="sig">static string StatusText()</code>
+<div class="mdoc">The status table <code>app status</code> prints, built from the workers&#x27; last
+reports (master) or this process&#x27;s own counters (single process).</div>
 </li>
 <li class=""><code class="sig">static string SharedTablesText()</code>
+<div class="mdoc">What this process is holding in shared memory. Reserved is the whole
+mapping a table sets aside for its capacity; &quot;in memory&quot; is the part of
+it that is actually resident -- the number that belongs in a memory
+report, and usually a small fraction of the first.</div>
 </li>
 <li class=""><code class="sig">static void PrintSharedTables()</code>
+<div class="mdoc">启动屏打印本进程共享内存表占用情况。</div>
 </li>
 <li class=""><code class="sig">static string StatusRow(string label, int wid)</code>
+<div class="mdoc">One process row of the status table, read from the shared stats table.</div>
 </li>
 <li class=""><code class="sig">static async void SingleProcessControlLoop()</code>
+<div class="mdoc">Control listener for a single-process server started through RunCommand:
+the same stop/reload/status commands, answered without a master.</div>
 </li>
 <li class=""><code class="sig">static async void HandleSelfCommand(nint sock)</code>
+<div class="mdoc">单进程服务器的控制命令处理：与 master 相同的 PING/STATUS/STOP/
+RELOAD；RELOAD 回复提示改用 restart（没有可替换的 worker 进程）。</div>
 </li>
 <li class=""><code class="sig">static async void DrainThenExit()</code>
+<div class="mdoc">Stops accepting and leaves once the connections in flight are done (or
+the grace period is over), so a stop/reload does not cut off a response
+that is halfway out.</div>
 </li>
 <li class=""><code class="sig">static async void RunAsWorkerProcess()</code>
+<div class="mdoc">worker 进程入口：向 master 的控制端口发 HELLO 注册。Windows 上为每个
+TCP listener 开一条 CHAN 交接通道并服务 master 递来的 socket；POSIX 上
+等 GO 后自行以 SO_REUSEPORT 绑定各 listener。随后挂载统计上报，并长驻
+监视控制连接：master 关闭即退出，收到 QUIT 则排空在途请求后退出。</div>
 </li>
 <li class=""><code class="sig">static async void ChannelLoop(TcpClient ch, Worker w)</code>
+<div class="mdoc">Worker side of a handoff channel: each inbound 372-byte
+WSAPROTOCOL_INFOA block is one accepted client connection. Rebuild the
+socket, ACK so the master can close its copy, and serve it.</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; SplitWords(string s)</code>
+<div class="mdoc">按空白字符（空格/制表/回车/换行）切分为单词列表。</div>
 </li>
 <li class=""><code class="sig">static async void MasterStatusLoop()</code>
+<div class="mdoc">Foreground master: print one status block per interval, computing each
+worker&#x27;s qps and cpu%% from the deltas between its last two reports.</div>
 </li>
 <li class=""><code class="sig">static async void SelfStatusLoop()</code>
+<div class="mdoc">Single-process server: same status line from in-process counters.</div>
 </li>
 <li class=""><code class="sig">static async bool RecvExact(TcpClient conn, byte[]dest, int need)</code>
 <div class="mdoc">Receives exactly <code>need</code> bytes into <code>dest</code> (binary-safe).</div>
 </li>
 <li class=""><code class="sig">static int IndexOfByte(string s, int b)</code>
+<div class="mdoc">返回字节 b 在字符串中首次出现的下标，未找到返回 -1。</div>
 </li>
 <li class=""><code class="sig">static async void RunAllLoopsOnSockets(List&lt;nint&gt; socks)</code>
 <div class="mdoc">Runs all registered workers concurrently on this process&#x27;s
@@ -998,22 +1165,52 @@ or -1.</div>
 <div class="mdoc">Serves this worker&#x27;s protocol on an already-bound socket.</div>
 </li>
 <li class=""><code class="sig">void Dispatch(nint clientSock)</code>
+<div class="mdoc">分发一个已接受的客户端 socket：先设 NoDelay；onRawConnection 在场时
+整条连接交给它（回调自主计数，不计入连接数闸门）；否则超过
+maxConnections 的连接直接关闭，余者按协议路由到 HTTP/WebSocket/
+SSE/MQTT/TCP 处理协程。</div>
 </li>
 <li class=""><code class="sig">async void RunRaw(nint clientSock)</code>
+<div class="mdoc">Spawnable async wrapper around the raw-connection delegate. Task.Spawn
+needs a concrete async method frame; awaiting the delegate here uses the
+proven indirect async-call path (spawning the delegate call directly does
+not build a task frame).</div>
 </li>
 <li class=""><code class="sig">Connection NewConnection(nint sock)</code>
+<div class="mdoc">分配自增连接 id 并构造 Connection。</div>
 </li>
 <li class=""><code class="sig">async void HandleTcp(nint clientSock)</code>
+<div class="mdoc">TCP 连接生命周期：先触发 onConnect，再循环收取数据交给 onMessage
+（未设回调时默认回显），非空返回串回发；对端断开后触发 onClose 并
+归还连接计数。回调抛出的异常会跳过顺序清理（Close/DropConn），
+计数漂移会让服务器在 maxConnections 处永久拒绝新连接，因此
+清理在 finally 中执行。</div>
 </li>
 <li class=""><code class="sig">async void HandleHttp(nint clientSock)</code>
+<div class="mdoc">HTTP framing, limits and dispatch live in exactly one place --
+HttpServer.ServeConnection -- which this protocol runs as-is, so the
+Worker path and a bare HttpServer cannot drift apart. DropConn 在
+finally 中：ServeConnection 抛出时计数同样必须归还。</div>
 </li>
 <li class=""><code class="sig">async void HandleWebSocket(nint clientSock)</code>
+<div class="mdoc">A WebSocket port is an HTTP port until the client asks to upgrade, so the
+request head is read and parsed first: an Upgrade request becomes a frame
+loop, anything else is served as HTTP (swoole&#x27;s WebSocket\Server does the
+same). The bytes consumed here are handed to whichever path takes over.</div>
 </li>
 <li class=""><code class="sig">async void HandleSse(nint clientSock)</code>
+<div class="mdoc">SSE 订阅：读取 GET 请求头后回 200 text/event-stream（带 no-cache 与
+CORS 通配头），把连接包成 SseConnection 交给 onSseSubscriber（未设
+回调时立即关闭）；此后连接由应用持有。请求头读取与 HTTP 路径
+一样武装 requestTimeout（慢速滴字客户端不能永久钉住连接），
+清理在 finally 中执行——onSseSubscriber 抛出时 DropConn 不能丢。</div>
 </li>
 <li class=""><code class="sig">async void HandleMqtt(nint clientSock)</code>
+<div class="mdoc">把连接交给内置的 MqttBroker.Global() 处理；mqtt 协议没有应用回调。</div>
 </li>
 <li class=""><code class="sig">async void RunUdp(nint sock)</code>
+<div class="mdoc">UDP 事件循环：每收到一个数据报调用 onPacket（未设回调时默认回显），
+非空返回串回发给发送方；Stop 置位退出循环后关闭 socket。</div>
 </li>
 </ul>
 </div></div>

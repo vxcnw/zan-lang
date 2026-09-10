@@ -8,16 +8,22 @@
 剪贴板格式常量（winuser.h）。
 
 - static int Text()
+  - 剪贴板格式：CF_TEXT（ANSI 文本）。
 
 - static int Bitmap()
+  - 剪贴板格式：CF_BITMAP（位图句柄）。
 
 - static int UnicodeText()
+  - 剪贴板格式：CF_UNICODETEXT（UTF-16 文本）。
 
 - static int Hdrop()
+  - 剪贴板格式：CF_HDROP（文件列表）。
 
 - static int Html()
+  - 已注册的 "HTML Format" 格式 id。
 
 - static int Rtf()
+  - 已注册的 "Rich Text Format" 格式 id。
 
 
 ## Clipboard (class)
@@ -73,20 +79,28 @@ PlatformNotSupportedException，而不是假装成功。
 - [DllImport("shell32", EntryPoint="DragFinish")]static extern void WinDragFinish(nint hdrop);
 
 - static int ToolNone()
+  - 无可用剪贴板工具。
 
 - static int ToolWayland()
+  - Wayland：wl-copy / wl-paste。
 
 - static int ToolXclip()
+  - X11：xclip（支持 -t 目标）。
 
 - static int ToolXsel()
+  - X11：xsel（只有纯文本）。
 
 - static int ToolPasteboard()
+  - macOS：pbcopy / pbpaste。
 
 - static string MimeText()
+  - POSIX 侧文本 MIME 类型。
 
 - static string MimeUriList()
+  - POSIX 侧文件列表 MIME 类型（freedesktop 拖放/粘贴格式）。
 
 - static bool HaveCommand(string name)
+  - PATH 里是否存在名为 `name` 的命令。
 
 - static int PosixTool()
   - 当前平台可用的剪贴板工具；一个都没有时返回 ToolNone。
@@ -94,6 +108,7 @@ PlatformNotSupportedException，而不是假装成功。
     合成器的剪贴板。
 
 - static void NoTool()
+  - 无可用剪贴板工具时统一抛出的错误（引导用户安装）。
 
 - static string TempFile(string tag)
   - 临时文件路径：剪贴板内容走文件而不进命令行。

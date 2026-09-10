@@ -22,12 +22,16 @@
 - AsyncGate()
 
 - bool IsOpen()
+  - 句柄是否仍可用（未 Close）；与"是否已 Signal"无关（Gate.IsValid 的旧名）。
 
 - async bool Wait()
+  - 挂起直到 Signal（暂存信号可立即消费）；门已 Close 时返回 false。
 
 - void Signal()
+  - 唤醒一个等待者；无等待者时暂存一次信号。
 
 - void Close()
+  - 释放运行时句柄；此后的 Wait 立即返回 false。
 
 
 ## AsyncRwLock (class)
@@ -75,6 +79,7 @@ await lock.EnterWrite(); ...  lock.ExitWrite();
   - 当前是否有写线程持有锁（诊断用）。
 
 - void Close()
+  - 释放读/写两个门的底层句柄（锁废弃时调用）。
 
 
 ## AtomicInt (class)
@@ -98,24 +103,35 @@ await lock.EnterWrite(); ...  lock.ExitWrite();
 - [DllImport("crt", EntryPoint="zan_atomic_int_add")]static extern long NativeAdd(nint handle, long delta);
 
 - AtomicInt(long initialValue)
+  - 创建初始值为 initialValue 的原子整数。
 
 - ~AtomicInt()
+  - 析构时销毁底层原子变量。
 
 - bool IsValid()
+  - 底层句柄是否创建成功（0 = 无效）。
 
 - long Load()
+  - 顺序一致读取当前值。
 
 - void Store(long newValue)
+  - 顺序一致写入新值。
 
 - long Exchange(long newValue)
+  - 原子换入新值，返回旧值。
 
 - long CompareExchange(long expected, long desired)
+  - 当前值 == expected 时换入 desired；返回旧值（== expected
+    表示成功）。
 
 - long Add(long delta)
+  - 原子加 delta，返回加后的新值。
 
 - long Increment()
+  - 原子 +1，返回新值。
 
 - long Decrement()
+  - 原子 -1，返回新值。
 
 
 ## BlockingQueue (class)
@@ -181,7 +197,7 @@ while (row != null) { ...; row = q.Dequeue(); }
 
 - nint slots;
 
-- string lockHandle;
+- nint lockHandle;
 
 - string sem;
 
@@ -242,11 +258,13 @@ while (row != null) { ...; row = q.Dequeue(); }
     队列正常结束或被取消时为 ""。
 
 - bool IsCompleted()
+  - 队列已结束（Complete/Cancel）且条目已取空。
 
 - int Count()
   - 等待被取出的条目数。
 
 - void Dispose()
+  - 销毁队列底层的信号量与锁，释放系统资源。
 
 - T TakeLocked()
   - 弹出一个条目；调用方持有锁。当已消费前缀
@@ -276,9 +294,9 @@ while (row != null) { ...; row = q.Dequeue(); }
 
 - nint lockHandle;
 
-- string lockHandle;
-
 - Channel(int capacity)
+  - 创建指定容量的 channel（容量语义见类注释：0 无界，
+    正值有界，1 即 CreateUnbuffered）。
 
 - static Channel CreateUnbuffered()
   - 创建无缓冲 channel。
@@ -330,12 +348,31 @@ while (row != null) { ...; row = q.Dequeue(); }
     它从来就不表示"已打开/已 Signal"。
 
 - async bool Wait()
+  - 挂起直到有人 Signal（暂存信号可立即消费）；门已 Close 时返回 false。
+
+- async bool Wait(int timeoutMs)
+  - 带超时的等待：至多 <paramref name="timeoutMs"/> 毫秒后
+    必然恢复。返回 true 只表示「已恢复」，不区分是 Signal 还是超时
+    ——调用方一律复查自己的谓词（计数语义本就要求复查循环）。
+    
+    超时由看门狗协程实现：到点向本门发一次信号。落在 FIFO 头部的
+    等待者被唤醒——可能是调用者自己，也可能是同一门上的别人；对
+    「任何等待都有出口」这个目的而言足够：没有谁会永久停在门上，
+    丢失的 Signal 最迟 timeoutMs 后也有进展。看门狗不取消：提前
+    醒来时它稍后的那次 Signal 存为盈余，由下一个等待者立即消费，
+    无副作用。timeoutMs <= 0 时退化为无限等待。
+
+- static async void Watchdog(long handle, int timeoutMs)
+  - 看门狗协程体：延迟 timeoutMs 后向句柄发一次信号。
 
 - void Signal()
+  - 唤醒一个等待者；无等待者时暂存一次信号（计数语义）。
 
 - void Close()
+  - 释放运行时句柄；此后的 Wait 立即返回 false。
 
 - long Handle()
+  - 运行时门句柄（0 = 已 Close）。
 
 - [DllImport("crt", EntryPoint="zan_gate_new")]static extern long zan_gate_new();
 
@@ -356,33 +393,42 @@ while (row != null) { ...; row = q.Dequeue(); }
 
 - [DllImport("kernel32", EntryPoint="CloseHandle")]static extern int WinCloseHandle(nint handle);
 
-- [DllImport("crt", EntryPoint="calloc")]static extern string PthreadCalloc(long count, long size);
+- [DllImport("crt", EntryPoint="calloc")]static extern nint PthreadCalloc(long count, long size);
 
-- [DllImport("crt", EntryPoint="free")]static extern void PthreadFree(string ptr);
+- [DllImport("crt", EntryPoint="free")]static extern void PthreadFree(nint ptr);
 
-- [DllImport("crt", EntryPoint="pthread_mutex_init")]static extern int PthreadMutexInit(string mutex, string attr);
+- [DllImport("crt", EntryPoint="pthread_mutex_init")]static extern int PthreadMutexInit(nint mutex, nint attr);
 
-- [DllImport("crt", EntryPoint="pthread_mutex_lock")]static extern int PthreadMutexLock(string mutex);
+- [DllImport("crt", EntryPoint="pthread_mutex_lock")]static extern int PthreadMutexLock(nint mutex);
 
-- [DllImport("crt", EntryPoint="pthread_mutex_unlock")]static extern int PthreadMutexUnlock(string mutex);
+- [DllImport("crt", EntryPoint="pthread_mutex_unlock")]static extern int PthreadMutexUnlock(nint mutex);
 
-- [DllImport("crt", EntryPoint="pthread_mutex_destroy")]static extern int PthreadMutexDestroy(string mutex);
+- [DllImport("crt", EntryPoint="pthread_mutex_destroy")]static extern int PthreadMutexDestroy(nint mutex);
 
 - static nint Create()
+  - 创建 Win32 互斥锁句柄（匿名，非初始占有）。
 
 - static void Lock(nint handle)
+  - 无限阻塞加锁（配对 Unlock）。
 
 - static void Unlock(nint handle)
+  - 解锁。
 
 - static void Destroy(nint handle)
+  - 销毁并关闭句柄。
 
-- static string Create()
+- static nint Create()
+  - 创建 POSIX 互斥锁；句柄是内联存放 pthread_mutex_t 的
+    64 字节块的地址。
 
-- static void Lock(string handle)
+- static void Lock(nint handle)
+  - 无限阻塞加锁（配对 Unlock）。
 
-- static void Unlock(string handle)
+- static void Unlock(nint handle)
+  - 解锁。
 
-- static void Destroy(string handle)
+- static void Destroy(nint handle)
+  - 销毁并释放内存。
 
 
 ## Semaphore (class)
@@ -426,8 +472,10 @@ while (row != null) { ...; row = q.Dequeue(); }
 - [DllImport("crt", EntryPoint="clock_gettime")]static extern int SemClockGettime(int clkId, nint tp);
 
 - static nint Create(int initialCount, int maxCount)
+  - 创建信号量：initialCount 初始许可，maxCount 上限。
 
 - static void Wait(nint handle)
+  - 无限阻塞获取一个许可（配对 Release）。
 
 - static bool WaitFor(nint handle, int timeoutMs)
   - 最多等待 `timeoutMs` 毫秒获取一个许可。
@@ -435,28 +483,45 @@ while (row != null) { ...; row = q.Dequeue(); }
     负超时无限等待，0 则轮询。
 
 - static void Release(nint handle)
+  - 归还一个许可（超过 maxCount 时失败）。
 
 - static void Destroy(nint handle)
+  - 销毁并关闭句柄。
 
 - static string Create(int initialCount, int maxCount)
+  - 创建 GCD 信号量：initialCount 初始许可（maxCount 由 dispatch
+    信号量语义忽略，仅为 API 对齐）。
 
 - static void Wait(string handle)
+  - 无限阻塞获取一个许可（配对 Release）。
 
 - static bool WaitFor(string handle, int timeoutMs)
+  - 限时获取：获取到返回 true；超时返回 false（不消耗许可）。
+    负超时无限等待。
 
 - static void Release(string handle)
+  - 归还一个许可。
 
 - static void Destroy(string handle)
+  - 释放 dispatch 信号量。
 
 - static string Create(int initialCount, int maxCount)
+  - 创建 POSIX 信号量：initialCount 初始许可（maxCount 由
+    sem_t 语义忽略，仅为 API 对齐）。
 
 - static void Wait(string handle)
+  - 无限阻塞获取一个许可（配对 Release）。
 
 - static bool WaitFor(string handle, int timeoutMs)
+  - 限时获取：获取到返回 true；超时返回 false（不消耗许可）。
+    负超时无限等待。sem_timedwait 接受 ABSOLUTE CLOCK_REALTIME
+    绝对截止时间，因此需读时钟再加上超时。
 
 - static void Release(string handle)
+  - 归还一个许可。
 
 - static void Destroy(string handle)
+  - 销毁并释放内存。
 
 
 ## SemaphoreSlim (class)
@@ -501,7 +566,7 @@ gate.SetLimit(8);                               // 提高上限，唤醒等待�
 
 - nint sem;
 
-- string lockHandle;
+- nint lockHandle;
 
 - string sem;
 
@@ -649,28 +714,41 @@ gate.SetLimit(8);                               // 提高上限，唤醒等待�
 - [DllImport("crt", EntryPoint="zan_shared_table_delete_at")]static extern int NativeDeleteAt(nint handle, long keyHash);
 
 - SharedTable(string name, int capacity)
+  - 创建一张未打开的表对象；随后用 KeySize/Column* 声明结构，
+    再 Create/Open。
 
 - void Label(string text)
   - 给这张表一个便于识别的名字，用于状态输出。匿名表没有
     名字，不设置就显示为 "(anonymous)"。
 
 - static void Track(SharedTable table)
+  - 把已打开的表登记进本进程的打开表列表（Create/Open/Attach/Label
+    都会走到；重复登记只更新标签）。
 
 - static void Untrack(nint handle)
+  - 把句柄从本进程的打开表列表移除。
 
 - ~SharedTable()
+  - 析构兜底：未显式 Close 时在此关闭映射；正常路径仍应显式 Close。
 
 - void KeySize(int size)
+  - 键的最大字节数（Create 前设置；默认 64）。
 
 - void ColumnInt(string name)
+  - 声明一个整型列（Create 前调用）。
 
 - void ColumnFloat(string name)
+  - 声明一个浮点列（Create 前调用）。
 
 - void ColumnString(string name, int size)
+  - 声明一个定长字符串列，`size` 为最大字节数（Create 前调用）。
 
 - bool Create()
+  - 按已声明的名字/容量/键宽/列结构创建共享表。
 
 - static SharedTable Open(string name)
+  - 打开本机上一张按名字创建的共享表（先 Create 成功的另一
+    进程/本进程再打开）。失败时返回未打开的表（IsOpen()=false）。
 
 - bool CreateAnonymous()
   - 建一张匿名表：不占用任何全局命名空间，机器上的其它程序
@@ -691,64 +769,96 @@ gate.SetLimit(8);                               // 提高上限，唤醒等待�
     未打开的表。
 
 - bool IsOpen()
+  - 表是否已成功创建/打开/附加。
 
 - void Close()
+  - 关闭本进程的映射；底层具名表仍然存在，其他进程不受影响。
 
 - bool Destroy()
+  - 关闭并销毁底层具名表（匿名表随引用消失，无需 Destroy）。
 
 - bool SetInt(string key, string column, long newValue)
+  - 写整型列；键或列不存在时返回 false。
 
 - long GetInt(string key, string column)
+  - 读整型列；键不存在返回 0。
 
 - bool SetFloat(string key, string column, double newValue)
+  - 写浮点列。
 
 - double GetFloat(string key, string column)
+  - 读浮点列。
 
 - bool SetString(string key, string column, string newValue)
+  - 写字符串列。
 
 - string GetString(string key, string column)
+  - 读字符串列；键不存在返回 ""。
 
 - long Increment(string key, string column, long delta)
+  - 原子加 delta（跨线程/进程），返回加后的新值。
 
 - long Decrement(string key, string column, long delta)
+  - 原子减 delta（Increment 的取负快捷方式）。
 
 - bool Expire(string key, long ttlMs)
+  - 给键设置 TTL：ttlMs 毫秒后过期。
 
 - bool ExpireAt(string key, long unixMs)
+  - 给键设置绝对过期时间（Unix 毫秒）。
 
 - bool Persist(string key)
+  - 移除键的过期时间（永不过期）。
 
 - long ExpiresAt(string key)
+  - 键的绝对过期时间（Unix 毫秒；无 TTL = 0）。
 
 - long PurgeExpired(long nowMs)
+  - 清理此刻已过期的键，返回清理的行数。
 
 - bool RateAllow(string key, long nowMs, long windowMs, long limit)
+  - 固定窗口限流：`windowMs` 窗口内第 limit+1 次起拒绝。
+    允许返回 true（并计数）。跨进程原子。
 
 - bool TryAcquireLease(string key, long owner, long nowMs, long leaseMs)
+  - 尝试获取键上的租约锁：`leaseMs` 内不续租自动过期。
+    owner 用于归属校验（谁加的锁谁解）。
 
 - bool ReleaseLease(string key, long owner)
+  - 释放 owner 持有的租约锁。
 
 - bool Delete(string key)
+  - 删除键。
 
 - bool Exists(string key)
+  - 键是否存在。
 
 - int Count()
+  - 当前行数。
 
 - void Clear()
+  - 清空所有行（保留结构与容量）。
 
 - static int STAT_RESERVED=0;
+  - Stat 项：整块映射的预留大小（字节）。
 
 - static int STAT_RESIDENT=1;
+  - Stat 项：本进程驻留物理内存的部分（字节），不支持时为 -1。
 
 - static int STAT_CAPACITY=2;
+  - Stat 项：表的行容量（向上取整到 2 的幂）。
 
 - static int STAT_COUNT=3;
+  - Stat 项：当前行数。
 
 - static int STAT_ROW_STRIDE=4;
+  - Stat 项：每行字节数（键 + 各列 + 行头）。
 
 - static int STAT_KEY_SIZE=5;
+  - Stat 项：键的最大字节数。
 
 - static int STAT_COLUMNS=6;
+  - Stat 项：列数。
 
 - long ReservedBytes()
   - 整块映射的大小（预留的虚拟地址空间，不是内存占用）。
@@ -766,18 +876,22 @@ gate.SetLimit(8);                               // 提高上限，唤醒等待�
   - 键的最大字节数。
 
 - int ColumnCount()
+  - 列数。
 
 - static int OpenCount()
   - 本进程当前映射着的共享表数量。
 
 - static string OpenLabel(int index)
+  - 第 `index` 张表的标签（Label() 设置的名字）。
 
 - static long OpenStat(int index, int what)
   - 第 `index` 张表的某项统计，取值见 STAT_* 常量。
 
 - static string StatPad(string s, int width)
+  - 左对齐补空格到 width 宽，再追加一个空格作列间隔。
 
 - static string StatBytes(long bytes)
+  - 字节数的人类可读形式（B/KB/MB，整除截断）；负数返回 "n/a"。
 
 - static string StatusText()
   - 本进程所有共享表的一张文本表格：行数、每行大小、预留的
@@ -787,10 +901,13 @@ gate.SetLimit(8);                               // 提高上限，唤醒等待�
   - 用与表相同的方式哈希键（FNV-1a，64 位）。
 
 - bool SetIntAt(long keyHash, string column, long newValue)
+  - 按哈希写整型列。
 
 - long GetIntAt(long keyHash, string column)
+  - 按哈希读整型列。
 
 - long IncrementAt(long keyHash, string column, long delta)
+  - 按哈希原子加 delta。
 
 - long MinAt(long keyHash, string column, long newValue)
   - 若 `newValue` 小于当前值则存入（0 视为未设置），
@@ -801,8 +918,10 @@ gate.SetLimit(8);                               // 提高上限，唤醒等待�
     一步原子完成。用于记录“目前最慢响应”。
 
 - bool SetStringAt(long keyHash, string column, string newValue)
+  - 按哈希写字符串列。
 
 - string GetStringAt(long keyHash, string column)
+  - 按哈希读字符串列。
 
 - bool MatchAt(long keyHash, string column, string text)
   - 判断某字符串列是否等于 `text`，不把
@@ -810,35 +929,10 @@ gate.SetLimit(8);                               // 提高上限，唤醒等待�
     为每次调用分配一个字符串。
 
 - bool ExistsAt(long keyHash)
+  - 哈希寻址的键是否存在。
 
 - bool DeleteAt(long keyHash)
-
-
-## Stopwatch (class)
-
-跨平台高分辨率秒表。
-
-- [DllImport("kernel32", EntryPoint="GetTickCount64")]static extern long WinGetTickCount64();
-
-- [DllImport("crt", EntryPoint="clock_gettime")]static extern int ClockGettime(int clk_id, string tp);
-
-- [DllImport("crt", EntryPoint="calloc")]static extern string StopwatchCalloc(long count, long size);
-
-- [DllImport("crt", EntryPoint="free")]static extern void StopwatchFree(string ptr);
-
-- static int MonotonicClockId()
-
-- static int MonotonicClockId()
-
-- [DllImport("crt", EntryPoint="zan_monotonic_us")]static extern long NativeMonotonicUs();
-
-- static long GetMicroseconds()
-  - 单调微秒。与 GetMilliseconds 不同，它能分辨
-    单个请求（Windows 上 GetTickCount64 步长约 15ms），而且
-    不分配内存，因此可用于请求处理路径。
-
-- static long GetMilliseconds()
-  - 返回当前毫秒级的 tick 计数。
+  - 删除哈希寻址的键。
 
 
 ## Thread (class)
@@ -898,6 +992,7 @@ t.Stop();
 - int tickCount;
 
 - long nextDue;
+  - 下次触发时刻（单调毫秒）。
 
 - Timer(int intervalMs, ThreadStart callback)
   - 创建一个每隔 `intervalMs` 毫秒触发一次 `callback` 的定时器。
@@ -921,8 +1016,12 @@ t.Stop();
   - 定时器运行期间（Start 与 Stop 之间）为 true。
 
 - static void Pump()
+  - 共享泵线程体：遍历注册表触发到期定时器；无定时器时退出。
 
 - static long Now()
+  - 单调毫秒。原来走 `ServerMetrics.MonoMillis()`，为了一个时钟读数把整个
+    `System.Diagnostics`（进程/日志/指标 → System.IO）拉进了每个用线程的
+    程序；`Stopwatch` 就在根命名空间，且分辨率更高。
 
 - static List<Timer> timers=new List<Timer>();
 
@@ -930,9 +1029,10 @@ t.Stop();
 
 - static nint lockHandle;
 
-- static string lockHandle;
+- static nint lockHandle;
 
 - static Timer()
+  - 静态初始化：创建注册表互斥锁。
 
 
 ## void (delegate)

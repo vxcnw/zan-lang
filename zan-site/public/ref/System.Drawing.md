@@ -31,7 +31,8 @@
 
 ## Color (class)
 
-表示一个包含 RGBA 分量的颜色。
+表示一个包含 RGBA 分量的颜色。分量取 0..255；
+整型颜色约定见 `Chart.Rgb`（0xFFRRGGBB）。
 
 - int r;
 
@@ -42,30 +43,43 @@
 - int a;
 
 - static Color FromRGB(int r, int g, int b)
+  - 从 RGB 分量构造不透明颜色（alpha 固定 255）。分量取 0..255。
 
 - static Color FromARGB(int a, int r, int g, int b)
+  - 从 ARGB 分量构造颜色（a=0 全透明，a=255 不透明）。
 
 - int ToColorRef()
+  - 打包为 Windows COLORREF（0x00BBGGRR），供原生 API 直接使用。
 
 - static Color Red()
+  - 不透明红。
 
 - static Color Green()
+  - 不透明绿。
 
 - static Color Blue()
+  - 不透明蓝。
 
 - static Color White()
+  - 不透明白。
 
 - static Color Black()
+  - 不透明黑。
 
 - static Color Gray()
+  - 不透明灰（128,128,128）。
 
 - static Color Yellow()
+  - 不透明黄。
 
 - static Color Cyan()
+  - 不透明青。
 
 - static Color Magenta()
+  - 不透明品红。
 
 - static Color Orange()
+  - 不透明橙（255,165,0）。
 
 
 ## Font (class)
@@ -171,42 +185,56 @@
 
 ## Point (class)
 
-表示一个二维点。
+表示一个二维点。x 向右、y 向下（屏幕坐标）。
 
 - public int x;
+  - X 坐标（向右）。
 
 - public int y;
+  - Y 坐标（向下）。
 
 - public Point(int x, int y)
+  - 构造点。
 
 
 ## Rectangle (class)
 
-表示一个矩形。
+表示一个矩形：左上角 (x,y) 与宽高；Right/Bottom 为开区间边界。
 
 - public int x;
+  - 左上角 X。
 
 - public int y;
+  - 左上角 Y。
 
 - public int width;
+  - 宽度。
 
 - public int height;
+  - 高度。
 
 - public Rectangle(int x, int y, int w, int h)
+  - 构造矩形（左上角 + 宽高）。
 
 - int Right()
+  - 右边界（x + width，开区间）。
 
 - int Bottom()
+  - 下边界（y + height，开区间）。
 
 - bool Contains(int px, int py)
+  - 点 (px,py) 是否落在矩形内（左闭右开：含左/上边，不含右/下边）。
 
 
 ## Size (class)
 
-表示一个二维尺寸。
+表示一个二维尺寸（宽 × 高，正值为常规方向）。
 
 - public int width;
+  - 宽度。
 
 - public int height;
+  - 高度。
 
 - public Size(int w, int h)
+  - 构造尺寸。

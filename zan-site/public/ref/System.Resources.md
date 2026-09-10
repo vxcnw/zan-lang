@@ -20,6 +20,7 @@
 - byte[]tag;
 
 - PackIndexEntry(byte[]hash, int off, int size, byte[]iv, byte[]tag)
+  - 构造 index 记录。
 
 
 ## ResourceEntry (class)
@@ -34,6 +35,7 @@
 - int len;
 
 - ResourceEntry(string name, string data, int len)
+  - 构造条目。
 
 
 ## ResourcePack (class)
@@ -54,24 +56,33 @@ Read() 会重新派生每条目密钥，并通过 GCM tag 拒绝
 - List<PackIndexEntry> index;
 
 - static void writeMagic(byte[]hdr)
+  - 写入 4 字节不透明 magic 与混淆后的版本字节（`1 ^ 165`）。
 
 - static bool checkMagic(string hdr)
+  - 校验头部 magic 与版本字节。
 
 - static void storeBE32(byte[]buf, int off, int v)
+  - 按大端序写入 32 位整数。
 
 - static int loadBE32(string buf, int off)
+  - 按大端序读取 32 位整数。
 
 - static void storeBE64(byte[]buf, int off, int v)
+  - 按大端序写入 64 位整数。
 
 - static int loadBE64(string buf, int off)
+  - 按大端序读取 8 字节为整数。
 
 - static byte[]nameHash(string name)
   - 条目名的截断 SHA-256（16 字节）。pack 中只存
     这个哈希，因此无法从文件列出条目名。
 
 - static byte[]indexKey(string masterKey, byte[]packId)
+  - index 加密密钥：HKDF(salt=packId, ikm=masterKey, info="ZRIX")，32 字节。
 
 - static byte[]entryKey(string masterKey, byte[]packId, byte[]nh)
+  - 条目密钥：HKDF(salt=packId, ikm=masterKey, info="ZREN"+名称哈希)，
+    32 字节；每条目独立，单个条目密钥泄露不波及其他条目。
 
 - static byte[]MixKey(string a, string b, int len)
   - 由两份 XOR 分片重组密钥，使真实密钥永不
@@ -84,12 +95,16 @@ Read() 会重新派生每条目密钥，并通过 GCM tag 拒绝
     <paramref name="err"/>[0]：0 正常，1 IO/magic 错误，2 认证失败，3 签名错误。
 
 - int Count()
+  - 返回 pack 内条目数。
 
 - int find(string name)
+  - 按名称哈希查找条目下标（逐字节累积比较），未找到返回 -1。
 
 - bool Contains(string name)
+  - 名称是否存在于 pack。
 
 - int SizeOf(string name)
+  - 返回条目负载的字节数；名称未知返回 -1。
 
 - byte[]Read(string name, List<int> outLen)
   - 按需解密一个条目（只从磁盘读取该条目）。
@@ -129,6 +144,7 @@ index（条目表）由主密钥与 packId 经 HKDF 派生的密钥做 AES-256-G
 - List<ResourceEntry> entries;
 
 - ResourcePackWriter()
+  - 构造写入器（空 pack，条目经 Add 入队）。
 
 - void Add(string name, string data, int len)
   - 入队一个条目。<paramref name="data"/> 是原始字节，

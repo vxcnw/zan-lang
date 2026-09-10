@@ -725,6 +725,10 @@ Chat/ChatApi.cs 的 Zan 强类型接口。
 
 - WechatWorkClient Timeout(int ms)
 
+- WechatWorkClient SetCallPolicy(ExternalCallPolicy policy)
+
+- ExternalCallPolicy CallPolicy()
+
 - WechatWorkClient SetAccessToken(string token, int expiresIn)
 
 - WechatWorkClient SetProviderAccessToken(string token)

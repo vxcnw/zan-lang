@@ -116,22 +116,31 @@ Windows 使用 Winsock2，Linux/macOS 使用 BSD 套接字（libc）。
 - [DllImport("ws2_32", EntryPoint="WSAGetLastError")]static extern int WinLastError();
 
 - static int SysClose(nint s)
+  - 关闭套接字（closesocket 直转发，收完整 SOCKET 句柄）。
 
 - static int SysShutdown(nint s, int how)
+  - 关闭收发（shutdown 直转发，收完整 SOCKET 句柄）。
 
 - static int SysBind(nint s, string addr, int addrlen)
+  - 绑定地址（bind 直转发，收完整 SOCKET 句柄）。
 
 - static int SysListen(nint s, int backlog)
+  - 开始监听（listen 直转发，收完整 SOCKET 句柄）。
 
 - static nint SysAccept(nint s, string addr, string addrlen)
+  - 接受连接（accept 直转发，收完整 SOCKET 句柄）。
 
 - static int SysConnect(nint s, string addr, int addrlen)
+  - 发起连接（connect 直转发，收完整 SOCKET 句柄）。
 
 - static int SysSetSockOpt(nint s, int level, int optname, string optval, int optlen)
+  - 设置套接字选项（setsockopt 直转发，收完整 SOCKET 句柄）。
 
 - static int SysSendTo(nint s, string buf, int len, int flags, string to, int tolen)
+  - UDP 发送数据报（sendto 直转发，收完整 SOCKET 句柄）。
 
 - static int SysRecvFrom(nint s, string buf, int len, int flags, string from, string fromlen)
+  - UDP 接收数据报（recvfrom 直转发，收完整 SOCKET 句柄）。
 
 - [DllImport("crt")]static extern int socket(int af, int type, int protocol);
 
@@ -167,9 +176,38 @@ Windows 使用 Winsock2，Linux/macOS 使用 BSD 套接字（libc）。
 
 - [DllImport("crt")]static extern int fcntl(int fd, int cmd, int arg);
 
+- [DllImport("crt", EntryPoint="__errno")]static extern nint NativeErrnoLocation();
+
 - [DllImport("crt", EntryPoint="__errno_location")]static extern nint NativeErrnoLocation();
 
 - [DllImport("crt", EntryPoint="__error")]static extern nint NativeErrnoLocation();
+
+- static int SysClose(nint s)
+  - 关闭套接字（句柄在此截断为 int fd 传给 close）。
+
+- static int SysShutdown(nint s, int how)
+  - 关闭收发（句柄截断为 int fd 传给 shutdown）。
+
+- static int SysBind(nint s, string addr, int addrlen)
+  - 绑定地址（句柄截断为 int fd 传给 bind）。
+
+- static int SysListen(nint s, int backlog)
+  - 开始监听（句柄截断为 int fd 传给 listen）。
+
+- static nint SysAccept(nint s, string addr, string addrlen)
+  - 接受连接（句柄截断为 int fd 传给 accept）。
+
+- static int SysConnect(nint s, string addr, int addrlen)
+  - 发起连接（句柄截断为 int fd 传给 connect）。
+
+- static int SysSetSockOpt(nint s, int level, int optname, string optval, int optlen)
+  - 设置套接字选项（句柄截断为 int fd 传给 setsockopt）。
+
+- static int SysSendTo(nint s, string buf, int len, int flags, string to, int tolen)
+  - UDP 发送数据报（句柄截断为 int fd 传给 sendto）。
+
+- static int SysRecvFrom(nint s, string buf, int len, int flags, string from, string fromlen)
+  - UDP 接收数据报（句柄截断为 int fd 传给 recvfrom）。
 
 - static int SysClose(nint s)
 
@@ -189,11 +227,45 @@ Windows 使用 Winsock2，Linux/macOS 使用 BSD 套接字（libc）。
 
 - static int SysRecvFrom(nint s, string buf, int len, int flags, string from, string fromlen)
 
+- static int NativeResolveIpv4(string hostname)
+
+- static int NativeResolveSockAddr(string name, int port, byte[]buf, int cap)
+
+- static int NativeResolveAll(string name, int port, byte[]buf, int cap)
+
+- static async long NativeResolveAllAsync2(nint name, int port, nint buf, int cap)
+
+- static int NativeSockAddrFamily(nint sa, int len)
+
+- static int NativeSockAddrIsSafe(nint sa, int len, int allowLoopback)
+
+- static async long NativeConnectSockAddr2(nint sock, nint sa, int len, int timeoutMs)
+
 - [DllImport("crt", EntryPoint="zan_io_resolve_ipv4")]static extern int NativeResolveIpv4(string hostname);
 
 - [DllImport("crt", EntryPoint="zan_io_resolve_sa")]static extern int NativeResolveSockAddr(string name, int port, byte[]buf, int cap);
 
+- [DllImport("crt", EntryPoint="zan_io_resolve_all")]static extern int NativeResolveAll(string name, int port, byte[]buf, int cap);
+
+- [DllImport("crt", EntryPoint="zan_io_resolve_all_async")]static extern long NativeResolveAllAsync2(nint name, int port, nint buf, int cap);
+
+- [DllImport("crt", EntryPoint="zan_io_sockaddr_family")]static extern int NativeSockAddrFamily(nint sa, int len);
+
+- [DllImport("crt", EntryPoint="zan_io_sockaddr_is_safe")]static extern int NativeSockAddrIsSafe(nint sa, int len, int allowLoopback);
+
+- [DllImport("crt", EntryPoint="zan_io_connect_sa")]static extern long NativeConnectSockAddr2(nint sock, nint sa, int len, int timeoutMs);
+
 - [DllImport("crt", EntryPoint="zan_io_sockaddr_ip_str")]static extern string NativeSockAddrIp(byte[]sa);
+
+- [DllImport("crt", EntryPoint="zan_io_sockaddr_ip_str_into")]static extern int NativeSockAddrIpInto(byte[]sa, nint buf, int cap);
+
+- [DllImport("crt", EntryPoint="zan_io_socket_peer_ip_into")]static extern int NativePeerIpInto(nint sock, nint buf, int cap);
+
+- static string IpTextFromNative(nint buf, int n)
+  - 从临时原生缓冲取出拷贝好的地址文本并释放缓冲。
+
+- static string SockAddrIpText(byte[]sa)
+  - sockaddr → 地址文本（拷贝语义，可安全跨 await 持有）。
 
 - [DllImport("crt")]static extern long strlen(string str);
 
@@ -204,6 +276,10 @@ Windows 使用 Winsock2，Linux/macOS 使用 BSD 套接字（libc）。
 
 - static void Cleanup()
   - 清理套接字子系统。
+
+- static ushort htons(ushort hostshort)
+
+- static int inet_addr(string cp)
 
 - static nint CreateTcp()
   - 创建 TCP 套接字。
@@ -272,6 +348,29 @@ Windows 使用 Winsock2，Linux/macOS 使用 BSD 套接字（libc）。
     事件循环），字面量 IP 走同步快路径。供 ConnectAsync /
     SendToAsync 使用。
 
+- static int ResolveAll(string host, int port, byte[]records)
+  - 同步解析全部地址候选到调用方提供的固定缓冲区。
+    每条记录占 32 字节，前 16/28 字节为 sockaddr，其余清零；返回
+    候选数，失败返回 0。
+
+- static async int ResolveAllAsync(string host, int port, byte[]records)
+  - 异步解析全部地址候选到调用方提供的固定缓冲区。返回候选
+    数，失败返回 0；解析失败绝不伪造 0.0.0.0。
+
+- static int SockAddrFamily(byte[]record, int len)
+  - 返回 sockaddr 记录的地址族常量（平台原生值）。
+
+- static bool SockAddrIsSafe(byte[]record, int len, bool allowLoopback)
+  - 该 sockaddr 是否为可安全连接的常规地址（非未指定/组播）；
+    allowLoopback 决定环回地址是否放行。
+
+- static bool IsV6Family(int family)
+  - 该地址族常量是否为 IPv6（AF_INET6 的平台取值不同）。
+
+- static async int ConnectSockAddrAsync(nint sock, byte[]record, int len, int timeoutMs)
+  - 对一个已经解析出的 sockaddr 做精确异步连接。仅传递
+    二进制地址给 runtime，不会再次按主机名解析。
+
 - static byte[]BuildSockAddrResolved(int ipAddr, int port)
   - 从已解析的 IPv4 整数地址构建 sockaddr_in（字节序与
     <c>inet_addr</c> 一致）。供异步连接复用——解析已在
@@ -310,6 +409,12 @@ Windows 使用 Winsock2，Linux/macOS 使用 BSD 套接字（libc）。
     在后台线程执行，不会阻塞事件循环。
 
 - static async int ConnectAsync(nint sock, string ip, int port)
+  - 连接到 `ip:port`，默认截止 120 秒。黑洞地址永远不会
+    唤醒 reactor——旧实现在这里以 Task.Delay(1) 死循环轮询，
+    永久挂起协程并烧 CPU；现在与带超时的重载共用同一条
+    退避轮询路径，超时返回 -3（套接字留给调用方关闭）。
+    需要不同时限的调用方请用四参重载（timeoutMs <= 0 表示
+    真正无截止）。
 
 - static async int ConnectAsync(nint sock, string ip, int port, int timeoutMs)
   - 受 <paramref name="timeoutMs"/> 限制的 ConnectAsync：在时限内
@@ -372,6 +477,7 @@ Windows 使用 Winsock2，Linux/macOS 使用 BSD 套接字（libc）。
 - static bool recvTimedOut=false;
 
 - static void MarkRecvTimeout(bool timedOut)
+  - 更新 LastRecvTimedOut 报告的标志（见带超时 RecvAsync）。
 
 - static async int RecvIntoAsync(nint sock, string buf, int bufSize)
   - 挂起直到可读，然后最多接收 <paramref
@@ -444,6 +550,10 @@ Windows 使用 Winsock2，Linux/macOS 使用 BSD 套接字（libc）。
     否则返回原主机名。
 
 - static string RemoteIp(nint sock)
+  - 远端 IP 地址文本。拷贝语义：返回的托管字符串拥有自己的
+    字节，不受线程共享格式化缓冲或 await 后协程迁移的影响
+    （此前直接采纳原生指针，WebApp 存下 ctx.RemoteIp 后会被
+    下一个连接的调用悄悄改写——限流键因此被污染）。
 
 - static int LastSocketError()
   - 最近一次失败的套接字系统调用的平台错误码：
@@ -456,17 +566,26 @@ Windows 使用 Winsock2，Linux/macOS 使用 BSD 套接字（libc）。
 - static bool resolveFailed;
 
 - static void CaptureLastError()
+  - 失败检查点处立即捕获平台错误码（见 lastError 上的说明）。
 
 - static bool LastResolveFailed()
+  - 最近一次解析是否失败（BuildSockAddrAsync / ConnectAsync 置位）。
 
 - static void MarkResolveFailed(bool failed)
+  - 更新 LastResolveFailed 报告的标志。
 
 - static long Ipv4ToLong(string ip)
+  - IPv4 文本 → 整数（字节序与 <c>inet_addr</c> 一致，第一段在低
+    字节），再按点分十进制的高位在前重排为 0..4294967295；
+    解析失败返回 -1（255.255.255.255 例外，inet_addr 对它返回 -1
+    但它是合法地址）。
 
 - static string LongToIpv4(long ipValue)
+  - Ipv4ToLong 的逆变换：0..4294967295 → 点分十进制；越界返回 ""。
 
 - static bool IsOpen(nint sock)
-  - 已被关闭（例如监听器被 Stop() 关闭）。
+  - 套接字是否仍然存活；false 表示
+    已被关闭（例如监听器被 Stop() 关闭）。
 
 - static bool IsReadable(nint sock)
   - 用 select() 以零超时检查套接字是否可读。
@@ -496,6 +615,8 @@ Windows 使用 Winsock2，Linux/macOS 使用 BSD 套接字（libc）。
 - [DllImport("crt")]static extern long strlen(string str);
 
 - TcpClient()
+  - 内部构造：句柄 -1（未连接），接收缓冲默认 64KB；经
+    Connect/ConnectAsync/FromSocket 使用。
 
 - nint Sock()
   - 返回底层套接字句柄（例如用于在
@@ -515,6 +636,10 @@ Windows 使用 Winsock2，Linux/macOS 使用 BSD 套接字（libc）。
     null（用 LastConnectTimedOut 区分两种情况）。非正超时
     表示"不设截止时间"。
 
+- static async TcpClient ConnectAsync(string host, int port, int timeoutMs, bool allowLoopback)
+  - 连接到已由调用方明确允许的本地或远程目标。DNS 解析完成后
+    每个候选地址先做二进制安全审核，再以同一 sockaddr 发起连接。
+
 - static bool LastConnectTimedOut()
   - 本线程最近一次 ConnectAsync 是因超时放弃
     而非被拒绝时为 true。通过同步辅助函数写入，
@@ -526,10 +651,15 @@ Windows 使用 Winsock2，Linux/macOS 使用 BSD 套接字（libc）。
 - static bool connectResolveFailed=false;
 
 - static void MarkConnectTimeout(bool timedOut)
+  - 更新 LastConnectTimedOut 报告的标志（在异步方法内直接给静态
+    变量赋值会被按值捕获，见 LastConnectTimedOut 上的说明）。
 
 - static bool LastConnectResolveFailed()
+  - 最近一次 ConnectAsync 是否因 DNS 解析失败（或候选地址全部被
+    安全审核拒绝）而返回 null；与超时标志互斥使用。
 
 - static void MarkConnectResolveFailed(bool failed)
+  - 更新 LastConnectResolveFailed 报告的标志。
 
 - static TcpClient Connect(string host, int port)
   - 同步连接远程主机。
@@ -658,7 +788,12 @@ nint client = await TcpListener.AcceptAsync(listener);
     挂起。这里补上一次 Start（失败照常抛 SocketException）。
 
 - void Stop()
-  - 停止监听器。
+  - 停止监听器。Windows 上必须先对句柄做 CancelIoEx
+    再关闭：closesocket 自己不会给挂起的 AcceptEx 投递完成包，
+    accept 里的协程会带着整条服务端对象链永远挂起（泄漏探测在
+    退出时全部记为仍可达）。CancelIoEx 让挂起的 accept 立刻以
+    -1 复位——与 POSIX 侧 dead-fd sweep 的语义一致；recv 版的
+    同样机制见 `Socket.ShutdownBoth` 的注释。
 
 - bool IsRunning()
   - 返回监听器是否正在运行。
@@ -701,9 +836,12 @@ await udp.SendToAsync("Hello", "127.0.0.1", 9999);
 - [DllImport("crt")]static extern long strlen(string str);
 
 - UdpClient()
+  - 内部构造：创建非阻塞 UDP 套接字，不绑定本地地址；
+    经 Bind() 使用。
 
 - static UdpClient Bind(string host, int port)
   - 创建绑定到本地地址和端口的 UDP 套接字。
+    绑定失败（端口被占用等）返回 null。
 
 - int SendTo(string data, string ip, int port)
   - 向指定地址发送数据报。
@@ -735,7 +873,7 @@ await udp.SendToAsync("Hello", "127.0.0.1", 9999);
   - 使用默认缓冲区大小接收。
 
 - void Close()
-  - 关闭 UDP 套接字。
+  - 关闭 UDP 套接字（幂等）。关闭后 IsBound 为 false。
 
 - nint GetSocket()
   - 返回底层套接字句柄。

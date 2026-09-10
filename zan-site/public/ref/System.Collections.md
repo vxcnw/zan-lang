@@ -5,22 +5,26 @@
 
 ## HashSet (class)
 
-唯一项的集合，底层是动态 <c>List</c>，线性
-扫描（`Add`、`Contains` 和
-`Remove` 均为 O(n)；哈希存储有待通用的哈希设施）。
+唯一项的集合：成员判定走 <c>Dict<T, int></c> 的开地址哈希表
+（`Add`、`Contains`、`Remove`
+摊还 O(1)），插入顺序用并行表保留（Remove 打墓碑，墓碑过半时
+一次性压缩，摊还仍 O(1)）。`ElementAt` 按插入次序
+枚举有效项。
 
-相等性：因为泛型元素类型在运行时会擦除为引用，
-运行时按以下规则判断唯一性：
+相等性沿用 Dict 的键规则：
 <list type="bullet">
-<item>值类型（int、long、double、bool、enum）按值比较——必须精确相等；以及</item>
-<item>引用类型（包括 string）按身份（同一实例）比较——</item>
-两个内容相同但实例不同的字符串会被视为不同。</item>
+<item>值类型（int、long、double、bool、enum）按值比较；</item>
+<item>string 按内容比较（Dict 的内建哈希/比较即内容感知）；</item>
+<item>其他引用类型按身份（同一实例）比较。</item>
 </list>
-目前如需基于内容的字符串集合，可用 <c>Dictionary</c> 以
-字符串为键，其内建比较即为内容感知。（对引用元素做内容相等比较
-需要泛型单态化。）
 
-- List<T> items;
+- Dict <T, int> idx;
+
+- List<T> order;
+
+- List<bool> dead;
+
+- int live;
 
 - HashSet()
 
@@ -33,6 +37,10 @@
 
 - bool Remove(T v)
   - 移除相等的项（若存在），返回是否实际移除。
+    只打墓碑；墓碑超过一半时整体压缩一次。
+
+- void Compact()
+  - 丢弃墓碑，重建 order 与 idx（均摊 O(1)/次操作）。
 
 - int Count()
   - 不同项的数量。
@@ -43,9 +51,12 @@
 - void Clear()
   - 清空所有项。
 
+- List<T> Keys()
+  - 全部有效项的快照（按插入次序）。修改快照不影响集合本身。
+
 - T ElementAt(int i)
-  - 按插入索引 <paramref name="i"/>（从 0 开始）取项，供
-    枚举使用。顺序反映插入次序，移除后会自动压缩。
+  - 第 <paramref name="i"/> 个有效项（从 0 开始，按插入次序，
+    跳过已移除的墓碑）；越界抛 IndexOutOfRange。
 
 
 ## LinkedList (class)

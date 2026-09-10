@@ -47,13 +47,15 @@
     <aside class="wiki-side doc-side">
       <div class="searchbox"><svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         <input id="docSearch" placeholder="筛选目录…" aria-label="filter"></div>
-      <details class="nsgrp" open><summary>System · 55</summary>
+      <details class="nsgrp" open><summary>System · 58</summary>
 <a href="/ref/System">System</a>
 <a href="/ref/System.Automation">System.Automation</a>
 <a href="/ref/System.Collections">System.Collections</a>
 <a href="/ref/System.Collections.Generic">System.Collections.Generic</a>
+<a href="/ref/System.Commercial">System.Commercial</a>
 <a href="/ref/System.Compiler">System.Compiler</a>
 <a href="/ref/System.Data">System.Data</a>
+<a href="/ref/System.Data.Excel">System.Data.Excel</a>
 <a href="/ref/System.Data.Firebird">System.Data.Firebird</a>
 <a href="/ref/System.Data.MySql">System.Data.MySql</a>
 <a href="/ref/System.Data.Orm">System.Data.Orm</a>
@@ -69,6 +71,7 @@
 <a href="/ref/System.Globalization">System.Globalization</a>
 <a href="/ref/System.IO">System.IO</a>
 <a href="/ref/System.IO.Compression">System.IO.Compression</a>
+<a href="/ref/System.IO.Watch">System.IO.Watch</a>
 <a href="/ref/System.Input">System.Input</a>
 <a href="/ref/System.Json">System.Json</a>
 <a href="/ref/System.Knowledge">System.Knowledge</a>
@@ -76,6 +79,7 @@
 <a href="/ref/System.Management">System.Management</a>
 <a href="/ref/System.Net">System.Net</a>
 <a href="/ref/System.Net.Coap">System.Net.Coap</a>
+<a href="/ref/System.Net.External">System.Net.External</a>
 <a href="/ref/System.Net.Http">System.Net.Http</a>
 <a href="/ref/System.Net.Http.Client">System.Net.Http.Client</a>
 <a href="/ref/System.Net.Http.Download">System.Net.Http.Download</a>
@@ -84,7 +88,6 @@
 <a href="/ref/System.Net.Modbus">System.Net.Modbus</a>
 <a href="/ref/System.Net.Mqtt">System.Net.Mqtt</a>
 <a href="/ref/System.Net.Ntp">System.Net.Ntp</a>
-<a href="/ref/System.Net.Rpc">System.Net.Rpc</a>
 <a href="/ref/System.Net.Sip">System.Net.Sip</a>
 <a href="/ref/System.Net.Sockets">System.Net.Sockets</a>
 <a href="/ref/System.Net.Sse">System.Net.Sse</a>
@@ -123,13 +126,13 @@
 <a href="/ref/Game.Arcade2D">Game.Arcade2D</a>
 <a href="/ref/Game.Arpg">Game.Arpg</a>
 <a href="/ref/Game.Arpg.Data">Game.Arpg.Data</a>
-<a href="/ref/Game.Arpg.Fonts">Game.Arpg.Fonts</a>
 <a href="/ref/Game.Board">Game.Board</a>
 <a href="/ref/Game.Cards">Game.Cards</a>
 <a href="/ref/Game.Core">Game.Core</a>
 <a href="/ref/Game.Foundation">Game.Foundation</a>
-<a href="/ref/Game.Foundation.Sdl">Game.Foundation.Sdl</a>
-<a href="/ref/Game.Render">Game.Render</a>
+<a href="/ref/Game.Foundation.Gui">Game.Foundation.Gui</a>
+<a href="/ref/Game.Idle">Game.Idle</a>
+<a href="/ref/Game.Kit">Game.Kit</a>
 <a href="/ref/Game.Scene">Game.Scene</a>
 </details>
 <details class="nsgrp"><summary>Sdk · 57</summary>
@@ -191,9 +194,6 @@
 <a href="/ref/Sdk.Wechat.Work">Sdk.Wechat.Work</a>
 <a href="/ref/Sdk.Wechat.WxOpen">Sdk.Wechat.WxOpen</a>
 </details>
-<details class="nsgrp" open><summary>SDL3 · 1</summary>
-<a href="/ref/SDL3">SDL3</a>
-</details>
 <details class="nsgrp"><summary>Platform · 1</summary>
 <a href="/ref/Platform">Platform</a>
 </details>
@@ -206,10 +206,13 @@
 报警并带&quot;确认&quot;按钮，未确认时按优先级闪烁。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">AlarmBuffer buffer;</code>
+<div class="mdoc">数据源（可与 AlarmList 共享同一份报警）。</div>
 </li>
 <li class=""><code class="sig">int wid;</code>
+<div class="mdoc">整条命中 id。</div>
 </li>
 <li class=""><code class="sig">int ackId;</code>
+<div class="mdoc">确认按钮命中 id。</div>
 </li>
 <li class=""><code class="sig">UiEvent Ack;</code>
 <div class="mdoc">报警被确认时触发。</div>
@@ -221,6 +224,7 @@
 换成与报警列表共享的同一个缓冲区。</div>
 </li>
 <li class=""><code class="sig">AlarmBanner(AlarmBuffer buf)</code>
+<div class="mdoc">共享缓冲区构造。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -228,18 +232,25 @@
 <div class="mdoc">换绑缓冲区（与 AlarmList 共享同一份报警）。</div>
 </li>
 <li class=""><code class="sig">AlarmBuffer Buffer()</code>
+<div class="mdoc">当前绑定的缓冲区。</div>
 </li>
 <li class=""><code class="sig">override string Kind()</code>
+<div class="mdoc">控件类型标识（序列化/设计器用）。</div>
 </li>
 <li class=""><code class="sig">override List&lt;PropSpec&gt; Props()</code>
+<div class="mdoc">覆写：无设计器属性（内容由数据源驱动）。</div>
 </li>
 <li class=""><code class="sig">override List&lt;string&gt; Events()</code>
+<div class="mdoc">覆写：公共事件之外提供 &quot;Ack&quot;。</div>
 </li>
 <li class=""><code class="sig">override void BindEvent(string evt, Action a)</code>
+<div class="mdoc">覆写：&quot;Ack&quot; 挂 Ack 事件，其余按名称走通用路由。</div>
 </li>
 <li class=""><code class="sig">override void OnMeasure(App app)</code>
+<div class="mdoc">首选高度 = 主题的 medium 行高。</div>
 </li>
 <li class=""><code class="sig">override void OnPaint(App app)</code>
+<div class="mdoc">覆写：画最新未确认报警文本与&quot;确认&quot;按钮，未确认时按优先级周期闪烁。</div>
 </li>
 </ul>
 </div></div>
@@ -253,18 +264,23 @@ al.Raise(&quot;PT101&quot;, &quot;压力高高&quot;, 2);
 al.Scan(io);              // 按位号限值自动产生 / 复归</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">List&lt;AlarmItem&gt; items;</code>
+<div class="mdoc">记录列表（追加序，下标 0 最旧）。</div>
 </li>
 <li class=""><code class="sig">int limit;</code>
+<div class="mdoc">容量上限（超出时淘汰最旧记录）。</div>
 </li>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">AlarmBuffer()</code>
+<div class="mdoc">默认容量 500。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">int Count()</code>
+<div class="mdoc">记录条数 / 按下标取记录（下标 0 最旧）。</div>
 </li>
 <li class=""><code class="sig">AlarmItem At(int i)</code>
+<div class="mdoc">第 i 条记录（不查越界）。</div>
 </li>
 <li class=""><code class="sig">int UnackedCount()</code>
 <div class="mdoc">未确认的报警条数（报警栏据此闪烁）。</div>
@@ -273,8 +289,10 @@ al.Scan(io);              // 按位号限值自动产生 / 复归</div>
 <div class="mdoc">最新一条未确认报警，没有则返回 null。</div>
 </li>
 <li class=""><code class="sig">AlarmItem Raise(string tagName, string text, int prio)</code>
+<div class="mdoc">产生一条报警；超出容量上限（默认 500）时淘汰最旧记录。</div>
 </li>
 <li class=""><code class="sig">void AckAll()</code>
+<div class="mdoc">确认全部报警。</div>
 </li>
 <li class=""><code class="sig">void Purge()</code>
 <div class="mdoc">移除已确认且已复归的记录。</div>
@@ -295,14 +313,19 @@ al.Scan(io);              // 按位号限值自动产生 / 复归</div>
 优先级 0 提示 / 1 警告 / 2 故障，决定颜色与排序。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">string stamp;</code>
+<div class="mdoc">发生时间（ToTimeString 文本）。</div>
 </li>
 <li class=""><code class="sig">string point;</code>
+<div class="mdoc">位号名。</div>
 </li>
 <li class=""><code class="sig">string message;</code>
+<div class="mdoc">描述文本。</div>
 </li>
 <li class=""><code class="sig">int priority;</code>
+<div class="mdoc">优先级：0 提示 / 1 警告 / 2 故障。</div>
 </li>
 <li class=""><code class="sig">bool acked;</code>
+<div class="mdoc">是否已确认。</div>
 </li>
 <li class=""><code class="sig">bool active;</code>
 <div class="mdoc">报警是否仍然成立（复归后仍留在列表里，直到被确认）。</div>
@@ -310,29 +333,39 @@ al.Scan(io);              // 按位号限值自动产生 / 复归</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">AlarmItem(string tagName, string text, int prio)</code>
+<div class="mdoc">构造一条活动、未确认的报警（时间取当前时刻）。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">string Stamp()</code>
+<div class="mdoc">发生时间文本。</div>
 </li>
 <li class=""><code class="sig">string Point()</code>
+<div class="mdoc">位号名。</div>
 </li>
 <li class=""><code class="sig">string Message()</code>
+<div class="mdoc">描述文本。</div>
 </li>
 <li class=""><code class="sig">int Priority()</code>
+<div class="mdoc">优先级。</div>
 </li>
 <li class=""><code class="sig">bool IsAcked()</code>
+<div class="mdoc">是否已确认。</div>
 </li>
 <li class=""><code class="sig">bool IsActive()</code>
+<div class="mdoc">报警是否仍成立。</div>
 </li>
 <li class=""><code class="sig">void Ack()</code>
+<div class="mdoc">确认（acked 置真）。</div>
 </li>
 <li class=""><code class="sig">void Clear()</code>
+<div class="mdoc">复归（active 置假；记录留在列表里直到确认并 Purge）。</div>
 </li>
 <li class=""><code class="sig">static int ColorOf(App app, int prio)</code>
 <div class="mdoc">优先级颜色：2 故障红、1 警告黄、其它信息蓝。</div>
 </li>
 <li class=""><code class="sig">static string LevelOf(int prio)</code>
+<div class="mdoc">优先级文字：FAULT / WARN / INFO。</div>
 </li>
 </ul>
 </div></div>
@@ -342,13 +375,16 @@ al.Scan(io);              // 按位号限值自动产生 / 复归</div>
 未确认行以优先级色底显示，点击行选中。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">AlarmBuffer buffer;</code>
+<div class="mdoc">数据源（可与 AlarmBanner 共享同一份报警）。</div>
 </li>
 <li class=""><code class="sig">int wid;</code>
+<div class="mdoc">整条命中 id（On.Fire 用）。</div>
 </li>
 <li class=""><code class="sig">int rowBaseId;</code>
 <div class="mdoc">行命中区的连续 id 块（缓冲上限即最大行数）。</div>
 </li>
 <li class=""><code class="sig">int selected;</code>
+<div class="mdoc">当前选中行下标（-1 = 无）。</div>
 </li>
 <li class=""><code class="sig">UiEvent RowClick;</code>
 <div class="mdoc">选中行变化时触发。</div>
@@ -359,6 +395,7 @@ al.Scan(io);              // 按位号限值自动产生 / 复归</div>
 <div class="mdoc">自带缓冲区（设计器 / 表单编译路径用）。</div>
 </li>
 <li class=""><code class="sig">AlarmList(AlarmBuffer buf)</code>
+<div class="mdoc">共享缓冲区构造。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -366,22 +403,31 @@ al.Scan(io);              // 按位号限值自动产生 / 复归</div>
 <div class="mdoc">换绑缓冲区（与 AlarmBanner 共享同一份报警）。</div>
 </li>
 <li class=""><code class="sig">AlarmBuffer Buffer()</code>
+<div class="mdoc">当前绑定的缓冲区。</div>
 </li>
 <li class=""><code class="sig">int Selected()</code>
+<div class="mdoc">当前选中行下标（-1 = 无选中）。</div>
 </li>
 <li class=""><code class="sig">AlarmItem SelectedItem()</code>
+<div class="mdoc">选中的报警记录；无选中或下标越界返回 null。</div>
 </li>
 <li class=""><code class="sig">override string Kind()</code>
+<div class="mdoc">控件类型标识（序列化/设计器用）。</div>
 </li>
 <li class=""><code class="sig">override List&lt;PropSpec&gt; Props()</code>
+<div class="mdoc">覆写：无设计器属性（内容由数据源驱动）。</div>
 </li>
 <li class=""><code class="sig">override List&lt;string&gt; Events()</code>
+<div class="mdoc">覆写：公共事件之外提供 &quot;RowClick&quot;。</div>
 </li>
 <li class=""><code class="sig">override void BindEvent(string evt, Action a)</code>
+<div class="mdoc">覆写：&quot;RowClick&quot; 挂 RowClick 事件，其余按名称走通用路由。</div>
 </li>
 <li class=""><code class="sig">override void OnMeasure(App app)</code>
+<div class="mdoc">覆写：固定首选尺寸 480 x 200（逻辑 px）。</div>
 </li>
 <li class=""><code class="sig">override void OnPaint(App app)</code>
+<div class="mdoc">覆写：画表头与五列报警行（最新在最上），点击行选中并触发 RowClick。</div>
 </li>
 </ul>
 </div></div>
@@ -391,20 +437,27 @@ al.Scan(io);              // 按位号限值自动产生 / 复归</div>
 报警限标线，超限时条体转报警色。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">string caption;</code>
+<div class="mdoc">标题（顶部，&quot;&quot; 不显示）。</div>
 </li>
 <li class=""><code class="sig">IoTag tag;</code>
+<div class="mdoc">数据位号；null = 用独立信号 raw。</div>
 </li>
 <li class=""><code class="sig">SignalInt raw;</code>
+<div class="mdoc">底层信号（条体长度跟随它的值）。</div>
 </li>
 <li class=""><code class="sig">int scale;</code>
+<div class="mdoc">缩放：显示值 = 原始计数 / scale（1 = 不缩放）。</div>
 </li>
 <li class=""><code class="sig">string unit;</code>
+<div class="mdoc">单位文本（读数后缀）；&quot;&quot; 不显示。</div>
 </li>
 <li class=""><code class="sig">int rawMin;</code>
+<div class="mdoc">量程（原始计数）；rawMax ≤ rawMin 时被修正为 rawMin+1。</div>
 </li>
 <li class=""><code class="sig">int rawMax;</code>
 </li>
 <li class=""><code class="sig">int loLimit;</code>
+<div class="mdoc">报警限标线（原始计数）；相等 = 不画标线。</div>
 </li>
 <li class=""><code class="sig">int hiLimit;</code>
 </li>
@@ -414,10 +467,13 @@ al.Scan(io);              // 按位号限值自动产生 / 复归</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">Bargraph(string text, IoTag t)</code>
+<div class="mdoc">位号构造：量程/缩放/单位取自位号。</div>
 </li>
 <li class=""><code class="sig">Bargraph(string text, SignalInt v, int lo, int hi)</code>
+<div class="mdoc">独立信号构造：量程 lo..hi（原始计数），scale=1、无单位。</div>
 </li>
 <li class=""><code class="sig">Bargraph(string text)</code>
+<div class="mdoc">标题构造：内部自建信号，量程 0..100。</div>
 </li>
 <li class=""><code class="sig">Bargraph()</code>
 <div class="mdoc">Placeable from the designer, which builds every control with no
@@ -426,36 +482,52 @@ arguments and then applies the design&#x27;s properties.</div>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">void InitBar(string text, IoTag t, SignalInt v, int sc, string u, int lo, int hi)</code>
+<div class="mdoc">初始化：标题 + 数据源 + 量程/单位（同 Gauge 的参数约定）。</div>
 </li>
 <li class=""><code class="sig">static int Vertical()</code>
+<div class="mdoc">方向常量：竖向（自下而上，0）。</div>
 </li>
 <li class=""><code class="sig">static int Horizontal()</code>
+<div class="mdoc">方向常量：横向（自左向右，1）。</div>
 </li>
 <li class=""><code class="sig">SignalInt Value()</code>
+<div class="mdoc">底层信号访问器。</div>
 </li>
 <li class=""><code class="sig">Bargraph Orient(int o)</code>
+<div class="mdoc">设方向（0 竖向 / 1 横向，链式）。</div>
 </li>
 <li class=""><code class="sig">Bargraph Range(int lo, int hi)</code>
+<div class="mdoc">设量程（原始计数，hi ≤ lo 时修正为 lo+1；链式）。</div>
 </li>
 <li class=""><code class="sig">Bargraph Limits(int lo, int hi)</code>
+<div class="mdoc">设报警限标线（原始计数；相等 = 不画，链式）。</div>
 </li>
 <li class=""><code class="sig">void Bind(IoTag t)</code>
+<div class="mdoc">换绑位号（同步量程、缩放与单位）。</div>
 </li>
 <li class=""><code class="sig">override string Kind()</code>
+<div class="mdoc">控件类型标识（序列化/设计器用）。</div>
 </li>
 <li class=""><code class="sig">override List&lt;PropSpec&gt; Props()</code>
+<div class="mdoc">覆写：返回设计器属性清单（标题 / 量程 / 数值信号 / 方向）。</div>
 </li>
 <li class=""><code class="sig">override void OnMeasure(App app)</code>
+<div class="mdoc">覆写：按方向给首选尺寸（横向 220 x 40，竖向 64 x 180）。</div>
 </li>
 <li class=""><code class="sig">int Fraction()</code>
+<div class="mdoc">当前值占量程的比例（千分比 0..1000）。</div>
 </li>
 <li class=""><code class="sig">override void OnPaint(App app)</code>
+<div class="mdoc">覆写：画轨道、按当前值比例填充、报警限标线与读数（横竖两向）。</div>
 </li>
 <li class=""><code class="sig">int PosOf(int v, int len)</code>
+<div class="mdoc">值 v 在长度 len 上的位置（钳制到 0..len）。</div>
 </li>
 <li class=""><code class="sig">void PaintLimitsV(App app, int x, int y, int w, int h)</code>
+<div class="mdoc">竖条的报警限标线（低报蓝线、高报红线）。</div>
 </li>
 <li class=""><code class="sig">void PaintLimitsH(App app, int x, int y, int w, int h)</code>
+<div class="mdoc">横条的报警限标线（低报蓝线、高报红线）。</div>
 </li>
 </ul>
 </div></div>
@@ -470,14 +542,19 @@ c.Row(&quot;电流&quot;, currentTag);
 c.Row(&quot;排气压力&quot;, pressTag);</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">string title;</code>
+<div class="mdoc">设备名（卡片左上标题）。</div>
 </li>
 <li class=""><code class="sig">SignalInt state;</code>
+<div class="mdoc">设备状态（0 停机 / 1 运行 / 2 报警 / 3 故障 / 4 离线）。</div>
 </li>
 <li class=""><code class="sig">List&lt;string&gt; rowNames;</code>
+<div class="mdoc">数据行名称，与 rowTags 按下标一一对应。</div>
 </li>
 <li class=""><code class="sig">List&lt;IoTag&gt; rowTags;</code>
+<div class="mdoc">数据行位号，与 rowNames 按下标一一对应。</div>
 </li>
 <li class=""><code class="sig">int wid;</code>
+<div class="mdoc">整卡命中 id（点击时触发 Click）。</div>
 </li>
 <li class=""><code class="sig">UiEvent Click;</code>
 <div class="mdoc">卡片被点击时触发（一般用于打开设备详情）。</div>
@@ -489,30 +566,39 @@ c.Row(&quot;排气压力&quot;, pressTag);</div>
 arguments and then applies the design&#x27;s properties.</div>
 </li>
 <li class=""><code class="sig">DeviceCard(string name)</code>
+<div class="mdoc">以设备名构造空卡片（数据行经 Row 追加）。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">SignalInt State()</code>
+<div class="mdoc">设备状态信号访问器。</div>
 </li>
 <li class=""><code class="sig">void Set(int st)</code>
+<div class="mdoc">写入设备状态（取值见类注释）。</div>
 </li>
 <li class=""><code class="sig">int RowCount()</code>
+<div class="mdoc">数据行数。</div>
 </li>
 <li class=""><code class="sig">DeviceCard Row(string label, IoTag t)</code>
 <div class="mdoc">追加一行&quot;名称 : 数值&quot;。</div>
 </li>
 <li class=""><code class="sig">override string Kind()</code>
+<div class="mdoc">控件类型标识（序列化/设计器用）。</div>
 </li>
 <li class=""><code class="sig">override List&lt;string&gt; Events()</code>
+<div class="mdoc">覆写：仅公共事件（点击语义走 Click）。</div>
 </li>
 <li class=""><code class="sig">override List&lt;PropSpec&gt; Props()</code>
+<div class="mdoc">覆写：返回设计器属性清单（设备名 / 状态信号）。</div>
 </li>
 <li class=""><code class="sig">static string TextOf(int st)</code>
 <div class="mdoc">状态文字。</div>
 </li>
 <li class=""><code class="sig">override void OnMeasure(App app)</code>
+<div class="mdoc">覆写：首选高度 = 标题行 + 数据行数 x 行高 + 边距。</div>
 </li>
 <li class=""><code class="sig">override void OnPaint(App app)</code>
+<div class="mdoc">覆写：画设备名、状态芯片、左侧状态色条与数据行，整卡可点击。</div>
 </li>
 </ul>
 </div></div>
@@ -531,16 +617,21 @@ Digital pv = new Digital(&quot;TIC101 PV&quot;, tag);</div>
 <div class="mdoc">无位号时的自持值（原始计数）与刻度。</div>
 </li>
 <li class=""><code class="sig">int scale;</code>
+<div class="mdoc">每工程单位的计数（显示值 = raw / scale，&lt;1 按 1）。</div>
 </li>
 <li class=""><code class="sig">string unit;</code>
+<div class="mdoc">工程单位后缀；空串不画。</div>
 </li>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">Digital(string text, IoTag t)</code>
+<div class="mdoc">标题 + 绑定位号（缩放与单位取自位号）。</div>
 </li>
 <li class=""><code class="sig">Digital(string text, SignalInt v, int sc, string u)</code>
+<div class="mdoc">标题 + 独立信号 + 缩放与单位。</div>
 </li>
 <li class=""><code class="sig">Digital(string text)</code>
+<div class="mdoc">标题 + 内部自持信号（初始 0，缩放 1，无单位）。</div>
 </li>
 <li class=""><code class="sig">Digital()</code>
 <div class="mdoc">Placeable from the designer, which builds every control with no
@@ -549,18 +640,25 @@ arguments and then applies the design&#x27;s properties.</div>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">void InitDigital(string text, IoTag t, SignalInt v, int sc, string u)</code>
+<div class="mdoc">初始化：标题 + 数据源（位号或独立信号）+ 缩放与单位。</div>
 </li>
 <li class=""><code class="sig">SignalInt Value()</code>
+<div class="mdoc">底层信号（换绑位号请用 &lt;c&gt;Bind&lt;/c&gt;）。</div>
 </li>
 <li class=""><code class="sig">void Bind(IoTag t)</code>
+<div class="mdoc">换绑位号（同步缩放与单位）。</div>
 </li>
 <li class=""><code class="sig">override string Kind()</code>
+<div class="mdoc">控件类型标识（序列化/设计器用）。</div>
 </li>
 <li class=""><code class="sig">override List&lt;PropSpec&gt; Props()</code>
+<div class="mdoc">覆写：返回设计器属性清单（标题 / 单位 / 缩放 / 数值信号）。</div>
 </li>
 <li class=""><code class="sig">override void OnMeasure(App app)</code>
+<div class="mdoc">覆写：固定首选尺寸 150 x 72（逻辑 px）。</div>
 </li>
 <li class=""><code class="sig">override void OnPaint(App app)</code>
+<div class="mdoc">覆写：画数显面板、标题与工程量值；超限转报警色，坏质量显示 &quot;----&quot;。</div>
 </li>
 </ul>
 </div></div>
@@ -580,15 +678,19 @@ wall.Set(&quot;1# 泵&quot;, 1);             // 停机 / 运行 / 报警 / 故�
 上的数值行由业务代码按位号追加——I/O 是代码，不是布局。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">List&lt;string&gt; names;</code>
+<div class="mdoc">设备名列表，与 cards 按下标平行（Of 按它查找）。</div>
 </li>
 <li class=""><code class="sig">List&lt;DeviceCard&gt; cards;</code>
+<div class="mdoc">设备卡片列表，与 names 按下标对应。</div>
 </li>
 <li class=""><code class="sig">int cardW;</code>
 <div class="mdoc">单张卡片的最小宽度（逻辑 px），决定自适应列数。</div>
 </li>
 <li class=""><code class="sig">int cardH;</code>
+<div class="mdoc">单张卡片的逻辑高度（px）。</div>
 </li>
 <li class=""><code class="sig">int gapPx;</code>
+<div class="mdoc">卡片间距（逻辑 px）。</div>
 </li>
 <li class=""><code class="sig">int cellW;</code>
 <div class="mdoc">缩放后的单元尺寸（Arrange 拿不到 App，故在测量时算好）。</div>
@@ -597,19 +699,27 @@ wall.Set(&quot;1# 泵&quot;, 1);             // 停机 / 运行 / 报警 / 故�
 </li>
 <li class=""><code class="sig">int cellGap;</code>
 </li>
+<li class=""><code class="sig">int lastArrangeW;</code>
+<div class="mdoc">上一帧 Arrange 实际拿到的宽度。列数由宽度决定，而测量发生在
+分配尺寸之前：用上一帧的真实宽度来算行数，测量和排布才不会
+各算一套（那会让多出来的行被裁掉）。</div>
+</li>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">EquipPanel()</code>
+<div class="mdoc">空设备墙（之后 AddDevice/SetItemsText）。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">int Count()</code>
+<div class="mdoc">设备卡片数量。</div>
 </li>
 <li class=""><code class="sig">DeviceCard AddDevice(string name)</code>
 <div class="mdoc">追加一台设备，返回它的卡片以便挂数值行和点击处理。
 （不叫 Add：那是 Control 添加子控件的名字。）</div>
 </li>
 <li class=""><code class="sig">DeviceCard At(int i)</code>
+<div class="mdoc">第 i 张卡片；越界返回 null。</div>
 </li>
 <li class=""><code class="sig">DeviceCard Of(string name)</code>
 <div class="mdoc">按设备名取卡片；名称不存在时返回 null。</div>
@@ -625,16 +735,22 @@ wall.Set(&quot;1# 泵&quot;, 1);             // 停机 / 运行 / 报警 / 故�
 <div class="mdoc">按序列化文本重建设备清单：<code>&quot;1# 泵|2# 泵|风机&quot;</code>。</div>
 </li>
 <li class=""><code class="sig">override string Kind()</code>
+<div class="mdoc">控件类型标识（序列化/设计器用）。</div>
 </li>
 <li class=""><code class="sig">override List&lt;PropSpec&gt; Props()</code>
+<div class="mdoc">覆写：返回设计器属性清单（卡片宽 / 卡片高）。</div>
 </li>
 <li class=""><code class="sig">override void OnMeasure(App app)</code>
+<div class="mdoc">覆写：缓存缩放后的单元尺寸，并按上一帧排布宽度推列数、
+行数回写首选尺寸。</div>
 </li>
 <li class=""><code class="sig">override void Arrange(int px, int py, int pw, int ph)</code>
 <div class="mdoc">卡片网格：按最小卡宽算出列数，再把剩余宽度均分给
 每列，行高固定，超出高度的卡片仍被排布（宿主可滚动）。</div>
 </li>
 <li class=""><code class="sig">override void OnPaint(App app)</code>
+<div class="mdoc">覆写：空面板时画一个可见的占位边框（设计器里不致一块空白）；
+有卡片则整体交给子控件绘制。</div>
 </li>
 </ul>
 </div></div>
@@ -647,20 +763,27 @@ wall.Set(&quot;1# 泵&quot;, 1);             // 停机 / 运行 / 报警 / 故�
 Gauge g = new Gauge(&quot;PT101&quot;, tag);</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">string caption;</code>
+<div class="mdoc">标题（底部居中，&quot;&quot; 不显示）。</div>
 </li>
 <li class=""><code class="sig">IoTag tag;</code>
+<div class="mdoc">数据位号；null = 用独立信号 raw。</div>
 </li>
 <li class=""><code class="sig">SignalInt raw;</code>
+<div class="mdoc">底层信号（指针角度跟随它的值）。</div>
 </li>
 <li class=""><code class="sig">int scale;</code>
+<div class="mdoc">缩放：显示值 = 原始计数 / scale（1 = 不缩放）。</div>
 </li>
 <li class=""><code class="sig">string unit;</code>
+<div class="mdoc">单位文本（读数后缀）；&quot;&quot; 不显示。</div>
 </li>
 <li class=""><code class="sig">int rawMin;</code>
+<div class="mdoc">量程（原始计数）；rawMax ≤ rawMin 时被修正为 rawMin+1。</div>
 </li>
 <li class=""><code class="sig">int rawMax;</code>
 </li>
 <li class=""><code class="sig">int loLimit;</code>
+<div class="mdoc">报警限（原始计数）；相等 = 整弧按正常色。</div>
 </li>
 <li class=""><code class="sig">int hiLimit;</code>
 </li>
@@ -668,14 +791,18 @@ Gauge g = new Gauge(&quot;PT101&quot;, tag);</div>
 <div class="mdoc">刻度弧的起止角（度，0 为 3 点方向，顺时针为正）。</div>
 </li>
 <li class=""><code class="sig">int sweepDeg;</code>
+<div class="mdoc">刻度弧的扫过角度（度，顺时针）。</div>
 </li>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">Gauge(string text, IoTag t)</code>
+<div class="mdoc">位号构造：量程/缩放/单位/报警限全部取自位号。</div>
 </li>
 <li class=""><code class="sig">Gauge(string text, SignalInt v, int lo, int hi)</code>
+<div class="mdoc">独立信号构造：量程 lo..hi（原始计数），scale=1、无单位。</div>
 </li>
 <li class=""><code class="sig">Gauge(string text)</code>
+<div class="mdoc">标题构造：内部自建信号，量程 0..100。</div>
 </li>
 <li class=""><code class="sig">Gauge()</code>
 <div class="mdoc">Placeable from the designer, which builds every control with no
@@ -684,32 +811,41 @@ arguments and then applies the design&#x27;s properties.</div>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">void InitGauge(string text, IoTag t, SignalInt v, int sc, string u, int lo, int hi)</code>
+<div class="mdoc">初始化：标题 + 数据源（位号或独立信号）+ 量程/单位。</div>
 </li>
 <li class=""><code class="sig">SignalInt Value()</code>
+<div class="mdoc">底层信号（指针角度跟随它的值）。</div>
 </li>
 <li class=""><code class="sig">void Bind(IoTag t)</code>
+<div class="mdoc">换绑位号（同步量程、缩放与单位）。</div>
 </li>
 <li class=""><code class="sig">Gauge Range(int lo, int hi)</code>
+<div class="mdoc">设量程（原始计数）。</div>
 </li>
 <li class=""><code class="sig">Gauge Limits(int lo, int hi)</code>
 <div class="mdoc">报警限对应的弧段着色（相等则整弧为正常色）。</div>
 </li>
 <li class=""><code class="sig">override string Kind()</code>
+<div class="mdoc">控件类型标识（序列化/设计器用）。</div>
 </li>
 <li class=""><code class="sig">override List&lt;PropSpec&gt; Props()</code>
+<div class="mdoc">覆写：返回设计器属性清单（标题 / 单位 / 量程 / 数值信号）。</div>
 </li>
 <li class=""><code class="sig">override void OnMeasure(App app)</code>
+<div class="mdoc">覆写：固定首选尺寸 160 x 160（逻辑 px）。</div>
 </li>
 <li class=""><code class="sig">int AngleOf(int v)</code>
 <div class="mdoc">原始值在刻度弧上的角度。</div>
 </li>
 <li class=""><code class="sig">override void OnPaint(App app)</code>
+<div class="mdoc">覆写：画刻度弧（按报警限分色）、主刻度、指针、读数与标题。</div>
 </li>
 <li class=""><code class="sig">static int CosDeg(int deg)</code>
 <div class="mdoc">定点三角函数（返回值放大 1000 倍），避免为了画一根指针
 引入浮点数学依赖。</div>
 </li>
 <li class=""><code class="sig">static int SinDeg(int deg)</code>
+<div class="mdoc">定点 sin（返回值放大 1000 倍，画指针用）。</div>
 </li>
 <li class=""><code class="sig">static int SinQ(int deg)</code>
 <div class="mdoc">0..90 度的 sin*1000，10 度一档线性插值（画表盘足够）。</div>
@@ -740,6 +876,7 @@ t.SetRaw(1234);                               // 123.4 \u00b0C</div>
 <div class="mdoc">每工程单位的计数（1 / 10 / 100 ...）。</div>
 </li>
 <li class=""><code class="sig">SignalInt raw;</code>
+<div class="mdoc">原始计数值信号（显示值 = raw / scale），HMI 控件共享引用。</div>
 </li>
 <li class=""><code class="sig">int rawMin;</code>
 </li>
@@ -757,6 +894,7 @@ t.SetRaw(1234);                               // 123.4 \u00b0C</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">IoTag(string name, string engUnit, int scaleCounts)</code>
+<div class="mdoc">构建位号：缩放 &lt;1 按 1；量程默认 0..100 单位、不判限。</div>
 </li>
 <li class=""><code class="sig">IoTag(string name):this(name, &quot;&quot;, 1)</code>
 <div class="mdoc">无量纲整数位号（无单位、无小数）。</div>
@@ -764,26 +902,37 @@ t.SetRaw(1234);                               // 123.4 \u00b0C</div>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">string Name()</code>
+<div class="mdoc">位号名 / 工程单位 / 定点缩放（每单位计数）。</div>
 </li>
 <li class=""><code class="sig">string Unit()</code>
+<div class="mdoc">工程单位文本。</div>
 </li>
 <li class=""><code class="sig">int Scale()</code>
+<div class="mdoc">定点缩放（每单位计数，显示值 = raw / scale）。</div>
 </li>
 <li class=""><code class="sig">SignalInt Value()</code>
+<div class="mdoc">底层信号（HMI 控件间共享引用实现整幅画面同步刷新）。</div>
 </li>
 <li class=""><code class="sig">int Raw()</code>
+<div class="mdoc">原始定点计数值（显示值 = raw / scale）。</div>
 </li>
 <li class=""><code class="sig">bool IsGood()</code>
+<div class="mdoc">最近写入是否有效（通信坏时 false，显示端画坏值样式）。</div>
 </li>
 <li class=""><code class="sig">int Min()</code>
+<div class="mdoc">量程上下限（原始计数）。</div>
 </li>
 <li class=""><code class="sig">int Max()</code>
+<div class="mdoc">量程上限（原始计数）。</div>
 </li>
 <li class=""><code class="sig">IoTag Range(int lo, int hi)</code>
+<div class="mdoc">设量程（原始计数，hi ≤ lo 时修正为 lo+1；链式）。</div>
 </li>
 <li class=""><code class="sig">IoTag Limits(int lo, int hi)</code>
+<div class="mdoc">设低/高报警限（原始计数；相等 = 不判限）。</div>
 </li>
 <li class=""><code class="sig">void SetRaw(int v)</code>
+<div class="mdoc">写入有效原始值（同时清除坏值标记）。</div>
 </li>
 <li class=""><code class="sig">void SetBad()</code>
 <div class="mdoc">通信中断 / 坏值：保留最后一次的数值但标记为不可信。</div>
@@ -798,6 +947,7 @@ t.SetRaw(1234);                               // 123.4 \u00b0C</div>
 <div class="mdoc">带小数点的工程值文本（不含单位）。</div>
 </li>
 <li class=""><code class="sig">string TextWithUnit()</code>
+<div class="mdoc">带小数点的工程值文本（含单位；无单位时退化为 &lt;c&gt;Text&lt;/c&gt;）。</div>
 </li>
 <li class=""><code class="sig">static string Format(int v, int scale)</code>
 <div class="mdoc">定点整数按 <code>scale</code> 格式化：scale=10 时 1234 -&gt; &quot;123.4&quot;。</div>
@@ -819,8 +969,10 @@ run.state = tag.Value();          // 绑定位号
 run.SetBlink(true);               // 故障闪烁</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">string caption;</code>
+<div class="mdoc">标题文本；空串不画。</div>
 </li>
 <li class=""><code class="sig">SignalInt state;</code>
+<div class="mdoc">状态信号：0 灭 / 1 绿 / 2 黄 / 3 红 / 4 蓝。</div>
 </li>
 <li class=""><code class="sig">bool blink;</code>
 <div class="mdoc">报警态（2/3）闪烁。</div>
@@ -831,8 +983,10 @@ run.SetBlink(true);               // 故障闪烁</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">Led(string text, SignalInt st)</code>
+<div class="mdoc">标题 + 外部状态信号。</div>
 </li>
 <li class=""><code class="sig">Led(string text)</code>
+<div class="mdoc">标题 + 内部自持信号（初始 0 = 灭）。</div>
 </li>
 <li class=""><code class="sig">Led()</code>
 <div class="mdoc">Placeable from the designer, which builds every control with no
@@ -841,29 +995,40 @@ arguments and then applies the design&#x27;s properties.</div>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">void InitLed(string text, SignalInt st)</code>
+<div class="mdoc">初始化：标题 + 状态信号（0 灭 / 1 绿 / 2 黄 / 3 红 / 4 蓝）。</div>
 </li>
 <li class=""><code class="sig">int State()</code>
+<div class="mdoc">状态读写 / 闪烁开关 / 标题文本 / 底层信号。</div>
 </li>
 <li class=""><code class="sig">void Set(int st)</code>
+<div class="mdoc">写状态值。</div>
 </li>
 <li class=""><code class="sig">void SetBlink(bool on)</code>
+<div class="mdoc">设置闪烁开关。</div>
 </li>
 <li class=""><code class="sig">void SetCaption(string s)</code>
+<div class="mdoc">设置标题文本。</div>
 </li>
 <li class=""><code class="sig">SignalInt Value()</code>
+<div class="mdoc">底层状态信号。</div>
 </li>
 <li class=""><code class="sig">override string Kind()</code>
+<div class="mdoc">控件类型标识（序列化/设计器用）。</div>
 </li>
 <li class=""><code class="sig">override List&lt;PropSpec&gt; Props()</code>
+<div class="mdoc">覆写：返回设计器属性清单（标题 / 状态信号 / 报警闪烁）。</div>
 </li>
 <li class=""><code class="sig">static int ColorOf(App app, int st)</code>
 <div class="mdoc">状态色：灭为边框灰，1 绿 2 黄 3 红 4 蓝。</div>
 </li>
 <li class=""><code class="sig">override void OnMeasure(App app)</code>
+<div class="mdoc">覆写：首选尺寸 = 圆点直径 + 标题宽，高度取 small 行高。</div>
 </li>
 <li class=""><code class="sig">int Dot(App app)</code>
+<div class="mdoc">圆点直径（缩放后的像素；未配置时用 12 基准值）。</div>
 </li>
 <li class=""><code class="sig">override void OnPaint(App app)</code>
+<div class="mdoc">覆写：画状态圆点与标题；报警闪烁按半秒周期申请局部动画帧。</div>
 </li>
 </ul>
 </div></div>
@@ -878,15 +1043,20 @@ kp.Target(spTag);                 // 确认写入该位号
 kp.Enter += () =&gt; { ... };        // 也可自己接管</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">SignalString entry;</code>
+<div class="mdoc">输入缓冲（显示文本，尚未按位号刻度换算）。</div>
 </li>
 <li class=""><code class="sig">IoTag target;</code>
+<div class="mdoc">确认（ENT）时写入的目标位号；null = 无目标，结果留在缓冲。</div>
 </li>
 <li class=""><code class="sig">int baseId;</code>
+<div class="mdoc">命中 id 块：0..11 数字/小数点/退格，12 +/-，13 CLR，14 ENT，
+15 保留给 On.Fire。</div>
 </li>
 <li class=""><code class="sig">bool allowSign;</code>
 <div class="mdoc">允许输入负号与小数点。</div>
 </li>
 <li class=""><code class="sig">bool allowDot;</code>
+<div class="mdoc">允许输入小数点；整个缓冲只允许一个小数点。</div>
 </li>
 <li class=""><code class="sig">UiEvent Enter;</code>
 <div class="mdoc">确认（ENT）时触发。</div>
@@ -897,36 +1067,48 @@ kp.Enter += () =&gt; { ... };        // 也可自己接管</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">NumPad()</code>
+<div class="mdoc">默认设计期构造：允许负号与小数点，无目标位号。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">SignalString Entry()</code>
+<div class="mdoc">输入缓冲的信号访问器。</div>
 </li>
 <li class=""><code class="sig">string Text()</code>
+<div class="mdoc">当前缓冲文本。</div>
 </li>
 <li class=""><code class="sig">void SetText(string s)</code>
+<div class="mdoc">覆盖缓冲文本（不触发 Enter）。</div>
 </li>
 <li class=""><code class="sig">void Clear()</code>
+<div class="mdoc">清空缓冲。</div>
 </li>
 <li class=""><code class="sig">NumPad Target(IoTag t)</code>
 <div class="mdoc">确认时写入的位号（同时把它的当前值预置进缓冲）。</div>
 </li>
 <li class=""><code class="sig">override string Kind()</code>
+<div class="mdoc">控件类型标识（序列化/设计器用）。</div>
 </li>
 <li class=""><code class="sig">override List&lt;string&gt; Events()</code>
+<div class="mdoc">覆写：公共事件之外提供 &quot;Enter&quot; 与 &quot;Cancel&quot;。</div>
 </li>
 <li class=""><code class="sig">override void BindEvent(string evt, Action a)</code>
+<div class="mdoc">覆写：&quot;Enter&quot;/&quot;Cancel&quot; 挂对应事件，其余按名称走通用路由。</div>
 </li>
 <li class=""><code class="sig">override List&lt;PropSpec&gt; Props()</code>
+<div class="mdoc">覆写：返回设计器属性清单（输入缓冲 / 允许负号 / 允许小数点）。</div>
 </li>
 <li class=""><code class="sig">override void OnMeasure(App app)</code>
+<div class="mdoc">覆写：固定首选尺寸 200 x 260（逻辑 px）。</div>
 </li>
 <li class=""><code class="sig">string KeyAt(int i)</code>
 <div class="mdoc">第 i 个键的文字（4 行 x 3 列）。</div>
 </li>
 <li class=""><code class="sig">override void OnPaint(App app)</code>
+<div class="mdoc">覆写：画输入显示屏、4x3 数字键盘与 +/-、CLR、ENT 底行。</div>
 </li>
 <li class=""><code class="sig">void PaintKey(App app, int id, int x, int y, int w, int h, string label, int bg, int fg)</code>
+<div class="mdoc">画一枚按键（含悬停/按下反馈与点击命中注册）。</div>
 </li>
 <li class=""><code class="sig">void Press(string label)</code>
 <div class="mdoc">处理一次按键，<code>label</code> 即键面文字。</div>
@@ -959,20 +1141,27 @@ io.Set(&quot;PT101.PV&quot;, 4321);</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">TagTable()</code>
+<div class="mdoc">空表；采集周期默认 500ms。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">int Count()</code>
+<div class="mdoc">位号数量 / 按下标取位号。</div>
 </li>
 <li class=""><code class="sig">IoTag At(int i)</code>
+<div class="mdoc">返回第 i 个位号。</div>
 </li>
 <li class=""><code class="sig">int Period()</code>
+<div class="mdoc">采集周期（毫秒，默认 500）。</div>
 </li>
 <li class=""><code class="sig">void SetPeriod(int ms)</code>
+<div class="mdoc">设置采集周期（毫秒）；非正数忽略。</div>
 </li>
 <li class=""><code class="sig">IoTag Add(string name, string unit, int scale)</code>
+<div class="mdoc">声明一个位号（配对单位与定点缩放）。</div>
 </li>
 <li class=""><code class="sig">IoTag Add(string name)</code>
+<div class="mdoc">无量纲整数位号（无单位、缩放 1）。</div>
 </li>
 <li class=""><code class="sig">IoTag Of(string name)</code>
 <div class="mdoc">按名查找位号，没有则返回 null（调用方不要假定非空）。</div>
@@ -982,8 +1171,10 @@ io.Set(&quot;PT101.PV&quot;, 4321);</div>
 画面加载时不必先声明全部位号。</div>
 </li>
 <li class=""><code class="sig">void Set(string name, int rawValue)</code>
+<div class="mdoc">采集回调写值入口：按名写入，位号不存在时静默忽略。</div>
 </li>
 <li class=""><code class="sig">void SetBad(string name)</code>
+<div class="mdoc">按名标记坏值（位号不存在时静默忽略）。</div>
 </li>
 <li class=""><code class="sig">int AlarmCount()</code>
 <div class="mdoc">处于报警状态的位号数量（低报 + 高报）。</div>
@@ -1019,8 +1210,11 @@ tr.Sample();</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">Trend(string text, int lo, int hi, int sc, int win)</code>
+<div class="mdoc">标题 + 量程（原始计数）/缩放/时间窗（点数，&lt;8 按 8）；
+hi ≤ lo 时量程自动扩为 lo+1。</div>
 </li>
 <li class=""><code class="sig">Trend(string text):this(text, 0, 100, 1, 120)</code>
+<div class="mdoc">默认量程 0..100、缩放 1、120 点时间窗。</div>
 </li>
 <li class=""><code class="sig">Trend():this(&quot;&quot;, 0, 100, 1, 120)</code>
 <div class="mdoc">Placeable from the designer, which builds every control with no
@@ -1029,12 +1223,16 @@ arguments and then applies the design&#x27;s properties.</div>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">int PenCount()</code>
+<div class="mdoc">曲线笔数 / 按下标取笔 / 网格开关。</div>
 </li>
 <li class=""><code class="sig">TrendPen PenAt(int i)</code>
+<div class="mdoc">返回第 i 支笔。</div>
 </li>
 <li class=""><code class="sig">void SetGrid(bool on)</code>
+<div class="mdoc">设置背景网格开/关。</div>
 </li>
 <li class=""><code class="sig">Trend Range(int lo, int hi)</code>
+<div class="mdoc">设量程（原始计数，所有笔共用）。</div>
 </li>
 <li class=""><code class="sig">TrendPen Add(string title, IoTag t, int color)</code>
 <div class="mdoc">加一笔曲线。第一次加入时若量程还是默认值，则跟随位号量程。</div>
@@ -1043,12 +1241,16 @@ arguments and then applies the design&#x27;s properties.</div>
 <div class="mdoc">所有曲线同时采一个点。</div>
 </li>
 <li class=""><code class="sig">override string Kind()</code>
+<div class="mdoc">控件类型标识（序列化/设计器用）。</div>
 </li>
 <li class=""><code class="sig">override List&lt;PropSpec&gt; Props()</code>
+<div class="mdoc">覆写：返回设计器属性清单（标题 / 量程 / 时间窗 / 网格）。</div>
 </li>
 <li class=""><code class="sig">override void OnMeasure(App app)</code>
+<div class="mdoc">覆写：固定首选尺寸 360 x 200（逻辑 px）。</div>
 </li>
 <li class=""><code class="sig">override void OnPaint(App app)</code>
+<div class="mdoc">覆写：画网格与纵轴刻度、各笔曲线和底部图例（新点在右、旧点左移）。</div>
 </li>
 <li class=""><code class="sig">int PlotY(int v, int ph)</code>
 <div class="mdoc">原始值在绘图区内的高度（自底向上的像素数）。</div>
@@ -1080,21 +1282,27 @@ arguments and then applies the design&#x27;s properties.</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">TrendPen(string name, IoTag t, int col, int cap)</code>
+<div class="mdoc">构造：笔名 + 位号 + 颜色 + 环形缓冲容量（&lt;8 按 8）。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">string Title()</code>
+<div class="mdoc">笔名 / 颜色 / 已存样本数 / 绑定的位号。</div>
 </li>
 <li class=""><code class="sig">int Color()</code>
+<div class="mdoc">本笔曲线颜色。</div>
 </li>
 <li class=""><code class="sig">int Count()</code>
+<div class="mdoc">已存样本数。</div>
 </li>
 <li class=""><code class="sig">IoTag Point()</code>
+<div class="mdoc">绑定的位号。</div>
 </li>
 <li class=""><code class="sig">void Sample()</code>
 <div class="mdoc">采一个点（一般由画面的周期定时器统一调用）。</div>
 </li>
 <li class=""><code class="sig">void Push(int v)</code>
+<div class="mdoc">直写一个原始值进环形缓冲（不走位号）。</div>
 </li>
 <li class=""><code class="sig">int At(int i)</code>
 <div class="mdoc">第 i 个点（0 = 最旧），按环形缓冲展开。</div>

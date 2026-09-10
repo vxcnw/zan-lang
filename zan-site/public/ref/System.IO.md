@@ -1,6 +1,6 @@
 # System.IO
 
-> 源码: `stdlib/System/IO/ByteBuffer.zan`, `stdlib/System/IO/Directory.zan`, `stdlib/System/IO/DirectoryTree.zan`, `stdlib/System/IO/DirectoryWatcher.zan`, `stdlib/System/IO/File.zan`, `stdlib/System/IO/FileInfo.zan`, `stdlib/System/IO/FileInfoEx.zan`, `stdlib/System/IO/FileStream.zan`, `stdlib/System/IO/IniFile.zan`, `stdlib/System/IO/KnownFolders.zan`, `stdlib/System/IO/MemoryMappedFile.zan`, `stdlib/System/IO/MemoryStream.zan`, `stdlib/System/IO/Path.zan`, `stdlib/System/IO/PathEx.zan`, `stdlib/System/IO/Shortcut.zan`, `stdlib/System/IO/Stream.zan`, `stdlib/System/IO/StreamReader.zan`, `stdlib/System/IO/StreamWriter.zan`
+> 源码: `stdlib/System/IO/ByteBuffer.zan`, `stdlib/System/IO/Directory.zan`, `stdlib/System/IO/DirectoryTree.zan`, `stdlib/System/IO/File.zan`, `stdlib/System/IO/FileInfo.zan`, `stdlib/System/IO/FileInfoEx.zan`, `stdlib/System/IO/FileStream.zan`, `stdlib/System/IO/IniFile.zan`, `stdlib/System/IO/KnownFolders.zan`, `stdlib/System/IO/MemoryMappedFile.zan`, `stdlib/System/IO/MemoryStream.zan`, `stdlib/System/IO/Path.zan`, `stdlib/System/IO/PathEx.zan`, `stdlib/System/IO/Shortcut.zan`, `stdlib/System/IO/Stream.zan`, `stdlib/System/IO/StreamReader.zan`, `stdlib/System/IO/StreamWriter.zan`
 
 
 ## ByteBuffer (class)
@@ -27,6 +27,7 @@ long v = b.ReadU32();
 - int rpos;
 
 - ByteBuffer()
+  - 构造零容量缓冲区；实例经 Alloc/FromRaw/FromStr 创建。
 
 - static ByteBuffer Alloc(int initialCapacity)
   - 分配指定初始容量的缓冲区。
@@ -72,14 +73,19 @@ long v = b.ReadU32();
     设置逻辑长度。不得超过容量。
 
 - void EnsureRoom(int extra)
+  - 确保还能再写 extra 字节（必要时扩容）。
 
 - ByteBuffer WriteU8(int v)
+  - 追加 1 个字节。
 
 - ByteBuffer WriteU16(int v)
+  - 追加小端 16 位。
 
 - ByteBuffer WriteU32(long v)
+  - 追加小端 32 位。
 
 - ByteBuffer WriteU64(long v)
+  - 追加小端 64 位。
 
 - ByteBuffer WriteVarInt(long v)
   - 无符号 LEB128 变长整数（0-127 占 1 字节）。
@@ -122,14 +128,20 @@ long v = b.ReadU32();
     （读取前先用它判断，防止越过缓冲区末尾）。
 
 - int ReadU8()
+  - 读取 1 个字节（0-255）；越界抛 InvalidOperationException。
 
 - int ReadU16()
+  - 读取小端 16 位；越界抛 InvalidOperationException。
 
 - long ReadU32()
+  - 读取小端 32 位（以 long 返回，无符号）；越界抛 InvalidOperationException。
 
 - long ReadU64()
+  - 读取小端 64 位；越界抛 InvalidOperationException。
 
 - long ReadVarInt()
+  - 读取 LEB128 变长整数；数据截断或超过 64 位时抛
+    InvalidOperationException。
 
 - nint ReadBytes(int count)
   - 将 count 字节读入新分配的原始块
@@ -167,27 +179,27 @@ opendir/readdir/mkdir。readdir 读取的 struct dirent 字段偏移
 - static List<string> MergeEmbed(List<string> disk, string path, bool dirs)
   - 把内嵌资源里的子项并进磁盘枚举结果（磁盘优先，不重复）。
 
-- [DllImport("kernel32", EntryPoint="GetFileAttributesW")]static extern int WinGetFileAttributes(string path);
+- [DllImport("kernel32", EntryPoint="GetFileAttributesW")]static extern int WinGetFileAttributes(nint path);
 
-- [DllImport("kernel32", EntryPoint="CreateDirectoryW")]static extern int WinCreateDirectory(string path, nint secAttrs);
+- [DllImport("kernel32", EntryPoint="CreateDirectoryW")]static extern int WinCreateDirectory(nint path, nint secAttrs);
 
-- [DllImport("kernel32", EntryPoint="RemoveDirectoryW")]static extern int WinRemoveDirectory(string path);
+- [DllImport("kernel32", EntryPoint="RemoveDirectoryW")]static extern int WinRemoveDirectory(nint path);
 
-- [DllImport("kernel32", EntryPoint="GetCurrentDirectoryW")]static extern int WinGetCurrentDirectory(int bufLen, string buf);
+- [DllImport("kernel32", EntryPoint="GetCurrentDirectoryW")]static extern int WinGetCurrentDirectory(int bufLen, nint buf);
 
-- [DllImport("kernel32", EntryPoint="SetCurrentDirectoryW")]static extern int WinSetCurrentDirectory(string path);
+- [DllImport("kernel32", EntryPoint="SetCurrentDirectoryW")]static extern int WinSetCurrentDirectory(nint path);
 
-- [DllImport("kernel32", EntryPoint="FindFirstFileW")]static extern nint WinFindFirstFile(string pattern, string findData);
+- [DllImport("kernel32", EntryPoint="FindFirstFileW")]static extern nint WinFindFirstFile(nint pattern, nint findData);
 
-- [DllImport("kernel32", EntryPoint="FindNextFileW")]static extern int WinFindNextFile(nint handle, string findData);
+- [DllImport("kernel32", EntryPoint="FindNextFileW")]static extern int WinFindNextFile(nint handle, nint findData);
 
 - [DllImport("kernel32", EntryPoint="FindClose")]static extern int WinFindClose(nint handle);
 
 - [DllImport("kernel32", EntryPoint="GetLogicalDrives")]static extern int WinGetLogicalDrives();
 
-- [DllImport("kernel32", EntryPoint="MultiByteToWideChar")]static extern int WinToWide(int codePage, int flags, string source, int sourceLength, string output, int outputLength);
+- [DllImport("kernel32", EntryPoint="MultiByteToWideChar")]static extern int WinToWide(int codePage, int flags, nint source, int sourceLength, nint output, int outputLength);
 
-- [DllImport("kernel32", EntryPoint="WideCharToMultiByte")]static extern int WinToUtf8(int codePage, int flags, string source, int sourceLength, string output, int outputLength, string defaultChar, string usedDefaultChar);
+- [DllImport("kernel32", EntryPoint="WideCharToMultiByte")]static extern int WinToUtf8(int codePage, int flags, nint source, int sourceLength, nint output, int outputLength, nint defaultChar, nint usedDefault);
 
 - [DllImport("crt", EntryPoint="opendir")]static extern nint opendir(string name);
 
@@ -203,11 +215,15 @@ opendir/readdir/mkdir。readdir 读取的 struct dirent 字段偏移
 
 - [DllImport("crt", EntryPoint="getcwd")]static extern string getcwd(string buf, int size);
 
-- static byte[]winWide(string text)
+- static nint winWide(string text)
+  - UTF-8 字符串转 UTF-16 缓冲区（供 W 系列 API）；text 为 null 时返回 0。
 
-- static string winUtf8(string wide)
+- static string winUtf8(nint wide)
+  - 读取以 NUL 结尾的 UTF-16 缓冲区为 UTF-8 字符串；wide 为 0 时返回 ""。
 
 - static int winAttributesUtf8(string path)
+  - 按 UTF-8 路径取 Win32 文件属性；路径转换失败时返回 -1
+    （属性本身失败时是 GetFileAttributesW 的 0xFFFFFFFF）。
 
 - static bool ExistsUtf8(string path)
   - 检查 UTF-8 路径是否存在（不使用 ANSI Windows API）。
@@ -219,6 +235,7 @@ opendir/readdir/mkdir。readdir 读取的 struct dirent 字段偏移
   - 创建路径以 UTF-8 编码的目录。
 
 - static List<string> GetRootsUtf8()
+  - 文件系统根列表：Windows 为每个存在的盘符（"C:/" 形式），POSIX 为 "/"。
 
 - static bool Exists(string path)
   - 检查目录是否存在。工作目录下找不到时，与 GetFiles/
@@ -227,6 +244,7 @@ opendir/readdir/mkdir。readdir 读取的 struct dirent 字段偏移
     views/、wwwroot/ 不存在。
 
 - static bool ExistsOnDisk(string path)
+  - 目录是否真实存在于磁盘（不走随附资源与内嵌副本回退）。
 
 - static void CreateDirectory(string path)
   - 在指定路径创建目录。
@@ -240,31 +258,82 @@ opendir/readdir/mkdir。readdir 读取的 struct dirent 字段偏移
 - static void SetCurrentDirectory(string path)
   - 设置当前工作目录。
 
-- static string winName(byte[]findData)
+- static string winName(nint findData)
+  - 从 WIN32_FIND_DATAW 缓冲区读取 cFileName（UTF-16，位于字节偏移 +44）。
 
 - static List<string> winList(string path, bool wantDirs, bool includeHidden)
+  - FindFirstFile/FindNextFile 枚举一层：wantDirs 决定收文件还是目录，
+    includeHidden=false 时跳过隐藏属性项。返回条目名（不含路径）。
 
 - static int direntTypeOffset()
+  - struct dirent 的 d_type 字节偏移（wasi-libc 布局）。
 
 - static int direntNameOffset()
+  - struct dirent 的 d_name 字节偏移（wasi-libc 布局）。
+
+- static int direntDirType()
+  - wasi-libc 的 d_type 字节沿用 WASI filetype：DT_DIR 判据改为 3。
 
 - static int direntTypeOffset()
+  - struct dirent 的 d_type 字节偏移（Darwin 布局）。
 
 - static int direntNameOffset()
+  - struct dirent 的 d_name 字节偏移（Darwin 布局）。
+
+- static int direntDirType()
+  - POSIX DT_DIR。
+
+- static int direntTypeOffset()
+  - struct dirent 的 d_type 字节偏移（glibc/Linux 布局）。
+
+- static int direntNameOffset()
+  - struct dirent 的 d_name 字节偏移（glibc/Linux 布局）。
+
+- static int direntDirType()
+  - POSIX DT_DIR。
 
 - static string posixName(string ent)
+  - 从 struct dirent* 读取以 NUL 结尾的 d_name。
 
 - static List<string> posixList(string path, bool wantDirs, bool includeHidden)
+  - opendir/readdir 枚举一层：wantDirs 决定收文件还是目录，
+    includeHidden=false 时跳过 "." 开头的条目。d_type 未知或为
+    符号链接时用 opendir 探测真身，返回条目名（不含路径）。
+
+- static List<string> ToPaths(List<string> names, string baseDir)
+  - 把枚举出的裸名字拼成完整路径（与 C# GetFiles 的返回
+    形态一致）。拼接基准用磁盘枚举时 ReadPath 解析到的目录：随附
+    资源回退后路径才真实存在。
+
+- static List<string> GetPaths(string path)
+  - 列出目录中的文件（不递归、含隐藏），返回完整路径——
+    与 C# Directory.GetFiles 的语义对齐（审计 D22：本库 GetFiles
+    返回裸文件名，是 C# 移植陷阱，但几十处既有调用都依赖裸名，
+    不能直接改签名）。找不到磁盘目录时回退到随附资源并合并内嵌
+    子项（内嵌项只有原始 path 可拼，基准取原始 path）。
+
+- static List<string> GetDirectoryPaths(string path)
+  - 列出目录中的子目录（不递归、含隐藏），返回完整路径。
+    语义同 `GetPaths`：磁盘项拼 ReadPath 解析目录，
+    内嵌项拼原始 path。
 
 - static List<string> GetFiles(string path)
-  - 列出目录中的文件（不递归）。
+  - 列出目录中的文件（不递归、含隐藏）。找不到磁盘目录时
+    回退到随附资源并合并内嵌子项。注意：返回裸文件名（不含路径），
+    C# 形态的完整路径用 `GetPaths`。
 
 - static List<string> GetDirectories(string path)
-  - 列出目录中的子目录。
+  - 列出目录中的子目录（不递归、含隐藏）。回退与合并
+    语义同 `GetFiles`。注意：返回裸目录名（不含路径），
+    C# 形态的完整路径用 `GetDirectoryPaths`。
 
 - static List<string> GetFilesFiltered(string path, bool includeHidden)
+  - GetFiles 的可控版本：includeHidden=false 时
+    （Windows 属性位 / POSIX 点前缀）跳过隐藏项。
 
 - static List<string> GetDirectoriesFiltered(string path, bool includeHidden)
+  - GetDirectories 的可控版本：includeHidden=false 时
+    （Windows 属性位 / POSIX 点前缀）跳过隐藏项。
 
 - static void CreateDirectoryRecursive(string path)
   - 递归创建路径中的所有目录。
@@ -292,11 +361,13 @@ PathFilter.Only(".zan").Skip("build bin obj"));
   - 递归收集匹配的文件完整路径（不含目录）。
 
 - static List<string> Files(string dirPath, PathFilter f)
+  - 递归收集匹配文件的完整路径。
 
 - static void FlatInto(List<string> outp, string dirPath, PathFilter f)
   - 单层文件的完整路径（不递归）。
 
 - static List<string> Flat(string dirPath, PathFilter f)
+  - 单层匹配文件的完整路径（不递归）。
 
 - static List<string> Names(string dirPath, PathFilter f)
   - 单层文件名（不递归），按过滤条件筛选。
@@ -306,44 +377,6 @@ PathFilter.Only(".zan").Skip("build bin obj"));
 
 - static List<string> SubNames(string dirPath, PathFilter f)
   - 子目录名（不递归），按过滤条件筛选。
-
-
-## DirectoryWatcher (class)
-
-监听目录并上报文件变化（新增/删除/修改）。
-后台线程约每 250 ms 轮询一次目录列表，并与
-上一份快照按名称 + 最后写入时间比较，因此
-所有平台行为一致（无需 ReadDirectoryChangesW / inotify 相关代码），
-代价是最多约 250 ms 的延迟。不递归子目录。
-
-DirectoryWatcher.Watch("C:\\data", OnChange);
-...
-DirectoryWatcher.Stop();
-
-回调收到条目名与一个 `FileChange` 类型，
-且必须是非捕获（non-capturing）的。
-
-- static List<FileSnapshot> lastSnapshot=new List<FileSnapshot>();
-
-- static bool watching=false;
-
-- static bool Watch(string path, FileChangeFn callback)
-  - 开始监听 `path`。以下情况返回 false：
-    目录不存在或已有监听器在运行。
-
-- static void Stop()
-  - 停止监听。当前这轮轮询结束后不再
-    投递任何事件。
-
-- static void Poll()
-
-- static List<FileSnapshot> Snapshot()
-
-- static void Compare(List<FileSnapshot> current)
-
-- static string dir="";
-
-- static FileChangeFn cb;
 
 
 ## File (class)
@@ -480,7 +513,10 @@ DirectoryWatcher.Stop();
     文件无法打开时抛出 FileNotFoundException。
 
 - static List<string> ReadAllLines(string path)
-  - 将文件所有行读入 List。
+  - 将文件所有行读入 List。识别 LF 与 CRLF，
+    末尾空行不计入结果。
+    每行只做一次 Substring 切片，不逐字符复制，
+    因此十万行级别的索引文件也能秒级读入。
 
 - static void WriteAllLines(string path, List<string> lines)
   - 将字符串列表逐行写入文件。
@@ -502,6 +538,8 @@ DirectoryWatcher.Stop();
     会被保留，因此可用于图片、可执行文件等任意内容）。
     文件无法打开时抛出 FileNotFoundException。
 
+- [DllImport("crt", EntryPoint="memcpy")]static extern nint EmbedCopyIn(byte[]dst, nint src, int n);
+
 - static void WriteAllBytes(string path, byte[]data)
   - 将原始字节写入文件（二进制安全，不同于
     接收字符串、无法携带 NUL 字节的 WriteBytes）。
@@ -517,17 +555,6 @@ DirectoryWatcher.Stop();
 - static void AppendAllBytes(string path, byte[]data)
   - 将原始字节追加到文件末尾（二进制安全）。
     文件不存在时创建。
-
-
-## FileChange (class)
-
-`DirectoryWatcher` 上报的文件系统变化类型。
-
-- static int Added()
-
-- static int Removed()
-
-- static int Modified()
 
 
 ## FileInfo (class)
@@ -549,26 +576,34 @@ DirectoryWatcher.Stop();
 - string path;
 
 - FileInfo(string p)
+  - 构造描述 `p` 处文件/目录的元数据对象（不访问磁盘）。
 
 - string FullName()
   - 该实例所描述的路径。
 
 - bool Exists()
+  - 路径是否存在（文件或目录）。
 
 - long Length()
   - 文件大小（字节），路径不存在时为 -1。
 
 - long LastWriteTime()
+  - 最后修改时间（Unix 秒；不存在为 0）。增量构建的主要依据。
 
 - long CreationTime()
+  - 创建时间（Unix 秒；不存在为 0）。
 
 - long LastAccessTime()
+  - 最后访问时间（Unix 秒；不存在为 0）。
 
 - bool IsReadOnly()
+  - 只读属性。路径不存在时返回 false。
 
 - bool IsHidden()
+  - 隐藏属性。路径不存在时返回 false。
 
 - bool IsDirectory()
+  - 是否为目录。路径不存在时返回 false。
 
 - bool SetReadOnly(bool on)
   - 将文件设为只读或可写。无法修改时返回 false
@@ -579,14 +614,20 @@ DirectoryWatcher.Stop();
     `other` 不存在时视为过期。
 
 - static long GetLastWriteTime(string path)
+  - 静态快捷方法：不经实例直接取路径的元数据。
+    语义同同名实例方法（不存在时时间戳为 0、长度为 -1）。
 
 - static long GetCreationTime(string path)
+  - 创建时间（Unix 秒；不存在为 0）的静态版。
 
 - static long GetLastAccessTime(string path)
+  - 最后访问时间（Unix 秒；不存在为 0）的静态版。
 
 - static long GetLength(string path)
+  - 文件大小（字节；不存在为 -1）的静态版。
 
 - static long GetAttributes(string path)
+  - 原始属性位（位 0 只读、位 1 隐藏、位 2 目录）；路径不存在时为 -1。
 
 
 ## FileInfoEx (class)
@@ -620,12 +661,16 @@ FileInfoEx.CreateHardLink("link.txt", "target.txt");
 - [DllImport("crt")]static extern long zan_file_set_time(string path, int which, long unixSec);
 
 - static int ReparsePointAttr()
+  - FILE_ATTRIBUTE_REPARSE_POINT（0x400）：junction/符号链接属性位。
 
 - static int ShgfiIcon()
+  - SHGFI_ICON：取图标句柄。
 
 - static int ShgfiSmallIcon()
+  - SHGFI_SMALLICON：取小图标。
 
 - static int ShgfiUseFileAttributes()
+  - SHGFI_USEFILEATTRIBUTES：按文件名扩展名猜测而非打开文件。
 
 - static string Version(string path)
   - 读取 Windows exe/dll 的版本信息资源，返回
@@ -634,6 +679,7 @@ FileInfoEx.CreateHardLink("link.txt", "target.txt");
     “”。
 
 - static string JoinVersion(int ms, int ls)
+  - 把 VS_FIXEDFILEINFO 的高/低双字拼成 "major.minor.build.revision"。
 
 - static nint Icon(string path)
   - 提取 `path` 的小型文件类型图标（exe 自带图标，或文件不存在时
@@ -654,14 +700,17 @@ FileInfoEx.CreateHardLink("link.txt", "target.txt");
     （结尾是点或根本没有点）。
 
 - static int LastIndexOfAny(string s, string chars)
+  - s 中最后出现 chars 里任一字符的下标；没有时返回 -1。
 
 - static long GetLastWriteTime(string path)
   - 最后写入的 Unix 时间戳（秒），路径不存在时返回 0。
     另见 `FileInfo.LastWriteTime`。
 
 - static long GetCreationTime(string path)
+  - 创建时间（Unix 秒；不存在为 0）的静态透传。
 
 - static long GetLastAccessTime(string path)
+  - 最后访问时间（Unix 秒；不存在为 0）的静态透传。
 
 - static bool SetLastWriteTime(string path, long unixSec)
   - 将最后写入时间设置为 Unix 时间戳。
@@ -681,21 +730,12 @@ FileInfoEx.CreateHardLink("link.txt", "target.txt");
 - [DllImport("crt")]static extern int link(string existing, string newLink);
 
 - static int LinkPosix(string link, string target)
+  - POSIX link(2) 的换序包装：把 CreateHardLink 的
+    (link, target) 调成 link(target, link)。
 
 - static bool IsReparsePoint(string path)
   - 当 `path` 是 reparse point（目录 junction、符号
     链接或 OneDrive 占位文件）时返回 true。仅 Windows；其他平台返回 false。
-
-
-## FileSnapshot (class)
-
-- string name;
-
-- long lastWriteTime;
-
-- long size;
-
-- FileSnapshot(string name, long lastWriteTime, long size)
 
 
 ## FileStream (class)
@@ -737,6 +777,7 @@ fs.Close();
 - bool writable;
 
 - FileStream()
+  - 构造未打开的流；实例经 Open/OpenRead/OpenWrite/Append 创建。
 
 - static FileStream Open(string path, string mode)
   - 以 stdio 模式字符串（“rb”、“wb”、“r+b”、
@@ -760,27 +801,39 @@ fs.Close();
   - 调用过 `Close` 后为 true。
 
 - override bool CanRead()
+  - 以可读模式打开且未关闭时为 true。
 
 - override bool CanWrite()
+  - 以可写模式打开且未关闭时为 true。
 
 - override bool CanSeek()
+  - 未关闭时为 true（磁盘流总是可 seek）。
 
 - override long Length()
+  - 文件长度（字节）。Length 每次调用都 seek 到尾部再回跳，
+    频繁调用有开销；已关闭时返回 -1。
 
 - override long Position()
+  - 当前读写位置（字节）；已关闭时返回 -1。
 
 - override long Seek(long offset, int origin)
+  - 移动读写位置：origin 0=文件头 1=当前位置 2=文件尾，
+    返回新位置；已关闭时返回 -1。
 
 - override int ReadInto(nint buf, int count)
+  - 实际读到的字节数（0 表示文件尾或已关闭）。
 
 - override int WriteFrom(nint buf, int count)
+  - 从 buf 写出最多 count 字节，返回实际写入数；已关闭或 count<=0 返回 0。
 
 - bool EndOfFile()
   - 读取到达文件末尾后为 true。
 
 - override void Flush()
+  - 把用户态缓冲刷到操作系统。
 
 - override void Close()
+  - 关闭文件句柄；重复调用安全。
 
 
 ## IniEntry (class)
@@ -788,8 +841,10 @@ fs.Close();
 一对 INI 键/值。
 
 - public string key;
+  - 键（去除首尾空白）。
 
 - public string text;
+  - 值（去除首尾空白，可含 "="）。
 
 
 ## IniFile (class)
@@ -847,16 +902,22 @@ ini.Save("app.ini");
   - 将 INI 写回 `path`。
 
 - static IniEntry Find(IniFile ini, string section, string key)
+  - 查找节中的键；节或键不存在时返回 null。
 
 - static IniSection FindSection(IniFile ini, string name)
+  - 只查找不创建：节不存在时返回 null。
 
 - static IniSection Section(IniFile ini, string name)
+  - 返回节，不存在时创建（追加到末尾）。
 
 - static List<string> SplitLines(string text)
+  - 按 \n 拆行并去掉行尾 \r；末尾无换行符的行也计入。
 
 - static int IndexOf(string hay, string needle, int from)
+  - 从 from 起查找子串；没有时返回 -1。
 
 - static int ParseInt(string s)
+  - 解析非负十进制整数；空串或含非数字字符返回 -1。
 
 
 ## IniSection (class)
@@ -864,8 +925,10 @@ ini.Save("app.ini");
 一个 INI 节：名称加有序的键/值条目。
 
 - public string name;
+  - 节名（无节头的条目归入空串节）。
 
 - public List<IniEntry> entries=new List<IniEntry>();
+  - 节内条目（按文件顺序）。
 
 
 ## KnownFolders (class)
@@ -925,6 +988,7 @@ string home = KnownFolders.Home();
     原样保留。Windows 下与 cmd.exe 语义一致（ExpandEnvironmentStringsW）。
 
 - static int IndexOf(string hay, string needle, int from)
+  - 从 from 起查找子串；没有时返回 -1。
 
 - [DllImport("crt", EntryPoint="setenv")]static extern int PosixSetenv(string name, string value, int overwrite);
 
@@ -1036,6 +1100,7 @@ ms.Close();
 - int pos;
 
 - MemoryStream()
+  - 构造空流；实例经 Alloc/FromStr/FromRaw 创建。
 
 - static MemoryStream Alloc(int initialCapacity)
   - 给定初始容量的空可写流。
@@ -1055,27 +1120,39 @@ ms.Close();
     以及 Close 之后失效。
 
 - void Grow(int needed)
+  - 扩容到至少 needed 字节（倍增策略）；分配失败抛 IOException。
 
 - override bool CanRead()
+  - 未 Close 时为 true。
 
 - override bool CanWrite()
+  - 未 Close 时为 true。
 
 - override bool CanSeek()
+  - 未 Close 时为 true。
 
 - override long Length()
+  - 已写入的最高水位字节数。
 
 - override long Position()
+  - 当前读写位置。
 
 - override long Seek(long offset, int origin)
+  - origin 0=开头 1=当前位置 2=末尾；目标钳制到不小于 0，
+    返回新位置。
 
 - void Clear()
   - 清空内容并回到开头；保留缓冲区。
 
 - override int ReadInto(nint buf, int count)
+  - 读取最多 count 字节到 buf，返回实际读取数（末尾为 0）。
 
 - override int WriteFrom(nint buf, int count)
+  - 从 buf 追加 count 字节（必要时扩容），推进位置与最高水位；
+    成功时总是返回 count。
 
 - override void Close()
+  - 释放缓冲区；重复调用安全。
 
 
 ## Path (class)
@@ -1151,18 +1228,26 @@ string rel = PathEx.GetRelativePath("C:\\a\\b", "C:\\a\\b\\c\\d.txt");
     Windows 盘符不区分大小写比较。
 
 - static bool MatchSegments(List<string> pat, int pi, List<string> pth, int ti)
+  - 按段递归匹配；"**" 消耗零个或多个路径段。
 
 - static bool SegmentMatch(string pattern, string segment)
+  - 单段通配符匹配：'*' 匹配任意字符序列，'?' 匹配单个字符。
+    Windows 上不区分大小写。
 
 - static bool SegMatch(string pat, int pi, string seg, int si)
+  - 单段匹配的回溯实现；连续 '*' 合并后尝试任意长度。
 
 - static List<string> SplitSegments(string path)
+  - 按 '/' 或 '\' 拆分路径（根路径保留空段）。
 
 - static bool Same(string a, string b)
+  - 段比较；Windows 上不区分大小写。
 
 - static bool CharEqual(string a, string b)
+  - 单字符比较；Windows 上不区分大小写。
 
 - static int IndexOf(string hay, string needle, int from)
+  - 从 from 起查找子串；没有时返回 -1。
 
 
 ## PathFilter (class)
@@ -1186,8 +1271,10 @@ PathFilter src = PathFilter.Only(".zan .zform .zscene")
   - 跳过以 "." 开头的目录 / 文件。
 
 - bool skipDotFiles;
+  - 跳过以 "." 开头的文件（默认保留）。
 
 - PathFilter()
+  - 构造默认过滤条件（全部文件、跳点开头目录）。
 
 - static PathFilter Any()
   - 全部文件。
@@ -1196,17 +1283,22 @@ PathFilter src = PathFilter.Only(".zan .zform .zscene")
   - 只要这些后缀的文件。
 
 - PathFilter Hide(string suffixes)
+  - 隐藏这些后缀（即使命中 exts），链式。
 
 - PathFilter Skip(string dirs)
+  - 不进入这些名字的子目录，链式。
 
 - PathFilter Dots(bool dirs, bool files)
   - 是否跳过点开头的目录 / 文件（默认跳目录、留文件）。
 
 - bool KeepFile(string name)
+  - 该文件名是否应收录（点开头/隐藏后缀的判断优先于 exts）。
 
 - bool EnterDir(string name)
+  - 是否进入该子目录（点开头目录与 skipDirs 命中的不进）。
 
 - static bool Dotted(string name)
+  - 名字以 "." 开头时为 true。
 
 - static bool AnySuffix(string list, string name)
   - 空格分隔的表里有一项是 `name` 的结尾时为 true。
@@ -1215,6 +1307,7 @@ PathFilter src = PathFilter.Only(".zan .zform .zscene")
   - 空格分隔的表里有一项等于 `name` 时为 true。
 
 - static List<string> Words(string list)
+  - 按空格拆分列表（忽略连续空格）。
 
 
 ## Shortcut (class)
@@ -1233,87 +1326,123 @@ ShortcutInfo info = Shortcut.Read("app.lnk");
 string t = info.target;
 
 - static string ClsidShellLink()
+  - CLSID_ShellLink：COM 快捷方式对象的类标识。
 
 - static string IidShellLinkW()
+  - IID_IShellLinkW：IShellLinkW（宽字符）接口标识。
 
 - static string IidPersistFile()
+  - IID_IPersistFile：IPersistFile 接口标识（.lnk 文件的加载/保存）。
 
 - static int SlotGetPath()
+  - IShellLinkW vtable 槽位 3：GetPath（取目标路径）。
 
 - static int SlotGetDescription()
+  - IShellLinkW vtable 槽位 6：GetDescription（取说明）。
 
 - static int SlotSetDescription()
+  - IShellLinkW vtable 槽位 7：SetDescription（设说明）。
 
 - static int SlotGetWorkingDir()
+  - IShellLinkW vtable 槽位 8：GetWorkingDirectory（取工作目录）。
 
 - static int SlotSetWorkingDir()
+  - IShellLinkW vtable 槽位 9：SetWorkingDirectory（设工作目录）。
 
 - static int SlotGetArguments()
+  - IShellLinkW vtable 槽位 10：GetArguments（取参数）。
 
 - static int SlotSetArguments()
+  - IShellLinkW vtable 槽位 11：SetArguments（设参数）。
 
 - static int SlotGetIconLocation()
+  - IShellLinkW vtable 槽位 16：GetIconLocation（取图标路径与序号）。
 
 - static int SlotSetIconLocation()
+  - IShellLinkW vtable 槽位 17：SetIconLocation（设图标路径与序号）。
 
 - static int SlotSetPath()
+  - IShellLinkW vtable 槽位 20：SetPath（设目标路径）。
 
 - static int SlotLoad()
+  - IPersistFile vtable 槽位 5：Load（打开 .lnk 文件）。
 
 - static int SlotSave()
+  - IPersistFile vtable 槽位 6：Save（写出 .lnk 文件）。
 
 - static bool comReady=false;
 
 - static void InitCom()
+  - 首次使用时初始化 COM（进程内只做一次）。
 
 - static bool Create(string lnkPath, string target, string arguments, string workingDir, string iconPath, int iconIndex, string description)
   - 在 `lnkPath` 处创建（或覆盖）一个指向
     `target` 的 .lnk。可选：参数、工作目录、图标路径+
-    图标索引、说明。成功返回 true。
+    图标索引、说明。成功返回 true。不需要的字段传空串/0。
 
 - static bool WriteDesktopEntry(string path, string target, string arguments, string workingDir, string iconPath, string description)
+  - freedesktop Desktop Entry Specification：一个带 [Desktop Entry] 头的
+    INI 文件，Type=Application 时 Exec 是要执行的命令行。
 
 - static string EntryName(string path)
+  - Desktop Entry 的 Name 默认用文件名（去掉 .desktop 后缀）。
 
 - static string QuoteArg(string s)
+  - Exec 行里带空白的可执行路径需要引号（规范 1.5 章）。
 
 - static string ExecTarget(string exec)
+  - Exec 的第一个 token 是目标程序，其余是参数；首 token 允许带引号。
 
 - static string ExecArguments(string exec)
+  - Exec 行去掉目标程序后的剩余参数串（原样保留）；无参数时为空串。
 
 - static string EntryValue(string text, string key)
+  - 在 Desktop Entry 文本中取 `key=` 行 "=" 之后的值；找不到返回空串。
 
 - static ShortcutInfo Read(string lnkPath)
-  - 解析 .lnk 文件。快捷方式未定义的字段
-    返回空值（iconIndex 为 0）。
+  - 解析 .lnk（Linux 上为 .desktop）文件，返回各字段。
+    文件不存在或解析失败时返回全空字段，不抛异常。
+    快捷方式未定义的字段返回空值（iconIndex 为 0）。
 
 - static string GetPath(nint shell)
+  - IShellLinkW::GetPath(LPWSTR, int cch, WIN32_FIND_DATAW*, DWORD flags).
 
 - static string GetText(nint shell, int slot)
+  - 形状为 (LPWSTR, int cch) 的 getter。
 
 - static string GetIconPath(nint shell)
+  - GetIconLocation 的路径部分；失败返回空串。
 
 - static int GetIconIndex(nint shell)
+  - GetIconLocation 的图标序号；失败返回 0。
 
 
 ## ShortcutInfo (class)
 
 由
-`Shortcut.Read` 返回的结构化 .lnk 内容。
+`Shortcut.Read` 返回的结构化 .lnk 内容。字段可能为空串
+（快捷方式未定义时），iconIndex 默认 0。
 
 - public string target;
+  - 快捷方式指向的目标程序路径。
 
 - public string arguments;
+  - 目标程序的命令行参数（原样保存，未做转义还原）。
 
 - public string workingDir;
+  - 目标程序的工作目录；未设置时为空。
 
 - public string description;
+  - 快捷方式的说明文字。
 
 - public string iconPath;
+  - 图标文件路径（.ico/.exe/.dll）；为空表示用目标程序自带图标。
 
 - public int iconIndex;
+  - 图标文件内的图标序号（从 0 起）。
 
 - ShortcutInfo()
+  - 构造各字段为空串、iconIndex 为 0 的信息。
 
 
 ## Stream (class)
@@ -1530,12 +1659,6 @@ w.Close();
 
 ## int (delegate)
 
+SetEnvironmentVariableW 的函数指针签名（经 Interop.Entry 取用）。
+
 `delegate int SetEnvironmentVariableWFn(nint name, nint val);`
-
-
-## void (delegate)
-
-`DirectoryWatcher.Watch` 的变化回调：
-条目名加一个 `FileChange` 类型。
-
-`delegate void FileChangeFn(string name, int change);`

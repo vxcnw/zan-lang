@@ -32,7 +32,7 @@
       <img class="hero-mascot" src="/mascot.png" alt=""/>
       <p class="kicker" style="text-align:left"><span class="zh">知识库 · 标准库参考</span><span class="en">API reference</span></p>
       <h1 class="grad">System.Data</h1>
-      <p class="lede"><span class="zh">18 个类型 · 完整签名由 stdlib 源码提取</span><span class="en">18 types · extracted from stdlib source</span></p>
+      <p class="lede"><span class="zh">19 个类型 · 完整签名由 stdlib 源码提取</span><span class="en">19 types · extracted from stdlib source</span></p>
       <p style="font-size:13.5px;color:var(--muted);margin:6px 0 0">
         <span class="zh">指南正文以中文编写；导航与界面文案提供英文切换。英文原文请抓取对应 .md 或见仓库 docs/。</span>
         <span class="en">This guide is written in Chinese; the navigation Chrome switches to English. Fetch the .md copy for the raw text.</span>
@@ -47,13 +47,15 @@
     <aside class="wiki-side doc-side">
       <div class="searchbox"><svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         <input id="docSearch" placeholder="筛选目录…" aria-label="filter"></div>
-      <details class="nsgrp" open><summary>System · 55</summary>
+      <details class="nsgrp" open><summary>System · 58</summary>
 <a href="/ref/System">System</a>
 <a href="/ref/System.Automation">System.Automation</a>
 <a href="/ref/System.Collections">System.Collections</a>
 <a href="/ref/System.Collections.Generic">System.Collections.Generic</a>
+<a href="/ref/System.Commercial">System.Commercial</a>
 <a href="/ref/System.Compiler">System.Compiler</a>
 <a href="/ref/System.Data" class="active">System.Data</a>
+<a href="/ref/System.Data.Excel">System.Data.Excel</a>
 <a href="/ref/System.Data.Firebird">System.Data.Firebird</a>
 <a href="/ref/System.Data.MySql">System.Data.MySql</a>
 <a href="/ref/System.Data.Orm">System.Data.Orm</a>
@@ -69,6 +71,7 @@
 <a href="/ref/System.Globalization">System.Globalization</a>
 <a href="/ref/System.IO">System.IO</a>
 <a href="/ref/System.IO.Compression">System.IO.Compression</a>
+<a href="/ref/System.IO.Watch">System.IO.Watch</a>
 <a href="/ref/System.Input">System.Input</a>
 <a href="/ref/System.Json">System.Json</a>
 <a href="/ref/System.Knowledge">System.Knowledge</a>
@@ -76,6 +79,7 @@
 <a href="/ref/System.Management">System.Management</a>
 <a href="/ref/System.Net">System.Net</a>
 <a href="/ref/System.Net.Coap">System.Net.Coap</a>
+<a href="/ref/System.Net.External">System.Net.External</a>
 <a href="/ref/System.Net.Http">System.Net.Http</a>
 <a href="/ref/System.Net.Http.Client">System.Net.Http.Client</a>
 <a href="/ref/System.Net.Http.Download">System.Net.Http.Download</a>
@@ -84,7 +88,6 @@
 <a href="/ref/System.Net.Modbus">System.Net.Modbus</a>
 <a href="/ref/System.Net.Mqtt">System.Net.Mqtt</a>
 <a href="/ref/System.Net.Ntp">System.Net.Ntp</a>
-<a href="/ref/System.Net.Rpc">System.Net.Rpc</a>
 <a href="/ref/System.Net.Sip">System.Net.Sip</a>
 <a href="/ref/System.Net.Sockets">System.Net.Sockets</a>
 <a href="/ref/System.Net.Sse">System.Net.Sse</a>
@@ -123,13 +126,13 @@
 <a href="/ref/Game.Arcade2D">Game.Arcade2D</a>
 <a href="/ref/Game.Arpg">Game.Arpg</a>
 <a href="/ref/Game.Arpg.Data">Game.Arpg.Data</a>
-<a href="/ref/Game.Arpg.Fonts">Game.Arpg.Fonts</a>
 <a href="/ref/Game.Board">Game.Board</a>
 <a href="/ref/Game.Cards">Game.Cards</a>
 <a href="/ref/Game.Core">Game.Core</a>
 <a href="/ref/Game.Foundation">Game.Foundation</a>
-<a href="/ref/Game.Foundation.Sdl">Game.Foundation.Sdl</a>
-<a href="/ref/Game.Render">Game.Render</a>
+<a href="/ref/Game.Foundation.Gui">Game.Foundation.Gui</a>
+<a href="/ref/Game.Idle">Game.Idle</a>
+<a href="/ref/Game.Kit">Game.Kit</a>
 <a href="/ref/Game.Scene">Game.Scene</a>
 </details>
 <details class="nsgrp"><summary>Sdk · 57</summary>
@@ -191,9 +194,6 @@
 <a href="/ref/Sdk.Wechat.Work">Sdk.Wechat.Work</a>
 <a href="/ref/Sdk.Wechat.WxOpen">Sdk.Wechat.WxOpen</a>
 </details>
-<details class="nsgrp" open><summary>SDL3 · 1</summary>
-<a href="/ref/SDL3">SDL3</a>
-</details>
 <details class="nsgrp"><summary>Platform · 1</summary>
 <a href="/ref/Platform">Platform</a>
 </details>
@@ -220,7 +220,10 @@ db.Execute(&quot;INSERT INTO users (id, name) VALUES (1, &#x27;Alice&#x27;)&quot
 DbResult result = db.Query(&quot;SELECT * FROM users&quot;);
 db.Close();
 
-DbConnection any = DbConnection.OpenODBC(&quot;DSN=mydsn;UID=u;PWD=p;&quot;);</div>
+DbConnection any = DbConnection.OpenODBC(&quot;DSN=mydsn;UID=u;PWD=p;&quot;);
+
+语句失败时抛出 <code>DbException</code>；空结果集总
+意味着「无行」，错误文本可通过 GetError() 获取。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">nint handle;</code>
 </li>
@@ -237,6 +240,7 @@ DbConnection any = DbConnection.OpenODBC(&quot;DSN=mydsn;UID=u;PWD=p;&quot;);</d
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">DbConnection()</code>
+<div class="mdoc">空连接；外部经各 Open* 工厂构造。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -247,6 +251,15 @@ DbConnection any = DbConnection.OpenODBC(&quot;DSN=mydsn;UID=u;PWD=p;&quot;);</d
 <li class=""><code class="sig">[DllImport(&quot;odbc32&quot;)]static extern int SQLDriverConnect(nint dbc, nint hwnd, string inConn, int inLen, string outConn, int outBufLen, string outLenPtr, int completion);</code>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;odbc32&quot;)]static extern int SQLExecDirect(nint stmt, string sql, int textLength);</code>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;odbc32&quot;)]static extern int SQLPrepare(nint stmt, string sql, int textLength);</code>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;odbc32&quot;)]static extern int SQLBindParameter(nint stmt, int ipar, int ptype, int ctype, int sqltype, long colDef, int scale, string valuePtr, long valueMax, byte[]indPtr);</code>
+<div class="mdoc">真参数绑定：值经驱动以数据形式上线，永不拼回
+SQL 文本——注入与转义方言问题在此一并消失。
+常量：1=SQL_PARAM_INPUT，1=SQL_C_CHAR，12=SQL_VARCHAR。</div>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;odbc32&quot;)]static extern int SQLExecute(nint stmt);</code>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;odbc32&quot;)]static extern int SQLNumResultCols(nint stmt, string colCountPtr);</code>
 </li>
@@ -264,6 +277,8 @@ DbConnection any = DbConnection.OpenODBC(&quot;DSN=mydsn;UID=u;PWD=p;&quot;);</d
 </li>
 <li class=""><code class="sig">[DllImport(&quot;odbc32&quot;)]static extern int SQLFreeStmt(nint stmt, int option);</code>
 </li>
+<li class=""><code class="sig">[DllImport(&quot;odbc32&quot;)]static extern int SQLGetDiagRec(int handleType, nint handle, int recNum, string sqlState, string nativeErrPtr, string msgBuf, int msgBufLen, string msgLenPtr);</code>
+</li>
 <li class=""><code class="sig">[DllImport(&quot;odbc&quot;)]static extern int SQLAllocHandle(int handleType, nint inputHandle, string outputHandle);</code>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;odbc&quot;)]static extern int SQLSetEnvAttr(nint env, int attr, nint valuePtr, int strLen);</code>
@@ -271,6 +286,13 @@ DbConnection any = DbConnection.OpenODBC(&quot;DSN=mydsn;UID=u;PWD=p;&quot;);</d
 <li class=""><code class="sig">[DllImport(&quot;odbc&quot;)]static extern int SQLDriverConnect(nint dbc, nint hwnd, string inConn, int inLen, string outConn, int outBufLen, string outLenPtr, int completion);</code>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;odbc&quot;)]static extern int SQLExecDirect(nint stmt, string sql, int textLength);</code>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;odbc&quot;)]static extern int SQLPrepare(nint stmt, string sql, int textLength);</code>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;odbc&quot;)]static extern int SQLBindParameter(nint stmt, int ipar, int ptype, int ctype, int sqltype, long colDef, int scale, string valuePtr, long valueMax, byte[]indPtr);</code>
+<div class="mdoc">同上：POSIX 侧 odbc 驱动管理器的真参数绑定。</div>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;odbc&quot;)]static extern int SQLExecute(nint stmt);</code>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;odbc&quot;)]static extern int SQLNumResultCols(nint stmt, string colCountPtr);</code>
 </li>
@@ -288,6 +310,8 @@ DbConnection any = DbConnection.OpenODBC(&quot;DSN=mydsn;UID=u;PWD=p;&quot;);</d
 </li>
 <li class=""><code class="sig">[DllImport(&quot;odbc&quot;)]static extern int SQLFreeStmt(nint stmt, int option);</code>
 </li>
+<li class=""><code class="sig">[DllImport(&quot;odbc&quot;)]static extern int SQLGetDiagRec(int handleType, nint handle, int recNum, string sqlState, string nativeErrPtr, string msgBuf, int msgBufLen, string msgLenPtr);</code>
+</li>
 <li class=""><code class="sig">static nint HandleFromBuf(string p)</code>
 <div class="mdoc">重建写入 out 缓冲区中的 64 位句柄/指针。
 64 位平台上句柄为指针大小（8 字节），因此必须读回全部八个
@@ -303,6 +327,7 @@ DbConnection any = DbConnection.OpenODBC(&quot;DSN=mydsn;UID=u;PWD=p;&quot;);</d
 <div class="mdoc">将 NUL 结尾的 C 缓冲区复制为 Zan 字符串。</div>
 </li>
 <li class=""><code class="sig">static bool OdbcSuccess(int rc)</code>
+<div class="mdoc">ODBC 返回码是否成功（SQL_SUCCESS=0 或 SQL_SUCCESS_WITH_INFO=1）。</div>
 </li>
 <li class=""><code class="sig">static DbConnection OpenODBC(string connectionString)</code>
 <div class="mdoc">用完整的 ODBC 连接字符串 / DSN 打开任意数据源。</div>
@@ -353,41 +378,87 @@ DbConnection any = DbConnection.OpenODBC(&quot;DSN=mydsn;UID=u;PWD=p;&quot;);</d
 如需免依赖的嵌入式访问，请使用 System.Data.Sqlite.SqliteConnection。</div>
 </li>
 <li class=""><code class="sig">static DbConnection OpenWith(string connectionString, int provider)</code>
+<div class="mdoc">全部工厂的落点：分配 ODBC 环境/连接句柄并 SQLDriverConnect；
+失败时 connected=false，lastError 记录静态描述与诊断文本。</div>
 </li>
 <li class=""><code class="sig">nint AllocStmt()</code>
 <div class="mdoc">分配语句句柄（SQL_HANDLE_STMT = 3）；失败时返回 0。</div>
 </li>
+<li class=""><code class="sig">void Fail()</code>
+<div class="mdoc">抛出记录的失败。provider 指明来自哪个引擎，
+处理方无需解析消息即可分支处理；错误文本仍可通过
+<code>GetError</code> 获取。</div>
+</li>
+<li class=""><code class="sig">void Diagnose(int handleType, nint h)</code>
+<div class="mdoc">把最近一条 ODBC 诊断记录的文本读进 lastError，替代
+纯静态描述——&quot;SQLExecDirect failed&quot; 不告诉用户是列名拼错还是
+表不存在，驱动的诊断文本才会。句柄无效或没有记录时不改动
+lastError（静态描述兜底）。只取第一条记录：ODBC 的失败原因
+几乎总在第一条。</div>
+</li>
 <li class=""><code class="sig">int Execute(string sql)</code>
-<div class="mdoc">执行非查询语句（INSERT/UPDATE/DELETE/DDL）。</div>
+<div class="mdoc">执行非查询语句（INSERT/UPDATE/DELETE/DDL）。
+失败时抛出 <code>DbException</code>。</div>
+</li>
+<li class=""><code class="sig">int BindParams(nint stmt, DbParams prms, List&lt;string&gt; keepValues, List &lt;byte[]&gt; keepInds)</code>
+<div class="mdoc">把 prms 绑定为 ODBC 输入参数。全部按 SQL_C_CHAR /
+SQL_VARCHAR 以数据形式传输（类型由列侧隐式转换），NULL 用
+指示符 SQL_NULL_DATA(-1) 表达。值与指示符缓冲必须活到
+SQLExecute 完成之后——ARC 不移动对象，地址稳定，但引用
+断了内存就没了；调用方持有 keepAlive 列表跨过 await。
+返回绑定的参数个数，失败返回 -1。</div>
 </li>
 <li class=""><code class="sig">async int ExecuteAsync(string sql)</code>
-<div class="mdoc">执行非查询语句（包装方法：ODBC 为同步操作）。</div>
+<div class="mdoc">执行非查询语句。SQLPrepare carries the managed SQL string
+synchronously; handle-only SQLExecute crosses the blocking boundary.
+带 prms 时走真参数绑定：占位符就是 ODBC 原生的 <code>?</code>，
+不再做任何文本内联。失败时抛出 <code>DbException</code>。</div>
 </li>
 <li class=""><code class="sig">async int ExecuteAsync(string sql, DbParams prms)</code>
+<div class="mdoc">带参数版本：同样的 SQLPrepare/SQLExecute 拆分，占位符为 ODBC <code>?</code>。</div>
 </li>
-<li class=""><code class="sig">DbResult Query(string sql)</code>
-<div class="mdoc">执行查询并返回结果集。</div>
+<li class=""><code class="sig">async int ExecuteCoreAsync(string sql, DbParams prms)</code>
+<div class="mdoc">Prepare +（可选）绑定参数 + 阻塞卸载的 SQLExecute；返回受影响行数，
+失败抛 <code>DbException</code>。</div>
 </li>
 <li class=""><code class="sig">async DbResult QueryAsync(string sql)</code>
-<div class="mdoc">执行查询（包装方法：ODBC 为同步操作）。</div>
+<div class="mdoc">执行查询并返回结果集。带 prms 时走真参数绑定
+（见 ExecuteCoreAsync）。失败时抛出
+<code>DbException</code>，因此空结果总意味着「无行」。</div>
 </li>
 <li class=""><code class="sig">async DbResult QueryAsync(string sql, DbParams prms)</code>
+<div class="mdoc">带参数版本：真参数绑定（见 <code>BindParams</code>），语义同无参重载。</div>
+</li>
+<li class=""><code class="sig">async DbResult QueryCoreAsync(string sql, DbParams prms)</code>
+<div class="mdoc">Prepare + 执行 + 描述列名 + 逐行 SQLGetData 取值（NULL 按指示符识别）；
+失败抛 <code>DbException</code>。</div>
+</li>
+<li class=""><code class="sig">DbResult Query(string sql)</code>
+<div class="mdoc">同步查询（阻塞调用线程——服务端代码请改用
+QueryAsync）。SQLExecDirect 直发，无参数版本。
+失败时抛出 <code>DbException</code>。</div>
 </li>
 <li class=""><code class="sig">string ExecuteScalar(string sql)</code>
 <div class="mdoc">执行标量查询（以字符串形式返回第一行第一列）。</div>
 </li>
 <li class=""><code class="sig">string ExecuteScalar(string sql, DbParams prms)</code>
+<div class="mdoc">带参数的 ExecuteScalar（语义同无参版本）；无行时返回空串。</div>
 </li>
 <li class=""><code class="sig">async string ExecuteScalarAsync(string sql)</code>
-<div class="mdoc">执行标量查询（包装方法：ODBC 为同步操作）。</div>
+<div class="mdoc">执行标量查询; see QueryAsync for the SQLPrepare/SQLExecute
+split used by this provider.</div>
 </li>
 <li class=""><code class="sig">async string ExecuteScalarAsync(string sql, DbParams prms)</code>
+<div class="mdoc">带参数的 ExecuteScalar（语义同无参版本）。</div>
 </li>
 <li class=""><code class="sig">async bool BeginTransactionAsync()</code>
+<div class="mdoc">执行 BEGIN 开启事务的协程版本，恒返回 true。</div>
 </li>
 <li class=""><code class="sig">async bool CommitAsync()</code>
+<div class="mdoc">执行 COMMIT 提交事务的协程版本，恒返回 true。</div>
 </li>
 <li class=""><code class="sig">async bool RollbackAsync()</code>
+<div class="mdoc">执行 ROLLBACK 回滚事务的协程版本，恒返回 true。</div>
 </li>
 <li class=""><code class="sig">string GetError()</code>
 <div class="mdoc">获取此连接记录的最后一条错误信息。</div>
@@ -411,44 +482,45 @@ DbConnection any = DbConnection.OpenODBC(&quot;DSN=mydsn;UID=u;PWD=p;&quot;);</d
 <div class="mdoc">返回 provider 类型。</div>
 </li>
 <li class=""><code class="sig">int Execute(string sql, DbParams prms)</code>
-<div class="mdoc">执行带参数的非查询语句。ODBC 路径没有
-统一的参数绑定接口，因此 <code>?</code> 占位符在执行前经加引号和转义
-后内联进 SQL。</div>
+<div class="mdoc">执行带参数的非查询语句（同步）。真参数绑定，
+与异步路径一致——<code>?</code> 是 ODBC 原生占位符，值以数据形式
+上线，不再有任何文本内联。失败时抛出
+<code>DbException</code>。</div>
 </li>
 <li class=""><code class="sig">DbResult Query(string sql, DbParams prms)</code>
-<div class="mdoc">执行带参数的查询（ODBC 路径上参数的绑定方式
-参见 Execute 重载）。</div>
-</li>
-<li class=""><code class="sig">static string InlineParams(string sql, DbParams prms)</code>
-<div class="mdoc">将 <code>?</code> 占位符（引号字面量之外的）替换为
-加引号并转义后的参数值。</div>
-</li>
-<li class=""><code class="sig">static string EscapeSqlString(string val)</code>
-<div class="mdoc">转义字符串中的单引号以保证 SQL 安全。</div>
+<div class="mdoc">执行带参数的查询（同步）。真参数绑定，取数逻辑与
+无参 Query 共用同一形状。失败时抛出
+<code>DbException</code>。</div>
 </li>
 </ul>
 </div></div>
 <div class="api"><div class="api-head"><span class="ns">DbException</span><span class="tag">class</span></div>
 <div class="api-body">
 <div class="mdoc">语句执行失败时抛出：服务端拒绝执行、会话未
-连接，或驱动无法完成请求。过去驱动通常以空结果
-回应此类失败，并把原因留在
-&lt;c&gt;GetError()&lt;/c&gt; 中，使得忘记检查的调用方继续
-处理根本不存在的行。
+连接，或驱动无法完成请求。所有内置驱动
+（ODBC、SQLite、PostgreSQL、MySQL、SQL Server、
+Firebird、TDengine）对语句失败一律抛出本异常，
+而不是以空结果或 -1 掩盖——因此空结果集
+总意味着「无行」；错误文本仍可通过驱动的
+&lt;c&gt;GetError()&lt;/c&gt; 获取。
 
 <code>Code</code> 是驱动自身的错误号（Firebird SQL 代码、
-MySQL 错误号、SQL Server 错误号、TDengine 代码）；当失败
+MySQL 错误号、SQL Server 错误号、SQLite 返回码、TDengine 代码）；当失败
 未到达服务器时为 0。<code>Provider</code> 是
 <code>DbProvider</code> 的 id，处理方无需解析消息即可知道
 是哪个驱动抛出的异常。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">public int Code;</code>
+<div class="mdoc">驱动自身的错误号；失败未到达服务器时为 0。</div>
 </li>
 <li class=""><code class="sig">public int Provider;</code>
+<div class="mdoc">抛出异常的驱动在 <code>DbProvider</code> 中的 id。</div>
 </li>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">public DbException(string message, int code, int provider)</code>
+<div class="mdoc">构造异常；&lt;c&gt;code&lt;/c&gt; 为驱动错误号，&lt;c&gt;provider&lt;/c&gt; 为
+<code>DbProvider</code> 的 id。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -493,12 +565,16 @@ DbParams p = new DbParams().Add(&quot;Alice&quot;).AddInt(30);
 DbResult r = db.Query(&quot;SELECT * FROM users WHERE name = ? AND age &gt; ?&quot;, p);</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">static int KindNull=0;</code>
+<div class="mdoc">NULL 参数的类型码。</div>
 </li>
 <li class=""><code class="sig">static int KindInt=1;</code>
+<div class="mdoc">整数参数的类型码（各驱动按 64 位绑定）。</div>
 </li>
 <li class=""><code class="sig">static int KindDouble=2;</code>
+<div class="mdoc">双精度浮点参数的类型码。</div>
 </li>
 <li class=""><code class="sig">static int KindText=3;</code>
+<div class="mdoc">文本参数的类型码。</div>
 </li>
 <li class=""><code class="sig">List&lt;DbParam&gt; items;</code>
 </li>
@@ -509,6 +585,7 @@ DbResult r = db.Query(&quot;SELECT * FROM users WHERE name = ? AND age &gt; ?&qu
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">void push(int kind, string t, long i, double d)</code>
+<div class="mdoc">按类型码追加一个参数（Add*/AddInt 等的公共入口）。</div>
 </li>
 <li class=""><code class="sig">DbParams Add(string val)</code>
 <div class="mdoc">追加一个文本参数。null 字符串绑定为 SQL NULL——
@@ -563,8 +640,10 @@ DbResult r = db.Query(&quot;SELECT * FROM users WHERE name = ? AND age &gt; ?&qu
 通过 <code>Release</code> 归还便立即恢复。已失效的连接
 会被逐出而非回收，把名额让给等待者。
 
-连接池依赖每个调度器单线程的协作模型：
-空闲列表只在 await 之间访问，因此无需加锁。
+连接池的共享状态（空闲/借出列表）由 <code>PoolCore</code>
+管理：池可能被不同 worker 线程上的协程同时访问，
+每处访问都必须在锁内进行——早期版本假设&quot;只在 await
+之间访问、无需加锁&quot;，在多 worker 下导致过真实崩溃。
 
 用法：
 DbPool pool = SqliteConnector.Pool(&quot;app.sqlite3&quot;, 8);
@@ -584,15 +663,22 @@ pool.Close();
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">DbPool(IDbConnector connector, int maxSize)</code>
+<div class="mdoc">由各 Connector 的 &lt;c&gt;Pool()&lt;/c&gt; 工厂构造（构造器不公开）。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">async IDbConnection OpenOne()</code>
+<div class="mdoc">经 connector 打开一个新连接。</div>
 </li>
 <li class=""><code class="sig">async IDbConnection AcquireAsync()</code>
 <div class="mdoc">借出一个连接：复用空闲连接，未达上限时新建，
-否则挂起协程直到有连接被释放。
-连接池关闭后返回 null。</div>
+否则挂起协程直到有连接被释放。饱和等待有硬上限
+（见 <code>PoolWait</code>）：超时返回 null，调用方按
+「数据库暂不可用」应答，绝不定死——任何「持着一条连接再等
+第二条」的嵌套租借缺陷只会退化成个别请求 503，而不是把整个
+worker 拖成永久假死（实测教训：协程死锁时 CPU 空转、端口照收、
+全站无响应）。
+连接池关闭后同样返回 null。</div>
 </li>
 <li class=""><code class="sig">void Release(IDbConnection c)</code>
 <div class="mdoc">将连接归还连接池。已损坏或 Close() 之后
@@ -758,13 +844,14 @@ GetString 对空字符串同样返回 &quot;&quot;）。</div>
 <div class="mdoc">获取指定索引处的列名。</div>
 </li>
 <li class=""><code class="sig">List&lt;string&gt; GetColumnNames()</code>
-<div class="mdoc">返回所有列名。</div>
+<div class="mdoc">返回所有列名（内部列表的副本，调用方改动
+不会影响本结果集）。</div>
 </li>
 <li class=""><code class="sig">bool HasRows()</code>
 <div class="mdoc">检查结果集是否包含行。</div>
 </li>
 <li class=""><code class="sig">List&lt;string&gt; GetRow(int index)</code>
-<div class="mdoc">将整行作为字符串列表返回。</div>
+<div class="mdoc">将整行作为字符串列表返回（内部行的副本）。</div>
 </li>
 <li class=""><code class="sig">List&lt;string&gt; First()</code>
 <div class="mdoc">获取第一行（便捷方法）。</div>
@@ -893,6 +980,7 @@ ORM 生成的 <code>&lt;Entity&gt;Cols</code> 类为列名提供
 <div class="mdoc">将列设置为 SQL NULL。</div>
 </li>
 <li class=""><code class="sig">DbValues push(string name, int kind, string t, long i, double d)</code>
+<div class="mdoc">追加一列；同名列已存在时原位覆盖（保持首次出现的顺序）。</div>
 </li>
 <li class=""><code class="sig">int Count()</code>
 <div class="mdoc">现有列数。</div>
@@ -923,10 +1011,15 @@ ORM 生成的 <code>&lt;Entity&gt;Cols</code> 类为列名提供
 到达数据库时以类型错误的形式暴露。</div>
 </li>
 <li class=""><code class="sig">long parseInt(DbValue v)</code>
+<div class="mdoc">严格解析文本为 64 位整数：接受可选正负号与纯数字，
+&quot;true&quot;/&quot;false&quot; 分别为 1/0；任何其他形状抛出 reject。</div>
 </li>
 <li class=""><code class="sig">double parseDouble(DbValue v)</code>
+<div class="mdoc">严格解析文本为双精度数：可选正负号、数字与至多一个小数点，
+其余字符（包括空格之外的内容）抛出 reject。</div>
 </li>
 <li class=""><code class="sig">void reject(DbValue v, string want)</code>
+<div class="mdoc">抛出指明列名、原值与目标类型的转换失败异常。</div>
 </li>
 </ul>
 </div></div>
@@ -960,8 +1053,11 @@ pool.Release(db);</div>
 <div class="mdoc">根据连接字符串构建的 ODBC 连接池。</div>
 </li>
 <li class=""><code class="sig">async IDbConnection ConnectAsync()</code>
+<div class="mdoc">打开一个新连接。ODBC 调用是同步的：打开在调用线程完成，
+返回的连接可立即使用（协程在此不挂起）。</div>
 </li>
 <li class=""><code class="sig">int GetProvider()</code>
+<div class="mdoc">池的 provider id（构造时传入）。</div>
 </li>
 </ul>
 </div></div>
@@ -989,8 +1085,16 @@ pool.Release(db);</div>
 临界区里绝不 await：所有方法都是同步的，锁只覆盖几条
 列表/计数操作，因此持锁期间协程不会被挂起，也不会
 把锁带过调度点。停泊逻辑留在驱动连接池中——&lt;c&gt;EnterWait&lt;/c&gt;、
-&lt;c&gt;await core.Waiter().Wait()&lt;/c&gt;、&lt;c&gt;LeaveWait&lt;/c&gt;——因此挂起的协程
-正是调用方所等待的那个协程，等待的 await 也发生在锁之外。</div>
+&lt;c&gt;await core.WaitForRelease(...)&lt;/c&gt;、&lt;c&gt;LeaveWait&lt;/c&gt;——因此挂起的协程
+正是调用方所等待的那个协程，等待的 await 也发生在锁之外。
+
+「等不到连接」对单个获取者必须有界：饱和等待由
+<code>PoolWait</code> / <code>WaitForRelease</code> 统一兜底——先停泊在
+事件门上（归还即醒），门等次数用尽后转短轮询直至预算耗尽，
+返回 false 让调用方快速失败。任何嵌套租借（持一条再等第二条）
+或漏归还因此只退化成个别请求拿不到连接，而不是把协程永久停在
+门上把整个池拖死（实测教训：协程死锁时 CPU 空转、端口照收、
+全站无响应）。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">int maxSize;</code>
 </li>
@@ -1052,6 +1156,8 @@ pool.Release(db);</div>
 <div class="mdoc">归还因打开失败而空出的槽位，并让等待者重试。</div>
 </li>
 <li class=""><code class="sig">bool RemoveBorrowed(T c)</code>
+<div class="mdoc">从借出列表摘除 c；c 确在列表中时返回 true
+（Pool/Drop 以此拒绝重复归还）。</div>
 </li>
 <li class=""><code class="sig">bool OpenBlocked()</code>
 <div class="mdoc">建连失败后，本次获取是否应跳过建连尝试。
@@ -1107,6 +1213,54 @@ sqlite3_open 约 125us，网络驱动还要等一个 RTT 或超时），
 <div class="mdoc">唤醒所有停泊的等待者；每个都会重新检查已关闭的池并
 返回 null。</div>
 </li>
+<li class=""><code class="sig">async bool WaitForRelease(PoolWait w)</code>
+<div class="mdoc">池饱和时的一轮有界等待，所有驱动连接池共用。
+
+先停泊在事件门上（零轮询，归还即醒；每轮门等自带
+<code>PoolWait.GateWaitMs</code> 看门狗，Signal 丢失也必然复查）；
+门等次数用尽仍拿不到——说明持有者迟迟不还：健康系统里一次
+归还在毫秒级——转为短轮询直至预算耗尽，返回 false 让调用方
+快速失败（应答「数据库暂不可用」），绝不定死。等待次数与预算
+记在调用方自备的 <code>PoolWait</code> 里，跨整个获取循环累计。</div>
+</li>
+</ul>
+</div></div>
+<div class="api"><div class="api-head"><span class="ns">PoolWait</span><span class="tag">class</span></div>
+<div class="api-body">
+<div class="mdoc">一个获取者在饱和等待期的进度：已发生的门等次数与剩余的
+轮询预算。获取循环外创建一次，传给每一轮
+<code>PoolCore{T}.WaitForRelease</code>；策略常数也集中在这里，
+是全仓库连接池唯一的饱和政策出处。</div>
+<h5 class="cat">字段</h5><ul class="sig">
+<li class=""><code class="sig">int gated;</code>
+<div class="mdoc">已消耗的事件门等次数。计数语义的门加上调用方的复查
+循环保证不丢失唤醒；超过上限说明持有者整体停滞（嵌套租借、
+漏归还），转轮询兜底。</div>
+</li>
+<li class=""><code class="sig">int budget;</code>
+<div class="mdoc">剩余的短轮询预算（毫秒），耗尽即放弃本次获取。</div>
+</li>
+<li class=""><code class="sig">static int GateWaitMs=250;</code>
+<div class="mdoc">单次门等的看门狗上限（毫秒）。Signal 正常到达时等待者
+立即醒来，不受此值影响；它只是唤醒丢失时的保险丝——最坏情况
+下每轮门等多拖这么久就复查一次，谁也不会永久停在门上。</div>
+</li>
+<li class=""><code class="sig">static int MaxGateWaits=64;</code>
+<div class="mdoc">门等次数上限：健康系统里归还远快于此，用满意味着池
+已被病态持有拖住。</div>
+</li>
+<li class=""><code class="sig">static int PollStepMs=20;</code>
+<div class="mdoc">轮询步长（毫秒）：预算耗尽前最后的挣扎，也让等待者
+周期性重查 IsClosed/空闲列表。</div>
+</li>
+<li class=""><code class="sig">static int PollBudgetMs=10000;</code>
+<div class="mdoc">轮询总预算（毫秒）：这是进程级自愈兜底的一部分——
+病态持有的最坏情形下，单个请求最多挂这么久就以 null 放弃。</div>
+</li>
+</ul>
+<h5 class="cat">构造</h5><ul class="sig">
+<li class=""><code class="sig">PoolWait()</code>
+</li>
 </ul>
 </div></div>
 <div class="api"><div class="api-head"><span class="ns">TracedDbConnection</span><span class="tag">class</span></div>
@@ -1135,58 +1289,81 @@ giving it back (see <code>Unwrap</code>).</div>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">IDbConnection Inner()</code>
-<div class="mdoc">The connection underneath.</div>
+<div class="mdoc">The connection underneath (already unwrapped to the driver
+connection).</div>
 </li>
 <li class=""><code class="sig">static IDbConnection Wrap(IDbConnection db)</code>
 <div class="mdoc"><code>db</code> timed, or <code>db</code> itself when nothing is listening: an
-untraced server must not pay for a wrapper on every lease.</div>
+untraced server must not pay for a wrapper on every lease. Idempotent
+(already-wrapped connections pass through). Called by the pool on lease.</div>
 </li>
 <li class=""><code class="sig">static IDbConnection Unwrap(IDbConnection db)</code>
 <div class="mdoc">The connection a pool handed out, however many times it was
 wrapped -- what has to go back to the pool is the pooled object, not a
-wrapper the pool has never seen.</div>
+wrapper the pool has never seen. Null-safe (null passes through).</div>
 </li>
 <li class=""><code class="sig">DbResult Query(string sql)</code>
+<div class="mdoc">Timed query; duration (µs) reported to DbTrace after return.</div>
 </li>
 <li class=""><code class="sig">DbResult Query(string sql, DbParams prms)</code>
+<div class="mdoc">Timed parameterized query; duration (µs) reported to DbTrace after return.</div>
 </li>
 <li class=""><code class="sig">int Execute(string sql)</code>
+<div class="mdoc">Timed execute; returns affected row count.</div>
 </li>
 <li class=""><code class="sig">int Execute(string sql, DbParams prms)</code>
+<div class="mdoc">Timed parameterized execute; returns affected row count.</div>
 </li>
 <li class=""><code class="sig">string ExecuteScalar(string sql)</code>
+<div class="mdoc">Timed scalar (first column of first row, as string).</div>
 </li>
 <li class=""><code class="sig">string ExecuteScalar(string sql, DbParams prms)</code>
+<div class="mdoc">Timed parameterized scalar (first column of first row, as string).</div>
 </li>
 <li class=""><code class="sig">async DbResult QueryAsync(string sql)</code>
+<div class="mdoc">Timed async query; duration (µs) reported to DbTrace after return.</div>
 </li>
 <li class=""><code class="sig">async DbResult QueryAsync(string sql, DbParams prms)</code>
+<div class="mdoc">Timed async parameterized query.</div>
 </li>
 <li class=""><code class="sig">async int ExecuteAsync(string sql)</code>
+<div class="mdoc">Timed async execute; returns affected row count.</div>
 </li>
 <li class=""><code class="sig">async int ExecuteAsync(string sql, DbParams prms)</code>
+<div class="mdoc">Timed async parameterized execute.</div>
 </li>
 <li class=""><code class="sig">async string ExecuteScalarAsync(string sql)</code>
+<div class="mdoc">Timed async scalar (first column of first row, as string).</div>
 </li>
 <li class=""><code class="sig">async string ExecuteScalarAsync(string sql, DbParams prms)</code>
+<div class="mdoc">Timed async parameterized scalar.</div>
 </li>
 <li class=""><code class="sig">int GetProvider()</code>
+<div class="mdoc">Provider id of the wrapped connection (SQLite/MySQL/PG/ODBC/TDengine).</div>
 </li>
 <li class=""><code class="sig">bool IsConnected()</code>
+<div class="mdoc">Whether the wrapped connection is open.</div>
 </li>
 <li class=""><code class="sig">void Close()</code>
+<div class="mdoc">Closes the wrapped connection (not timed).</div>
 </li>
 <li class=""><code class="sig">void BeginTransaction()</code>
+<div class="mdoc">Transactional forwarding — transaction control itself is not timed.</div>
 </li>
 <li class=""><code class="sig">void Commit()</code>
+<div class="mdoc">Commits the wrapped connection&#x27;s transaction (not timed).</div>
 </li>
 <li class=""><code class="sig">void Rollback()</code>
+<div class="mdoc">Rolls the wrapped connection&#x27;s transaction back (not timed).</div>
 </li>
 <li class=""><code class="sig">async bool BeginTransactionAsync()</code>
+<div class="mdoc">Async begin-transaction forwarding (not timed).</div>
 </li>
 <li class=""><code class="sig">async bool CommitAsync()</code>
+<div class="mdoc">Async commit forwarding (not timed).</div>
 </li>
 <li class=""><code class="sig">async bool RollbackAsync()</code>
+<div class="mdoc">Async rollback forwarding (not timed).</div>
 </li>
 </ul>
 </div></div>
@@ -1235,8 +1412,10 @@ takes, so a server can hand this straight to its metrics.</div>
 应使用这些方法。</div>
 </li>
 <li class=""><code class="sig">async bool CommitAsync();</code>
+<div class="mdoc">提交事务写入的协程版本。</div>
 </li>
 <li class=""><code class="sig">async bool RollbackAsync();</code>
+<div class="mdoc">回滚事务写入的协程版本。</div>
 </li>
 </ul>
 </div></div>
@@ -1281,32 +1460,44 @@ QueryBuilder），使 ORM 在 ODBC DbConnection 与
 非阻塞 IO。</div>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">DbResult Query(string sql, DbParams prms);</code>
+<div class="mdoc">执行查询语句，&lt;c&gt;prms&lt;/c&gt; 绑定到语句的参数占位符；失败时抛出
+<code>DbException</code>，空结果集总意味着「无行」。</div>
 </li>
 <li class=""><code class="sig">int Execute(string sql, DbParams prms);</code>
+<div class="mdoc">执行非查询语句（带参数），返回受影响行数。</div>
 </li>
 <li class=""><code class="sig">DbResult Query(string sql);</code>
+<div class="mdoc">执行查询语句；失败时抛出 <code>DbException</code>。</div>
 </li>
 <li class=""><code class="sig">int Execute(string sql);</code>
+<div class="mdoc">执行非查询语句，返回受影响行数。</div>
 </li>
 <li class=""><code class="sig">string ExecuteScalar(string sql);</code>
+<div class="mdoc">执行语句并返回第一行第一列（字符串形式）；无行时返回空串。</div>
 </li>
 <li class=""><code class="sig">string ExecuteScalar(string sql, DbParams prms);</code>
+<div class="mdoc"><code>ExecuteScalar(string)</code> 的带参数版本。</div>
 </li>
 <li class=""><code class="sig">int GetProvider();</code>
+<div class="mdoc">该驱动在 <code>DbProvider</code> 中的 id。</div>
 </li>
 <li class=""><code class="sig">async DbResult QueryAsync(string sql, DbParams prms);</code>
-<div class="mdoc"><code>Query</code> 的协程版本：挂起而非
-阻塞 worker（针对带异步 IO 的驱动）。</div>
+<div class="mdoc"><code>Execute(string, DbParams)</code> 的协程版本。</div>
 </li>
 <li class=""><code class="sig">async int ExecuteAsync(string sql, DbParams prms);</code>
+<div class="mdoc"><code>Execute(string, DbParams)</code> 的协程版本。</div>
 </li>
 <li class=""><code class="sig">async DbResult QueryAsync(string sql);</code>
+<div class="mdoc"><code>Query(string)</code> 的协程版本。</div>
 </li>
 <li class=""><code class="sig">async int ExecuteAsync(string sql);</code>
+<div class="mdoc"><code>Execute(string)</code> 的协程版本。</div>
 </li>
 <li class=""><code class="sig">async string ExecuteScalarAsync(string sql);</code>
+<div class="mdoc"><code>ExecuteScalar(string)</code> 的协程版本。</div>
 </li>
 <li class=""><code class="sig">async string ExecuteScalarAsync(string sql, DbParams prms);</code>
+<div class="mdoc"><code>ExecuteScalar(string, DbParams)</code> 的协程版本。</div>
 </li>
 </ul>
 </div></div>

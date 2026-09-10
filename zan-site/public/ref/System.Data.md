@@ -25,6 +25,9 @@ db.Close();
 
 DbConnection any = DbConnection.OpenODBC("DSN=mydsn;UID=u;PWD=p;");
 
+语句失败时抛出 `DbException`；空结果集总
+意味着「无行」，错误文本可通过 GetError() 获取。
+
 - nint handle;
 
 - nint env;
@@ -45,6 +48,15 @@ DbConnection any = DbConnection.OpenODBC("DSN=mydsn;UID=u;PWD=p;");
 
 - [DllImport("odbc32")]static extern int SQLExecDirect(nint stmt, string sql, int textLength);
 
+- [DllImport("odbc32")]static extern int SQLPrepare(nint stmt, string sql, int textLength);
+
+- [DllImport("odbc32")]static extern int SQLBindParameter(nint stmt, int ipar, int ptype, int ctype, int sqltype, long colDef, int scale, string valuePtr, long valueMax, byte[]indPtr);
+  - 真参数绑定：值经驱动以数据形式上线，永不拼回
+    SQL 文本——注入与转义方言问题在此一并消失。
+    常量：1=SQL_PARAM_INPUT，1=SQL_C_CHAR，12=SQL_VARCHAR。
+
+- [DllImport("odbc32")]static extern int SQLExecute(nint stmt);
+
 - [DllImport("odbc32")]static extern int SQLNumResultCols(nint stmt, string colCountPtr);
 
 - [DllImport("odbc32")]static extern int SQLDescribeCol(nint stmt, int colNum, string colName, int bufLen, string nameLenPtr, string typePtr, string sizePtr, string decPtr, string nullPtr);
@@ -61,6 +73,8 @@ DbConnection any = DbConnection.OpenODBC("DSN=mydsn;UID=u;PWD=p;");
 
 - [DllImport("odbc32")]static extern int SQLFreeStmt(nint stmt, int option);
 
+- [DllImport("odbc32")]static extern int SQLGetDiagRec(int handleType, nint handle, int recNum, string sqlState, string nativeErrPtr, string msgBuf, int msgBufLen, string msgLenPtr);
+
 - [DllImport("odbc")]static extern int SQLAllocHandle(int handleType, nint inputHandle, string outputHandle);
 
 - [DllImport("odbc")]static extern int SQLSetEnvAttr(nint env, int attr, nint valuePtr, int strLen);
@@ -68,6 +82,13 @@ DbConnection any = DbConnection.OpenODBC("DSN=mydsn;UID=u;PWD=p;");
 - [DllImport("odbc")]static extern int SQLDriverConnect(nint dbc, nint hwnd, string inConn, int inLen, string outConn, int outBufLen, string outLenPtr, int completion);
 
 - [DllImport("odbc")]static extern int SQLExecDirect(nint stmt, string sql, int textLength);
+
+- [DllImport("odbc")]static extern int SQLPrepare(nint stmt, string sql, int textLength);
+
+- [DllImport("odbc")]static extern int SQLBindParameter(nint stmt, int ipar, int ptype, int ctype, int sqltype, long colDef, int scale, string valuePtr, long valueMax, byte[]indPtr);
+  - 同上：POSIX 侧 odbc 驱动管理器的真参数绑定。
+
+- [DllImport("odbc")]static extern int SQLExecute(nint stmt);
 
 - [DllImport("odbc")]static extern int SQLNumResultCols(nint stmt, string colCountPtr);
 
@@ -85,7 +106,10 @@ DbConnection any = DbConnection.OpenODBC("DSN=mydsn;UID=u;PWD=p;");
 
 - [DllImport("odbc")]static extern int SQLFreeStmt(nint stmt, int option);
 
+- [DllImport("odbc")]static extern int SQLGetDiagRec(int handleType, nint handle, int recNum, string sqlState, string nativeErrPtr, string msgBuf, int msgBufLen, string msgLenPtr);
+
 - DbConnection()
+  - 空连接；外部经各 Open* 工厂构造。
 
 - static nint HandleFromBuf(string p)
   - 重建写入 out 缓冲区中的 64 位句柄/指针。
@@ -102,6 +126,7 @@ DbConnection any = DbConnection.OpenODBC("DSN=mydsn;UID=u;PWD=p;");
   - 将 NUL 结尾的 C 缓冲区复制为 Zan 字符串。
 
 - static bool OdbcSuccess(int rc)
+  - ODBC 返回码是否成功（SQL_SUCCESS=0 或 SQL_SUCCESS_WITH_INFO=1）。
 
 - static DbConnection OpenODBC(string connectionString)
   - 用完整的 ODBC 连接字符串 / DSN 打开任意数据源。
@@ -152,41 +177,87 @@ DbConnection any = DbConnection.OpenODBC("DSN=mydsn;UID=u;PWD=p;");
     如需免依赖的嵌入式访问，请使用 System.Data.Sqlite.SqliteConnection。
 
 - static DbConnection OpenWith(string connectionString, int provider)
+  - 全部工厂的落点：分配 ODBC 环境/连接句柄并 SQLDriverConnect；
+    失败时 connected=false，lastError 记录静态描述与诊断文本。
 
 - nint AllocStmt()
   - 分配语句句柄（SQL_HANDLE_STMT = 3）；失败时返回 0。
 
+- void Fail()
+  - 抛出记录的失败。provider 指明来自哪个引擎，
+    处理方无需解析消息即可分支处理；错误文本仍可通过
+    `GetError` 获取。
+
+- void Diagnose(int handleType, nint h)
+  - 把最近一条 ODBC 诊断记录的文本读进 lastError，替代
+    纯静态描述——"SQLExecDirect failed" 不告诉用户是列名拼错还是
+    表不存在，驱动的诊断文本才会。句柄无效或没有记录时不改动
+    lastError（静态描述兜底）。只取第一条记录：ODBC 的失败原因
+    几乎总在第一条。
+
 - int Execute(string sql)
   - 执行非查询语句（INSERT/UPDATE/DELETE/DDL）。
+    失败时抛出 `DbException`。
+
+- int BindParams(nint stmt, DbParams prms, List<string> keepValues, List <byte[]> keepInds)
+  - 把 prms 绑定为 ODBC 输入参数。全部按 SQL_C_CHAR /
+    SQL_VARCHAR 以数据形式传输（类型由列侧隐式转换），NULL 用
+    指示符 SQL_NULL_DATA(-1) 表达。值与指示符缓冲必须活到
+    SQLExecute 完成之后——ARC 不移动对象，地址稳定，但引用
+    断了内存就没了；调用方持有 keepAlive 列表跨过 await。
+    返回绑定的参数个数，失败返回 -1。
 
 - async int ExecuteAsync(string sql)
-  - 执行非查询语句（包装方法：ODBC 为同步操作）。
+  - 执行非查询语句。SQLPrepare carries the managed SQL string
+    synchronously; handle-only SQLExecute crosses the blocking boundary.
+    带 prms 时走真参数绑定：占位符就是 ODBC 原生的 `?`，
+    不再做任何文本内联。失败时抛出 `DbException`。
 
 - async int ExecuteAsync(string sql, DbParams prms)
+  - 带参数版本：同样的 SQLPrepare/SQLExecute 拆分，占位符为 ODBC `?`。
 
-- DbResult Query(string sql)
-  - 执行查询并返回结果集。
+- async int ExecuteCoreAsync(string sql, DbParams prms)
+  - Prepare +（可选）绑定参数 + 阻塞卸载的 SQLExecute；返回受影响行数，
+    失败抛 `DbException`。
 
 - async DbResult QueryAsync(string sql)
-  - 执行查询（包装方法：ODBC 为同步操作）。
+  - 执行查询并返回结果集。带 prms 时走真参数绑定
+    （见 ExecuteCoreAsync）。失败时抛出
+    `DbException`，因此空结果总意味着「无行」。
 
 - async DbResult QueryAsync(string sql, DbParams prms)
+  - 带参数版本：真参数绑定（见 `BindParams`），语义同无参重载。
+
+- async DbResult QueryCoreAsync(string sql, DbParams prms)
+  - Prepare + 执行 + 描述列名 + 逐行 SQLGetData 取值（NULL 按指示符识别）；
+    失败抛 `DbException`。
+
+- DbResult Query(string sql)
+  - 同步查询（阻塞调用线程——服务端代码请改用
+    QueryAsync）。SQLExecDirect 直发，无参数版本。
+    失败时抛出 `DbException`。
 
 - string ExecuteScalar(string sql)
   - 执行标量查询（以字符串形式返回第一行第一列）。
 
 - string ExecuteScalar(string sql, DbParams prms)
+  - 带参数的 ExecuteScalar（语义同无参版本）；无行时返回空串。
 
 - async string ExecuteScalarAsync(string sql)
-  - 执行标量查询（包装方法：ODBC 为同步操作）。
+  - 执行标量查询; see QueryAsync for the SQLPrepare/SQLExecute
+    split used by this provider.
 
 - async string ExecuteScalarAsync(string sql, DbParams prms)
+  - 带参数的 ExecuteScalar（语义同无参版本）。
 
 - async bool BeginTransactionAsync()
+  - 执行 BEGIN 开启事务的协程版本，恒返回 true。
 
 - async bool CommitAsync()
+  - 执行 COMMIT 提交事务的协程版本，恒返回 true。
 
 - async bool RollbackAsync()
+  - 执行 ROLLBACK 回滚事务的协程版本，恒返回 true。
 
 - string GetError()
   - 获取此连接记录的最后一条错误信息。
@@ -210,41 +281,42 @@ DbConnection any = DbConnection.OpenODBC("DSN=mydsn;UID=u;PWD=p;");
   - 返回 provider 类型。
 
 - int Execute(string sql, DbParams prms)
-  - 执行带参数的非查询语句。ODBC 路径没有
-    统一的参数绑定接口，因此 `?` 占位符在执行前经加引号和转义
-    后内联进 SQL。
+  - 执行带参数的非查询语句（同步）。真参数绑定，
+    与异步路径一致——`?` 是 ODBC 原生占位符，值以数据形式
+    上线，不再有任何文本内联。失败时抛出
+    `DbException`。
 
 - DbResult Query(string sql, DbParams prms)
-  - 执行带参数的查询（ODBC 路径上参数的绑定方式
-    参见 Execute 重载）。
-
-- static string InlineParams(string sql, DbParams prms)
-  - 将 `?` 占位符（引号字面量之外的）替换为
-    加引号并转义后的参数值。
-
-- static string EscapeSqlString(string val)
-  - 转义字符串中的单引号以保证 SQL 安全。
+  - 执行带参数的查询（同步）。真参数绑定，取数逻辑与
+    无参 Query 共用同一形状。失败时抛出
+    `DbException`。
 
 
 ## DbException (class)
 
 语句执行失败时抛出：服务端拒绝执行、会话未
-连接，或驱动无法完成请求。过去驱动通常以空结果
-回应此类失败，并把原因留在
-<c>GetError()</c> 中，使得忘记检查的调用方继续
-处理根本不存在的行。
+连接，或驱动无法完成请求。所有内置驱动
+（ODBC、SQLite、PostgreSQL、MySQL、SQL Server、
+Firebird、TDengine）对语句失败一律抛出本异常，
+而不是以空结果或 -1 掩盖——因此空结果集
+总意味着「无行」；错误文本仍可通过驱动的
+<c>GetError()</c> 获取。
 
 `Code` 是驱动自身的错误号（Firebird SQL 代码、
-MySQL 错误号、SQL Server 错误号、TDengine 代码）；当失败
+MySQL 错误号、SQL Server 错误号、SQLite 返回码、TDengine 代码）；当失败
 未到达服务器时为 0。`Provider` 是
 `DbProvider` 的 id，处理方无需解析消息即可知道
 是哪个驱动抛出的异常。
 
 - public int Code;
+  - 驱动自身的错误号；失败未到达服务器时为 0。
 
 - public int Provider;
+  - 抛出异常的驱动在 `DbProvider` 中的 id。
 
 - public DbException(string message, int code, int provider)
+  - 构造异常；<c>code</c> 为驱动错误号，<c>provider</c> 为
+    `DbProvider` 的 id。
 
 - static DbException Of(string message)
   - 从未到达服务器的失败，因此不带错误号
@@ -283,18 +355,23 @@ DbParams p = new DbParams().Add("Alice").AddInt(30);
 DbResult r = db.Query("SELECT * FROM users WHERE name = ? AND age > ?", p);
 
 - static int KindNull=0;
+  - NULL 参数的类型码。
 
 - static int KindInt=1;
+  - 整数参数的类型码（各驱动按 64 位绑定）。
 
 - static int KindDouble=2;
+  - 双精度浮点参数的类型码。
 
 - static int KindText=3;
+  - 文本参数的类型码。
 
 - List<DbParam> items;
 
 - DbParams()
 
 - void push(int kind, string t, long i, double d)
+  - 按类型码追加一个参数（Add*/AddInt 等的公共入口）。
 
 - DbParams Add(string val)
   - 追加一个文本参数。null 字符串绑定为 SQL NULL——
@@ -348,8 +425,10 @@ DbResult r = db.Query("SELECT * FROM users WHERE name = ? AND age > ?", p);
 通过 `Release` 归还便立即恢复。已失效的连接
 会被逐出而非回收，把名额让给等待者。
 
-连接池依赖每个调度器单线程的协作模型：
-空闲列表只在 await 之间访问，因此无需加锁。
+连接池的共享状态（空闲/借出列表）由 `PoolCore`
+管理：池可能被不同 worker 线程上的协程同时访问，
+每处访问都必须在锁内进行——早期版本假设"只在 await
+之间访问、无需加锁"，在多 worker 下导致过真实崩溃。
 
 用法：
 DbPool pool = SqliteConnector.Pool("app.sqlite3", 8);
@@ -367,13 +446,20 @@ pool.Close();
 - PoolCore<IDbConnection> core;
 
 - DbPool(IDbConnector connector, int maxSize)
+  - 由各 Connector 的 <c>Pool()</c> 工厂构造（构造器不公开）。
 
 - async IDbConnection OpenOne()
+  - 经 connector 打开一个新连接。
 
 - async IDbConnection AcquireAsync()
   - 借出一个连接：复用空闲连接，未达上限时新建，
-    否则挂起协程直到有连接被释放。
-    连接池关闭后返回 null。
+    否则挂起协程直到有连接被释放。饱和等待有硬上限
+    （见 `PoolWait`）：超时返回 null，调用方按
+    「数据库暂不可用」应答，绝不定死——任何「持着一条连接再等
+    第二条」的嵌套租借缺陷只会退化成个别请求 503，而不是把整个
+    worker 拖成永久假死（实测教训：协程死锁时 CPU 空转、端口照收、
+    全站无响应）。
+    连接池关闭后同样返回 null。
 
 - void Release(IDbConnection c)
   - 将连接归还连接池。已损坏或 Close() 之后
@@ -533,13 +619,14 @@ KingbaseES/人大金仓, Vastbase, GaussDB, QuestDB) via libpq.
   - 获取指定索引处的列名。
 
 - List<string> GetColumnNames()
-  - 返回所有列名。
+  - 返回所有列名（内部列表的副本，调用方改动
+    不会影响本结果集）。
 
 - bool HasRows()
   - 检查结果集是否包含行。
 
 - List<string> GetRow(int index)
-  - 将整行作为字符串列表返回。
+  - 将整行作为字符串列表返回（内部行的副本）。
 
 - List<string> First()
   - 获取第一行（便捷方法）。
@@ -654,6 +741,7 @@ ORM 生成的 `<Entity>Cols` 类为列名提供
   - 将列设置为 SQL NULL。
 
 - DbValues push(string name, int kind, string t, long i, double d)
+  - 追加一列；同名列已存在时原位覆盖（保持首次出现的顺序）。
 
 - int Count()
   - 现有列数。
@@ -684,10 +772,15 @@ ORM 生成的 `<Entity>Cols` 类为列名提供
     到达数据库时以类型错误的形式暴露。
 
 - long parseInt(DbValue v)
+  - 严格解析文本为 64 位整数：接受可选正负号与纯数字，
+    "true"/"false" 分别为 1/0；任何其他形状抛出 reject。
 
 - double parseDouble(DbValue v)
+  - 严格解析文本为双精度数：可选正负号、数字与至多一个小数点，
+    其余字符（包括空格之外的内容）抛出 reject。
 
 - void reject(DbValue v, string want)
+  - 抛出指明列名、原值与目标类型的转换失败异常。
 
 
 ## OdbcConnector (class)
@@ -716,8 +809,11 @@ pool.Release(db);
   - 根据连接字符串构建的 ODBC 连接池。
 
 - async IDbConnection ConnectAsync()
+  - 打开一个新连接。ODBC 调用是同步的：打开在调用线程完成，
+    返回的连接可立即使用（协程在此不挂起）。
 
 - int GetProvider()
+  - 池的 provider id（构造时传入）。
 
 
 ## PoolCore (class)
@@ -744,8 +840,16 @@ pool.Release(db);
 临界区里绝不 await：所有方法都是同步的，锁只覆盖几条
 列表/计数操作，因此持锁期间协程不会被挂起，也不会
 把锁带过调度点。停泊逻辑留在驱动连接池中——<c>EnterWait</c>、
-<c>await core.Waiter().Wait()</c>、<c>LeaveWait</c>——因此挂起的协程
+<c>await core.WaitForRelease(...)</c>、<c>LeaveWait</c>——因此挂起的协程
 正是调用方所等待的那个协程，等待的 await 也发生在锁之外。
+
+「等不到连接」对单个获取者必须有界：饱和等待由
+`PoolWait` / `WaitForRelease` 统一兜底——先停泊在
+事件门上（归还即醒），门等次数用尽后转短轮询直至预算耗尽，
+返回 false 让调用方快速失败。任何嵌套租借（持一条再等第二条）
+或漏归还因此只退化成个别请求拿不到连接，而不是把协程永久停在
+门上把整个池拖死（实测教训：协程死锁时 CPU 空转、端口照收、
+全站无响应）。
 
 - int maxSize;
 
@@ -803,6 +907,8 @@ pool.Release(db);
   - 归还因打开失败而空出的槽位，并让等待者重试。
 
 - bool RemoveBorrowed(T c)
+  - 从借出列表摘除 c；c 确在列表中时返回 true
+    （Pool/Drop 以此拒绝重复归还）。
 
 - bool OpenBlocked()
   - 建连失败后，本次获取是否应跳过建连尝试。
@@ -858,6 +964,51 @@ pool.Release(db);
   - 唤醒所有停泊的等待者；每个都会重新检查已关闭的池并
     返回 null。
 
+- async bool WaitForRelease(PoolWait w)
+  - 池饱和时的一轮有界等待，所有驱动连接池共用。
+    
+    先停泊在事件门上（零轮询，归还即醒；每轮门等自带
+    `PoolWait.GateWaitMs` 看门狗，Signal 丢失也必然复查）；
+    门等次数用尽仍拿不到——说明持有者迟迟不还：健康系统里一次
+    归还在毫秒级——转为短轮询直至预算耗尽，返回 false 让调用方
+    快速失败（应答「数据库暂不可用」），绝不定死。等待次数与预算
+    记在调用方自备的 `PoolWait` 里，跨整个获取循环累计。
+
+
+## PoolWait (class)
+
+一个获取者在饱和等待期的进度：已发生的门等次数与剩余的
+轮询预算。获取循环外创建一次，传给每一轮
+`PoolCore{T}.WaitForRelease`；策略常数也集中在这里，
+是全仓库连接池唯一的饱和政策出处。
+
+- int gated;
+  - 已消耗的事件门等次数。计数语义的门加上调用方的复查
+    循环保证不丢失唤醒；超过上限说明持有者整体停滞（嵌套租借、
+    漏归还），转轮询兜底。
+
+- int budget;
+  - 剩余的短轮询预算（毫秒），耗尽即放弃本次获取。
+
+- PoolWait()
+
+- static int GateWaitMs=250;
+  - 单次门等的看门狗上限（毫秒）。Signal 正常到达时等待者
+    立即醒来，不受此值影响；它只是唤醒丢失时的保险丝——最坏情况
+    下每轮门等多拖这么久就复查一次，谁也不会永久停在门上。
+
+- static int MaxGateWaits=64;
+  - 门等次数上限：健康系统里归还远快于此，用满意味着池
+    已被病态持有拖住。
+
+- static int PollStepMs=20;
+  - 轮询步长（毫秒）：预算耗尽前最后的挣扎，也让等待者
+    周期性重查 IsClosed/空闲列表。
+
+- static int PollBudgetMs=10000;
+  - 轮询总预算（毫秒）：这是进程级自愈兜底的一部分——
+    病态持有的最坏情形下，单个请求最多挂这么久就以 null 放弃。
+
 
 ## TracedDbConnection (class)
 
@@ -881,58 +1032,81 @@ giving it back (see `Unwrap`).
 - TracedDbConnection(IDbConnection inner)
 
 - IDbConnection Inner()
-  - The connection underneath.
+  - The connection underneath (already unwrapped to the driver
+    connection).
 
 - static IDbConnection Wrap(IDbConnection db)
   - `db` timed, or `db` itself when nothing is listening: an
-    untraced server must not pay for a wrapper on every lease.
+    untraced server must not pay for a wrapper on every lease. Idempotent
+    (already-wrapped connections pass through). Called by the pool on lease.
 
 - static IDbConnection Unwrap(IDbConnection db)
   - The connection a pool handed out, however many times it was
     wrapped -- what has to go back to the pool is the pooled object, not a
-    wrapper the pool has never seen.
+    wrapper the pool has never seen. Null-safe (null passes through).
 
 - DbResult Query(string sql)
+  - Timed query; duration (µs) reported to DbTrace after return.
 
 - DbResult Query(string sql, DbParams prms)
+  - Timed parameterized query; duration (µs) reported to DbTrace after return.
 
 - int Execute(string sql)
+  - Timed execute; returns affected row count.
 
 - int Execute(string sql, DbParams prms)
+  - Timed parameterized execute; returns affected row count.
 
 - string ExecuteScalar(string sql)
+  - Timed scalar (first column of first row, as string).
 
 - string ExecuteScalar(string sql, DbParams prms)
+  - Timed parameterized scalar (first column of first row, as string).
 
 - async DbResult QueryAsync(string sql)
+  - Timed async query; duration (µs) reported to DbTrace after return.
 
 - async DbResult QueryAsync(string sql, DbParams prms)
+  - Timed async parameterized query.
 
 - async int ExecuteAsync(string sql)
+  - Timed async execute; returns affected row count.
 
 - async int ExecuteAsync(string sql, DbParams prms)
+  - Timed async parameterized execute.
 
 - async string ExecuteScalarAsync(string sql)
+  - Timed async scalar (first column of first row, as string).
 
 - async string ExecuteScalarAsync(string sql, DbParams prms)
+  - Timed async parameterized scalar.
 
 - int GetProvider()
+  - Provider id of the wrapped connection (SQLite/MySQL/PG/ODBC/TDengine).
 
 - bool IsConnected()
+  - Whether the wrapped connection is open.
 
 - void Close()
+  - Closes the wrapped connection (not timed).
 
 - void BeginTransaction()
+  - Transactional forwarding — transaction control itself is not timed.
 
 - void Commit()
+  - Commits the wrapped connection's transaction (not timed).
 
 - void Rollback()
+  - Rolls the wrapped connection's transaction back (not timed).
 
 - async bool BeginTransactionAsync()
+  - Async begin-transaction forwarding (not timed).
 
 - async bool CommitAsync()
+  - Async commit forwarding (not timed).
 
 - async bool RollbackAsync()
+  - Async rollback forwarding (not timed).
 
 
 ## void (delegate)
@@ -983,8 +1157,10 @@ takes, so a server can hand this straight to its metrics.
     应使用这些方法。
 
 - async bool CommitAsync();
+  - 提交事务写入的协程版本。
 
 - async bool RollbackAsync();
+  - 回滚事务写入的协程版本。
 
 
 ## IDbConnector (interface)
@@ -1027,29 +1203,41 @@ QueryBuilder），使 ORM 在 ODBC DbConnection 与
 非阻塞 IO。
 
 - DbResult Query(string sql, DbParams prms);
+  - 执行查询语句，<c>prms</c> 绑定到语句的参数占位符；失败时抛出
+    `DbException`，空结果集总意味着「无行」。
 
 - int Execute(string sql, DbParams prms);
+  - 执行非查询语句（带参数），返回受影响行数。
 
 - DbResult Query(string sql);
+  - 执行查询语句；失败时抛出 `DbException`。
 
 - int Execute(string sql);
+  - 执行非查询语句，返回受影响行数。
 
 - string ExecuteScalar(string sql);
+  - 执行语句并返回第一行第一列（字符串形式）；无行时返回空串。
 
 - string ExecuteScalar(string sql, DbParams prms);
+  - `ExecuteScalar(string)` 的带参数版本。
 
 - int GetProvider();
+  - 该驱动在 `DbProvider` 中的 id。
 
 - async DbResult QueryAsync(string sql, DbParams prms);
-  - `Query` 的协程版本：挂起而非
-    阻塞 worker（针对带异步 IO 的驱动）。
+  - `Execute(string, DbParams)` 的协程版本。
 
 - async int ExecuteAsync(string sql, DbParams prms);
+  - `Execute(string, DbParams)` 的协程版本。
 
 - async DbResult QueryAsync(string sql);
+  - `Query(string)` 的协程版本。
 
 - async int ExecuteAsync(string sql);
+  - `Execute(string)` 的协程版本。
 
 - async string ExecuteScalarAsync(string sql);
+  - `ExecuteScalar(string)` 的协程版本。
 
 - async string ExecuteScalarAsync(string sql, DbParams prms);
+  - `ExecuteScalar(string, DbParams)` 的协程版本。

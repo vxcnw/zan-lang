@@ -24,12 +24,17 @@
 与「声明数 × 项目字节数」相乘，就出在这里。
 
 - List<string> stripped;
+  - 抹除了字面量与注释的行（与源文件行号一一对应）。
 
 - List<string> owners;
+  - 每行所属的类型体名（不在任何类型内为 ""）。
 
 - List<string> decls;
+  - 每行声明的成员名（无声明为 ""）。
 
 - static CeFileIndex Of(List<string> ls)
+  - 为整份源码建文件索引：抹除字面量/注释、划分每行的
+    owner 类型、摘出每行声明的成员名，三份结果一次算齐。
 
 - static CeFileIndex OfText(string body)
   - 源文本的索引（宿主给的项目源码是整篇文本）。
@@ -123,6 +128,10 @@ CodeEditor 分部：自动补全弹窗、符号索引和
     即使尚未输入前缀。
 
 - void UpdateCompletion()
+  - 重算补全候选：点号模式按已输前缀过滤完整成员列表；常规模式
+    收集光标前的字词前缀，把基础候选表（特性上下文只给
+    DllImport/StructLayout）与周边词按匹配度打分合并，排序后截断
+    前 60 条再套种类过滤。无候选时收起弹窗。
 
 - void ScoreCandidates(List<string> items, List<string> kinds, string defKind, string pfx, Dict <string, bool> taken, List<int> scores)
   - 把 `items` 中匹配 `pfx` 的候选追加到弹窗列表，`taken` 跟踪已入选的
@@ -255,10 +264,13 @@ CodeEditor 分部：自动补全弹窗、符号索引和
   - 返回鼠标指针下的标识符，没有则 ""。
 
 - static void KeywordListK(List<string> outk, List<string> kinds)
+  - 关键字候选（种类统一 "K"）。
 
 - static void CollectWordsK(List<string> ls, List<string> outw, List<string> kinds)
+  - 收集整份行列表的词（种类统一 "W"）。
 
 - static void CollectWordsRangeK(List<string> ls, int from, int to, List<string> outw, List<string> kinds)
+  - 收集 [from, to) 行范围内的词，缺的种类位补 "W"。
 
 - static int WordScanRadius()
   - 词补全向光标上下各看多少行。整篇扫描会让每次击键的代价随文件
@@ -440,6 +452,7 @@ CodeEditor 分部：自动补全弹窗、符号索引和
     候选表线性查重会把一次补全变成平方级。
 
 - static void AddCand(List<string> cand, List<string> kinds, Dict <string, bool> seen, string w, string kind)
+  - 词去重后追加进候选表（空词与已存在的词跳过）。
 
 - void AddProjectCandidates(List<string> cand, List<string> kinds)
   - 把项目声明的类型（及其成员）加入补全。
@@ -587,6 +600,8 @@ CodeEditor 分部：IntelliSense 描述与片段展开，以及
   - 把 `line` 高亮为当前暂停的执行行（-1 清除）。
 
 - void HandleInput(App app)
+  - 分发输入事件：kind==6（字符/编辑键）转 HandleCharKey，
+    kind==4（导航/选择键）转 HandleNavKey，其余种类忽略。
 
 - void HandleCharKey(App app)
   - kind==6：键入字符、Ctrl 快捷键和编辑键。
@@ -668,8 +683,11 @@ CodeEditor 分部：语法高亮（按行缓存的词法分析）
   - 选区高亮色调，选在当前外观下可读的颜色。
 
 - static void DrawSelHighlight(Canvas c, App app, int aL, int aC, int cL, int cC, int ln, string text, int textX, int rowY, int lineH, int fontSize, Rect area)
+  - 在行 `ln` 上绘制本行命中的选区高亮条（首/末行按列截断，
+    中间行整行；不在选区内不画）。
 
 - static string DiagMsg(List<Diagnostic> ds, int line)
+  - 诊断列表里 `line` 行的消息（无则 ""）。
 
 - static bool DiagHas(List<Diagnostic> ds, int line)
   - 任何诊断位于 `line` 行时返回 true。
@@ -678,6 +696,11 @@ CodeEditor 分部：语法高亮（按行缓存的词法分析）
   - 任何快速修复指向 `line` 行时返回 true。
 
 - int Render(App app, Rect area)
+  - 主渲染：画表面/装订线/高亮文本/光标/诊断与选区，处理焦点
+    （获得焦点即占用 Tab）、滚轮与行布局，随后是补全弹窗、右键
+    菜单、CodeLens、引用弹窗、滚动条与悬停提示，最后做点击（移动
+    光标/多击选择）与按键输入。诊断在光标换行时重跑。返回本帧
+    编辑器的焦点 id。
 
 - void RenderLines(App app, Rect area, int lineH, int fontSize, int gutterW, int textX, int visLines, bool focused, int hoverColor, int breakpointColor, int lineNumberColor, int caretColor, int defaultText)
   - 绘制可见行窗口：装订线、断点/执行标记、行号、
@@ -702,8 +725,10 @@ CodeEditor 分部：语法高亮（按行缓存的词法分析）
     光标行的一次从右到左扫描加一次记忆化签名查找。
 
 - static string WordAt(string line, int col)
+  - `line[col]` 所在的标识符词（列上无标识符字符为 ""）。
 
 - static bool IsIdentChar(string ch)
+  - 单字符是否属于标识符（字母/数字/下划线）。
 
 - static bool IsIdentByte(int b)
   - 标识符字节判定。文本扫描逐字符调用它，切一个
@@ -711,6 +736,7 @@ CodeEditor 分部：语法高亮（按行缓存的词法分析）
     因此热路径按字节问。
 
 - static string LookupVar(List<DbgVar> vars, string name)
+  - 调试变量的一行摘要文本 "name : type = val"（不存在为 ""）。
 
 - static DbgVar LookupVarRaw(List<DbgVar> vars, string name)
   - 与 LookupVar 类似，但返回条目本身，调用方可渲染
@@ -721,6 +747,7 @@ CodeEditor 分部：语法高亮（按行缓存的词法分析）
     能与该行精确对齐缩进。
 
 - static string Indent(int n)
+  - n 层缩进的空格串（每层 2 格，至多 12 层）。
 
 - static void PrettyJson(string s, List<string> out2, int maxLines)
   - 把类 JSON 的值字符串美化打印为缩进行。忽略
@@ -916,9 +943,9 @@ ed.LoadText("using System;\n\nclass Main {}");
 ...
 ed.Render(app, editorRect);               // 每帧调用
 
-- static int lang=1;
-  - 编辑器自有界面（上下文菜单）的 UI 语言：0 = 英文，
-    1 = 中文。由宿主应用设置；仅影响显示。
+- static string lang="zh";
+  - 编辑器自有界面（上下文菜单）的 UI 语言码："zh" / "en"。
+    由宿主应用设置；仅影响显示。
 
 - List<string> lines;
 
@@ -1181,6 +1208,16 @@ ed.Render(app, editorRect);               // 每帧调用
 
 - int synText;
 
+- int cssKw;
+
+- int cssTy;
+
+- int cssStr;
+
+- int cssCom;
+
+- int cssNum;
+
 - int syntaxLang;
 
 - void SetSyntaxLang(int lang)
@@ -1213,20 +1250,28 @@ ed.Render(app, editorRect);               // 每帧调用
   - 按 '\n' 把字符串拆分为行（去除 '\r'）。
 
 - void SetLines(List<string> ls)
+  - 整体替换缓冲区：保证至少一行，光标与滚动复位到开头，
+    并强制下一帧重新计算诊断。
 
 - void LoadText(string s)
+  - 载入整段文本（SetLines 的字符串版），同时清空 CodeLens、
+    签名备忘等派生自旧内容的缓存。
 
 - string GetText()
+  - 全部文本（行以 '\n' 连接）。
 
 - int TextStamp()
   - 廉价的内容指纹（行数 + 总字符数）；使宿主
     无需实例化完整文本即可每帧检测缓冲区变化。
 
 - int LineCount()
+  - 缓冲区行数。
 
 - int CurLine()
+  - 当前光标行（0 起）。
 
 - int CurCol()
+  - 当前光标列（0 起）。
 
 - string LineAt(int i)
   - 第 `i` 行的文本（越界返回 ""）。使宿主（查找栏）
@@ -1244,6 +1289,7 @@ ed.Render(app, editorRect);               // 每帧调用
     光标一起保存，以恢复缓冲区离开时的状态。
 
 - void SetScrollLine(int line)
+  - 设置首个可见行（钳制到 [0, 行数-1]）。
 
 - bool CompletionActive()
   - 补全弹窗显示期间返回 true。
@@ -1268,8 +1314,10 @@ ed.Render(app, editorRect);               // 每帧调用
     并清除标志，使宿主恰好处理一次。
 
 - void SetDebugVars(List<DbgVar> vars)
+  - 替换调试变量面板的内容（宿主自己的数据，编辑器只负责显示）。
 
 - void GoToLine(int line)
+  - 跳到某行行首（钳制行号、清除选区）。
 
 - int BufLen()
   - 缓冲区总大小，仅用作使编译器诊断失效的廉价变化信号
@@ -1295,24 +1343,36 @@ ed.Render(app, editorRect);               // 每帧调用
   - 第 `ln` 行当前携带有效编译器诊断时返回 true。
 
 - void GoToLineCol(int line, int col)
+  - 跳到指定行列（列超界时钳到行尾）。
 
 - void InsertStr(string ins)
+  - ---- 编辑原语 ----
+    在光标处插入一段无换行文本，光标随之前移。
 
 - void NewLine()
+  - 在光标处换行：拆分当前行，并把被拆行的前导空白（自动缩进）
+    带到新行，光标落在缩进之后。
 
 - void BackspaceEdit()
+  - 退格：删光标前一字符；行首时与上一行合并。
 
 - void DeleteEdit()
+  - 删除光标处字符；行尾时吞掉下一行。
 
 - void ClampCol()
+  - 把光标列钳回当前行合法范围（[0, 行长]）。
 
 - void MoveLeft()
+  - 左移一字符；行首时退到上一行行尾。
 
 - void MoveRight()
+  - 右移一字符；行尾时进到下一行行首。
 
 - void MoveUp()
+  - 上移一行（列号钳制到新行长）。
 
 - void MoveDown()
+  - 下移一行（列号钳制到新行长）。
 
 - void MoveWordLeft()
   - 将光标移到上一个单词开头（Ctrl+Left）。
@@ -1341,14 +1401,22 @@ ed.Render(app, editorRect);               // 每帧调用
     选区时）。
 
 - void SaveUndo()
+  - ---- 撤销 / 重做 ----
+    把当前全文与光标压入撤销栈（上限 50 条，超出丢最旧），
+    并清空重做栈。
 
 - void Undo()
+  - 撤销最近一次编辑：撤销前状态先压入重做栈，恢复后清除选区。
 
 - void Redo()
+  - 重做最近一次被撤销的编辑（对称地更新撤销栈）。
 
 - void SelectAll()
+  - ---- 选区 ----
+    全选：锚点置 (0,0)，光标置文末。
 
 - void ClearSelection()
+  - 取消选区（锚点保留但不再激活）。
 
 - void SelectRange(int aLine, int aCol, int bLine, int bCol)
   - 从 (aLine, aCol) 选中到 (bLine, bCol)，光标停在
@@ -1394,6 +1462,8 @@ ed.Render(app, editorRect);               // 每帧调用
   - 根据文本区域内的鼠标位置（像素）放置光标。
 
 - void ClearExtraCarets()
+  - ---- 多光标 ----
+    清掉全部辅助光标（只留主光标）。
 
 - void AddCaretBelow()
   - 在最下方活动光标的下一行添加辅助光标。
@@ -1410,16 +1480,23 @@ ed.Render(app, editorRect);               // 每帧调用
     位于第 0 列时（合并行会改变索引）退化为单光标。
 
 - void StartSelection()
+  - 尚无选区时在当前位置埋下选区锚点（拖拽/Shift 移动前调用）。
 
 - string GetSelectedText()
+  - 选区文本（行间以 '\n' 连接；方向自动归一，无选区为 ""）。
 
 - void DeleteSelection()
+  - 删除整个选区：光标落在选区起点，选区取消（无选区为空操作）。
 
 - void CopySelection()
+  - 复制选区到系统剪贴板（同时留在内部缓冲）。
 
 - void CutSelection()
+  - 剪切：复制选区后再删除。
 
 - void PasteClipboard()
+  - 粘贴：优先系统剪贴板（可粘其他应用复制的内容），为空时回退
+    编辑器内缓冲；内容经 InsertBlock 插入（替换选区）。
 
 - void InsertBlock(string ins)
   - 在光标处插入可能含多行的文本（替换当前
@@ -1439,6 +1516,7 @@ ed.Render(app, editorRect);               // 每帧调用
   - 整行删除当前行。
 
 - static string LTrim(string s)
+  - 去掉前导空格/制表符。
 
 - static string Uncomment(string s)
   - 删除前导空白后的第一个"// "（或"//"）。
@@ -1452,7 +1530,8 @@ ed.Render(app, editorRect);               // 每帧调用
     （如"find"、"gotoline"）；无命令时返回空字符串。
 
 - static string T(string en, string zh)
-  - 本地化标签：按 `lang` 显示英文或中文。
+  - 本地化标签：键式查找（System.Globalization.Lang），英文原文
+    作键、内置中文为缺省串；语言包未加载时回退缺省串。
 
 - static List<ContextMenuItem> BuildCtxMenu()
   - 构建右键菜单项。Action 为 0 表示分隔行。
@@ -1461,6 +1540,7 @@ ed.Render(app, editorRect);               // 每帧调用
   - 按 id 执行右键菜单动作（见 BuildCtxMenu）。
 
 - bool CtxMenuOpen()
+  - 右键菜单当前是否打开。
 
 - void RenderCtxMenu(App app)
   - 将右键菜单绘制为顶层浮层（限制在整个
@@ -1468,6 +1548,10 @@ ed.Render(app, editorRect);               // 每帧调用
     帧末调用，以免被其他内容覆盖。
 
 - void CheckErrors()
+  - ---- 错误诊断 ----
+    重跑启发式诊断：按行括号缓存做花括号/圆括号配平（多余或缺失
+    的闭合各报一条）、`using` 行缺分号，最后由
+    AnalyzeMissingUsings 标记使用了却未导入的 stdlib 类型。
 
 - void EnsureLineScan()
   - 刷新括号扫描的按行缓存。诊断在每次光标换行时重跑，而整篇
@@ -1511,9 +1595,13 @@ ed.Render(app, editorRect);               // 每帧调用
 - int color;
 
 - CodeSpan(string text, int color)
+  - 组装一段带色的高亮文本。
 
 
 ## ContextMenuItem (class)
+
+右键菜单的一项：标签、右侧显示的快捷键提示，以及动作编号
+（0 = 分隔行，其余由编辑器的菜单执行器解释）。
 
 - string label;
 
@@ -1522,6 +1610,7 @@ ed.Render(app, editorRect);               // 每帧调用
 - int action;
 
 - ContextMenuItem(string label, string key, int action)
+  - `action` 为 0 时 label/key 被忽略（纯分隔行）。
 
 
 ## DbgVar (class)
@@ -1672,6 +1761,15 @@ ed.Render(app, editorRect);               // 每帧调用
   - 编辑器配色主题选择器使用的命名预设语法调色板，基于
     暗色 chrome。idx：0 = Dark+（默认），1 = Monokai，2 = Dracula，
     3 = Solarized Dark，4 = Night Owl，5 = High Contrast。
+
+- static EditorPalette PresetFor(int idx, bool lightBg)
+  - 命名预设随皮肤背景亮度的变体：暗色背景沿用经典暗色预设；
+    浅色背景返回同色系加深、白底上可读的浅色变体。没有这一层，
+    宿主把暗底预设推给编辑器后，亮色皮肤的白底上画的就是
+    浅灰/亮蓝的暗底文字——刺眼且不可读。
+    浅色变体的每个角色色在白底上的对比度都不低于 4.5:1（WCAG AA
+    正文），因此同色系里偏亮的青/黄/绿需要压暗后才能上白底。
+    idx 含义见 `Preset`。
 
 - static EditorPalette Chrome()
   - 两种调色板共用的暗色弹出组件。

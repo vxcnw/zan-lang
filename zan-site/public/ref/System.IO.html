@@ -32,7 +32,7 @@
       <img class="hero-mascot" src="/mascot.png" alt=""/>
       <p class="kicker" style="text-align:left"><span class="zh">知识库 · 标准库参考</span><span class="en">API reference</span></p>
       <h1 class="grad">System.IO</h1>
-      <p class="lede"><span class="zh">26 个类型 · 完整签名由 stdlib 源码提取</span><span class="en">26 types · extracted from stdlib source</span></p>
+      <p class="lede"><span class="zh">22 个类型 · 完整签名由 stdlib 源码提取</span><span class="en">22 types · extracted from stdlib source</span></p>
       <p style="font-size:13.5px;color:var(--muted);margin:6px 0 0">
         <span class="zh">指南正文以中文编写；导航与界面文案提供英文切换。英文原文请抓取对应 .md 或见仓库 docs/。</span>
         <span class="en">This guide is written in Chinese; the navigation Chrome switches to English. Fetch the .md copy for the raw text.</span>
@@ -47,13 +47,15 @@
     <aside class="wiki-side doc-side">
       <div class="searchbox"><svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         <input id="docSearch" placeholder="筛选目录…" aria-label="filter"></div>
-      <details class="nsgrp" open><summary>System · 55</summary>
+      <details class="nsgrp" open><summary>System · 58</summary>
 <a href="/ref/System">System</a>
 <a href="/ref/System.Automation">System.Automation</a>
 <a href="/ref/System.Collections">System.Collections</a>
 <a href="/ref/System.Collections.Generic">System.Collections.Generic</a>
+<a href="/ref/System.Commercial">System.Commercial</a>
 <a href="/ref/System.Compiler">System.Compiler</a>
 <a href="/ref/System.Data">System.Data</a>
+<a href="/ref/System.Data.Excel">System.Data.Excel</a>
 <a href="/ref/System.Data.Firebird">System.Data.Firebird</a>
 <a href="/ref/System.Data.MySql">System.Data.MySql</a>
 <a href="/ref/System.Data.Orm">System.Data.Orm</a>
@@ -69,6 +71,7 @@
 <a href="/ref/System.Globalization">System.Globalization</a>
 <a href="/ref/System.IO" class="active">System.IO</a>
 <a href="/ref/System.IO.Compression">System.IO.Compression</a>
+<a href="/ref/System.IO.Watch">System.IO.Watch</a>
 <a href="/ref/System.Input">System.Input</a>
 <a href="/ref/System.Json">System.Json</a>
 <a href="/ref/System.Knowledge">System.Knowledge</a>
@@ -76,6 +79,7 @@
 <a href="/ref/System.Management">System.Management</a>
 <a href="/ref/System.Net">System.Net</a>
 <a href="/ref/System.Net.Coap">System.Net.Coap</a>
+<a href="/ref/System.Net.External">System.Net.External</a>
 <a href="/ref/System.Net.Http">System.Net.Http</a>
 <a href="/ref/System.Net.Http.Client">System.Net.Http.Client</a>
 <a href="/ref/System.Net.Http.Download">System.Net.Http.Download</a>
@@ -84,7 +88,6 @@
 <a href="/ref/System.Net.Modbus">System.Net.Modbus</a>
 <a href="/ref/System.Net.Mqtt">System.Net.Mqtt</a>
 <a href="/ref/System.Net.Ntp">System.Net.Ntp</a>
-<a href="/ref/System.Net.Rpc">System.Net.Rpc</a>
 <a href="/ref/System.Net.Sip">System.Net.Sip</a>
 <a href="/ref/System.Net.Sockets">System.Net.Sockets</a>
 <a href="/ref/System.Net.Sse">System.Net.Sse</a>
@@ -123,13 +126,13 @@
 <a href="/ref/Game.Arcade2D">Game.Arcade2D</a>
 <a href="/ref/Game.Arpg">Game.Arpg</a>
 <a href="/ref/Game.Arpg.Data">Game.Arpg.Data</a>
-<a href="/ref/Game.Arpg.Fonts">Game.Arpg.Fonts</a>
 <a href="/ref/Game.Board">Game.Board</a>
 <a href="/ref/Game.Cards">Game.Cards</a>
 <a href="/ref/Game.Core">Game.Core</a>
 <a href="/ref/Game.Foundation">Game.Foundation</a>
-<a href="/ref/Game.Foundation.Sdl">Game.Foundation.Sdl</a>
-<a href="/ref/Game.Render">Game.Render</a>
+<a href="/ref/Game.Foundation.Gui">Game.Foundation.Gui</a>
+<a href="/ref/Game.Idle">Game.Idle</a>
+<a href="/ref/Game.Kit">Game.Kit</a>
 <a href="/ref/Game.Scene">Game.Scene</a>
 </details>
 <details class="nsgrp"><summary>Sdk · 57</summary>
@@ -191,15 +194,12 @@
 <a href="/ref/Sdk.Wechat.Work">Sdk.Wechat.Work</a>
 <a href="/ref/Sdk.Wechat.WxOpen">Sdk.Wechat.WxOpen</a>
 </details>
-<details class="nsgrp" open><summary>SDL3 · 1</summary>
-<a href="/ref/SDL3">SDL3</a>
-</details>
 <details class="nsgrp"><summary>Platform · 1</summary>
 <a href="/ref/Platform">Platform</a>
 </details>
     </aside>
     <div class="wiki-main">
-      <div class="note"><p><span class="zh">源码文件：</span><code class="inline">stdlib/System/IO/ByteBuffer.zan</code>, <code class="inline">stdlib/System/IO/Directory.zan</code>, <code class="inline">stdlib/System/IO/DirectoryTree.zan</code>, <code class="inline">stdlib/System/IO/DirectoryWatcher.zan</code>, <code class="inline">stdlib/System/IO/File.zan</code>, <code class="inline">stdlib/System/IO/FileInfo.zan</code>, <code class="inline">stdlib/System/IO/FileInfoEx.zan</code>, <code class="inline">stdlib/System/IO/FileStream.zan</code>, <code class="inline">stdlib/System/IO/IniFile.zan</code>, <code class="inline">stdlib/System/IO/KnownFolders.zan</code>, <code class="inline">stdlib/System/IO/MemoryMappedFile.zan</code>, <code class="inline">stdlib/System/IO/MemoryStream.zan</code>, <code class="inline">stdlib/System/IO/Path.zan</code>, <code class="inline">stdlib/System/IO/PathEx.zan</code>, <code class="inline">stdlib/System/IO/Shortcut.zan</code>, <code class="inline">stdlib/System/IO/Stream.zan</code>, <code class="inline">stdlib/System/IO/StreamReader.zan</code>, <code class="inline">stdlib/System/IO/StreamWriter.zan</code></p></div>
+      <div class="note"><p><span class="zh">源码文件：</span><code class="inline">stdlib/System/IO/ByteBuffer.zan</code>, <code class="inline">stdlib/System/IO/Directory.zan</code>, <code class="inline">stdlib/System/IO/DirectoryTree.zan</code>, <code class="inline">stdlib/System/IO/File.zan</code>, <code class="inline">stdlib/System/IO/FileInfo.zan</code>, <code class="inline">stdlib/System/IO/FileInfoEx.zan</code>, <code class="inline">stdlib/System/IO/FileStream.zan</code>, <code class="inline">stdlib/System/IO/IniFile.zan</code>, <code class="inline">stdlib/System/IO/KnownFolders.zan</code>, <code class="inline">stdlib/System/IO/MemoryMappedFile.zan</code>, <code class="inline">stdlib/System/IO/MemoryStream.zan</code>, <code class="inline">stdlib/System/IO/Path.zan</code>, <code class="inline">stdlib/System/IO/PathEx.zan</code>, <code class="inline">stdlib/System/IO/Shortcut.zan</code>, <code class="inline">stdlib/System/IO/Stream.zan</code>, <code class="inline">stdlib/System/IO/StreamReader.zan</code>, <code class="inline">stdlib/System/IO/StreamWriter.zan</code></p></div>
 <div class="api"><div class="api-head"><span class="ns">ByteBuffer</span><span class="tag">class</span></div>
 <div class="api-body">
 <div class="mdoc">可增长的二进制缓冲区，显式跟踪长度，小端序
@@ -226,6 +226,7 @@ long v = b.ReadU32();
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">ByteBuffer()</code>
+<div class="mdoc">构造零容量缓冲区；实例经 Alloc/FromRaw/FromStr 创建。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -273,14 +274,19 @@ ReadVarInt / ReadString 从位置 0 开始读取。</div>
 设置逻辑长度。不得超过容量。</div>
 </li>
 <li class=""><code class="sig">void EnsureRoom(int extra)</code>
+<div class="mdoc">确保还能再写 extra 字节（必要时扩容）。</div>
 </li>
 <li class=""><code class="sig">ByteBuffer WriteU8(int v)</code>
+<div class="mdoc">追加 1 个字节。</div>
 </li>
 <li class=""><code class="sig">ByteBuffer WriteU16(int v)</code>
+<div class="mdoc">追加小端 16 位。</div>
 </li>
 <li class=""><code class="sig">ByteBuffer WriteU32(long v)</code>
+<div class="mdoc">追加小端 32 位。</div>
 </li>
 <li class=""><code class="sig">ByteBuffer WriteU64(long v)</code>
+<div class="mdoc">追加小端 64 位。</div>
 </li>
 <li class=""><code class="sig">ByteBuffer WriteVarInt(long v)</code>
 <div class="mdoc">无符号 LEB128 变长整数（0-127 占 1 字节）。</div>
@@ -323,14 +329,20 @@ ReadVarInt / ReadString 从位置 0 开始读取。</div>
 （读取前先用它判断，防止越过缓冲区末尾）。</div>
 </li>
 <li class=""><code class="sig">int ReadU8()</code>
+<div class="mdoc">读取 1 个字节（0-255）；越界抛 InvalidOperationException。</div>
 </li>
 <li class=""><code class="sig">int ReadU16()</code>
+<div class="mdoc">读取小端 16 位；越界抛 InvalidOperationException。</div>
 </li>
 <li class=""><code class="sig">long ReadU32()</code>
+<div class="mdoc">读取小端 32 位（以 long 返回，无符号）；越界抛 InvalidOperationException。</div>
 </li>
 <li class=""><code class="sig">long ReadU64()</code>
+<div class="mdoc">读取小端 64 位；越界抛 InvalidOperationException。</div>
 </li>
 <li class=""><code class="sig">long ReadVarInt()</code>
+<div class="mdoc">读取 LEB128 变长整数；数据截断或超过 64 位时抛
+InvalidOperationException。</div>
 </li>
 <li class=""><code class="sig">nint ReadBytes(int count)</code>
 <div class="mdoc">将 count 字节读入新分配的原始块
@@ -369,27 +381,27 @@ opendir/readdir/mkdir。readdir 读取的 struct dirent 字段偏移
 <li class=""><code class="sig">static List&lt;string&gt; MergeEmbed(List&lt;string&gt; disk, string path, bool dirs)</code>
 <div class="mdoc">把内嵌资源里的子项并进磁盘枚举结果（磁盘优先，不重复）。</div>
 </li>
-<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;GetFileAttributesW&quot;)]static extern int WinGetFileAttributes(string path);</code>
+<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;GetFileAttributesW&quot;)]static extern int WinGetFileAttributes(nint path);</code>
 </li>
-<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;CreateDirectoryW&quot;)]static extern int WinCreateDirectory(string path, nint secAttrs);</code>
+<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;CreateDirectoryW&quot;)]static extern int WinCreateDirectory(nint path, nint secAttrs);</code>
 </li>
-<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;RemoveDirectoryW&quot;)]static extern int WinRemoveDirectory(string path);</code>
+<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;RemoveDirectoryW&quot;)]static extern int WinRemoveDirectory(nint path);</code>
 </li>
-<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;GetCurrentDirectoryW&quot;)]static extern int WinGetCurrentDirectory(int bufLen, string buf);</code>
+<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;GetCurrentDirectoryW&quot;)]static extern int WinGetCurrentDirectory(int bufLen, nint buf);</code>
 </li>
-<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;SetCurrentDirectoryW&quot;)]static extern int WinSetCurrentDirectory(string path);</code>
+<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;SetCurrentDirectoryW&quot;)]static extern int WinSetCurrentDirectory(nint path);</code>
 </li>
-<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;FindFirstFileW&quot;)]static extern nint WinFindFirstFile(string pattern, string findData);</code>
+<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;FindFirstFileW&quot;)]static extern nint WinFindFirstFile(nint pattern, nint findData);</code>
 </li>
-<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;FindNextFileW&quot;)]static extern int WinFindNextFile(nint handle, string findData);</code>
+<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;FindNextFileW&quot;)]static extern int WinFindNextFile(nint handle, nint findData);</code>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;FindClose&quot;)]static extern int WinFindClose(nint handle);</code>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;GetLogicalDrives&quot;)]static extern int WinGetLogicalDrives();</code>
 </li>
-<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;MultiByteToWideChar&quot;)]static extern int WinToWide(int codePage, int flags, string source, int sourceLength, string output, int outputLength);</code>
+<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;MultiByteToWideChar&quot;)]static extern int WinToWide(int codePage, int flags, nint source, int sourceLength, nint output, int outputLength);</code>
 </li>
-<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;WideCharToMultiByte&quot;)]static extern int WinToUtf8(int codePage, int flags, string source, int sourceLength, string output, int outputLength, string defaultChar, string usedDefaultChar);</code>
+<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;WideCharToMultiByte&quot;)]static extern int WinToUtf8(int codePage, int flags, nint source, int sourceLength, nint output, int outputLength, nint defaultChar, nint usedDefault);</code>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;opendir&quot;)]static extern nint opendir(string name);</code>
 </li>
@@ -405,11 +417,15 @@ opendir/readdir/mkdir。readdir 读取的 struct dirent 字段偏移
 </li>
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;getcwd&quot;)]static extern string getcwd(string buf, int size);</code>
 </li>
-<li class=""><code class="sig">static byte[]winWide(string text)</code>
+<li class=""><code class="sig">static nint winWide(string text)</code>
+<div class="mdoc">UTF-8 字符串转 UTF-16 缓冲区（供 W 系列 API）；text 为 null 时返回 0。</div>
 </li>
-<li class=""><code class="sig">static string winUtf8(string wide)</code>
+<li class=""><code class="sig">static string winUtf8(nint wide)</code>
+<div class="mdoc">读取以 NUL 结尾的 UTF-16 缓冲区为 UTF-8 字符串；wide 为 0 时返回 &quot;&quot;。</div>
 </li>
 <li class=""><code class="sig">static int winAttributesUtf8(string path)</code>
+<div class="mdoc">按 UTF-8 路径取 Win32 文件属性；路径转换失败时返回 -1
+（属性本身失败时是 GetFileAttributesW 的 0xFFFFFFFF）。</div>
 </li>
 <li class=""><code class="sig">static bool ExistsUtf8(string path)</code>
 <div class="mdoc">检查 UTF-8 路径是否存在（不使用 ANSI Windows API）。</div>
@@ -421,6 +437,7 @@ opendir/readdir/mkdir。readdir 读取的 struct dirent 字段偏移
 <div class="mdoc">创建路径以 UTF-8 编码的目录。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; GetRootsUtf8()</code>
+<div class="mdoc">文件系统根列表：Windows 为每个存在的盘符（&quot;C:/&quot; 形式），POSIX 为 &quot;/&quot;。</div>
 </li>
 <li class=""><code class="sig">static bool Exists(string path)</code>
 <div class="mdoc">检查目录是否存在。工作目录下找不到时，与 GetFiles/
@@ -429,6 +446,7 @@ GetDirectories 一样回退到程序随附的那一份（单文件包的解包�
 views/、wwwroot/ 不存在。</div>
 </li>
 <li class=""><code class="sig">static bool ExistsOnDisk(string path)</code>
+<div class="mdoc">目录是否真实存在于磁盘（不走随附资源与内嵌副本回退）。</div>
 </li>
 <li class=""><code class="sig">static void CreateDirectory(string path)</code>
 <div class="mdoc">在指定路径创建目录。</div>
@@ -442,31 +460,82 @@ views/、wwwroot/ 不存在。</div>
 <li class=""><code class="sig">static void SetCurrentDirectory(string path)</code>
 <div class="mdoc">设置当前工作目录。</div>
 </li>
-<li class=""><code class="sig">static string winName(byte[]findData)</code>
+<li class=""><code class="sig">static string winName(nint findData)</code>
+<div class="mdoc">从 WIN32_FIND_DATAW 缓冲区读取 cFileName（UTF-16，位于字节偏移 +44）。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; winList(string path, bool wantDirs, bool includeHidden)</code>
+<div class="mdoc">FindFirstFile/FindNextFile 枚举一层：wantDirs 决定收文件还是目录，
+includeHidden=false 时跳过隐藏属性项。返回条目名（不含路径）。</div>
 </li>
 <li class=""><code class="sig">static int direntTypeOffset()</code>
+<div class="mdoc">struct dirent 的 d_type 字节偏移（wasi-libc 布局）。</div>
 </li>
 <li class=""><code class="sig">static int direntNameOffset()</code>
+<div class="mdoc">struct dirent 的 d_name 字节偏移（wasi-libc 布局）。</div>
+</li>
+<li class=""><code class="sig">static int direntDirType()</code>
+<div class="mdoc">wasi-libc 的 d_type 字节沿用 WASI filetype：DT_DIR 判据改为 3。</div>
 </li>
 <li class=""><code class="sig">static int direntTypeOffset()</code>
+<div class="mdoc">struct dirent 的 d_type 字节偏移（Darwin 布局）。</div>
 </li>
 <li class=""><code class="sig">static int direntNameOffset()</code>
+<div class="mdoc">struct dirent 的 d_name 字节偏移（Darwin 布局）。</div>
+</li>
+<li class=""><code class="sig">static int direntDirType()</code>
+<div class="mdoc">POSIX DT_DIR。</div>
+</li>
+<li class=""><code class="sig">static int direntTypeOffset()</code>
+<div class="mdoc">struct dirent 的 d_type 字节偏移（glibc/Linux 布局）。</div>
+</li>
+<li class=""><code class="sig">static int direntNameOffset()</code>
+<div class="mdoc">struct dirent 的 d_name 字节偏移（glibc/Linux 布局）。</div>
+</li>
+<li class=""><code class="sig">static int direntDirType()</code>
+<div class="mdoc">POSIX DT_DIR。</div>
 </li>
 <li class=""><code class="sig">static string posixName(string ent)</code>
+<div class="mdoc">从 struct dirent* 读取以 NUL 结尾的 d_name。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; posixList(string path, bool wantDirs, bool includeHidden)</code>
+<div class="mdoc">opendir/readdir 枚举一层：wantDirs 决定收文件还是目录，
+includeHidden=false 时跳过 &quot;.&quot; 开头的条目。d_type 未知或为
+符号链接时用 opendir 探测真身，返回条目名（不含路径）。</div>
+</li>
+<li class=""><code class="sig">static List&lt;string&gt; ToPaths(List&lt;string&gt; names, string baseDir)</code>
+<div class="mdoc">把枚举出的裸名字拼成完整路径（与 C# GetFiles 的返回
+形态一致）。拼接基准用磁盘枚举时 ReadPath 解析到的目录：随附
+资源回退后路径才真实存在。</div>
+</li>
+<li class=""><code class="sig">static List&lt;string&gt; GetPaths(string path)</code>
+<div class="mdoc">列出目录中的文件（不递归、含隐藏），返回完整路径——
+与 C# Directory.GetFiles 的语义对齐（审计 D22：本库 GetFiles
+返回裸文件名，是 C# 移植陷阱，但几十处既有调用都依赖裸名，
+不能直接改签名）。找不到磁盘目录时回退到随附资源并合并内嵌
+子项（内嵌项只有原始 path 可拼，基准取原始 path）。</div>
+</li>
+<li class=""><code class="sig">static List&lt;string&gt; GetDirectoryPaths(string path)</code>
+<div class="mdoc">列出目录中的子目录（不递归、含隐藏），返回完整路径。
+语义同 <code>GetPaths</code>：磁盘项拼 ReadPath 解析目录，
+内嵌项拼原始 path。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; GetFiles(string path)</code>
-<div class="mdoc">列出目录中的文件（不递归）。</div>
+<div class="mdoc">列出目录中的文件（不递归、含隐藏）。找不到磁盘目录时
+回退到随附资源并合并内嵌子项。注意：返回裸文件名（不含路径），
+C# 形态的完整路径用 <code>GetPaths</code>。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; GetDirectories(string path)</code>
-<div class="mdoc">列出目录中的子目录。</div>
+<div class="mdoc">列出目录中的子目录（不递归、含隐藏）。回退与合并
+语义同 <code>GetFiles</code>。注意：返回裸目录名（不含路径），
+C# 形态的完整路径用 <code>GetDirectoryPaths</code>。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; GetFilesFiltered(string path, bool includeHidden)</code>
+<div class="mdoc">GetFiles 的可控版本：includeHidden=false 时
+（Windows 属性位 / POSIX 点前缀）跳过隐藏项。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; GetDirectoriesFiltered(string path, bool includeHidden)</code>
+<div class="mdoc">GetDirectories 的可控版本：includeHidden=false 时
+（Windows 属性位 / POSIX 点前缀）跳过隐藏项。</div>
 </li>
 <li class=""><code class="sig">static void CreateDirectoryRecursive(string path)</code>
 <div class="mdoc">递归创建路径中的所有目录。</div>
@@ -495,11 +564,13 @@ PathFilter.Only(&quot;.zan&quot;).Skip(&quot;build bin obj&quot;));
 <div class="mdoc">递归收集匹配的文件完整路径（不含目录）。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; Files(string dirPath, PathFilter f)</code>
+<div class="mdoc">递归收集匹配文件的完整路径。</div>
 </li>
 <li class=""><code class="sig">static void FlatInto(List&lt;string&gt; outp, string dirPath, PathFilter f)</code>
 <div class="mdoc">单层文件的完整路径（不递归）。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; Flat(string dirPath, PathFilter f)</code>
+<div class="mdoc">单层匹配文件的完整路径（不递归）。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; Names(string dirPath, PathFilter f)</code>
 <div class="mdoc">单层文件名（不递归），按过滤条件筛选。</div>
@@ -509,47 +580,6 @@ PathFilter.Only(&quot;.zan&quot;).Skip(&quot;build bin obj&quot;));
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; SubNames(string dirPath, PathFilter f)</code>
 <div class="mdoc">子目录名（不递归），按过滤条件筛选。</div>
-</li>
-</ul>
-</div></div>
-<div class="api"><div class="api-head"><span class="ns">DirectoryWatcher</span><span class="tag">class</span></div>
-<div class="api-body">
-<div class="mdoc">监听目录并上报文件变化（新增/删除/修改）。
-后台线程约每 250 ms 轮询一次目录列表，并与
-上一份快照按名称 + 最后写入时间比较，因此
-所有平台行为一致（无需 ReadDirectoryChangesW / inotify 相关代码），
-代价是最多约 250 ms 的延迟。不递归子目录。
-
-DirectoryWatcher.Watch(&quot;C:\\data&quot;, OnChange);
-...
-DirectoryWatcher.Stop();
-
-回调收到条目名与一个 <code>FileChange</code> 类型，
-且必须是非捕获（non-capturing）的。</div>
-<h5 class="cat">字段</h5><ul class="sig">
-<li class=""><code class="sig">static bool watching=false;</code>
-</li>
-<li class=""><code class="sig">static string dir=&quot;&quot;;</code>
-</li>
-<li class=""><code class="sig">static FileChangeFn cb;</code>
-</li>
-</ul>
-<h5 class="cat">方法</h5><ul class="sig">
-<li class=""><code class="sig">static List&lt;FileSnapshot&gt; lastSnapshot=new List&lt;FileSnapshot&gt;();</code>
-</li>
-<li class=""><code class="sig">static bool Watch(string path, FileChangeFn callback)</code>
-<div class="mdoc">开始监听 <code>path</code>。以下情况返回 false：
-目录不存在或已有监听器在运行。</div>
-</li>
-<li class=""><code class="sig">static void Stop()</code>
-<div class="mdoc">停止监听。当前这轮轮询结束后不再
-投递任何事件。</div>
-</li>
-<li class=""><code class="sig">static void Poll()</code>
-</li>
-<li class=""><code class="sig">static List&lt;FileSnapshot&gt; Snapshot()</code>
-</li>
-<li class=""><code class="sig">static void Compare(List&lt;FileSnapshot&gt; current)</code>
 </li>
 </ul>
 </div></div>
@@ -687,7 +717,10 @@ Windows 上退化为按扩展名判断（.exe/.bat/.cmd/.com）。</div>
 文件无法打开时抛出 FileNotFoundException。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; ReadAllLines(string path)</code>
-<div class="mdoc">将文件所有行读入 List。</div>
+<div class="mdoc">将文件所有行读入 List。识别 LF 与 CRLF，
+末尾空行不计入结果。
+每行只做一次 Substring 切片，不逐字符复制，
+因此十万行级别的索引文件也能秒级读入。</div>
 </li>
 <li class=""><code class="sig">static void WriteAllLines(string path, List&lt;string&gt; lines)</code>
 <div class="mdoc">将字符串列表逐行写入文件。
@@ -709,6 +742,8 @@ FileNotFoundException。</div>
 会被保留，因此可用于图片、可执行文件等任意内容）。
 文件无法打开时抛出 FileNotFoundException。</div>
 </li>
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;memcpy&quot;)]static extern nint EmbedCopyIn(byte[]dst, nint src, int n);</code>
+</li>
 <li class=""><code class="sig">static void WriteAllBytes(string path, byte[]data)</code>
 <div class="mdoc">将原始字节写入文件（二进制安全，不同于
 接收字符串、无法携带 NUL 字节的 WriteBytes）。</div>
@@ -727,18 +762,6 @@ FileNotFoundException。</div>
 </li>
 </ul>
 </div></div>
-<div class="api"><div class="api-head"><span class="ns">FileChange</span><span class="tag">class</span></div>
-<div class="api-body">
-<div class="mdoc"><code>DirectoryWatcher</code> 上报的文件系统变化类型。</div>
-<h5 class="cat">方法</h5><ul class="sig">
-<li class=""><code class="sig">static int Added()</code>
-</li>
-<li class=""><code class="sig">static int Removed()</code>
-</li>
-<li class=""><code class="sig">static int Modified()</code>
-</li>
-</ul>
-</div></div>
 <div class="api"><div class="api-head"><span class="ns">FileInfo</span><span class="tag">class</span></div>
 <div class="api-body">
 <div class="mdoc">单个文件或目录的元数据：大小、时间戳以及
@@ -752,6 +775,7 @@ FileNotFoundException。</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">FileInfo(string p)</code>
+<div class="mdoc">构造描述 <code>p</code> 处文件/目录的元数据对象（不访问磁盘）。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -767,21 +791,28 @@ FileNotFoundException。</div>
 <div class="mdoc">该实例所描述的路径。</div>
 </li>
 <li class=""><code class="sig">bool Exists()</code>
+<div class="mdoc">路径是否存在（文件或目录）。</div>
 </li>
 <li class=""><code class="sig">long Length()</code>
 <div class="mdoc">文件大小（字节），路径不存在时为 -1。</div>
 </li>
 <li class=""><code class="sig">long LastWriteTime()</code>
+<div class="mdoc">最后修改时间（Unix 秒；不存在为 0）。增量构建的主要依据。</div>
 </li>
 <li class=""><code class="sig">long CreationTime()</code>
+<div class="mdoc">创建时间（Unix 秒；不存在为 0）。</div>
 </li>
 <li class=""><code class="sig">long LastAccessTime()</code>
+<div class="mdoc">最后访问时间（Unix 秒；不存在为 0）。</div>
 </li>
 <li class=""><code class="sig">bool IsReadOnly()</code>
+<div class="mdoc">只读属性。路径不存在时返回 false。</div>
 </li>
 <li class=""><code class="sig">bool IsHidden()</code>
+<div class="mdoc">隐藏属性。路径不存在时返回 false。</div>
 </li>
 <li class=""><code class="sig">bool IsDirectory()</code>
+<div class="mdoc">是否为目录。路径不存在时返回 false。</div>
 </li>
 <li class=""><code class="sig">bool SetReadOnly(bool on)</code>
 <div class="mdoc">将文件设为只读或可写。无法修改时返回 false
@@ -792,14 +823,20 @@ FileNotFoundException。</div>
 <code>other</code> 不存在时视为过期。</div>
 </li>
 <li class=""><code class="sig">static long GetLastWriteTime(string path)</code>
+<div class="mdoc">静态快捷方法：不经实例直接取路径的元数据。
+语义同同名实例方法（不存在时时间戳为 0、长度为 -1）。</div>
 </li>
 <li class=""><code class="sig">static long GetCreationTime(string path)</code>
+<div class="mdoc">创建时间（Unix 秒；不存在为 0）的静态版。</div>
 </li>
 <li class=""><code class="sig">static long GetLastAccessTime(string path)</code>
+<div class="mdoc">最后访问时间（Unix 秒；不存在为 0）的静态版。</div>
 </li>
 <li class=""><code class="sig">static long GetLength(string path)</code>
+<div class="mdoc">文件大小（字节；不存在为 -1）的静态版。</div>
 </li>
 <li class=""><code class="sig">static long GetAttributes(string path)</code>
+<div class="mdoc">原始属性位（位 0 只读、位 1 隐藏、位 2 目录）；路径不存在时为 -1。</div>
 </li>
 </ul>
 </div></div>
@@ -834,12 +871,16 @@ FileInfoEx.CreateHardLink(&quot;link.txt&quot;, &quot;target.txt&quot;);
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;)]static extern long zan_file_set_time(string path, int which, long unixSec);</code>
 </li>
 <li class=""><code class="sig">static int ReparsePointAttr()</code>
+<div class="mdoc">FILE_ATTRIBUTE_REPARSE_POINT（0x400）：junction/符号链接属性位。</div>
 </li>
 <li class=""><code class="sig">static int ShgfiIcon()</code>
+<div class="mdoc">SHGFI_ICON：取图标句柄。</div>
 </li>
 <li class=""><code class="sig">static int ShgfiSmallIcon()</code>
+<div class="mdoc">SHGFI_SMALLICON：取小图标。</div>
 </li>
 <li class=""><code class="sig">static int ShgfiUseFileAttributes()</code>
+<div class="mdoc">SHGFI_USEFILEATTRIBUTES：按文件名扩展名猜测而非打开文件。</div>
 </li>
 <li class=""><code class="sig">static string Version(string path)</code>
 <div class="mdoc">读取 Windows exe/dll 的版本信息资源，返回
@@ -848,6 +889,7 @@ FileInfoEx.CreateHardLink(&quot;link.txt&quot;, &quot;target.txt&quot;);
 “”。</div>
 </li>
 <li class=""><code class="sig">static string JoinVersion(int ms, int ls)</code>
+<div class="mdoc">把 VS_FIXEDFILEINFO 的高/低双字拼成 &quot;major.minor.build.revision&quot;。</div>
 </li>
 <li class=""><code class="sig">static nint Icon(string path)</code>
 <div class="mdoc">提取 <code>path</code> 的小型文件类型图标（exe 自带图标，或文件不存在时
@@ -868,14 +910,17 @@ FileInfoEx.CreateHardLink(&quot;link.txt&quot;, &quot;target.txt&quot;);
 （结尾是点或根本没有点）。</div>
 </li>
 <li class=""><code class="sig">static int LastIndexOfAny(string s, string chars)</code>
+<div class="mdoc">s 中最后出现 chars 里任一字符的下标；没有时返回 -1。</div>
 </li>
 <li class=""><code class="sig">static long GetLastWriteTime(string path)</code>
 <div class="mdoc">最后写入的 Unix 时间戳（秒），路径不存在时返回 0。
 另见 <code>FileInfo.LastWriteTime</code>。</div>
 </li>
 <li class=""><code class="sig">static long GetCreationTime(string path)</code>
+<div class="mdoc">创建时间（Unix 秒；不存在为 0）的静态透传。</div>
 </li>
 <li class=""><code class="sig">static long GetLastAccessTime(string path)</code>
+<div class="mdoc">最后访问时间（Unix 秒；不存在为 0）的静态透传。</div>
 </li>
 <li class=""><code class="sig">static bool SetLastWriteTime(string path, long unixSec)</code>
 <div class="mdoc">将最后写入时间设置为 Unix 时间戳。
@@ -895,25 +940,12 @@ FileInfoEx.CreateHardLink(&quot;link.txt&quot;, &quot;target.txt&quot;);
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;)]static extern int link(string existing, string newLink);</code>
 </li>
 <li class=""><code class="sig">static int LinkPosix(string link, string target)</code>
+<div class="mdoc">POSIX link(2) 的换序包装：把 CreateHardLink 的
+(link, target) 调成 link(target, link)。</div>
 </li>
 <li class=""><code class="sig">static bool IsReparsePoint(string path)</code>
 <div class="mdoc">当 <code>path</code> 是 reparse point（目录 junction、符号
 链接或 OneDrive 占位文件）时返回 true。仅 Windows；其他平台返回 false。</div>
-</li>
-</ul>
-</div></div>
-<div class="api"><div class="api-head"><span class="ns">FileSnapshot</span><span class="tag">class</span></div>
-<div class="api-body">
-<h5 class="cat">字段</h5><ul class="sig">
-<li class=""><code class="sig">string name;</code>
-</li>
-<li class=""><code class="sig">long lastWriteTime;</code>
-</li>
-<li class=""><code class="sig">long size;</code>
-</li>
-</ul>
-<h5 class="cat">构造</h5><ul class="sig">
-<li class=""><code class="sig">FileSnapshot(string name, long lastWriteTime, long size)</code>
 </li>
 </ul>
 </div></div>
@@ -942,6 +974,7 @@ fs.Close();
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">FileStream()</code>
+<div class="mdoc">构造未打开的流；实例经 Open/OpenRead/OpenWrite/Append 创建。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -983,27 +1016,39 @@ fs.Close();
 <div class="mdoc">调用过 <code>Close</code> 后为 true。</div>
 </li>
 <li class=""><code class="sig">override bool CanRead()</code>
+<div class="mdoc">以可读模式打开且未关闭时为 true。</div>
 </li>
 <li class=""><code class="sig">override bool CanWrite()</code>
+<div class="mdoc">以可写模式打开且未关闭时为 true。</div>
 </li>
 <li class=""><code class="sig">override bool CanSeek()</code>
+<div class="mdoc">未关闭时为 true（磁盘流总是可 seek）。</div>
 </li>
 <li class=""><code class="sig">override long Length()</code>
+<div class="mdoc">文件长度（字节）。Length 每次调用都 seek 到尾部再回跳，
+频繁调用有开销；已关闭时返回 -1。</div>
 </li>
 <li class=""><code class="sig">override long Position()</code>
+<div class="mdoc">当前读写位置（字节）；已关闭时返回 -1。</div>
 </li>
 <li class=""><code class="sig">override long Seek(long offset, int origin)</code>
+<div class="mdoc">移动读写位置：origin 0=文件头 1=当前位置 2=文件尾，
+返回新位置；已关闭时返回 -1。</div>
 </li>
 <li class=""><code class="sig">override int ReadInto(nint buf, int count)</code>
+<div class="mdoc">实际读到的字节数（0 表示文件尾或已关闭）。</div>
 </li>
 <li class=""><code class="sig">override int WriteFrom(nint buf, int count)</code>
+<div class="mdoc">从 buf 写出最多 count 字节，返回实际写入数；已关闭或 count&lt;=0 返回 0。</div>
 </li>
 <li class=""><code class="sig">bool EndOfFile()</code>
 <div class="mdoc">读取到达文件末尾后为 true。</div>
 </li>
 <li class=""><code class="sig">override void Flush()</code>
+<div class="mdoc">把用户态缓冲刷到操作系统。</div>
 </li>
 <li class=""><code class="sig">override void Close()</code>
+<div class="mdoc">关闭文件句柄；重复调用安全。</div>
 </li>
 </ul>
 </div></div>
@@ -1012,8 +1057,10 @@ fs.Close();
 <div class="mdoc">一对 INI 键/值。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">public string key;</code>
+<div class="mdoc">键（去除首尾空白）。</div>
 </li>
 <li class=""><code class="sig">public string text;</code>
+<div class="mdoc">值（去除首尾空白，可含 &quot;=&quot;）。</div>
 </li>
 </ul>
 </div></div>
@@ -1072,16 +1119,22 @@ ini.Save(&quot;app.ini&quot;);</div>
 <div class="mdoc">将 INI 写回 <code>path</code>。</div>
 </li>
 <li class=""><code class="sig">static IniEntry Find(IniFile ini, string section, string key)</code>
+<div class="mdoc">查找节中的键；节或键不存在时返回 null。</div>
 </li>
 <li class=""><code class="sig">static IniSection FindSection(IniFile ini, string name)</code>
+<div class="mdoc">只查找不创建：节不存在时返回 null。</div>
 </li>
 <li class=""><code class="sig">static IniSection Section(IniFile ini, string name)</code>
+<div class="mdoc">返回节，不存在时创建（追加到末尾）。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; SplitLines(string text)</code>
+<div class="mdoc">按 \n 拆行并去掉行尾 \r；末尾无换行符的行也计入。</div>
 </li>
 <li class=""><code class="sig">static int IndexOf(string hay, string needle, int from)</code>
+<div class="mdoc">从 from 起查找子串；没有时返回 -1。</div>
 </li>
 <li class=""><code class="sig">static int ParseInt(string s)</code>
+<div class="mdoc">解析非负十进制整数；空串或含非数字字符返回 -1。</div>
 </li>
 </ul>
 </div></div>
@@ -1090,10 +1143,12 @@ ini.Save(&quot;app.ini&quot;);</div>
 <div class="mdoc">一个 INI 节：名称加有序的键/值条目。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">public string name;</code>
+<div class="mdoc">节名（无节头的条目归入空串节）。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">public List&lt;IniEntry&gt; entries=new List&lt;IniEntry&gt;();</code>
+<div class="mdoc">节内条目（按文件顺序）。</div>
 </li>
 </ul>
 </div></div>
@@ -1154,6 +1209,7 @@ POSIX：$TMPDIR 或 /tmp）。</div>
 原样保留。Windows 下与 cmd.exe 语义一致（ExpandEnvironmentStringsW）。</div>
 </li>
 <li class=""><code class="sig">static int IndexOf(string hay, string needle, int from)</code>
+<div class="mdoc">从 from 起查找子串；没有时返回 -1。</div>
 </li>
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;setenv&quot;)]static extern int PosixSetenv(string name, string value, int overwrite);</code>
 </li>
@@ -1271,6 +1327,7 @@ ms.Close();
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">MemoryStream()</code>
+<div class="mdoc">构造空流；实例经 Alloc/FromStr/FromRaw 创建。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -1292,27 +1349,39 @@ ms.Close();
 以及 Close 之后失效。</div>
 </li>
 <li class=""><code class="sig">void Grow(int needed)</code>
+<div class="mdoc">扩容到至少 needed 字节（倍增策略）；分配失败抛 IOException。</div>
 </li>
 <li class=""><code class="sig">override bool CanRead()</code>
+<div class="mdoc">未 Close 时为 true。</div>
 </li>
 <li class=""><code class="sig">override bool CanWrite()</code>
+<div class="mdoc">未 Close 时为 true。</div>
 </li>
 <li class=""><code class="sig">override bool CanSeek()</code>
+<div class="mdoc">未 Close 时为 true。</div>
 </li>
 <li class=""><code class="sig">override long Length()</code>
+<div class="mdoc">已写入的最高水位字节数。</div>
 </li>
 <li class=""><code class="sig">override long Position()</code>
+<div class="mdoc">当前读写位置。</div>
 </li>
 <li class=""><code class="sig">override long Seek(long offset, int origin)</code>
+<div class="mdoc">origin 0=开头 1=当前位置 2=末尾；目标钳制到不小于 0，
+返回新位置。</div>
 </li>
 <li class=""><code class="sig">void Clear()</code>
 <div class="mdoc">清空内容并回到开头；保留缓冲区。</div>
 </li>
 <li class=""><code class="sig">override int ReadInto(nint buf, int count)</code>
+<div class="mdoc">读取最多 count 字节到 buf，返回实际读取数（末尾为 0）。</div>
 </li>
 <li class=""><code class="sig">override int WriteFrom(nint buf, int count)</code>
+<div class="mdoc">从 buf 追加 count 字节（必要时扩容），推进位置与最高水位；
+成功时总是返回 count。</div>
 </li>
 <li class=""><code class="sig">override void Close()</code>
+<div class="mdoc">释放缓冲区；重复调用安全。</div>
 </li>
 </ul>
 </div></div>
@@ -1390,18 +1459,26 @@ string rel = PathEx.GetRelativePath(&quot;C:\\a\\b&quot;, &quot;C:\\a\\b\\c\\d.t
 Windows 盘符不区分大小写比较。</div>
 </li>
 <li class=""><code class="sig">static bool MatchSegments(List&lt;string&gt; pat, int pi, List&lt;string&gt; pth, int ti)</code>
+<div class="mdoc">按段递归匹配；&quot;**&quot; 消耗零个或多个路径段。</div>
 </li>
 <li class=""><code class="sig">static bool SegmentMatch(string pattern, string segment)</code>
+<div class="mdoc">单段通配符匹配：&#x27;*&#x27; 匹配任意字符序列，&#x27;?&#x27; 匹配单个字符。
+Windows 上不区分大小写。</div>
 </li>
 <li class=""><code class="sig">static bool SegMatch(string pat, int pi, string seg, int si)</code>
+<div class="mdoc">单段匹配的回溯实现；连续 &#x27;*&#x27; 合并后尝试任意长度。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; SplitSegments(string path)</code>
+<div class="mdoc">按 &#x27;/&#x27; 或 &#x27;\&#x27; 拆分路径（根路径保留空段）。</div>
 </li>
 <li class=""><code class="sig">static bool Same(string a, string b)</code>
+<div class="mdoc">段比较；Windows 上不区分大小写。</div>
 </li>
 <li class=""><code class="sig">static bool CharEqual(string a, string b)</code>
+<div class="mdoc">单字符比较；Windows 上不区分大小写。</div>
 </li>
 <li class=""><code class="sig">static int IndexOf(string hay, string needle, int from)</code>
+<div class="mdoc">从 from 起查找子串；没有时返回 -1。</div>
 </li>
 </ul>
 </div></div>
@@ -1426,10 +1503,12 @@ PathFilter src = PathFilter.Only(&quot;.zan .zform .zscene&quot;)
 <div class="mdoc">跳过以 &quot;.&quot; 开头的目录 / 文件。</div>
 </li>
 <li class=""><code class="sig">bool skipDotFiles;</code>
+<div class="mdoc">跳过以 &quot;.&quot; 开头的文件（默认保留）。</div>
 </li>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">PathFilter()</code>
+<div class="mdoc">构造默认过滤条件（全部文件、跳点开头目录）。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -1440,17 +1519,22 @@ PathFilter src = PathFilter.Only(&quot;.zan .zform .zscene&quot;)
 <div class="mdoc">只要这些后缀的文件。</div>
 </li>
 <li class=""><code class="sig">PathFilter Hide(string suffixes)</code>
+<div class="mdoc">隐藏这些后缀（即使命中 exts），链式。</div>
 </li>
 <li class=""><code class="sig">PathFilter Skip(string dirs)</code>
+<div class="mdoc">不进入这些名字的子目录，链式。</div>
 </li>
 <li class=""><code class="sig">PathFilter Dots(bool dirs, bool files)</code>
 <div class="mdoc">是否跳过点开头的目录 / 文件（默认跳目录、留文件）。</div>
 </li>
 <li class=""><code class="sig">bool KeepFile(string name)</code>
+<div class="mdoc">该文件名是否应收录（点开头/隐藏后缀的判断优先于 exts）。</div>
 </li>
 <li class=""><code class="sig">bool EnterDir(string name)</code>
+<div class="mdoc">是否进入该子目录（点开头目录与 skipDirs 命中的不进）。</div>
 </li>
 <li class=""><code class="sig">static bool Dotted(string name)</code>
+<div class="mdoc">名字以 &quot;.&quot; 开头时为 true。</div>
 </li>
 <li class=""><code class="sig">static bool AnySuffix(string list, string name)</code>
 <div class="mdoc">空格分隔的表里有一项是 <code>name</code> 的结尾时为 true。</div>
@@ -1459,6 +1543,7 @@ PathFilter src = PathFilter.Only(&quot;.zan .zform .zscene&quot;)
 <div class="mdoc">空格分隔的表里有一项等于 <code>name</code> 时为 true。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; Words(string list)</code>
+<div class="mdoc">按空格拆分列表（忽略连续空格）。</div>
 </li>
 </ul>
 </div></div>
@@ -1482,88 +1567,124 @@ string t = info.target;</div>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">static string ClsidShellLink()</code>
+<div class="mdoc">CLSID_ShellLink：COM 快捷方式对象的类标识。</div>
 </li>
 <li class=""><code class="sig">static string IidShellLinkW()</code>
+<div class="mdoc">IID_IShellLinkW：IShellLinkW（宽字符）接口标识。</div>
 </li>
 <li class=""><code class="sig">static string IidPersistFile()</code>
+<div class="mdoc">IID_IPersistFile：IPersistFile 接口标识（.lnk 文件的加载/保存）。</div>
 </li>
 <li class=""><code class="sig">static int SlotGetPath()</code>
+<div class="mdoc">IShellLinkW vtable 槽位 3：GetPath（取目标路径）。</div>
 </li>
 <li class=""><code class="sig">static int SlotGetDescription()</code>
+<div class="mdoc">IShellLinkW vtable 槽位 6：GetDescription（取说明）。</div>
 </li>
 <li class=""><code class="sig">static int SlotSetDescription()</code>
+<div class="mdoc">IShellLinkW vtable 槽位 7：SetDescription（设说明）。</div>
 </li>
 <li class=""><code class="sig">static int SlotGetWorkingDir()</code>
+<div class="mdoc">IShellLinkW vtable 槽位 8：GetWorkingDirectory（取工作目录）。</div>
 </li>
 <li class=""><code class="sig">static int SlotSetWorkingDir()</code>
+<div class="mdoc">IShellLinkW vtable 槽位 9：SetWorkingDirectory（设工作目录）。</div>
 </li>
 <li class=""><code class="sig">static int SlotGetArguments()</code>
+<div class="mdoc">IShellLinkW vtable 槽位 10：GetArguments（取参数）。</div>
 </li>
 <li class=""><code class="sig">static int SlotSetArguments()</code>
+<div class="mdoc">IShellLinkW vtable 槽位 11：SetArguments（设参数）。</div>
 </li>
 <li class=""><code class="sig">static int SlotGetIconLocation()</code>
+<div class="mdoc">IShellLinkW vtable 槽位 16：GetIconLocation（取图标路径与序号）。</div>
 </li>
 <li class=""><code class="sig">static int SlotSetIconLocation()</code>
+<div class="mdoc">IShellLinkW vtable 槽位 17：SetIconLocation（设图标路径与序号）。</div>
 </li>
 <li class=""><code class="sig">static int SlotSetPath()</code>
+<div class="mdoc">IShellLinkW vtable 槽位 20：SetPath（设目标路径）。</div>
 </li>
 <li class=""><code class="sig">static int SlotLoad()</code>
+<div class="mdoc">IPersistFile vtable 槽位 5：Load（打开 .lnk 文件）。</div>
 </li>
 <li class=""><code class="sig">static int SlotSave()</code>
+<div class="mdoc">IPersistFile vtable 槽位 6：Save（写出 .lnk 文件）。</div>
 </li>
 <li class=""><code class="sig">static void InitCom()</code>
+<div class="mdoc">首次使用时初始化 COM（进程内只做一次）。</div>
 </li>
 <li class=""><code class="sig">static bool Create(string lnkPath, string target, string arguments, string workingDir, string iconPath, int iconIndex, string description)</code>
 <div class="mdoc">在 <code>lnkPath</code> 处创建（或覆盖）一个指向
 <code>target</code> 的 .lnk。可选：参数、工作目录、图标路径+
-图标索引、说明。成功返回 true。</div>
+图标索引、说明。成功返回 true。不需要的字段传空串/0。</div>
 </li>
 <li class=""><code class="sig">static bool WriteDesktopEntry(string path, string target, string arguments, string workingDir, string iconPath, string description)</code>
+<div class="mdoc">freedesktop Desktop Entry Specification：一个带 [Desktop Entry] 头的
+INI 文件，Type=Application 时 Exec 是要执行的命令行。</div>
 </li>
 <li class=""><code class="sig">static string EntryName(string path)</code>
+<div class="mdoc">Desktop Entry 的 Name 默认用文件名（去掉 .desktop 后缀）。</div>
 </li>
 <li class=""><code class="sig">static string QuoteArg(string s)</code>
+<div class="mdoc">Exec 行里带空白的可执行路径需要引号（规范 1.5 章）。</div>
 </li>
 <li class=""><code class="sig">static string ExecTarget(string exec)</code>
+<div class="mdoc">Exec 的第一个 token 是目标程序，其余是参数；首 token 允许带引号。</div>
 </li>
 <li class=""><code class="sig">static string ExecArguments(string exec)</code>
+<div class="mdoc">Exec 行去掉目标程序后的剩余参数串（原样保留）；无参数时为空串。</div>
 </li>
 <li class=""><code class="sig">static string EntryValue(string text, string key)</code>
+<div class="mdoc">在 Desktop Entry 文本中取 <code>key=</code> 行 &quot;=&quot; 之后的值；找不到返回空串。</div>
 </li>
 <li class=""><code class="sig">static ShortcutInfo Read(string lnkPath)</code>
-<div class="mdoc">解析 .lnk 文件。快捷方式未定义的字段
-返回空值（iconIndex 为 0）。</div>
+<div class="mdoc">解析 .lnk（Linux 上为 .desktop）文件，返回各字段。
+文件不存在或解析失败时返回全空字段，不抛异常。
+快捷方式未定义的字段返回空值（iconIndex 为 0）。</div>
 </li>
 <li class=""><code class="sig">static string GetPath(nint shell)</code>
+<div class="mdoc">IShellLinkW::GetPath(LPWSTR, int cch, WIN32_FIND_DATAW*, DWORD flags).</div>
 </li>
 <li class=""><code class="sig">static string GetText(nint shell, int slot)</code>
+<div class="mdoc">形状为 (LPWSTR, int cch) 的 getter。</div>
 </li>
 <li class=""><code class="sig">static string GetIconPath(nint shell)</code>
+<div class="mdoc">GetIconLocation 的路径部分；失败返回空串。</div>
 </li>
 <li class=""><code class="sig">static int GetIconIndex(nint shell)</code>
+<div class="mdoc">GetIconLocation 的图标序号；失败返回 0。</div>
 </li>
 </ul>
 </div></div>
 <div class="api"><div class="api-head"><span class="ns">ShortcutInfo</span><span class="tag">class</span></div>
 <div class="api-body">
 <div class="mdoc">由
-<code>Shortcut.Read</code> 返回的结构化 .lnk 内容。</div>
+<code>Shortcut.Read</code> 返回的结构化 .lnk 内容。字段可能为空串
+（快捷方式未定义时），iconIndex 默认 0。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">public string target;</code>
+<div class="mdoc">快捷方式指向的目标程序路径。</div>
 </li>
 <li class=""><code class="sig">public string arguments;</code>
+<div class="mdoc">目标程序的命令行参数（原样保存，未做转义还原）。</div>
 </li>
 <li class=""><code class="sig">public string workingDir;</code>
+<div class="mdoc">目标程序的工作目录；未设置时为空。</div>
 </li>
 <li class=""><code class="sig">public string description;</code>
+<div class="mdoc">快捷方式的说明文字。</div>
 </li>
 <li class=""><code class="sig">public string iconPath;</code>
+<div class="mdoc">图标文件路径（.ico/.exe/.dll）；为空表示用目标程序自带图标。</div>
 </li>
 <li class=""><code class="sig">public int iconIndex;</code>
+<div class="mdoc">图标文件内的图标序号（从 0 起）。</div>
 </li>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">ShortcutInfo()</code>
+<div class="mdoc">构造各字段为空串、iconIndex 为 0 的信息。</div>
 </li>
 </ul>
 </div></div>
@@ -1792,11 +1913,7 @@ w.Close();
 </div></div>
 <div class="api"><div class="api-head"><span class="ns">int</span><span class="tag">delegate</span></div>
 <div class="api-body">
-</div></div>
-<div class="api"><div class="api-head"><span class="ns">void</span><span class="tag">delegate</span></div>
-<div class="api-body">
-<div class="mdoc"><code>DirectoryWatcher.Watch</code> 的变化回调：
-条目名加一个 <code>FileChange</code> 类型。</div>
+<div class="mdoc">SetEnvironmentVariableW 的函数指针签名（经 Interop.Entry 取用）。</div>
 </div></div>
     </div>
   </div>

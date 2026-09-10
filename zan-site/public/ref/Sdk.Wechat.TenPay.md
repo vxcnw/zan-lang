@@ -42,6 +42,10 @@
 
 - WechatPayLegacyMpClient Timeout(int ms)
 
+- WechatPayLegacyMpClient SetCallPolicy(ExternalCallPolicy policy)
+
+- ExternalCallPolicy CallPolicy()
+
 - WechatPayLegacyMpClient SetAccessToken(string accessToken)
 
 - async WechatRawResponse RequestJsonAsync(string method, string path, string query, string jsonBody)
@@ -1197,6 +1201,10 @@ TenpayV3.PayBank.cs 的 Zan 微信支付强类型接口。
 - WechatPayV2Client Server(string host, int port)
 
 - WechatPayV2Client Timeout(int ms)
+
+- WechatPayV2Client SetCallPolicy(ExternalCallPolicy policy)
+
+- ExternalCallPolicy CallPolicy()
 
 - async WechatRawResponse RequestAsync(string path, WechatPayV2Request request, bool requireClientCertificate)
 
@@ -5114,6 +5122,8 @@ ChainBrandProfitsharing/ChainBrandProfitsharingApis.cs 的 Zan 微信支付强�
 - WechatPayV3Client Server(string host, int port)
 
 - WechatPayV3Client Timeout(int ms)
+
+- WechatPayV3Client SetCallPolicy(ExternalCallPolicy policy)
 
 - WechatPayV3Client SetPlatformPublicKey(string serial, string publicKeyOrCertificatePem)
 

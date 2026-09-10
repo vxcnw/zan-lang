@@ -47,13 +47,15 @@
     <aside class="wiki-side doc-side">
       <div class="searchbox"><svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         <input id="docSearch" placeholder="筛选目录…" aria-label="filter"></div>
-      <details class="nsgrp" open><summary>System · 55</summary>
+      <details class="nsgrp" open><summary>System · 58</summary>
 <a href="/ref/System">System</a>
 <a href="/ref/System.Automation">System.Automation</a>
 <a href="/ref/System.Collections">System.Collections</a>
 <a href="/ref/System.Collections.Generic">System.Collections.Generic</a>
+<a href="/ref/System.Commercial">System.Commercial</a>
 <a href="/ref/System.Compiler">System.Compiler</a>
 <a href="/ref/System.Data">System.Data</a>
+<a href="/ref/System.Data.Excel">System.Data.Excel</a>
 <a href="/ref/System.Data.Firebird">System.Data.Firebird</a>
 <a href="/ref/System.Data.MySql">System.Data.MySql</a>
 <a href="/ref/System.Data.Orm">System.Data.Orm</a>
@@ -69,6 +71,7 @@
 <a href="/ref/System.Globalization">System.Globalization</a>
 <a href="/ref/System.IO">System.IO</a>
 <a href="/ref/System.IO.Compression">System.IO.Compression</a>
+<a href="/ref/System.IO.Watch">System.IO.Watch</a>
 <a href="/ref/System.Input">System.Input</a>
 <a href="/ref/System.Json">System.Json</a>
 <a href="/ref/System.Knowledge">System.Knowledge</a>
@@ -76,6 +79,7 @@
 <a href="/ref/System.Management">System.Management</a>
 <a href="/ref/System.Net">System.Net</a>
 <a href="/ref/System.Net.Coap">System.Net.Coap</a>
+<a href="/ref/System.Net.External">System.Net.External</a>
 <a href="/ref/System.Net.Http">System.Net.Http</a>
 <a href="/ref/System.Net.Http.Client">System.Net.Http.Client</a>
 <a href="/ref/System.Net.Http.Download">System.Net.Http.Download</a>
@@ -84,7 +88,6 @@
 <a href="/ref/System.Net.Modbus">System.Net.Modbus</a>
 <a href="/ref/System.Net.Mqtt">System.Net.Mqtt</a>
 <a href="/ref/System.Net.Ntp">System.Net.Ntp</a>
-<a href="/ref/System.Net.Rpc">System.Net.Rpc</a>
 <a href="/ref/System.Net.Sip">System.Net.Sip</a>
 <a href="/ref/System.Net.Sockets">System.Net.Sockets</a>
 <a href="/ref/System.Net.Sse">System.Net.Sse</a>
@@ -123,13 +126,13 @@
 <a href="/ref/Game.Arcade2D">Game.Arcade2D</a>
 <a href="/ref/Game.Arpg">Game.Arpg</a>
 <a href="/ref/Game.Arpg.Data">Game.Arpg.Data</a>
-<a href="/ref/Game.Arpg.Fonts">Game.Arpg.Fonts</a>
 <a href="/ref/Game.Board">Game.Board</a>
 <a href="/ref/Game.Cards">Game.Cards</a>
 <a href="/ref/Game.Core">Game.Core</a>
 <a href="/ref/Game.Foundation">Game.Foundation</a>
-<a href="/ref/Game.Foundation.Sdl">Game.Foundation.Sdl</a>
-<a href="/ref/Game.Render">Game.Render</a>
+<a href="/ref/Game.Foundation.Gui">Game.Foundation.Gui</a>
+<a href="/ref/Game.Idle">Game.Idle</a>
+<a href="/ref/Game.Kit">Game.Kit</a>
 <a href="/ref/Game.Scene">Game.Scene</a>
 </details>
 <details class="nsgrp"><summary>Sdk · 57</summary>
@@ -191,9 +194,6 @@
 <a href="/ref/Sdk.Wechat.Work">Sdk.Wechat.Work</a>
 <a href="/ref/Sdk.Wechat.WxOpen">Sdk.Wechat.WxOpen</a>
 </details>
-<details class="nsgrp" open><summary>SDL3 · 1</summary>
-<a href="/ref/SDL3">SDL3</a>
-</details>
 <details class="nsgrp"><summary>Platform · 1</summary>
 <a href="/ref/Platform">Platform</a>
 </details>
@@ -219,6 +219,11 @@ TDengine 的 REST 没有客户端语句协议，因此 <code>?</code>
 TDengine 没有事务，因此这里没有 Begin/Commit
 等操作可用。
 
+语句失败（服务端报错、无法到达 taosAdapter、占位符
+个数不匹配）时抛出 <code>DbException</code>，
+携带 taosAdapter 响应中的错误码；空结果集总意味着
+「无行」。错误文本仍可通过 GetError() 获取。
+
 用法：
 TDengineConnection db = TDengineConnection.Open(&quot;127.0.0.1&quot;, 6041,
 &quot;root&quot;, &quot;taosdata&quot;, &quot;demo&quot;);
@@ -240,11 +245,15 @@ db.Close();</div>
 </li>
 <li class=""><code class="sig">string lastError;</code>
 </li>
+<li class=""><code class="sig">int lastCode;</code>
+</li>
 <li class=""><code class="sig">int affected;</code>
 </li>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">TDengineConnection()</code>
+<div class="mdoc">私有构造；统一经 <code>Open</code>/<code>OpenToken</code>/
+<code>OpenAsync</code> 创建。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -321,6 +330,7 @@ db.Close();</div>
 解除分块，并记录非 200 状态码。</div>
 </li>
 <li class=""><code class="sig">string Unreachable()</code>
+<div class="mdoc">无法到达 taosAdapter 时的错误文本。</div>
 </li>
 <li class=""><code class="sig">string Post(string sql)</code>
 <div class="mdoc">发送一条语句并返回响应 body，请求无法完成时
@@ -333,8 +343,13 @@ db.Close();</div>
 </li>
 <li class=""><code class="sig">bool Failed(JsonValue root)</code>
 <div class="mdoc">响应报告服务端错误时返回 true；
-错误描述保存在 lastError 中。3.x 的（<code>code</code> != 0）
-和 2.x 的（<code>status</code> == &quot;error&quot;）都会被识别。</div>
+错误描述保存在 lastError 中，错误码保存在 lastCode 中。
+3.x 的（<code>code</code> != 0）和 2.x 的（<code>status</code> == &quot;error&quot;）
+都会被识别。</div>
+</li>
+<li class=""><code class="sig">void Fail()</code>
+<div class="mdoc">抛出记录的失败，携带 taosAdapter 自身的
+错误码，调用方无需解析消息即可分支处理。</div>
 </li>
 <li class=""><code class="sig">DbResult Decode(string body)</code>
 <div class="mdoc">将一个 <code>/rest/sql</code> 响应文档转换为结果集，
@@ -342,18 +357,23 @@ db.Close();</div>
 并区分 JSON null 与空字符串。</div>
 </li>
 <li class=""><code class="sig">DbResult Query(string sql)</code>
-<div class="mdoc">执行查询并返回结果集。</div>
+<div class="mdoc">执行查询并返回结果集。服务器报错或无法到达
+taosAdapter 时抛出 <code>DbException</code>，
+因此空结果总意味着「无行」；错误信息仍可通过
+<code>GetError</code> 获取。</div>
 </li>
 <li class=""><code class="sig">DbResult Query(string sql, DbParams prms)</code>
 <div class="mdoc">执行查询，其中 <code>?</code> 占位符从
-&lt;paramref name=&quot;prms&quot;/&gt; 填充。</div>
+&lt;paramref name=&quot;prms&quot;/&gt; 填充。占位符个数不匹配时
+抛出 <code>DbException</code>。</div>
 </li>
 <li class=""><code class="sig">int Execute(string sql)</code>
-<div class="mdoc">执行语句并返回受影响的行数，失败返回 -1
-。</div>
+<div class="mdoc">执行语句并返回受影响的行数。失败时抛出
+<code>DbException</code>。</div>
 </li>
 <li class=""><code class="sig">int Execute(string sql, DbParams prms)</code>
-<div class="mdoc">执行带参数的语句。</div>
+<div class="mdoc">执行带参数的语句。占位符个数不匹配或语句
+失败时抛出 <code>DbException</code>。</div>
 </li>
 <li class=""><code class="sig">string ExecuteScalar(string sql)</code>
 <div class="mdoc">第一行第一列的值，否则返回 &quot;&quot;。</div>
@@ -362,16 +382,20 @@ db.Close();</div>
 <div class="mdoc">参数化查询第一行第一列的值。</div>
 </li>
 <li class=""><code class="sig">async DbResult QueryAsync(string sql)</code>
-<div class="mdoc">查询，不阻塞 worker 线程。</div>
+<div class="mdoc">查询，不阻塞 worker 线程。失败时抛出
+<code>DbException</code>。</div>
 </li>
 <li class=""><code class="sig">async DbResult QueryAsync(string sql, DbParams prms)</code>
-<div class="mdoc">参数化查询，不阻塞 worker 线程。</div>
+<div class="mdoc">参数化查询，不阻塞 worker 线程。占位符个数
+不匹配时抛出 <code>DbException</code>。</div>
 </li>
 <li class=""><code class="sig">async int ExecuteAsync(string sql)</code>
-<div class="mdoc">执行语句，不阻塞 worker 线程。</div>
+<div class="mdoc">执行语句，不阻塞 worker 线程。失败时抛出
+<code>DbException</code>。</div>
 </li>
 <li class=""><code class="sig">async int ExecuteAsync(string sql, DbParams prms)</code>
-<div class="mdoc">执行参数化语句，不阻塞 worker 线程。</div>
+<div class="mdoc">执行参数化语句，不阻塞 worker 线程。失败时
+抛出 <code>DbException</code>。</div>
 </li>
 <li class=""><code class="sig">async string ExecuteScalarAsync(string sql)</code>
 <div class="mdoc">第一行第一列的值，不阻塞。</div>
@@ -383,8 +407,10 @@ db.Close();</div>
 <div class="mdoc">空操作：TDengine 没有事务。参见 BeginTransaction。</div>
 </li>
 <li class=""><code class="sig">async bool CommitAsync()</code>
+<div class="mdoc">空操作：无事务，恒返回 true。</div>
 </li>
 <li class=""><code class="sig">async bool RollbackAsync()</code>
+<div class="mdoc">空操作：无事务，恒返回 true。</div>
 </li>
 <li class=""><code class="sig">int AffectedRows()</code>
 <div class="mdoc">上一条语句影响的行数。</div>
@@ -406,6 +432,7 @@ Execute 返回时即已持久化）。</div>
 <div class="mdoc">空操作：TDengine 没有事务，因此无法撤销任何操作。</div>
 </li>
 <li class=""><code class="sig">bool IsConnected()</code>
+<div class="mdoc">打开时 adapter 正常响应（凭据校验通过）且未调用 Close。</div>
 </li>
 <li class=""><code class="sig">void Close()</code>
 <div class="mdoc">释放连接状态。REST 协议是无状态的，因此
@@ -460,8 +487,11 @@ pool.Release(db);
 <div class="mdoc">使用 token 认证的连接池。</div>
 </li>
 <li class=""><code class="sig">async IDbConnection ConnectAsync()</code>
+<div class="mdoc">打开一个新&quot;连接&quot;（端点 + 认证头）：token 非空走 token 认证，
+否则走用户名/密码认证。</div>
 </li>
 <li class=""><code class="sig">int GetProvider()</code>
+<div class="mdoc">池的 provider id（恒为 <code>DbProvider.TDengine</code>）。</div>
 </li>
 </ul>
 </div></div>
@@ -502,14 +532,17 @@ pool.Close();</div>
 <li class=""><code class="sig">TDenginePool(string host, int port, string user, string password, string token, string database, int maxSize)</code>
 </li>
 <li class=""><code class="sig">TDenginePool(string host, int port, string token, string database, int maxSize):this(host, port, &quot;&quot;, &quot;&quot;, token, database, maxSize)</code>
+<div class="mdoc">令牌登录形式的构造，委托给完整构造（无用户名/密码）。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">async TDengineConnection OpenOne()</code>
+<div class="mdoc">新建一个连接：有 token 走令牌登录，否则用户名/密码。</div>
 </li>
 <li class=""><code class="sig">async TDengineConnection AcquireAsync()</code>
 <div class="mdoc">借出一个连接：复用空闲连接，未达上限则新建，
-否则挂起协程，直到有连接被归还。
+否则挂起协程，直到有连接被归还。饱和等待有硬上限
+（见 <code>PoolWait</code>）：超时返回 null，绝不定死。
 池已关闭后返回 null。</div>
 </li>
 <li class=""><code class="sig">void Release(TDengineConnection c)</code>

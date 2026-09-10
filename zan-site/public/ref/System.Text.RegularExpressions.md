@@ -176,8 +176,10 @@ string text = re.Replace("port=8080", "$2:$1");
   - `${...}` 里的组号或组名对应的组号，无法解析时 -1。
 
 - static int DigitValue(string d)
+  - 十进制字符的数值（'0'->'0' … '9'->9）；非数字字符返回 0。
 
 - static bool IsDigit(string d)
+  - 判断是否为十进制字符 '0'-'9'。
 
 - List<string> Split(string input)
   - 在每个匹配处分割 `input`。空匹配会被跳过，
@@ -219,98 +221,147 @@ string text = re.Replace("port=8080", "$2:$1");
 不支持的语法一律在编译期报错，绝不"接受但永不匹配"。
 
 - static int OpChar()
+  - 操作码：匹配一个字面码点（ax=码点）。
 
 - static int OpAny()
+  - 操作码：`.` 匹配任意码点（未开 dotAll 时排除 \n）。
 
 - static int OpClass()
+  - 操作码：匹配字符类（ax=类索引）。
 
 - static int OpMatch()
+  - 操作码：匹配成功终点。
 
 - static int OpJmp()
+  - 操作码：无条件跳转（ax=目标地址）。
 
 - static int OpSplit()
+  - 操作码：回溯分叉（先试 ax，失败再试 ay）。
 
 - static int OpSave()
+  - 操作码：记录捕获位置（ax=槽位，组 g 用 2g/2g+1）。
 
 - static int OpBol()
+  - 操作码：`^` 行首断言。
 
 - static int OpEol()
+  - 操作码：`$` 行尾断言。
 
 - static int OpWordB()
+  - 操作码：`\b`/`\B` 词边界断言（ax=1 为 \b，0 为 \B）。
 
 - static int OpBackref()
+  - 操作码：反向引用（ax=组号）。
 
 - static int OpBos()
+  - 操作码：`\A` 输入起点断言。
 
 - static int OpEos()
+  - 操作码：`\z`/`\Z` 输入终点断言。
 
 - static int OpGpos()
+  - 操作码：`\G` 上次匹配起点断言。
 
 - static int OpMark()
+  - 操作码：把当前 sp 存入标记槽位，供空循环检查。
 
 - static int OpEmptyChk()
+  - 操作码：主体这一轮没有前进就跳出循环。
 
 - static int OpLook()
+  - 操作码：环视 / 原子组入口（ax=种类，ay=断言后的继续地址）。
 
 - static int OpLookEnd()
+  - 操作码：环视子程序终点，回传子匹配结束位置。
 
 - static int LookAhead()
+  - 环视种类：顺序肯定 `(?=...)`。
 
 - static int LookAheadNeg()
+  - 环视种类：顺序否定 `(?!...)`。
 
 - static int LookBehind()
+  - 环视种类：回顾肯定 `(?<=...)`。
 
 - static int LookBehindNeg()
+  - 环视种类：回顾否定 `(?<!...)`。
 
 - static int LookAtomic()
+  - 环视种类：原子组 `(?>...)`。
 
 - static int MemRange()
+  - 字符类成员种类：码点范围。
 
 - static int MemNotSet()
+  - 字符类成员种类：不属于简写集合 lo（用于类内 \D \W \S）。
 
 - List<int> op;
+  - 操作码列。
 
 - List<int> ax;
+  - x 操作数列（常为指令地址、码点或组号）。
 
 - List<int> ay;
+  - y 操作数列。
 
 - List<int> az;
+  - z 操作数列。
 
 - List<int> clsKind;
+  - 字符类：类 c 的成员位于 clsKind/clsLo/clsHi[clsStart[c] ..
+    clsStart[c] + clsCount[c])，当 clsNeg[c] == 1 时整类取反。
+    成员种类（MemRange/MemNotSet）。
 
 - List<int> clsLo;
+  - 成员下界（MemRange）或简写集合字母（MemNotSet）。
 
 - List<int> clsHi;
+  - 成员上界（MemRange 用）。
 
 - List<int> clsStart;
+  - 类 c 的成员区间起点。
 
 - List<int> clsCount;
+  - 类 c 的成员个数。
 
 - List<int> clsNeg;
+  - 1 表示整类取反。
 
 - List<string> groupNames;
+  - 命名组：groupNames[i] 对应 groupNums[i]
 
 - List<int> groupNums;
+  - 与 groupNames 平行的组号列。
 
 - int groups;
+  - 捕获组数量，组 0 为整个匹配。
 
 - int marks;
+  - 空循环检查用的槽位数。
 
 - bool ignoreCase;
+  - (?i)：ASCII 大小写折叠比较。
 
 - bool multiline;
+  - (?m)：^ $ 也匹配行边界
 
 - bool dotAll;
+  - (?s)：. 也匹配 \n
 
 - string pattern;
+  - 编译所用的模式文本。
 
 - string error;
+  - 解析失败原因，成功为 ""。
 
 - nint pbuf;
+  - 指向模式字节的解析游标
 
 - int plen;
+  - 模式字节长度。
 
 - int ppos;
+  - 当前解析位置（字节偏移）。
 
 - RegexProgram()
 
@@ -346,8 +397,10 @@ string text = re.Replace("port=8080", "$2:$1");
   - 码点的 UTF-8 字节数。
 
 - int Emit(int o, int x, int y, int z)
+  - 追加一条指令，返回其地址。
 
 - int Here()
+  - 下一条指令将写入的地址。
 
 - static bool XIsPc(int o)
   - 指令 `o` 的 x 字段是否是指令地址。
@@ -360,10 +413,13 @@ string text = re.Replace("port=8080", "$2:$1");
     用于把 `{n,m}` 展开为重复副本。
 
 - int PeekAt(int i)
+  - 查看模式第 i 个字节，越界返回 -1。
 
 - int Peek()
+  - 查看当前字节，模式末尾返回 -1。
 
 - int Next()
+  - 消耗并返回当前字节，模式末尾返回 -1。
 
 - int NextCp()
   - 读取一个码点（多字节字面量按整体处理）。
@@ -384,15 +440,20 @@ string text = re.Replace("port=8080", "$2:$1");
   - term := atom quantifier?
 
 - void ParseQuantifier(int start)
+  - 解析量词 `* + ? {n} {n,m}` 及惰性 `?` 后缀；`{` 后不是数字时
+    整体按字面量回退，占有量词 `+` 明确报错。
 
 - int ParseInt()
+  - 读取十进制数字串；一个数字都没有时返回 -1。
 
 - void ApplyQuantifier(int start, int min, int max, bool lazy)
   - 把已发射到 [start, end) 的原子改写成其重复形式。
 
 - void AppendBody(List<int> bo, List<int> bx, List<int> by, List<int> bz, int delta)
+  - 把保存下来的主体指令重定位 delta 后重新发射一份。
 
 - void Truncate(int n)
+  - 把指令列表截断到 n 条（丢弃 n 之后的所有指令）。
 
 - void StarAt(int start, int len, bool lazy)
   - 将 [start, start+len) 处的主体转换为 `body*`：
@@ -413,21 +474,28 @@ string text = re.Replace("port=8080", "$2:$1");
     并重定位 start 处及之后的跳转目标。
 
 - void ParseAtom()
+  - atom := 分组 | '.' | '^' | '$' | '[' | 反斜杠转义 | 字面量码点；
+    前置量词、模式提前结束均报错。
 
 - void ParseGroup()
   - '(' 已消耗。处理捕获组、`(?:`、`(?#`、`(?=` `(?!`
     `(?<=` `(?<!`、`(?>` 和 `(?<name>`。
 
 - string CharText(int c)
+  - 字节的诊断显示形式：ASCII 字符原样，其余为 \xHH。
 
 - static string Hex2(int v)
+  - 0-255 的两位小写十六进制文本。
 
 - int NewGroup(string name)
   - 登记一个捕获组，返回组号。
 
 - string ParseGroupName(int closer)
+  - 读取组名直到 closer（'>' 或 '''）；只允许 ASCII 字母、数字与
+    下划线，为空、含非法字符或未闭合时报错并返回 ""。
 
 - void ParseCaptureBody(int gi)
+  - 捕获组体：先发射左 Save（槽位 gi*2），再解析组体与 ')'。
 
 - void ParseGroupTail(int gi)
   - 解析组体与 ')'；gi >= 0 时补上收尾的 Save。
@@ -447,8 +515,10 @@ string text = re.Replace("port=8080", "$2:$1");
   - 开始一个字符类并返回其索引。
 
 - void AddMember(int ci, int kind, int lo, int hi)
+  - 给类 ci 追加一个成员（kind 取 MemRange/MemNotSet）。
 
 - void AddRange(int ci, int lo, int hi)
+  - 给类 ci 追加码点范围 [lo, hi]。
 
 - void AddShorthand(int ci, int kind)
   - 添加 `\d \w \s` 简写的范围。`kind` 用小写字母的
@@ -468,24 +538,37 @@ string text = re.Replace("port=8080", "$2:$1");
     反斜杠已消耗，`e` 是其后的那个字节。
 
 - static int HexDigit(int c)
+  - 十六进制数字的数值；不是十六进制字符返回 -1。
 
 - int ParseHexEscape()
+  - `\xHH` / `\x{HH..}` 的码点；畸形、为空或超出 Unicode 范围时报错
+    并返回 0。
 
 - int ParseFixedHex(int digits)
+  - 读取 digits 位定长十六进制转义（\uXXXX、\UXXXXXXXX）；
+    缺数字或超出 Unicode 范围时报错并返回 0。
 
 - int ParseControlEscape()
+  - `\cX` 的控制字符码点（X 统一大写后减 '@'）；X 缺失或不是
+    字母时报错并返回 0。
 
 - void ParseEscape()
+  - 模式级反斜杠序列：简写类（\d\w\s 及取反）、锚点（\b\B\A\z\Z\G）、
+    命名/编号反向引用，其余交给 EscapeValue 作字面量转义。
 
 - static int Fold(int c)
   - ASCII 大小写折叠。非 ASCII 码点原样返回：Unicode
     折叠需要码表，这里明确只做 ASCII（文档已说明）。
 
 - static bool IsWordCp(int c)
+  - 码点是否属于 \w（ASCII 字母、数字、下划线）。
 
 - static bool InShorthand(int kind, int c)
+  - 码点是否属于 \d/\w/\s 集合（kind 为小写字母的码值）。
 
 - bool ClassHas(int ci, int c)
+  - 码点是否属于类 ci（逐成员判定，ignoreCase 时做 ASCII 折叠，
+    clsNeg 为 1 时整类取反）。
 
 - int RunAt(nint input, int len, int start, int origin, List<int> caps)
   - 从 `start` 运行程序。成功后 `caps` 保存
@@ -506,21 +589,30 @@ string text = re.Replace("port=8080", "$2:$1");
 模式保持不可变，可对多个输入进行匹配。
 
 - nint input;
+  - 输入字节缓冲区。
 
 - int len;
+  - 输入长度（字节）。
 
 - List<int> caps;
+  - 正在填充的捕获槽（2 * GroupCount() 个）。
 
 - List<int> marks;
+  - 空循环检查槽。
 
 - int budget;
+  - 剩余回溯步数预算。
 
 - int end;
+  - 匹配成功时的结束位置。
 
 - int origin;
+  - 本次尝试的起点（\G）
 
 - int subEnd;
+  - 环视 / 原子组子程序的结束位置
 
 - bool overflow;
+  - 回溯预算耗尽
 
 - RegexRun()

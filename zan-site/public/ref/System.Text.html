@@ -47,13 +47,15 @@
     <aside class="wiki-side doc-side">
       <div class="searchbox"><svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         <input id="docSearch" placeholder="筛选目录…" aria-label="filter"></div>
-      <details class="nsgrp" open><summary>System · 55</summary>
+      <details class="nsgrp" open><summary>System · 58</summary>
 <a href="/ref/System">System</a>
 <a href="/ref/System.Automation">System.Automation</a>
 <a href="/ref/System.Collections">System.Collections</a>
 <a href="/ref/System.Collections.Generic">System.Collections.Generic</a>
+<a href="/ref/System.Commercial">System.Commercial</a>
 <a href="/ref/System.Compiler">System.Compiler</a>
 <a href="/ref/System.Data">System.Data</a>
+<a href="/ref/System.Data.Excel">System.Data.Excel</a>
 <a href="/ref/System.Data.Firebird">System.Data.Firebird</a>
 <a href="/ref/System.Data.MySql">System.Data.MySql</a>
 <a href="/ref/System.Data.Orm">System.Data.Orm</a>
@@ -69,6 +71,7 @@
 <a href="/ref/System.Globalization">System.Globalization</a>
 <a href="/ref/System.IO">System.IO</a>
 <a href="/ref/System.IO.Compression">System.IO.Compression</a>
+<a href="/ref/System.IO.Watch">System.IO.Watch</a>
 <a href="/ref/System.Input">System.Input</a>
 <a href="/ref/System.Json">System.Json</a>
 <a href="/ref/System.Knowledge">System.Knowledge</a>
@@ -76,6 +79,7 @@
 <a href="/ref/System.Management">System.Management</a>
 <a href="/ref/System.Net">System.Net</a>
 <a href="/ref/System.Net.Coap">System.Net.Coap</a>
+<a href="/ref/System.Net.External">System.Net.External</a>
 <a href="/ref/System.Net.Http">System.Net.Http</a>
 <a href="/ref/System.Net.Http.Client">System.Net.Http.Client</a>
 <a href="/ref/System.Net.Http.Download">System.Net.Http.Download</a>
@@ -84,7 +88,6 @@
 <a href="/ref/System.Net.Modbus">System.Net.Modbus</a>
 <a href="/ref/System.Net.Mqtt">System.Net.Mqtt</a>
 <a href="/ref/System.Net.Ntp">System.Net.Ntp</a>
-<a href="/ref/System.Net.Rpc">System.Net.Rpc</a>
 <a href="/ref/System.Net.Sip">System.Net.Sip</a>
 <a href="/ref/System.Net.Sockets">System.Net.Sockets</a>
 <a href="/ref/System.Net.Sse">System.Net.Sse</a>
@@ -123,13 +126,13 @@
 <a href="/ref/Game.Arcade2D">Game.Arcade2D</a>
 <a href="/ref/Game.Arpg">Game.Arpg</a>
 <a href="/ref/Game.Arpg.Data">Game.Arpg.Data</a>
-<a href="/ref/Game.Arpg.Fonts">Game.Arpg.Fonts</a>
 <a href="/ref/Game.Board">Game.Board</a>
 <a href="/ref/Game.Cards">Game.Cards</a>
 <a href="/ref/Game.Core">Game.Core</a>
 <a href="/ref/Game.Foundation">Game.Foundation</a>
-<a href="/ref/Game.Foundation.Sdl">Game.Foundation.Sdl</a>
-<a href="/ref/Game.Render">Game.Render</a>
+<a href="/ref/Game.Foundation.Gui">Game.Foundation.Gui</a>
+<a href="/ref/Game.Idle">Game.Idle</a>
+<a href="/ref/Game.Kit">Game.Kit</a>
 <a href="/ref/Game.Scene">Game.Scene</a>
 </details>
 <details class="nsgrp"><summary>Sdk · 57</summary>
@@ -191,9 +194,6 @@
 <a href="/ref/Sdk.Wechat.Work">Sdk.Wechat.Work</a>
 <a href="/ref/Sdk.Wechat.WxOpen">Sdk.Wechat.WxOpen</a>
 </details>
-<details class="nsgrp" open><summary>SDL3 · 1</summary>
-<a href="/ref/SDL3">SDL3</a>
-</details>
 <details class="nsgrp"><summary>Platform · 1</summary>
 <a href="/ref/Platform">Platform</a>
 </details>
@@ -202,29 +202,38 @@
       <div class="note"><p><span class="zh">源码文件：</span><code class="inline">stdlib/System/Text/Bm25Index.zan</code>, <code class="inline">stdlib/System/Text/Csv.zan</code>, <code class="inline">stdlib/System/Text/Encoding.zan</code>, <code class="inline">stdlib/System/Text/FuzzyMatching.zan</code>, <code class="inline">stdlib/System/Text/Markdown.zan</code>, <code class="inline">stdlib/System/Text/Pinyin.zan</code>, <code class="inline">stdlib/System/Text/Template.zan</code>, <code class="inline">stdlib/System/Text/TextTable.zan</code></p></div>
 <div class="api"><div class="api-head"><span class="ns">Bm25Document</span><span class="tag">class</span></div>
 <div class="api-body">
+<div class="mdoc">索引内的一篇文档：id、词频表与总词元长度。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">int id;</code>
+<div class="mdoc">文档 id（调用方指定）。</div>
 </li>
 <li class=""><code class="sig">Dictionary &lt;string, int&gt; terms;</code>
+<div class="mdoc">词元 -&gt; 词频。</div>
 </li>
 <li class=""><code class="sig">int length;</code>
+<div class="mdoc">词元总数（词频之和），BM25 长度归一用。</div>
 </li>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">Bm25Document(int id, Dictionary &lt;string, int&gt; terms, int length)</code>
+<div class="mdoc">构造文档记录。</div>
 </li>
 </ul>
 </div></div>
 <div class="api"><div class="api-head"><span class="ns">Bm25Hit</span><span class="tag">class</span></div>
 <div class="api-body">
+<div class="mdoc">一次命中的内部记分记录。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">int id;</code>
+<div class="mdoc">文档 id。</div>
 </li>
 <li class=""><code class="sig">double score;</code>
+<div class="mdoc">BM25 分数。</div>
 </li>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">Bm25Hit(int id, double score)</code>
+<div class="mdoc">构造命中记录。</div>
 </li>
 </ul>
 </div></div>
@@ -244,20 +253,26 @@ List&lt;int&gt; hits = idx.Search(&quot;quick fox&quot;);   // [1]
 （数千文档、小词元）——每次查询都会扫描全部文档。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">int totalLen;</code>
+<div class="mdoc">全部文档的词元长度之和。</div>
 </li>
 <li class=""><code class="sig">double k1;</code>
+<div class="mdoc">BM25 饱和参数 k1（1.2）。</div>
 </li>
 <li class=""><code class="sig">double b;</code>
+<div class="mdoc">BM25 长度归一参数 b（0.75）。</div>
 </li>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">Bm25Index()</code>
+<div class="mdoc">创建空索引，参数取标准值 k1=1.2、b=0.75。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">List&lt;Bm25Document&gt; documents=new List&lt;Bm25Document&gt;();</code>
+<div class="mdoc">全部已索引文档。</div>
 </li>
 <li class=""><code class="sig">Dictionary &lt;string, int&gt; df=new Dictionary &lt;string, int&gt;();</code>
+<div class="mdoc">词元 -&gt; 含它的文档数（文档频率）。</div>
 </li>
 <li class=""><code class="sig">void Add(int docId, string text)</code>
 <div class="mdoc">添加文档。重复添加同一 id 会替换其内容。</div>
@@ -273,18 +288,25 @@ List&lt;int&gt; hits = idx.Search(&quot;quick fox&quot;);   // [1]
 分数从高到低。空查询返回空结果。</div>
 </li>
 <li class=""><code class="sig">static Dictionary &lt;string, int&gt; Tokenize(string text)</code>
+<div class="mdoc">分词：转小写、按非字母数字字符切分，返回词元 -&gt; 词频。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; UniqueTerms(string query)</code>
+<div class="mdoc">查询分词并去重（保持首次出现顺序）。</div>
 </li>
 <li class=""><code class="sig">static int GetSeen(Dictionary &lt;string, int&gt; seen, string key)</code>
+<div class="mdoc">seen 字典的取值，缺失为 0。</div>
 </li>
 <li class=""><code class="sig">static void AddTerm(Dictionary &lt;string, int&gt; terms, string term)</code>
+<div class="mdoc">词频表累加一次该词元。</div>
 </li>
 <li class=""><code class="sig">int DfOf(string term)</code>
+<div class="mdoc">词元的文档频率，缺失为 0。</div>
 </li>
 <li class=""><code class="sig">void IncDf(string term)</code>
+<div class="mdoc">文档频率 +1（不存在则置 1）。</div>
 </li>
 <li class=""><code class="sig">void DecDf(string term)</code>
+<div class="mdoc">文档频率 -1，减到 0 时移除。</div>
 </li>
 </ul>
 </div></div>
@@ -313,6 +335,8 @@ string out = Csv.Serialize(rows);                 // 逗号分隔，自动加引
 <div class="mdoc">使用自定义分隔符序列化。</div>
 </li>
 <li class=""><code class="sig">static string Escape(string field, string separator)</code>
+<div class="mdoc">按需给单个字段加引号：含分隔符、引号或换行时用引号包围，
+字段内的引号写成两个；其余原样返回。</div>
 </li>
 </ul>
 </div></div>
@@ -320,6 +344,13 @@ string out = Csv.Serialize(rows);                 // 逗号分隔，自动加引
 <div class="api-body">
 <div class="mdoc">跨平台文本编码与转换工具。
 使用各平台均可用的 C 运行时函数。</div>
+<h5 class="cat">属性</h5><ul class="sig">
+<li class=""><code class="sig">static Encoding UTF8 { get }</code>
+<div class="mdoc">UTF-8 编码入口（C# Encoding.UTF8 的对应形态）。
+Zan 字符串本身就是 UTF-8 字节串，因此编码即原样拷贝，
+解码即校验/清洗后原样还原。</div>
+</li>
+</ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;)]static extern long strlen(string str);</code>
 </li>
@@ -344,6 +375,20 @@ string out = Csv.Serialize(rows);                 // 逗号分隔，自动加引
 </li>
 <li class=""><code class="sig">static int GetByteCount(string text)</code>
 <div class="mdoc">获取 UTF-8 字符串的字节数。</div>
+</li>
+<li class=""><code class="sig">static byte[]GetBytes(string text)</code>
+<div class="mdoc">把字符串编码为 UTF-8 字节（等价 s.ToBytes()，null 收敛为
+空串）。返回的 byte[] 长度即字节数。</div>
+</li>
+<li class=""><code class="sig">static string GetString(byte[]bytes, int offset, int count)</code>
+<div class="mdoc">把 UTF-8 字节解码为字符串：从 &lt;paramref name=&quot;offset&quot;/&gt;
+起取 &lt;paramref name=&quot;count&quot;/&gt; 个字节。非法字节序列（截断的多字节
+头、10xxxxxx 续字节落单）逐个替换为 U+FFFD，与 C#
+Encoding.UTF8.GetString 的宽松替换行为一致，绝不产生越界读取。
+count 会被夹进 [0, 剩余字节]，负 offset 收敛为 0。</div>
+</li>
+<li class=""><code class="sig">static string GetString(byte[]bytes)</code>
+<div class="mdoc">GetString(bytes, 0, bytes.Length) 的便捷形态。</div>
 </li>
 <li class=""><code class="sig">static string ByteToHex(int b)</code>
 <div class="mdoc">将字节值转换为十六进制字符串（两个字符）。</div>
@@ -440,16 +485,23 @@ List&lt;string&gt; hits = idx.Search(&quot;quick fox&quot;);     // [&quot;1&quo
 <code>query</code> 不是子序列时返回 0。</div>
 </li>
 <li class=""><code class="sig">static bool IsBoundary(string s, int i)</code>
+<div class="mdoc">判断 s[i] 是否落在词边界上：边界指紧跟非字母的字母，
+或紧邻大写字母的小写字母（驼峰）。i 为 0 视为词首，返回 true。</div>
 </li>
 <li class=""><code class="sig">static bool IsLetter(string ch)</code>
+<div class="mdoc">判断是否为 ASCII 字母（A-Z、a-z），只看首字符的低 8 位。</div>
 </li>
 <li class=""><code class="sig">static bool IsUpper(string ch)</code>
+<div class="mdoc">判断是否为 ASCII 大写字母（A-Z），只看首字符的低 8 位。</div>
 </li>
 <li class=""><code class="sig">static bool IsLower(string ch)</code>
+<div class="mdoc">判断是否为 ASCII 小写字母（a-z），只看首字符的低 8 位。</div>
 </li>
 <li class=""><code class="sig">static bool SameChar(string a, string b)</code>
+<div class="mdoc">忽略大小写比较两个单字符（转小写后判等）。</div>
 </li>
 <li class=""><code class="sig">static bool SameStr(string a, string b)</code>
+<div class="mdoc">区分大小写的字符串相等（<code>==</code> 的具名包装）。</div>
 </li>
 <li class=""><code class="sig">static bool SameStrIgnoreCase(string a, string b)</code>
 <div class="mdoc">忽略大小写的相等：完全匹配的定义（Score 承诺 1.0）
@@ -480,34 +532,54 @@ List&lt;string&gt; hits = idx.Search(&quot;quick fox&quot;);     // [&quot;1&quo
 <div class="mdoc">将受支持的 Markdown 语法渲染为紧凑的转义 HTML。</div>
 </li>
 <li class=""><code class="sig">static bool Block(StringBuilder html, bool first, string block)</code>
+<div class="mdoc">追加一个块级元素；非首块前置 &quot;\n&quot;。返回后续调用的
+first 值（恒 false）。</div>
 </li>
 <li class=""><code class="sig">static string Inline(string text)</code>
+<div class="mdoc">行内语法（代码/粗体/斜体/链接/转义）渲染入口。</div>
 </li>
 <li class=""><code class="sig">static string InlineAt(string text, int depth)</code>
+<div class="mdoc">Inline 的递归实现：<code>depth</code> 限制嵌套层数，超限时整段只做
+HTML 转义。未闭合的定界符按字面输出。</div>
 </li>
 <li class=""><code class="sig">static bool SafeUrl(string url)</code>
+<div class="mdoc">链接 URL 是否可生成锚点：相对路径，或 http/https/mailto
+协议，且不含 ASCII 控制字符。</div>
 </li>
 <li class=""><code class="sig">static string EscapeHtml(string text)</code>
+<div class="mdoc">HTML 转义：&lt; &gt; &amp; &quot; &#x27;。</div>
 </li>
 <li class=""><code class="sig">static bool IsBlockStart(string line)</code>
+<div class="mdoc">该行是否开始一个新块（围栏代码/标题/列表/引用），
+段落累积据此停止。</div>
 </li>
 <li class=""><code class="sig">static int HeadingLevel(string line)</code>
+<div class="mdoc">ATX 标题级别（1-6，&quot;#&quot; 后须有空格）；非标题返回 0。</div>
 </li>
 <li class=""><code class="sig">static bool IsQuote(string line)</code>
+<div class="mdoc">该行是否为块级引用（以 &quot;&gt;&quot; 开头）。</div>
 </li>
 <li class=""><code class="sig">static int ListKind(string line)</code>
+<div class="mdoc">列表行类别：1 无序（&quot;- &quot;/&quot;* &quot;/&quot;+ &quot;），2 有序（&quot;N. &quot;），
+非列表行返回 0。</div>
 </li>
 <li class=""><code class="sig">static int ListBody(string line, int kind)</code>
+<div class="mdoc">列表行中项正文（&quot;&quot; 内容）的起始下标。</div>
 </li>
 <li class=""><code class="sig">static List&lt;string&gt; Lines(string text)</code>
+<div class="mdoc">按 CR/CRLF/LF 把文本切成行；结尾无换行也补最后一行。</div>
 </li>
 <li class=""><code class="sig">static string Trim(string text)</code>
+<div class="mdoc">去除两端空白（空格、制表、换行）。</div>
 </li>
 <li class=""><code class="sig">static bool IsSpace(string ch)</code>
+<div class="mdoc">字符是否为空白（空格/制表/CR/LF）。</div>
 </li>
 <li class=""><code class="sig">static bool StartsWith(string text, string prefix)</code>
+<div class="mdoc">前缀匹配。</div>
 </li>
 <li class=""><code class="sig">static int Find(string text, string needle, int from)</code>
+<div class="mdoc">从 from 起查找子串，找不到返回 -1。</div>
 </li>
 </ul>
 </div></div>
@@ -524,9 +596,20 @@ string ab = Pinyin.Initials(&quot;中文&quot;);     // &quot;ZW&quot;
 string py = Pinyin.ToPinyin(&quot;Zan 语言&quot;); // &quot;Zan  yuyan&quot;
 
 Non-hanzi characters pass through unchanged. The lookup table is built
-lazily on first use and cached.</div>
+lazily on first use and cached.
+
+The dictionary itself lives in a data file (<code>pinyin.txt</code>, one
+&quot;汉字拼音&quot; line per GB2312 hanzi), not in compiled code — like the Gui
+icon packs it is resolved at run time through a discovery chain: env
+<code>ZAN_PINYIN_DATA</code> (file), <code>pinyin.txt</code> beside the exe, embedded resource
+<code>text/pinyin.txt</code> (zanc bakes the stdlib copy into every published
+program carrying this module), then the stdlib source tree for source
+checkouts. A replacement file overrides the baked-in table without
+recompiling anything. Deliberately no System.IO dependency here: this
+module must stay tiny for every program that merely touches pinyin.</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">static Dictionary &lt;string, string&gt; cache;</code>
+<div class="mdoc">Lazily built &quot;hanzi -&gt; pinyin&quot; table (null until first lookup).</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -544,16 +627,66 @@ characters pass through. &quot;中文&quot; -&gt; &quot;ZW&quot;, &quot;hello �
 Returns &quot;&quot; when <code>ch</code> is not a hanzi in the table.</div>
 </li>
 <li class=""><code class="sig">static Dictionary &lt;string, string&gt; Table()</code>
+<div class="mdoc">The cached table, built on first use.</div>
 </li>
 <li class=""><code class="sig">static Dictionary &lt;string, string&gt; Build()</code>
+<div class="mdoc">Parse the &quot;汉字拼音&quot; dictionary text (one hanzi+pinyin per line)
+into the table; short or malformed lines are skipped.</div>
 </li>
 <li class=""><code class="sig">static string Lookup(string han)</code>
+<div class="mdoc">Pinyin of one hanzi, or &quot;&quot; when it is not in the table.</div>
 </li>
 <li class=""><code class="sig">static int Utf8Width(string ch)</code>
 <div class="mdoc">UTF-8 byte width of the first character: 1 for ASCII,
 2/3/4 for multi-byte sequences.</div>
 </li>
-<li class=""><code class="sig">static string Data()</code>
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;)]static extern string getenv(string name);</code>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;zan_file_fopen&quot;)]static extern nint zan_pkg_fopen(string path, string mode);</code>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;)]static extern int fclose(nint fp);</code>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;)]static extern long fread(byte[]buf, long size, long count, nint fp);</code>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;)]static extern int zan_embed_has(string name);</code>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;)]static extern string zan_embed_read(string name);</code>
+</li>
+<li class=""><code class="sig">static string Env(string name)</code>
+<div class="mdoc">getenv wrapper returning &quot;&quot; instead of null.</div>
+</li>
+<li class=""><code class="sig">static string ReadSmallFile(string path)</code>
+<div class="mdoc">Read a whole small text file via raw CRT handles — the same
+primitives File.ReadAllText uses, minus the System.IO dependency.</div>
+</li>
+<li class=""><code class="sig">static string ExeDir()</code>
+<div class="mdoc">Directory of the running executable (&quot;&quot; when unknown);
+resolved through the same primitives ProcessHost.SelfExe uses.</div>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;GetModuleFileNameW&quot;)]static extern int GetModuleFileNameW(nint hModule, nint buf, int size);</code>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;kernel32&quot;, EntryPoint=&quot;WideCharToMultiByte&quot;)]static extern int ToMulti(int page, int flags, nint wide, int wideLen, nint mb, int mbLen, nint defChar, nint usedDef);</code>
+</li>
+<li class=""><code class="sig">static string WideToStr(nint p)</code>
+<div class="mdoc">NUL-terminated UTF-16 buffer -&gt; Zan string (mirrors
+Wide.Read; kept local to avoid a System dependency).</div>
+</li>
+<li class=""><code class="sig">[DllImport(&quot;crt&quot;)]static extern int readlink(string path, byte[]buf, int size);</code>
+</li>
+<li class=""><code class="sig">static bool ReadableFile(string path)</code>
+<div class="mdoc">True when the path opens as a readable file. (fopen on a
+directory succeeds on POSIX, but the discovery chain only ever asks
+for concrete file names, so a handle check is enough here.)</div>
+</li>
+<li class=""><code class="sig">static bool EmbedExists(string path)</code>
+<div class="mdoc">True when the named embedded resource exists.</div>
+</li>
+<li class=""><code class="sig">static string LoadData()</code>
+<div class="mdoc">Load the &quot;汉字拼音&quot; dictionary text through the same kind of
+discovery chain the Gui icon packs use: env override, a file beside
+the exe, embedded resources, the stdlib source tree. Returns &quot;&quot; when
+nothing is found — the table then stays empty and lookups pass hanzi
+through unchanged.</div>
 </li>
 </ul>
 </div></div>
@@ -583,12 +716,20 @@ string raw = Template.RenderRaw(&quot;Hi {{name}}!&quot;, vars);// &quot;Hi **za
 &lt;c&gt;&amp; &lt; &gt; &quot; &#x27;&lt;/c&gt;。</div>
 </li>
 <li class=""><code class="sig">static string Expand(string text, Dictionary &lt;string, string&gt; vars, bool escape)</code>
+<div class="mdoc">替换核心：扫描 &lt;c&gt;{{key}}&lt;/c&gt; / &lt;c&gt;{{{key}}}&lt;/c&gt; 占位符，
+键两侧的空白会被剥掉。&lt;c&gt;{{{key}}}&lt;/c&gt; 无论 escape 与否都原样插入；
+&lt;c&gt;{{key}}&lt;/c&gt; 在 escape 为 true 时对值做 HTML 转义。
+占位符未闭合（找不到对应的 &lt;c&gt;}}&lt;/c&gt; / &lt;c&gt;}}}&lt;/c&gt;）时渲染在
+该处截断，剩余文本与占位符一并丢弃。</div>
 </li>
 <li class=""><code class="sig">static string Lookup(string key, Dictionary &lt;string, string&gt; vars)</code>
+<div class="mdoc">查占位符的值：vars 为 null 或键不存在时返回 &quot;&quot;（渲染不报错）。</div>
 </li>
 <li class=""><code class="sig">static string Trim(string s)</code>
+<div class="mdoc">剥掉 s 首尾的空白（空格、制表符、换行、回车）。</div>
 </li>
 <li class=""><code class="sig">static int Find(string hay, string needle, int from)</code>
+<div class="mdoc">返回 needle 在 hay 中自 from（含）起首次出现的下标，找不到返回 -1。</div>
 </li>
 </ul>
 </div></div>
@@ -629,8 +770,10 @@ Console.WriteLine(t.Render());
 <div class="mdoc">渲染对齐后的表格（ASCII 边框）。</div>
 </li>
 <li class=""><code class="sig">static string Border(int[]widths)</code>
+<div class="mdoc">渲染分隔线：每列按 widths[i]+2 个 <code>-</code> 输出，形如 <code>+----+---+</code>。</div>
 </li>
 <li class=""><code class="sig">static string Line(List&lt;string&gt; cells, int[]widths)</code>
+<div class="mdoc">渲染一行：单元格左对齐、按 widths 补空格；cells 缺列时以空单元格补齐。</div>
 </li>
 </ul>
 </div></div>

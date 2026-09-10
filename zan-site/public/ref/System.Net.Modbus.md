@@ -31,8 +31,11 @@ m.Close();
 - bool connected;
 
 - string lastError;
+  - 成功交换后为空 ""；失败后为简短原因，
+    以便调用方区分异常应答与链路断开。
 
 - ModbusClient()
+  - 私有构造：由 `ConnectAsync` 使用。
 
 - static async ModbusClient ConnectAsync(string host, int port, int unit)
   - 连接 Modbus TCP 端点。<paramref name="unit"/> 是
@@ -40,19 +43,32 @@ m.Close();
     在网关之后才有意义）。
 
 - bool IsConnected()
+  - 连接是否仍可用（对端关闭或帧错误后为 false）。
 
 - string LastError()
   - 上一次交换的失败原因（成功时为 ""）。
 
 - void Close()
+  - 关闭连接（幂等）。
 
 - async byte[]ReadBytesAsync(int need)
+  - 在 IO reactor 上挂起，跨多次 recv 精确读取
+    <paramref name="need"/> 个字节；对端关闭时置 connected=false
+    并返回已到手的（残缺）缓冲。
 
 - async byte[]TransactAsync(byte[]pdu, int pduLen)
+  - 一次请求/响应往返：发送 MBAP 头 + PDU，接收帧化的
+    应答 PDU（功能字节 + 数据）。传输失败或收到异常应答时
+    返回占位数组，并设置 `LastError`；事务 id 与
+    长度上限（260）在此校验。
 
 - async List<int> ReadBitsAsync(int fc, int addr, int count)
+  - 线圈（fc 1）与离散输入（fc 2）共用的读取器：
+    每个位对应一个 0/1 int；失败时返回空列表（见 LastError）。
 
 - async List<int> ReadRegsAsync(int fc, int addr, int count)
+  - 保持（fc 3）与输入（fc 4）寄存器共用的读取器：
+    每个寄存器为 16 位大端值；失败时返回空列表（见 LastError）。
 
 - async List<int> ReadCoilsAsync(int addr, int count)
   - 读取线圈（功能码 1）：每个线圈对应一个 0/1 int。

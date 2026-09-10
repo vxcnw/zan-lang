@@ -47,13 +47,15 @@
     <aside class="wiki-side doc-side">
       <div class="searchbox"><svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         <input id="docSearch" placeholder="筛选目录…" aria-label="filter"></div>
-      <details class="nsgrp" open><summary>System · 55</summary>
+      <details class="nsgrp" open><summary>System · 58</summary>
 <a href="/ref/System">System</a>
 <a href="/ref/System.Automation">System.Automation</a>
 <a href="/ref/System.Collections">System.Collections</a>
 <a href="/ref/System.Collections.Generic">System.Collections.Generic</a>
+<a href="/ref/System.Commercial">System.Commercial</a>
 <a href="/ref/System.Compiler">System.Compiler</a>
 <a href="/ref/System.Data">System.Data</a>
+<a href="/ref/System.Data.Excel">System.Data.Excel</a>
 <a href="/ref/System.Data.Firebird">System.Data.Firebird</a>
 <a href="/ref/System.Data.MySql">System.Data.MySql</a>
 <a href="/ref/System.Data.Orm">System.Data.Orm</a>
@@ -69,6 +71,7 @@
 <a href="/ref/System.Globalization">System.Globalization</a>
 <a href="/ref/System.IO">System.IO</a>
 <a href="/ref/System.IO.Compression">System.IO.Compression</a>
+<a href="/ref/System.IO.Watch">System.IO.Watch</a>
 <a href="/ref/System.Input">System.Input</a>
 <a href="/ref/System.Json">System.Json</a>
 <a href="/ref/System.Knowledge">System.Knowledge</a>
@@ -76,6 +79,7 @@
 <a href="/ref/System.Management">System.Management</a>
 <a href="/ref/System.Net">System.Net</a>
 <a href="/ref/System.Net.Coap">System.Net.Coap</a>
+<a href="/ref/System.Net.External">System.Net.External</a>
 <a href="/ref/System.Net.Http">System.Net.Http</a>
 <a href="/ref/System.Net.Http.Client">System.Net.Http.Client</a>
 <a href="/ref/System.Net.Http.Download">System.Net.Http.Download</a>
@@ -84,7 +88,6 @@
 <a href="/ref/System.Net.Modbus">System.Net.Modbus</a>
 <a href="/ref/System.Net.Mqtt">System.Net.Mqtt</a>
 <a href="/ref/System.Net.Ntp">System.Net.Ntp</a>
-<a href="/ref/System.Net.Rpc">System.Net.Rpc</a>
 <a href="/ref/System.Net.Sip">System.Net.Sip</a>
 <a href="/ref/System.Net.Sockets">System.Net.Sockets</a>
 <a href="/ref/System.Net.Sse">System.Net.Sse</a>
@@ -123,13 +126,13 @@
 <a href="/ref/Game.Arcade2D">Game.Arcade2D</a>
 <a href="/ref/Game.Arpg">Game.Arpg</a>
 <a href="/ref/Game.Arpg.Data">Game.Arpg.Data</a>
-<a href="/ref/Game.Arpg.Fonts">Game.Arpg.Fonts</a>
 <a href="/ref/Game.Board">Game.Board</a>
 <a href="/ref/Game.Cards">Game.Cards</a>
 <a href="/ref/Game.Core">Game.Core</a>
 <a href="/ref/Game.Foundation">Game.Foundation</a>
-<a href="/ref/Game.Foundation.Sdl">Game.Foundation.Sdl</a>
-<a href="/ref/Game.Render">Game.Render</a>
+<a href="/ref/Game.Foundation.Gui">Game.Foundation.Gui</a>
+<a href="/ref/Game.Idle">Game.Idle</a>
+<a href="/ref/Game.Kit">Game.Kit</a>
 <a href="/ref/Game.Scene">Game.Scene</a>
 </details>
 <details class="nsgrp"><summary>Sdk · 57</summary>
@@ -190,9 +193,6 @@
 <a href="/ref/Sdk.Wechat.TenPay">Sdk.Wechat.TenPay</a>
 <a href="/ref/Sdk.Wechat.Work">Sdk.Wechat.Work</a>
 <a href="/ref/Sdk.Wechat.WxOpen">Sdk.Wechat.WxOpen</a>
-</details>
-<details class="nsgrp" open><summary>SDL3 · 1</summary>
-<a href="/ref/SDL3">SDL3</a>
 </details>
 <details class="nsgrp"><summary>Platform · 1</summary>
 <a href="/ref/Platform">Platform</a>
@@ -400,13 +400,13 @@ OrderByNum）。</div>
 <li class=""><code class="sig">static List&lt;T&gt; OrderByKeysStrDescending&lt;T&gt;(this List&lt;T&gt; src, List&lt;string&gt; keys)</code>
 <div class="mdoc">按预先计算的字符串键列表稳定排序（降序）。</div>
 </li>
-<li class=""><code class="sig">static List&lt;T&gt; MergeSortKeysInt&lt;T&gt;(List&lt;T&gt; src, List&lt;int&gt; ka, int sign)</code>
+<li class=""><code class="sig">static List&lt;T&gt; MergeSortKeysInt&lt;T&gt;(List&lt;T&gt; src, List&lt;int&gt; keys, int sign)</code>
 </li>
-<li class=""><code class="sig">static List&lt;T&gt; MergeSortKeysLong&lt;T&gt;(List&lt;T&gt; src, List&lt;long&gt; ka, int sign)</code>
+<li class=""><code class="sig">static List&lt;T&gt; MergeSortKeysLong&lt;T&gt;(List&lt;T&gt; src, List&lt;long&gt; keys, int sign)</code>
 </li>
-<li class=""><code class="sig">static List&lt;T&gt; MergeSortKeysStr&lt;T&gt;(List&lt;T&gt; src, List&lt;string&gt; ka, bool desc)</code>
+<li class=""><code class="sig">static List&lt;T&gt; MergeSortKeysStr&lt;T&gt;(List&lt;T&gt; src, List&lt;string&gt; keys, bool desc)</code>
 </li>
-<li class=""><code class="sig">static List&lt;T&gt; MergeSortKeysNum&lt;T&gt;(List&lt;T&gt; src, List&lt;double&gt; ka, bool desc)</code>
+<li class=""><code class="sig">static List&lt;T&gt; MergeSortKeysNum&lt;T&gt;(List&lt;T&gt; src, List&lt;double&gt; keys, bool desc)</code>
 </li>
 <li class=""><code class="sig">static List &lt;Grouping&lt;T&gt;&gt; GroupBy&lt;T&gt;(this List&lt;T&gt; src, KeySelector&lt;T&gt; key)</code>
 <div class="mdoc">按整数键对元素分组。Grouping.IntKey 保存
@@ -498,6 +498,7 @@ AverageNum）。</div>
 <div class="mdoc">text 匹配 SQL LIKE 模式（&#x27;%&#x27;/&#x27;_&#x27;）时返回 true。</div>
 </li>
 <li class=""><code class="sig">static bool LikeAt(string t, int ti, string p, int pi)</code>
+<div class="mdoc">LikeMatch 的递归体：&#x27;%&#x27; 尝试消耗任意长度，&#x27;_&#x27; 匹配单个字符。</div>
 </li>
 <li class=""><code class="sig">static List&lt;T&gt; In&lt;T&gt;(this List&lt;T&gt; src, List&lt;T&gt; values)</code>
 <div class="mdoc">SQL IN：保留 values 中存在的元素（使用 ==）。</div>
@@ -522,14 +523,17 @@ InStr）。</div>
 &lt;c&gt;Expr&lt;T&gt;&lt;/c&gt; 参数的方法会以表达式树形式接收 lambda。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">public ExprNode Root;</code>
+<div class="mdoc">表达式树的根节点；未构造时为 null。</div>
 </li>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">public Expr()</code>
+<div class="mdoc">空包装：Root 为 null（经 <code>From</code> 装入树）。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">static Expr&lt;T&gt; From(ExprNode root)</code>
+<div class="mdoc">以给定的根节点包装成一个 Expr&lt;T&gt;。</div>
 </li>
 </ul>
 </div></div>
@@ -552,49 +556,66 @@ lambda 参数本身作为接收方时为 null；B = 参数）
 5 = 非（A = 操作数）</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">public int Kind;</code>
+<div class="mdoc">节点类型（见类注释的 0-5 编号）。</div>
 </li>
 <li class=""><code class="sig">public string Name;</code>
+<div class="mdoc">成员/运算符/方法/参数名（按 Kind 取义）。</div>
 </li>
 <li class=""><code class="sig">public ExprNode A;</code>
+<div class="mdoc">第一个操作数（接收方/函数体等）。</div>
 </li>
 <li class=""><code class="sig">public ExprNode B;</code>
+<div class="mdoc">第二个操作数（右操作数/调用参数）。</div>
 </li>
 <li class=""><code class="sig">public int TVal;</code>
 <div class="mdoc">常量负载类型：0 = int，1 = double，2 = string，3 = bool。</div>
 </li>
 <li class=""><code class="sig">public int IVal;</code>
+<div class="mdoc">TVal=0 时的整数值。</div>
 </li>
 <li class=""><code class="sig">public double DVal;</code>
+<div class="mdoc">TVal=1 时的浮点值。</div>
 </li>
 <li class=""><code class="sig">public string SVal;</code>
+<div class="mdoc">TVal=2 时的字符串值。</div>
 </li>
 <li class=""><code class="sig">public bool BVal;</code>
+<div class="mdoc">TVal=3 时的布尔值。</div>
 </li>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">public ExprNode()</code>
+<div class="mdoc">空节点：全字段取默认值（等 Static 工厂逐个赋值）。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">static ExprNode Member(string n)</code>
+<div class="mdoc">构造成员访问节点（Kind 0）。</div>
 </li>
 <li class=""><code class="sig">static ExprNode Const(int v)</code>
+<div class="mdoc">构造 int 常量节点（Kind 1，TVal 0）。</div>
 </li>
 <li class=""><code class="sig">static ExprNode Const(double v)</code>
+<div class="mdoc">构造 double 常量节点（Kind 1，TVal 1）。</div>
 </li>
 <li class=""><code class="sig">static ExprNode Const(string s)</code>
+<div class="mdoc">构造 string 常量节点（Kind 1，TVal 2）。</div>
 </li>
 <li class=""><code class="sig">static ExprNode Const(bool v)</code>
+<div class="mdoc">构造 bool 常量节点（Kind 1，TVal 3）。</div>
 </li>
 <li class=""><code class="sig">static ExprNode Binary(string op, ExprNode l, ExprNode r)</code>
+<div class="mdoc">构造二元运算节点（Kind 2；op 见类注释的运算符表）。</div>
 </li>
 <li class=""><code class="sig">static ExprNode Call(string fn, ExprNode recv, ExprNode arg)</code>
 <div class="mdoc">3 = 调用（Name = 方法名；A = 接收方树，当
 lambda 参数本身作为接收方时为 null；B = 单个参数树）。</div>
 </li>
 <li class=""><code class="sig">static ExprNode Lambda(string p, ExprNode body)</code>
+<div class="mdoc">构造 lambda 节点（Kind 4；p 为参数名）。</div>
 </li>
 <li class=""><code class="sig">static ExprNode Not(ExprNode x)</code>
+<div class="mdoc">构造逻辑非节点（Kind 5）。</div>
 </li>
 </ul>
 </div></div>
@@ -609,10 +630,12 @@ lambda 参数本身作为接收方时为 null；B = 单个参数树）。</div>
 <div class="mdoc">使用 GroupBy(KeySelector) 分组时的整数键。</div>
 </li>
 <li class=""><code class="sig">public List&lt;T&gt; Items;</code>
+<div class="mdoc">组内元素（按出现顺序）。</div>
 </li>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">public Grouping()</code>
+<div class="mdoc">空组：键为空串、元素列表为空。</div>
 </li>
 </ul>
 </div></div>

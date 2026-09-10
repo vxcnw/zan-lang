@@ -1,6 +1,6 @@
 # System.Compiler
 
-> 源码: `stdlib/System/Compiler/GenCommon.zan`, `stdlib/System/Compiler/GenDb.zan`, `stdlib/System/Compiler/GenDbEmit.zan`, `stdlib/System/Compiler/GenForm.zan`, `stdlib/System/Compiler/GenJson.zan`, `stdlib/System/Compiler/GenRoute.zan`, `stdlib/System/Compiler/GenScene.zan`, `stdlib/System/Compiler/ZanGen.zan`
+> 源码: `stdlib/System/Compiler/GenCommon.zan`, `stdlib/System/Compiler/GenDb.zan`, `stdlib/System/Compiler/GenDbEmit.zan`, `stdlib/System/Compiler/GenForm.zan`, `stdlib/System/Compiler/GenIndex.zan`, `stdlib/System/Compiler/GenJson.zan`, `stdlib/System/Compiler/GenRoute.zan`, `stdlib/System/Compiler/GenScene.zan`, `stdlib/System/Compiler/ZanGen.zan`
 
 
 ## DbField (class)
@@ -8,25 +8,36 @@
 一个实体字段的编译期模型(对应 dbgen.c 的 dg_field_t)。
 
 - string Name;
+  - 字段名。
 
 - string TypeName;
+  - 声明的类型名。
 
 - int Kind;
+  - 字段类别: 0 int, 1 double, 2 bool, 3 string, 4 enum, 5 nav
 
 - string Col;
+  - 列名([Column(Name=...)] 覆盖, 默认字段名)。
 
 - bool IsPk;
+  - 是否主键([Column(IsPrimary)] 或名为 id)。
 
 - bool IsIdent;
+  - 是否自增 identity 列。
 
 - bool IdentSet;
+  - IsIdentity 是显式写出来的(而不是按主键推断)
 
 - bool NotNull;
+  - 是否 NOT NULL(默认仅主键, [Column(IsNullable)] 覆盖)。
 
 - int StrLen;
+  - 字符串最大长度([Column(StringLength)])。
 
 
 ## GenCommon (class)
+
+ZanGen 各生成器共享的工具集: 回复组装、字符串转义、诊断与输出行。
 
 - static JsonValue NewReply()
   - 新回复: { "sources": [], "rewrites": [], "errors": [], "warnings": [] }
@@ -44,6 +55,7 @@
   - 标记失败:回复变成 { "error": msg },C 端读取并报错。
 
 - static bool HasError(JsonValue reply)
+  - 是否已用 Fail 标记失败(error 键存在)。
 
 - static string Esc(string s)
   - 把 s 转义为可嵌入 .zan 字符串字面量正文的文本。
@@ -59,9 +71,13 @@
 
 ## GenDb (class)
 
+编译期类型化 ORM 查询降级: 把类型化查询链重写为 __DbBind 参数化绑定链。
+
 - static JsonValue Unit;
+  - 输入的编译单元 AST(req.unit)。
 
 - static JsonValue Reply;
+  - 输出容器: 重写指令与诊断写进这里(reply)。
 
 - static Dict <string, JsonValue> ClassOf;
 
@@ -72,16 +88,22 @@
 - static Dict <int, JsonValue> CallById;
 
 - static int RwCount;
+  - 已发出的重写指令数(链登记用)。
 
 - static bool Any;
+  - 本轮是否发出过任何重写(决定是否触发绑定类文本生成)。
 
 - static bool SyncAll;
+  - 出现过 SyncStructureAll 调用(需为全部表实体生成绑定)。
 
 - static List<JsonValue> Projs;
+  - 聚合/列投影形状(生成 Pj<N>)。
 
 - static JsonValue ClassGet(string name)
+  - 按名字查类/枚举声明, 不存在返回 null。
 
 - static bool EnumGet(string name)
+  - 名字是否对应已知枚举。
 
 - static JsonValue AttrOf(JsonValue cls, string name)
   - 属性读取(与 dbgen.c 的 dg_attr 一致,名字精确匹配)。
@@ -90,68 +112,93 @@
   - 具名属性参数(`Name = expr`)的表达式树,或 null。
 
 - static string AttrStr(JsonValue attr, string key)
+  - 具名属性参数取字符串字面量, 缺失或类型不符返回 ""。
 
 - static bool AttrBool(JsonValue attr, string key, bool dflt)
+  - 具名属性参数取 bool 字面量, 缺失或类型不符返回 dflt。
 
 - static int AttrInt(JsonValue attr, string key, int dflt)
+  - 具名属性参数取 int 字面量, 缺失或类型不符返回 dflt。
 
 - static bool IsIntName(string n)
+  - 类型名是否属于整型族(int/long/short/byte/sbyte/uint/ushort/
+    ulong/char/nint)。
 
 - static bool IsFloatName(string n)
+  - 类型名是否属于浮点族(double/float/decimal)。
 
 - static bool Is64(string type)
   - 声明类型是否是 64 位整数(列走 BIGINT 与 64 位绑定/读取)。
 
 - static int ClassifyKind(string type)
+  - 类型名 -> 字段类别: 0 int、1 double、2 bool、3 string、4 enum、
+    5 导航实体、6 跳过(数组/泛型/可空/未知)。
 
 - static List<DbField> FieldsOf(string cls, int depth)
   - 收集一个实体的全部字段(基类递归,与 dbgen.c 的 dg_collect_fields
     一致:跳过 static 与 DF_SKIP)。
 
 - static void FieldsInto(string cls, int depth, List<DbField> outl)
+  - FieldsOf 的递归体: 先基类后自身收集字段, depth 防继承环(>8 停)。
 
 - static DbField FieldFind(List<DbField> fs, string name)
+  - 按字段名在字段列表中查找, 没有返回 null。
 
 - static string TableOf(string cls)
+  - 实体的表名([Table(Name=...)], 缺省用类名)。
 
 - static List<JsonValue> IndexAttrs(string cls)
   - 实体上的 `[Index(Name = "...", Fields = "a,b", IsUnique = true)]`,
     按声明顺序;一个实体可以带多条。
 
 - static bool IsTableEntity(string cls)
+  - 类是否带 [Table] 属性(即 ORM 实体)。
 
 - static string PkOf(string cls)
   - 主键列:显式 identity 优先,其次叫 id 的字段,没有返回 ""。
 
 - static int NeedAdd(string name)
+  - 实体名进 NeedNames(待生成绑定类), 返回其在列表中的下标。
 
 - static JsonValue CallAt(int id)
+  - 按调用点 id 取调用点, 不存在返回 null。
 
 - static JsonValue TreeStr(string s)
+  - 字符串字面量节点。
 
 - static JsonValue TreeNull()
+  - null 字面量节点。
 
 - static JsonValue TreeId(string name)
+  - 标识符节点。
 
 - static JsonValue TreeGenericId(string name, string targ)
   - 泛型标识符:`Expr<T>` 的 "Expr" 带 targs 数组(反序列化器据此
     构建 inst_type_ref)。
 
 - static JsonValue TreeMem(JsonValue obj, string name)
+  - 成员访问节点 o.n。
 
 - static JsonValue TreeCall(JsonValue callee, JsonValue args)
+  - 调用节点 f(a)。
 
 - static JsonValue TreeCall1(JsonValue callee, JsonValue arg)
+  - 单参调用节点; arg 为 null 时即无参调用。
 
 - static JsonValue OneArg(JsonValue arg)
+  - 单元素参数数组; arg 为 null 时空数组。
 
 - static JsonValue TreeBin(string op, JsonValue l, JsonValue r)
+  - 二元运算节点 op l r。
 
 - static JsonValue TreeCast(string t, JsonValue e)
+  - 类型转换节点 (t)e。
 
 - static JsonValue TreeLam(List<string> ps, JsonValue body)
+  - lambda 节点 (p1..pn) => body。
 
 - static int ArgsCount(JsonValue call)
+  - 调用点实参个数(缺 args 算 0)。
 
 - static string LamParam(JsonValue lam)
   - lambda 节点的第一个形参名;结构不完整时给空串。
@@ -160,10 +207,13 @@
   - o[key] 数组的长度;缺失算 0。
 
 - static JsonValue ArgAt(JsonValue call, int i)
+  - 调用点第 i 个实参, 越界返回 null。
 
 - static JsonValue NewOp(string op, JsonValue call)
+  - 针对调用点的重写指令头(op + id)。
 
 - static void AddRewrite(JsonValue op)
+  - 把重写指令追加进 reply 并计数(RwCount 供链登记判断)。
 
 - static void MarkChain(JsonValue call, string entity, int ck)
   - 链重写成功后登记调用点:下游调用点沿 `call#<id>` 回溯链根时,每一环
@@ -171,22 +221,33 @@
     先于外层登记,与 dbgen.c 直接改 AST 的语义一致。
 
 - static void Diag(JsonValue call, string msg)
+  - 在调用点位置向 reply.errors 追加一条错误诊断。
 
 - static string SqlOp(string op, bool flip)
+  - Zan 比较运算符 -> SQL 文本(两侧各一个空格); flip 时反转
+    < > 方向; 不支持的运算符返回 ""。
 
 - static string ExprOp(string op)
+  - 表达式树支持的运算符白名单(原样返回), 不支持返回 ""。
 
 - class Wf
+  - 单个 Where/Having lambda 的翻译状态: 文本段与表达式段交替累积
+    成片段树, Binds 记录按出现顺序的绑定值。
 
 - static void WfText(Wf w, string s)
+  - 追加一段 SQL 文本。
 
 - static void WfFlush(Wf w)
+  - 把累积文本折叠进片段树并清空缓冲。
 
 - static void WfExpr(Wf w, JsonValue e)
+  - 追加一个表达式段(先折叠未完的文本)。
 
 - static void WfBind(Wf w, int kind, JsonValue expr)
+  - 记录一个绑定值; 超过 64 个置 Ok=false。
 
 - static void WfErr(Wf w, string msg)
+  - 发一条 Where 翻译诊断并置 Ok=false。
 
 - static bool MentionsParam(JsonValue e, string pname)
   - 表达式树里是否出现 lambda 参数名。
@@ -195,11 +256,14 @@
   - `p.field` -> 字段条目,否则 null。
 
 - static void WfCol(Wf w, DbField f)
+  - 输出限定列名 t.<col>。
 
 - static string LitMismatch(DbField f, JsonValue e)
   - 字面量/字段类型匹配(编译期)。不匹配返回消息,匹配返回 ""。
 
 - static bool CheckValueType(Wf w, DbField f, JsonValue e)
+  - 字面量与列类型不匹配时发诊断返回 false; 匹配(或不涉及字面量)
+    返回 true。
 
 - static void WfValue(Wf w, DbField f, JsonValue e)
   - 标量比较值:`?` 标记 + 按列类型的绑定。枚举包 (int) 转换,
@@ -214,22 +278,28 @@
   - 绑定类型 -> 链方法名。
 
 - static JsonValue OpObj(string m, JsonValue args)
+  - 链操作 { m, args }。
 
 - static JsonValue OneOp(string m, JsonValue arg)
+  - 单参链操作; arg 为 null 时无参。
 
 - static bool WhereMethod(Wf w, JsonValue e)
   - `p.f.Method(arg...)` 条件:空参 null 测试、两参范围测试、
     单参比较方法,以及字符串匹配与 In 系列。
 
 - static void WhereCond(Wf w, JsonValue e)
+  - 条件树递归翻译: &&/||、!、bool 列直读、方法形式与运算符形式的
+    比较、null 测试、聚合比较。失败置 w.Ok=false。
 
 - static JsonValue WhereFrag(JsonValue call, string cls, JsonValue lambda, Wf w)
   - 把 lambda 翻译成 SQL 片段树 + 绑定列表,返回片段树;不可翻译时
     发诊断并返回 null。
 
 - class ExprSlot
+  - 一个 `Expr<T>` 形参槽: 所在类/方法/参数位与实体名。
 
 - static List<ExprSlot> Eslots;
+  - 本单元全部 Expr 槽, 由 CollectExprSlots 填充。
 
 - static void CollectExprSlots()
   - 扫描方法声明的 `Expr<...>` 形参(形状检查即可,无需 binder)。
@@ -241,15 +311,19 @@
   - 接收者链是否最终落在 lambda 参数上(`o` in `o.region` / ...)。
 
 - static bool ExprIsValue(JsonValue e, string pname)
+  - 表达式是否是"值侧": p 链读或 int/double/str/bool 字面量。
 
 - static DbField MemberField(List<DbField> fs, JsonValue e, string pname)
+  - `p.field` 形态的字段条目, 否则 null。
 
 - static int LitKind(JsonValue e)
+  - 字面量类别: 0 int、1 double、2 bool、3 string, 非字面量 -1。
 
 - static bool KindCompat(int fk, int lk)
   - 字面量 lk 能否与列类型 fk 比较(与 dbgen.c 的 dg_kind_compat 一致)。
 
 - static bool ExprTypeOk(List<DbField> fs, JsonValue l, JsonValue r, string pname)
+  - 二元运算两侧的列/字面量类型是否可比较(任一侧不涉及列时恒真)。
 
 - static bool ExprCompatible(List<DbField> fs, JsonValue e, string pname)
   - lambda 体能否降级为 ExprSql 能构建 SQL 的树:列读、字面量、
@@ -343,6 +417,7 @@
   - 选择器列:`p => p.field` 的列,失败时发诊断并返回 null。
 
 - static bool SelectHead(string name)
+  - 名字是否是查询链头方法(访问器上可直接接链的那批)。
 
 - static string ChainEntity2(JsonValue call, out int kind)
   - 沿 fluent 链接收者回溯到重写后的 `__DbBind.X_<T>` 根,返回实体名
@@ -360,7 +435,29 @@
 - static JsonValue AccConn(JsonValue acc)
   - 访问器 `obj.__Conn()` 调用树。
 
+- static JsonValue DaoClass(string entity)
+  - 返回实体对应的手写 DAO 类。DAO 名称按实体的稳定短名约定为
+    `<Entity>Dao`;生成器只选择非静态、非 private/protected 的实例方法。
+    这样 `this.User` 的领域方法仍由项目 DAO 负责，GenDb 不复制业务 SQL。
+
+- static bool DaoAmbiguous(string entity)
+  - `<Entity>Dao` 是否有多个同名/同 orig 的声明。
+
+- static string DaoName(JsonValue dao, string entity)
+  - DAO 的真实类名(命名空间 mangling 后的名字); dao 为 null 时
+    按约定名 `<entity>Dao`。
+
+- static bool DaoHasMethod(JsonValue dao, string name, int argc)
+  - DAO 是否有指定名字与参数个数的非静态、非 private/protected
+    实例方法。
+
+- static JsonValue DaoCallTree(string dao, string method, JsonValue conn, JsonValue args)
+  - 构造 `new <Dao>(conn).Method(args...)` 的表达式树。此树只描述
+    编译期已经确认的 DAO 调用，连接仍由 accessor 所属对象提供。
+
 - static void VisitCall(JsonValue call)
+  - 单个调用点分派: SyncStructureAll、Expr 槽参数、访问器根
+    (Insert/Update/Delete/Read/DAO 调用/链头)、ORM 根、链方法。
 
 - static void ChainMethods(JsonValue call, string entity, int ck)
   - 链上方法分派(调用点已被识别为 db 链)。
@@ -370,52 +467,45 @@
     `.W(frag).P(v)...` 链树。
 
 - static void Run(JsonValue req, JsonValue reply)
+  - 入口: 建立类符号表, 收集 Expr 槽, 按 id 升序(children-first)
+    访问全部调用点; 发生过重写且无诊断时调用 GenDbEmit 生成
+    绑定类文本。
 
 
 ## GenDbEmit (class)
 
+实体绑定类文本生成：`<Entity>Cols`、`__DbQ_/I_/U_/D_/CF_`
+各门面、`__DbM_` 取值/赋值口与 `__DbB_` 行来源,以及汇总类
+`__DbBind`。由 `GenDb` 在收集到实体后调用
+`Run` 产出整段源码。
+
 - static bool Is64(string type)
   - 声明类型是否是 64 位整数(需要 BIGINT 列与 64 位绑定/读取)。
 
-- static string Getter(int kind)
-  - 行的 Getter 名(按字段类型)。
+- static string Bl(bool v)
+  - 布尔值的 Zan 字面量("true"/"false"),拼进生成的代码。
 
-- static string GetterOf(DbField f)
-  - 行的 Getter 名(64 位整数列走 GetLong,否则同 Getter(kind))。
+- static string Getter(int kind)
+  - 行的 Getter 名(按字段类型)——投影仍按目标类型直接取值。
+
+- static string ColArgs(DbField f)
+  - `m.Col(...)` 的实参文本：列名、字段名、类型码、是否 64 位、
+    主键、自增、非空、字符串长度。
 
 - static void Projections(StringBuilder b, string cls)
   - 聚合/列投影终端:GenDb.Projs 里属于本实体的每个形状生成
     `Pj<N>()` / `Pj<N>Async()` / `Pj<N>One()` / `Pj<N>OneAsync()`,
     结果映射到业务侧声明的目标类型(类型安全,业务侧不出现 SQL)。
 
-- static int TyCode(int kind)
-  - __DbBind.Ty 的列类型码:0 int/enum, 1 double, 2 bool, 3 string,
-    4 64 位整数。
+- static bool Has(List<string> l, string v)
+  - 实体的取值/赋值口 `__DbM_<T>` 与行来源 `__DbB_<T>`。列集合和 SQL
+    仍由运行期决定；这里仅把列元数据分发到实体的直接字段访问，避免为每个
+    实体拉入通用反射读写表。
 
-- static int TyCodeOf(DbField f)
-  - 字段的列类型码(在 TyCode 之上区分 64 位整数)。
-
-- static void BindField(StringBuilder b, string ind, DbField f, string obj)
-  - 输出 `ps.AddXxx(o.<field>);` 绑定语句(ind 为缩进)。
-
-- static void GenCols(StringBuilder b, string cls, List<DbField> fs, string tbl)
-  - `<Entity>Cols`:表名 + 列名常量 + Has/Kind/Require。
-
-- static void GenEntity(StringBuilder b, string cls)
-  - 查询类 __DbQ_<E>。
-
-- static void GenInsert(StringBuilder b, string cls, List<DbField> fs, string tbl)
-  - __DbI_<E>:INSERT(行列表 / DbValues 字典 / Only/Skip)。
-
-- static void GenUpdate(StringBuilder b, string cls, List<DbField> fs, string tbl)
-  - __DbU_<E>:UPDATE(Set/SetIncr/Where 链)。
-
-- static void GenDelete(StringBuilder b, string cls, string tbl)
-  - __DbD_<E>:DELETE(Where 链)。
-
-- static string PkList(List<DbField> fs)
-  - 复合主键的列清单(两列及以上时才有:一列的主键仍写在列定义里)。
-    identity 列自带 PRIMARY KEY,不参与表级约束。
+- static void GenAccess(StringBuilder b, string cls)
+  - 生成 `__DbM_<E>`(按列字段名分发到实体直接字段的
+    Read/Bind)与 `__DbB_<E>`(IOrmRows:实体列表按行按列绑定)。
+    导航字段(Kind 5)不参与列绑定。
 
 - static bool IsIdent(string s)
   - 只有标识符字符的名字才写进 DDL:索引名来自实体上的字面量,
@@ -423,12 +513,31 @@
 
 - static List<string> IndexArgs(string cls, List<DbField> fs, string tbl)
   - 实体 `[Index(Name=, Fields=, IsUnique=)]` -> 每条索引一行
-    `__DbBind.EnsureIndex(db, name, tbl, cols, unique)` 的实参文本。
-    `Fields` 写的是实体字段名,进语句的是它们的物理列名;既有表也补建
-    缺失的索引(存在性由 __DbBind 按方言判断)。
+    `m.Index(name, cols, unique)` 的实参文本。`Fields` 写的是实体
+    字段名,进语句的是它们的物理列名;既有表也补建缺失的索引
+    (存在性由 OrmDialect 按方言判断)。
+
+- static void GenCols(StringBuilder b, string cls, List<DbField> fs, string tbl)
+  - `<Entity>Cols`:表名 + 列名常量 + Has/Kind/Require + 运行期元数据。
+    元数据只建一次(静态缓存),SQL 片段的缓存挂在它上面。
+
+- static void GenEntity(StringBuilder b, string cls)
+  - 查询门面 __DbQ_<E>:链式方法转发给 OrmSelect,只有行映射与终端
+    需要实体类型。
+
+- static void GenInsert(StringBuilder b, string cls, List<DbField> fs, string tbl)
+  - 插入门面 __DbI_<E>:行列表/动态列/Only/Skip/Upsert 都转发给
+    OrmInsert,只有实体类型的重载需要在这里。
+
+- static void GenUpdate(StringBuilder b, string cls, List<DbField> fs, string tbl)
+  - 更新门面 __DbU_<E>：Set/SetIncr/Where 链转发给 OrmUpdate；
+    实体整体更新在运行期按元数据展开。
+
+- static void GenDelete(StringBuilder b, string cls, List<DbField> fs, string tbl)
+  - 删除门面 __DbD_<E>：Where 链转发给 OrmDelete。
 
 - static void GenCodeFirst(StringBuilder b, string cls, List<DbField> fs, string tbl)
-  - __DbCF_<E>:CodeFirst(缺表建表,缺列加列;同步 + 异步)。
+  - CodeFirst 门面 __DbCF_<E>：建表/加列/补索引都由 OrmSync 按元数据做。
 
 - static void Run()
   - 汇总 __DbBind + 各实体类,产出整段生成源码。
@@ -436,11 +545,42 @@
 
 ## GenForm (class)
 
+.zform 设计文档到合成 partial class 的代码生成器。
+与 src/compiler/formgen.c 等价(输出逐字节一致);入口是
+`Translate`,由 design 请求分派 .zform 文件进来。
+
+- static List<string> compNames;
+  - 本轮 design 请求携带的用户组件文档（design 请求的
+    components[i]: { name, text }，来自工程 components/*.zcomp）。
+    组件名（文件基名）→ 已解析 JSON。引用展开（ExpandRefNode）
+    按名查表；Translate 入口填一次。
+
+- static List<JsonValue> compDocs;
+
 - static void Translate(JsonValue req, JsonValue reply)
+  - 翻译 design 请求里所有 .zform 文件(.zscene 归 GenScene):
+    逐个解析、校验、合成为 .zan 源码,经 GenCommon.AddSource
+    追加进 reply 的 sources;失败时写 reply 的 error 后返回。
 
 - static StringBuilder TranslateOne(JsonValue reply, string json, string file_name, bool emit_main)
   - 翻译单个 .zform 文档。失败返回 null;具体诊断(非法 kind 等)
     已写入 reply 的 error,纯解析失败则不设 error(C 端报通用错误)。
+
+- static JsonValue CompDoc(string name)
+  - 组件名对应的组件文档；未登记返回 null。
+
+- static JsonValue DeepCopy(JsonValue v)
+  - JsonValue 深拷贝：对象/数组递归新建，标量节点原样共享
+    （不可变）。组件文档缓存 per 实例展开必须用它。
+
+- static string ExpandRefs(JsonValue arr, int depth)
+  - 展开字段数组里的用户组件引用节点（带 "ref" 键）。就地
+    改写：引用节点变成 Panel 外壳（名字/几何/停靠/绑定等
+    自身键全部保留），组件文档的字段匿名挂进 kids——内部名
+    不进宿主命名空间、内部事件不接线（组件内部是引用的黑
+    盒；宿主要接的是引用节点自己的 on* 绑定）。组件文档是
+    流式时，其顶层字段标 dock=1 让生成代码竖排；自由时保持
+    绝对坐标。组件可引用组件（递归，防环）。返回 "" 或错误。
 
 - static void ValidateFields(JsonValue reply, JsonValue arr, string file_name)
   - 校验字段树:每个字段的 kind 必须是合法 Zan 标识符(递归 kids)。
@@ -456,6 +596,7 @@
     ("name"、"addr.city")。
 
 - static string KindOf(JsonValue o)
+  - 字段的控件 kind:取 "kind" 字符串值,缺省或非字符串返回 ""。
 
 - static string TypeOf(JsonValue o)
   - 字段的 Zan 类型:泛型控件在 "of" 里写类型实参
@@ -471,16 +612,23 @@
   - "of" 的每个类型实参必须是合法 Zan 类型名(允许点分限定)。
 
 - static string TrimWs(string s)
+  - 剥掉 s 首尾的空格与制表符(不含换行)。
 
 - static bool IsContainer(JsonValue o)
+  - 字段是否为容器:带 "kids" 数组即视为容器,可递归放下级控件。
 
 - static int ObjNum(JsonValue o, string key, int def)
+  - 读对象的整数属性:存在且为数字时取其值,否则返回 def。
 
 - static bool ObjBool(JsonValue o, string key)
+  - 读对象的布尔属性:缺省或非布尔一律 false。
 
 - static string ObjStr(JsonValue o, string key)
+  - 读对象的字符串属性:缺省或非字符串返回 ""。
 
 - static int PrefH(JsonValue o)
+  - 控件的布局首选高度:取 "fh"(设计器里每控件可调),
+    缺省或非正数回退 32 逻辑像素。
 
 - static string JoinOpts(JsonValue o)
   - Join options with '|' (mirrors JoinOpts).
@@ -496,6 +644,9 @@
     数据本身由 code-behind 用 `grid.Bind(list)` 传入 List<of>。
 
 - static void EmitColumn(StringBuilder b, JsonValue c, string vn)
+  - 把一列的声明展开成 DataGrid<T> 的链式列构造调用
+    (标题/宽度/类型列/对齐/前缀后缀/聚合/冻结/编辑回写等),
+    非法或缺失的 "field" 直接跳过不发射。
 
 - static void EmitHandlers(StringBuilder wire, JsonValue o, string vn, string dispatch)
   - 发射 on<Event> 处理器绑定(事件名 = 去掉前导 "on" 的键)。
@@ -508,22 +659,98 @@
     就不参与布局。
 
 - static int ChildrenCount(JsonValue o)
+  - 直接子控件数:无 "kids" 数组则为 0。自动布局用它估容器高度。
 
-- static int EmitField(StringBuilder decls, StringBuilder body, StringBuilder wire, StringBuilder valid, JsonValue o, string parent, int id, List<string> used, bool freeMode, bool parentIsFlow, string dispatch, bool instanceFields)
+- static int EmitField(StringBuilder decls, StringBuilder body, StringBuilder wire, StringBuilder valid, JsonValue o, string parent, int id, List<string> used, bool freeMode, bool parentIsFlow, string dispatch, bool instanceFields, bool anon)
   - 发射一个字段的声明/构造/事件接线/校验,递归容器 kids。
     返回下一个局部 id。与旧 formgen 的 fg_emit_field 逐字节等价。
+    `anon`:组件引用展开的内部字段——不生成具名声明、不接内部
+    事件(组件内部对宿主不透明);`compAbs` 经壳节点的
+    "compAbs" 键折叠进 freeMode(自由组件文档的子树恒走绝对几何)。
+
+- static int ContainerPrefH(JsonValue o)
+  - 容器在自动堆叠（Dock.Top / 流式格）里的偏好高度：
+    引用展开的壳带 "ph" 键（组件画布高），其余容器维持
+    44 + 44 * 子数的旧估算。
+
+
+## GenIndex (class)
+
+项目语义索引导出器: 从单元元数据生成 routes/entities/index 三个产物。
+
+- static JsonValue unit;
+  - Seed 播种的单元元数据(classes/files 由此读取)。
+
+- static List<string> files;
+  - 单元源文件表:file_id -> 路径,来自 unit 的 "files"。
+
+- static string Base;
+  - 可选的路径前缀裁剪。工具为了避开 cwd 歧义常把绝对路径喂给编译器,
+    但索引消费者要的是工作区相对路径;调用方设置本字段即可(Seed 不会
+    重置它)。空串表示按编译器原样输出。
+
+- static void Seed(JsonValue u)
+  - 从单元元数据建立查表状态,并给 GenRoute / GenDb 播种,以便直接调用
+    它们的判定函数(两者的 Run 会自己重播种,先后调用互不影响)。
+
+- static string FileOf(int id)
+  - file_id -> 源文件路径(受 Base 裁剪)。旧编译器不导出 files 表时
+    回退为 ""。
+
+- static string Slashes(string p)
+  - 把路径里的反斜杠统一成正斜杠(索引进产物前规整)。
+
+- static string Relative(string path)
+  - 相对化:路径带 Base 前缀(忽略尾斜杠差异)时裁掉前缀,
+    否则按原样返回。
+
+- static JsonValue NamedArg(JsonValue attr, string key)
+  - 命名实参 `Name = <expr>` 的右值表达式树,没有则 null。
+
+- static JsonValue AttrOf(JsonValue owner, string name)
+  - 属性名匹配的第一个属性(类或成员),没有则 null。
+
+- static string ExprText(JsonValue e)
+  - 表达式树 -> 可读文本("PermBit.Create|PermBit.Update"、"true"、"8")。
+    索引给人和 AI 看,保留源码写法比求值成数字更有用。
+
+- static string CustomText(JsonValue cls, JsonValue m, string key)
+  - `Custom(...)` 上一个命名实参的文本,方法优先于类。
+
+- static string AuthOf(JsonValue cls, JsonValue m)
+  - 授权门:`Custom(Authorization = CustomAuthorization.X)` -> "X"。
+
+- static JsonValue RoutesDoc()
+  - 路由表。筛选与路径拼装跟 GenRoute.GenController 同一套判定:
+    只有被 [Route]/[Http*] 标注(或 ApiController 的公开方法)、参数形状
+    可绑定的方法才是 action。
+
+- static JsonValue EntitiesDoc()
+  - 实体表:每个 `[Table]` 类的物理表、列、导航、索引与生成门面名。
+
+- static JsonValue ManifestDoc(int routes, int entities)
+  - index.json 清单:版本、生成者、源文件数与路由/实体条数、
+    产物文件名列表及全部源文件(相对路径)。
+
+- static int WriteTo(JsonValue u, string dir)
+  - 把三份产物写进 `dir`(目录不存在则创建)。返回写出的路由条数。
 
 
 ## GenJson (class)
+
+System.Json 实体映射器: 为 Json.Deserialize/Serialize 生成 __JsonBind 绑定类与重写指令。
 
 - static Dict <string, JsonValue> ClassOf;
   - 类名 → 类 JSON(含 kind/bases/fields)。
 
 - static List<string> NeedNames;
+  - 本单元实际引用到的类（生成 __JsonBind 的顺序）。
 
 - static List<bool> NeedRootList;
+  - 与 NeedNames 平行：该类是否需要 List 根形态（DL_/SL_ 入口）。
 
 - static JsonValue Reply;
+  - 当前编译单元的 reply：诊断与 sources 回填都经它写入。
 
 - static JsonValue ClassGet(string name)
   - Dict 无 Get 成员:用 TryGetValue 封装。
@@ -533,27 +760,41 @@
 - static int FElemKind;
 
 - static void Run(JsonValue req, JsonValue reply)
+  - 入口：扫描 unit 的 classes/calls，收集 Json.Deserialize<T>/
+    Serialize<T> 调用点，生成并回填 __JsonBind 源码与重写指令。
 
 - static void Err(JsonValue call, string msg)
+  - 调用点错误：写入 reply.errors（带 file/line/col/msg）。
 
 - static void Warn(JsonValue field, string msg)
+  - 字段警告（如不支持的类型被跳过）：写入 reply.warnings。
 
 - static void Diag(JsonValue arr, JsonValue at, string msg)
+  - 向诊断数组追加一条 {file,line,col,msg}（取自 at 的整数字段）；
+    arr 为 null 时静默不产生诊断。
 
 - static void VisitCall(JsonValue call)
+  - 处理一个调用点：校验显式类型参数、类可达性、List<Class> 形态，
+    通过后按 Deserialize/Serialize × 单个/List 组合决定 D_/S_/DL_/SL_ 前缀，
+    下发 json_call 重写指令。不合法时写诊断并跳过。
 
 - static int NeedFind(string name)
+  - 类名在 NeedNames 中的下标，未收集过返回 -1。
 
 - static int NeedAdd(string name)
+  - 收集/去重一个被引用的类；已存在时返回原下标。
 
 - static bool IsIntName(string n)
+  - 是否映射为 FK 1（Int）：int/short/byte/sbyte/uint/ushort/char。
 
 - static bool IsLongName(string n)
+  - 是否映射为 FK 2（Long）：long/ulong。
 
 - static bool IsFloatName(string n)
+  - 是否映射为 FK 3（Float）：double/float/decimal。
 
 - static int BaseKind(string name)
-  - 基元/枚举/类的基类分类(FK 常量)。
+  - 基元/枚举/类的基类分类(FK 常量)。未知类型返回 0（SKIP，字段被跳过并告警）。
 
 - static int FieldKind(string tname)
   - 字段整体分类;List 元素经 FElemName/FElemKind 输出。
@@ -567,23 +808,42 @@
     返回新的 emitted(仅 mode 2 有意义)。
 
 - static void GenFieldW(StringBuilder out0, int fk, string fname, string tname)
+  - writer（mode 2）字段行：把一个字段直写成 JSON 文本
+    （数字/枚举转十进制、bool 写 true/false、string 经
+    Encoding.JsonEscape、类嵌套调 W_、List/List2 按元素种类展开）。
+    List 元素种类读 FElemName/FElemKind。
 
 - static void GenFieldB(StringBuilder out0, int fk, string fname, string tname)
+  - binder（mode 1）字段行：从 JsonValue 宽容地读回字段
+    （缺键取类型缺省值；枚举按 int 直赋）。List 字段遇非数组的
+    单个值时也接受，包装成单元素列表。
 
 - static void GenFieldT(StringBuilder out0, int fk, string fname, string tname)
+  - tree（mode 0）字段行：把字段转成 JsonValue 节点放入对象
+    （null→NewNull，string 过 T_Str，类嵌套调 T_）。List 元素
+    种类读 FElemName/FElemKind。
 
 - static void EmitBindClass()
+  - 合成 __JsonBind 类：先写通用 null 转换助手，再按引用顺序生成
+    每个类的 B_/T_/W_/D_/S_（及 List 形态 DL_/SL_），回填到 reply.sources。
 
 - static void GenClass(StringBuilder out0, int idx)
+  - 为一个类生成全部 binder 代码：B_(JsonValue→实体，宽容缺省)、
+    T_(实体→JsonValue，null→NewNull)、W_(实体→JSON 文本直写，
+    快约 4 倍)、D_/S_ 字符串入口，NeedRootList 时加 DL_/SL_。
 
 
 ## GenRoute (class)
 
+属性路由生成器: 消费 genmeta 单元元数据, 合成 __AttrRoutes 路由注册源码。
+
 - static JsonValue Reply;
+  - 输出容器: 合成源码与诊断写进这里(reply)。
 
 - static Dict <string, JsonValue> ClassOf;
 
 - static JsonValue Unit;
+  - 输入的编译单元元数据(req.unit)。
 
 - static Dict <string, int> MetaKind;
 
@@ -622,8 +882,11 @@
 - static string RWhere;
 
 - static JsonValue ClassGet(string name)
+  - 按名字查类声明, 不存在返回 null。
 
 - static void Run(JsonValue req, JsonValue reply)
+  - 入口: 扫描全部控制器生成路由; 无路由或已有诊断时不产出。
+    产物是名为 __AttrRoutes 的合成源码(蹦床方法 + Register)。
 
 - static string Esc(string s)
   - 转义为 Zan 字符串字面量正文(与 routegen 的 rg_put_qstr 一致:
@@ -642,13 +905,20 @@
   - 结构性属性(按结构解释,不进入用户元数据)。
 
 - static bool AttrNamed(JsonValue d, string nm)
+  - 声明 d(类/方法)上是否出现名为 nm 的属性。
+
+- static List<string> AttrStringArgs(JsonValue d, string nm)
+  - 属性类上 <name>(...) 的全部字符串字面量参数;无则空表。
 
 - static string AttrStringArg(JsonValue d, string nm)
   - 属性类上第一个 <name>(...) 的字符串参数;无则 ""。
 
 - static bool DerivesFrom(JsonValue cls, string basename)
+  - 类的 bases 里是否直接列出 basename(不递归)。
 
 - static bool IsController(JsonValue cls)
+  - 类是否呈控制器形状: 名以 Controller 结尾、继承
+    Controller/ApiController, 或带 [Route]/[ApiController]。
 
 - static string ControllerDisplay(JsonValue cls)
   - 原始(未改名)简单类名:nsresolve 会给重名控制器改名,但
@@ -670,17 +940,24 @@
   - 控制器 token = 原始类名去掉 "Controller" 后缀并小写。
 
 - static string BuildPath(string clsTpl, string mTpl, string ctrlTok, string actionTok)
+  - 合并类/方法路由模板, 替换 [controller]/[action] token, 归一化
+    斜杠; 方法模板不以 / 开头且无 [action] 时追加 [action] 段。
 
 - static bool EvalConst(JsonValue e)
   - 枚举成员求值(仅需要名字;数值无消费者)。
 
 - static void MetaSet(string key, bool onlyAbsent)
+  - 把 ConstKind/ConstSval 写入元数据键 key; onlyAbsent 时键已存在
+    则跳过。首次插入顺序记录在 MetaOrder。
 
 - static int MetaGetKind(string key)
+  - 键的元数据类别, 没有返回 -1。
 
 - static string MetaGetVal(string key)
+  - 键的元数据值, 没有返回 ""。
 
 - static string PmapProp(string param)
+  - ctor 参数名 → 属性名映射, 没有返回 ""。
 
 - static void ApplyAttr(JsonValue attr)
   - 应用一次属性用法到元数据:属性类默认值(仅缺省时)先,
@@ -694,10 +971,14 @@
   - 字面量参数原样输出;非字面量(动态默认值是代码,不是文档)为 ""。
 
 - static void ParamsAdd(JsonValue call)
+  - 记录一次输入调用发现的参数: 同名重复读按更强声明合并
+    (必填/具体类型/默认与描述取先到者), 超过 64 个静默丢弃。
 
 - static bool PNameSeen(string nm)
+  - 参数名是否已登记。
 
 - static void ParamAddOne(string nm, string ty, string desc, string def)
+  - 登记一个可选参数(query 来源; 同名已存在则跳过)。
 
 - static void ParamsAddPaged(JsonValue call)
   - this.Paged(defOrder, defLimit) 读每个列表屏共享的五个参数
@@ -714,8 +995,10 @@
     ("{id:int}" → id/int/path)。
 
 - static void EmitParams(StringBuilder out0)
+  - 把参数文档表输出为注册链上的 .Param(...) 序列。
 
 - static void EmitFluent(StringBuilder out0, string title)
+  - 把路由元数据输出为注册链上的 fluent 调用(Title/Auth/Menu/Lock/Upload/Limit/Meta)。
 
 - static int GenController(JsonValue cls, StringBuilder handlers, StringBuilder reg)
   - 生成一个控制器的全部路由;返回路由数。
@@ -724,12 +1007,31 @@
   - 方法上第一个 HTTP 动词属性名,无则 ""。
 
 - static string MethodVerb(JsonValue m)
+  - 方法上的 HTTP 动词(取第一个动词属性), 没有动词属性时返回 ""。
 
 - static bool BindableParams(JsonValue ps)
-  - 参数类型能否由蹦床从请求绑定(string/int/long/double/bool)。
+  - 参数类型能否由蹦床从请求绑定(string/int/long/double/bool,
+    或本单元内可表单化的类)。
 
 - static bool BindableType(string t)
   - 单个参数类型是否可绑定。
+
+- static JsonValue FormClassOf(string t)
+  - 参数类型指向的表单类:本单元已知、是 class、能以无参构造
+    (显式声明了无参构造,或根本没声明构造)。返回类 JSON,否则 null。
+
+- static Dict <string, string> OptArgs(JsonValue m)
+  - [Opt("page=1","kw=")]:可选签名参数 name → default。
+
+- static string InCall(string t, string label, string def)
+  - In* 读表达式:string 走 In,其余带类型化默认。
+
+- static string OptBindLine(string t, string n, string def)
+  - 可选参数的绑定语句:[Opt("page=1")] 下的 `int page` 生成
+    `int page = __c.InInt("page", 1);`——缺失取默认值,不再 400。
+
+- static double AtoD(string s)
+  - 十进制小数字面量解析(默认值只可能是源码里写得出的简单形状)。
 
 - static string BindLine(string t, string n)
   - 一条绑定语句:`long id = __c.NeedLong("id", "id");`。必填语义:
@@ -739,7 +1041,14 @@
 
 ## GenScene (class)
 
+.zscene 场景设计文档到合成 partial class 的代码生成器。
+与 src/compiler/scenegen.c 等价(输出逐字节一致);入口是
+`Translate`,由 design 请求分派 .zscene 文件进来。
+
 - static void Translate(JsonValue req, JsonValue reply)
+  - 翻译 design 请求里所有 .zscene 文件(.zform 归 GenForm):
+    逐个解析、合成为 .zan 源码,经 GenCommon.AddSource 追加进
+    reply 的 sources;失败时写 reply 的 error 后返回。
 
 - static string Esc(string s)
   - 转义为可嵌入 .zan 字符串字面量正文的文本。
@@ -748,15 +1057,20 @@
     与 GenCommon.Esc 不同)。
 
 - static int ObjNum(JsonValue o, string key, int def)
+  - 读对象的整数属性:存在且为数字时取其值,否则返回 def。
 
 - static string ObjStr(JsonValue o, string key)
+  - 读对象的字符串属性:缺省或非字符串返回 ""。
 
 - static bool ObjBool(JsonValue o, string key, bool def)
+  - 读对象的布尔属性:缺省或非布尔返回 def(与 GenForm 的
+    ObjBool 不同,这里允许指定缺省,如 visible 缺省 true)。
 
 - static int ArrNum(JsonValue o, string key, int i, int def)
   - 数值数组属性的第 i 个分量("color"/"clearColor")。
 
 - static bool UsedHas(List<string> used, string n)
+  - 元素名是否已被用作静态字段名(重名元素改用局部变量)。
 
 - static StringBuilder TranslateOne(JsonValue reply, string json, string file_name, bool emit_main)
   - 翻译单个 .zscene 文档。解析失败返回 null(不设 error,
@@ -765,4 +1079,9 @@
 
 ## ZanGen (class)
 
+编译期代码生成器入口: 按 mode 把请求分派给各 Gen* 模块并回写 reply。
+
 - static void Main()
+  - 生成器进程入口：读入请求 JSON,按 mode 分派(design ->
+    GenForm/GenScene,codegen -> GenJson/GenRoute/GenDb,设了
+    ZAN_INDEX_DIR 再顺带 GenIndex.WriteTo),把 reply 写到 out.json。

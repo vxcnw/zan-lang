@@ -22,42 +22,61 @@ Children/Parent/HitTest/FindAll 返回的元素都是新引用,各自 Dispose。
 Windows 仅;其他平台抛 PlatformNotSupportedException。
 
 - static int SlotParent()
+  - IAccessible vtable 槽位 7：get_accParent（取父对象）。
 
 - static int SlotChildCount()
+  - IAccessible vtable 槽位 8：get_accChildCount（子元素数）。
 
 - static int SlotName()
+  - IAccessible vtable 槽位 10：get_accName（元素名称）。
 
 - static int SlotValue()
+  - IAccessible vtable 槽位 11：get_accValue（元素值）。
 
 - static int SlotDescription()
+  - IAccessible vtable 槽位 12：get_accDescription（元素描述）。
 
 - static int SlotRole()
+  - IAccessible vtable 槽位 13：get_accRole（角色码）。
 
 - static int SlotState()
+  - IAccessible vtable 槽位 14：get_accState（状态位组合）。
 
 - static int SlotKeyboardShortcut()
+  - IAccessible vtable 槽位 17：get_accKeyboardShortcut（快捷键描述）。
 
 - static int SlotDefaultAction()
+  - IAccessible vtable 槽位 20：get_accDefaultAction（默认动作描述）。
 
 - static int SlotSelect()
+  - IAccessible vtable 槽位 21：accSelect（选中/聚焦）。
 
 - static int SlotLocation()
+  - IAccessible vtable 槽位 22：accLocation（屏幕矩形）。
 
 - static int SlotHitTest()
+  - IAccessible vtable 槽位 24：accHitTest（坐标命中测试）。
 
 - static int SlotDoDefaultAction()
+  - IAccessible vtable 槽位 25：accDoDefaultAction（执行默认动作）。
 
 - static int SlotPutValue()
+  - IAccessible vtable 槽位 27：put_accValue（设置值）。
 
 - static string IID_IAccessible()
+  - IAccessible 接口的 IID（字符串形式，经 Com.Guid 转换使用）。
 
 - static int ObjClient()
+  - OBJID_CLIENT（-4）：窗口客户区的无障碍对象。
 
 - static int ObjWindow()
+  - OBJID_WINDOW（0）：窗口本身的无障碍对象。
 
 - static int VtI4()
+  - VARIANT 类型 VT_I4（3）：32 位整数。
 
 - static int ChildSelf()
+  - CHILDID_SELF（0）：子 ID 表示元素自身是独立对象。
 
 - static nint oleacc;
 
@@ -74,29 +93,41 @@ Windows 仅;其他平台抛 PlatformNotSupportedException。
 - static nint fnSysAlloc;
 
 - nint acc;
+  - 持有的 IAccessible 接口指针（拥有引用，Dispose 释放；0 为空元素）。
 
 - int childId;
+  - 本元素在父对象中的子 ID（CHILDID_SELF=0 表示独立对象）。
 
 - static nint OleAcc()
+  - oleacc.dll 模块句柄；首次调用时加载并缓存，加载失败为 0。
 
 - static bool EnsureCom()
+  - 确保当前线程的 COM 已初始化；失败返回 false。
 
 - static nint FromWindowFn()
+  - 懒解析的 AccessibleObjectFromWindow 入口；未找到为 0。
 
 - static nint FromPointFn()
+  - 懒解析的 AccessibleObjectFromPoint 入口；未找到为 0。
 
 - static nint ChildrenFn()
+  - 懒解析的 AccessibleChildren 入口；未找到为 0。
 
 - static nint WindowFromAccFn()
+  - 懒解析的 WindowFromAccessibleObject 入口；未找到为 0。
 
 - static nint Bstr(string s)
+  - 分配 COM BSTR（oleaut32 SysAllocString）；oleaut32 不可用或
+    分配失败返回 0。
 
 - static void FreeBstr(nint bstr)
+  - 释放 BSTR（SysFreeString）；0 直接忽略。
 
 - static string TakeBstr(nint bstr)
   - 读取并释放一个 BSTR out 参数。
 
 - static nint ChildVariant(int id)
+  - 构造 VT_I4 的子元素 VARIANT（24 字节，调用方负责 NativeMemory.Free）。
 
 - UiElement(nint acc, int childId)
   - 接管引用:acc 必须已是调用方拥有的引用(AddRef 过);Dispose 时释放。
@@ -169,6 +200,8 @@ Windows 仅;其他平台抛 PlatformNotSupportedException。
     新引用,调用方 Dispose。
 
 - static void Walk(UiElement el, string name, int role, int depth, List<UiElement> outList)
+  - FindAll 的递归实现：先按名称/角色收录本元素（以独立引用加入
+    outList），再下钻子元素；`depth` 递减防环。
 
 - bool Invoke()
   - 执行默认动作(按钮点击、链接跳转等)。
@@ -689,10 +722,13 @@ Window.Close(wnd);
 屏幕坐标或客户区坐标中的一个点。
 
 - public int x;
+  - X 坐标。
 
 - public int y;
+  - Y 坐标。
 
 - WindowPoint(int x, int y)
+  - 构造点。
 
 
 ## WindowRect (class)
@@ -700,20 +736,28 @@ Window.Close(wnd);
 屏幕坐标或客户区坐标中的窗口矩形。
 
 - public int x;
+  - 左上角 X。
 
 - public int y;
+  - 左上角 Y。
 
 - public int width;
+  - 宽度。
 
 - public int height;
+  - 高度。
 
 - WindowRect(int x, int y, int w, int h)
+  - 构造矩形。
 
 - int Right()
+  - 右边界（x + width）。
 
 - int Bottom()
+  - 下边界（y + height）。
 
 - bool Contains(int px, int py)
+  - 点 (px, py) 是否落在矩形内（左/上闭，右/下开）。
 
 
 ## WindowThreadInfo (class)
@@ -721,10 +765,13 @@ Window.Close(wnd);
 窗口所属的线程与进程。
 
 - public int tid;
+  - 所属线程 ID。
 
 - public int pid;
+  - 所属进程 ID。
 
 - WindowThreadInfo(int tid, int pid)
+  - 构造。
 
 
 ## int (delegate)

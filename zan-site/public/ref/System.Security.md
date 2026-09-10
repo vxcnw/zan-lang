@@ -43,8 +43,10 @@
 - [DllImport("crt", EntryPoint="free")]static extern void GuardFree(string ptr);
 
 - static bool armed;
+  - Guard 是否已启动（Arm 幂等标记）。
 
 - static int strikes;
+  - 时钟偏差连续计次；连续两次超出阈值才终止（单次可能是调度抖动）。
 
 - static long baseTick;
 
@@ -53,6 +55,7 @@
 - static long qpcFreq;
 
 - static long Le64(string b)
+  - 从 8 字节的原生缓冲区中读取小端序 64 位值。
 
 - static void Trip()
   - 静默终止进程；检测到任何篡改时调用。
@@ -62,11 +65,15 @@
     看门狗。可安全调用一次；重复调用会被忽略。
 
 - static void CheckOnce()
+  - 一次廉价的内联检查：检测是否有调试器附加。游戏也可
+    每帧调用以获得更快的响应；看门狗每秒调用一次。
 
 - static void Check()
   - 公开的逐次检查。开销低，可选。检测调试器附加。
 
 - static void Watch()
+  - 后台看门狗：每秒一次（CPU 占用可忽略）。检测
+    启动后附加的调试器以及明显的变速时钟缩放。
 
 
 ## Protected (class)
@@ -82,6 +89,7 @@
 - int chk;
 
 - static int Key()
+  - 混淆用的固定 XOR 密钥（非加密材料，只为让明文不直接落内存）。
 
 - static Protected Of(int v)
   - 创建一个初始化为 <paramref name="v"/> 的受保护值。

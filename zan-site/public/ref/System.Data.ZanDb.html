@@ -47,13 +47,15 @@
     <aside class="wiki-side doc-side">
       <div class="searchbox"><svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         <input id="docSearch" placeholder="筛选目录…" aria-label="filter"></div>
-      <details class="nsgrp" open><summary>System · 55</summary>
+      <details class="nsgrp" open><summary>System · 58</summary>
 <a href="/ref/System">System</a>
 <a href="/ref/System.Automation">System.Automation</a>
 <a href="/ref/System.Collections">System.Collections</a>
 <a href="/ref/System.Collections.Generic">System.Collections.Generic</a>
+<a href="/ref/System.Commercial">System.Commercial</a>
 <a href="/ref/System.Compiler">System.Compiler</a>
 <a href="/ref/System.Data">System.Data</a>
+<a href="/ref/System.Data.Excel">System.Data.Excel</a>
 <a href="/ref/System.Data.Firebird">System.Data.Firebird</a>
 <a href="/ref/System.Data.MySql">System.Data.MySql</a>
 <a href="/ref/System.Data.Orm">System.Data.Orm</a>
@@ -69,6 +71,7 @@
 <a href="/ref/System.Globalization">System.Globalization</a>
 <a href="/ref/System.IO">System.IO</a>
 <a href="/ref/System.IO.Compression">System.IO.Compression</a>
+<a href="/ref/System.IO.Watch">System.IO.Watch</a>
 <a href="/ref/System.Input">System.Input</a>
 <a href="/ref/System.Json">System.Json</a>
 <a href="/ref/System.Knowledge">System.Knowledge</a>
@@ -76,6 +79,7 @@
 <a href="/ref/System.Management">System.Management</a>
 <a href="/ref/System.Net">System.Net</a>
 <a href="/ref/System.Net.Coap">System.Net.Coap</a>
+<a href="/ref/System.Net.External">System.Net.External</a>
 <a href="/ref/System.Net.Http">System.Net.Http</a>
 <a href="/ref/System.Net.Http.Client">System.Net.Http.Client</a>
 <a href="/ref/System.Net.Http.Download">System.Net.Http.Download</a>
@@ -84,7 +88,6 @@
 <a href="/ref/System.Net.Modbus">System.Net.Modbus</a>
 <a href="/ref/System.Net.Mqtt">System.Net.Mqtt</a>
 <a href="/ref/System.Net.Ntp">System.Net.Ntp</a>
-<a href="/ref/System.Net.Rpc">System.Net.Rpc</a>
 <a href="/ref/System.Net.Sip">System.Net.Sip</a>
 <a href="/ref/System.Net.Sockets">System.Net.Sockets</a>
 <a href="/ref/System.Net.Sse">System.Net.Sse</a>
@@ -123,13 +126,13 @@
 <a href="/ref/Game.Arcade2D">Game.Arcade2D</a>
 <a href="/ref/Game.Arpg">Game.Arpg</a>
 <a href="/ref/Game.Arpg.Data">Game.Arpg.Data</a>
-<a href="/ref/Game.Arpg.Fonts">Game.Arpg.Fonts</a>
 <a href="/ref/Game.Board">Game.Board</a>
 <a href="/ref/Game.Cards">Game.Cards</a>
 <a href="/ref/Game.Core">Game.Core</a>
 <a href="/ref/Game.Foundation">Game.Foundation</a>
-<a href="/ref/Game.Foundation.Sdl">Game.Foundation.Sdl</a>
-<a href="/ref/Game.Render">Game.Render</a>
+<a href="/ref/Game.Foundation.Gui">Game.Foundation.Gui</a>
+<a href="/ref/Game.Idle">Game.Idle</a>
+<a href="/ref/Game.Kit">Game.Kit</a>
 <a href="/ref/Game.Scene">Game.Scene</a>
 </details>
 <details class="nsgrp"><summary>Sdk · 57</summary>
@@ -191,9 +194,6 @@
 <a href="/ref/Sdk.Wechat.Work">Sdk.Wechat.Work</a>
 <a href="/ref/Sdk.Wechat.WxOpen">Sdk.Wechat.WxOpen</a>
 </details>
-<details class="nsgrp" open><summary>SDL3 · 1</summary>
-<a href="/ref/SDL3">SDL3</a>
-</details>
 <details class="nsgrp"><summary>Platform · 1</summary>
 <a href="/ref/Platform">Platform</a>
 </details>
@@ -213,6 +213,7 @@
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">BLeafEntry(string key, string val, int overflowPage)</code>
+<div class="mdoc">构造一条记录。</div>
 </li>
 </ul>
 </div></div>
@@ -233,12 +234,15 @@
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">BNode(bool isLeaf)</code>
+<div class="mdoc">构造空节点（叶子或内部）。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">static BNode Leaf()</code>
+<div class="mdoc">空叶子节点。</div>
 </li>
 <li class=""><code class="sig">static BNode Internal()</code>
+<div class="mdoc">空内部节点。</div>
 </li>
 <li class=""><code class="sig">BNode Copy()</code>
 <div class="mdoc">独立副本。从已提交页面解码出的节点
@@ -290,6 +294,7 @@
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">BTree()</code>
+<div class="mdoc">私有构造；统一经 <code>Open</code> 创建。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -298,20 +303,26 @@
 。</div>
 </li>
 <li class=""><code class="sig">string GetError()</code>
+<div class="mdoc">打开失败原因；无错为空串。</div>
 </li>
 <li class=""><code class="sig">int RootId()</code>
+<div class="mdoc">当前根页 id（0 = 空树）。</div>
 </li>
 <li class=""><code class="sig">void Sync()</code>
 <div class="mdoc">当 pager 采纳了另一进程的提交时丢弃已解码的节点：
 页面 id 现在可能存放了不同的内容。</div>
 </li>
 <li class=""><code class="sig">static void InsEntry(List&lt;BLeafEntry&gt; l, int idx, BLeafEntry v)</code>
+<div class="mdoc">在下标 idx 处插入叶子条目（其余右移）。</div>
 </li>
 <li class=""><code class="sig">static void InsStr(List&lt;string&gt; l, int idx, string v)</code>
+<div class="mdoc">在下标 idx 处插入字符串（其余右移）。</div>
 </li>
 <li class=""><code class="sig">static void InsInt(List&lt;int&gt; l, int idx, int v)</code>
+<div class="mdoc">在下标 idx 处插入整数（其余右移）。</div>
 </li>
 <li class=""><code class="sig">static int Compare(string a, string b)</code>
+<div class="mdoc">按无符号字节序比较两串（页内有序性与扫描都依赖它）。</div>
 </li>
 <li class=""><code class="sig">string ReadChain(int firstPage)</code>
 <div class="mdoc">将整条 overflow 链读回为一个字符串。</div>
@@ -325,8 +336,11 @@
 没有快照引用前仍保持可读。</div>
 </li>
 <li class=""><code class="sig">BNode ReadNode(int pageId)</code>
+<div class="mdoc">读取（或取自缓存）并解码一个节点页；旧版 TYPE_LEAF 与
+当前 TYPE_LEAF2 都能解。</div>
 </li>
 <li class=""><code class="sig">static int EncodedSize(BNode n)</code>
+<div class="mdoc">节点编码后的字节数（据此决定是否分裂）。</div>
 </li>
 <li class=""><code class="sig">void WriteNode(int pageId, BNode n)</code>
 <div class="mdoc">把节点编码进属于当前事务的页面
@@ -357,6 +371,7 @@
 （单元素列表）。</div>
 </li>
 <li class=""><code class="sig">bool Contains(string key)</code>
+<div class="mdoc">键是否存在。</div>
 </li>
 <li class=""><code class="sig">void Put(string key, string val)</code>
 <div class="mdoc">在当前进行中的写入事务里插入或替换 key -&gt; val
@@ -395,8 +410,11 @@ free list——不解码、不重写——沿途每个
 并返回被删除的键数量。</div>
 </li>
 <li class=""><code class="sig">int DeleteMatching(string startKey, string endKey, int mode)</code>
+<div class="mdoc">两种删除模式共用的实现（<code>DeleteRange</code> 与
+<code>DeletePrefix</code> 的入口）；mode 决定区间语义。</div>
 </li>
 <li class=""><code class="sig">static bool InRange(string key, string startKey, string endKey, int mode)</code>
+<div class="mdoc">key 是否落在当前模式定义的区间内。</div>
 </li>
 <li class=""><code class="sig">int PruneNode(int pageId, string startKey, string endKey, int mode, List&lt;int&gt; removed)</code>
 <div class="mdoc">删除一个子树内的区间。返回（可能是
@@ -414,6 +432,7 @@ free list——不解码、不重写——沿途每个
 条目计数，因此值永远不会被解码。</div>
 </li>
 <li class=""><code class="sig">int CountNode(int pageId)</code>
+<div class="mdoc">递归统计子树的键数（只读页头计数，不解码值）。</div>
 </li>
 </ul>
 </div></div>
@@ -453,12 +472,14 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">Collection()</code>
+<div class="mdoc">仅初始化空字段；真正的构造走 <code>Attach</code>。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">[DllImport(&quot;crt&quot;, EntryPoint=&quot;memchr&quot;)]static extern nint MemChr(nint p, int c, long n);</code>
 </li>
 <li class=""><code class="sig">static Collection Attach(KvStore kv, AsyncRwLock rw, string name)</code>
+<div class="mdoc">绑定到底层 KvStore 的一个命名空间，并加载索引列表与字段名字典。</div>
 </li>
 <li class=""><code class="sig">void SyncMeta()</code>
 <div class="mdoc">当数据库更新到新版本（即其他进程已提交）时，重新读取缓存的元数据（字段名字典、索引
@@ -470,21 +491,29 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
 才发生。</div>
 </li>
 <li class=""><code class="sig">string Name()</code>
+<div class="mdoc">集合名。</div>
 </li>
 <li class=""><code class="sig">static string PadId(int id)</code>
+<div class="mdoc">把 id 编码为定宽 6 位 base-64 数字（&#x27;?&#x27;..&#x27;~&#x27;）：字节序即数值序，
+且不含 0x00、&#x27;:&#x27; 与 &#x27;\t&#x27;，不破坏 B+Tree 顺序与键分隔。</div>
 </li>
 <li class=""><code class="sig">static int UnpadId(string s)</code>
 <div class="mdoc">PadId 的逆操作。</div>
 </li>
 <li class=""><code class="sig">string DocKey(int id)</code>
+<div class="mdoc">文档正文键 c:{name}:{id(定宽)}。</div>
 </li>
 <li class=""><code class="sig">string SeqKey()</code>
+<div class="mdoc">自增 id 序列键。</div>
 </li>
 <li class=""><code class="sig">string IdxMetaKey()</code>
+<div class="mdoc">索引字段列表元数据键（逗号分隔）。</div>
 </li>
 <li class=""><code class="sig">string KeysMetaKey()</code>
+<div class="mdoc">字段名字典元数据键（JSON 数组）。</div>
 </li>
 <li class=""><code class="sig">string IdxPosKey(string field)</code>
+<div class="mdoc">批量索引构建游标键；键不存在即表示该索引已构建完成。</div>
 </li>
 <li class=""><code class="sig">string IdxPrefix(string field, string val)</code>
 <div class="mdoc">同一索引字段所有条目共享的前缀。字段用
@@ -492,12 +521,16 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
 对每个条目零开销。</div>
 </li>
 <li class=""><code class="sig">string IdxKey(string field, string val, int id)</code>
+<div class="mdoc">完整二级索引条目键：<code>IdxPrefix</code> 加定宽 id。</div>
 </li>
 <li class=""><code class="sig">void LoadIndexMeta()</code>
+<div class="mdoc">从元数据键加载索引字段列表（逗号分隔；空则无索引）。</div>
 </li>
 <li class=""><code class="sig">void LoadKeyDict()</code>
+<div class="mdoc">从元数据键的 JSON 数组加载字段名字典。</div>
 </li>
 <li class=""><code class="sig">int KeyId(string k)</code>
+<div class="mdoc">字段名的 1 起始字典 id；首次出现时追加进字典并标记待持久化（须在 kv 事务内）。</div>
 </li>
 <li class=""><code class="sig">int KeyIdOf(string k)</code>
 <div class="mdoc">字段名的字典 id；若该集合从未
@@ -505,14 +538,23 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
 因此可在读取路径安全使用。</div>
 </li>
 <li class=""><code class="sig">string KeyName(int id)</code>
+<div class="mdoc">字典 id 反查字段名；越界时返回 &quot;?&quot; 加 id（不抛错）。</div>
 </li>
 <li class=""><code class="sig">void PersistKeyDict()</code>
+<div class="mdoc">字典有变更时把整个字典写回元数据键（须在 kv 事务内）。</div>
 </li>
 <li class=""><code class="sig">static bool IsIntStr(string s)</code>
+<div class="mdoc">字符串是否为纯十进制整数（可带负号，至多 18 位以留在 varint 范围内）。</div>
 </li>
-<li class=""><code class="sig">static int ParseI64(string s)</code>
+<li class=""><code class="sig">static long ParseI64(string s)</code>
+<div class="mdoc">解析带符号的十进制整数为 64 位。用它替代 Convert.ToInt，因为后者
+目前降级为 C 的 atoi（声明返回 i64），因此无法
+符号扩展——负数及大于 2^31 的值会以零扩展的
+垃圾数据返回。累加器必须是 long：IsIntStr 放行最长 18 位，
+epoch 毫秒时间戳（13 位，&gt;2^31）此前在 int 里静默回绕后落盘。</div>
 </li>
 <li class=""><code class="sig">void WriteVal(ByteBuffer b, JsonValue v)</code>
+<div class="mdoc">按上方标签表把一个 JsonValue 写入记录；对象键写作字典 id（须在 kv 事务内）。</div>
 </li>
 <li class=""><code class="sig">string EncodeDoc(JsonValue doc)</code>
 <div class="mdoc">将文档序列化为紧凑的二进制记录：一个 &#x27;B&#x27;
@@ -522,6 +564,7 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
 会与正文一起持久化。</div>
 </li>
 <li class=""><code class="sig">JsonValue ReadVal(ByteBuffer b)</code>
+<div class="mdoc">从记录中读取 <code>WriteVal</code> 写出的一个值并还原为 JsonValue。</div>
 </li>
 <li class=""><code class="sig">static int IdOfKey(string key)</code>
 <div class="mdoc">键尾随数字中编码的 id。行键和
@@ -529,6 +572,7 @@ id 用零填充，因此 B+Tree 顺序即插入顺序，使 FindAll
 id 的某个数字可能恰好像分隔符。</div>
 </li>
 <li class=""><code class="sig">static string IdFromKey(string key)</code>
+<div class="mdoc"><code>IdOfKey</code> 的字符串形式。</div>
 </li>
 <li class=""><code class="sig">ByteBuffer OpenRecord(string body)</code>
 <div class="mdoc">将二进制记录正文（见 EncodeDoc）解码回
@@ -551,12 +595,17 @@ JsonValue 对象。&quot;_id&quot; 不存储在正文中；调用方从
 没有该字段时返回 null。</div>
 </li>
 <li class=""><code class="sig">JsonValue DecodeDoc(string body)</code>
+<div class="mdoc">把存储的二进制记录（见 <code>EncodeDoc</code>）解码回 JsonValue 对象；
+&quot;_id&quot; 由调用方从行键附加。</div>
 </li>
 <li class=""><code class="sig">void AddIndexEntries(int id, JsonValue doc)</code>
+<div class="mdoc">为每个已索引字段写入该文档的二级索引条目（须在 kv 事务内）。</div>
 </li>
 <li class=""><code class="sig">void RemoveIndexEntries(int id, JsonValue doc)</code>
+<div class="mdoc">删除一篇文档的全部二级索引条目；doc 为 null（文档已不存在）时无事可做。</div>
 </li>
 <li class=""><code class="sig">int NextId()</code>
+<div class="mdoc">读取并推进自增 id 序列，返回新分配的 id（须在 kv 事务内）。</div>
 </li>
 <li class=""><code class="sig">int Insert(JsonValue doc)</code>
 <div class="mdoc">存储新文档，分配并返回其 _id
@@ -570,6 +619,7 @@ JsonValue 对象。&quot;_id&quot; 不存储在正文中；调用方从
 <div class="mdoc">返回文档；不存在则返回 null。</div>
 </li>
 <li class=""><code class="sig">bool Exists(int id)</code>
+<div class="mdoc">文档 id 是否存在。</div>
 </li>
 <li class=""><code class="sig">bool Update(int id, JsonValue doc)</code>
 <div class="mdoc">替换现有文档；id 不存在时返回 false。</div>
@@ -579,8 +629,10 @@ JsonValue 对象。&quot;_id&quot; 不存储在正文中；调用方从
 序列越过该 id，避免后续插入冲突。</div>
 </li>
 <li class=""><code class="sig">bool DeleteById(int id)</code>
+<div class="mdoc">删除文档及其索引条目；返回该 id 是否原本存在。</div>
 </li>
 <li class=""><code class="sig">void PersistIndexMeta()</code>
+<div class="mdoc">把索引字段列表写回元数据键（须在 kv 事务内）。</div>
 </li>
 <li class=""><code class="sig">void EnsureIndex(string field)</code>
 <div class="mdoc">为字段创建（或重建）二级索引，按有界批次
@@ -611,6 +663,7 @@ IndexReady 为 false，FindByIndex 回退为扫描，因此不完整的
 索引绝不会产生不完整的结果。</div>
 </li>
 <li class=""><code class="sig">bool HasIndex(string field)</code>
+<div class="mdoc">字段是否已在索引列表中（含批量构建尚未完成的）。</div>
 </li>
 <li class=""><code class="sig">bool IndexReady(string field)</code>
 <div class="mdoc">当字段已被索引且其批次构建
@@ -644,12 +697,16 @@ limit 0 表示不限数量，按 id 顺序返回。</div>
 <div class="mdoc">对集合启动流畅的 LINQ 风格查询。</div>
 </li>
 <li class=""><code class="sig">async JsonValue FindByIdAsync(int id)</code>
+<div class="mdoc"><code>FindById</code> 的协程版本：在共享读写锁的读侧执行。</div>
 </li>
 <li class=""><code class="sig">async int InsertAsync(JsonValue doc)</code>
+<div class="mdoc"><code>Insert</code> 的协程版本：在共享读写锁的写侧执行。</div>
 </li>
 <li class=""><code class="sig">async bool UpdateAsync(int id, JsonValue doc)</code>
+<div class="mdoc"><code>Update</code> 的协程版本：在共享读写锁的写侧执行。</div>
 </li>
 <li class=""><code class="sig">async bool DeleteByIdAsync(int id)</code>
+<div class="mdoc"><code>DeleteById</code> 的协程版本：在共享读写锁的写侧执行。</div>
 </li>
 <li class=""><code class="sig">async bool UpdateAtomic(int id, DocUpdater fn)</code>
 <div class="mdoc">对单篇文档的原子读改写：fn 在
@@ -702,6 +759,7 @@ limit 0 表示不限数量，按 id 顺序返回。</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">DbRegistry()</code>
+<div class="mdoc">私有构造；统一经 <code>Attach</code> 创建。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -725,6 +783,8 @@ limit 0 表示不限数量，按 id 顺序返回。</div>
 数据库文件的注册表。</div>
 </li>
 <li class=""><code class="sig">bool IsShared()</code>
+<div class="mdoc">共享内存注册表是否可用；不可用时（如平台不支持）所有
+发布/查询方法退化为单进程语义。</div>
 </li>
 <li class=""><code class="sig">int Processes()</code>
 <div class="mdoc">当前打开该数据库的进程数。
@@ -735,15 +795,20 @@ limit 0 表示不限数量，按 id 顺序返回。</div>
 （注册表出现后未提交过任何内容时为 0）。</div>
 </li>
 <li class=""><code class="sig">void PublishTxn(long txnid)</code>
+<div class="mdoc">写入者在提交后发布新的事务 id（注册表不可用时无操作）。</div>
 </li>
 <li class=""><code class="sig">bool LockWrite()</code>
 <div class="mdoc">阻塞直到本进程获得唯一的写入者槽位。</div>
 </li>
 <li class=""><code class="sig">void UnlockWrite()</code>
+<div class="mdoc">释放写入互斥锁；未持有时无操作。</div>
 </li>
 <li class=""><code class="sig">long HashOfSlot(int index)</code>
+<div class="mdoc">第 index 个读取者槽位的哈希键。</div>
 </li>
 <li class=""><code class="sig">bool Alive(int otherPid)</code>
+<div class="mdoc">进程是否存活：pid 0 视为死亡、本进程恒存活；
+Windows 用 OpenProcess 探测，POSIX 用 kill(pid, 0)。</div>
 </li>
 <li class=""><code class="sig">void ClaimSlot()</code>
 <div class="mdoc">为本进程认领一个读取者槽位，复用
@@ -759,6 +824,8 @@ limit 0 表示不限数量，按 id 顺序返回。</div>
 不动；更旧的页面则可复用。</div>
 </li>
 <li class=""><code class="sig">void Close()</code>
+<div class="mdoc">释放写锁、撤销本进程的读取者槽位、递减进程计数，
+并关闭共享内存与锁文件。</div>
 </li>
 </ul>
 </div></div>
@@ -804,10 +871,12 @@ List&lt;JsonValue&gt; adults = users.Query()
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">DocQuery()</code>
+<div class="mdoc">私有构造；统一经 <code>Of</code> 创建。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">static DocQuery Of(Collection col)</code>
+<div class="mdoc">为集合创建一个空查询。</div>
 </li>
 <li class=""><code class="sig">DocQuery Where(DocPredicate pred)</code>
 <div class="mdoc">Lambda 过滤器；多次调用彼此 AND。</div>
@@ -821,26 +890,37 @@ List&lt;JsonValue&gt; adults = users.Query()
 <div class="mdoc">字段的整数等值约束。</div>
 </li>
 <li class=""><code class="sig">DocQuery OrderByInt(DocIntKey key)</code>
+<div class="mdoc">按整数键升序排序（再次调用覆盖先前排序设置）。</div>
 </li>
 <li class=""><code class="sig">DocQuery OrderByIntDesc(DocIntKey key)</code>
+<div class="mdoc">按整数键降序排序。</div>
 </li>
 <li class=""><code class="sig">DocQuery OrderByStr(DocStrKey key)</code>
+<div class="mdoc">按字符串键升序排序。</div>
 </li>
 <li class=""><code class="sig">DocQuery OrderByStrDesc(DocStrKey key)</code>
+<div class="mdoc">按字符串键降序排序。</div>
 </li>
 <li class=""><code class="sig">DocQuery Skip(int n)</code>
+<div class="mdoc">跳过前 n 条（分页）。</div>
 </li>
 <li class=""><code class="sig">DocQuery Take(int n)</code>
+<div class="mdoc">最多返回 n 条（0 = 不限）。</div>
 </li>
 <li class=""><code class="sig">List&lt;JsonValue&gt; Candidates()</code>
+<div class="mdoc">候选集：有索引等值用索引；否则用第一个等值约束做字段扫描
+缩小范围；再否则取整个集合。</div>
 </li>
 <li class=""><code class="sig">bool MatchesRest(JsonValue d)</code>
+<div class="mdoc">检查余下的等值约束与 lambda 过滤器
+（首个等值约束已由 <code>Candidates</code> 的扫描应用）。</div>
 </li>
 <li class=""><code class="sig">bool EqAppliedByScan()</code>
 <div class="mdoc">当候选集已经应用了第一个等值
 过滤器时为 true，重复检查将浪费工作。</div>
 </li>
 <li class=""><code class="sig">bool Matches(JsonValue d)</code>
+<div class="mdoc">检查全部等值约束与 lambda 过滤器。</div>
 </li>
 <li class=""><code class="sig">void SortDocs(List&lt;JsonValue&gt; docs)</code>
 <div class="mdoc">对预计算的键做自底向上归并排序：O(n log n)，稳定。</div>
@@ -872,6 +952,7 @@ List&lt;JsonValue&gt; adults = users.Query()
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">EqFilter(string field, string val)</code>
+<div class="mdoc">私有构造；经 <code>DocQuery.WhereEq</code> 创建。</div>
 </li>
 </ul>
 </div></div>
@@ -886,6 +967,7 @@ List&lt;JsonValue&gt; adults = users.Query()
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">KvEntry(string key, string val)</code>
+<div class="mdoc">构造一条记录。</div>
 </li>
 </ul>
 </div></div>
@@ -936,8 +1018,10 @@ db.Close();
 <div class="mdoc">以显式页缓存容量打开（页大小为 4 KB）。</div>
 </li>
 <li class=""><code class="sig">bool IsOpen()</code>
+<div class="mdoc">是否处于打开状态（打开无错误且底层 Pager 可用）。</div>
 </li>
 <li class=""><code class="sig">string GetError()</code>
+<div class="mdoc">最近一次打开失败的错误文本；Open 失败时由它给出原因。</div>
 </li>
 <li class=""><code class="sig">void SetSyncEvery(int n)</code>
 <div class="mdoc">数据页 fsync 频率：1 = 每次提交（默认），N = 每
@@ -952,6 +1036,7 @@ N 次提交。meta 页总是在数据页之后写入，因此
 空间增长的这两个数字。</div>
 </li>
 <li class=""><code class="sig">int FreePages()</code>
+<div class="mdoc">空闲列表中的页数（已删除但可复用的空间）。</div>
 </li>
 <li class=""><code class="sig">int PageWrites()</code>
 <div class="mdoc">自该句柄打开以来写入磁盘的页数：写放大
@@ -965,11 +1050,13 @@ EndSnapshot() 为止读到的都是同一版本的数据库，即使其他
 其仍可见的页面在此期间不会被复用。</div>
 </li>
 <li class=""><code class="sig">void EndSnapshot()</code>
+<div class="mdoc">结束快照：释放对旧版本页面的引用，使其可被复用。</div>
 </li>
 <li class=""><code class="sig">string Get(string key)</code>
 <div class="mdoc">返回值；不存在时返回 &quot;&quot;（参见 Contains）。</div>
 </li>
 <li class=""><code class="sig">bool Contains(string key)</code>
+<div class="mdoc">键是否存在（与 Get(&quot;&quot;) 无法区分「值为空串」不同）。</div>
 </li>
 <li class=""><code class="sig">void Put(string key, string val)</code>
 <div class="mdoc">插入或替换一个键。除非处于
@@ -1010,11 +1097,13 @@ limit 0 表示不限。返回追加的条目数。</div>
 <div class="mdoc">所有带给定前缀的键（例如 &quot;user:&quot;）。</div>
 </li>
 <li class=""><code class="sig">int Count()</code>
+<div class="mdoc">键的总数（遍历整棵树统计）。</div>
 </li>
 <li class=""><code class="sig">void Checkpoint()</code>
 <div class="mdoc">将迄今写入的所有内容强制落盘到稳定存储。</div>
 </li>
 <li class=""><code class="sig">void Close()</code>
+<div class="mdoc">关闭底层存储与进程内读写锁。</div>
 </li>
 <li class=""><code class="sig">async string GetAsync(string key)</code>
 <div class="mdoc">共享锁读取；可安全地与并发写入共存。</div>
@@ -1023,6 +1112,7 @@ limit 0 表示不限。返回追加的条目数。</div>
 <div class="mdoc">独占锁写入并自动提交。</div>
 </li>
 <li class=""><code class="sig">async bool DeleteAsync(string key)</code>
+<div class="mdoc">独占锁删除一个键；返回键此前是否存在。</div>
 </li>
 <li class=""><code class="sig">async string UpdateAtomic(string key, KvUpdater fn)</code>
 <div class="mdoc">原子读改写：fn 在写临界区内看到
@@ -1054,21 +1144,25 @@ limit 0 表示不限。返回追加的条目数。</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">NodeCache(int cap)</code>
+<div class="mdoc">以固定容量构建（槽位数约为容量的 4 倍、取 2 的幂）。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">int FindSlot(int pageId)</code>
+<div class="mdoc">开放寻址探测：命中返回槽位，未命中返回 -(空槽 + 1)。</div>
 </li>
 <li class=""><code class="sig">BNode Get(int pageId)</code>
 <div class="mdoc">缓存的节点，没有则返回 null。</div>
 </li>
 <li class=""><code class="sig">void Put(int pageId, BNode n)</code>
+<div class="mdoc">缓存解码节点；容量已满时整体清空再插入。</div>
 </li>
 <li class=""><code class="sig">void Remove(int pageId)</code>
 <div class="mdoc">忘记某个页面：它的 id 即将存放不同的内容
 （写时复制或 free-list 复用），过期的解码结果不能继续存在。</div>
 </li>
 <li class=""><code class="sig">void Clear()</code>
+<div class="mdoc">清空缓存（快照推进或容量回收时）。</div>
 </li>
 </ul>
 </div></div>
@@ -1101,24 +1195,33 @@ limit 0 表示不限。返回追加的条目数。</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">PageCache(int cap)</code>
+<div class="mdoc">以固定页数容量构建（槽位数为容量的 2 倍向上取 2 的幂）。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">int Count()</code>
+<div class="mdoc">缓存中的页数。</div>
 </li>
 <li class=""><code class="sig">int FindSlot(int pageId)</code>
+<div class="mdoc">页 id 的槽位；未命中返回 -1。</div>
 </li>
 <li class=""><code class="sig">int FindInsertSlot(int pageId)</code>
+<div class="mdoc">找到首个空槽或墓碑槽（插入用）。</div>
 </li>
 <li class=""><code class="sig">void LruUnlink(int slot)</code>
+<div class="mdoc">从 LRU 链摘除槽位。</div>
 </li>
 <li class=""><code class="sig">void LruPushFront(int slot)</code>
+<div class="mdoc">把槽位推到 LRU 链头（最近使用）。</div>
 </li>
 <li class=""><code class="sig">bool Has(int pageId)</code>
+<div class="mdoc">页是否在缓存中。</div>
 </li>
 <li class=""><code class="sig">ByteBuffer Get(int pageId)</code>
+<div class="mdoc">取页缓冲区并把它标记为最近使用；未命中返回小占位缓冲。</div>
 </li>
 <li class=""><code class="sig">void SetPinned(int pageId, bool p)</code>
+<div class="mdoc">设置/清除页的钉住标志。</div>
 </li>
 <li class=""><code class="sig">void UnpinAll()</code>
 <div class="mdoc">解除全部钉住（事务结束时调用）。</div>
@@ -1132,8 +1235,10 @@ limit 0 表示不限。返回追加的条目数。</div>
 内容可能属于已不存在的版本）。</div>
 </li>
 <li class=""><code class="sig">int EvictableSlot()</code>
+<div class="mdoc">LRU 尾部起找第一个未钉住的槽位；全部钉住时为 -1。</div>
 </li>
 <li class=""><code class="sig">void Grow()</code>
+<div class="mdoc">槽位数翻倍并重散列（保留钉住状态与 LRU 顺序）。</div>
 </li>
 <li class=""><code class="sig">void Put(int pageId, ByteBuffer buf, bool pin)</code>
 <div class="mdoc">插入一页并接管 buf 的所有权；满了时驱逐 LRU
@@ -1174,6 +1279,7 @@ f.Close();</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">PageFile()</code>
+<div class="mdoc">私有构造；统一经 <code>Open</code> 创建。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -1209,8 +1315,10 @@ f.Close();</div>
 <div class="mdoc">为随机读写打开（或创建）一个文件。</div>
 </li>
 <li class=""><code class="sig">bool IsOpen()</code>
+<div class="mdoc">文件是否成功打开。</div>
 </li>
 <li class=""><code class="sig">string GetError()</code>
+<div class="mdoc">最近一次操作的错误描述（无错为空串）。</div>
 </li>
 <li class=""><code class="sig">int ReadAt(long offset, ByteBuffer buf, int count)</code>
 <div class="mdoc">从 offset 处读取 count 字节到 buf（先清空 buf）。
@@ -1244,8 +1352,11 @@ f.Close();</div>
 退出，锁由操作系统释放，因此崩溃的写入者不会卡死数据库。</div>
 </li>
 <li class=""><code class="sig">bool Unlock()</code>
+<div class="mdoc">释放 LockExclusive 取得的锁；成功返回 true。</div>
 </li>
 <li class=""><code class="sig">void Close()</code>
+<div class="mdoc">关闭文件。进程退出时操作系统会兜底释放，但显式关闭
+能及时让出锁与句柄。</div>
 </li>
 </ul>
 </div></div>
@@ -1264,20 +1375,28 @@ f.Close();</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">PageIdSet()</code>
+<div class="mdoc">空、256 槽的集合。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">int Count()</code>
+<div class="mdoc">集合内的页数。</div>
 </li>
 <li class=""><code class="sig">int SlotOf(int pageId)</code>
+<div class="mdoc">开放寻址探测：命中返回槽位，未命中返回
+-(空槽位 + 1)（供 <code>Add</code> 就地写入）。</div>
 </li>
 <li class=""><code class="sig">bool Has(int pageId)</code>
+<div class="mdoc">页 id 是否在集合中。</div>
 </li>
 <li class=""><code class="sig">void Grow()</code>
+<div class="mdoc">槽位数翻倍并重散列。</div>
 </li>
 <li class=""><code class="sig">void Add(int pageId)</code>
+<div class="mdoc">加入一页（已存在时无操作）；装载因子过半先扩容。</div>
 </li>
 <li class=""><code class="sig">void Clear()</code>
+<div class="mdoc">清空集合（保留槽位容量）。</div>
 </li>
 </ul>
 </div></div>
@@ -1359,25 +1478,34 @@ pager.Commit();                          // fsync data, then meta</div>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">Pager()</code>
+<div class="mdoc">私有构造；统一经 <code>Open</code> 创建。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">static int PageIdOf(long stored)</code>
+<div class="mdoc">把存储的 64 位页号收窄为 32 位 id；超出
+[0, 2^31-1] 视为损坏，返回 0。</div>
 </li>
 <li class=""><code class="sig">static Pager Open(string path, int cacheCapacity)</code>
 <div class="mdoc">打开数据库文件（不存在则创建）。</div>
 </li>
 <li class=""><code class="sig">bool IsOpen()</code>
+<div class="mdoc">打开是否成功（原因见 <code>GetError</code>）。</div>
 </li>
 <li class=""><code class="sig">string GetError()</code>
+<div class="mdoc">最近一次失败的错误文本；无错为空串。</div>
 </li>
 <li class=""><code class="sig">int PageCount()</code>
+<div class="mdoc">文件中的页总数（含两枚 meta 页）。</div>
 </li>
 <li class=""><code class="sig">long CommitId()</code>
+<div class="mdoc">本句柄当前快照的事务 id。</div>
 </li>
 <li class=""><code class="sig">int RootId()</code>
+<div class="mdoc">B+Tree 根页 id。</div>
 </li>
 <li class=""><code class="sig">void SetRoot(int id)</code>
+<div class="mdoc">设置新根（提交时随 meta 页一起持久化）。</div>
 </li>
 <li class=""><code class="sig">int FreePages()</code>
 <div class="mdoc">空闲链表上的页数加上已可复用的页数
@@ -1399,6 +1527,9 @@ pager.Commit();                          // fsync data, then meta</div>
 丢失”换取吞吐量——但绝不会损坏数据库。</div>
 </li>
 <li class=""><code class="sig">void WriteMeta(long newTxn)</code>
+<div class="mdoc">把 meta 字段写成交替的两枚 meta 页之一（由新事务 id 奇偶
+决定槽位），CRC 覆盖前 META_FIELDS 字节。不 fsync（由
+<code>Commit</code> 统一做）。</div>
 </li>
 <li class=""><code class="sig">long ReadMetaSlot(int slot, ByteBuffer h)</code>
 <div class="mdoc">读取一个 meta 页；返回其事务 id，若页
@@ -1425,6 +1556,7 @@ registry 分配，在整库内唯一：若已发布 id 等于
 因为快照已移动。并清除该标志。</div>
 </li>
 <li class=""><code class="sig">void LoadFreeList()</code>
+<div class="mdoc">惰性加载持久化的空闲链表（首读后缓存）。</div>
 </li>
 <li class=""><code class="sig">void ReclaimFree()</code>
 <div class="mdoc">将无存活读者可达的空闲页移入
@@ -1442,12 +1574,14 @@ registry 分配，在整库内唯一：若已发布 id 等于
 什么都不做。</div>
 </li>
 <li class=""><code class="sig">void EndRead()</code>
+<div class="mdoc">结束读快照：最外层退出时撤销快照发布。</div>
 </li>
 <li class=""><code class="sig">bool BeginWrite()</code>
 <div class="mdoc">占用唯一的写者槽位（阻塞）并在最新已提交快照上
 开始写事务。可嵌套。</div>
 </li>
 <li class=""><code class="sig">bool InWrite()</code>
+<div class="mdoc">当前是否处于写事务中（含嵌套）。</div>
 </li>
 <li class=""><code class="sig">bool IsFresh(int pageId)</code>
 <div class="mdoc">当页属于当前运行中的写事务时为 true
@@ -1491,11 +1625,14 @@ meta 页（fsync）。meta 写入前崩溃会保留旧版本
 <div class="mdoc">将迄今写入的所有内容强制刷入稳定存储。</div>
 </li>
 <li class=""><code class="sig">void Close()</code>
+<div class="mdoc">回滚写事务并按序关闭注册表与文件。</div>
 </li>
 </ul>
 </div></div>
 <div class="api"><div class="api-head"><span class="ns">PendingWalPage</span><span class="tag">class</span></div>
 <div class="api-body">
+<div class="mdoc">恢复扫描中暂存的一个事务页帧：页号加页镜像，等提交记录
+确认事务完整后再写入主文件。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">int id;</code>
 </li>
@@ -1523,10 +1660,13 @@ u32 crc32     载荷的 CRC32
 payload       载荷，payloadLen 字节（页镜像；提交记录没有）</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">static int FRAME_PAGE=1;</code>
+<div class="mdoc">帧类型码：页帧。</div>
 </li>
 <li class=""><code class="sig">static int FRAME_COMMIT=2;</code>
+<div class="mdoc">帧类型码：提交记录（事务的持久化点）。</div>
 </li>
 <li class=""><code class="sig">static int HEADER_LEN=20;</code>
+<div class="mdoc">帧头长度（字节）：u32 type + u64 id + u32 len + u32 crc。</div>
 </li>
 <li class=""><code class="sig">PageFile file;</code>
 </li>
@@ -1541,8 +1681,10 @@ payload       载荷，payloadLen 字节（页镜像；提交记录没有）</di
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">static Wal Open(string path, int pageSize)</code>
+<div class="mdoc">打开（必要时创建）指定路径的 WAL 文件。</div>
 </li>
 <li class=""><code class="sig">bool IsOpen()</code>
+<div class="mdoc">底层文件是否成功打开。</div>
 </li>
 <li class=""><code class="sig">long Size()</code>
 <div class="mdoc">当前 WAL 文件大小（字节）。</div>
@@ -1563,6 +1705,7 @@ payload       载荷，payloadLen 字节（页镜像；提交记录没有）</di
 <div class="mdoc">截断 WAL（主文件检查点成功后调用）。</div>
 </li>
 <li class=""><code class="sig">void Close()</code>
+<div class="mdoc">关闭并删除 WAL 文件。</div>
 </li>
 </ul>
 </div></div>
@@ -1603,10 +1746,14 @@ db.Close();</div>
 每次提交都 fsync。</div>
 </li>
 <li class=""><code class="sig">static ZanDatabase Open(string path, int cachePages)</code>
+<div class="mdoc">以显式页缓存容量打开（不存在则创建）；打开失败时
+<code>IsOpen</code> 为 false，原因见 <code>GetError</code>。</div>
 </li>
 <li class=""><code class="sig">bool IsOpen()</code>
+<div class="mdoc">打开是否成功（失败原因见 <code>GetError</code>）。</div>
 </li>
 <li class=""><code class="sig">string GetError()</code>
+<div class="mdoc">打开失败的错误文本；成功时为空串。</div>
 </li>
 <li class=""><code class="sig">void SetSyncEvery(int n)</code>
 <div class="mdoc">fsync 频率：1 = 每次提交，N = 分组提交。</div>
@@ -1621,10 +1768,13 @@ db.Close();</div>
 <div class="mdoc">将后续写入批量合并为一次原子提交。</div>
 </li>
 <li class=""><code class="sig">bool Commit()</code>
+<div class="mdoc">提交 <code>Begin</code> 以来的全部写入；返回是否成功落盘。</div>
 </li>
 <li class=""><code class="sig">void Checkpoint()</code>
+<div class="mdoc">将迄今写入的内容强制落盘到稳定存储。</div>
 </li>
 <li class=""><code class="sig">void Close()</code>
+<div class="mdoc">关闭底层存储与读写锁。</div>
 </li>
 </ul>
 </div></div>

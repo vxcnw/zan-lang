@@ -1,6 +1,6 @@
 # System.Data.Orm
 
-> 源码: `stdlib/System/Data/Orm/DbSchema.zan`, `stdlib/System/Data/Orm/DbTable.zan`, `stdlib/System/Data/Orm/ExprSql.zan`, `stdlib/System/Data/Orm/Model.zan`, `stdlib/System/Data/Orm/QueryBuilder.zan`
+> 源码: `stdlib/System/Data/Orm/DbSchema.zan`, `stdlib/System/Data/Orm/DbTable.zan`, `stdlib/System/Data/Orm/ExprSql.zan`, `stdlib/System/Data/Orm/IOrmRows.zan`, `stdlib/System/Data/Orm/Model.zan`, `stdlib/System/Data/Orm/OrmDialect.zan`, `stdlib/System/Data/Orm/OrmInsert.zan`, `stdlib/System/Data/Orm/OrmMeta.zan`, `stdlib/System/Data/Orm/OrmSelect.zan`, `stdlib/System/Data/Orm/OrmSync.zan`, `stdlib/System/Data/Orm/OrmWrite.zan`, `stdlib/System/Data/Orm/QueryBuilder.zan`
 
 
 ## DbColumnDef (class)
@@ -219,6 +219,7 @@ SQL 文本由 `QueryBuilder` 生成 —— 调用方只描述
   - 删除符合条件的行，返回删除行数。
 
 - async DbResult run(string columns)
+  - 执行 SELECT：套用已设置的 Limit/Offset 后按给定列清单查询。
 
 
 ## ExprSql (class)
@@ -261,6 +262,16 @@ not: !expr
 - string downSql;
 
 - Migration(string name, string up, string down)
+  - 保存迁移名与 UP/DOWN SQL；外部经 `New` 构造。
+
+- static Migration New(string name, string up, string down)
+  - 创建一条迁移。
+
+- static int Exec(IDbExecutor db, string sql)
+  - 执行一条迁移语句；执行器以负数报告失败时抛出
+    `DbException`——迁移绝不能悄悄落空，
+    否则记录表照样登记，失败被永久掩盖（内置驱动语句失败
+    本就直接抛，这里给不抛异常的自定义执行器兜底）。
 
 - void Up(IDbExecutor db)
   - 执行迁移（运行 UP SQL）。
@@ -321,6 +332,7 @@ userModel.Delete(db).Where("id = 1").Execute();
 - IDbExecutor db;
 
 - Model(string tableName)
+  - 以已校验的表名初始化空模型；外部入口是 `Define`。
 
 - static Model Define(string tableName)
   - 以表名定义一个新模型。
@@ -402,20 +414,29 @@ userModel.Delete(db).Where("id = 1").Execute();
   - 索引 i 处的列类型（含 NOT NULL / PRIMARY KEY 后缀）。
 
 - static bool EqIgnoreCase(string a, string b)
+  - 忽略 ASCII 大小写比较两个字符串。
 
 - static int ColIndex(DbResult r, string name)
+  - 按列名（忽略大小写）在查询结果中找下标；未找到返回 -1。
 
 - static void FillFromSqlite(Model m, IDbExecutor db, string t)
+  - 用 PRAGMA table_info 把 SQLite 表内省进模型。
 
 - static void FillFromMysql(Model m, IDbExecutor db, string t)
+  - 用 SHOW COLUMNS 把 MySQL/MariaDB 表内省进模型。
 
 - static void FillFromInformationSchema(Model m, IDbExecutor db, string t)
+  - 用 information_schema.columns 内省表（PG / SQL Server 等 ANSI 目录），
+    主键尽力从目录补取。
 
 - static void FillFromTdengine(Model m, IDbExecutor db, string t)
+  - 用 DESCRIBE 内省 TDengine 表；首行 timestamp 列视作主键。
 
 - static string PrimaryKeyFromCatalog(IDbExecutor db, string t)
+  - 从 ANSI 目录查表的主键列名；无主键或查询失败时返回空串。
 
 - void AddIntrospected(string name, string type, bool isPk, bool notNull)
+  - 追加内省得到的列，按需附加 PRIMARY KEY / NOT NULL 后缀。
 
 - static Model FromTable(IDbExecutor db, string tableName)
   - 通过反射现有表结构来构建 Model（即
@@ -426,8 +447,10 @@ userModel.Delete(db).Where("id = 1").Execute();
     CreateTable() 能够往返重建。
 
 - static string StripMods(string type)
+  - 去掉类型文本尾部的 PRIMARY KEY / NOT NULL / UNIQUE 修饰。
 
 - static int IndexOfSub(string s, string sub)
+  - 朴素子串查找，返回首个下标；未找到返回 -1。
 
 - string ToDefineCode()
   - 生成重建该模型的 Zan 源码，形式为
@@ -445,6 +468,7 @@ userModel.Delete(db).Where("id = 1").Execute();
 - string val;
 
 - ModelCell(string key, string val)
+  - 构造一个键值单元格。
 
 
 ## ModelColumn (class)
@@ -458,6 +482,7 @@ NOT NULL / PRIMARY KEY / DEFAULT 等后缀）。用一个实体代替并行的
 - string type;
 
 - ModelColumn(string name, string type)
+  - 保存列名与完整类型文本（类型文本经 RequireDdlType 校验）。
 
 
 ## ModelDelete (class)
@@ -469,17 +494,22 @@ NOT NULL / PRIMARY KEY / DEFAULT 等后缀）。用一个实体代替并行的
 - QueryBuilder qb;
 
 - ModelDelete(IDbExecutor db, string tableName)
+  - 记录执行器，条件构建复用 `QueryBuilder`。
 
 - static ModelDelete New(IDbExecutor db, string tableName)
+  - 为表开启 DELETE 构建。
 
 - ModelDelete Where(string condition)
+  - 追加原始条件（AND 连接）。
 
 - ModelDelete WhereEq(string column, string val)
+  - 追加 column = ?（绑定值）。
 
 - int Execute()
   - 执行 DELETE 并返回受影响的行数。
 
 - int ExecuteAsync()
+  - `Execute` 的包装方法。
 
 
 ## ModelQuery (class)
@@ -493,20 +523,28 @@ NOT NULL / PRIMARY KEY / DEFAULT 等后缀）。用一个实体代替并行的
 - QueryBuilder qb;
 
 - ModelQuery(IDbExecutor db, string tableName)
+  - 记录执行器与表名，条件构建复用 `QueryBuilder`。
 
 - static ModelQuery NewSelect(IDbExecutor db, string tableName)
+  - 为表开启 SELECT 构建。
 
 - ModelQuery Where(string condition)
+  - 追加原始条件（AND 连接）。
 
 - ModelQuery WhereEq(string column, string val)
+  - 追加 column = ?（绑定值）。
 
 - ModelQuery WhereEqInt(string column, int val)
+  - 追加 column = ?（绑定整数）。
 
 - ModelQuery OrderBy(string column)
+  - 按列升序排序。
 
 - ModelQuery OrderByDesc(string column)
+  - 按列降序排序。
 
 - ModelQuery OrderByDescending(string column)
+  - `OrderByDesc` 的别名。
 
 - ModelQuery WhereLike(string column, string pattern)
   - 添加 `column LIKE ?`，使用绑定模式。
@@ -556,8 +594,10 @@ NOT NULL / PRIMARY KEY / DEFAULT 等后缀）。用一个实体代替并行的
   - 至少有一行匹配时返回 true。
 
 - ModelQuery Limit(int count)
+  - 设置 LIMIT。
 
 - ModelQuery Offset(int count)
+  - 设置 OFFSET。
 
 - List<ModelRow> Execute()
   - 执行查询并返回 ModelRow 列表。
@@ -579,6 +619,7 @@ NOT NULL / PRIMARY KEY / DEFAULT 等后缀）。用一个实体代替并行的
 - List<ModelCell> cells;
 
 - ModelRow()
+  - 构造空行。
 
 - ModelRow Set(string key, string val)
   - 设置行上的一个值。
@@ -620,21 +661,836 @@ NOT NULL / PRIMARY KEY / DEFAULT 等后缀）。用一个实体代替并行的
 - QueryBuilder qb;
 
 - ModelUpdate(IDbExecutor db, string tableName)
+  - 记录执行器，条件与赋值构建复用 `QueryBuilder`。
 
 - static ModelUpdate New(IDbExecutor db, string tableName)
+  - 为表开启 UPDATE 构建。
 
 - ModelUpdate Set(string column, string val)
+  - 设置 column = ?（绑定值）。
 
 - ModelUpdate SetInt(string column, int val)
+  - 设置 column = ?（绑定整数）。
 
 - ModelUpdate Where(string condition)
+  - 追加原始条件（AND 连接）。
 
 - ModelUpdate WhereEq(string column, string val)
+  - 追加 column = ?（绑定值）。
 
 - int Execute()
   - 执行 UPDATE 并返回受影响的行数。
 
 - int ExecuteAsync()
+  - `Execute` 的包装方法。
+
+
+## OrmCol (class)
+
+一个实体列的运行期描述。编译期只发射这些描述（表名、列名、
+字段名、类型码、主键/自增/长度），SQL 文本、参数绑定与行映射
+全部由本目录下的共享实现按描述完成 —— 实体和列增加时只多几行
+元数据，不再多出一份 SQL 拼装代码。
+
+Kind 与编译期 <c>DbField.Kind</c> 一致：0 int、1 double、
+2 bool、3 string、4 enum；<c>I64</c> 区分 64 位整数列。
+
+- string Col;
+
+- string Field;
+
+- int Kind;
+
+- bool I64;
+
+- bool IsPk;
+
+- bool IsIdent;
+
+- bool NotNull;
+
+- int StrLen;
+
+- OrmCol(string col, string field, int kind, bool i64, bool pk, bool ident, bool notNull, int len)
+
+- int TyCode()
+  - DDL 类型码（`OrmDialect.Ty`）：
+    0 int、1 double、2 bool、3 string、4 bigint。
+
+- int PKind()
+  - 动态值按列声明类型转换时用的 DbParams 类型码。
+
+
+## OrmDelete (class)
+
+类型化 DELETE 的运行期实现：条件片段 + 绑定值。
+没有条件时不执行（不生成全表删除）。
+
+- IDbExecutor db;
+
+- OrmMeta meta;
+
+- string tbl;
+
+- string w;
+
+- DbParams ps;
+
+- bool on;
+
+- OrmDelete(IDbExecutor db, OrmMeta meta)
+  - 私有构造；统一经 `Create` 创建。
+
+- static OrmDelete Create(IDbExecutor db, OrmMeta meta)
+  - 为实体创建一个空 DELETE 构造器。
+
+- void AsTable(string t)
+  - 改写到另一张表（标识符校验，防注入）。
+
+- void CondBegin(bool c)
+  - 条件开关：false 期间 W/P* 收集的片段全部失效（ORM 内部
+    按条件组合调用，应用层一般不直接用）。
+
+- void CondEnd()
+  - 结束条件区间，恢复片段收集。
+
+- void W(string f)
+  - WHERE 片段：多个片段以 AND 连接。
+
+- void WhereDict(DbValues v)
+  - 字典键值批量进 WHERE（等值条件，列名经元数据校验）。
+
+- void P(string v)
+  - WHERE 参数：与 W 片段中占位符的出现顺序一致。
+
+- void Pi(int v)
+  - WHERE 整数参数。
+
+- void Pl(long v)
+  - WHERE 64 位整数参数。
+
+- void Pd(double v)
+  - WHERE 浮点参数。
+
+- void InI(List<int> vs)
+  - IN 列表参数（配合 W 片段里的 "col IN (?)"）。
+
+- void InL(List<long> vs)
+  - `InI` 的 long 版本。
+
+- void InS(List<string> vs)
+  - `InI` 的 string 版本。
+
+- void InD(List<double> vs)
+  - `InI` 的 double 版本。
+
+- int ExecuteAffrows()
+  - 执行 DELETE 并返回受影响行数；无 WHERE 时不执行（不生成
+    全表删除）。
+
+- async int ExecuteAffrowsAsync()
+  - 异步执行 DELETE。
+
+
+## OrmDialect (class)
+
+方言与目录探测：列类型、upsert 写法、表/列/索引存在性、自增值。
+以前这些文本由代码生成器抄进每个用户产物，现在只有这一份实现，
+改 SQL 规则只改这里。
+
+- static string Marks(int n)
+  - `?, ?, ?` —— n 个占位符（n 为 0 时是 NULL）。
+
+- static bool Has(List<string> l, string v)
+  - 列表是否包含某值。
+
+- static string Unalias(string f)
+  - WHERE 片段里的 `t.` 别名在 UPDATE/DELETE 上不成立。
+
+- static DbParams Cat(DbParams a, DbParams b)
+  - 两段参数按顺序合成一段（SET 在前、WHERE 在后）。
+
+- static void CopyInto(DbParams src, DbParams dst)
+  - 按各自的类型码把参数逐个复制到 dst。
+
+- static string ConflictHead(int p, List<string> keys, bool nop)
+  - upsert 的冲突头：各家写法不同（ON CONFLICT /
+    ON DUPLICATE KEY / MERGE 前的 ON ...）。
+
+- static string Excl(int p, string c, int md)
+  - 冲突时一列的新值：直接覆盖（0）、累加（1）、
+    取大（2）、取小（3）。
+
+- static int Mode(List<string> acc, List<string> mx, List<string> mn, string c)
+  - 列 c 的冲突更新模式码：累加 1、取大 2、取小 3、覆盖 0
+    （与 `Excl` 的 md 对应）。
+
+- static string LastIdSql(IDbExecutor db)
+  - 刚插入行的自增值。没有会话级「最后自增 id」的
+    引擎（Firebird 用 INSERT … RETURNING 读生成器，TDengine
+    没有自增列）直接抛错，而不是发出别的方言的 SQL 让
+    服务器报一条费解的错。
+
+- static int LastId(IDbExecutor db)
+  - 查询刚插入行的自增值；无行时为 0。
+
+- static async int LastIdAsync(IDbExecutor db)
+  - `LastId` 的异步版本。
+
+- static string OwnScope(int p)
+  - 目录探测的库/schema 作用域过滤子句（限定在连接自己的库，按 provider 给出）。
+
+- static bool HasInformationSchema(int p)
+  - 该 provider 是否提供 information_schema 目录。
+
+- static string HasTableSql(IDbExecutor db)
+  - 表存在性探测 SQL（SQLite 查 sqlite_master、Firebird 查
+    RDB$RELATIONS、其余查 information_schema，均带参数占位符）；
+    不支持目录探测的 provider 直接抛错。
+
+- static bool HasTable(IDbExecutor db, string t)
+  - 表是否存在。
+
+- static async bool HasTableAsync(IDbExecutor db, string t)
+  - `HasTable` 的异步版本。
+
+- static string ColsSql(int p)
+  - information_schema 列名查询（限自身库/schema）。
+
+- static List<string> Cols(IDbExecutor db, string t)
+  - 表现有的列名清单：SQLite 走 PRAGMA table_info，Firebird 走
+    RDB$RELATION_FIELDS（并截掉 CHAR(31) 的尾部空格），
+    其余走 information_schema；不支持的 provider 抛错。
+
+- static async List<string> ColsAsync(IDbExecutor db, string t)
+  - `Cols` 的异步版本。
+
+- static string HasIndexSql(int p)
+  - 二级索引存在性探测 SQL（按方言给出，带参数占位符）。
+
+- static DbParams IndexProbeParams(int p, string nm, string t)
+  - `HasIndexSql` 对应的探测参数：
+    按表名一起比对的方言为 (索引名, 表名)，其余为 (索引名)。
+
+- static string IndexDdl(int p, string nm, string t, string cols, bool uniq)
+  - CREATE [UNIQUE] INDEX 语句文本。
+
+- static void EnsureIndex(IDbExecutor db, string nm, string t, string cols, bool uniq)
+  - 索引不存在时创建；DDL 失败（负返回值）抛
+    `DbException`。
+
+- static async void EnsureIndexAsync(IDbExecutor db, string nm, string t, string cols, bool uniq)
+  - `EnsureIndex` 的异步版本。
+
+- static string Ty(int p, int kind, bool pk, bool ident, int len)
+  - 列的 DDL 类型。kind：0 int/enum、1 double、2 bool、
+    3 string、4 64 位整数。
+
+
+## OrmIndex (class)
+
+实体上声明的二级索引。
+
+- string Name;
+
+- string Cols;
+
+- bool Unique;
+
+- OrmIndex(string name, string cols, bool uniq)
+
+
+## OrmInsert (class)
+
+类型化 INSERT 的运行期实现：实体行与动态列（DbValues）两条来源，
+Only/Skip 决定的列集合在运行期成形，upsert 子句按方言拼装。
+
+- IDbExecutor db;
+
+- OrmMeta meta;
+
+- string tbl;
+
+- IOrmRows rows;
+
+- List<DbValues> dicts;
+
+- List<string> only;
+
+- List<string> skip;
+
+- List<string> conf;
+
+- List<string> acc;
+
+- List<string> gmx;
+
+- List<string> gmn;
+
+- bool upsert;
+
+- bool nop;
+
+- string sql;
+
+- DbParams bound;
+
+- OrmInsert(IDbExecutor db, OrmMeta meta)
+  - 私有构造；统一经 `Create` 创建。
+
+- static OrmInsert Create(IDbExecutor db, OrmMeta meta)
+  - 为实体创建一个空的 INSERT 构造器。
+
+- void AsTable(string t)
+  - 改写到另一张表（标识符校验，防注入）。
+
+- void SetRows(IOrmRows rows)
+  - 实体行来源：由编译期为该实体发的取值口提供。
+
+- int RowCount()
+  - 实体行数。
+
+- void AddDict(DbValues v)
+  - 追加一行动态列（列名经元数据校验，未知列抛异常）。
+
+- void Only(string c)
+  - 只插入该列（可多次调用，与 Skip 互斥语义）。
+
+- void Skip(string c)
+  - 跳过该列（可多次调用）。
+
+- void OC(string c)
+  - upsert：冲突时把该列更新为新值；键列缺省取主键。
+
+- void ACC(string c)
+  - upsert：冲突时该列累加（counter 语义）。
+
+- void GMX(string c)
+  - upsert：冲突时该列取更大值（GREATEST/max）。
+
+- void GMN(string c)
+  - upsert：冲突时该列取更小值。
+
+- void NOP()
+  - upsert：冲突时什么都不改（DO NOTHING）。
+
+- int DictCount()
+  - 动态列行数。
+
+- bool Use(string c, bool identity)
+  - 这一列是否进语句：Only 优先，其次自增列不写，
+    最后看 Skip。
+
+- List<OrmCol> used()
+  - 依 Only / 自增列 / Skip 规则选出参与语句的列集合。
+
+- string colList(List<OrmCol> cols)
+  - 把列集合拼成逗号分隔的列名清单。
+
+- string Conflict()
+  - 冲突子句。键列缺省取实体主键；方言差异
+    （excluded 对 VALUES()、GREATEST 对 max）在 OrmDialect 里解决。
+
+- int BuildDicts()
+  - 动态列写入：所有行按第一行的列形状对齐，缺的列写
+    NULL，值按列声明类型绑定。
+
+- int BuildRows()
+  - 实体行写入：列集合成形一次，每行按同一集合绑定。
+
+- int ExecuteDicts()
+  - 执行动态列 INSERT，返回受影响行数。
+
+- async int ExecuteDictsAsync()
+  - 异步执行动态列 INSERT。
+
+- int ExecuteAffrows()
+  - 执行插入（动态列优先，否则实体行），返回受影响行数。
+
+- async int ExecuteAffrowsAsync()
+  - 异步执行插入。
+
+- int ExecuteIdentity()
+  - 插入单行并取自增主键值（0 = 插入失败或无自增列）。
+
+- async int ExecuteIdentityAsync()
+  - 异步插入并取自增主键值。
+
+
+## OrmMeta (class)
+
+一个实体的全部运行期元数据。生成的代码为每个实体建一次并缓存，
+之后所有 SELECT/INSERT/UPDATE/DELETE/CodeFirst 都读它。
+
+- string Entity;
+
+- string Table;
+
+- List<OrmCol> Cols;
+
+- List<OrmNav> Navs;
+
+- List<OrmIndex> Idx;
+
+- Dict <string, OrmCol> byCol;
+
+- string selList;
+
+- bool frozen;
+
+- OrmMeta(string entity, string table)
+
+- static OrmMeta Of(string entity, string table)
+  - 新建一个实体的元数据。
+
+- OrmMeta Seal()
+  - 封存元数据：`Seal` 之后的构建调用一律
+    抛异常。生成的代码在元数据建成并发布到静态缓存前调用它，
+    保证运行期描述不会被后续代码悄悄改形。
+
+- void CheckNotFrozen()
+  - 封存后的构建调用统一经此拒绝。
+
+- OrmMeta Col(string col, string field, int kind, bool i64, bool pk, bool ident, bool notNull, int len)
+  - 追加一列（按实体字段声明顺序）。
+
+- OrmNav Nav(string field, string table)
+  - 追加一个导航字段，返回它以便继续追加它的列。
+
+- OrmMeta Index(string name, string cols, bool uniq)
+  - 追加一条索引声明。
+
+- OrmCol Find(string c)
+  - 列描述，不存在时为 null。
+
+- bool Has(string c)
+  - 列是否属于本实体。
+
+- int KindOf(string c)
+  - 列的声明类型（DbParams.Kind*），不存在时 KindNull。
+
+- string Require(string c)
+  - 校验列名属于本实体，动态列集合的唯一入口。
+
+- string SelectList()
+  - `t.a, t.b` —— 实体自身列的 SELECT 片段（缓存）。
+
+- List<string> PkCols()
+  - 主键列名（声明顺序）。
+
+- OrmCol PkCol()
+  - UPDATE ... WHERE 用的定位列：最后一个主键列，
+    没有主键时为 null（与实体链的既有语义一致）。
+
+- string PkList()
+  - 复合主键的表级约束列清单（两列及以上才有；
+    identity 列自带 PRIMARY KEY，不参与）。
+
+
+## OrmNav (class)
+
+导航字段（`[Column]` 之外的实体引用）的连接描述：
+连接 `LEFT JOIN <Table> j_<Field> ON t.<Field>Id = j_<Field>.id`，
+被包含时它的列跟在实体自身列之后。
+
+- string Field;
+
+- string Table;
+
+- List<OrmCol> Cols;
+
+- int PkAt;
+
+- OrmNav(string field, string table)
+
+- OrmNav Col(string col, string field, int kind, bool i64)
+  - 追加一列被连接实体的列。
+
+- string SelectList()
+  - `j_<Field>.a, j_<Field>.b` —— 连接列的 SELECT 片段。
+
+- string Join()
+  - 连接子句。
+
+
+## OrmSelect (class)
+
+类型化 SELECT 链的运行期实现：条件片段、绑定值、分组、排序、
+分页、连接与终端 SQL 都在这里，一份实现服务所有实体。生成的
+`__DbQ_<E>` 只是它的类型化门面（转发 + 用实体类型收口结果）。
+
+- IDbExecutor db;
+
+- OrmMeta meta;
+
+- string tbl;
+
+- string w;
+
+- DbParams ps;
+
+- string ob;
+
+- string gb;
+
+- string h;
+
+- bool distinct;
+
+- int limN;
+
+- int offN;
+
+- bool on;
+
+- List<bool> navOn;
+
+- OrmSelect(IDbExecutor db, OrmMeta meta)
+  - 私有构造；统一经 `Create` 创建。
+
+- static OrmSelect Create(IDbExecutor db, OrmMeta meta)
+  - 为实体创建一个空 SELECT 链。
+
+- OrmMeta Meta()
+  - 实体元数据（类型化门面读取列信息用）。
+
+- DbParams Params()
+  - 当前积累的 WHERE 参数（类型化门面直接执行时复用）。
+
+- string GroupKey()
+  - 分组键（类型化门面按分组取值用）。
+
+- bool NavOn(int i)
+  - 第 i 个导航字段是否被包含。
+
+- void W(string f)
+  - WHERE 片段：多个片段以 AND 连接（列名一般带 "t." 别名）。
+
+- void WExpr(ExprNode root)
+  - lambda 降级出的表达式树：SQL 片段与绑定值都由
+    `ExprSql` 产出。
+
+- void WhereDict(DbValues v)
+  - 动态列集合等值条件：列名按实体校验，值按列声明类型
+    绑定。
+
+- void CondBegin(bool c)
+  - 条件开关：false 期间 W/P* 收集的片段全部失效（ORM 内部
+    按条件组合调用）。
+
+- void CondEnd()
+  - 结束条件区间，恢复片段收集。
+
+- void AsTable(string t)
+  - 查另一张表（标识符校验，防注入）。
+
+- void P(string v)
+  - WHERE 参数：与 W 片段中占位符的出现顺序一致。
+
+- void Pi(int v)
+  - WHERE 整数参数。
+
+- void Pl(long v)
+  - WHERE 64 位整数参数。
+
+- void Pd(double v)
+  - WHERE 浮点参数。
+
+- void InI(List<int> vs)
+  - IN 列表参数（配合 W 片段里的 "t.col IN (?)"）。
+
+- void InL(List<long> vs)
+  - `InI` 的 long 版本。
+
+- void InS(List<string> vs)
+  - `InI` 的 string 版本。
+
+- void InD(List<double> vs)
+  - `InI` 的 double 版本。
+
+- void OB(string col)
+  - ORDER BY 追加一列（升序）。
+
+- void OBD(string col)
+  - ORDER BY 追加一列（降序）。
+
+- void GB(string col)
+  - GROUP BY 单列。
+
+- void OBK()
+  - 便捷：按分组键排序（升序）。
+
+- void OBDK()
+  - 便捷：按分组键排序（降序）。
+
+- void H(string f)
+  - HAVING 片段：多个片段以 AND 连接。
+
+- void DISTINCT()
+  - SELECT DISTINCT。
+
+- void Take(int n)
+  - LIMIT n。
+
+- void SkipN(int n)
+  - OFFSET n。
+
+- void Page(int index, int size)
+  - 1 起始的分页（换算成 LIMIT/OFFSET，方言在 BuildSelect 处理）。
+
+- void Include(int i)
+  - 包含第 i 个导航字段（LEFT JOIN + 它的列）。
+
+- int NavAt(int i)
+  - 被包含的导航字段在结果里的起始列号。
+
+- void tail(StringBuilder sb)
+  - 把 WHERE/GROUP BY/HAVING/ORDER BY 片段追加到 SELECT 文本之后。
+
+- string BuildSelect()
+  - 实体行的 SELECT。分页写法按方言：SQL Server/Oracle 用
+    OFFSET ... FETCH（且必须有 ORDER BY）。
+
+- DbResult Rows()
+  - 执行实体行查询。
+
+- async DbResult RowsAsync()
+  - 异步执行实体行查询。
+
+- string BuildCol(string col)
+  - 单列/投影的 SELECT（分页在 DTO 版里按 LIMIT/OFFSET）。
+
+- string BuildDto(string cols)
+  - 投影 SELECT 的语句文本（固定 LIMIT/OFFSET 分页写法）。
+
+- List<string> MapCol(DbResult r)
+  - 把结果集第一列抽成字符串列表。
+
+- List<string> ToListCol(string col)
+  - 执行单列查询并返回字符串列表。
+
+- async List<string> ToListColAsync(string col)
+  - `ToListCol` 的异步版本。
+
+- DbResult Dto(string cols)
+  - 执行投影查询（DTO 列表，LIMIT/OFFSET 分页）。
+
+- async DbResult DtoAsync(string cols)
+  - 异步执行投影查询。
+
+- void One()
+  - 只取一行（LIMIT 1）。
+
+- string BuildCount()
+  - 分组后的行数：分组键上的 COUNT 要套一层子查询。
+    派生表必须带别名——MySQL/PostgreSQL/SQL Server 对无别名
+    的子查询直接报语法错。
+
+- string BuildAgg(string expr)
+  - 聚合 SELECT 的语句文本（表达式如 "COUNT(*)"、"SUM(t.n)"），
+    复用 WHERE/GROUP BY/HAVING，忽略排序与分页。
+
+- DbResult AggR(string expr)
+  - 执行聚合查询，返回原始结果集。
+
+- async DbResult AggRAsync(string expr)
+  - `AggR` 的异步版本。
+
+- int AggI(string expr)
+  - 聚合结果取 int；无行时为 0。
+
+- long AggL(string expr)
+  - 聚合结果取 long；无行时为 0。
+
+- double AggD(string expr)
+  - 聚合结果取 double；无行时为 0.0。
+
+- async int AggIAsync(string expr)
+  - `AggI` 的异步版本。
+
+- async long AggLAsync(string expr)
+  - `AggL` 的异步版本。
+
+- async double AggDAsync(string expr)
+  - `AggD` 的异步版本。
+
+- int Count()
+  - 匹配的行数（分组查询时数分组数）。
+
+- async int CountAsync()
+  - 异步行数。
+
+- bool Any()
+  - 是否存在匹配行。
+
+- async bool AnyAsync()
+  - 异步判断是否存在匹配行。
+
+
+## OrmSync (class)
+
+CodeFirst：缺表建表、缺列加列、缺索引补索引。DDL 从实体元数据
+直接算出来，同步与异步两条路径共用同一段文本构造。
+
+- static string CreateDdl(int p, OrmMeta m, string t)
+  - CREATE TABLE 语句。复合主键写成表级约束（列定义里
+    不能各自带 PRIMARY KEY）。
+
+- static string AddColDdl(int p, OrmCol c, string t)
+  - ALTER TABLE ... ADD COLUMN 语句（新列不带主键/自增修饰）。
+
+- static void ExecDdl(IDbExecutor db, string ddl)
+  - 执行一条 DDL；执行器以负数报告失败（内置驱动
+    语句失败会直接抛 DbException，这里给不抛异常的
+    自定义执行器兜底）时同样抛出，绝不让建表/加列悄悄落空。
+
+- static async void ExecDdlAsync(IDbExecutor db, string ddl)
+  - `ExecDdl` 的协程版本，失败约定相同。
+
+- static void Sync(IDbExecutor db, OrmMeta m)
+  - 同步路径的 schema 同步：缺表则建表并建全部索引；表已存在时
+    逐列比对、缺列加列，最后补齐索引（幂等，可重复调用）。
+
+- static async void SyncAsync(IDbExecutor db, OrmMeta m)
+  - `Sync` 的协程版本。
+
+- static void Indexes(IDbExecutor db, OrmMeta m, string t)
+  - 按元数据补齐实体声明的全部索引（EnsureIndex 幂等）。
+
+- static async void IndexesAsync(IDbExecutor db, OrmMeta m, string t)
+  - `Indexes` 的协程版本。
+
+
+## OrmUpdate (class)
+
+类型化 UPDATE 的运行期实现：SET 片段与 WHERE 片段各自带一段参数，
+执行时按 SET→WHERE 的顺序合并。实体整体更新（SetSource）在执行
+时按元数据展开：非主键列进 SET，主键列进 WHERE。
+
+- IDbExecutor db;
+
+- OrmMeta meta;
+
+- string tbl;
+
+- IOrmRows src;
+
+- List<string> only;
+
+- List<string> skip;
+
+- string sets;
+
+- DbParams sp;
+
+- string w;
+
+- DbParams wp;
+
+- bool on;
+
+- OrmUpdate(IDbExecutor db, OrmMeta meta)
+  - 私有构造；统一经 `Create` 创建。
+
+- static OrmUpdate Create(IDbExecutor db, OrmMeta meta)
+  - 为实体创建一个空 UPDATE 构造器。
+
+- void AsTable(string t)
+  - 改写到另一张表（标识符校验，防注入）。
+
+- void Only(string c)
+  - 只更新该列（与 Skip 互斥语义，可多次调用）。
+
+- void Skip(string c)
+  - 跳过该列（可多次调用）。
+
+- void SetSource(IOrmRows rows)
+  - 实体整体更新的值来源（取第一行）。
+
+- void CondBegin(bool c)
+  - 条件开关：false 期间 W/P* 收集的片段全部失效（ORM 内部
+    按条件组合调用，应用层一般不直接用）。
+
+- void CondEnd()
+  - 结束条件区间，恢复片段收集。
+
+- bool Use(string c)
+  - 该列是否进 SET：Only 优先，其次非 Skip。
+
+- void Frag(string f)
+  - 追加一段 SET 片段（片段间以逗号连接）。
+
+- void SetI(string c, int v)
+  - SET 片段：追加一个 "col = ?" 并把值排入 SET 参数区。
+
+- void SetL(string c, long v)
+  - `SetI` 的 long 版本。
+
+- void SetD(string c, double v)
+  - `SetI` 的 double 版本。
+
+- void SetS(string c, string v)
+  - `SetI` 的 string 版本。
+
+- void SetB(string c, bool v)
+  - 布尔值写整型 0/1。
+
+- void SetIncrI(string c, int v)
+  - 自增片段："col = col + ?"（数据库侧原值累加）。
+
+- void SetIncrL(string c, long v)
+  - `SetIncrI` 的 long 版本。
+
+- void SetIncrD(string c, double v)
+  - `SetIncrI` 的 double 版本。
+
+- void SetDict(DbValues v)
+  - 字典键值批量进 SET（列名经元数据校验，按列类型绑定）。
+
+- void W(string f)
+  - WHERE 片段：多个片段以 AND 连接。
+
+- void WhereDict(DbValues v)
+  - 字典键值批量进 WHERE（等值条件）。
+
+- void P(string v)
+  - WHERE 参数：与 W 片段中占位符的出现顺序一致。
+
+- void Pi(int v)
+  - WHERE 整数参数。
+
+- void Pl(long v)
+  - WHERE 64 位整数参数。
+
+- void Pd(double v)
+  - WHERE 浮点参数。
+
+- void InI(List<int> vs)
+  - IN 列表参数（配合 W 片段里的 "col IN (?)"）。
+
+- void InL(List<long> vs)
+  - `InI` 的 long 版本。
+
+- void InS(List<string> vs)
+  - `InI` 的 string 版本。
+
+- void InD(List<double> vs)
+  - `InI` 的 double 版本。
+
+- void ApplySource()
+  - 实体整体更新：列在执行时展开，Only/Skip 的链顺序
+    任意；定位列取实体主键（含复合主键），没有主键则无法定位、
+    什么也不做。
+
+- string BuildUpdate()
+  - 生成 UPDATE 语句；无 SET 或无 WHERE 时返回 ""
+    （绝无全表更新）。
+
+- int ExecuteAffrows()
+  - 执行并返回受影响行数。
+
+- async int ExecuteAffrowsAsync()
+  - 异步执行并返回受影响行数。
 
 
 ## QueryBuilder (class)
@@ -642,19 +1498,14 @@ NOT NULL / PRIMARY KEY / DEFAULT 等后缀）。用一个实体代替并行的
 仿 FreeSQL 的流式 SQL 查询构建器。
 支持通过方法链执行 SELECT、INSERT、UPDATE、DELETE。
 
-用法：
-QueryBuilder qb = QueryBuilder.From("users");
-string sql = qb.Where("age > 18").OrderBy("name").Limit(10).BuildSelect("*");
-
-string insertSql = QueryBuilder.InsertInto("users")
-.Set("name", "Alice").Set("age", "30").BuildInsert();
-
-string updateSql = QueryBuilder.Update("users")
-.Set("name", "Bob").Where("id = 1").BuildUpdate();
-
-参数化模式（推荐——值永远不会进入 SQL 文本）：
-QueryBuilder qb = QueryBuilder.From("users").WhereEq("name", name);
+用法（全部走 `?` 占位符 + DbParams——值永远不会进入 SQL 文本，
+由 DbConnection 以驱动级参数绑定上线）：
+QueryBuilder qb = QueryBuilder.From("users").WhereEq("age", 18);
 DbResult r = db.Query(qb.BuildSelectParams("*"), qb.SelectParams());
+
+string sql = QueryBuilder.InsertInto("users")
+.Set("name", "Alice").BuildInsertParams();
+db.Execute(sql, qb.InsertParams());
 
 标识符（表、列、ORDER BY / GROUP BY 目标）会按
 [A-Za-z_][A-Za-z0-9_.]* 校验；非法标识符抛出 Exception。
@@ -693,6 +1544,13 @@ DbResult r = db.Query(qb.BuildSelectParams("*"), qb.SelectParams());
 
 - static string RequireIdent(string s)
   - s 是安全标识符时原样返回；否则抛出异常。
+
+- static string RequireDdlType(string s)
+  - s 是安全的 DDL 类型文本时原样返回；否则抛出异常。
+    允许字母、数字、下划线、空格、括号和逗号——足以表达
+    `INTEGER`、`VARCHAR(255)`、`NUMERIC(10,2)`、`DOUBLE PRECISION`
+    这类类型，而引号、分号、注释符等注入通道一律拒绝。
+    列类型文本会拼接进 CREATE TABLE，必须过这道检查。
 
 - static QueryBuilder From(string table)
   - 创建从某表 SELECT 的查询构建器。
@@ -799,13 +1657,14 @@ DbResult r = db.Query(qb.BuildSelectParams("*"), qb.SelectParams());
   - 设置 HAVING 子句。
 
 - QueryBuilder Join(string table, string on)
-  - 添加 JOIN 子句。
+  - 添加 JOIN 子句。表名经过标识符校验；
+    `on` 是自由条件表达式，引用外部输入时须自行参数化。
 
 - QueryBuilder LeftJoin(string table, string on)
-  - 添加 LEFT JOIN 子句。
+  - 添加 LEFT JOIN 子句。表名经过标识符校验。
 
 - QueryBuilder RightJoin(string table, string on)
-  - 添加 RIGHT JOIN 子句。
+  - 添加 RIGHT JOIN 子句。表名经过标识符校验。
 
 - QueryBuilder Limit(int count)
   - 设置 LIMIT。
@@ -831,6 +1690,10 @@ DbResult r = db.Query(qb.BuildSelectParams("*"), qb.SelectParams());
 - QueryBuilder SetInt(string column, int val)
   - 设置整数形式的 column=value 对。
 
+- void AppendClauses(StringBuilder sb)
+  - 把 JOIN/WHERE/GROUP BY/HAVING/ORDER BY/LIMIT/OFFSET
+    子句追加到 sb（占位符原样保留，参数由调用方随 SQL 一起传）。
+
 - string BuildSelectParams(string columns)
   - 构建带 `?` 占位符的 SELECT（参见 SelectParams()）。
 
@@ -852,31 +1715,11 @@ DbResult r = db.Query(qb.BuildSelectParams("*"), qb.SelectParams());
 - string BuildDeleteParams()
   - 构建带 `?` 占位符的 DELETE（参见 SelectParams()）。
 
-- string BuildSelect(string columns)
-  - 构建 SELECT 查询（旧版：参数内联）。
-
-- string BuildSelect(string columns, bool keepPlaceholders)
-
-- string BuildCount()
-  - 构建 SELECT COUNT 查询。
-
-- string BuildInsert()
-  - 构建 INSERT 查询。
-
-- string BuildUpdate()
-  - 构建 UPDATE 查询。
-
-- string BuildDelete()
-  - 构建 DELETE 查询（旧版：参数内联）。
-
-- static string InlineParams(string sql, DbParams prms)
-  - 将 `?` 占位符（引号字面量之外）替换为
-    带引号、已转义的参数值，供旧版纯字符串执行使用。
-
-- void AppendClauses(StringBuilder sb)
-
-- static string EscapeString(string val)
-  - 转义字符串中的单引号以确保 SQL 安全。
+- static string EscapeDdlLiteral(string val)
+  - DDL 字面量转义（单引号加倍）。只允许用于
+    CREATE TABLE 的 DEFAULT 子句这类无法参数化的位置——
+    所有 DML 一律走 `?` + DbParams 驱动级绑定，
+    不要用本方法拼接查询值。
 
 
 ## SetClause (class)
@@ -904,3 +1747,19 @@ QuestDB、DuckDB、Firebird 3+）
 - static int SqlServer=1;
 
 - static int Oracle=2;
+
+
+## IOrmRows (interface)
+
+实体行的取值口：共享实现只按列元数据要值，不认识实体类型。
+
+反射读写字段只在「静态类型就是实体」的地方成立（`object` 接收者拿不回
+具体类型），所以按列元数据循环取值的那几行由编译期给每个实体发一份，
+实现这个接口；代码量与字段数无关，加字段只多一行元数据。
+参数绑定、SQL 构造、结果映射的规则仍只有共享实现这一份。
+
+- int RowCount();
+  - 待写入的行数。
+
+- void BindCol(int row, OrmCol c, DbParams ps);
+  - 把第 row 行的 c 列按声明类型追加为一个参数。

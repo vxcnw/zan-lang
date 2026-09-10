@@ -32,7 +32,7 @@
       <img class="hero-mascot" src="/mascot.png" alt=""/>
       <p class="kicker" style="text-align:left"><span class="zh">知识库 · 标准库参考</span><span class="en">API reference</span></p>
       <h1 class="grad">System.Net.Http</h1>
-      <p class="lede"><span class="zh">9 个类型 · 完整签名由 stdlib 源码提取</span><span class="en">9 types · extracted from stdlib source</span></p>
+      <p class="lede"><span class="zh">10 个类型 · 完整签名由 stdlib 源码提取</span><span class="en">10 types · extracted from stdlib source</span></p>
       <p style="font-size:13.5px;color:var(--muted);margin:6px 0 0">
         <span class="zh">指南正文以中文编写；导航与界面文案提供英文切换。英文原文请抓取对应 .md 或见仓库 docs/。</span>
         <span class="en">This guide is written in Chinese; the navigation Chrome switches to English. Fetch the .md copy for the raw text.</span>
@@ -47,13 +47,15 @@
     <aside class="wiki-side doc-side">
       <div class="searchbox"><svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         <input id="docSearch" placeholder="筛选目录…" aria-label="filter"></div>
-      <details class="nsgrp" open><summary>System · 55</summary>
+      <details class="nsgrp" open><summary>System · 58</summary>
 <a href="/ref/System">System</a>
 <a href="/ref/System.Automation">System.Automation</a>
 <a href="/ref/System.Collections">System.Collections</a>
 <a href="/ref/System.Collections.Generic">System.Collections.Generic</a>
+<a href="/ref/System.Commercial">System.Commercial</a>
 <a href="/ref/System.Compiler">System.Compiler</a>
 <a href="/ref/System.Data">System.Data</a>
+<a href="/ref/System.Data.Excel">System.Data.Excel</a>
 <a href="/ref/System.Data.Firebird">System.Data.Firebird</a>
 <a href="/ref/System.Data.MySql">System.Data.MySql</a>
 <a href="/ref/System.Data.Orm">System.Data.Orm</a>
@@ -69,6 +71,7 @@
 <a href="/ref/System.Globalization">System.Globalization</a>
 <a href="/ref/System.IO">System.IO</a>
 <a href="/ref/System.IO.Compression">System.IO.Compression</a>
+<a href="/ref/System.IO.Watch">System.IO.Watch</a>
 <a href="/ref/System.Input">System.Input</a>
 <a href="/ref/System.Json">System.Json</a>
 <a href="/ref/System.Knowledge">System.Knowledge</a>
@@ -76,6 +79,7 @@
 <a href="/ref/System.Management">System.Management</a>
 <a href="/ref/System.Net">System.Net</a>
 <a href="/ref/System.Net.Coap">System.Net.Coap</a>
+<a href="/ref/System.Net.External">System.Net.External</a>
 <a href="/ref/System.Net.Http" class="active">System.Net.Http</a>
 <a href="/ref/System.Net.Http.Client">System.Net.Http.Client</a>
 <a href="/ref/System.Net.Http.Download">System.Net.Http.Download</a>
@@ -84,7 +88,6 @@
 <a href="/ref/System.Net.Modbus">System.Net.Modbus</a>
 <a href="/ref/System.Net.Mqtt">System.Net.Mqtt</a>
 <a href="/ref/System.Net.Ntp">System.Net.Ntp</a>
-<a href="/ref/System.Net.Rpc">System.Net.Rpc</a>
 <a href="/ref/System.Net.Sip">System.Net.Sip</a>
 <a href="/ref/System.Net.Sockets">System.Net.Sockets</a>
 <a href="/ref/System.Net.Sse">System.Net.Sse</a>
@@ -123,13 +126,13 @@
 <a href="/ref/Game.Arcade2D">Game.Arcade2D</a>
 <a href="/ref/Game.Arpg">Game.Arpg</a>
 <a href="/ref/Game.Arpg.Data">Game.Arpg.Data</a>
-<a href="/ref/Game.Arpg.Fonts">Game.Arpg.Fonts</a>
 <a href="/ref/Game.Board">Game.Board</a>
 <a href="/ref/Game.Cards">Game.Cards</a>
 <a href="/ref/Game.Core">Game.Core</a>
 <a href="/ref/Game.Foundation">Game.Foundation</a>
-<a href="/ref/Game.Foundation.Sdl">Game.Foundation.Sdl</a>
-<a href="/ref/Game.Render">Game.Render</a>
+<a href="/ref/Game.Foundation.Gui">Game.Foundation.Gui</a>
+<a href="/ref/Game.Idle">Game.Idle</a>
+<a href="/ref/Game.Kit">Game.Kit</a>
 <a href="/ref/Game.Scene">Game.Scene</a>
 </details>
 <details class="nsgrp"><summary>Sdk · 57</summary>
@@ -191,9 +194,6 @@
 <a href="/ref/Sdk.Wechat.Work">Sdk.Wechat.Work</a>
 <a href="/ref/Sdk.Wechat.WxOpen">Sdk.Wechat.WxOpen</a>
 </details>
-<details class="nsgrp" open><summary>SDL3 · 1</summary>
-<a href="/ref/SDL3">SDL3</a>
-</details>
 <details class="nsgrp"><summary>Platform · 1</summary>
 <a href="/ref/Platform">Platform</a>
 </details>
@@ -225,6 +225,8 @@ shutdown 系统调用，不包含 await。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">static bool sweeping=false;</code>
 </li>
+<li class=""><code class="sig">static int activeCount=0;</code>
+</li>
 <li class=""><code class="sig">static long nowMs=0;</code>
 </li>
 </ul>
@@ -233,41 +235,81 @@ shutdown 系统调用，不包含 await。</div>
 </li>
 <li class=""><code class="sig">static List&lt;int&gt; freeSlots=new List&lt;int&gt;();</code>
 </li>
-<li class=""><code class="sig">static int Arm(nint sock, int timeoutMs)</code>
-<div class="mdoc">注册一个连接并返回其槽位；
-截止时间被禁用（timeoutMs &lt;= 0）时返回 -1。</div>
+<li class=""><code class="sig">static HttpDeadlineToken Arm(nint sock, int timeoutMs)</code>
+<div class="mdoc">注册一个连接并返回带 generation 的 token；
+截止时间被禁用（timeoutMs &lt;= 0）时返回 null。</div>
 </li>
-<li class=""><code class="sig">static void Touch(int slot, int timeoutMs)</code>
-<div class="mdoc">为某个槽位重启时间窗口（每个请求调用一次）。</div>
+<li class=""><code class="sig">static HttpDeadlineToken Arm(nint sock, int timeoutMs, int totalMs)</code>
+<div class="mdoc">注册阶段 deadline，并可附带从 Arm 时刻起的 total budget。
+totalMs &lt;= 0 表示不设总预算。</div>
 </li>
-<li class=""><code class="sig">static bool Expired(int slot)</code>
-<div class="mdoc">当扫描器已对该槽位执行挂断时返回 true，即唤醒
-归属者读取的是截止时间而非对端。需要报告
-超时的调用方（HTTP 客户端）必须在 Disarm 之前查询。</div>
+<li class=""><code class="sig">static void Touch(HttpDeadlineToken token, int timeoutMs)</code>
+<div class="mdoc">为 token 重启阶段窗口。阶段预算为非正值时仍保留
+total deadline；不能因为关闭某一阶段而把总截止时间一并关闭。</div>
 </li>
-<li class=""><code class="sig">static void Disarm(int slot)</code>
-<div class="mdoc">连接结束时释放槽位。</div>
+<li class=""><code class="sig">static bool Expired(HttpDeadlineToken token)</code>
+<div class="mdoc">当扫描器已对 token 执行挂断时返回 true。
+必须在 Disarm 前查询。</div>
+</li>
+<li class=""><code class="sig">static void Disarm(HttpDeadlineToken token)</code>
+<div class="mdoc">连接结束时释放 token；重复释放安全，旧 token 不能释放新连接。</div>
 </li>
 <li class=""><code class="sig">static bool SweepOnce()</code>
-</li>
-<li class=""><code class="sig">static void StopSweeping()</code>
+<div class="mdoc">单次扫描：刷新粗粒度时钟并对过期连接执行挂断
+（shutdown 而非 close，见类文档）。返回是否仍有活动 token。</div>
 </li>
 <li class=""><code class="sig">static async void Sweep()</code>
+<div class="mdoc">每秒扫描一次的常驻协程；只在有活动 token 时存活。
+SweepOnce 返回 false 后仍需在锁内再确认一次 activeCount，
+避免 Arm 与扫描器退出之间丢失唤醒。</div>
 </li>
 </ul>
 </div></div>
 <div class="api"><div class="api-head"><span class="ns">HttpDeadlineSlot</span><span class="tag">class</span></div>
 <div class="api-body">
+<div class="mdoc">槽位表中的一条：连接套接字、阶段/总截止时间与 generation。</div>
 <h5 class="cat">字段</h5><ul class="sig">
 <li class=""><code class="sig">nint sock;</code>
 </li>
-<li class=""><code class="sig">int deadline;</code>
+<li class=""><code class="sig">long deadline;</code>
+</li>
+<li class=""><code class="sig">int generation;</code>
+</li>
+<li class=""><code class="sig">bool active;</code>
 </li>
 <li class=""><code class="sig">bool fired;</code>
 </li>
+<li class=""><code class="sig">long totalDeadline;</code>
+</li>
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
-<li class=""><code class="sig">HttpDeadlineSlot(nint sock, int deadline)</code>
+<li class=""><code class="sig">HttpDeadlineSlot(nint sock, long deadline)</code>
+<div class="mdoc">新槽位：generation 从 1 起，槽位复用时递增。</div>
+</li>
+</ul>
+</div></div>
+<div class="api"><div class="api-head"><span class="ns">HttpDeadlineToken</span><span class="tag">class</span></div>
+<div class="api-body">
+<div class="mdoc">Arm 返回的截止时间句柄：记录槽位下标与 generation，供 Disarm 使用。</div>
+<h5 class="cat">字段</h5><ul class="sig">
+<li class=""><code class="sig">int slot;</code>
+</li>
+<li class=""><code class="sig">int generation;</code>
+</li>
+<li class=""><code class="sig">bool disarmed;</code>
+</li>
+</ul>
+<h5 class="cat">构造</h5><ul class="sig">
+<li class=""><code class="sig">HttpDeadlineToken(int slot, int generation)</code>
+<div class="mdoc">token 记录槽位下标与创建时的 generation，
+用于槽位复用后旧 token 不再误操作新连接。</div>
+</li>
+</ul>
+<h5 class="cat">析构</h5><ul class="sig">
+<li class=""><code class="sig">~HttpDeadlineToken()</code>
+<div class="mdoc">传输异常可能在到达显式清理点之前就把请求展开掉。
+析构只是兜底；正常路径仍然显式 Disarm。Disarm 幂等，
+两条路径都安全。</div>
 </li>
 </ul>
 </div></div>
@@ -315,10 +357,12 @@ f.Consume(f.RequestBytes());                     // 只丢弃本请求
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">HttpFramer()</code>
+<div class="mdoc">私有构造：用 <code>Create</code> / <code>CreateTls</code> 创建。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
 <li class=""><code class="sig">static HttpFramer Create(nint sock)</code>
+<div class="mdoc">为明文套接字创建拆包器（64KB 复用接收缓冲）。</div>
 </li>
 <li class=""><code class="sig">static HttpFramer CreateTls(TlsStream stream)</code>
 <div class="mdoc">从 TLS 连接拆包：除了字节源不同，定界规则与明文
@@ -342,6 +386,13 @@ HTTP 完全一样（TlsStream.RecvIntoAsync 同样给出精确字节数）。</d
 <li class=""><code class="sig">int HeaderEnd()</code>
 <div class="mdoc">头部结束空行之后的下标（即正文首字节的位置），
 空行尚未到达时返回 -1。同时识别 CRLF 与单独 LF 分隔。</div>
+</li>
+<li class=""><code class="sig">async int FillHead(int maxHeaderBytes)</code>
+<div class="mdoc">头部读取专用的受限接收（不能调用无上限的 Fill：一次
+64KB 的 recv 可能把 maxHeaderBytes 直接冲过头，随后才检查已经
+太迟）。只接收仍在 cap 内的字节，并在追加后再次核验，保证恶意
+头不会先进入待处理缓冲。返回收到的字节数；超限返回 -431，
+对端关闭返回 0。</div>
 </li>
 <li class=""><code class="sig">async int ReadHead(int maxHeaderBytes)</code>
 <div class="mdoc">一直接收，直到完整的头部块到齐。
@@ -384,16 +435,20 @@ HTTP 完全一样（TlsStream.RecvIntoAsync 同样给出精确字节数）。</d
 累积，因此块里的 NUL 不会截断正文；累计长度超过
 &lt;paramref name=&quot;maxBodyBytes&quot;/&gt; 立即拒绝，避免用无限多个小块
 撑爆内存。畸形的长度行按 400 拒绝——不能猜，猜错就等于把
-剩余字节当成下一条请求（走私）。</div>
+剩余字节当成下一条请求（走私）。等待 LF 的字节同样有上限
+（8KB）：一条不终止的&quot;长度行&quot;不计入正文限额，若无上限，
+单条连接就能把待处理缓冲喂到任意大小。</div>
 </li>
 <li class=""><code class="sig">async int SkipTrailer(int from)</code>
 <div class="mdoc">跳过结束块之后的 trailer 头部，返回其后的线路下标；
-对端中途关闭返回 -1。</div>
+对端中途关闭返回 -1。单行超过 8KB 按 -1（畸形）处理：trailer
+行与长度行一样不受正文限额约束，必须自带上限。</div>
 </li>
 <li class=""><code class="sig">int IndexOfLf(int from)</code>
 <div class="mdoc">从 &lt;paramref name=&quot;from&quot;/&gt; 起第一个 LF 的下标，没有则 -1。</div>
 </li>
 <li class=""><code class="sig">static int HexVal(int c)</code>
+<div class="mdoc">十六进制字符的数值；非十六进制字符返回 -1。</div>
 </li>
 <li class=""><code class="sig">void Dispose()</code>
 <div class="mdoc">归还接收缓冲区并释放待处理缓冲区。连接关闭时调用；
@@ -441,9 +496,24 @@ HTTP 完全一样（TlsStream.RecvIntoAsync 同样给出精确字节数）。</d
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">HttpRequest()</code>
+<div class="mdoc">私有构造：HTTP/1.1 keep-alive 的默认状态，由 Parse 使用。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
+<li class=""><code class="sig">static bool IsOws(int c)</code>
+<div class="mdoc">是否为可选空白（SP / HTAB，RFC 7230 OWS）。</div>
+</li>
+<li class=""><code class="sig">static int TrimOwsStart(string raw, int start, int stop)</code>
+<div class="mdoc">[start, stop) 起点跳过 RFC 7230 OWS（SP / HTAB）。</div>
+</li>
+<li class=""><code class="sig">static int TrimOwsStop(string raw, int start, int stop)</code>
+<div class="mdoc">[start, stop) 终点回退 RFC 7230 OWS（SP / HTAB）。</div>
+</li>
+<li class=""><code class="sig">static bool FinalTransferChunked(string raw, int start, int stop)</code>
+<div class="mdoc">Transfer-Encoding 是逗号分隔的 token 列表；只有最后一个
+token 为 chunked 时才可由 HttpFramer 解码。token 之间的 OWS 合法，
+其它编码不被静默忽略，避免把未定界的字节当成下一条请求。</div>
+</li>
 <li class=""><code class="sig">static HttpRequest Parse(string raw)</code>
 <div class="mdoc">把原始 HTTP 请求字符串解析为 HttpRequest。
 
@@ -520,6 +590,7 @@ HTTP 完全一样（TlsStream.RecvIntoAsync 同样给出精确字节数）。</d
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">HttpResponse()</code>
+<div class="mdoc">私有构造：200 / keep-alive 的默认状态，由各静态工厂使用。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -542,14 +613,23 @@ HTTP 完全一样（TlsStream.RecvIntoAsync 同样给出精确字节数）。</d
 <li class=""><code class="sig">bool IsBinary()</code>
 <div class="mdoc">正文是否为二进制缓冲区。</div>
 </li>
+<li class=""><code class="sig">static bool HasCrlf(string s)</code>
+<div class="mdoc">字符串是否含 CR/LF（头部注入检查用）。</div>
+</li>
 <li class=""><code class="sig">static HttpResponse Redirect(string url)</code>
-<div class="mdoc">创建重定向响应。</div>
+<div class="mdoc">创建重定向响应。Location 不允许注入折行；非法值
+被保守拒绝，不产生一个可被下游解释的重定向头。</div>
 </li>
 <li class=""><code class="sig">static HttpResponse NotFound()</code>
 <div class="mdoc">创建 404 Not Found 响应。</div>
 </li>
 <li class=""><code class="sig">static HttpResponse ServerError(string message)</code>
-<div class="mdoc">创建 500 Internal Server Error 响应。</div>
+<div class="mdoc">创建 500 Internal Server Error 响应。message 原样进入
+HTML 正文，先做 HTML 转义：消息里常含异常文本、URL 或用户
+输入片段，未转义就是把反射型 XSS 内置在错误页里。</div>
+</li>
+<li class=""><code class="sig">static string EscapeHtmlText(string text)</code>
+<div class="mdoc">最小 HTML 实体转义（&amp; &lt; &gt; &quot; &#x27;），供内嵌消息进正文用。</div>
 </li>
 <li class=""><code class="sig">static HttpResponse WithStatus(int code, string text, string body)</code>
 <div class="mdoc">用自定义状态码创建响应。</div>
@@ -558,7 +638,12 @@ HTTP 完全一样（TlsStream.RecvIntoAsync 同样给出精确字节数）。</d
 <div class="mdoc">主动释放响应持有的头部存储。</div>
 </li>
 <li class=""><code class="sig">HttpResponse SetHeader(string name, string headerValue)</code>
-<div class="mdoc">设置响应头。</div>
+<div class="mdoc">设置响应头。名称和值均禁止 CR/LF，避免注入
+额外字段或响应体；非法输入保持响应可序列化但不添加该头。</div>
+</li>
+<li class=""><code class="sig">string GetHeader(string name)</code>
+<div class="mdoc">Returns one response header by name. Header names are
+case-insensitive as required by HTTP; an absent header returns &quot;&quot;.</div>
 </li>
 <li class=""><code class="sig">HttpResponse SetContentType(string ct)</code>
 <div class="mdoc">设置 content type。</div>
@@ -573,6 +658,15 @@ HTTP 完全一样（TlsStream.RecvIntoAsync 同样给出精确字节数）。</d
 <li class=""><code class="sig">string Build()</code>
 <div class="mdoc">将响应序列化为原始 HTTP 响应字符串。仅适用于文本正文；
 二进制正文请用 <code>BuildHeaders</code> + &lt;c&gt;bodyBytes&lt;/c&gt;。</div>
+</li>
+<li class=""><code class="sig">static bool IsOws(int c)</code>
+<div class="mdoc">是否为可选空白（SP / HTAB，RFC 7230 OWS）。</div>
+</li>
+<li class=""><code class="sig">static int TrimOwsStart(string s, int start, int stop)</code>
+<div class="mdoc">[start, stop) 起点跳过 OWS，返回首个非 OWS 字节下标。</div>
+</li>
+<li class=""><code class="sig">static int TrimOwsStop(string s, int start, int stop)</code>
+<div class="mdoc">[start, stop) 终点回退 OWS，返回尾后第一个非 OWS 下标。</div>
 </li>
 <li class=""><code class="sig">static HttpResponse Parse(string raw)</code>
 <div class="mdoc">解析原始 HTTP 响应（客户端用法）。</div>
@@ -593,6 +687,7 @@ HTTP 完全一样（TlsStream.RecvIntoAsync 同样给出精确字节数）。</d
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">HttpRoute(string method, string path, string response)</code>
+<div class="mdoc">私有构造：由 HttpRouter 的注册方法创建。</div>
 </li>
 </ul>
 </div></div>
@@ -605,6 +700,7 @@ HTTP 完全一样（TlsStream.RecvIntoAsync 同样给出精确字节数）。</d
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">HttpRouter()</code>
+<div class="mdoc">创建空路由表。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -675,6 +771,7 @@ HTTP/1.1 帧解析与限制在 stdlib 中的唯一实现；Worker 的 &quot;http
 </ul>
 <h5 class="cat">构造</h5><ul class="sig">
 <li class=""><code class="sig">HttpServer(string host, int port)</code>
+<div class="mdoc">创建未启动的服务器；用 OnRequest / Workers 等配置后调用 Start。</div>
 </li>
 </ul>
 <h5 class="cat">方法</h5><ul class="sig">
@@ -718,9 +815,12 @@ System.Net.Worker，由其创建并监管 n 个进程；否则
 而非忙等。</div>
 </li>
 <li class=""><code class="sig">static async void RejectOverloaded(nint clientSock)</code>
+<div class="mdoc">超过 maxConnections 时对下游回 503（Connection: close）并关闭。</div>
 </li>
 <li class=""><code class="sig">async void HandleConnection(nint clientSock)</code>
-<div class="mdoc">处理单个客户端连接。</div>
+<div class="mdoc">处理单个客户端连接。连接计数必须在 finally 中归还：
+处理器抛出的异常会跳过顺序清理，泄漏的计数会让服务器在
+maxConnections 处永久 503。</div>
 </li>
 <li class=""><code class="sig">static async void ServeConnection(nint clientSock, HttpRequestHandler handler, int maxHeaderBytes, int maxRequestBytes, int timeoutMs)</code>
 <div class="mdoc">将一个 HTTP/1.1 连接服务到底：帧解析（分段
@@ -749,6 +849,14 @@ System.Net.Worker，由其创建并监管 n 个进程；否则
 （如 WebSocket 端口先读握手头部）交回 HTTP 循环：拆包器连同
 其中未消费的字节一并交接，无需把字节转成字符串再放回——
 二进制正文在这一步转换里会被 NUL 截断。</div>
+</li>
+<li class=""><code class="sig">static async int ServeFramedCore(nint clientSock, HttpRequestHandler handler, HttpFramer framer, int maxHeaderBytes, int maxRequestBytes, int timeoutMs, HttpDeadlineToken watch)</code>
+<div class="mdoc">HTTP 连接循环本体：读头块 → 解析 → 读正文 → 分发
+处理器 → 按字节长度发响应，keep-alive 循环；431/413/400/501
+拒绝响应在此统一发送并关闭连接。</div>
+</li>
+<li class=""><code class="sig">static async int ServeFramedInner(nint clientSock, HttpRequestHandler handler, HttpFramer framer, int maxHeaderBytes, int maxRequestBytes, int timeoutMs, HttpDeadlineToken watch, TcpClient client)</code>
+<div class="mdoc">ServeFramedCore 的循环体；释放见 ServeFramedCore 的 finally。</div>
 </li>
 <li class=""><code class="sig">void Stop()</code>
 <div class="mdoc">停止服务器。</div>

@@ -18,6 +18,7 @@ ARC4 密钥流，即每个 Firebird 3+ 服务器自带的线路加密插件。
 - int y;
 
 - FbArc4(FbBytes key)
+  - 由会话密钥构建（K = SHA1(S)，见 `FbSrp.Prove`）。
 
 - void Translate(string buf, int off, int len)
   - 就地异或缓冲区中的 <paramref name="len"/> 字节；
@@ -37,8 +38,10 @@ ARC4 密钥流，即每个 Firebird 3+ 服务器自带的线路加密插件。
 - int subtype;
 
 - FbBlobRef(FbRow row, int col, FbBytes id, int subtype)
+  - 记录目标行、列号、BLOB id 与子类型。
 
 - static FbBlobRef Of(FbRow row, int col, FbBytes id, int subtype)
+  - 构造 `FbBlobRef`。
 
 
 ## FbBuf (class)
@@ -50,14 +53,19 @@ ARC4 密钥流，即每个 Firebird 3+ 服务器自带的线路加密插件。
 - List<int> b;
 
 - static byte[]Alloc(int n)
+  - 分配 n 字节的零填充块（读侧解码复用）。
 
 - FbBuf()
+  - 私有构造；写入方法链式累积字节。
 
 - int Count()
+  - 当前字节数。
 
 - int At(int i)
+  - 下标 i 处的字节。
 
 - FbBuf U8(int v)
+  - 追加单字节，返回自身以链式写入。
 
 - FbBuf Int(int v)
   - 4 字节大端整数。
@@ -69,6 +77,7 @@ ARC4 密钥流，即每个 Firebird 3+ 服务器自带的线路加密插件。
   - 带长度块的原始字节。
 
 - void pad()
+  - 补零到 4 字节边界（块尾对齐是 XDR 帧格式的要求）。
 
 - FbBuf Block(FbBytes src)
   - 带长度前缀、4 字节对齐的块。
@@ -91,6 +100,7 @@ ARC4 密钥流，即每个 Firebird 3+ 服务器自带的线路加密插件。
 - int len;
 
 - FbBytes(byte[]data, int len)
+  - 私有构造；统一经 `Own`/`Of`/`Alloc` 创建。
 
 - static FbBytes Own(byte[]data, int len)
   - 将现有缓冲区连同其长度封装起来。
@@ -103,16 +113,22 @@ ARC4 密钥流，即每个 Firebird 3+ 服务器自带的线路加密插件。
   - 将 Zan 字符串的字节复制到带长度的块中。
 
 - static FbBytes Alloc(int n)
+  - 分配 n 字节的零填充块。
 
 - static FbBytes Empty()
+  - 长度为 0 的空块。
 
 - byte[]Data()
+  - 底层缓冲区（自带 NUL 终止，内容按长度解读）。
 
 - int Len()
+  - 有效字节数。
 
 - int At(int i)
+  - 下标 i 处的字节。
 
 - void SetAt(int i, int v)
+  - 覆写下标 i 处的字节。
 
 - string Text()
   - 字节作为文本，止于首个 NUL。
@@ -128,6 +144,7 @@ ARC4 密钥流，即每个 Firebird 3+ 服务器自带的线路加密插件。
   - 将十六进制字符串解码为带长度的块。
 
 - static int nibble(int c)
+  - 十六进制字符转半字节（0-9/a-f/A-F；其余为 0）。
 
 - void Release()
   - 丢弃缓冲区以便立即回收。
@@ -156,24 +173,32 @@ ARC4 密钥流，即每个 Firebird 3+ 服务器自带的线路加密插件。
 - string alias;
 
 - FbColumn()
+  - 空列描述，经 describe 解析或 `Of` 填充。
 
 - static FbColumn Of(int sqltype, int scale, int sqllen)
   - 已知形状的列，用于在缺少 describe 缓冲区时
     解码某个值。
 
 - int SqlType()
+  - Firebird SQL 类型码。
 
 - int SubType()
+  - 子类型（BLOB/数值细分）。
 
 - int Scale()
+  - 缩放（负值表示隐含小数位）。
 
 - int Length()
+  - 声明长度。
 
 - bool NullOk()
+  - 列是否可为 NULL。
 
 - string Field()
+  - 底层字段名。
 
 - string Relation()
+  - 所属表名。
 
 - string Name()
   - 结果集应展示的列名：有 SELECT 别名时
@@ -196,22 +221,31 @@ ARC4 密钥流，即每个 Firebird 3+ 服务器自带的线路加密插件。
 - string message;
 
 - FbError()
+  - 空状态向量。
 
 - void AddCode(int c)
+  - 追加一个 gds 码。
 
 - void SetSqlCode(int c)
+  - 记录 SQL 码。
 
 - void SetMessage(string m)
+  - 记录可读消息。
 
 - bool Failed()
+  - 服务器是否报告了错误。
 
 - int SqlCode()
+  - SQL 码。
 
 - string Message()
+  - 可读消息。
 
 - int CodeCount()
+  - gds 码数量。
 
 - int CodeAt(int i)
+  - 第 i 个 gds 码。
 
 - bool Has(int code)
   - 向量包含给定 gds 码时为 true。
@@ -378,14 +412,19 @@ Firebird 线缆协议的操作码（服务器 <c>remote/protocol.h</c> 中的
 - FbBytes values;
 
 - FbParamBlock(FbBytes blr, FbBytes values)
+  - 私有构造；统一经 `Of` 创建。
 
 - static FbParamBlock Of(FbBytes blr, FbBytes values)
+  - 组装 BLR 消息与取值块。
 
 - FbBytes Blr()
+  - 描述取值的 BLR 消息。
 
 - FbBytes Values()
+  - 取值本身（前缀 NULL 位图）。
 
 - void Release()
+  - 释放两块缓冲区。
 
 
 ## FbReader (class)
@@ -399,20 +438,28 @@ Firebird 线缆协议的操作码（服务器 <c>remote/protocol.h</c> 中的
 - int len;
 
 - FbReader(string buf, int len)
+  - 私有构造；统一经 `Over` 创建。
 
 - static FbReader Over(FbBytes b)
+  - 游标覆盖一个带长度的字节块。
 
 - static FbReader Over(string buf, int len)
+  - 游标覆盖缓冲区前 len 字节。
 
 - int Pos()
+  - 当前读取位置。
 
 - int Left()
+  - 距末尾剩余的字节数。
 
 - bool Eof()
+  - 是否已读到末尾。
 
 - void Skip(int n)
+  - 向前跳过 n 字节（截停在末尾，不报错）。
 
 - int U8()
+  - 读取单字节；越过末尾返回 0。
 
 - int U16LE()
   - 2 字节小端整数：info 缓冲区和 clumplets
@@ -455,20 +502,28 @@ Firebird 线缆协议的操作码（服务器 <c>remote/protocol.h</c> 中的
 - FbError err;
 
 - FbResponse(int handle, FbBytes oid, FbBytes buf, FbError err)
+  - 打包 op_response 的四个字段。
 
 - static FbResponse Of(int handle, FbBytes oid, FbBytes buf, FbError err)
+  - 构造 `FbResponse`。
 
 - int Handle()
+  - 返回的对象句柄（数据库、事务、语句等）。
 
 - FbBytes Oid()
+  - 8 字节对象 id。
 
 - FbBytes Buf()
+  - 随附的 info 缓冲区。
 
 - FbError Err()
+  - 状态向量解析出的错误。
 
 - bool Failed()
+  - 服务器是否报告了错误。
 
 - void Release()
+  - 释放 oid 与 buf 缓冲。
 
 
 ## FbRow (class)
@@ -480,12 +535,16 @@ Firebird 线缆协议的操作码（服务器 <c>remote/protocol.h</c> 中的
 - List<bool> nulls;
 
 - FbRow(int n)
+  - 构造 n 格、默认全 NULL 的行。
 
 - void Set(int i, string v)
+  - 写入第 i 格并清除其 NULL 标志。
 
 - List<string> Values()
+  - 各格文本。
 
 - List<bool> Nulls()
+  - 各格 NULL 标志。
 
 
 ## FbSrp (class)
@@ -520,6 +579,7 @@ client -> server:  M = H(H(N)^H(g) mod N, H(user), salt, A, B, K)
 - FbBytes pub;
 
 - FbSrp(BigInt priv, FbBytes pub)
+  - 私有构造；统一经 `Create`/`FromPrivateHex` 创建。
 
 - static FbSrp Create()
   - 以新的秘密指数开始握手。当
@@ -531,12 +591,16 @@ client -> server:  M = H(H(N)^H(g) mod N, H(user), salt, A, B, K)
     使用它：可使握手可复现。
 
 - static FbSrp FromPrivate(BigInt a)
+  - 由秘密指数计算公钥 A = g^a mod N，并按最短大端形式保存。
 
 - static BigInt Prime()
+  - 握手素数 N。
 
 - static BigInt Multiplier()
+  - SRP-6a 乘数 k。
 
 - static BigInt Generator()
+  - 生成元 g（恒为 2）。
 
 - FbBytes Public()
   - 客户端公钥 A。
@@ -549,10 +613,13 @@ client -> server:  M = H(H(N)^H(g) mod N, H(user), salt, A, B, K)
     对每个整数都这样哈希和传输。
 
 - static BigInt ToInt(FbBytes b)
+  - 大端字节串转大整数。
 
 - static FbBytes Sha1Of(FbBytes b)
+  - SHA-1 摘要（定长 20 字节）。
 
 - static FbBytes Sha256Of(FbBytes b)
+  - SHA-256 摘要（定长 32 字节）。
 
 - static string NormalizeUser(string user)
   - 参与证明计算的登录名：带引号的名称保留
@@ -583,12 +650,16 @@ SRP 握手的客户端证明及双方协商出的会话密钥
 - FbBytes key;
 
 - FbSrpProof(FbBytes proof, FbBytes key)
+  - 私有构造；统一经 `Of` 创建。
 
 - static FbSrpProof Of(FbBytes proof, FbBytes key)
+  - 组装证明与密钥。
 
 - FbBytes Proof()
+  - 客户端证明 M。
 
 - FbBytes Key()
+  - 会话密钥 K（同时用作线路加密密钥）。
 
 
 ## FbType (class)
@@ -706,19 +777,25 @@ Firebird SQL 类型码（表示“可空”的奇数变体
 语句取值的编码器与解码器。
 
 - static string HEX="0123456789abcdef";
+  - 十六进制渲染用的字符表。
 
 - static long DoubleBits(double v)
   - double 的 IEEE-754 位模式：语言没有
     重新解释转换（reinterpret cast），故需手工规范化。
+    ±∞/NaN 单独处理：∞ 除以 2 仍是 ∞，归一化循环永不终止，
+    一次非有限参数就把协程永久钉死（与 TDS 侧同修）。
 
 - static double Pow2(int e)
   - 以 double 表示的 2^e（e 可为负）。
 
 - static string Ieee(int sign, int exp, long mant, int bias, int mantBits)
+  - 由 IEEE 754 位型（符号/指数/尾数/偏置/尾数位数）渲染浮点文本。
 
 - static string Pad2(int v)
+  - 两位零填充十进制。
 
 - static string Pad4(int v)
+  - 四位零填充十进制。
 
 - static string CivilDate(int z)
   - 由相对于 1970-01-01 的天数得到公历日期。
@@ -739,6 +816,7 @@ Firebird SQL 类型码（表示“可空”的奇数变体
     （INT128 放不进机器字）。
 
 - static string Hex(FbBytes raw)
+  - 把原始字节渲染为 "0x…" 十六进制（无法识别/DECFLOAT 类型的兜底）。
 
 - static string Decode(FbColumn col, FbBytes raw)
   - 把取回的一个值渲染为文本。BLOB 列不在此解码——
@@ -751,6 +829,7 @@ Firebird SQL 类型码（表示“可空”的奇数变体
     只贡献自己的一个位。
 
 - static void appendBE(FbBuf b, long v, int n)
+  - 向 b 追加 v 的 n 字节大端形式。
 
 
 ## FbXsqlda (class)
@@ -763,19 +842,25 @@ Firebird SQL 类型码（表示“可空”的奇数变体
 - int stmtType;
 
 - FbXsqlda()
+  - 空布局，经 `Parse` 填充。
 
 - int Count()
+  - 列数。
 
 - FbColumn At(int i)
+  - 第 i 列。
 
 - int StmtType()
+  - 语句类型（FbType.STMT_*）。
 
 - void SetStmtType(int t)
+  - 记录语句类型。
 
 - bool IsSelect()
   - 当语句需要逐行取回结果时为 true。
 
 - void Resize(int n)
+  - 保证至少有 n 个列描述。
 
 - int Parse(FbBytes buf)
   - 将 describe 缓冲区读入本布局。返回服务器截断处的 1 起始索引，
@@ -854,6 +939,7 @@ await db.CloseAsync();
     损坏或恶意的长度前缀。
 
 - FirebirdConnection()
+  - 空连接；外部经 `OpenAsync` 构造。
 
 - async int recvExact(byte[]dst, int off, int need)
   - 精确读取 <paramref name="need"/> 字节，会话加密时
@@ -864,6 +950,7 @@ await db.CloseAsync();
     加密前复制，确保密钥流不会改写调用方的缓冲区。
 
 - async int recvInt()
+  - 读取 4 字节大端整数；连接关闭时返回 -1 并标记断开。
 
 - async int recvSigned()
   - 读取一个协议视为有符号的 32 位值。
@@ -900,12 +987,15 @@ await db.CloseAsync();
     <c>WireCrypt = Disabled</c> 的服务器）。
 
 - async bool handshake(string host, int port, string db, string user, string pw)
+  - 完整连接序列：TCP 连接、op_connect（协议 13 + SRP 公钥）、
+    SRP 认证、op_attach 取数据库句柄并开启事务。
 
 - static FbBytes ConnectPacket(string database, string user, string pubHex, bool wireCrypt)
   - 构建 <c>op_connect</c>：客户端提供协议 13 及
     SRP 公钥，服务器以 salt 和自身公钥应答。
 
 - static void cnct(FbBuf b, int tag, string v)
+  - 写入单个 connect 用户项（1 字节标签 + 1 字节长度 + 值）。
 
 - static void cnctChunked(FbBuf b, int tag, string v)
   - specific-data clumplet 带有序号字节，按
@@ -920,19 +1010,24 @@ await db.CloseAsync();
     正文。
 
 - static FbBytes ContAuth(FbBytes authData, string plugin, string pluginList)
+  - 构建 op_cont_auth：认证数据（hex）、插件名与插件列表。
 
 - static string GuessWireCrypt(FbBytes buf)
   - 从服务器提供的列表中选择线路加密插件。
     缓冲区是 clumplet 列表：标签 1 保存以空格分隔的插件名。
 
 - async bool startCrypt(FbBytes sessionKey)
+  - 发送 op_crypt 请求 Arc4 线路加密，并在发出请求之后、
+    读取应答之前启用双向 ARC4 密钥流。
 
 - static FbBytes AttachPacket(string database, string user, FbBytes authData)
   - 构建带数据库参数块的 <c>op_attach</c>。
 
 - static void dpbStr(FbBuf b, int tag, string v)
+  - 写入单个 DPB 字符串项（标签 + 长度 + 值）。
 
 - async bool beginTransaction()
+  - 以 WRITE / WAIT / READ COMMITTED（REC_VERSION）开启新事务。
 
 - async bool commitRetaining()
   - 提交但不放弃事务句柄：在显式事务之外执行的语句
@@ -946,16 +1041,22 @@ await db.CloseAsync();
   - 回滚当前事务并开启新事务。
 
 - async int allocStatement()
+  - 分配语句句柄；失败返回 -1。
 
 - static FbBytes describeItems()
   - prepare 请求的 describe 条目：先是语句类型，
     再是每个输出列的布局。
 
 - async FbXsqlda prepare(int stmt, string sql)
+  - prepare 语句并解析输出描述（XSQLDA）；描述超出单个缓冲区时
+    按 INFO_SQLDA_START 从服务器停下的列继续读取，失败返回 null。
 
 - async bool execute(int stmt, DbParams prms)
+  - 执行语句：无参数走空 BLR；有参数经 FbValue.Params 编码
+    BLR 与绑定值后随 op_execute 发送。
 
 - async bool freeStatement(int stmt)
+  - 释放（DSQL_DROP）语句句柄。
 
 - async int affectedRows(int stmt, bool select)
   - 读取上一条语句产生的行计数器。
@@ -1028,8 +1129,10 @@ await db.CloseAsync();
   - 本会话附加到的数据库。
 
 - bool IsConnected()
+  - 连接是否仍打开。
 
 - int GetProvider()
+  - 驱动标识，恒为 `DbProvider.Firebird`。
 
 - async void CloseAsync()
   - 礼貌地分离（回滚打开的事务），然后
@@ -1073,14 +1176,18 @@ pool.Close();
 - PoolCore<FirebirdConnection> core;
 
 - FirebirdPool(string host, int port, string database, string user, string password, bool wireCrypt, int maxSize)
+  - 完整构造：显式指定是否启用 wire 协议加密。
 
 - FirebirdPool(string host, int port, string database, string user, string password, int maxSize):this(host, port, database, user, password, true, maxSize)
+  - 以默认配置（启用 wire 加密）构造。
 
 - async FirebirdConnection OpenOne()
+  - 新建一个连接（attach + SRP 认证握手）；失败返回 null。
 
 - async FirebirdConnection AcquireAsync()
   - 借出一个连接：复用空闲的，未达上限则新建，
-    否则挂起协程，直到有连接被释放。
+    否则挂起协程，直到有连接被释放。饱和等待有硬上限
+    （见 `PoolWait`）：超时返回 null，绝不定死。
     连接池关闭后返回 null。
 
 - void Release(FirebirdConnection c)
@@ -1103,6 +1210,7 @@ pool.Close();
   - `Close` 调用过后为 true。
 
 - int GetProvider()
+  - 池的 provider id（恒为 `DbProvider.Firebird`）。
 
 - void Close()
   - 关闭所有空闲连接并将连接池标记为已关闭。仍被

@@ -45,6 +45,7 @@ db.Close();
 - int packetId;
 
 - SqlServerConnection()
+  - 私有构造；统一经 `OpenAsync` 创建。
 
 - async int recvExact(byte[]dst, int off, int need)
   - 恰好读取 <paramref name="need"/> 字节，部分读取之间
@@ -63,8 +64,13 @@ db.Close();
   - 打开连接并使用 SQL Server 认证方式登录。
 
 - async bool handshake(string host, int port, string db, string user, string pw)
+  - PRELOGIN + LOGIN7 握手：声明 ENCRYPT_NOT_SUP 保持明文，
+    服务器要求 TLS（ENCRYPT_REQ）时在这里失败；登录应答
+    带出服务器版本与实际绑定的数据库。
 
 - async TdsResponse roundTrip(int type, TdsBytes payload)
+  - 发送一条消息并解码响应：网络失败会把连接标记为断开并返回
+    空响应，语句级失败只记录（由调用方决定是否抛出）。
 
 - async DbResult QueryAsync(string sql)
   - 运行语句批处理并返回结果集。当服务器拒绝批处理时抛出
@@ -109,10 +115,13 @@ db.Close();
   - 会话所绑定的数据库。
 
 - bool IsConnected()
+  - 登录成功且连接未被网络错误关闭。
 
 - int GetProvider()
+  - 恒为 `DbProvider.SqlServer`。
 
 - void Close()
+  - 关闭套接字；重复调用安全。
 
 
 ## SqlServerPool (class)
@@ -147,10 +156,12 @@ pool.Close();
 - SqlServerPool(string host, int port, string database, string user, string password, int maxSize)
 
 - async SqlServerConnection OpenOne()
+  - 新建一条 TDS 连接（池的建连回调）。
 
 - async SqlServerConnection AcquireAsync()
   - 借出一条连接：复用空闲连接，未达到上限则新建，
-    否则挂起协程直到有连接被释放。
+    否则挂起协程直到有连接被释放。饱和等待有硬上限
+    （见 `PoolWait`）：超时返回 null，绝不定死。
     连接池关闭后返回 null。
 
 - void Release(SqlServerConnection c)
@@ -188,22 +199,31 @@ pool.Close();
     供逐字节拼接文本的解码器使用。
 
 - TdsBuf()
+  - 私有构造；缓冲区经 `Alloc` 风格的写入方法累积。
 
 - int Count()
+  - 当前字节数。
 
 - int At(int i)
+  - 下标 i 处的字节。
 
-- void SetAt(int i, int v)
+- internal void SetAt(int i, int v)
+  - 覆写下标 i 处的字节（回填长度/状态位用）。
 
 - TdsBuf U8(int v)
+  - 追加单字节，返回自身以链式写入。
 
 - TdsBuf U16LE(int v)
+  - 追加两字节小端整数。
 
 - TdsBuf U16BE(int v)
+  - 追加两字节大端整数（BLOB 块头等大端字段用）。
 
 - TdsBuf U32LE(int v)
+  - 追加四字节小端整数。
 
 - TdsBuf U32BE(int v)
+  - 追加四字节大端整数。
 
 - TdsBuf U64LE(long v)
   - 八字节小端整数（行数、事务
@@ -240,6 +260,7 @@ pool.Close();
 - int len;
 
 - TdsBytes(byte[]data, int len)
+  - 私有构造；统一经 `Own`/`Of`/`Alloc` 创建。
 
 - static TdsBytes Own(byte[]data, int len)
   - 包装现有缓冲区及其长度。
@@ -248,14 +269,19 @@ pool.Close();
   - 将 Zan 字符串的字节复制为带长度的块。
 
 - static TdsBytes Alloc(int n)
+  - 分配 n 字节的零填充块。
 
 - byte[]Data()
+  - 底层缓冲区（自带 NUL 终止，内容按长度解读）。
 
 - int Len()
+  - 有效字节数。
 
 - int At(int i)
+  - 下标 i 处的字节。
 
 - void SetAt(int i, int v)
+  - 覆写下标 i 处的字节。
 
 - void Release()
   - 释放缓冲区，以便立即回收。
@@ -271,14 +297,19 @@ pool.Close();
 - bool isNull;
 
 - TdsCell(string text, bool isNull)
+  - 私有构造；经 `Of`/`Null` 创建。
 
 - static TdsCell Of(string text)
+  - 非空单元格。
 
 - static TdsCell Null()
+  - NULL 单元格（文本为空串但 `IsNull` 为 true）。
 
 - string Text()
+  - 单元格文本（NULL 时为空串）。
 
 - bool IsNull()
+  - 是否为 SQL NULL。
 
 
 ## TdsColumn (class)
@@ -290,22 +321,29 @@ COLMETADATA 描述的结果集的一列。
 - int type;
 
 - int size;
+  - 声明长度；0xFFFF 表示 MAX (PLP) 列。
 
 - int precision;
 
 - int scale;
 
 - TdsColumn()
+  - 空列描述，经 `TdsValue.ReadTypeInfo` 填充。
 
 - string Name()
+  - 列名。
 
 - int Type()
+  - TDS 类型 ID。
 
 - int Size()
+  - 声明长度；0xFFFF 表示 MAX (PLP) 列。
 
 - int Scale()
+  - 小数位数（时间/数值类型）。
 
 - int Precision()
+  - 精度（DECIMAL/NUMERIC）。
 
 
 ## TdsMessage (class)
@@ -315,6 +353,7 @@ token 流的解码器。不涉及 IO，
 无需服务器即可测试线格式。
 
 - static int TDS74=1946157060;
+  - 登录包头中的 TDS 版本常数 0x74000004（7.4）。
 
 - static TdsBytes Prelogin(int encrypt)
   - PRELOGIN：一张 (token, offset, length) 条目表，后跟
@@ -326,7 +365,7 @@ token 流的解码器。不涉及 IO，
   - 服务器对 PRELOGIN 的应答，只取其中的 ENCRYPTION 字节
     （0 关闭、1 开启、2 不支持、3 必须）。
 
-- static TdsBytes Login7(string host, string user, string password, string appName, string server, string database, int packetSize)
+- internal static TdsBytes Login7(string host, string user, string password, string appName, string server, string database, int packetSize)
   - LOGIN7：固定 94 字节的 offset/length 对头部，后跟
     其指向的 UCS-2 字符串。
 
@@ -334,10 +373,10 @@ token 流的解码器。不涉及 IO，
   - TDS 7.2 及以上要求在批次或 RPC 之前
     的 ALL_HEADERS 块：只需要事务描述符。
 
-- static TdsBytes SqlBatch(string sql)
+- internal static TdsBytes SqlBatch(string sql)
   - SQLBatch 载荷：头部加 UCS-2 编码的语句。
 
-- static TdsBytes RpcExecuteSql(string sql, DbParams prms)
+- internal static TdsBytes RpcExecuteSql(string sql, DbParams prms)
   - 调用 sp_executesql 的 RPC 载荷，参数正是借此
     带外传输：值从不拼进语句文本，因此无需转义，
     服务器也能复用执行计划。
@@ -346,75 +385,103 @@ token 流的解码器。不涉及 IO，
   - sp_executesql 所需的 "@P1 bigint, @P2 float" 声明串。
 
 - static void ParamHeader(TdsBuf b, string name)
+  - RPC 参数公共头：参数名 + 输入参数状态字节。
 
 - static void NVarcharParam(TdsBuf b, string name, string val)
   - NVARCHAR 参数。超过 4000 字符的文本无法放入
     定长格式，改为以 PLP 分块按 NVARCHAR(MAX) 发送。
 
 - static void IntParam(TdsBuf b, string name, long val)
+  - bigint 参数（INTN，八字节）。
 
 - static void FloatParam(TdsBuf b, string name, double val)
+  - float 参数（FLTN，八字节，按 IEEE-754 位型发送）。
 
 - static void NullParam(TdsBuf b, string name)
+  - NULL 参数（NVARCHAR 类型、长度 0xFFFF 表示 NULL）。
 
 - static long DoubleBits(double v)
   - double 的 IEEE-754 位模式：对数值做归一化来构造，
-    因为语言没有 reinterpret 转换。
+    因为语言没有 reinterpret 转换。非有限值单独处理：±∞ 与 NaN
+    会让下面的归一化循环永不终止（∞/2 还是 ∞）——一次
+    AddDouble(Infinity) 就把协程永久钉死。
 
 - static int TOK_RETURNSTATUS=121;
+  - token 0x79：RPC 返回状态。
 
 - static int TOK_COLMETADATA=129;
+  - token 0x81：结果集列元数据。
 
 - static int TOK_TABNAME=164;
+  - token 0xA4：表名。
 
 - static int TOK_COLINFO=165;
+  - token 0xA5：列信息。
 
 - static int TOK_ORDER=169;
+  - token 0xA9：ORDER BY 列序号。
 
 - static int TOK_ERROR=170;
+  - token 0xAA：服务器错误。
 
 - static int TOK_INFO=171;
+  - token 0xAB：服务器提示消息。
 
 - static int TOK_RETURNVALUE=172;
+  - token 0xAC：输出参数值。
 
 - static int TOK_LOGINACK=173;
+  - token 0xAD：登录确认。
 
 - static int TOK_FEATUREACK=174;
+  - token 0xAE：服务器功能协商应答。
 
 - static int TOK_ROW=209;
+  - token 0xD1：普通行。
 
 - static int TOK_NBCROW=210;
+  - token 0xD2：NBC 行（位图标记 NULL 列）。
 
 - static int TOK_SSPI=237;
+  - token 0xED：SSPI 安全通道数据。
 
 - static int TOK_ENVCHANGE=227;
+  - token 0xE3：环境变化（数据库、语言、包大小…）。
 
 - static int TOK_DONE=253;
+  - token 0xFD：整个请求的完成标记。
 
 - static int TOK_DONEPROC=254;
+  - token 0xFE：存储过程级完成标记。
 
 - static int TOK_DONEINPROC=255;
+  - token 0xFF：批内语句级完成标记。
 
 - static TdsResponse Decode(TdsBytes buf)
   - 解码完整的响应消息。
 
 - static List<TdsColumn> ReadColumns(TdsReader r, TdsResponse resp)
+  - COLMETADATA：读出列类型与列名，并把结果集的列结构填进 resp。
 
 - static void ReadRow(TdsReader r, List<TdsColumn> cols, TdsResponse resp, bool nbc)
   - ROW，或 NBCROW——前导位图标记 NULL 列，
     这些列的值完全省略。
 
 - static void ReadError(TdsReader r, TdsResponse resp)
+  - ERROR：记录第一条错误的消息文本与错误号（后续错误忽略）。
 
 - static void ReadLoginAck(TdsReader r, TdsResponse resp)
+  - LOGINACK：取服务器版本号，拼成 "major.minor.build"。
 
 - static void ReadEnvChange(TdsReader r, TdsResponse resp)
   - ENVCHANGE 报告登录带来的环境变化；只有数据库名
     值得保留，其余只需跳过。
 
 - static void SkipFeatureAck(TdsReader r)
+  - 跳过 FEATUREACK 的 (id, len, data) 条目表，直至 0xFF 终止符。
 
 - static void SkipReturnValue(TdsReader r)
+  - 跳过 RETURNVALUE（输出参数）的完整结构。
 
 
 ## TdsPacket (class)
@@ -422,24 +489,34 @@ token 流的解码器。不涉及 IO，
 TDS 报文类型及报文头的状态位。
 
 - static int SQLBATCH=1;
+  - 报文类型 0x01：SQL 语句批处理。
 
 - static int RPC=3;
+  - 报文类型 0x03：RPC 调用（sp_executesql）。
 
 - static int REPLY=4;
+  - 报文类型 0x04：服务器响应。
 
 - static int ATTENTION=6;
+  - 报文类型 0x06：Attention（取消当前请求）。
 
 - static int LOGIN7=16;
+  - 报文类型 0x10：登录请求。
 
 - static int PRELOGIN=18;
+  - 报文类型 0x12：登录前协商。
 
 - static int STATUS_NORMAL=0;
+  - 状态位 0x00：消息未结束（后续还有包）。
 
 - static int STATUS_EOM=1;
+  - 状态位 0x01：EOM，本消息的最后一个包。
 
 - static int HEADER_LEN=8;
+  - 报文头长度（字节）。
 
 - static int DEFAULT_SIZE=4096;
+  - 登录时协商的默认包大小。
 
 - static TdsBytes Frame(int type, int status, int packetId, TdsBytes payload, int off, int len)
   - 将载荷包进八字节报文头。
@@ -458,30 +535,43 @@ TDS 报文类型及报文头的状态位。
 - int len;
 
 - TdsReader(string buf, int len)
+  - 私有构造；统一经 `Over` 创建。
 
 - static TdsReader Over(string buf)
+  - 游标覆盖整段缓冲区。
 
 - static TdsReader Over(string buf, int len)
+  - 游标只覆盖缓冲区前 len 字节（消息体短于缓冲区时用）。
 
 - static TdsReader Over(TdsBytes b)
+  - 游标覆盖一个带长度的字节块。
 
 - int Pos()
+  - 当前读取位置。
 
 - int Left()
+  - 距末尾剩余的字节数。
 
 - bool Eof()
+  - 是否已读到末尾。
 
 - void Seek(int p)
+  - 跳到绝对位置 p。
 
 - int U8()
+  - 读取单字节；越过末尾返回 0（各 U* 同此约定）。
 
 - int U16LE()
+  - 读取两字节小端整数。
 
 - int U16BE()
+  - 读取两字节大端整数。
 
 - int U32LE()
+  - 读取四字节小端整数。
 
 - int U32BE()
+  - 读取四字节大端整数。
 
 - long UIntLE(int n)
   - 1..8 字节的无符号小端整数。结果用
@@ -492,6 +582,7 @@ TDS 报文类型及报文头的状态位。
   - 1..8 字节的有符号小端整数。
 
 - void Skip(int n)
+  - 向前跳过 n 字节（截停在末尾，不报错）。
 
 - string Narrow(int n)
   - 读取 <paramref name="n"/> 字节的单字节文本。其中的任何 NUL
@@ -529,20 +620,28 @@ TDS 报文类型及报文头的状态位。
 - string database;
 
 - TdsResponse()
+  - 私有构造；经 `TdsMessage.Decode` 填充。
 
 - DbResult Rows()
+  - 结果集（无结果集时为空结果）。
 
 - int Affected()
+  - 受影响行数（有结果集时等于行数）。
 
 - string Error()
+  - 第一条 ERROR token 的消息文本；无错为 ""。
 
 - int ErrorNumber()
+  - 服务器自身的错误号；无错为 0。
 
 - string ServerVersion()
+  - LOGINACK 报告的服务器版本。
 
 - string Database()
+  - ENVCHANGE 报告的会话数据库。
 
 - bool Failed()
+  - 服务器是否拒绝了请求（`Error` 非空）。
 
 
 ## TdsType (class)
@@ -647,23 +746,31 @@ TYPE_INFO 描述符及其后的行值的解码。
 必须在此完成，并对所有调用方共享。
 
 - static string HEX="0123456789abcdef";
+  - 十六进制渲染用的字符表。
 
 - static void ReadTypeInfo(TdsReader r, TdsColumn col)
   - 读取 TYPE_INFO 描述符到 <paramref name="col"/>。
 
 - static void SkipTableName(TdsReader r)
+  - 跳过 TEXT/IMAGE 类型描述符尾部的表名（多段 UsVarchar）。
 
 - static int FixedWidth(int t)
+  - 定长类型的线上宽度（字节）；变长类型返回 0。
 
 - static TdsCell ReadValue(TdsReader r, TdsColumn col)
   - 读取 <paramref name="col"/> 对应的一行值。
 
 - static bool IsLarge(int t)
+  - 是否为「大值类型」（两字节长度或 PLP 编码）。
 
 - static TdsCell ReadPlp(TdsReader r, int t)
   - PLP：八字节总长度（或 unknown/NULL 标记），
     随后是分块，直到零长度块。分块先合并为一个
     带长度的块，因为一个值可能横跨多个分块。
+    防御：U8() 读穿缓冲尾会返回 0 而非报错，因此损坏/恶意
+    的流此前可以无限追加零字节把客户端喂到 OOM。这里按
+    包剩余字节校验每个分块声明（分块不会横跨包边界），
+    并给单值设 64 MiB 硬上限；违规一律按 NULL 收场。
 
 - static TdsCell Text(TdsReader r, int n, int t)
   - 按列类型家族渲染接下来的 <paramref name="n"/> 个字节：
@@ -671,17 +778,20 @@ TYPE_INFO 描述符及其后的行值的解码。
     原样输出。
 
 - static string Hex(TdsReader r, int n)
+  - 把 n 字节渲染为 "0x…" 小写十六进制。
 
 - static TdsCell Scalar(TdsReader r, int t, int n, TdsColumn col)
   - 数值、时间及 GUID 值，其含义取决于
     实际发送的字节数（INTN 4 是 int，INTN 8 是 bigint）。
 
 - static string Float(TdsReader r, int n)
+  - 读取 n(4 或 8) 字节小端位型并按 IEEE 754 渲染浮点文本。
 
 - static double Pow2(int e)
   - 以 double 表示的 2^e（e 可为负）。
 
 - static string Ieee(int sign, int exp, long mant, int bias, int mantBits)
+  - 由 IEEE 754 位型（符号/指数/尾数/偏置/尾数位数）渲染浮点文本。
 
 - static string Money(TdsReader r, int n)
   - MONEY 是缩放整数：每单位四万分之一，
@@ -693,8 +803,10 @@ TYPE_INFO 描述符及其后的行值的解码。
     对 32 位 limb 做除法来生成各位数字，而非直接整数运算。
 
 - static string LimbsToDecimal(List<int> limbs)
+  - 小端 32 位 limb 序列转十进制数字串（去前导零）。
 
 - static string Digit(int v)
+  - 把 0-15 的数值渲染为单个十六进制字符。
 
 - static string Scaled(long units, int scale)
   - 渲染带 <paramref name="scale"/> 位隐式
@@ -709,6 +821,7 @@ TYPE_INFO 描述符及其后的行值的解码。
     一天的量是 8.64e11，因此计数用 <c>long</c>。
 
 - static string Offset(int minutes)
+  - 渲染 UTC 偏移："+HH:MM" / "-HH:MM"。
 
 - static string CivilDate(int z)
   - 相对于 1970-01-01 的天数对应的公历日期。
@@ -718,9 +831,13 @@ TYPE_INFO 描述符及其后的行值的解码。
     后两个是大端。
 
 - static string HexAt(List<int> raw, int i)
+  - 取 raw[i] 的两个十六进制字符。
 
 - static string Pad2(int v)
+  - 两位零填充十进制。
 
 - static string Pad3(int v)
+  - 三位零填充十进制。
 
 - static string Pad4(int v)
+  - 四位零填充十进制。

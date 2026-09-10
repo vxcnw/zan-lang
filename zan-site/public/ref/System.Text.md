@@ -5,22 +5,33 @@
 
 ## Bm25Document (class)
 
+索引内的一篇文档：id、词频表与总词元长度。
+
 - int id;
+  - 文档 id（调用方指定）。
 
 - Dictionary <string, int> terms;
+  - 词元 -> 词频。
 
 - int length;
+  - 词元总数（词频之和），BM25 长度归一用。
 
 - Bm25Document(int id, Dictionary <string, int> terms, int length)
+  - 构造文档记录。
 
 
 ## Bm25Hit (class)
 
+一次命中的内部记分记录。
+
 - int id;
+  - 文档 id。
 
 - double score;
+  - BM25 分数。
 
 - Bm25Hit(int id, double score)
+  - 构造命中记录。
 
 
 ## Bm25Index (class)
@@ -39,16 +50,22 @@ List<int> hits = idx.Search("quick fox");   // [1]
 （数千文档、小词元）——每次查询都会扫描全部文档。
 
 - List<Bm25Document> documents=new List<Bm25Document>();
+  - 全部已索引文档。
 
 - Dictionary <string, int> df=new Dictionary <string, int>();
+  - 词元 -> 含它的文档数（文档频率）。
 
 - int totalLen;
+  - 全部文档的词元长度之和。
 
 - double k1;
+  - BM25 饱和参数 k1（1.2）。
 
 - double b;
+  - BM25 长度归一参数 b（0.75）。
 
 - Bm25Index()
+  - 创建空索引，参数取标准值 k1=1.2、b=0.75。
 
 - void Add(int docId, string text)
   - 添加文档。重复添加同一 id 会替换其内容。
@@ -64,18 +81,25 @@ List<int> hits = idx.Search("quick fox");   // [1]
     分数从高到低。空查询返回空结果。
 
 - static Dictionary <string, int> Tokenize(string text)
+  - 分词：转小写、按非字母数字字符切分，返回词元 -> 词频。
 
 - static List<string> UniqueTerms(string query)
+  - 查询分词并去重（保持首次出现顺序）。
 
 - static int GetSeen(Dictionary <string, int> seen, string key)
+  - seen 字典的取值，缺失为 0。
 
 - static void AddTerm(Dictionary <string, int> terms, string term)
+  - 词频表累加一次该词元。
 
 - int DfOf(string term)
+  - 词元的文档频率，缺失为 0。
 
 - void IncDf(string term)
+  - 文档频率 +1（不存在则置 1）。
 
 - void DecDf(string term)
+  - 文档频率 -1，减到 0 时移除。
 
 
 ## Csv (class)
@@ -103,6 +127,8 @@ string out = Csv.Serialize(rows);                 // 逗号分隔，自动加引
   - 使用自定义分隔符序列化。
 
 - static string Escape(string field, string separator)
+  - 按需给单个字段加引号：含分隔符、引号或换行时用引号包围，
+    字段内的引号写成两个；其余原样返回。
 
 
 ## Encoding (class)
@@ -133,6 +159,25 @@ string out = Csv.Serialize(rows);                 // 逗号分隔，自动加引
 
 - static int GetByteCount(string text)
   - 获取 UTF-8 字符串的字节数。
+
+- static Encoding UTF8 { get }
+  - UTF-8 编码入口（C# Encoding.UTF8 的对应形态）。
+    Zan 字符串本身就是 UTF-8 字节串，因此编码即原样拷贝，
+    解码即校验/清洗后原样还原。
+
+- static byte[]GetBytes(string text)
+  - 把字符串编码为 UTF-8 字节（等价 s.ToBytes()，null 收敛为
+    空串）。返回的 byte[] 长度即字节数。
+
+- static string GetString(byte[]bytes, int offset, int count)
+  - 把 UTF-8 字节解码为字符串：从 <paramref name="offset"/>
+    起取 <paramref name="count"/> 个字节。非法字节序列（截断的多字节
+    头、10xxxxxx 续字节落单）逐个替换为 U+FFFD，与 C#
+    Encoding.UTF8.GetString 的宽松替换行为一致，绝不产生越界读取。
+    count 会被夹进 [0, 剩余字节]，负 offset 收敛为 0。
+
+- static string GetString(byte[]bytes)
+  - GetString(bytes, 0, bytes.Length) 的便捷形态。
 
 - static string ByteToHex(int b)
   - 将字节值转换为十六进制字符串（两个字符）。
@@ -228,16 +273,23 @@ List<string> hits = idx.Search("quick fox");     // ["1"]
     `query` 不是子序列时返回 0。
 
 - static bool IsBoundary(string s, int i)
+  - 判断 s[i] 是否落在词边界上：边界指紧跟非字母的字母，
+    或紧邻大写字母的小写字母（驼峰）。i 为 0 视为词首，返回 true。
 
 - static bool IsLetter(string ch)
+  - 判断是否为 ASCII 字母（A-Z、a-z），只看首字符的低 8 位。
 
 - static bool IsUpper(string ch)
+  - 判断是否为 ASCII 大写字母（A-Z），只看首字符的低 8 位。
 
 - static bool IsLower(string ch)
+  - 判断是否为 ASCII 小写字母（a-z），只看首字符的低 8 位。
 
 - static bool SameChar(string a, string b)
+  - 忽略大小写比较两个单字符（转小写后判等）。
 
 - static bool SameStr(string a, string b)
+  - 区分大小写的字符串相等（`==` 的具名包装）。
 
 - static bool SameStrIgnoreCase(string a, string b)
   - 忽略大小写的相等：完全匹配的定义（Score 承诺 1.0）
@@ -267,34 +319,54 @@ List<string> hits = idx.Search("quick fox");     // ["1"]
   - 将受支持的 Markdown 语法渲染为紧凑的转义 HTML。
 
 - static bool Block(StringBuilder html, bool first, string block)
+  - 追加一个块级元素；非首块前置 "\n"。返回后续调用的
+    first 值（恒 false）。
 
 - static string Inline(string text)
+  - 行内语法（代码/粗体/斜体/链接/转义）渲染入口。
 
 - static string InlineAt(string text, int depth)
+  - Inline 的递归实现：`depth` 限制嵌套层数，超限时整段只做
+    HTML 转义。未闭合的定界符按字面输出。
 
 - static bool SafeUrl(string url)
+  - 链接 URL 是否可生成锚点：相对路径，或 http/https/mailto
+    协议，且不含 ASCII 控制字符。
 
 - static string EscapeHtml(string text)
+  - HTML 转义：< > & " '。
 
 - static bool IsBlockStart(string line)
+  - 该行是否开始一个新块（围栏代码/标题/列表/引用），
+    段落累积据此停止。
 
 - static int HeadingLevel(string line)
+  - ATX 标题级别（1-6，"#" 后须有空格）；非标题返回 0。
 
 - static bool IsQuote(string line)
+  - 该行是否为块级引用（以 ">" 开头）。
 
 - static int ListKind(string line)
+  - 列表行类别：1 无序（"- "/"* "/"+ "），2 有序（"N. "），
+    非列表行返回 0。
 
 - static int ListBody(string line, int kind)
+  - 列表行中项正文（"" 内容）的起始下标。
 
 - static List<string> Lines(string text)
+  - 按 CR/CRLF/LF 把文本切成行；结尾无换行也补最后一行。
 
 - static string Trim(string text)
+  - 去除两端空白（空格、制表、换行）。
 
 - static bool IsSpace(string ch)
+  - 字符是否为空白（空格/制表/CR/LF）。
 
 - static bool StartsWith(string text, string prefix)
+  - 前缀匹配。
 
 - static int Find(string text, string needle, int from)
+  - 从 from 起查找子串，找不到返回 -1。
 
 
 ## Pinyin (class)
@@ -312,7 +384,18 @@ string py = Pinyin.ToPinyin("Zan 语言"); // "Zan  yuyan"
 Non-hanzi characters pass through unchanged. The lookup table is built
 lazily on first use and cached.
 
+The dictionary itself lives in a data file (`pinyin.txt`, one
+"汉字拼音" line per GB2312 hanzi), not in compiled code — like the Gui
+icon packs it is resolved at run time through a discovery chain: env
+`ZAN_PINYIN_DATA` (file), `pinyin.txt` beside the exe, embedded resource
+`text/pinyin.txt` (zanc bakes the stdlib copy into every published
+program carrying this module), then the stdlib source tree for source
+checkouts. A replacement file overrides the baked-in table without
+recompiling anything. Deliberately no System.IO dependency here: this
+module must stay tiny for every program that merely touches pinyin.
+
 - static Dictionary <string, string> cache;
+  - Lazily built "hanzi -> pinyin" table (null until first lookup).
 
 - static string ToPinyin(string text)
   - The full pinyin of `text`: every hanzi becomes its pinyin,
@@ -328,16 +411,66 @@ lazily on first use and cached.
     Returns "" when `ch` is not a hanzi in the table.
 
 - static Dictionary <string, string> Table()
+  - The cached table, built on first use.
 
 - static Dictionary <string, string> Build()
+  - Parse the "汉字拼音" dictionary text (one hanzi+pinyin per line)
+    into the table; short or malformed lines are skipped.
 
 - static string Lookup(string han)
+  - Pinyin of one hanzi, or "" when it is not in the table.
 
 - static int Utf8Width(string ch)
   - UTF-8 byte width of the first character: 1 for ASCII,
     2/3/4 for multi-byte sequences.
 
-- static string Data()
+- [DllImport("crt")]static extern string getenv(string name);
+
+- [DllImport("crt", EntryPoint="zan_file_fopen")]static extern nint zan_pkg_fopen(string path, string mode);
+
+- [DllImport("crt")]static extern int fclose(nint fp);
+
+- [DllImport("crt")]static extern long fread(byte[]buf, long size, long count, nint fp);
+
+- [DllImport("crt")]static extern int zan_embed_has(string name);
+
+- [DllImport("crt")]static extern string zan_embed_read(string name);
+
+- static string Env(string name)
+  - getenv wrapper returning "" instead of null.
+
+- static string ReadSmallFile(string path)
+  - Read a whole small text file via raw CRT handles — the same
+    primitives File.ReadAllText uses, minus the System.IO dependency.
+
+- static string ExeDir()
+  - Directory of the running executable ("" when unknown);
+    resolved through the same primitives ProcessHost.SelfExe uses.
+
+- [DllImport("kernel32", EntryPoint="GetModuleFileNameW")]static extern int GetModuleFileNameW(nint hModule, nint buf, int size);
+
+- [DllImport("kernel32", EntryPoint="WideCharToMultiByte")]static extern int ToMulti(int page, int flags, nint wide, int wideLen, nint mb, int mbLen, nint defChar, nint usedDef);
+
+- static string WideToStr(nint p)
+  - NUL-terminated UTF-16 buffer -> Zan string (mirrors
+    Wide.Read; kept local to avoid a System dependency).
+
+- [DllImport("crt")]static extern int readlink(string path, byte[]buf, int size);
+
+- static bool ReadableFile(string path)
+  - True when the path opens as a readable file. (fopen on a
+    directory succeeds on POSIX, but the discovery chain only ever asks
+    for concrete file names, so a handle check is enough here.)
+
+- static bool EmbedExists(string path)
+  - True when the named embedded resource exists.
+
+- static string LoadData()
+  - Load the "汉字拼音" dictionary text through the same kind of
+    discovery chain the Gui icon packs use: env override, a file beside
+    the exe, embedded resources, the stdlib source tree. Returns "" when
+    nothing is found — the table then stays empty and lookups pass hanzi
+    through unchanged.
 
 
 ## Template (class)
@@ -366,12 +499,20 @@ string raw = Template.RenderRaw("Hi {{name}}!", vars);// "Hi **zan**!"
     <c>& < > " '</c>。
 
 - static string Expand(string text, Dictionary <string, string> vars, bool escape)
+  - 替换核心：扫描 <c>{{key}}</c> / <c>{{{key}}}</c> 占位符，
+    键两侧的空白会被剥掉。<c>{{{key}}}</c> 无论 escape 与否都原样插入；
+    <c>{{key}}</c> 在 escape 为 true 时对值做 HTML 转义。
+    占位符未闭合（找不到对应的 <c>}}</c> / <c>}}}</c>）时渲染在
+    该处截断，剩余文本与占位符一并丢弃。
 
 - static string Lookup(string key, Dictionary <string, string> vars)
+  - 查占位符的值：vars 为 null 或键不存在时返回 ""（渲染不报错）。
 
 - static string Trim(string s)
+  - 剥掉 s 首尾的空白（空格、制表符、换行、回车）。
 
 - static int Find(string hay, string needle, int from)
+  - 返回 needle 在 hay 中自 from（含）起首次出现的下标，找不到返回 -1。
 
 
 ## TextTable (class)
@@ -407,5 +548,7 @@ Console.WriteLine(t.Render());
   - 渲染对齐后的表格（ASCII 边框）。
 
 - static string Border(int[]widths)
+  - 渲染分隔线：每列按 widths[i]+2 个 `-` 输出，形如 `+----+---+`。
 
 - static string Line(List<string> cells, int[]widths)
+  - 渲染一行：单元格左对齐、按 widths 补空格；cells 缺列时以空单元格补齐。

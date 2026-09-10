@@ -37,44 +37,64 @@ WM_LBUTTONDOWN 等到指定窗口。事件不进系统输入队列,目标窗口�
 - [DllImport("user32", EntryPoint="MapVirtualKeyW")]static extern int WinMapVirtualKey(int vk, int mapType);
 
 - static long WM_KEYDOWN()
+  - WM_KEYDOWN(0x100)。
 
 - static long WM_KEYUP()
+  - WM_KEYUP(0x101)。
 
 - static long WM_CHAR()
+  - WM_CHAR(0x102)。
 
 - static long WM_MOUSEMOVE()
+  - WM_MOUSEMOVE(0x200)。
 
 - static long WM_LBUTTONDOWN()
+  - WM_LBUTTONDOWN(0x201)。
 
 - static long WM_LBUTTONUP()
+  - WM_LBUTTONUP(0x202)。
 
 - static long WM_LBUTTONDBLCLK()
+  - WM_LBUTTONDBLCLK(0x203)。
 
 - static long WM_RBUTTONDOWN()
+  - WM_RBUTTONDOWN(0x204)。
 
 - static long WM_RBUTTONUP()
+  - WM_RBUTTONUP(0x205)。
 
 - static long WM_MBUTTONDOWN()
+  - WM_MBUTTONDOWN(0x207)。
 
 - static long WM_MBUTTONUP()
+  - WM_MBUTTONUP(0x208)。
 
 - static long WM_MOUSEWHEEL()
+  - WM_MOUSEWHEEL(0x20A)。
 
 - static long WM_XBUTTONDOWN()
+  - WM_XBUTTONDOWN(0x20B)。
 
 - static long WM_XBUTTONUP()
+  - WM_XBUTTONUP(0x20C)。
 
 - static int MapVkToVscEx()
+  - MAPVK_VK_TO_VSC_EX(4)：虚拟键 → 扩展扫描码。
 
 - static long MK_LBUTTON()
+  - MK_LBUTTON(0x1)：左键按下。
 
 - static long MK_RBUTTON()
+  - MK_RBUTTON(0x2)：右键按下。
 
 - static long MK_MBUTTON()
+  - MK_MBUTTON(0x10)：中键按下。
 
 - static long MK_XBUTTON1()
+  - MK_XBUTTON1(0x20)：第一个扩展键按下。
 
 - static long MK_XBUTTON2()
+  - MK_XBUTTON2(0x40)：第二个扩展键按下。
 
 - static nint FindWindowByTitle(string title)
   - 顶层窗口句柄,标题匹配(大小写不敏感,子串/全串看系统);
@@ -139,6 +159,7 @@ WM_LBUTTONDOWN 等到指定窗口。事件不进系统输入队列,目标窗口�
   - 同步发送一次鼠标点击(按下+抬起),等待目标处理完。
 
 - static bool Post(nint hwnd, long msg, long wparam, long lparam)
+  - PostMessage 包装；返回消息是否成功进入目标队列。
 
 - static long KeyLParam(int vk, bool up)
   - WM_KEYDOWN/UP 的 lParam:低位重复计数,扫描码(扩展键带
@@ -198,6 +219,8 @@ PlatformNotSupportedException。
 - [DllImport("kernel32", EntryPoint="GetCurrentThreadId")]static extern int GetCurrentThreadId();
 
 - static HookProc hookProc;
+  - 原生 hook proc。存放在静态字段中，确保 ARC 在 user32 仍持有其地址期间不会释放该
+    delegate。
 
 - static nint hookHandle;
 
@@ -226,6 +249,8 @@ PlatformNotSupportedException。
     未安装任何钩子时调用也安全。
 
 - static bool Install(int kind, KeyboardHookCallback kcb, MouseHookCallback mcb)
+  - 安装 `kind` 类型钩子（13 = WH_KEYBOARD_LL，14 = WH_MOUSE_LL）；
+    已有钩子或 3 秒内未安装成功返回 false。
 
 - static void HookThreadEntry()
   - 运行在钩子线程上：安装后一直泵取 GetMessage。
@@ -253,13 +278,16 @@ Hotkey.Unregister();
 PlatformNotSupportedException。
 
 - static int ModAlt()
-  - Register(int, int, ...) 接受的修饰键位。
+  - Register(int, int, ...) 接受的修饰键位 MOD_ALT(0x0001)。
 
 - static int ModCtrl()
+  - 修饰键位 MOD_CONTROL(0x0002)。
 
 - static int ModShift()
+  - 修饰键位 MOD_SHIFT(0x0004)。
 
 - static int ModWin()
+  - 修饰键位 MOD_WIN(0x0008)。
 
 - [DllImport("user32", EntryPoint="RegisterHotKey")]static extern int RegisterHotKey(nint hwnd, int id, int mods, int vk);
 
@@ -322,12 +350,16 @@ System Events（osascript）、鼠标需要 cliclick。纯 Wayland 下合成器
 因此文本里的引号和 shell 元字符不会被解释。
 
 - static int None()
+  - 后端种类：无可用注入后端。
 
 - static int Xdotool()
+  - 后端种类：X11/XWayland 的 xdotool（XTEST）。
 
 - static int MacOs()
+  - 后端种类：macOS 的 System Events（osascript）。
 
 - static bool Have(string tool)
+  - 本机是否装有指定命令行工具（command -v 探测）。
 
 - static int Kind()
   - 本机可用的注入后端。
@@ -353,12 +385,16 @@ System Events（osascript）、鼠标需要 cliclick。纯 Wayland 下合成器
   - System Events 的修饰键名；不是修饰键返回 ""。
 
 - static int[]LetterCodes()
+  - A..Z 的 macOS 虚拟键码表（下标 = VK-0x41；字母键码不连续）。
 
 - static int[]DigitCodes()
+  - 0..9 的 macOS 虚拟键码表（下标 = VK-0x30）。
 
 - static int[]FnCodes()
+  - F1..F12 的 macOS 虚拟键码表（下标 = VK-0x70）。
 
 - static string Ascii(int code)
+  - ASCII 码点转单字符字符串。
 
 
 ## Keyboard (class)
@@ -383,10 +419,13 @@ Keyboard.Press(Keyboard.VK("Enter"));
   - 修饰键，可用于任何接受 VK 码的地方。
 
 - static int Shift()
+  - 修饰键 Shift（VK 0x10）。
 
 - static int Alt()
+  - 修饰键 Alt（VK 0x12）。
 
 - static int Win()
+  - 修饰键 Win（VK 0x5B）。
 
 - [DllImport("user32", EntryPoint="SendInput")]static extern int WinSendInput(int count, nint inputs, int cbSize);
 
@@ -401,10 +440,13 @@ Keyboard.Press(Keyboard.VK("Enter"));
 - [DllImport("user32", EntryPoint="MapVirtualKeyW")]static extern int WinMapVirtualKey(int code, int mapType);
 
 - static int FExtended()
+  - KEYEVENTF_EXTENDEDKEY(0x0001)：扩展键。
 
 - static int FKeyUp()
+  - KEYEVENTF_KEYUP(0x0002)：抬起。
 
 - static int FUnicode()
+  - KEYEVENTF_UNICODE(0x0004)：wScan 承载 Unicode 码点。
 
 - static void Down(int vk)
   - 按住 `vk`。
@@ -493,10 +535,14 @@ Keyboard.Press(Keyboard.VK("Enter"));
     只能作为每次 keystroke/key code 的 `using` 子句一起发出。
 
 - static string MacUsing(List<string> mods)
+  - 拼 AppleScript 的 `using {..}` 修饰键子句；无修饰键返回 ""。
 
 - static void MacKey(int vk, List<string> mods)
+  - 发一次 key code 敲击（带修饰键 using 子句）；VK 无 macOS 键码
+    或 osascript 失败时抛异常。
 
 - static void MacText(string text, List<string> mods)
+  - 发一次文本 keystroke（带修饰键 using 子句）；osascript 失败时抛异常。
 
 - static string Hex(int v)
   - `v` 的小写十六进制（无前导零），用于 VK-0x 显示名称。
@@ -571,36 +617,52 @@ Mouse.Click(Mouse.Left());
 - [DllImport("user32", EntryPoint="GetAsyncKeyState")]static extern short WinGetAsyncKeyState(int vk);
 
 - static int FMove()
+  - MOUSEEVENTF_MOVE(0x0001)：相对移动。
 
 - static int FLeftDown()
+  - MOUSEEVENTF_LEFTDOWN(0x0002)。
 
 - static int FLeftUp()
+  - MOUSEEVENTF_LEFTUP(0x0004)。
 
 - static int FRightDown()
+  - MOUSEEVENTF_RIGHTDOWN(0x0008)。
 
 - static int FRightUp()
+  - MOUSEEVENTF_RIGHTUP(0x0010)。
 
 - static int FMiddleDown()
+  - MOUSEEVENTF_MIDDLEDOWN(0x0020)。
 
 - static int FMiddleUp()
+  - MOUSEEVENTF_MIDDLEUP(0x0040)。
 
 - static int FXDown()
+  - MOUSEEVENTF_XDOWN(0x0080)。
 
 - static int FXUp()
+  - MOUSEEVENTF_XUP(0x0100)。
 
 - static int FWheel()
+  - MOUSEEVENTF_WHEEL(0x0800)：滚轮滚动。
 
 - static int FAbsolute()
+  - MOUSEEVENTF_ABSOLUTE(0x8000)：绝对坐标。
 
 - static int VkLeft()
+  - VK_LBUTTON(0x01)。
 
 - static int VkRight()
+  - VK_RBUTTON(0x02)。
 
 - static int VkMiddle()
+  - VK_MBUTTON(0x04)。
 
 - static int VkX1()
+  - VK_XBUTTON1(0x05)。
 
 - static int VkX2()
+  - VK_XBUTTON2(0x06)。
 
 - static Point GetPos()
   - 当前光标位置（屏幕坐标）。
@@ -652,6 +714,7 @@ Mouse.Click(Mouse.Left());
   - cliclick 的按钮名（只有左/右两个）。
 
 - static bool HaveCliclick()
+  - 本机是否装有 cliclick（macOS 注入后端）。
 
 - static void Posix(string xargs, string mac, string what)
   - 将一个动作发给当前平台后端：`xargs` 是 xdotool/ydotool 的参数，

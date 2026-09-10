@@ -52,12 +52,14 @@ NUL 字节的值可原样返回（使用 RedisReply.len）。命令
 - [DllImport("crt")]static extern long strlen(string str);
 
 - RedisClient()
+  - 私有构造；统一经 `ConnectAsync` 创建。
 
 - static async RedisClient ConnectAsync(string host, int port)
   - 连接 Redis 服务器，在 IO reactor 上挂起直到
     （非阻塞）连接建立完成。
 
 - static async RedisClient ConnectAsync(string host, int port, int timeoutMs)
+  - 带连接超时（毫秒，0 = 不限时）的连接；失败返回 null。
 
 - void Close()
   - 关闭连接并释放缓冲区。
@@ -150,6 +152,10 @@ NUL 字节的值可原样返回（使用 RedisReply.len）。命令
 
 ## RedisPool (class)
 
+Redis 客户端连接池：复用空闲连接、限制并发连接数，饱和时
+以协程挂起等待归还（有界，超时返回 null）。建连失败的路径
+带退避，避免后端不可达时每次获取都重试建连。
+
 - string host;
 
 - int port;
@@ -159,26 +165,44 @@ NUL 字节的值可原样返回（使用 RedisReply.len）。命令
 - PoolCore<RedisClient> core;
 
 - RedisPool(string host, int port, int maxSize):this(host, port, maxSize, 3000)
+  - 以默认 3000ms 连接超时构建池。
 
 - RedisPool(string host, int port, int maxSize, int connectTimeoutMs)
+  - 以显式连接超时（毫秒）构建池。
 
 - async RedisClient OpenOne()
+  - 新建一个客户端并用 PING 验证可用性；任何失败都关闭连接并
+    返回 null（不抛出，由调用方记录建连失败）。
 
 - async RedisClient AcquireAsync()
+  - 借出一个客户端：复用空闲的，未达上限则新建，
+    否则挂起协程直到有客户端被归还。饱和等待有硬上限
+    （见 `PoolWait`）：超时返回 null，绝不定死。
+    连接池关闭后返回 null。
 
 - void Release(RedisClient client)
+  - 归还一个客户端：池已关闭或连接已死时无条件 Close 并剔除
+    （否则套接字泄漏），否则放回空闲列表。null 安全。
 
 - int IdleCount()
+  - 空闲连接数。
 
 - int LiveCount()
+  - 存活连接数（空闲 + 已借出）。
 
 - int WaitingCount()
+  - 正在等待归还的协程数。
 
 - int MaxSize()
+  - 并发连接上限。
 
 - bool IsClosed()
+  - 池是否已被关闭。
 
 - void Close()
+  - 关闭池：关闭所有空闲连接并唤醒全部等待者
+    （它们从 AcquireAsync 得到 null）。已借出的连接在
+    Release 时关闭。
 
 
 ## RedisReply (class)

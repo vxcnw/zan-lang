@@ -12,7 +12,7 @@ SNTP 客户端（RFC 4330）——通过 UDP 123 端口获取墙上时钟时间�
 long unix = await NtpClient.QueryAsync("pool.ntp.org", 123, 3000);
 if (unix > 0) { /* seconds since 1970-01-01 UTC */ }
 
-- static long EPOCH_DELTA=2208988800;
+- static const long EPOCH_DELTA=2208988800;
 
 - static async long QueryAsync(string host, int port, int timeoutMs)
   - 发送一次 SNTP 请求并返回 Unix 秒（UTC），

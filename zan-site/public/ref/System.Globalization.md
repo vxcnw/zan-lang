@@ -1,6 +1,72 @@
 # System.Globalization
 
-> 源码: `stdlib/System/Globalization/Lunar.zan`
+> 源码: `stdlib/System/Globalization/Lang.zan`, `stdlib/System/Globalization/Lunar.zan`
+
+
+## Lang (class)
+
+键式多语言查找（Apple .strings 同构）：源代码里保留英文原文作为
+**键**（同时也是缺省值），各语言的译文放在独立的语言包文件里，
+运行时按当前语言查表——命中用译文，未命中回退调用方提供的缺省串。
+新增一门语言 = 新增一个包文件，不需要重编译。
+
+包文件布局：<c><dir>/.json</c>（如
+<c>assets/lang/zh.json</c>），内容是平铺的键值对象：
+<c>{ "English source text": "中文翻译", ... }</c>。键就是源代码里的
+英文原文（与 .strings 把源文案当键一致）；包可以只覆盖一部分键，
+缺口按调用方缺省串逐条回退，所以包可以增量翻译。
+
+同形异义消歧：两处英文原文相同但译文不同时，键里用 <c>@</c> 后缀
+区分（如 <c>"Cloud@云服务"</c> vs <c>"Cloud@点云"</c>）。后缀是键的
+一部分、包里照写；约定后缀为非 ASCII，调用方在展示源语言（空代码
+回退到键本身）时自行剥掉首个 <c>'@'</c> 及其后内容。
+
+加载通过普通 `File` 调用进行：相对路径先盘上、后 exe
+内嵌副本（zanc --embed），发布形态无需特殊处理。包按需解析一次并
+缓存；切语言不重新读盘。
+
+- static string code="";
+  - 当前语言代码（"en" / "zh" / ...）。空串 = 源语言（键本身），
+    查找直接返回缺省串，不查表。
+
+- static Dictionary <string, Dictionary <string, string>> packs;
+  - 已解析的语言包缓存：<语言代码, 键 -> 译文>。
+
+- static List<string> dirs;
+  - 语言包所在目录的候选列表（LoadDir/LoadDirs 记录）。按序探测：
+    仓库内运行用工程相对路径，发布形态用 exe 旁的 assets/ 相对路径。
+
+- static string Code()
+  - 当前语言代码。
+
+- static bool Set(string newCode)
+  - 切换语言（"en"/"zh"/...；空串 = 源语言）。包在首次
+    查找时按需加载；未知语言在查找时表现为回退缺省串。返回是否
+    发生了变化。
+
+- static void LoadDir(string langDir)
+  - 设置语言包目录并立即预载当前语言的包（可选）。之后
+    每次切语言都会从同一目录按需加载对应包。
+
+- static void LoadDirs(List<string> langDirs)
+  - 同 LoadDir，但接受一组按序探测的候选目录（第一个存在
+    对应包文件的获胜）——与宿主程序自己的资产路径解析约定对齐。
+
+- static string Tr(string key, string dflt)
+  - 两参查找：<paramref name="key"/> 是源代码里的英文原文，
+    <paramref name="dflt"/> 是调用方内置的当前语言缺省串（兼容既有
+    T(en, zh) 调用形态）。当前语言命中包则用包译文；未命中回退
+    <paramref name="dflt"/>；源语言（空代码）直接返回缺省串。
+
+- static string Tr(string key)
+  - 单参查找：没有内置缺省串的新代码用这个，包未命中时
+    回退键本身（即英文原文），与 .strings 的 key-fallback 一致。
+    键含消歧后缀时回退的是带 <c>@后缀</c> 的原始键，源语言展示需
+    自行剥离（见类注释）。
+
+- static Dictionary <string, string> Pack(string code)
+  - 语言代码 -> 键值表；解析失败/文件缺失返回 null（查找
+    逐条回退缺省串，不打断程序）。包只解析一次，之后走缓存。
 
 
 ## Lunar (class)

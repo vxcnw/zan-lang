@@ -1,6 +1,6 @@
 # System.Diagnostics
 
-> 源码: `stdlib/System/Diagnostics/Log.zan`, `stdlib/System/Diagnostics/Privileges.zan`, `stdlib/System/Diagnostics/Process.zan`, `stdlib/System/Diagnostics/ProcessControl.zan`, `stdlib/System/Diagnostics/ProcessHost.zan`, `stdlib/System/Diagnostics/ProcessList.zan`, `stdlib/System/Diagnostics/ServerMetrics.zan`, `stdlib/System/Diagnostics/Stopwatch.zan`
+> 源码: `stdlib/System/Diagnostics/Log.zan`, `stdlib/System/Diagnostics/Privileges.zan`, `stdlib/System/Diagnostics/Process.zan`, `stdlib/System/Diagnostics/ProcessControl.zan`, `stdlib/System/Diagnostics/ProcessHost.zan`, `stdlib/System/Diagnostics/ProcessList.zan`, `stdlib/System/Diagnostics/ServerMetrics.zan`
 
 
 ## ErrEntry (class)
@@ -16,6 +16,7 @@ failures in the backend even when the console is off.
 - string detail;
 
 - ErrEntry(long ts, string origin, string detail)
+  - 构造一条错误记录；`ts` 直接采用调用方传入的 epoch 秒。
 
 
 ## Log (class)
@@ -44,18 +45,18 @@ Log.MaxFileSize(64 * 1024 * 1024);
 Log.Info("server listening on :8080");
 Log.Error("db connect failed: " + err);
 
-- static int TRACE=0;
+- static const int TRACE=0;
   - 级别常量，供 Configure / Write 使用。
 
-- static int DEBUG=1;
+- static const int DEBUG=1;
 
-- static int INFO=2;
+- static const int INFO=2;
 
-- static int WARN=3;
+- static const int WARN=3;
 
-- static int ERROR=4;
+- static const int ERROR=4;
 
-- static int FATAL=5;
+- static const int FATAL=5;
 
 - static string dir="";
 
@@ -90,16 +91,22 @@ Log.Error("db connect failed: " + err);
   - 当前生效的日志文件完整路径。
 
 - static void Trace(string msg)
+  - 记录一条 TRACE 级消息。
 
 - static void Debug(string msg)
+  - 记录一条 DEBUG 级消息。
 
 - static void Info(string msg)
+  - 记录一条 INFO 级消息。
 
 - static void Warn(string msg)
+  - 记录一条 WARN 级消息。
 
 - static void Error(string msg)
+  - 记录一条 ERROR 级消息。
 
 - static void Fatal(string msg)
+  - 记录一条 FATAL 级消息。
 
 - static void Write(int level, string msg)
   - 写一条记录：`时间 [级别] pid/wid 正文`。
@@ -110,12 +117,15 @@ Log.Error("db connect failed: " + err);
     也不能丢日志。
 
 - static string LevelName(int level)
+  - 级别名（INFO/WARN 各补一个空格对齐到 5 字符）；level 越界时
+    钳到 [TRACE, FATAL]。
 
 - static void EnsureDirFor(string path)
   - 建出 `path` 的父目录。模式带目录时（按月分目录）新的一个月
     就是一个还不存在的目录，Configure 那次创建管不到它。
 
 - static string Sep()
+  - 平台路径分隔符。
 
 - static string Expand(string pattern, DateTime t)
   - 展开文件名模式中的 {yyyy} {MM} {dd} {HH} {pid} {wid}。
@@ -125,6 +135,7 @@ Log.Error("db connect failed: " + err);
     master 要为**即将派生**的 worker 算出文件名，那不是它自己的序号。
 
 - static string Replace(string text, string from, string to)
+  - 把 `text` 中所有字面 `from` 替换为 `to`。
 
 
 ## Privileges (class)
@@ -166,6 +177,7 @@ PlatformNotSupportedException，而不是静默失败。
 - [DllImport("kernel32", EntryPoint="CloseHandle")]static extern int WinCloseHandle(nint handle);
 
 - static nint OpenToken(int access)
+  - 以请求的访问权限打开当前进程的 token；失败返回 0。
 
 - [DllImport("crt", EntryPoint="geteuid")]static extern int GetEuid();
 
@@ -179,7 +191,8 @@ PlatformNotSupportedException，而不是静默失败。
 
 - static string UserSid()
   - 当前用户的稳定标识：Windows 上为 SID 字符串
-    （"S-1-5-21-..."），POSIX 上为数字 uid。
+    （"S-1-5-21-..."），POSIX 上为数字 uid 字符串。Windows 打开
+    token 失败时返回 ""。
 
 - static bool EnablePrivilege(string name)
   - 在当前进程 token 上启用指定特权（如 "SeDebugPrivilege"）。
@@ -196,14 +209,26 @@ PlatformNotSupportedException，而不是静默失败。
 - static int RunAsWait(string file, string args)
   - 以提权方式启动 `file` 并等待退出，返回
     其退出码（启动失败、被拒绝或本机无提权工具时为 -1）。
+    Linux 上 pkexec 的 126/127（拒绝/找不到程序）也统一报 -1，
+    不会与子进程自身退出码混淆。
 
 - static string ElevateCommand(string file, string args)
+  - 拼提权命令：macOS 用 osascript（AppleScript 字符串
+    已做 \\ 与 " 转义），Linux 已是 root 时直接执行、否则用 pkexec，
+    本机没有可用提权工具时返回 ""。
 
 - static bool HasTool(string name)
+  - 检测本机是否装有指定命令行工具（POSIX 专用，
+    command -v 探测）。
 
 - static string ShellQuote(string s)
+  - 单引号引用：串内的 ' 拆成 '\\'' 以保持字面量（POSIX
+    shell 语义）。
 
 - static int ShellElevated(string file, string args, bool wait)
+  - 以 runas 动词和 SEE_MASK_NOCLOSEPROCESS 调用
+    ShellExecuteExW。`wait` 为 true 时阻塞并返回子进程退出码；
+    否则成功时返回 0，ShellExecuteExW 失败返回 -1。
 
 
 ## Process (class)
@@ -283,14 +308,26 @@ Windows 上使用 _popen/_pclose，POSIX（Linux/macOS）上使用 popen/pclose�
   - 关闭交互式 shell 会话（发送 EOF 并等待）。
 
 - static nint WinHandleAt(byte[]pi, int off)
+  - 从 PROCESS_INFORMATION 缓冲区读取小端 HANDLE（8 字节）。
 
 - static void WinPutHandle(byte[]buf, int off, nint h)
+  - 把 8 字节小端 HANDLE 写入结构体缓冲区。
 
 - static void WinPutInt(byte[]buf, int off, int v)
+  - 把 32 位整数按小端写入缓冲区（STARTUPINFO/SECURITY_ATTRIBUTES 字段用）。
 
 - static int WinSpawn(string command, bool waitFor)
+  - 通过 cmd.exe 启动 `command`，不显示控制台窗口。当 `waitFor`
+    为 true 时，等待完成并返回子进程退出码；否则
+    启动成功返回 0（启动失败返回 -1）。
 
 - static string WinReadText(string path)
+  - 读取捕获文件，将输出编码规范化为 UTF-8：
+    - UTF-16LE（BOM FF FE）直接转换；
+    - 其他情况从系统 ANSI 代码页转换
+    （中文系统上的 sc.exe / schtasks.exe 输出 GBK）。
+    控制台工具按连接对象选择编码，因此
+    单独采用任一假设都不安全；由 BOM 来消除歧义。
 
 - static List<string> RunCapture(string cmd)
   - 运行命令并将 stdout+stderr 按行捕获。
@@ -369,6 +406,7 @@ kill(2) 信号（SIGSTOP/SIGCONT/SIGTERM/SIGKILL）和 setpriority(2)。
 - [DllImport("kernel32", EntryPoint="SetPriorityClass")]static extern int WinSetPriorityClass(nint proc, int cls);
 
 - static nint Open(int pid, int access)
+  - 以给定操作所需的访问权限打开进程。
 
 - [DllImport("crt", EntryPoint="kill")]static extern int KillSignal(int pid, int sig);
 
@@ -377,12 +415,16 @@ kill(2) 信号（SIGSTOP/SIGCONT/SIGTERM/SIGKILL）和 setpriority(2)。
 - [DllImport("crt", EntryPoint="setpriority")]static extern int SetPriority(int which, int pid, int value);
 
 - static int SigStop()
+  - 当前平台的 SIGSTOP 信号号（Linux 为 19，macOS 为 17）。
 
 - static int SigCont()
+  - 当前平台的 SIGCONT 信号号（Linux 为 18，macOS 为 19）。
 
 - static int SigStop()
+  - 当前平台的 SIGSTOP 信号号（Linux 为 19，macOS 为 17）。
 
 - static int SigCont()
+  - 当前平台的 SIGCONT 信号号（Linux 为 18，macOS 为 19）。
 
 - static bool Suspend(int pid)
   - 挂起 `pid` 的所有线程。成功返回 true。（POSIX：
@@ -421,8 +463,10 @@ kill(2) 信号（SIGSTOP/SIGCONT/SIGTERM/SIGKILL）和 setpriority(2)。
     成功返回 true。
 
 - static int LevelToNice(int level)
+  - 0..5 等级 -> nice 值（-20..19）。
 
 - static int NiceToLevel(int nice)
+  - nice 值 -> 0..5 等级。
 
 
 ## ProcessEntry (class)
@@ -433,14 +477,19 @@ kill(2) 信号（SIGSTOP/SIGCONT/SIGTERM/SIGKILL）和 setpriority(2)。
 因此批量接口 `ProcessList.List` 省略它们）。
 
 - public int pid;
+  - 进程 ID。
 
 - public string name;
+  - 不含扩展名的镜像名（Windows）或可执行文件基名（Linux）。
 
 - public string exePath;
+  - 可执行文件完整路径；仅 ByPid 填充，其余为 ""。
 
 - public int parentPid;
+  - 父进程 PID。
 
 - public int threads;
+  - 线程数。
 
 - public long memoryBytes;
   - 工作集（字节）（Windows）/ 常驻集（Linux）。无法读取时
@@ -471,6 +520,13 @@ MultiProcessSupported() 返回 false；调用方应运行单进程
 （必要时改用 IIS/NSSM/Windows 服务托管）。
 
 - [DllImport("crt")]static extern string getenv(string name);
+  - libc 入口点。这些必须带有 [DllImport("crt")]：裸 `extern`
+    不会被识别为原生导入，编译器会
+    将其降低为常量 0，而不是发出真正的 libc 调用。这在
+    Windows 上不可见（Windows 使用下面的 kernel32 导入），但会破坏
+    POSIX 路径——getpid() 返回 0，readlink()/getenv() 返回
+    0/null，导致 SelfExe() 为空、worker 角色检测失败，
+    使多进程服务器无法生成或启动 worker。
 
 - [DllImport("kernel32", EntryPoint="GetCurrentProcessId")]static extern int GetCurrentProcessId();
 
@@ -570,7 +626,7 @@ MultiProcessSupported() 返回 false；调用方应运行单进程
     （或拒绝访问）时返回 null。
 
 - static int SelfPid()
-  - 当前进程的 PID。
+  - 当前进程的 PID；不支持的平台返回 0。
 
 - static long MemoryUsage(int pid)
   - `pid` 的工作集（Windows）/ 常驻集（Linux），单位为
@@ -596,38 +652,52 @@ MultiProcessSupported() 返回 false；调用方应运行单进程
 - [DllImport("kernel32", EntryPoint="QueryFullProcessImageNameW")]static extern int WinQueryFullProcessImageNameW(nint proc, int flags, nint buf, nint size);
 
 - static List<ProcessEntry> WinList()
+  - Windows 实现：遍历 Toolhelp32 快照；快照失败返回空列表。
 
 - static long WinMemory(int pid)
+  - Windows 实现：GetProcessMemoryInfo 读取工作集；打不开进程返回 -1。
 
 - static string WinExePath(int pid)
+  - Windows 实现：QueryFullProcessImageNameW；打不开进程返回 ""。
 
 - static List<ProcessEntry> LinuxList()
+  - Linux 实现：枚举 /proc 下数字命名的目录。
 
 - static ProcessEntry LinuxEntry(int pid)
+  - 从 /proc/<pid>/stat 组装条目（exePath 不在此填）；读不到时返回 null。
 
 - static int StatField(string s, int index)
   - `s` 中按空格分隔的令牌的第 `index` 个（从 0 起算）。
 
 - static int TokenLen(string s, int from)
+  - `s` 中从 `from` 起到下一个空格的令牌长度（按字节/单元计）。
 
 - static long LinuxMemory(int pid)
+  - Linux 实现：解析 /proc/<pid>/status 的 VmRSS 行（kB -> 字节）。
 
 - static string LinuxExePath(int pid)
+  - Linux 实现：取 /proc/<pid>/cmdline 的第一个 NUL 前的 argv[0]。
 
 - static string BaseName(string path)
   - 路径的最后一段（"C:\a\b.exe" -> "b.exe"，"/a/b" -> "b"）。
 
 - static int IndexOf(string hay, string needle, int from)
+  - 从 `from` 起查找 `needle` 的首次出现，找不到返回 -1。
 
 - static int LastIndexOf(string hay, string needle)
+  - `needle` 在 `hay` 中最后一次出现的下标，找不到返回 -1。
 
 - static bool EndsWith(string s, string tail)
+  - `s` 是否以 `tail` 结尾（区分大小写）。
 
 - static int ParseInt(string s)
+  - 十进制解析为 int；空串/非数字/带符号返回 -1。
 
 - static long ParseLong(string s)
+  - 十进制解析为 long；空串/非数字/带符号返回 -1。
 
 - static int CodeOf(string ch)
+  - 取 `ch` 编码后首字节的值（用于判断 ASCII 数字）。
 
 
 ## ProcessResult (class)
@@ -636,10 +706,14 @@ MultiProcessSupported() 返回 false；调用方应运行单进程
 stdout+stderr。见 `Process.Capture`。
 
 - int exitCode;
+  - 子进程退出码；经 shell 执行时为 shell 报告的码，
+    启动失败（Capture 的 POSIX 分支）为 -1。
 
 - List<string> lines;
+  - 按行拆分的 stdout+stderr；启动失败时可能为 null。
 
 - ProcessResult()
+  - 构造空结果：退出码 0、无输出行；实际内容由 Capture 填充。
 
 - bool Ok()
   - 命令是否以 0 退出。
@@ -659,6 +733,7 @@ individual samples dominated by long-lived connections.
 - string method;
 
 - string path;
+  - 路由模式（"/user/{id}"）或资源路径。
 
 - string req;
 
@@ -675,9 +750,12 @@ individual samples dominated by long-lived connections.
 - long rejected;
 
 - ReqAgg(string method, string path)
+  - 构造一行以端点为键的聚合；`req` 字段在此拼成 "METHOD path" 联合形式。
 
 
 ## ServerErrorDoc (class)
+
+RecentErrors() 返回的一条错误记录：ErrEntry 的对外投影。
 
 - long ts;
 
@@ -687,6 +765,9 @@ individual samples dominated by long-lived connections.
 
 
 ## ServerMetrics (class)
+
+进程内服务器指标聚合器（单例经 Global()）：请求/查询吞吐与延迟、
+慢操作环形缓冲、每秒序列，以及 /admin/stats 形状的 JSON 快照。
 
 - [DllImport("kernel32", EntryPoint="GetTickCount64")]static extern long GetTickCount64();
 
@@ -715,6 +796,7 @@ individual samples dominated by long-lived connections.
 - int reqRejected;
 
 - int reqUnmatched;
+  - 未被任何路由或资源认领的请求数（404/405、路径扫描），只计数不按键保存。
 
 - long reqTotalUs;
 
@@ -755,8 +837,10 @@ individual samples dominated by long-lived connections.
 - long errTotal;
 
 - string errLogPath;
+  - 错误追加写入的日志文件路径（"" = 不写文件）。
 
 - bool errDebug;
+  - 调试模式下错误同时回显到 stdout。
 
 - long startMillis;
 
@@ -771,6 +855,7 @@ individual samples dominated by long-lived connections.
 - int seriesCap;
 
 - long[]sSec;
+  - 该槽位持有的秒值（-1 = 空槽，环形已被越过）。
 
 - int[]sReq;
 
@@ -785,8 +870,10 @@ individual samples dominated by long-lived connections.
 - long[]sQueryUs;
 
 - int[]sCpu;
+  - 该秒的进程 CPU%（-1 = 未知）。
 
 - long[]sRss;
+  - 该秒的常驻内存字节数（-1 = 未知）。
 
 - int[]sHist;
 
@@ -807,24 +894,29 @@ individual samples dominated by long-lived connections.
 - ErrorSink errSink;
 
 - ServerMetrics()
+  - 私有构造：唯一入口是 Global()。各计数、环形缓冲与每秒序列在此初始化。
 
 - void Entered()
   - A request started. Paired with Left() in the dispatcher, so the
     counter is exact rather than sampled.
 
 - void Left()
+  - 一次请求离开，与 Entered() 配对；计数不会减到零以下。
 
 - void StreamOpened()
   - A long-lived connection opened / closed, and what it pushed
     while it was open. Frames and bytes, never a duration.
 
 - void StreamClosed(long frames, long bytes)
+  - 一条长连接关闭，`frames`/`bytes` 为其存续期内的累计推送量，并入总量。
 
 - static const int HIST_BINS=13;
 
 - static long HistEdge(int bin)
+  - 桶 `bin` 的上沿（微秒）；最后一桶为 long 最大值，兜住其余一切。
 
 - static int HistBin(long us)
+  - `us` 落入的直方图桶下标（0 起）；超过所有上沿落在最后一桶。
 
 - int SeriesSlot(long sec)
   - The bucket for `sec`, cleared and CPU/RSS-sampled if this is the
@@ -839,10 +931,13 @@ individual samples dominated by long-lived connections.
 - static byte[]monoBuf;
 
 - static ServerMetrics Global()
+  - 进程级共享单例；首次调用时构造，此后所有请求共用一份。
 
 - ServerMetrics SlowRequestMs(int ms)
+  - 设置慢请求阈值（毫秒）；返回自身以便链式配置。
 
 - ServerMetrics SlowQueryMs(int ms)
+  - 设置慢查询阈值（毫秒）；返回自身以便链式配置。
 
 - ServerMetrics ErrorLog(string path, bool debugConsole)
   - Where errors are appended and whether they also echo to the
@@ -859,10 +954,14 @@ individual samples dominated by long-lived connections.
     forever.
 
 - ServerMetrics DebugConsole(bool on)
+  - 打开/关闭错误同时回显到 stdout；返回自身以便链式配置。
 
 - bool DebugConsoleOn()
+  - 当前是否把错误回显到 stdout。
 
 - void AppendErrLine(string line)
+  - 向错误日志追加一行并在 close 时落盘，进程随即崩溃记录也能存活。
+    错误罕见，不在任何热路径上；请求路径不碰磁盘。
 
 - void RecordError(long ts, string origin, string detail)
   - Records one server-side error: kept in a bounded in-memory ring
@@ -875,11 +974,13 @@ individual samples dominated by long-lived connections.
     delegate so this class stays free of a database.
 
 - long ErrorTotal()
+  - 启动以来记录的错误总数（含已滚出内存 ring 的条目）。
 
 - List<ServerErrorDoc> RecentErrors(int limit)
   - Recent errors, most-recent first, for a backend log screen.
 
 - static long LeInt(byte[]buf, int off, int n)
+  - 从 `buf` 的 `off` 起按小端读 `n` 字节为无符号整数（探针缓冲区用）。
 
 - static long MonoMicros()
   - Monotonic MICROSECONDS: the clock every duration recorded here
@@ -900,8 +1001,10 @@ individual samples dominated by long-lived connections.
     on the current platform.
 
 - static int LastIndexOf(string s, string ch)
+  - 字符 `ch` 在 `s` 中最后一次出现的下标，找不到返回 -1。
 
 - static List<string> SplitWs(string s)
+  - 按空白（空格/制表/换行）拆分 `s`，连续空白算一个分隔，不产生空段。
 
 - void RecordRoute(int slot, string method, string pattern, int status, long us)
   - Records one completed request that the server actually served,
@@ -1001,8 +1104,10 @@ individual samples dominated by long-lived connections.
     (the list is tiny and this avoids mutating the live aggregates).
 
 - JsonValue SlowReqJson()
+  - 慢请求 ring 的 JSON 数组（{"req","us"}），按记录先后排列。
 
 - JsonValue SlowQueryJson()
+  - 慢查询 ring 的 JSON 数组（{"sql","us"}），按记录先后排列。
 
 - long SeriesPercentile(int idx, int pct)
   - Estimated latency percentile (0-100) for one bucket, read off
@@ -1029,10 +1134,14 @@ individual samples dominated by long-lived connections.
     The shortest interval a CPU percentage may be computed over.
 
 - static JsonValue DocNum(long v)
+  - 以十进制文本构造 JSON 数值叶子。
 
 - static JsonValue DocStr(string s)
+  - 构造 JSON 字符串叶子；null 映射为 JSON null。
 
 - string SnapshotJson()
+  - 生成本进程的指标快照 JSON（/admin/stats 形状）：uptime、CPU/内存、
+    请求与查询计数、并发与流负载、慢操作列表和 top SQL/端点排行。
 
 
 ## SqlAgg (class)
@@ -1050,65 +1159,7 @@ arguments -- `in (1,2,3)` and `in (1,2,3,4,5)` -- counts as one entry.
 - long maxUs;
 
 - SqlAgg(string sql)
-
-
-## Stopwatch (class)
-
-高分辨率计时器。Windows 上使用 QueryPerformanceCounter，
-POSIX 上使用 clock_gettime(CLOCK_MONOTONIC) —— 两者都不受墙钟时间
-变化（NTP 同步、手动改时）影响，计时结果保持准确。
-
-Stopwatch sw = new Stopwatch();
-sw.Start();
-... work ...
-sw.Stop();
-long ms = sw.ElapsedMilliseconds();
-
-- [DllImport("kernel32", EntryPoint="QueryPerformanceFrequency")]static extern int PlatQueryPerformanceFrequency(nint freq);
-
-- [DllImport("kernel32", EntryPoint="QueryPerformanceCounter")]static extern int PlatQueryPerformanceCounter(nint count);
-
-- [DllImport("crt", EntryPoint="zan_monotonic_ns")]static extern long ZanMonotonicNs();
-
-- long startTicks;
-
-- long accumulated;
-
-- bool running;
-
-- static Stopwatch StartNew()
-  - 开始（或继续）计时，可安全重复调用。
-
-- void Start()
-  - 开始（或继续）计时。
-
-- void Stop()
-  - 停止计时；多次 Start/Stop 的耗时会累加。
-
-- void Reset()
-  - 重置累计时间（运行中则同时停止）。
-
-- void Restart()
-  - 重新开始：清零并启动。
-
-- double ElapsedMilliseconds()
-  - 总耗时（毫秒，双精度）。
-    计时器可能仍在运行；读数包含当前累计值。
-
-- double ElapsedSeconds()
-  - 总耗时（秒，双精度）。
-
-- long ElapsedTicks()
-  - 以原始频率单位表示的耗时（参见 `Frequency`）。
-
-- bool IsRunning()
-  - 计时器运行中返回 true。
-
-- static long Frequency()
-  - 高分辨率时钟每秒的 tick 数。
-
-- static long NowTicks()
-  - 当前单调时钟读数（频率单位）。
+  - 构造一行以归一化语句为键的聚合，各计数从零开始。
 
 
 ## void (delegate)
