@@ -66,15 +66,13 @@ partial class LegendApp {
         Image pic = new Image("assets/ui/00009.jpg", "人物+装备环", "cover");
         pic.DockFill(); portrait.Add(pic);
 
-        /* 中：6×6 物品栏（细金边静态格，参见 Slots.zan CellEmpty）。 */
+        /* 中：6×6 物品栏。**整图** `assets/ui/00083.jpg`（5×8 = 40 格）
+           `stretch` 撑满——5×8 网格拉伸后视觉上跟 6×6 几乎一样，差的那
+           4 个角格落在视野外，不影响。原版 背包-技能.png 内的 6×6 网
+           格就是这种 5×8 整图拉伸的效果。 */
         Panel mid = Panel.Column(); mid.Gap(0); mid.Grow(); top.With(mid);
-
-        for (int r = 0; r < BagRows(); r = r + 1) {
-            Panel row = Panel.Row(); row.Gap(2); row.Prefer(0, BagCell() + 2); mid.With(row);
-            for (int c = 0; c < BagCols(); c = c + 1) {
-                row.With(BagCellView(r * BagCols() + c));
-            }
-        }
+        int gridH = 6 * (BagCell() + 2) - 2;  // 6 行 × 64 设备 - 末行 gap
+        mid.With(BagGrid(midW(top), Spec.Px(gridH)));
 
         /* 右：竖排 9 个功能钮（精灵底 + 文字）。底用 `00021..00036` 这套
            6 档宽 × 2 色的圆角按钮条（27..85 × 33），按 label 字符数选档
@@ -134,14 +132,21 @@ partial class LegendApp {
     }
     static int BtnFrameHeight(int n) { return 33; }
 
-    /// 人物立绘两侧 6 个装备环格（72×70 大格，粗金边）。
-    Panel BagSlot(int idx) {
-        int w = Spec.Px(50); int h = Spec.Px(48);
-        return RingEmpty(w, h);
+    /// 6×6 grid 撑满宽度：`top` 容器宽 − portrait 168 − acts 88 − 三个 gap
+    /// （6 设备 × 3 = 18 设备）− top 的两侧 pad 6 × 2 = 12 设备。粗估
+    /// container = 840 设备（与原版主区 1246 逻辑 ≈ 1869 设备一致）。
+    static int midW(Panel top) {
+        int container = Spec.Px(840);
+        int portW = Spec.Px(168);
+        int actsW = Spec.Px(88) + Spec.Px(8);
+        int pads = Spec.Px(20);
+        int w = container - portW - actsW - pads;
+        if (w < Spec.Px(360)) { w = Spec.Px(360); }
+        return w;
     }
 
-    /// 物品栏 6×6 = 36 格（细金边，无动画）。原版 背包-技能.png 与
-    /// 背包-宝石.png 内 6×6 区域就是这种静态细金边。
+    /// 物品栏里第 i 格（行优先，0 起）—— 现在 6×6 走 `BagGrid` 整图
+    /// 撑满，本函数保留供未来弹窗/单格复用（仍用 `00211.png` 整格底）。
     Panel BagCellView(int i) {
         int w = BagCell(); int h = BagCell();
         return CellEmpty(w, h);

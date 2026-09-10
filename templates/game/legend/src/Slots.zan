@@ -85,60 +85,75 @@ partial class LegendApp {
             SlotBadge(e, 1), quality);
     }
 
-    /// **格框精灵路径**（出处：`tools/minimir/ui_index_map.csv`，原版
-    /// `game.exe` 静态分析台账——写界面前必读，不要自己配边框色）：
+    /// **格框精灵路径**（实测像素为准；`tools/minimir/ui_index_map.csv`
+    /// 的 `module_guess` 字段只是猜的——见 REFERENCE_AUDIT §11.0）：
     ///
-    ///   - `00002.png` (42×37) — **包裹格背景**（`.` 通用底图），
-    ///     6×6 物品栏的空格底就是它，直接 `stretch` 撑满格子。
-    ///   - `00001/00003/00004/00005.png` (42×37) — 同形的**品质色**边框
-    ///     （红/黄/洋红/蓝），带道具时按品级叠一层。
-    ///   - `00211.png` (45×43) — **物品格子（通用）**，填满型石质底。
-    ///   - `00063.png` (72×70) — **排行榜/列表行背景**（不是装备格！）。
+    ///   - **`00083.jpg` (488×249 = 5×8 = 40 物品格整图)** — **6×6 物品
+    ///     栏的整张底图**。`stretch` 撑满中段 grid 区，5×8 自然形成网格
+    ///     视觉，省掉 36 个单格拼装。
+    ///   - **`00082.jpg` (488×249)** — 同 5×8 = 40 格的暗红变体（页
+    ///     9 排行榜 / 23 图鉴列表的整图底）。
+    ///   - **`00211.png` (45×43)** — 单个物品格（用户提到的「石头底」）。
+    ///   - `00063.png` (72×70) — 排行榜行（大格）背景。
     ///   - `00132/00134.png` (735×30) — 焦点/选中标志（通用）。
-    ///
-    /// **没有帧动画**：`00001-00005` 同形不同色是品级不是帧。
-    static string CellBgPath() { return "assets/ui/00002.png"; }
-    static string ItemCellBgPath() { return "assets/ui/00211.png"; }
-    static string RowBgPath() { return "assets/ui/00063.png"; }
-    static string FocusPath() { return "assets/ui/00132.png"; }
-
-    /// 品质色边框：0=普通(无边框，用 00002 底图) 1..4 = 红/黄/洋红/蓝。
-    static string QualityFramePath(int quality) {
-        if (quality <= 0) { return ""; }
-        int n = quality;
-        if (n > 4) { n = 4; }
+    static string BagGridPath() { return "assets/ui/00083.jpg"; }
+    static string TableGridPath() { return "assets/ui/00082.jpg"; }
+    static string CellEmptyPath() { return "assets/ui/00211.png"; }
+    static string BigRarityPath(int quality) {
+        int n = 61;
+        if (quality == 2) { n = 62; }
+        else if (quality == 3) { n = 63; }
+        else if (quality >= 4) { n = 64; }
         return "assets/ui/" + Rules.N(n).PadLeft(5, "0") + ".png";
     }
+    static string FocusPath() { return "assets/ui/00132.png"; }
 
-    /// 空格子：**原版包裹格底图** `00002.png` 撑满（不再用 CSS border）。
+    /// 6×6 物品栏底图：`00083.jpg`（5×8 = 40 格整图）`stretch` 撑满。
+    /// 调用方给定 6×6 中段的实际宽高（device 像素），就拿到一张完整网格
+    /// 视觉的底图。原版 背包-技能.png 内的 6×6 区域像素分布与 00083
+    /// 拉伸到同尺寸后一致。
+    static Panel BagGrid(int wDevice, int hDevice) {
+        Panel s = Panel.Row(); s.Pad(0); s.Prefer(wDevice, hDevice);
+        Image bg = new Image(BagGridPath(), "包裹", "stretch");
+        bg.DockFill(); s.Add(bg);
+        return s;
+    }
+
+    /// 表格整图底：5×8 grid（488×249）`stretch` 撑满表格区。排行榜 /
+    /// 图鉴 / 邮箱等列表都用。
+    static Panel TableGrid(int wDevice, int hDevice) {
+        Panel s = Panel.Row(); s.Pad(0); s.Prefer(wDevice, hDevice);
+        Image bg = new Image(TableGridPath(), "表", "stretch");
+        bg.DockFill(); s.Add(bg);
+        return s;
+    }
+
+    /// 单个空物品格底图（`00211.png`）—— 现在 6×6 整图已用 BagGrid，
+    /// 不再需要单格；如果个别弹窗/小窗口仍要 1×1 格再用。
     static Panel CellEmpty(int wDevice, int hDevice) {
         Panel s = Panel.Row(); s.Pad(0); s.Prefer(wDevice, hDevice);
-        Image bg = new Image(CellBgPath(), "格", "stretch");
+        Image bg = new Image(CellEmptyPath(), "格", "stretch");
         bg.DockFill(); s.Add(bg);
         return s;
     }
 
-    /// 装备环空格：同用底图（原版包裹格背景是同一张，只有品级框不同）。
+    /// 装备环空格：单格 `00211.png`（人物立绘两侧 6 个大环，每环独立）。
+    /// 已被整图 00009/00010.jpg（人物+6 环压好）替代，保留以备个别页用。
     static Panel RingEmpty(int wDevice, int hDevice) {
         Panel s = Panel.Row(); s.Pad(0); s.Prefer(wDevice, hDevice);
-        Image bg = new Image(CellBgPath(), "格", "stretch");
+        Image bg = new Image(CellEmptyPath(), "格", "stretch");
         bg.DockFill(); s.Add(bg);
         return s;
     }
 
-    /// 物品格（带图标 + 角标）：底 = 通用物品格子 `00211.png`；
-    /// `quality > 0` 时再叠一层品质色边框 `00001-00005`。
+    /// 物品格（带图标 + 角标）：底 = `00211.png`，叠图标 + 角标。
     Panel ItemCell(int wDevice, int hDevice,
                   string artPath, string badge, int quality) {
         Panel s = Panel.Row(); s.Pad(0); s.Prefer(wDevice, hDevice);
-        Image bg = new Image(ItemCellBgPath(), "格底", "stretch");
+        Image bg = new Image(CellEmptyPath(), "格底", "stretch");
         bg.DockFill(); s.Add(bg);
         Image ic = new Image(artPath, "道具", "contain");
         ic.DockFill(); s.Add(ic);
-        if (quality > 0) {
-            Image q = new Image(QualityFramePath(quality), "品级", "stretch");
-            q.DockFill(); s.Add(q);
-        }
         if (badge.Length > 0) {
             Label t = Text(badge, "slot-badge", 0);
             t.DockManual(); t.Place(SlotInset(), 0);
@@ -148,9 +163,20 @@ partial class LegendApp {
         return s;
     }
 
-    /// 大格（装备环 / 宝石 / 技能）：与物品格同底，尺寸由调用方给。
+    /// 大格（装备环 / 宝石 / 技能）。
     Panel RingCell(int wDevice, int hDevice,
                    string artPath, string badge, int quality) {
-        return ItemCell(wDevice, hDevice, artPath, badge, quality);
+        Panel s = Panel.Row(); s.Pad(0); s.Prefer(wDevice, hDevice);
+        Image bg = new Image(BigRarityPath(quality), "品级", "stretch");
+        bg.DockFill(); s.Add(bg);
+        Image ic = new Image(artPath, "道具", "contain");
+        ic.DockFill(); s.Add(ic);
+        if (badge.Length > 0) {
+            Label t = Text(badge, "slot-badge", 0);
+            t.DockManual(); t.Place(SlotInset(), 0);
+            t.Prefer(0, Spec.Px(11));
+            s.Add(t);
+        }
+        return s;
     }
 }
