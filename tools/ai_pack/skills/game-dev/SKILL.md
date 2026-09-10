@@ -185,3 +185,12 @@ description: Zan 上做 2D 游戏(templates/game/* 与 stdlib/Game)的帧循环�
   颜色，或定向色扫描（主题绿 `g>r+20 and g>b+20 and g>60`、
   红子 `r>140 and g<70 and b<70`）出 bbox 判居中/判内容；最后
   2.5x 增亮整页缩图肉眼复核。
+- **UiDriver 像素 dump 是唯一真相，窗口截图会抓到没重绘的空帧**（2026-09-11
+  传奇排行榜）：同一构建，窗口截图整片空白，而同一次运行的 `dump pixels` /
+  `dump tree` 都完整。看到空白先别怀疑页面构建，用 `dump pixels`（ZPX1→PNG）
+  做 A/B。`ZAN_UI_SCRIPT` 的驱动文件只传裸文件名（launcher 会拼目录，带路径
+  就静默不跑）；点击后 ≥3s 再 dump，否则 tree 全零。
+- **ctest 管道到 `tail` 会吃掉退出码**：后台跑 `test.ps1 … | tail` 得到 exit 0，
+  日志尾却是 `TEST_FAIL`。判定看日志里的 `tests passed` / `TEST_FAIL` 文本，
+  不看管道退出码；失败项先按名字归因（网络类 / 其他会话未提交的 stdlib
+  改动 / 属性计数漂移），再决定是不是自己的。

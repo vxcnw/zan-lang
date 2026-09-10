@@ -63,7 +63,7 @@ image { background: transparent; border-width: 0; }
 
 .page-surface, .battlefield { background: #1d2633; }
 /* 左栏与聊天面板是同一种更深的底（实测 #171e29），与主区 #1d2633 明显分开。 */
-.sidebar, .profile, .hero-feed, .feed, .chat-panel, .rank-panel {
+.sidebar, .profile, .hero-feed, .feed, .chat-panel {
     background: #171e29; border: 1px #272e38; }
 .frame { background: var(--bg-surface); border: 1px #256489; }
 
@@ -606,3 +606,47 @@ pagination::arrow { color: #089cf3; font-size: 12; }
 .guild-lv-t { color: #f0f0f0; font-size: 12; }
 .guild-btn { color: #089cf3; background: #1f2936; border: 1px #3f4956; font-size: 12; }
 .guild-hint { color: #b8b8b8; font-size: 12; }
+
+/* ---- 排行榜（页 9）：左预览面板 + 页签 + 6 列表格 --------------------
+   与称谓/爵位/行会三页的差异（都在 Spec.Rank* 里有实测出处）：
+     · 外框是蓝 #1e5588（那三页是灰 #3d4756）
+     · 表头带 39 设备、带下多一条 2 设备蓝线
+     · 行高恒定 39（节距 43，不带 0.5 取整补偿）
+   配色实测：排名/职业白、玩家/等级青 #00f0f0、ID 品红 #ff4060、
+   属性标签黄深一档、数值黄亮一档。 */
+/* 页面 Row 必须声明 display:flex：Panel.Row() 默认走停靠布局，停靠在左的
+   面板会拉满整页高（实测 774，原版 710），align-items 只有 flex 容器才认。 */
+.rank-page { display: flex; flex-direction: row; align-items: flex-start; }
+.rank-col { padding: 0; }
+.rank-panel { background: #243040; border: 1px #1e5588; }
+.rank-art { background: #0c0d0e; border: 1px #1e5588; }
+.rank-art-t { color: #c8c8c8; font-size: 11; }
+.rank-stats { background: #171e29; border: 1px #1e5588; }
+.rank-stat { background: transparent; }
+.rank-st-t { color: #f0e020; font-size: 15; }
+.rank-st-lv { color: #f47bc0; font-size: 13; }
+.rank-st-hp { color: #f87c03; font-size: 13; }
+.rank-st-mp { color: #7c7efd; font-size: 13; }
+.rank-st-atk { color: #05d1e0; font-size: 13; }
+.rank-st-mag { color: #0b77f3; font-size: 13; }
+.rank-st-tao { color: #0ad508; font-size: 13; }
+.rank-st-def { color: #f7eb06; font-size: 13; }
+.rank-st-mdef { color: #a605f7; font-size: 13; }
+.rank-st-luck { color: #df7306; font-size: 13; }
+/* 页签行同样要 display:flex，六枚按钮的 flex-grow 才会等分（停靠布局不认
+   flex-grow，六枚会叠成一枚）。 */
+.rank-tabs { background: transparent; display: flex; flex-direction: row; }
+.rank-tab { flex-grow: 1; }
+.rank-box { background: #1d2633; border: 1px #1e5588; }
+.rank-head-line { background: #1e5282; }
+.rank-c0 { color: #f0f0f0; font-size: 12; }
+.rank-c1 { color: #00f0f0; font-size: 12; }
+.rank-c2 { color: #00f0f0; font-size: 12; }
+.rank-c3 { color: #ff4060; font-size: 12; }
+.rank-c4 { color: #f0f0f0; font-size: 12; }
+.rank-cell-l { justify-content: flex-start; }
+/* 属性列字号 11：原版「经验：604765589748973」墨迹 188 设备、格宽 204，
+   本引擎字体同字号比原版宽 ~7%，12 号会溢出成省略号。 */
+.rank-attr-k { color: #c0c000; font-size: 11; }
+.rank-attr-v { color: #e8e800; font-size: 11; }
+.rank-note { color: #c0c0c0; font-size: 12; }

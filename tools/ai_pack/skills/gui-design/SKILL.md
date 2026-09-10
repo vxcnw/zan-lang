@@ -286,6 +286,19 @@ CSS 里非 token 的长度由 `Style.ScaleLayout` 补乘,`StyleBox.IsPrescaled`
 构造器调用 `InitControl(名字, 停靠)`;隐式默认构造器不会跑基类字段初始化,
 `children` 为 null、`visible` 为 false,首次 `With`/`Arrange` 即段错误。
 
+排版容器三条实测（2026-09-11 传奇「排行榜」页踩的）：
+- **`Panel.Row()` / `Column()` 默认是停靠布局，不是 flex**：`Grow()`（flex-grow）、
+  `align-items`、`justify-content` 只在该元素的 CSS 类显式写了
+  `display: flex; flex-direction: row|column` 时才被采纳。坑：六枚等分页签
+  `Grow()` 全无效、叠成一枚；左面板被 `align-items` 默认 stretch 拉满整页高
+  （给 flex + `align-items: flex-start` 才对上原图 167..876）。
+- **`Prefer(w, 0)` 是"撑满可用高度"，不是"高度自适应"**：布局把声明高度 ≤ 0
+  当 fill。要定高就写显式数（面板 710 设备）；要按内容就别写 Prefer 高度。
+- **显式 `Padding(top, …)` 与类上 `padding` 的优先级是"显式赢"**（padSet 优先；
+  `Panel.StylePadT` 曾漏这条、被类 padding 顶掉致面板顶从 167 掉到 164，已修
+  stdlib）。规则：同一元素不要两头都给——要么皮肤给 padding，要么代码给
+  Padding，混用只会互相顶。
+
 ## 收尾自查(逐条过)
 
 1. 字号只来自阶梯(含 Tailwind `text-*` 档),没有即兴值。

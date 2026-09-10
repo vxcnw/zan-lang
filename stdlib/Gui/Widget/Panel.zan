@@ -283,9 +283,15 @@ class Panel : Control {
 
     /// 标题行是面板自身的装饰：样式表 `padding` 只能叠加，
     /// 绝不能把内容框顶回标题下面（与 Card 同一约定）。
+    ///
+    /// `padSet`（显式 `Pad()`/`Padding()`）优先，与基类的
+    /// `StylePadL/R/B` 一致：皮肤里写了 `padding` 的类一旦套在调过
+    /// `Padding(top, …)` 的面板上，顶部内边距就会被皮肤清零——实测
+    /// 排行榜页的左面板顶被吃掉 3 设备、整个面板上移，而左右内边距
+    /// 却正常，就是这么来的。
     override int StylePadT() {
         int styled = padT;
-        if (computedStyle != null) { styled = computedStyle.PadTOr(padT); }
+        if (!padSet && computedStyle != null) { styled = computedStyle.PadTOr(padT); }
         if (style == 2 && title != "" && styled < padT) { return padT; }
         return styled;
     }

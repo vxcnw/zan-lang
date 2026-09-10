@@ -550,4 +550,99 @@ class Spec {
     static int GuildLvH() { return Px(15); }        // 21 设备（同上共 22）
     static int GuildApplyW() { return Px(65); }     // 申请钮 97 设备
     static int GuildApplyH() { return Px(18); }     // 27 设备
+
+    /* ---- 排行榜页（9）实测（`mir2/mir/排行榜.png`，同一 150% 标尺）----
+       页面 = 左预览面板 + 右（页签行 + 表格）。
+         · 页内缩：内容左 374 + 3 = 377（左面板左缘）；右缘 1490 − 7 = 1483
+         · 左面板 377..655（宽 279）y 167..876，1 设备蓝框 `#1e5588`、
+           底 `#243040`，内边距 10 设备、两盒之间 7 设备
+         · 立绘卡 388..644 × 178..552（257×375），1 设备蓝框；底图
+           `assets/ui/00010.jpg`（168×250）——**空格框已烘进底图**，
+           所以这里只叠道具图标（同包裹页 00009.jpg 的做法）
+         · 属性盒 388..644 × 560..865（257×306），底 `#171e29`、1 设备蓝框；
+           顶留白 9、左内缩 30，标题行 35 设备 + 9 行属性 28 设备
+         · 页签行 y 177..219（高 43）：6 枚等分、缝 10 设备，满宽 824 与
+           表框同宽；底 `#1f2936`、1 设备框 `#3f4956`、字蓝（同 `.tbl-btn`）
+         · 页签 → 表框 12 设备
+         · 表框 659..1483 × 232..808：1 设备蓝框（**比其他表格页的灰框
+           换成蓝框**）；表头带 39 设备（`#103555`），带下 2 设备蓝线 +
+           6 设备缝；12 行行高恒定 39（节距 43，**不需要 0.5 取整补偿**）；
+           末行 → 容器底 10 设备
+         · 表格底 → 页脚 21 设备；页脚左内缩 4 设备、**无「说明」钮**
+       列宽实测（设备）77/172/137/93/104/204，列缝 4.5、首列左缘 669
+       （= 容器左 659 + 1 框 + 8） */
+    static int RankPagePadT() { return Px(2); }     // 页内容顶 → 面板顶 3 设备
+    static int RankPagePadL() { return Px(2); }     // 页内容左 → 面板左 3 设备
+    static int RankPagePadR() { return Px(5); }     // 表框右 → 页内容右 7 设备
+    static int RankColGap() { return Px(2); }       // 左面板 → 右列 3 设备
+    static int RankLeftW() { return Px(186); }      // 左面板宽 279 设备
+    /// 左面板高 710 设备 = 上下内边距 20 + 立绘卡 375 + 缝 7 + 属性盒 306
+    /// + 上下各 1 设备框。**必须显式给**：`Prefer(w, 0)` 把高度钉成 0，
+    /// 布局把「声明高度 ≤ 0」当作撑满可用空间，面板会被拉到整页高
+    /// （实测 774，比原版多 64）。
+    static int RankLeftH() {
+        return RankPanelPad() * 2 + RankArtH() + RankPanelGap()
+             + RankStatsH() + Px(1) * 2;
+    }
+    static int RankPanelPad() { return Px(7); }     // 面板内边距 10 设备
+    static int RankPanelGap() { return Px(5); }     // 立绘卡 → 属性盒 7 设备
+    static int RankArtW() { return Px(171); }       // 立绘卡外框 256 设备
+    static int RankArtH() { return Px(250); }       // 375 设备（原图 250 逻辑 × 1.5）
+    static int RankStatsH() { return Px(204); }     // 属性盒外框 306 设备
+    static int RankStatsPadT() { return Px(6); }    // 盒顶 → 标题行 9 设备
+    static int RankStatsPadL() { return Px(20); }   // 左内缩 30 设备
+    static int RankTitleH() { return Px(23); }      // 标题行 35 设备
+    static int RankStatH() { return Px(19); }       // 属性行 28 设备
+    static int RankTabTop() { return Px(7); }       // 面板顶 → 页签顶 10 设备（页签 177、面板 167）
+    static int RankTabH() { return Px(29); }        // 页签高 43 设备
+    static int RankTabGap() { return Px(7); }       // 页签缝 10 设备
+    static int RankTabToBox() { return Px(8); }     // 页签 → 表框 12 设备
+    static int RankHeadH() { return Px(26); }       // 表头带 39 设备
+    static int RankHeadLine() { return Px(1); }     // 表头带下蓝线 2 设备
+    static int RankHeadGap() { return Px(6); }      // 蓝线 → 首行 9 设备（首行顶 285）
+    static int RankRowH() { return Px(26); }        // 行高恒定 39 设备
+    static int RankBottomPad() { return Px(7); }    // 末行 → 容器底 10 设备
+    static int RankFootGap() { return Px(14); }     // 表底 → 页脚 21 设备
+    static int RankFootPadL() { return Px(3); }     // 页脚左内缩 4 设备
+    static int RankRows() { return 12; }
+    static int RankPages() { return 10; }           // 原版页脚字段是 1/10
+
+    /// 排行榜列宽（设备实测 ÷1.5）：77/172/137/93/104/204。
+    static List<int> RankCols() {
+        List<int> w = new List<int>();
+        w.Add(Px(51));                              // 排名      77
+        w.Add(Px(115));                             // 玩家     172
+        w.Add(Px(91));                              // 等级     137
+        w.Add(Px(62));                              // ID        93
+        w.Add(Px(69));                              // 职业     104
+        w.Add(Px(136));                             // 属性     204
+        return w;
+    }
+
+    /* 立绘卡上的 10 个装备格：坐标是**底图 00010.jpg 的逻辑像素**
+       （原图 168×250，上屏按 1.5 倍 = 252×375 设备），格框 34×31 逻辑。
+       底图里只有 10 个格框：右列 4（x 131，y 43/81/131/170）、左列 2
+       （x 5，y 131/170）、底行 4（y 209，x 5/46/88/131）——左列上两格
+       原图**本来就没有框**，所以那里什么都不摆（包裹页 Spec.BagEquipY
+       给左列 4 个 y 值，与这张底图对不上，见 REFERENCE_AUDIT）。 */
+    static int RankSlotCount() { return 10; }
+    static int RankSlotX(int i) {
+        if (i < 4) { return Px(131); }              // 右列
+        if (i < 6) { return Px(5); }                // 左列
+        if (i == 6) { return Px(5); }               // 底行
+        if (i == 7) { return Px(46); }
+        if (i == 8) { return Px(88); }
+        return Px(131);
+    }
+    static int RankSlotY(int i) {
+        if (i == 0) { return Px(43); }
+        if (i == 1) { return Px(81); }
+        if (i == 2) { return Px(132); }
+        if (i == 3) { return Px(171); }
+        if (i == 4) { return Px(132); }
+        if (i == 5) { return Px(171); }
+        return Px(210);                             // 底行
+    }
+    static int RankSlotW() { return Px(32); }       // 图标 48 设备（格框 51）
+    static int RankSlotH() { return Px(29); }       // 图标 43 设备（格框 46.5）
 }

@@ -57,13 +57,21 @@ partial class LegendApp {
     /// （实测第一版表格整列文字贴左、与原版差 29 设备）。格子挂
     /// `.tbl-cell`（`display:flex; justify-content:center`）后，标签按自身
     /// 测量宽参与 flex 排布，才真正居中。
-    Panel TblCellCls(string text, string cls, int wDevice, string boxCls) {
+    /// 同上，但行高由调用方给**设备像素**：各页行高并不统一——称谓/爵位/
+    /// 行会节距 49.5（45/46 交替），排行榜节距 43（恒定 39，**不需要**取整
+    /// 补偿）。骨架只有这一份，`TblCellCls` 的默认值就是旧行为。
+    Panel TblCellClsAt(string text, string cls, int wDevice, string boxCls,
+                       int hDevice) {
         Panel c = Panel.Row(); c.Class = boxCls;
-        c.Pad(0); c.Prefer(wDevice, Spec.TblRowH());
+        c.Pad(0); c.Prefer(wDevice, hDevice);
         Label t = Text(text, cls, 0);
         t.Grow();
         c.With(t);
         return c;
+    }
+
+    Panel TblCellCls(string text, string cls, int wDevice, string boxCls) {
+        return TblCellClsAt(text, cls, wDevice, boxCls, Spec.TblRowH());
     }
 
     Panel TblCell(string text, string cls, int wDevice) {
@@ -84,14 +92,22 @@ partial class LegendApp {
     /// 表头带：满宽底色 + 内缩 12 设备的定宽格 + 居中青字。列数 = heads.Count，
     /// 列宽由调用方给（各页列数不同：称谓 10 列、爵位 12 列）。
     Panel TblHead(List<string> heads, List<int> ws) {
+        return TblHeadAt(heads, ws, Spec.TblHeadH(), Spec.TblColGap(),
+                         Spec.TblPadL());
+    }
+
+    /// 同上，但带高/列缝/左内缩由调用方给**设备像素**（排行榜带高 39、
+    /// 左内缩 8，与称谓页的 41/12 不同）。
+    Panel TblHeadAt(List<string> heads, List<int> ws, int hDevice, int gap,
+                    int padL) {
         Panel band = Panel.Row(); band.Class = "tbl-head";
-        band.Pad(0); band.Gap(Spec.TblColGap());
-        band.Prefer(0, Spec.TblHeadH());
-        band.Padding(0, 0, 0, Spec.TblPadL());
+        band.Pad(0); band.Gap(gap);
+        band.Prefer(0, hDevice);
+        band.Padding(0, 0, 0, padL);
         for (int i = 0; i < heads.Count; i = i + 1) {
             Panel c = Panel.Row(); c.Class = "tbl-head-c";
             c.Pad(0);
-            c.Prefer(ws[i], Spec.TblHeadH());
+            c.Prefer(ws[i], hDevice);
             Label t = Text(heads[i], "tbl-head-t", 0);
             t.Grow();
             c.With(t);
@@ -122,10 +138,19 @@ partial class LegendApp {
     /// 「中间某列不是纯文字」的页面用（行会：等级列是红椭圆徽章、申请列
     /// 是按钮）。
     Panel TblRowBoxes(List<Panel> cells, int r, string rowCls) {
+        return TblRowBoxesAt(cells, TblRowHAt(r), Spec.TblColGap(),
+                             Spec.TblPadL(), rowCls);
+    }
+
+    /// 行骨架的唯一实现：行高取**已算好的设备像素**，列缝/左内缩也由调用方
+    /// 给。分两套路子是为了不改各页已经对过的像素——称谓/爵位/行会走
+    /// `TblRowBoxes`（49/50 交替），排行榜走这里（恒定 39）。
+    Panel TblRowBoxesAt(List<Panel> cells, int rowHDevice, int gap, int padL,
+                        string rowCls) {
         Panel row = Panel.Row(); row.Class = rowCls;
-        row.Pad(0); row.Gap(Spec.TblColGap());
-        row.Prefer(0, TblRowHAt(r));
-        row.Padding(0, 0, 0, Spec.TblPadL());
+        row.Pad(0); row.Gap(gap);
+        row.Prefer(0, rowHDevice);
+        row.Padding(0, 0, 0, padL);
         for (int i = 0; i < cells.Count; i = i + 1) { row.With(cells[i]); }
         return row;
     }
