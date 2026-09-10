@@ -121,6 +121,9 @@ class Window {
     static extern int zan_gui_present_dirty_add(int x, int y, int w, int h);
 
     [DllImport("zan_gui")]
+    static extern void zan_gui_present_full();
+
+    [DllImport("zan_gui")]
     static extern int zan_gui_set_title(nint hwnd, string title);
 
     [DllImport("zan_gui")]
@@ -593,6 +596,13 @@ class Window {
     void PresentFull() {
         #if WINDOWS
         Win32Shell.PresentFull((nint)handle);
+        #else
+        /* Non-Windows shells keep the dirty-rect queue (OHOS/Android
+         * texture uploads); PresentFull means "this frame redrew every
+         * pixel -- ignore the queued rects". Without this the whole-window
+         * frame's declaration is lost and the shell diffs against a stale
+         * shadow. */
+        zan_gui_present_full();
         #endif
     }
 
