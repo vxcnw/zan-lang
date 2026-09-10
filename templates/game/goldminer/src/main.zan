@@ -165,6 +165,14 @@ class MinerApp {
     public string bgPath;
     public string minerPath;
     public string[] kindPath;           // 11 物品
+    // 新美术(gpt-image-2 手绘,*2 文件名;旧资产名一律不动,缺则回退旧图)
+    public string campPath2;            // 天空带画面(0..SKY_H)
+    public string minePath2;            // 地层画面(SKY_H..H)
+    public string topPath2;             // 顶栏木牌横幅
+    public string resultPath2;          // 结算羊皮纸面板
+    public string glowPath2;            // 柔光晕(拆弹警示底光)
+    public string dynPath2;             // 炸药随身包图标(顶栏)
+    public string bombPath2;            // 拆弹弹体(拆弹面板)
 
     // 计时
     public long lastFrameAt;
@@ -188,10 +196,24 @@ class MinerApp {
         Data.HOOK_X = Data.W / 2;
         a.uiRng = Rng.Seed(20260904L);
         a.bgPath = MinerApp.FindAsset("assets/bg.jpg");
-        a.minerPath = MinerApp.FindAsset("assets/miner.png");
+        // 新美术优先(*2 文件名),旧资产名一律不动,缺则逐级回退旧图
+        a.campPath2 = MinerApp.FindAsset("assets/camp2.png");
+        a.minePath2 = MinerApp.FindAsset("assets/mine2.png");
+        a.topPath2 = MinerApp.FindAsset("assets/top2.png");
+        a.resultPath2 = MinerApp.FindAsset("assets/result2.png");
+        a.glowPath2 = MinerApp.FindAsset("assets/glow2.png");
+        a.dynPath2 = MinerApp.FindAsset("assets/dyn2.png");
+        a.bombPath2 = MinerApp.FindAsset("assets/bomb2.png");
+        a.minerPath = MinerApp.FindAsset("assets/miner2.png");
+        if (a.minerPath == null) {
+            a.minerPath = MinerApp.FindAsset("assets/miner.png");
+        }
         a.kindPath = new string[ItemDef.KIND_COUNT];
         for (int i = 0; i < ItemDef.KIND_COUNT; i = i + 1) {
-            a.kindPath[i] = MinerApp.FindAsset("assets/" + Data.KIND_TEX[i] + ".png");
+            a.kindPath[i] = MinerApp.FindAsset("assets/" + Data.KIND_TEX[i] + "2.png");
+            if (a.kindPath[i] == null) {
+                a.kindPath[i] = MinerApp.FindAsset("assets/" + Data.KIND_TEX[i] + ".png");
+            }
         }
         a.w = new World();
         a.w.rng = Rng.Seed((int)(DateTime.UtcNow().ToUnixSeconds() & 2147483647));
@@ -246,6 +268,26 @@ class MinerApp {
         outWH[1] = (b[20] & 255) << 24 | (b[21] & 255) << 16
                  | (b[22] & 255) << 8 | (b[23] & 255);
         return outWH[0] > 0 && outWH[1] > 0;
+    }
+
+    // 全出血横带 cover：把 path 按目标带纵横比裁一块铺满 (dw,dh)，
+    // focus 0..1 选纵向取景位(0 顶 1 底)。ddz BlitCover 同款，多一个
+    // 取景参数——营地/地层各取画面信息最厚的横带，不留 letterbox。
+    static void BlitBand(Canvas c, string path, int dx, int dy, int dw, int dh,
+                         double focus) {
+        int iw = Canvas.ImageWidth(path);
+        int ih = Canvas.ImageHeight(path);
+        if (iw <= 0 || ih <= 0) { return; }
+        int sw = iw;
+        int sh = sw * dh / dw;
+        if (sh > ih) { sh = ih; sw = sh * dw / dh; }
+        int sy = (int)((ih - sh) * focus);
+        string src = CDraw.BlitSource(c, path);
+        if (src == null) { return; }
+        c.BlitImage(src, CDraw.MapX(dx + CDraw.originX),
+                    CDraw.MapY(dy + CDraw.originY),
+                    CDraw.MapW(dw), CDraw.MapW(dh),
+                    (iw - sw) / 2, sy, sw, sh);
     }
 
     // ---------------------------------------------------------------
@@ -318,8 +360,14 @@ class MinerApp {
             ox = this.uiRng.Range(-wo.shakeMag, wo.shakeMag + 1) / 8;
             oy = this.uiRng.Range(-wo.shakeMag, wo.shakeMag + 1) / 8;
         }
-        // 背景
-        if (this.bgPath != null) {
+        // 背景:天空带 + 地层带双横带 cover(接缝压在 SKY_H 草地线下,
+        // 8px 交叠防震屏露缝);新图缺失回退旧整图,再缺回退渐变
+        if (this.campPath2 != null && this.minePath2 != null) {
+            MinerApp.BlitBand(rd, this.campPath2, ox, oy, w, Data.SKY_H + 8,
+                              0.55);
+            MinerApp.BlitBand(rd, this.minePath2, ox, oy + Data.SKY_H - 8, w,
+                              h - Data.SKY_H + 8, 0.5);
+        } else if (this.bgPath != null) {
             CDraw.BlitImage(rd, this.bgPath, ox, oy, w, h);
         } else {
             CDraw.FillVGrad(rd, 0, 0, w, h, CDraw.Argb(255, 96, 140, 200),
@@ -396,8 +444,14 @@ class MinerApp {
         World wo = this.w;
         int pct = wo.Target() > 0 ? wo.gold * 100 / wo.Target() : 0;
         if (pct > 100) { pct = 100; }
-        // 顶栏
-        CDraw.FillRect(rd, ox, oy, Data.W, 46, CDraw.Argb(215, 12, 14, 20));
+        // 顶栏:木牌横幅画打底(全宽 cover),轻压暗保文字对比;缺图回退
+        // 半透明黑条。文字信息两版一致。
+        if (this.topPath2 != null) {
+            MinerApp.BlitBand(rd, this.topPath2, ox, oy, Data.W, 48, 0.5);
+            CDraw.FillRect(rd, ox, oy, Data.W, 46, CDraw.Argb(110, 12, 14, 20));
+        } else {
+            CDraw.FillRect(rd, ox, oy, Data.W, 46, CDraw.Argb(215, 12, 14, 20));
+        }
         CDraw.FillRect(rd, ox, oy + 46, Data.W, 2, CDraw.Argb(255, 138, 111, 51));
         CText.DrawShadow(rd, "第 " + Convert.ToString(wo.level) + " 关",
                          ox + 16, oy + 10, 2, 232, 226, 212, 255);
@@ -414,6 +468,11 @@ class MinerApp {
         int xr = ox + Data.W - 16;
         string dtxt = "Q 炸药 x" + Convert.ToString(wo.dynamites);
         int dw = CText.Width(dtxt, 2);
+        if (this.dynPath2 != null) {
+            int isz = 26;                       // 炸药随身包(161x200 实比)
+            CDraw.BlitImage(rd, this.dynPath2, xr - dw - 8 - isz * 161 / 200,
+                            oy + 8, isz * 161 / 200, isz);
+        }
         CText.DrawShadow(rd, dtxt, xr - dw, oy + 10, 2, 200, 194, 174, 255);
         xr = xr - dw - 28;
         string ttxt = "剩余 " + Convert.ToString(totalCs / 100) + "." +
@@ -435,21 +494,43 @@ class MinerApp {
                            CDraw.Argb(205, 10, 12, 17));
             CDraw.FillRect(rd, ox + Data.W / 2 - 170, oy + 230, 340, 3,
                            CDraw.Argb(255, 192, 85, 63));
+            int tx = ox + Data.W / 2;
+            if (this.bombPath2 != null) {
+                // 弹体贴面板左侧,柔光晕按帧缩放脉动;文字整体右移让位
+                int bw = 72 * 277 / 340;        // 弹体(277x340 实比)
+                int bx = ox + Data.W / 2 - 156;
+                int by = oy + 269;
+                if (this.glowPath2 != null) {
+                    int g = 150 + (int)(Math.Sin(this.now / 110.0) * 12.0);
+                    CDraw.BlitImage(rd, this.glowPath2,
+                                    bx + bw / 2 - g / 2, by + 36 - g / 2, g, g);
+                }
+                CDraw.BlitImage(rd, this.bombPath2, bx, by, bw, 72);
+                tx = tx + 30;
+            }
             CText.DrawCenteredShadow(rd, "疯狂点击! 拆除炸弹!",
-                                     ox + Data.W / 2, oy + 252, 3,
+                                     tx, oy + 252, 3,
                                      240, 176, 80, 255);
             CText.DrawCenteredShadow(rd, Convert.ToString(wo.bombClicks) + "/"
                                      + Convert.ToString(wo.bombNeed) + "    "
                                      + Convert.ToString(wo.bombTimeLeft / 1000 + 1)
                                      + " 秒",
-                                     ox + Data.W / 2, oy + 312, 2,
+                                     tx, oy + 312, 2,
                                      232, 226, 212, 255);
         }
         // 结算覆盖
         if (wo.state == World.ST_RESULT) {
             bool win = wo.levelResult > 0;
-            CDraw.FillRect(rd, ox + Data.W / 2 - 230, oy + 200, 460, 210,
-                           CDraw.Argb(205, 10, 12, 17));
+            if (this.resultPath2 != null) {
+                // 羊皮纸面板打底(460x210 ≈ 1024x468 实比),轻压暗保文字
+                CDraw.BlitImage(rd, this.resultPath2, ox + Data.W / 2 - 230,
+                                oy + 200, 460, 210);
+                CDraw.FillRect(rd, ox + Data.W / 2 - 230, oy + 200, 460, 210,
+                               CDraw.Argb(60, 10, 12, 17));
+            } else {
+                CDraw.FillRect(rd, ox + Data.W / 2 - 230, oy + 200, 460, 210,
+                               CDraw.Argb(205, 10, 12, 17));
+            }
             CDraw.FillRect(rd, ox + Data.W / 2 - 230, oy + 200, 460, 3,
                            CDraw.Argb(255, win ? 111 : 192,
                                       win ? 170 : 85, win ? 94 : 63));
