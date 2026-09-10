@@ -290,3 +290,27 @@
   共享表通信是 aardio 单线程 GUI 的历史产物；Zan 用 `async/await` +
   线程安全集合表达同样的语义，这是"写法归 Zan"最典型的一处。
 
+### 6.5 补充档（第二轮排查补漏，2026-09-10）
+
+逐项对照后确认仍是真缺口的：
+
+| 目标模块 | aardio 参考 | 说明 | 难度 |
+| --- | --- | --- | --- |
+| `Encoding` 补 GBK/GB18030/Big5 转换 | `string/encoding.aardio`（codepage 注册表查询）、`fsys/codepage.aardio`（按 BOM/名称转码读文件） | 现状：`Encoding` 只有 UTF-8 一族，GBK 解码散落在 `Process.WinCapture` 的 `#if WINDOWS` 分支里。中文生态读写老文件/老协议必需，跨平台走 iconv 或内置表。`Process` 已示范 kernel32 直调，非 Windows 需 runtime 补一层 | M |
+| `System.Net.Uri`（宽松 URL 解析） | `inet/urlpart.aardio`（scheme/host/user/pass/port/query 分段） | 现状只有 `ExternalTarget.Parse`——那是**安全严格**的解析器（拒绝 userinfo/百分号等），不能当通用解析用。通用解析允许 userinfo/片段/任意 scheme，HttpClient 与 WebSocket 都将受益 | S |
+| `DateTime` 格式化/解析增强 | `time/util.aardio`（`%Y-%m-%d %H:%M:%S` 式 format/parse） | 现状 `ParseDate` 只认严格 `YYYY-MM-DD`。补：格式串 format/parse 双向、`TimeSpan` 文本化——报表、日志、CSV 导入高频 | M |
+| `System.Text.ChineseNumber` | `string/chineseNumber.aardio`（216 行：数字↔中文大小写、金额、日期时间中文化，简繁两套） | 财务/票据/发票场景刚需；简繁两套字符表照搬，实现纯算法 | S |
+| Zip 读写支持传统加密（ZipCrypto） | `zlib/zip.aardio`（minizip 带 password 参数） | 现状 `Zip` 明写"无加密"。老软件导出的 zip 全是 ZipCrypto；解密只需 CRC32（已有）+ 密钥流，读侧价值高于写侧 | M |
+| `System.IO.HostsFile` | `fsys/hosts.aardio`（读改写 hosts + 刷新 DNS 缓存） | 网络调试/内网映射工具常用。跨平台：hosts 路径 Windows/POSIX 各一个常量，刷新 DNS 缓存 Windows 走 `DnsFlushResolverCache`、POSIX 无操作 | S |
+| `System.IO.BatchRename`（批量文件操作框架） | `fsys/batch.aardio` | 按通配符批量遍历+改名/转码；`Directory` 已有遍历，缺的是"批量预览+应用"骨架。价值边际，可与 LatestFile 合并成一个"文件工具"小族 | S |
+
+顺带确认过、已有等价物或价值不足的：`inet/mac.aardio`（`NetworkInterface`
+已有 macAddress）、`inet/conn.aardio`（WinInet 代理设置，仅 Windows 且
+HttpClient 不走系统代理，语义不适用）、`string/res.aardio`（PE 资源字符串，
+仅 Windows）、`string/fontRanges.aardio`（GDI 字体覆盖查询，Gui 自绘栈不适用）、
+`string/stream.aardio`/`fsys/table.aardio`（持久化 KV 配置——`ZanDb.KvStore`
+是更完整的同类）、`string/fencedCodeBlock.aardio`、`string/html.minify`、
+`string/lrc.aardio`（歌词解析，应用层）、`string/oct.aardio`（八进制转义，
+`Encoding` 可扩一方法解决）、`crypt/bin.aardio`（Hex/Base64 已有）。
+
+
