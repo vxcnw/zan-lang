@@ -23,7 +23,7 @@
  *                -1           the tray was stopped / the manager vanished
  */
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__OHOS__)
 
 #include <pthread.h>
 

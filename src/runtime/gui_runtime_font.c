@@ -192,14 +192,16 @@ static FT_Library g_ft_library;
 static FT_Face g_ft_face;
 static int g_ft_state;
 
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(__OHOS__)
 /* The device's default and CJK faces as configured by the ROM. Vendors
  * (MIUI, HarmonyOS, ...) ship their own default font and keep
  * /system/etc/fonts.xml pointing at it, so a fixed "Roboto" path renders
  * every ROM in Noto instead of the font the user actually sees elsewhere.
  * AOSP marks the file deprecated in favour of AFontMatcher (API 29+), but
  * still requires vendors to maintain it; when it disappears or stops
- * parsing, the hardcoded chain in ft_prepare is the fallback. */
+ * parsing, the hardcoded chain in ft_prepare is the fallback. OHOS is in
+ * the same boat: musl sysroot has no fontconfig headers, and the device
+ * ships /system/etc/fonts.xml + /system/fonts exactly like Android. */
 static char g_android_def_path[256];
 static int g_android_def_idx;
 static char g_android_cjk_path[256];
@@ -351,12 +353,13 @@ static int ft_prepare(int font_size) {
     if (g_ft_state == 0) {
         g_ft_state = -1;
         if (FT_Init_FreeType(&g_ft_library) != 0) return 0;
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(__OHOS__)
         /* Android ships no fontconfig; the system faces live in
          * /system/fonts. Primary face follows the ROM's own default
          * (fonts.xml first nameless family -- MiSans on MIUI, ...),
          * falling back to AOSP's Roboto; CJK glyphs resolve through
-         * ft_face_for_cp's zh family below. */
+         * ft_face_for_cp's zh family below. OHOS musl: same shapes, no
+         * fontconfig headers in the sysroot either. */
         ft_android_pick_fonts();
         if (access(g_android_def_path, R_OK) == 0 &&
             FT_New_Face(g_ft_library, g_android_def_path,
@@ -364,10 +367,11 @@ static int ft_prepare(int font_size) {
             g_ft_state = 1;
         } else {
             static const char *const prim_paths[] = {
+                "/system/fonts/HarmonyOS_Sans.ttf", /* OHOS device default */
                 "/system/fonts/DroidSans.ttf",
                 "/system/fonts/NotoSansCJK-Regular.ttc",
             };
-            static const int prim_idx[] = { 0, 2 };
+            static const int prim_idx[] = { 0, 0, 2 };
             for (int i = 0; i < 2; i++) {
                 if (access(prim_paths[i], R_OK) != 0) continue;
                 if (FT_New_Face(g_ft_library, prim_paths[i], prim_idx[i],
@@ -427,7 +431,7 @@ static FT_Face ft_face_for_cp(u32 cp, int font_size) {
         }
     }
     if (g_ft_fb_count < ZAN_FT_FB_MAX) {
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(__OHOS__)
         /* The fallback chain mirrors fonts.xml: the zh family found at
          * init (Noto CJK ttc face 2 on AOSP, the ROM's CJK face on
          * vendor builds), then the serif ttc and DroidSansFallback for
@@ -1062,7 +1066,7 @@ EXPORT i32 zan_gui_font_height(i32 font_size) {
 /* Icon glyphs are drawn in Zan, as vector primitives on top of the Canvas
  * line/rect/circle/sector calls: stdlib/Gui/IconVector.zan. */
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__OHOS__)
 /* ---- window management (EWMH / Xlib) ---- */
 
 EXPORT i32 zan_gui_minimize(iptr hwnd_val) {
