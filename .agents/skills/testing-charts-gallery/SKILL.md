@@ -199,3 +199,53 @@ stdlib Chart 改动 → `cd build && ctest -R conformance_chart`（26 例，~96s
 从快照整文件恢复再 `git diff --numstat` 核对范围，能省掉全部重写。
 快照恢复后必须重跑编译探针 + ctest 档位——被覆写可能同时吞掉后续
 手工修复（本会话 drb6 标量漏抄修复就被快照回滚了一次）。
+
+## 平滑曲线（`smooth: true`）的 ECharts 语义与实现坑
+
+ECharts line 的平滑算法不是「单调 Hermite / Cardinal / Catmull-Rom」，
+是 **`poly.ts:drawSegment`**（`src/chart/line/poly.ts:36-209`）的
+自研贝塞尔。关键事实——从源码逐行确认：
+
+- `LineView.ts:118-119` `getSmooth(s) = isNumber(s) ? s : (s ? 0.5 : 0)`
+  — `smooth:true` ≠ 1，是 0.5（张力系数）。`smooth:0.3` ≠ smooth:true`。
+  引擎若把 `smooth` 当 0/1 bool 处理，`smooth:0.3 / 0.5 / 0.8` 画出来一样。
+- `LineView.ts:854` 把 `series.smoothMonotone` 透传给 polyline；
+  `LineSeries.ts:200` 默认 `null`。`poly.ts:134/143/152` 的三分支中
+  唯一走的是 `else`（无单调约束的通用贝塞尔）。
+- `poly.ts:152-191` 七步：cp1/nextCp0 初算 → nextCp0 钳到 [x,nextX]×[y,nextY]
+  → cp1 反算 → cp1 钳到 [prevX,x]×[prevY,y] → nextCp0 再反算（**此处不再钳**）。
+  poly.ts 没有「切线归零」，所以极值点不会水平搁架——而是轻微过冲。
+- `poly.ts:91-101` 跳过**严格重复点**（X 和 Y 都相同）。bump-chart
+  的 Pasta 2002=2003=#1（**Y 相同但 X 不同**）不在此列。
+
+**实现时的关键陷阱**（session 4 三次尝试都栽在这里）：
+
+1. **「局部极值点的切线归零」是单调 Hermite 的特征，不是 ECharts 的。**
+   把单调 Hermite 替成 ECharts 贝塞尔后，bump-chart 的「顶上变水平」
+   变成「顶上过冲」——也是 ECharts 的真行为，不是 bug。
+2. **控制点正确 ≠ 渲染正确。** 三次尝试后**手算控制点**已与 ECharts
+   JS 参考完全一致，但**渲染仍然「麻花」**——根因在下游
+   （bezier 采样率 `steps = segW/256` 在长斜线段可能降到 2，
+   把贝塞尔退化成折线；或描边光栅器对子像素控制点的处理不同）。
+   排查**必须**用探针把控制点和 `steps` 同时打印出来，
+   至少验证：`cp0.x/cp0.y/cp1.x/cp1.y` 与 `_scratch/official_shots/`
+   同一数据下采样后一致。
+3. **Zan 窗口 3222 宽、官方 1200 宽——同一算法视觉差 2.7×。**
+   同样 75px 过冲，官方看不见、Zan 显眼。**不要靠像素 diff 判等**，
+   要把 Zan 用 1200×780 的等比裁切后再比（见 _scratch/compare_shot.ps1）。
+4. **Zan 凸图（bump-chart）的「端点过冲」是 ECharts 行为**。
+   如果产品想要不过冲，得改默认 `smooth` 张力（如 0.3），
+   **或**用 `smoothMonotone:'x'` / `'y'`，**或**画分类型图（line 改 bar）。
+   引擎层不修。
+5. **「鼠标经过没响应」可能是 IME 抢焦点**——微软拼音/搜狗候选窗口
+   出现在 Zan 截图中时，是 IME 在拦截输入，**不是 hover 不工作**。
+   先 dismiss IME 再复现。
+6. **会话中**改 smooth 算法超过两次没收敛——立即回退
+   `git checkout HEAD -- stdlib/Gui/Component/Chart/ChartViewLine.zan`
+   并把「无结论」写进 CHART_RESIDUAL。**不要**继续在 commit 之间
+   反复猜测。ECharts 6.1 poly.ts 是一段精密但**对稀数据不稳定**的
+   算法，凭眼睛和直觉调试不收敛。
+
+**已验证 commit**：
+- `ec24a91b` 修复了 Y-extent（dataZoom 窗口）、axisLabel.margin、
+  time-axis `points.x` 去定点。**不**碰 smooth 算法。
