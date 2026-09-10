@@ -62,7 +62,11 @@ class Ra2App {
         if (slash > 0) { Directory.CreateDirectoryRecursive(path.Substring(0, slash)); }
         int w = c.Width();
         int h = c.Height();
-        if (w <= 0 || h <= 0) { return; }
+        if (w <= 0 || h <= 0) {
+            Console.WriteLine("selftest dump FAILED (canvas " + Convert.ToString(w)
+                + "x" + Convert.ToString(h) + ") " + path);
+            return;
+        }
         int rowBytes = w * 3;
         int pad = (4 - (rowBytes % 4)) % 4;
         int imageBytes = (rowBytes + pad) * h;
@@ -76,17 +80,49 @@ class Ra2App {
         Ra2App.PutI32(bmp, 22, h);
         bmp[26] = (byte)1;
         bmp[28] = (byte)24;
+        // BMP rows run bottom-up, so row y of the file is canvas row h-1-y;
+        // the pixel read is that same row, not the flipped one again.
         for (int y = 0; y < h; y = y + 1) {
             int dstRow = 54 + y * (rowBytes + pad);
-            int srcRow = (h - 1 - y) * w * 4;
+            int srcY = h - 1 - y;
             for (int x = 0; x < w; x = x + 1) {
-                int argb = c.GetPixel(x, h - 1 - y);
+                int argb = c.GetPixel(x, srcY);
                 bmp[dstRow + x * 3] = (byte)(argb & 0xFF);
                 bmp[dstRow + x * 3 + 1] = (byte)((argb >> 8) & 0xFF);
                 bmp[dstRow + x * 3 + 2] = (byte)((argb >> 16) & 0xFF);
             }
         }
         File.WriteAllBytes(path, bmp);
+        // A screenshot that cannot be read is worse than none: a silent
+        // short write used to leave a 1-byte file that the review chain then
+        // reported as a black screen. Assert the size the header promised.
+        long wrote = File.GetSize(path);
+        if (wrote != 54 + imageBytes) {
+            Console.WriteLine("selftest dump FAILED (wrote " + Convert.ToString(wrote)
+                + ", want " + Convert.ToString(54 + imageBytes) + ") " + path);
+            return;
+        }
+        // Report how much of the frame is not the letterbox background, so a
+        // capture of a blank or all-black screen is visible in the log
+        // instead of only in the image.
+        int litSamples = 0;
+        int allSamples = 0;
+        int step = w / 32;
+        if (step < 1) { step = 1; }
+        for (int y = h / 16; y < h; y = y + h / 16) {
+            for (int x = step; x < w; x = x + step) {
+                int argb = c.GetPixel(x, y);
+                int rr = (argb >> 16) & 0xFF;
+                int gg = (argb >> 8) & 0xFF;
+                int bb = argb & 0xFF;
+                allSamples = allSamples + 1;
+                if (rr + gg + bb > 30) { litSamples = litSamples + 1; }
+            }
+        }
+        Console.WriteLine("selftest dump " + path + " " + Convert.ToString(w)
+            + "x" + Convert.ToString(h) + " lit="
+            + Convert.ToString(litSamples) + "/"
+            + Convert.ToString(allSamples));
     }
 
     /// <summary>Writes a 24-bit BMP of an in-memory Texture. The screen dumps
@@ -198,6 +234,9 @@ class Ra2App {
     static int deployFrame;
     static bool yardShown;
     static bool buildArmed;
+    // The map-picker walk runs once; its frames re-fire when the shell loops.
+    static bool mapSelOpened;
+    static bool mapSelUsed;
 
     // Locates data/ regardless of the working directory the game was launched
     // from (repo root, build/, or a double-click on the exe). Falls back to the
@@ -228,6 +267,31 @@ class Ra2App {
     static bool SelfTestArmed() {
         string v = Ra2App.getenv("RA2_SELFTEST");
         return v != null && v.Length > 0 && v != "0";
+    }
+
+    // Every self-test run writes its screenshots into its own directory,
+    // named for the process, so a stale capture can never be mistaken for a
+    // fresh one -- reading an old shot from a shared build/ directory cost
+    // this project several rounds of chasing bugs that were not there.
+    // RA2_SHOT_TAG overrides the suffix for a caller that wants a stable
+    // name.
+    static string ShotTag;
+
+    static string ShotDir() {
+        if (Ra2App.ShotTag == null) {
+            string tag = Ra2App.getenv("RA2_SHOT_TAG");
+            if (tag == null || tag.Length == 0) {
+                tag = Convert.ToString(Window.GetTickMs() % 1000000);
+            }
+            Ra2App.ShotTag = "build/run" + tag;
+        }
+        return Ra2App.ShotTag;
+    }
+
+    /// <summary>The path a self-test screenshot should be written to. Always
+    /// inside the run's own directory (see ShotDir).</summary>
+    static string ShotPath(string name) {
+        return Ra2App.ShotDir() + "/" + name;
     }
 
     // RA2_DUMP_ASSETS=1 copies a short list of shipped art out of the install's
@@ -2014,13 +2078,27 @@ class Ra2Loop : IGuiHostLoop {
         } else {
             this.RenderShell(host);
         }
-        if (this.selfTest) { this.SelfTestShots(host); }
+
+        // The self-test walk: the script fires on the *current* frame count
+        // (not after an increment), and a screen change is re-rendered before
+        // the shot so the capture belongs to the new scene. A previous
+        // ordering -- shot first, script after -- caused several screens to
+        // be photographed before they were drawn, so single/skirmish/lobby
+        // captures all came out byte-identical.
+        if (this.selfTest) {
+            this.SelfTestScript(host);
+            if (this.shell.CurrentScene() == 2) {
+                this.RenderGame(host);
+            } else {
+                this.RenderShell(host);
+            }
+            this.SelfTestShots(host);
+        }
 
         // The click is spent by the frame it drew; clear it for the next.
         this.clicked = false;
         this.rightClicked = false;
-        this.frames = this.frames + 1;
-        if (this.selfTest) { this.SelfTestScript(host); }
+        if (this.selfTest) { this.frames = this.frames + 1; }
     }
 
     /// <summary>The reference's Fullscreen entry toggles the window's full
@@ -2033,8 +2111,8 @@ class Ra2Loop : IGuiHostLoop {
         host.app.window.ToggleMaximize();
     }
 
-    /// <summary>The shell scenes: menu (0), single player (4), options (5),
-    /// loading (3) and skirmish setup (1).</summary>
+    /// <summary>The shell scenes: menu (0), options (5), loading (3) and
+    /// skirmish setup (1).</summary>
     void RenderShell(GuiHost host) {
         if (this.shell.CurrentScene() == 0) {
             int act = Screens.DrawMainMenu(this.R, this.art, this.ui,
@@ -2045,22 +2123,20 @@ class Ra2Loop : IGuiHostLoop {
             if (act == 1) { this.shell.OpenSkirmish(); }
             if (act == 2) { this.shell.OpenOptions(); }
             if (act == 4) { Ra2Loop.ToggleFullscreen(host); }
-        } else if (this.shell.CurrentScene() == 4) {
-            int act = Screens.DrawSinglePlayer(this.R, this.art, this.ui,
-                this.shell, this.mouseX, this.mouseY, this.clicked,
-                Ra2App.ViewW(), Ra2App.ViewH());
-            // New ids from the reference page: 新战役 (1), 载入 (disabled),
-            // 遭遇战 (2), 上一页 (3). There are no campaign missions in the
-            // data yet, so 新战役 rides into skirmish with the Allied flag
-            // the way the campaign's first disc would; noted in the gap
-            // list.
-            if (act == 1) {
-                this.shell.SetSide(Side.Allied());
-                this.shell.OpenSkirmish();
-            } else if (act == 2) {
-                this.shell.OpenSkirmish();
-            } else if (act == 3) {
-                this.shell.Back();
+        } else if (this.shell.CurrentScene() == 6) {
+            // The map picker, pushed by 选图 (Scene.MapSelect). Its own
+            // sidebar carries 使用地图 / 导入地图 / 取消.
+            List<string> selMaps = this.maps;
+            R2Tex selPreview = this.preview;
+            int sact = Screens.DrawMapSelect(this.R, this.art, this.shell,
+                selMaps, selPreview, this.ui, Ra2App.ViewW(), Ra2App.ViewH(),
+                this.mouseX, this.mouseY, this.clicked);
+            if (sact == 1) {
+                this.shell.UseMap();
+                this.dirty = true;
+            } else if (sact == 3) {
+                this.shell.CancelMap();
+                this.dirty = true;
             }
         } else if (this.shell.CurrentScene() == 5) {
             int act = Screens.DrawOptions(this.R, this.art, this.shell, this.ui,
@@ -2089,6 +2165,8 @@ class Ra2Loop : IGuiHostLoop {
                 this.shell.EnterGame();
             }
         } else if (this.shell.CurrentScene() == 1) {
+            Console.WriteLine("selftest DrawSkirmish scene=1 maps="
+                + Convert.ToString(this.maps.Count));
             if (this.previewIndex != this.shell.MapIndex()) {
                 this.preview = null;
                 this.preview = Ra2App.BuildPreview(this.R, this.db, this.vfs,
@@ -2104,6 +2182,7 @@ class Ra2Loop : IGuiHostLoop {
                 this.shell.StartGame();
             }
             if (act == 2) { this.shell.Back(); }
+            if (act == 3) { this.shell.OpenMapSelect(); this.dirty = true; }
         }
     }
 
@@ -3139,20 +3218,41 @@ class Ra2Loop : IGuiHostLoop {
             // arbitrary buffer -- the menu shot used to survive by luck
             // of the rotation while the skirmish one came back blank.
             if (this.frames == 2) {
-                Ra2App.DumpScreen("build/ra2_shot_menu.bmp",
+                Ra2App.DumpScreen(Ra2App.ShotPath("ra2_shot_menu.bmp"),
                                   c);
             }
             if (this.frames == 4) {
-                Ra2App.DumpScreen("build/ra2_shot_single.bmp",
+                Ra2App.DumpScreen(Ra2App.ShotPath("ra2_shot_single.bmp"),
+                                  c);
+            }
+            // The skirmish shot fires while the setup screen is up (frame 5,
+            // before the country dropdown opens at 6). The map-picker shot
+            // is taken by the walk itself, on the frame it pushes the
+            // picker, because the picker's lifetime is driven by flags.
+            if (this.frames == 5) {
+                Console.WriteLine("selftest shot5 scene="
+                    + Convert.ToString(this.shell.CurrentScene())
+                    + " hasShellBg="
+                    + Convert.ToString(this.art != null
+                        && this.art.HasShellBg() ? 1 : 0));
+                Ra2App.DumpScreen(Ra2App.ShotPath("ra2_shot_skirmish.bmp"),
                                   c);
             }
             if (this.frames == 6) {
-                Ra2App.DumpScreen("build/ra2_shot_skirmish.bmp",
+                Ra2App.DumpScreen(Ra2App.ShotPath("ra2_shot_lobby.bmp"),
                                   c);
             }
+            // The map picker is pushed on frame 7 (visible) and committed on
+            // frame 8 (which pops back to setup). Shot 7 catches it open
+            // with the filter applied; shot 9 catches the setup screen the
+            // picker popped back to.
             if (this.frames == 7) {
-                Ra2App.DumpScreen("build/ra2_shot_lobby.bmp",
+                Ra2App.DumpScreen(Ra2App.ShotPath("ra2_shot_mapsel.bmp"),
                                   c);
+            }
+            if (this.frames == 9 && Ra2App.mapSelUsed) {
+                Ra2App.DumpScreen(
+                    Ra2App.ShotPath("ra2_shot_mapsel_used.bmp"), c);
             }
         }
     }
@@ -3162,15 +3262,41 @@ class Ra2Loop : IGuiHostLoop {
     void SelfTestScript(GuiHost host) {
         Canvas c = this.C;
 
-        // The retail menu has no skirmish entry: the walk goes through the
-        // 单人游戏 page like the original (single_player -> skirmish).
-        if (this.frames == 4) { this.shell.OpenSinglePlayer(); }
-        // Frame 5 presses 遭遇战 on that page; frame 6 lingers on the lobby
-        // (so the map preview builds) and then opens the country dropdown
-        // for the frame-7 shot.
-        if (this.frames == 5) { this.shell.OpenSkirmish(); }
+        // The reference's home list has Skirmish at the top level, so the
+        // walk goes menu -> setup directly (`HomeScreen.ts:55`).
+        if (this.frames == 4) { this.shell.OpenSkirmish(); }
+        // Frame 5 lingers on the setup screen; frame 6 opens the country
+        // dropdown for the frame-7 shot.
         if (this.frames == 6) { this.shell.SetCountryListOpen(true); }
         if (this.frames == 7) { this.shell.SelectMap(1); }
+        // The map picker: frame 7 pushes it with a filter and sort applied;
+        // the following frame commits the choice with 使用地图, which must
+        // pop back to setup with the new index. The shots are taken by
+        // SelfTestShots on the frames the screens are actually up -- dumping
+        // from here would capture the canvas from before the re-render.
+        if (this.frames == 7 && !Ra2App.mapSelOpened) {
+            Ra2App.mapSelOpened = true;
+            this.shell.OpenMapSelect();
+            this.shell.SetPickSearch("MP");
+            this.shell.SetPickSort(1);
+            Console.WriteLine("selftest mapsel scene="
+                + Convert.ToString(this.shell.CurrentScene())
+                + " pickMap=" + Convert.ToString(this.shell.PickMap())
+                + " sort=" + Convert.ToString(this.shell.PickSort())
+                + " search=" + this.shell.PickSearch()
+                + " maps=" + Convert.ToString(this.maps.Count));
+        }
+        if (this.frames == 8 && Ra2App.mapSelOpened && !Ra2App.mapSelUsed) {
+            Ra2App.mapSelUsed = true;
+            this.shell.SetPickSearch("");
+            this.shell.SetPickMap(2, this.maps.Count);
+            Console.WriteLine("selftest mapsel use="
+                + Convert.ToString(this.shell.PickMap()));
+            this.shell.UseMap();
+            Console.WriteLine("selftest mapsel back scene="
+                + Convert.ToString(this.shell.CurrentScene())
+                + " mapIndex=" + Convert.ToString(this.shell.MapIndex()));
+        }
         // The Soviet run: the sidebar's red chrome and the Soviet
         // roster ride shell's side flag, so flipping it before
         // StartGame re-themes the whole game view. Frame 9 keeps the
@@ -3179,7 +3305,7 @@ class Ra2Loop : IGuiHostLoop {
         if (this.frames == 7 && Ra2App.SelfTestSoviet()) {
             this.shell.SetSide(Side.Soviet());
         }
-        if (this.frames == 8) { this.shell.StartGame(); }
+        if (this.frames == 9) { this.shell.StartGame(); }
         // Frame 9: mid-load, the bar part-way with the LS800 backdrop
         // up -- the loading screen's regression shot. The bar fills
         // 50% per selftest frame, so frame 11's 100% flips to Playing
@@ -3187,8 +3313,8 @@ class Ra2Loop : IGuiHostLoop {
         // runs two frames later than it did before the load screen.
         if (this.frames == 9) {
             Ra2App.DumpScreen(this.shell.SideIndex() == 0
-                              ? "build/ra2_shot_loading.bmp"
-                              : "build/ra2_shot_loading_sov.bmp",
+                              ? Ra2App.ShotPath("ra2_shot_loading.bmp")
+                              : Ra2App.ShotPath("ra2_shot_loading_sov.bmp"),
                               c);
         }
         // Once the game is running, arm the second build (a power
@@ -3205,8 +3331,8 @@ class Ra2Loop : IGuiHostLoop {
             Ra2App.deployFrame = this.frames;
             Ra2App.ProbeUnlocked(this.game, "beforeDeploy");
             Ra2App.DumpScreen(this.shell.SideIndex() == 0
-                              ? "build/ra2_shot_mcv.bmp"
-                              : "build/ra2_shot_mcv_sov.bmp", c);
+                              ? Ra2App.ShotPath("ra2_shot_mcv.bmp")
+                              : Ra2App.ShotPath("ra2_shot_mcv_sov.bmp"), c);
             bool dep = this.game.DeploySelected();
             Console.WriteLine("selftest deploy " + (dep ? "ok" : "refused")
                 + " objects=" + Convert.ToString(this.world.ObjectCount()));
@@ -3222,8 +3348,8 @@ class Ra2Loop : IGuiHostLoop {
             if (!Ra2App.yardShown) {
                 Ra2App.yardShown = true;
                 Ra2App.DumpScreen(this.shell.SideIndex() == 0
-                                  ? "build/ra2_shot_yard.bmp"
-                                  : "build/ra2_shot_yard_sov.bmp", c);
+                                  ? Ra2App.ShotPath("ra2_shot_yard.bmp")
+                                  : Ra2App.ShotPath("ra2_shot_yard_sov.bmp"), c);
             }
             if (!Ra2App.buildArmed) {
                 Ra2App.buildArmed = true;
@@ -3345,8 +3471,8 @@ class Ra2Loop : IGuiHostLoop {
             // captured without combat effects over them.
             int pside = this.shell.SideIndex();
             Ra2App.DumpScreen(pside == 0
-                              ? "build/ra2_shot_tanks.bmp"
-                              : "build/ra2_shot_tanks_sov.bmp",
+                              ? Ra2App.ShotPath("ra2_shot_tanks.bmp")
+                              : Ra2App.ShotPath("ra2_shot_tanks_sov.bmp"),
                               c);
             // Then put a producing structure on screen and select it,
             // so the next frame's dump shows the training panel: the
@@ -3426,8 +3552,8 @@ class Ra2Loop : IGuiHostLoop {
             // selected structure's training panel); capture it, then
             // report and leave.
             Ra2App.DumpScreen(this.shell.SideIndex() == 0
-                              ? "build/ra2_shot_game_ui.bmp"
-                              : "build/ra2_shot_game_ui_sov.bmp",
+                              ? Ra2App.ShotPath("ra2_shot_game_ui.bmp")
+                              : Ra2App.ShotPath("ra2_shot_game_ui_sov.bmp"),
                               c);
             int objCount = this.world == null ? -1 : this.world.ObjectCount();
             int money = this.game == null ? -1 : this.game.Money();
@@ -3502,8 +3628,8 @@ class Ra2Loop : IGuiHostLoop {
             // Soviet leg re-enters here a second time, so this is
             // also where the flipped-side check actually stops it.
             Ra2App.DumpScreen(this.shell.SideIndex() == 0
-                              ? "build/ra2_shot_gamemenu.bmp"
-                              : "build/ra2_shot_gamemenu_sov.bmp",
+                              ? Ra2App.ShotPath("ra2_shot_gamemenu.bmp")
+                              : Ra2App.ShotPath("ra2_shot_gamemenu_sov.bmp"),
                               c);
             Console.WriteLine("selftest gamemenu open="
                 + Convert.ToString(Ra2App.gameMenu ? 1 : 0)
@@ -3556,8 +3682,8 @@ class Ra2Loop : IGuiHostLoop {
         // corridor, deadlocking the walk before StartGame.
         if (this.frames == 17 && Ra2App.stressLeft <= 0) {
             Ra2App.DumpScreen(this.shell.SideIndex() == 0
-                              ? "build/ra2_shot_quit.bmp"
-                              : "build/ra2_shot_quit_sov.bmp",
+                              ? Ra2App.ShotPath("ra2_shot_quit.bmp")
+                              : Ra2App.ShotPath("ra2_shot_quit_sov.bmp"),
                               c);
             Console.WriteLine("selftest quitconfirm buttons="
                 + Convert.ToString(Ra2App.MenuButtonCount()));
