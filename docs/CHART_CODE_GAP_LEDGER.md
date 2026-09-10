@@ -184,15 +184,67 @@ parallel/graph 整类失效 100%」是**过期结论**——它测的是 2026-09
 
 ---
 
-## 六、复现
+## 六、验证机制：两个不会腐烂的闸门
+
+截图口径之所以失效，是因为"判据"和"证据"都是像素，既不自证也不留存。
+补上两个**数值**闸门，正确性才有可执行的判据。
+
+### 闸门 1 · 数值 oracle（`scripts/ec_oracle.js`）
+
+**真的 ECharts 引擎可以在 node 里无头跑**：`dist/echarts.js` +
+`init(null,null,{renderer:'svg',ssr:true,width,height})` +
+`getZr().storage.getDisplayList(true)`，直接读出每个图元的**精确浮点
+几何**（`rect` 的 `x/y/width/height`、`circle` 的 `cx/cy/r`、`line` 的
+两端点），以及轴刻度文本。不需要解析 SVG，不需要窗口，不依赖时钟。
 
 ```bash
-python scripts/chart_gap_audit.py                # 汇总 + 未读键倒排
-python scripts/chart_gap_audit.py --markdown out.md
-python scripts/chart_gap_audit.py --json out.json
+node scripts/ec_oracle.js --option examples/gui_charts/options/bar-simple.json \
+     --width 400 --height 300
 ```
 
-无外部依赖（只读仓库内 `examples/gui_charts/options` 与
-`stdlib/Gui/Component/Chart`），因此在任何检出上可复现。
-语义对照（W1–W4、A1–A10）需 ECharts 6.1 源；本机在
-`_scratch/echarts-master/`，建议长期保存时另存 `docs/` 引用清单而非整树。
+实例（同一个 option，官方 vs 现引擎）：
+
+| 量 | 官方 oracle | 现引擎公式 |
+|----|-----------|-----------|
+| `bar-simple`（7 类目 1 系列，band=42.857） | 柱宽 **29.571**、首柱 x **66.643** | `groupW=step*7/10=30.0`，首柱 x ≈ 66.43 |
+| 4 类目 2 系列（band=75） | 柱宽 **26.071**、第二系列 x **98.804** | `barW=(52.5-2)/2=25.25`、x ≈ 98.8± |
+
+官方数由 `barGrid.ts:255-270` 精确复现：`barCategoryGap=max(35-2*4,15)%=27%`、
+`autoWidth=(75-20.25)/(2+0.1)=26.071`、组内起始偏移 `catgap/2=10.125`。
+
+**用法**：每个要移植的函数，先用 oracle 对一组固定输入取数，落成
+golden JSON；Zan 侧移植后必须逐值一致（浮点按 1e-3 比）。这把
+"像不像"换成了"等不等"。
+
+参照源码固定为 **6.1.0 / git `33ec5201159fe84f1317e4a7b00d63a73e095703`**；
+本机 `_scratch/echarts-master/` 有 README 保护、不被 7 天清理扫走，也可
+`git clone` 后 checkout 该 sha。
+
+### 闸门 2 · 未读配置键棘轮（`scripts/chart_gap_audit.py --check`）
+
+278 个未读键是**存量债**，靠人工记；棘轮保证它只减不增：
+
+```bash
+python scripts/chart_gap_audit.py --check docs/chart_gap_baseline.json
+```
+
+- 出现 baseline 之外的新未读键 → 退出码 1（新增 demo / 改 option 时
+  静默丢配置会当场被拦）。
+- Zan 侧**源引用丢失**同样报错——某个函数的 `文件:行` 出处被删掉，
+  等于这条移植失去审计能力，与新增缺口同级。
+- 实现一个键后重新 `--write-baseline`，账本同步删行。
+
+## 七、复现
+
+```bash
+python scripts/chart_gap_audit.py                        # 汇总 + 未读键倒排
+python scripts/chart_gap_audit.py --check docs/chart_gap_baseline.json
+python scripts/chart_gap_audit.py --write-baseline docs/chart_gap_baseline.json
+python scripts/chart_gap_audit.py --markdown out.md --json out.json
+node scripts/ec_oracle.js --option <option.json> [--width W] [--height H]
+```
+
+`chart_gap_audit.py` 无外部依赖（只读仓库内
+`examples/gui_charts/options` 与 `stdlib/Gui/Component/Chart`）。
+`ec_oracle.js` 需要 node + ECharts 6.1 dist（见闸门 1），是开发工具，
+不进构建、不进 ctest 档位。

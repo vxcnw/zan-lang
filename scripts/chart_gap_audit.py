@@ -107,12 +107,57 @@ def main():
     ap.add_argument('--markdown')
     ap.add_argument('--top', type=int, default=0,
                     help='limit unread keys listed (0 = all)')
+    ap.add_argument('--write-baseline', metavar='PATH',
+                    help='record the current gaps as the ratchet baseline')
+    ap.add_argument('--check', metavar='PATH',
+                    help='fail (exit 1) if new gaps appeared vs PATH')
     args = ap.parse_args()
 
     n_files, key_files, unread, cites, engine_src = scan()
     total_keys = len(key_files)
     total_lines = sum(len(t.splitlines()) for t in engine_src.values())
     cited_lines = sum(v[0] for v in cites.values())
+
+    if args.write_baseline:
+        json.dump({
+            'note': 'Ratchet baseline. New unread keys fail --check; remove keys '
+                    'as they are implemented. Regenerate deliberately.',
+            'unread_keys': sorted(unread),
+            'source_citations': {n: v[1] for n, v in cites.items()},
+        }, open(args.write_baseline, 'w', encoding='utf-8'),
+            ensure_ascii=False, indent=1)
+        print('wrote baseline: %d unread keys -> %s'
+              % (len(unread), args.write_baseline))
+        return 0
+
+    if args.check:
+        base = json.load(open(args.check, encoding='utf-8'))
+        known = set(base.get('unread_keys', []))
+        new = sorted(set(unread) - known)
+        # Citations are the audit trail for source-faithful ports; losing one
+        # means a ported function was rewritten without its provenance.
+        lost = []
+        for name, files in base.get('source_citations', {}).items():
+            now = set(cites.get(name, (0, []))[1])
+            gone = sorted(set(files) - now)
+            if gone:
+                lost.append('%s: %s' % (name, ', '.join(gone)))
+        if not new and not lost:
+            print('ratchet OK: no new unread keys, no lost source citations '
+                  '(%d unread keys still tracked)' % len(unread))
+            return 0
+        if new:
+            print('FAIL: %d option key(s) the engine never reads appeared:'
+                  % len(new))
+            for k in new:
+                print('   %-28s %s' % (k, ', '.join(sorted(unread[k])[:3])))
+        if lost:
+            print('FAIL: source-citation provenance dropped:')
+            for line in lost:
+                print('   ' + line)
+        print('\nEither implement the key, or add it to the baseline with '
+              '--write-baseline and say why in docs/CHART_CODE_GAP_LEDGER.md.')
+        return 1
 
     print('option files scanned      : %d' % n_files)
     print('distinct config keys      : %d' % total_keys)
@@ -159,7 +204,8 @@ def main():
             for k, fs in ordered:
                 fh.write('| `%s` | %d | %s |\n'
                          % (k, len(fs), ', '.join(sorted(fs)[:2])))
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
