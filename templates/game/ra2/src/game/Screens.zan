@@ -863,7 +863,13 @@ class Screens {
             bool[] enabled = new bool[10];
             bool[] bottom = new bool[10];
             int[] ids = new int[10];
-            labels[0] = ui.Or("GUI:Skirmish", "遭遇战");
+            // Note the first entry: the reference hardcodes the English
+            // literal `'Skirmish'` (`HomeScreen.ts:49`) rather than
+            // looking up a CSF key, so this port does the same. Passing
+            // "GUI:Skirmish" through `ui.Or` would pick up whatever the
+            // CSF holds for that key and silently diverge -- the diff
+            // tool (tools/ra2_diff.py) flags exactly that.
+            labels[0] = "Skirmish";
             labels[1] = "Load Game";
             labels[2] = "Live Interaction";
             labels[3] = "Replays";
@@ -888,19 +894,25 @@ class Screens {
             bottom[9] = true;
 
             // The reference's tooltips (`HomeScreen.ts:50,66,78,86,98,110,
-            // 120,131,142,151`), shown on the lower strip on hover.
+            // 120,131,142,151`), shown on the lower strip on hover. The
+            // ones without a CSF key are English literals in the
+            // reference; they are carried verbatim rather than
+            // translated, so the two implementations stay comparable.
             string[] tips = new string[10];
-            tips[0] = ui.Or("STT:SkirmishButtonStartGame",
-                            "与电脑进行一场单人遭遇战");
-            tips[1] = "继续一场已保存的遭遇战";
-            tips[2] = "进入直播互动模式";
-            tips[3] = "观看并回放对战录像";
-            tips[4] = "通过交换 SDP 建立局域网对战";
-            tips[5] = ui.Or("STT:Mods", "管理并游玩修改版");
-            tips[6] = ui.Or("STT:InfoAndCredits", "信息与制作群");
-            tips[7] = ui.Or("STT:MainButtonOptions", "游戏设置");
-            tips[8] = "底层文件系统与测试工具";
-            tips[9] = ui.Or("STT:Fullscreen", "切换全屏模式");
+            tips[0] = "Play a single-player skirmish against the AI";
+            tips[1] = "Continue a saved skirmish match";
+            tips[2] = "Enter live interaction mode, where viewer events such"
+                + " as joins, likes, and gifts drive both sides to send"
+                + " units into battle";
+            tips[3] = "View and play back game replays";
+            tips[4] = "Exchange SDP manually to establish a LAN P2P data"
+                + " channel";
+            tips[5] = ui.Or("STT:Mods", "Manage and play modified content");
+            tips[6] = ui.Or("STT:InfoAndCredits",
+                            "Information about the game and its credits");
+            tips[7] = ui.Or("STT:MainButtonOptions", "Game settings");
+            tips[8] = "Access low-level file system and testing tools";
+            tips[9] = ui.Or("STT:Fullscreen", "Toggle full screen mode");
 
             int slotCount = ShellLayout.SlotCount();
             int bottomRow = slotCount - 1;
@@ -1241,32 +1253,37 @@ class Screens {
             rowY[1] = 199 + 84;
             rowY[2] = 577 - 42;
             int[] ids = new int[3];
-            ids[0] = 1; ids[1] = 0; ids[2] = 2;
+            ids[0] = 1; ids[1] = 3; ids[2] = 2;
             for (int i = 0; i < 3; i = i + 1) {
                 ShellLayout.ButtonCell(rowY[i], rect);
                 int cellX = bx + rect[0] * bw / 800;
                 int cellY = by + rect[1] * bh / 600;
                 int cellW = rect[2] * bw / 800;
                 int cellH = rect[3] * bh / 600;
-                bool hov = inside && i != 1
+                bool hov = inside
                     && R2Panel.PointIn(mp[0], mp[1], rect[0], rect[1],
                                        rect[2], rect[3]);
                 bool pressed = hov && clicked;
                 if (pressed) { action = ids[i]; }
-                Screens.DrawSdbtnanm(r, art, cellX, cellY, cellW, cellH,
-                                     pressed, false);
+                int state = hov && clicked ? 4 : 2;
+                R2Tex btnPlate = art != null ? art.SlotFrame(state) : null;
+                if (btnPlate != null) {
+                    Screens.BlitShell(r, btnPlate, cellX, cellY, cellW, cellH,
+                                      bw, bh);
+                } else {
+                    Screens.DrawSdbtnanm(r, art, cellX, cellY, cellW, cellH,
+                                         pressed, false);
+                }
                 ShellLayout.CaptionRect(rect[0], rect[1], rect[2], rect[3],
                                         pressed, rect);
                 int capX = bx + rect[0] * bw / 800;
                 int capY = by + rect[1] * bh / 600;
                 int capW = rect[2] * bw / 800;
-                // 选图 is not wired yet: its plate still draws, but the
-                // caption reads as unavailable, the way the original dimmed
-                // buttons whose pages were not reached.
-                if (i == 1) { ShellLayout.TextDisabled(rgb); }
-                else { ShellLayout.TextEnabled(rgb); }
-                R2Text.DrawCentered(r, labels[i], capX + capW / 2, capY,
-                                    2, rgb[0], rgb[1], rgb[2], 255);
+                int capH = rect[3] * bh / 600;
+                ShellLayout.TextEnabled(rgb);
+                R2Text.DrawCentered(r, labels[i], capX + capW / 2,
+                                    capY + (capH - 12) / 2, 2,
+                                    rgb[0], rgb[1], rgb[2], 255);
             }
 
             // The lobby's left half keeps the original's row/options
@@ -1299,6 +1316,388 @@ class Screens {
                                              dx2, dy2, aw2, viewW, mouseX,
                                              mouseY, clicked);
         return act2;
+    }
+
+    /// <summary>The map picker, the screen 选图 pushes (`MapSelScreen.ts`).
+    /// Its sidebar is the reference's own list: 使用地图 / 导入地图 /
+    /// 取消 (`MapSelScreen.ts:211-252`), with 取消 bottom-pinned. The body is
+    /// a game-mode list, the map list with its sort dropdown, and the search
+    /// box (`MapSel.tsx:65-95`); the title is GUI:ChooseMap.</summary>
+    static int DrawMapSelect(R2Canvas r, ShellArt art, Shell shell,
+                             List<string> maps, R2Tex preview, Strings ui,
+                             int viewW, int viewH, int mouseX, int mouseY,
+                             bool clicked) {
+        List<int> rgb = new List<int>();
+        rgb.Add(0); rgb.Add(0); rgb.Add(0);
+        List<int> rect = new List<int>();
+        rect.Add(0); rect.Add(0); rect.Add(0); rect.Add(0);
+        // The mode list the reference offers, cooperative filtered out
+        // (`MapSelScreen.ts:182-184`).
+        int modeCount = Shell.ModeCount() - 1;
+        // The maps this mode can play. The install has no per-map game-mode
+        // table yet, so every map is listed under 遭遇战 and the other modes
+        // show an empty list -- the reference's filter, with the data it has.
+        int mapCount = shell.MapCount();
+        int act = 0;
+
+        // A filter + sort over the map list, mirroring `MapSel.tsx:33-64`.
+        // The visible order is a List<int> of map indices so the caller's
+        // order is never mutated.
+        List<int> order = new List<int>();
+        string needle = shell.PickSearch();
+        for (int i = 0; i < mapCount; i = i + 1) {
+            if (shell.PickMode() != 0) { break; }
+            string title = maps[i];
+            if (needle == "" || Screens.ContainsIgnoreCase(title, needle)) {
+                order.Add(i);
+            }
+        }
+        Screens.SortMapOrder(order, maps, shell.PickSort());
+
+        if (art != null && art.HasShellBg()) {
+            ShellLayout.BaseRect(viewW, viewH, rect);
+            int bx = rect[0];
+            int by = rect[1];
+            int bw = rect[2];
+            int bh = rect[3];
+            r.SetColor(0, 0, 0, 255);
+            r.FillRect(bx, by, bw, bh);
+            if (art.HasShellBg632()) {
+                Screens.BlitShell(r, art.ShellBg632(), bx, by, 632, 570,
+                                  bw, bh);
+            } else {
+                Screens.BlitShell(r, art.ShellBg(), bx, by, 800, 600,
+                                  bw, bh);
+            }
+            int panelX = 800 - 168;
+            if (art.HasPanelTop()) {
+                Screens.BlitShell(r, art.PanelTop(), bx + panelX * bw / 800,
+                                  by, 168, 199, bw, bh);
+            }
+            if (art.HasPanelTile()) {
+                for (int i = 0; i < 9; i = i + 1) {
+                    Screens.BlitShell(r, art.PanelTile(),
+                                      bx + panelX * bw / 800,
+                                      by + (199 + i * 42) * bh / 600,
+                                      168, 42, bw, bh);
+                }
+            }
+            if (art.HasPanelBottom()) {
+                Screens.BlitShell(r, art.PanelBottom(),
+                                  bx + panelX * bw / 800,
+                                  by + 577 * bh / 600, 168, 23, bw, bh);
+            }
+
+            List<int> mp = new List<int>();
+            mp.Add(0); mp.Add(0);
+            bool inside = ShellLayout.FromBase(viewW, viewH, mouseX, mouseY,
+                                               mp);
+
+            // Title: 选择战役, centred in the SDTP panel the way the setup
+            // screen centres 遭遇战.
+            int titleX = bx + (panelX + 3) * bw / 800;
+            int titleY = by + 9 * bh / 600;
+            int titleW = 163 * bw / 800;
+            ShellLayout.TextEnabled(rgb);
+            R2Text.DrawCentered(r, ui.Or("GUI:ChooseMap", "选择战役"),
+                                titleX + titleW / 2, titleY, 2,
+                                rgb[0], rgb[1], rgb[2], 255);
+
+            // ---- the body, in the reference's three columns ---------------
+            // The form fills the film area: the mode list on the left, the
+            // map list in the middle, the search box under it.
+            int bodyX = bx + 24 * bw / 800;
+            int bodyY = by + 30 * bh / 600;
+            int modeW = 130 * bw / 800;
+            int listW = 300 * bw / 800;
+            int rowH = 20 * bh / 600;
+            int listX = bodyX + modeW + 16 * bw / 800;
+            int listH = 300 * bh / 600;
+
+            // Game-mode list.
+            ShellLayout.TextEnabled(rgb);
+            R2Text.Draw(r, ui.Or("GUI:GameType", "游戏类型"), bodyX, bodyY, 1,
+                        rgb[0], rgb[1], rgb[2], 255);
+            for (int i = 0; i < modeCount; i = i + 1) {
+                int iy = bodyY + rowH + i * rowH;
+                bool sel = i == shell.PickMode();
+                bool hov = inside && R2Panel.PointIn(
+                    mp[0], mp[1], 24, 30 + (i + 1) * 20, modeW * 800 / bw,
+                    20);
+                if (sel) {
+                    r.SetColor(48, 28, 8, 255);
+                    r.FillRect(bodyX, iy, modeW, rowH);
+                } else if (hov) {
+                    r.SetColor(30, 20, 12, 255);
+                    r.FillRect(bodyX, iy, modeW, rowH);
+                }
+                ShellLayout.TextEnabled(rgb);
+                R2Text.Draw(r, Shell.ModeLabel(i), bodyX + 4, iy + 2, 1,
+                            rgb[0], rgb[1], rgb[2], 255);
+                if (hov && clicked) {
+                    shell.SetPickMode(i);
+                    act = 0;
+                }
+            }
+
+            // Map list + its 排序 dropdown. The sort control is a Select in
+            // the reference (`MapSel.tsx:71-78`), so it cycles its five
+            // options.
+            ShellLayout.TextEnabled(rgb);
+            R2Text.Draw(r, ui.Or("GUI:GameMap", "游戏地图"), listX, bodyY, 1,
+                        rgb[0], rgb[1], rgb[2], 255);
+            int sortX = listX + listW - 110 * bw / 800;
+            int sortW = 110 * bw / 800;
+            bool sortHov = inside && R2Panel.PointIn(
+                mp[0], mp[1], 24 + 130 + 16 + 300 - 110, 30, 110, 14);
+            r.SetColor(12, 12, 18, 255);
+            r.FillRect(sortX, bodyY - 2, sortW, rowH);
+            r.SetColor(sortHov ? 210 : 180, 24, 24, 255);
+            r.DrawRect(sortX, bodyY - 2, sortW, rowH);
+            ShellLayout.TextEnabled(rgb);
+            R2Text.Draw(r, Screens.SortLabel(shell.PickSort()), sortX + 4,
+                        bodyY, 1, rgb[0], rgb[1], rgb[2], 255);
+            if (sortHov && clicked) {
+                shell.SetPickSort((shell.PickSort() + 1) % 5);
+            }
+
+            // The rows themselves.
+            int listTop = bodyY + rowH;
+            r.SetColor(8, 8, 12, 255);
+            r.FillRect(listX, listTop, listW, listH);
+            r.SetColor(120, 20, 20, 255);
+            r.DrawRect(listX, listTop, listW, listH);
+            int visible = listH / rowH;
+            int scroll = shell.PickScroll();
+            int shown = 0;
+            for (int k = 0; k < order.Count; k = k + 1) {
+                if (k < scroll) { continue; }
+                if (shown >= visible) { break; }
+                int idx = order[k];
+                int iy = listTop + shown * rowH;
+                bool sel = idx == shell.PickMap();
+                bool hov = inside && R2Panel.PointIn(
+                    mp[0], mp[1], 24 + 130 + 16, 30 + 20 + k * 20,
+                    listW * 800 / bw, 20);
+                if (sel) {
+                    r.SetColor(48, 28, 8, 255);
+                    r.FillRect(listX, iy, listW, rowH);
+                } else if (hov) {
+                    r.SetColor(30, 20, 12, 255);
+                    r.FillRect(listX, iy, listW, rowH);
+                }
+                ShellLayout.TextEnabled(rgb);
+                R2Text.Draw(r, maps[idx], listX + 4, iy + 2, 1,
+                            rgb[0], rgb[1], rgb[2], 255);
+                if (hov && clicked) {
+                    shell.SetPickMap(idx, mapCount);
+                    act = 0;
+                }
+                shown = shown + 1;
+            }
+            if (order.Count == 0) {
+                ShellLayout.TextDisabled(rgb);
+                R2Text.Draw(r, "（没有符合条件的地图）", listX + 4,
+                            listTop + 4, 1, rgb[0], rgb[1], rgb[2], 255);
+            }
+
+            // Scrollbar, only when the list overflows.
+            if (order.Count > visible && visible > 0) {
+                int sbX = listX + listW + 3 * bw / 800;
+                int sbW = 8 * bw / 800;
+                r.SetColor(24, 12, 12, 255);
+                r.FillRect(sbX, listTop, sbW, listH);
+                int thumbH = listH * visible / order.Count;
+                if (thumbH < 8) { thumbH = 8; }
+                int travel = listH - thumbH;
+                int maxScroll = order.Count - visible;
+                if (maxScroll < 1) { maxScroll = 1; }
+                int thumbY = listTop + scroll * travel / maxScroll;
+                r.SetColor(200, 40, 40, 255);
+                r.FillRect(sbX, thumbY, sbW, thumbH);
+            }
+
+            // The search box (`MapSel.tsx:90-95`).
+            int srchY = listTop + listH + 8 * bh / 600;
+            ShellLayout.TextEnabled(rgb);
+            R2Text.Draw(r, ui.Or("GUI:Search", "搜索"), listX, srchY, 1,
+                        rgb[0], rgb[1], rgb[2], 255);
+            int boxX = listX + 50 * bw / 800;
+            int boxW = listW - 50 * bw / 800;
+            r.SetColor(8, 8, 12, 255);
+            r.FillRect(boxX, srchY - 2, boxW, rowH);
+            r.SetColor(140, 24, 24, 255);
+            r.DrawRect(boxX, srchY - 2, boxW, rowH);
+            string shownSearch = shell.PickSearch();
+            if (shownSearch == "") { shownSearch = "…"; }
+            ShellLayout.TextEnabled(rgb);
+            R2Text.Draw(r, shownSearch, boxX + 4, srchY, 1, rgb[0], rgb[1],
+                        rgb[2], 255);
+
+            // The preview sits in the sidebar's SDTP window the way the
+            // setup screen's does, so the picker shows what is selected.
+            int pvX = bx + 328 * bw / 800;
+            int pvY = by + 37 * bh / 600;
+            int pvW = 144 * bw / 800;
+            int pvH = 113 * bh / 600;
+            r.SetColor(8, 10, 16, 255);
+            r.FillRect(pvX, pvY, pvW, pvH);
+            r.SetColor(180, 24, 24, 255);
+            r.DrawRect(pvX, pvY, pvW, pvH);
+            if (preview != null) {
+                r.DrawTexture(preview, pvX + 2, pvY + 2, pvW - 4, pvH - 4);
+            }
+            ShellLayout.TextEnabled(rgb);
+            if (shell.PickMap() >= 0 && shell.PickMap() < mapCount) {
+                R2Text.Draw(r, maps[shell.PickMap()], bx + 328 * bw / 800,
+                            by + 188 * bh / 600, 1, rgb[0], rgb[1], rgb[2],
+                            255);
+            }
+
+            // The sidebar: 使用地图, 导入地图, 取消 (bottom).
+            string[] labels = new string[3];
+            labels[0] = ui.Or("GUI:UseMap", "使用地图");
+            labels[1] = ui.Or("TS:ImportMap", "导入地图");
+            labels[2] = ui.Or("GUI:Cancel", "取消");
+            int[] ids = new int[3];
+            ids[0] = 1; ids[1] = 2; ids[2] = 3;
+            int[] rowIndex = new int[3];
+            rowIndex[0] = 0;
+            rowIndex[1] = 1;
+            rowIndex[2] = ShellLayout.SlotCount() - 1;   // 取消 pinned bottom
+            for (int i = 0; i < 3; i = i + 1) {
+                ShellLayout.ButtonCell(ShellLayout.SlotTopY()
+                                       + rowIndex[i] * ShellLayout.TileH(),
+                                       rect);
+                int cellX = bx + rect[0] * bw / 800;
+                int cellY = by + rect[1] * bh / 600;
+                int cellW = rect[2] * bw / 800;
+                int cellH = rect[3] * bh / 600;
+                bool hov = inside && R2Panel.PointIn(
+                    mp[0], mp[1], rect[0], rect[1], rect[2], rect[3]);
+                // 导入地图 imports from the local filesystem, which this
+                // build has no picker for; it draws Unlit the way the
+                // reference draws a disabled entry.
+                bool usable = i != 1;
+                int state = !usable ? 1 : (hov && clicked ? 4 : 2);
+                R2Tex plate = art != null ? art.SlotFrame(state) : null;
+                if (plate != null) {
+                    Screens.BlitShell(r, plate, cellX, cellY, cellW, cellH,
+                                      bw, bh);
+                } else {
+                    Screens.DrawSdbtnanm(r, art, cellX, cellY, cellW, cellH,
+                                         hov && clicked, !usable);
+                }
+                ShellLayout.CaptionRect(rect[0], rect[1], rect[2], rect[3],
+                                        hov && clicked, rect);
+                int capX = bx + rect[0] * bw / 800;
+                int capY = by + rect[1] * bh / 600;
+                int capW = rect[2] * bw / 800;
+                int capH = rect[3] * bh / 600;
+                if (usable) { ShellLayout.TextEnabled(rgb); }
+                else { ShellLayout.TextDisabled(rgb); }
+                R2Text.DrawCentered(r, labels[i], capX + capW / 2,
+                                    capY + (capH - 12) / 2, 2,
+                                    rgb[0], rgb[1], rgb[2], 255);
+                if (hov && clicked && usable) { act = ids[i]; }
+            }
+
+            // The strip carries the selected mode's own description, the
+            // reference's gameMode.description tooltip
+            // (`MapSel.tsx:68`).
+            string tip = Shell.ModeDescription(shell.PickMode());
+            ShellLayout.TextEnabled(rgb);
+            R2Text.Draw(r, tip, bx + 10 * bw / 800, by + (600 - 21) * bh / 600,
+                        1, rgb[0], rgb[1], rgb[2], 255);
+            return act;
+        }
+
+        // No shell art: the same screen on the drawn backdrop.
+        R2Panel.Backdrop(r, null, viewW, viewH);
+        R2Text.DrawCentered(r, ui.Or("GUI:ChooseMap", "选择战役"),
+                            viewW / 2, 24, 2, 255, 214, 0, 255);
+        return 0;
+    }
+
+    /// <summary>Case-insensitive substring test for the map search box
+    /// (`MapSel.tsx:62` lowercases both sides).</summary>
+    static bool ContainsIgnoreCase(string hay, string needle) {
+        if (needle == "") { return true; }
+        string h = Screens.Lower(hay);
+        string n = Screens.Lower(needle);
+        if (n.Length > h.Length) { return false; }
+        for (int i = 0; i + n.Length <= h.Length; i = i + 1) {
+            bool same = true;
+            for (int k = 0; k < n.Length; k = k + 1) {
+                if (h[i + k] != n[k]) { same = false; break; }
+            }
+            if (same) { return true; }
+        }
+        return false;
+    }
+
+    static string Lower(string s) {
+        string low = "";
+        for (int i = 0; i < s.Length; i = i + 1) {
+            int c = s[i] & 255;
+            if (c >= 65 && c <= 90) { c = c + 32; }
+            low = low + (char)c;
+        }
+        return low;
+    }
+
+    static string SortLabel(int s) {
+        if (s == 1) { return "名称 ↓"; }
+        if (s == 2) { return "名称 ↑"; }
+        if (s == 3) { return "人数 ↓"; }
+        if (s == 4) { return "人数 ↑"; }
+        return "不排序";
+    }
+
+    /// <summary>Applies the picker's sort to the visible order, in place
+    /// (`MapSel.tsx:33-48`). Insertion sort: the lists are small and this
+    /// keeps the original order stable for equal keys.</summary>
+    static void SortMapOrder(List<int> order, List<string> maps, int sort) {
+        if (sort == 0) { return; }
+        for (int i = 1; i < order.Count; i = i + 1) {
+            int cur = order[i];
+            int j = i - 1;
+            while (j >= 0 && Screens.MapBefore(order[j], cur, maps, sort)) {
+                order[j + 1] = order[j];
+                j = j - 1;
+            }
+            order[j + 1] = cur;
+        }
+    }
+
+    /// <summary>True when a should sort after b.</summary>
+    static bool MapBefore(int a, int b, List<string> maps, int sort) {
+        int cmp = 0;
+        if (sort == 1 || sort == 2) {
+            cmp = Screens.CompareName(maps[a], maps[b]);
+            if (sort == 2) { cmp = 0 - cmp; }
+        }
+        // The install has no per-map max-slot table yet, so the two
+        // player-count orders fall back to the map order -- the reference
+        // sorts on maxSlots, which this port cannot read until the map
+        // header is parsed for it.
+        if (cmp > 0) { return true; }
+        return false;
+    }
+
+    /// <summary>Case-insensitive name compare, the reference's
+    /// localeCompare on the lowercased titles.</summary>
+    static int CompareName(string a, string b) {
+        string la = Screens.Lower(a);
+        string lb = Screens.Lower(b);
+        int n = la.Length < lb.Length ? la.Length : lb.Length;
+        for (int i = 0; i < n; i = i + 1) {
+            int ca = la[i] & 255;
+            int cb = lb[i] & 255;
+            if (ca != cb) { return ca < cb ? 0 - 1 : 1; }
+        }
+        if (la.Length == lb.Length) { return 0; }
+        return la.Length < lb.Length ? 0 - 1 : 1;
     }
 
     /// <summary>The lobby's left half -- player rows, options and the map
@@ -1368,7 +1767,16 @@ class Screens {
             if (!player && clicked && inside && R2Panel.PointIn(
                     mp[0], mp[1], Screens.DluX(35), Screens.DluY(dluY),
                     faceW * 800 / bw, faceH * 600 / bh)) {
-                shell.CycleEnemyDifficulty(i - 1);
+                // The AI row's difficulty opens a list, the way the
+                // reference's AI slots each own a Select
+                // (`LobbyForm.tsx:247-256`); one list is ever down, which the
+                // shell tracks in openList.
+                if (shell.OpenList() == Shell.ListEnemyDiff()
+                 && shell.OpenSlot() == i - 1) {
+                    shell.CloseList();
+                } else {
+                    shell.SetOpenList(Shell.ListEnemyDiff(), i - 1);
+                }
             }
 
             // Country face (row 0 and any open AI row), DLU x=180 w=78.
@@ -1382,17 +1790,30 @@ class Screens {
             r.FillRect(cX + 2, py + 2, cW - 4, faceH - 4);
             string country = player
                 ? Shell.FlatName(shell.FlatIndex()) : "随机(???)";
+            if (!player) {
+                country = shell.EnemyCountryName(i - 1);
+            }
             ShellLayout.TextEnabled(rgb);
             R2Text.Draw(r, country, cX + 4, py + 2, 1, rgb[0], rgb[1],
                         rgb[2], 255);
-            if (player && clicked && inside && R2Panel.PointIn(
+            if (clicked && inside && R2Panel.PointIn(
                     mp[0], mp[1], Screens.DluX(180), Screens.DluY(dluY),
                     cW * 800 / bw, faceH * 600 / bh)) {
-                shell.SetCountryListOpen(!shell.CountryListOpen());
+                // The player's list and an AI row's list are the same flat
+                // list; only the target differs, which openSlot carries.
+                if (player) {
+                    shell.SetCountryListOpen(!shell.CountryListOpen());
+                } else if (shell.OpenList() == Shell.ListEnemyCountry()
+                        && shell.OpenSlot() == i - 1) {
+                    shell.CloseList();
+                } else {
+                    shell.SetOpenList(Shell.ListEnemyCountry(), i - 1);
+                }
             }
 
             // Colour face, DLU x=264 w=35: the player's cycles the eight;
-            // AI rows wear hostile hues.
+            // AI rows carry their own colour, 随机 by default and settable
+            // per row (`LobbyForm.tsx:247-256` gives every AI a ColorSelect).
             int kX = dx + Screens.DluX(264) * bw / 800;
             int kW = Screens.DluX(35) * bw / 800;
             int cr2 = 196;
@@ -1403,9 +1824,20 @@ class Screens {
                 Shell.ColorRgb(shell.ColorIndex(), rgbp);
                 cr2 = rgbp[0]; cg2 = rgbp[1]; cb2 = rgbp[2];
             } else {
-                List<int> dot = new List<int>();
-                Screens.EnemySwatch(i, dot);
-                cr2 = dot[0]; cg2 = dot[1]; cb2 = dot[2];
+                // A row that has not been given a colour keeps the hostile
+                // default swatch; once the player picks one, the row wears
+                // the real house colour -- including the same colour the
+                // player picked, which the original allows.
+                int aiCol = shell.EnemyColor(i - 1);
+                if (aiCol >= 0) {
+                    List<int> rgbp = new List<int>();
+                    Shell.ColorRgb(aiCol, rgbp);
+                    cr2 = rgbp[0]; cg2 = rgbp[1]; cb2 = rgbp[2];
+                } else {
+                    List<int> dot = new List<int>();
+                    Screens.EnemySwatch(i, dot);
+                    cr2 = dot[0]; cg2 = dot[1]; cb2 = dot[2];
+                }
             }
             r.SetColor(8, 8, 12, 255);
             r.FillRect(kX, py, kW, faceH);
@@ -1413,29 +1845,94 @@ class Screens {
             r.DrawRect(kX, py, kW, faceH);
             r.SetColor(cr2, cg2, cb2, 255);
             r.FillRect(kX + 2, py + 2, kW - 4, faceH - 4);
-            if (player && clicked && inside && R2Panel.PointIn(
+            if (clicked && inside && R2Panel.PointIn(
                     mp[0], mp[1], Screens.DluX(264), Screens.DluY(dluY),
                     kW * 800 / bw, faceH * 600 / bh)) {
-                shell.SetColor((shell.ColorIndex() + 1) % 8);
+                if (player) {
+                    shell.SetColor((shell.ColorIndex() + 1) % 8);
+                } else {
+                    // Cycle 随机 -> colour 0..7 -> back to 随机.
+                    int next = shell.EnemyColor(i - 1) + 1;
+                    if (next > 7) { next = 0 - 1; }
+                    shell.SetEnemyColor(i - 1, next);
+                }
+            }
+
+            // Start-position face, DLU x=322 w=42 -- the column the earlier
+            // revision dropped entirely. The original shows the map's start
+            // waypoint number, with 1 being the first free spot; the player
+            // can pin one, the AI takes what is left.
+            int spX = dx + Screens.DluX(322) * bw / 800;
+            int spW = Screens.DluX(42) * bw / 800;
+            r.SetColor(8, 8, 12, 255);
+            r.FillRect(spX, py, spW, faceH);
+            r.SetColor(180, 24, 24, 255);
+            r.DrawRect(spX, py, spW, faceH);
+            string spTxt = Convert.ToString(i + 1);
+            if (player && shell.StartPosIndex() == 0) { spTxt = "随机"; }
+            ShellLayout.TextEnabled(rgb);
+            R2Text.DrawCentered(r, spTxt, spX + spW / 2, py + 2, 1,
+                                rgb[0], rgb[1], rgb[2], 255);
+            if (player && clicked && inside && R2Panel.PointIn(
+                    mp[0], mp[1], Screens.DluX(322), Screens.DluY(dluY),
+                    spW * 800 / bw, faceH * 600 / bh)) {
+                shell.SetStartPos((shell.StartPosIndex() + 1) % 9);
+            }
+
+            // Team face, DLU x=372 w=28: 无 or A..D, the four the reference
+            // caps at (`PregameController.ts:357`).
+            int tmX = dx + Screens.DluX(372) * bw / 800;
+            int tmW = Screens.DluX(28) * bw / 800;
+            r.SetColor(8, 8, 12, 255);
+            r.FillRect(tmX, py, tmW, faceH);
+            r.SetColor(180, 24, 24, 255);
+            r.DrawRect(tmX, py, tmW, faceH);
+            int tmVal = player ? shell.TeamIndex() : shell.EnemyTeam(i - 1);
+            ShellLayout.TextEnabled(rgb);
+            R2Text.DrawCentered(r, Team.NameOf(tmVal), tmX + tmW / 2, py + 2,
+                                1, rgb[0], rgb[1], rgb[2], 255);
+            if (clicked && inside && R2Panel.PointIn(
+                    mp[0], mp[1], Screens.DluX(372), Screens.DluY(dluY),
+                    tmW * 800 / bw, faceH * 600 / bh)) {
+                // 无 -> A -> B -> C -> D -> 无.
+                int next = tmVal + 1;
+                if (next >= Team.Max()) { next = Team.None(); }
+                if (player) { shell.SetTeam(next); }
+                else { shell.SetEnemyTeam(i - 1, next); }
             }
         }
 
-        // Checkboxes: DLU (35,145) (35,162) (35,179) (35,197) + build-off.
-        string[] checkLabels = new string[5];
+        // The option checkboxes. The reference's lobby form shows these down
+        // the left column and the build-off-ally one in the right column
+        // (`LobbyForm.tsx:148-217`); the labels are its CSF keys. All of them
+        // draw and all of them toggle -- the earlier revision declared five
+        // labels but looped `i < 5 && i < 4`, so 联军建筑 was dead.
+        string[] checkLabels = new string[8];
         checkLabels[0] = ui.Or("GUI:ShortGame", "快速游戏");
         checkLabels[1] = ui.Or("GUI:MCVRepacks", "基地重新部署");
         checkLabels[2] = ui.Or("GUI:CratesAppear", "升级工具箱");
         checkLabels[3] = ui.Or("GUI:Superweapons", "超级武器");
-        checkLabels[4] = "联军建筑";
-        bool[] checkVals = new bool[5];
+        checkLabels[4] = ui.Or("GUI:DestroyableBridges", "可摧毁桥梁");
+        checkLabels[5] = ui.Or("GUI:MultiEngineer", "多人工程师");
+        checkLabels[6] = ui.Or("GUI:NoDogEngiKills", "警犬不杀工程师");
+        checkLabels[7] = ui.Or("GUI:BuildOffAlly", "联军建筑");
+        bool[] checkVals = new bool[8];
         checkVals[0] = shell.ShortGame();
         checkVals[1] = shell.McvRedeploy();
         checkVals[2] = shell.Crates();
         checkVals[3] = shell.Superweapons();
-        checkVals[4] = false;
-        for (int i = 0; i < 5 && i < 4; i = i + 1) {
+        checkVals[4] = shell.DestroyableBridges();
+        checkVals[5] = shell.MultiEngineer();
+        checkVals[6] = shell.NoDogEngiKills();
+        checkVals[7] = shell.BuildOffAlly();
+        for (int i = 0; i < 8; i = i + 1) {
+            // Seven down the left edge (DLU x=35, y 145 + 17*i); 联军建筑
+            // sits in the right column under the three sliders, the way the
+            // reference places BuildOffAlly (`LobbyForm.tsx:212-217`).
             int dluY = 145 + i * 17;
-            int cbX = dx + Screens.DluX(35) * bw / 800;
+            int dluX = 35;
+            if (i == 7) { dluY = 196; dluX = 320; }
+            int cbX = dx + Screens.DluX(dluX) * bw / 800;
             int cbY = dy + Screens.DluY(dluY) * bh / 600;
             int cbS = Screens.DluX(18) * bw / 800;
             r.SetColor(90, 20, 20, 255);
@@ -1452,12 +1949,16 @@ class Screens {
             R2Text.Draw(r, checkLabels[i], cbX + cbS + 6, cbY, 1,
                         rgb[0], rgb[1], rgb[2], 255);
             if (clicked && inside && R2Panel.PointIn(
-                    mp[0], mp[1], Screens.DluX(35), Screens.DluY(dluY),
+                    mp[0], mp[1], Screens.DluX(dluX), Screens.DluY(dluY),
                     110, 14)) {
                 if (i == 0) { shell.ToggleShortGame(); }
                 if (i == 1) { shell.ToggleMcvRedeploy(); }
                 if (i == 2) { shell.ToggleCrates(); }
                 if (i == 3) { shell.ToggleSuperweapons(); }
+                if (i == 4) { shell.ToggleDestroyableBridges(); }
+                if (i == 5) { shell.ToggleMultiEngineer(); }
+                if (i == 6) { shell.ToggleNoDogEngiKills(); }
+                if (i == 7) { shell.ToggleBuildOffAlly(); }
             }
         }
 
@@ -1485,10 +1986,18 @@ class Screens {
             r.FillRect(trX, trY, trW, trH);
             r.SetColor(12, 12, 16, 255);
             r.FillRect(trX + 2, trY + 2, trW - 4, trH - 4);
+            // The three sliders. Speed has seven stops (0..6), units 0..10,
+            // and money the original's own span -- the reference clamps it to
+            // 500..100000 (`Shell.AdjustCredits`), so the thumb maps that
+            // range rather than a 0..100 grid, which used to leave both ends
+            // of the track unreachable.
             int pos = 0;
             int max = 1;
             if (i == 0) { pos = shell.GameSpeed(); max = 6; }
-            if (i == 1) { pos = shell.StartCredits() / 1000; max = 100; }
+            if (i == 1) {
+                pos = (shell.StartCredits() - 500) * 100 / 99500;
+                max = 100;
+            }
             if (i == 2) { pos = shell.UnitCount(); max = 10; }
             int thumbW = Screens.DluX(12) * bw / 800;
             int travel = trW - 4 - thumbW;
@@ -1505,34 +2014,49 @@ class Screens {
                     85, 13)) {
                 int half = (mp[0] - Screens.DluX(214)) * max / 85;
                 if (i == 0) { shell.SetSpeed(half); }
-                if (i == 1) { shell.AdjustCredits(half * 1000
-                    - shell.StartCredits()); }
+                if (i == 1) {
+                    shell.AdjustCredits(500 + half * 99500 / 100
+                                        - shell.StartCredits());
+                }
                 if (i == 2) { shell.AdjustUnits(half - shell.UnitCount()); }
             }
         }
 
-        // The country dropdown, over the rows: right under the player's
-        // country face.
-        if (shell.CountryListOpen()) {
+        // The country dropdown, over the rows: right under the face that
+        // opened it -- the player's own row, or an AI row. The reference
+        // gives every slot a CountrySelect, so the same list serves both
+        // (`LobbyForm.tsx:247-256`).
+        bool countryListOpen = shell.CountryListOpen()
+            || shell.OpenList() == Shell.ListEnemyCountry();
+        int countryListRow = 0;
+        if (shell.OpenList() == Shell.ListEnemyCountry()) {
+            countryListRow = shell.OpenSlot() + 1;
+        }
+        if (countryListOpen) {
+            int clDluY = 11 + countryListRow * 16;
             int listX = dx + Screens.DluX(180) * bw / 800;
-            int listY = dy + Screens.DluY(11) * bh / 600
-                + Screens.DluY(10) * bh / 600;
+            int listY = dy + Screens.DluY(clDluY + 10) * bh / 600;
             int listW = Screens.DluX(78) * bw / 800;
-            int listH = Shell.FlatCount() * Screens.DluY(15) * bh / 600;
+            // 随机 plus the ten real countries, so an AI row can go back to
+            // random after a concrete pick.
+            int rows = Shell.FlatCount() + 1;
+            int listH = rows * Screens.DluY(15) * bh / 600;
             r.SetColor(12, 12, 18, 255);
             r.FillRect(listX, listY, listW, listH);
             r.SetColor(180, 24, 24, 255);
             r.DrawRect(listX, listY, listW, listH);
             bool took = false;
-            for (int i = 0; i < Shell.FlatCount(); i = i + 1) {
-                int idx = i + 1;
+            int cur = shell.OpenList() == Shell.ListEnemyCountry()
+                ? shell.EnemyCountry(shell.OpenSlot()) : shell.FlatIndex();
+            for (int i = 0; i < rows; i = i + 1) {
+                int idx = i;
                 int rowH = Screens.DluY(15) * bh / 600;
                 int iy = listY + i * rowH;
                 string nm = Shell.FlatName(idx);
                 bool hov = inside && R2Panel.PointIn(
                     mp[0], mp[1], Screens.DluX(180),
-                    Screens.DluY(21) + i * 15, 78, 15);
-                if (idx == shell.FlatIndex()) {
+                    Screens.DluY(clDluY + 10) + i * 15, 78, 15);
+                if (idx == cur) {
                     r.SetColor(48, 28, 8, 255);
                     r.FillRect(listX, iy, listW, rowH);
                 } else if (hov) {
@@ -1543,8 +2067,13 @@ class Screens {
                 R2Text.Draw(r, nm, listX + 4, iy, 1, rgb[0], rgb[1],
                             rgb[2], 255);
                 if (hov && clicked) {
-                    shell.SetFlatCountry(idx);
-                    shell.SetCountryListOpen(false);
+                    if (shell.OpenList() == Shell.ListEnemyCountry()) {
+                        shell.SetEnemyCountry(shell.OpenSlot(), idx);
+                        shell.CloseList();
+                    } else {
+                        shell.SetFlatCountry(idx);
+                        shell.SetCountryListOpen(false);
+                    }
                     took = true;
                 }
             }
@@ -1552,10 +2081,59 @@ class Screens {
         }
         if (clicked && inside && !R2Panel.PointIn(mp[0], mp[1],
                 Screens.DluX(180), Screens.DluY(21), 78,
-                15 * Shell.FlatCount()) && shell.CountryListOpen()
+                15 * (Shell.FlatCount() + 1)) && countryListOpen
             && !R2Panel.PointIn(mp[0], mp[1], Screens.DluX(180),
-                                Screens.DluY(11), 78, 10)) {
-            shell.SetCountryListOpen(false);
+                                Screens.DluY(11 + countryListRow * 16),
+                                78, 10)) {
+            shell.CloseList();
+        }
+
+        // An AI row's difficulty list, hung under the row's name face. All
+        // five of the reference's skill names are offered
+        // (`PregameController.ts:312-323`).
+        if (shell.OpenList() == Shell.ListEnemyDiff()) {
+            int slot = shell.OpenSlot();
+            int row = slot + 1;
+            int dluY = 11 + row * 16;
+            int listX = dx + Screens.DluX(35) * bw / 800;
+            int listY = dy + Screens.DluY(dluY + 10) * bh / 600;
+            int listW = Screens.DluX(100) * bw / 800;
+            int rowH = Screens.DluY(15) * bh / 600;
+            int listH = Difficulty.Count() * rowH;
+            r.SetColor(12, 12, 18, 255);
+            r.FillRect(listX, listY, listW, listH);
+            r.SetColor(180, 24, 24, 255);
+            r.DrawRect(listX, listY, listW, listH);
+            bool tookDiff = false;
+            for (int k = 0; k < Difficulty.Count(); k = k + 1) {
+                int iy = listY + k * rowH;
+                bool hov = inside && R2Panel.PointIn(
+                    mp[0], mp[1], Screens.DluX(35), Screens.DluY(dluY + 10)
+                    + k * 15, 100, 15);
+                if (k == shell.EnemyDifficulty(slot)) {
+                    r.SetColor(48, 28, 8, 255);
+                    r.FillRect(listX, iy, listW, rowH);
+                } else if (hov) {
+                    r.SetColor(30, 20, 12, 255);
+                    r.FillRect(listX, iy, listW, rowH);
+                }
+                ShellLayout.TextEnabled(rgb);
+                R2Text.Draw(r, Difficulty.NameOf(k), listX + 4, iy, 1,
+                            rgb[0], rgb[1], rgb[2], 255);
+                if (hov && clicked) {
+                    shell.SetEnemyDifficulty(slot, k);
+                    shell.CloseList();
+                    tookDiff = true;
+                }
+            }
+            if (clicked && inside && !tookDiff
+             && !R2Panel.PointIn(mp[0], mp[1], Screens.DluX(35),
+                                 Screens.DluY(dluY + 10), 100,
+                                 15 * Difficulty.Count())
+             && !R2Panel.PointIn(mp[0], mp[1], Screens.DluX(35),
+                                 Screens.DluY(dluY), 100, 10)) {
+                shell.CloseList();
+            }
         }
     }
 
