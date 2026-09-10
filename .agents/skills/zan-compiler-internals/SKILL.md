@@ -52,9 +52,42 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
   dtor/retain 跳过 target 槽（是函数非对象）；无捕获 lambda 也走 rec-first
   （`is_closure || target_is_wasm32`）。C 回调 cast `(nint)M` 走裸 fn 指针
   路径（emit_raw_fn_for_cb_cast），与记录互不干扰。
+- **根修兜底（2026-09-11）：wasm 链接加 `--table-base=2`（main.c wasm-ld
+  命令行）**。lld 默认表基址 1，地址取函数的表索引奇偶皆有——任何漏网
+  的裸 fn delegate（如 `inp.Size = vm.x` 合成 Binding 访问器曾是裸指针，
+  `emit_binding_acc_delegate` 已按 mg 形状收口）都会撞 tag：索引 N 被当
+  tagged 记录 untag 成 N-1，间接调用恰好落进相邻函数（实测 Canvas_DrawGlyph
+  落进 getenv）。表基址挪到 2 后裸索引恒为偶，native 的「偶数才合法」
+  假设在 wasm 上成立，整族漏网点一次性免疫。
 - **教训**：中间层用「指针低位 tag」复用值位时，必须审计目标平台上"这个
   位模式是否真的不可能出现"——函数表索引/句柄/压缩指针都可能撞 tag。
   新 target 落地时对"native 偶数才合法"的隐含假设逐个显式化。
+
+## wasm32 局部数爆炸：V8 每函数 5 万局部硬上限（2026-09-11）
+
+- **症状**：浏览器 `WebAssembly.instantiate` 报 `Compiling function #N:"X"
+  failed: local count too large`。V8 上限 50,000 局部/函数；gui_gallery 的
+  RenderPreviewEx（1.1 万行 IR）在默认档发出 116,222 个局部。
+- **根因**：默认档（ZAN_OPT_NONE）走 `fast_codegen`→`LLVMCodeGenLevelNone`，
+  wasm 后端零 stackify，几乎每条 IR 中间值都落成一个 wasm local（11.3 万
+  IR 行 ≈ 11.6 万局部，一比一）。wasm32 上跳过 `fast_codegen`（main.c
+  `if (!irgen.target_is_wasm) irgen.fast_codegen = true;`）后同一函数 731
+  局部，全模块 max 731，编译 60s 可接受。**诊断工具**：解析 wasm code
+  section 的 ULEB local 声明即可按函数计数（`_scratch` 里现成
+  wasmlocals.py/wasmname.py 思路：导入函数计数偏移 + 每函数 `count×valtype`
+  对求和）。
+- **DLLImport nint 的坑**：`map_type` 对 TYPE_NINT 恒发 i64（所有 target）。
+  embedres.c 往 File.zan 的 `nint zan_embed_bytes` 声明里塞函数体时，返回
+  值必须按声明的实际返回类型 coerce（ptrtoint）；x64 宽度撞对掩盖了非法
+  IR，wasm32 的 32 位指针立刻 `type error in return[0] (expected i64, got
+  i32)`。凡「编译器合成的函数体装进 DllImport 声明」都要查这一层。
+- **wasi-libc getenv 在 zan shim 下崩**：libc 惰性 environ 初始化走 zan
+  WASI shim 的空 environ 契约，strncmp 读野指针 OOB（只在分配压力大、
+  渲染中途首次 getenv 时炸，启动时探针复现不了）。H5 无环境变量——
+  rt_sync_wasm.c 直接 stub `getenv→NULL`（显式 .o 优先于 libc.a 档案）。
+- **stdlib 快照坑**：wasm gallery 构建用 `--stdlib-path _scratch/h5gui/
+  stdlib_min`（带 WASI 分支的裁剪快照），**repo stdlib 的修复必须镜像进
+  快照**（Effects.zan TakeDamage 首帧 null 守卫），否则构建用的还是旧代码。
 
 ## parser：looks_like_var_decl 的分派契约
 

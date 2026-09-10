@@ -67,6 +67,13 @@ rem event-injection door (see the JS host in the H5 template).
 rem gnu11, not c11: wasi-libc hides clock_gettime (gui shell's tick) and
 rem stb_vorbis's alloca behind the GNU feature-test macros.
 "%ZIG%" cc -target wasm32-wasi -g0 -std=gnu11 -I %RT% -I %RT%\libwebp\src -O2 -c %RT%\gui_runtime.c -DZAN_GUI_WASM -o toolchain\wasm32\zanrt_gui.o || exit /b 1
+rem Single-threaded sync equivalents for wasm32 GUI programs (rt_sync_wasm.c):
+rem threads run their body synchronously, atomics are plain cells, the shared
+rem table degrades to "unavailable", clocks are real. main.c links this next to
+rem zanrt_gui.o so GUI-sized stdlib pull-ins (DataTable export, HttpClient
+rem timeout plumbing) satisfy zan_thread_/zan_atomic_int_/zan_monotonic_/
+rem zan_shared_table_ references without rt_sync.o.
+"%ZIG%" cc -target wasm32-wasi -g0 -std=gnu11 -I %RT% -O2 -c %RT%\rt_sync_wasm.c -o toolchain\wasm32\zanrt_syncw.o || exit /b 1
 echo built toolchain\wasm32
 
 rem Android (bionic): zig cc has no bionic target, so this block needs the

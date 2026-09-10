@@ -377,6 +377,14 @@ static void embed_emit_read_has_bytes(zan_irgen_t *g, struct embed_api_ctx *c,
     LLVMTypeRef bty = LLVMFunctionType(c->i8p, bargs, 2, 0);
     LLVMValueRef bfn = embed_define(g, "zan_embed_bytes", bty);
     if (!bfn) { LLVMDisposeBuilder(b); return; }
+    /* embed_define reuses the declaration File.zan's DllImport already made,
+     * and TYPE_NINT lowers to i64 on every target (irgen.c map_type), so the
+     * reused function returns i64 while the body's natural result is the data
+     * pointer. On 64-bit targets the widths coincide and the mis-typed ret
+     * slipped through; wasm32's 32-bit pointers hit it as a real module
+     * validation error ("type error in return[0] (expected i64, got i32)").
+     * Coerce both returns to the declaration's actual return type. */
+    LLVMTypeRef brt = LLVMGetReturnType(LLVMGlobalGetValueType(bfn));
     LLVMBasicBlockRef bb0 = LLVMAppendBasicBlockInContext(g->ctx, bfn, "entry");
     LLVMBasicBlockRef bgot = LLVMAppendBasicBlockInContext(g->ctx, bfn, "got");
     LLVMBasicBlockRef bnil = LLVMAppendBasicBlockInContext(g->ctx, bfn, "nil");
@@ -398,14 +406,17 @@ static void embed_emit_read_has_bytes(zan_irgen_t *g, struct embed_api_ctx *c,
     LLVMBuildBr(b, bdg);
     LLVMPositionBuilderAtEnd(b, bdg);
     LLVMValueRef bdp = LLVMBuildStructGEP2(b, c->ent_ty, be, 1, "dp");
-    LLVMBuildRet(b, LLVMBuildLoad2(b, c->i8p, bdp, "d"));
+    LLVMValueRef bd = LLVMBuildLoad2(b, c->i8p, bdp, "d");
+    if (brt != c->i8p) bd = LLVMBuildPtrToInt(b, bd, brt, "d.n");
+    LLVMBuildRet(b, bd);
     LLVMPositionBuilderAtEnd(b, bnil);
     LLVMBuildCondBr(b, LLVMBuildIsNull(b, bo, "noout2"), bdn, bsn);
     LLVMPositionBuilderAtEnd(b, bsn);
     LLVMBuildStore(b, LLVMConstInt(c->i32, 0, 0), bo);
     LLVMBuildBr(b, bdn);
     LLVMPositionBuilderAtEnd(b, bdn);
-    LLVMBuildRet(b, LLVMConstNull(c->i8p));
+    LLVMBuildRet(b, brt == c->i8p ? LLVMConstNull(c->i8p)
+                                  : LLVMConstInt(brt, 0, 0));
 
     LLVMDisposeBuilder(b);
 }

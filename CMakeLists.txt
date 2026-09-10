@@ -1489,6 +1489,13 @@ foreach(_src ${_conf_srcs})
   elseif(_name STREQUAL "server_mvc_timezone")
     set(_extra_args
       "${CMAKE_SOURCE_DIR}/templates/server/server-mvc/src/Framework/Fmt.zan")
+  elseif(_name STREQUAL "file_embed_bytes")
+    # The case reads its fixtures back through the embedded-resource API;
+    # they are registered under "assets/..." via --embed. (Same branch as the
+    # conformance loop above -- without it the arcguard twin fails on the
+    # first File.Exists before any ARC property is exercised.)
+    set(_extra_args
+      "--embed;${CMAKE_SOURCE_DIR}/tests/conformance/embed_assets=assets")
   elseif(_needs_gui_driver)
     set(_extra_args "${_gui_driver_args}")
   else()

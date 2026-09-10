@@ -259,8 +259,12 @@ static LLVMValueRef emit_co_live_has(zan_irgen_t *g, LLVMValueRef frame) {
  * the coroutine completes, a reaper frees it, or an unwind skips it -- because
  * an entry that outlives its frame would wake freed memory when it comes due. */
 static void emit_co_cancel_delay(zan_irgen_t *g, LLVMValueRef frame) {
+    /* The real definition (rt_timer.c) returns the cancel count; the call
+     * sites ignore it. On wasm32 wasm-ld enforces exact signatures, so the
+     * declaration must carry the i32 return too or the link synthesizes a
+     * mismatch against zanrt_timer.o. */
     LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
-    LLVMTypeRef ty = LLVMFunctionType(LLVMVoidTypeInContext(g->ctx), &i8ptr, 1, 0);
+    LLVMTypeRef ty = LLVMFunctionType(LLVMInt32TypeInContext(g->ctx), &i8ptr, 1, 0);
     LLVMValueRef fn = LLVMGetNamedFunction(g->mod, "zan_timer_cancel_delay");
     if (!fn) fn = LLVMAddFunction(g->mod, "zan_timer_cancel_delay", ty);
     zan_call2(g->builder, ty, fn, &frame, 1, "");

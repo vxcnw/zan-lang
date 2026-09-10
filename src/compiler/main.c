@@ -3513,7 +3513,14 @@ int main(int argc, char **argv) {
          * IDE, tests, and every plain `zanc foo.zan`). Unreachable definitions
          * are still dropped: emitting a whole globbed-in stdlib directory costs
          * far more time and size than the sweep itself. */
-        irgen.fast_codegen = true;
+        /* Not for wasm32: at CGLevelNone the WebAssembly backend stackifies
+         * nothing and lowers nearly every IR value to a wasm local, so any
+         * nontrivial function blows past V8's hard 50,000-locals-per-function
+         * cap and the module fails to instantiate ("local count too large").
+         * gui_gallery's RenderPreviewEx alone emitted 116k locals; the
+         * optimizing selector keeps the same source under ~3k. */
+        if (!irgen.target_is_wasm)
+            irgen.fast_codegen = true;
         if (!do_emit_ir) {
             zan_opt_strip_unused(&irgen);
             /* The sweep just erased the imports nothing calls; drop their
@@ -4531,16 +4538,22 @@ int main(int argc, char **argv) {
                     NULL
                 };
                 static const char *const gui_pre[] = { "zan_gui_", NULL };
-                /* zan_dispatch_* (Gui.Dispatcher's queue) is provided by
-                 * zanrt_gui.o on wasm -- a lock-free ring, since the worker
-                 * has one thread (gui_runtime_wasm.c). So a GUI program
-                 * (one that references zan_gui_*, pulling the gui object)
-                 * may reference the dispatcher; anything else that needs
-                 * rt_sync still cannot link. */
+                /* Two escape hatches from the rejection, both backed by
+                 * single-threaded wasm equivalents in the shipped objects:
+                 * zan_dispatch_* comes from zanrt_gui.o (lock-free ring,
+                 * gui_runtime_wasm.c) whenever the program is a GUI one;
+                 * everything else in the list has a stub in
+                 * zanrt_syncw.o (rt_sync_wasm.c): threads run their body
+                 * synchronously, atomics are plain cells, the shared table
+                 * degrades to "unavailable", clocks are real. Programs
+                 * whose parallelism/cross-process semantics actually
+                 * matter get silently-wrong behavior from these stubs --
+                 * the honest answers stay ZAN_OS_WASI exclusions (see the
+                 * NetworkInterface/Ping rejection via zan_plat_). */
                 int has_disp = wasm_obj_refs_any(obj_tmp, disp_pre);
                 int has_other = wasm_obj_refs_any(obj_tmp, other_sync_pre);
-                needs_sync = has_other
-                    || (has_disp && !wasm_obj_refs_any(obj_tmp, gui_pre));
+                needs_sync = (has_other || has_disp)
+                    && !wasm_obj_refs_any(obj_tmp, gui_pre);
             }
             if (needs_sync) {
                 fprintf(stderr,
@@ -5977,11 +5990,20 @@ int main(int argc, char **argv) {
                 /* Same declaration-level coarseness as the sync flag: the
                  * flag is set by any compiled zan_io_socket_* / zan_gate_*
                  * declaration, but only a real undefined reference needs the
-                 * reactor object (which cannot link on wasm). */
+                 * reactor object (which cannot link on wasm). GUI programs
+                 * get clean-failure socket stubs from zanrt_syncw.o instead
+                 * of a rejection -- HttpClient's timeout plumbing and the
+                 * like references these symbols while never opening a real
+                 * socket; anything that actually connects will see the
+                 * failure surfaced through its Zan-side error handling. */
                 static const char *const sock_pre[] = {
-                    "zan_io_socket_", "zan_gate_", NULL
+                    "zan_io_socket_", "zan_gate_", "zan_io_connect_",
+                    "zan_io_resolve", "zan_io_sockaddr_",
+                    NULL
                 };
-                if (wasm_obj_refs_any(obj_tmp, sock_pre)) {
+                static const char *const gui_pre2[] = { "zan_gui_", NULL };
+                if (wasm_obj_refs_any(obj_tmp, sock_pre)
+                    && !wasm_obj_refs_any(obj_tmp, gui_pre2)) {
                     fprintf(stderr,
                             "error: socket-async programs are not available for "
                             "the wasm32 target\n");
@@ -5993,8 +6015,16 @@ int main(int argc, char **argv) {
                 }
             }
             char cmd[8192];
+            /* --table-base=2: Zan delegate values tag heap closure records
+             * with bit 0 (zan_abi.h ZAN_CLOSURE_TAG) and treat even values as
+             * bare function pointers. On wasm32 a bare fn pointer is a
+             * function-table index, and lld's default table base of 1 makes
+             * odd indices legal raw addresses -- one odd index read through a
+             * tag-test misroutes to function N-1 (Canvas_DrawGlyph landing in
+             * getenv was exactly that). Basing the table at 2 keeps every
+             * raw index even, so the native assumption holds on wasm too. */
             snprintf(cmd, sizeof(cmd),
-                     "wasm-ld%s -o \"%s\" \"%s/crt1.o\" \"%s\"",
+                     "wasm-ld%s --table-base=2 -o \"%s\" \"%s/crt1.o\" \"%s\"",
                      publish_mode ? " -s --gc-sections" : "", obj_path, sys, obj_tmp);
             for (int ei = 0; ei < extra_link_input_count; ei++) {
                 size_t cur = strlen(cmd);
@@ -6043,6 +6073,20 @@ int main(int argc, char **argv) {
                     size_t cur = strlen(cmd);
                     snprintf(cmd + cur, sizeof(cmd) - cur,
                              " \"%s\" --export=zan_gui_wasm_feed", guiobj);
+                    /* Sync-family symbols the GUI stdlib pulls in
+                     * (threads/atomics/monotonic/monitor): single-threaded
+                     * equivalents from rt_sync_wasm.c. Linked only for GUI
+                     * programs, the same gate that vouches for the
+                     * single-threaded execution model making those
+                     * equivalents sound. */
+                    char syncwobj[1300];
+                    snprintf(syncwobj, sizeof(syncwobj),
+                             "%s/zanrt_syncw.o", sys);
+                    if (zan_file_exists(syncwobj)) {
+                        size_t cur2 = strlen(cmd);
+                        snprintf(cmd + cur2, sizeof(cmd) - cur2, " \"%s\"",
+                                 syncwobj);
+                    }
                 }
             }
             if (irgen.wasm_eh_used) {

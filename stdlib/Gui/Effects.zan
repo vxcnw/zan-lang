@@ -30,6 +30,10 @@ class BackdropFx {
     /// 供 App.FxPresent 只修复被画过的矩形。
     static List<int> TakeDamage() {
         List<int> d = BackdropFx.damage;
+        /* 首帧先于任何 Mark 到来时 damage 还是 null（wasm 的首帧
+         * FxPresent 早于第一笔带记录的绘制），调用方直接 .Count 会
+         * 空引用——"取走并清空"的契约是空列表，不是 null。 */
+        if (d == null) { d = new List<int>(); }
         BackdropFx.damage = new List<int>();
         return d;
     }

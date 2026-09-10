@@ -2921,6 +2921,21 @@ zan_status_t zan_irgen_write_obj(zan_irgen_t *g, const char *path) {
              * not see mismatched signatures on zan_file_fopen/zan_pkg_fopen. */
             { "zan_file_fopen", "ppp" },
             { "zan_pkg_fopen", "ppp" },
+            /* DllImport params typed nint (TYPE_NINT lowers to i64 even on
+             * wasm32) against native definitions whose pointer/handle params
+             * are 32-bit. The GUI entry points take i32 surface ids / i32
+             * point buffers via nint call sites; the socket reactor takes
+             * i64 handles in C (long long) while other call shapes pass
+             * i32-ish ints. Without adapters wasm-ld flags each shape
+             * mismatch and picks one side's signature. */
+            { "zan_gui_draw_polyline", "vppiii" },
+            { "zan_gui_draw_polyline_fx", "vppiii" },
+            /* NativeMemory.Copy/Find lower to memmove/memchr with a 64-bit
+             * length (Zan int); wasm32 size_t is 32-bit. The coroutine
+             * drivers declare zan_timer_cancel_delay as void while
+             * rt_timer.c's real definition returns the cancel count. */
+            { "memmove", "ppps" },
+            { "memchr", "ppis" },
             { NULL, NULL }
         };
         LLVMTypeRef w_i32 = LLVMInt32TypeInContext(g->ctx);

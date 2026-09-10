@@ -41,6 +41,12 @@ static LLVMValueRef build_static_mg_record(zan_irgen_t *g, zan_loc_t loc,
  * with the closure tag bit (see target_is_wasm32 below). */
 static bool target_is_wasm32(zan_irgen_t *g);
 
+/* The synthesized Binding<T> accessor pair as the delegate value the
+ * getter/setter field stores: bare fn pointer on native, static-method-group
+ * record on wasm32 (see the definition, next to build_static_mg_record). */
+static LLVMValueRef emit_binding_acc_delegate(zan_irgen_t *g, LLVMValueRef acc,
+                                              LLVMTypeRef acc_ty);
+
 /* Whether `cls` or one of its base classes declares a member named `name`,
  * of any kind (field, method, property, event, constant). */
 static int type_declares_member(zan_symbol_t *cls, zan_istr_t name) {
@@ -2443,11 +2449,17 @@ static LLVMValueRef emit_binding_value(zan_irgen_t *g, zan_type_t *bind_t,
         LLVMValueRef gptr = LLVMBuildStructGEP2(g->builder, st, objp, (unsigned)fi_getter, "b.get");
         LLVMTypeRef gslot_t = LLVMStructGetTypeAtIndex(st, (unsigned)fi_getter);
         zan_store_fit(g,
-            LLVMBuildBitCast(g->builder, get_fn, gslot_t, "b.get.bc"), gptr);
+            LLVMBuildBitCast(g->builder,
+                emit_binding_acc_delegate(g, get_fn,
+                    LLVMGlobalGetValueType(get_fn)),
+                gslot_t, "b.get.bc"), gptr);
         LLVMValueRef sptr = LLVMBuildStructGEP2(g->builder, st, objp, (unsigned)fi_setter, "b.set");
         LLVMTypeRef sslot_t = LLVMStructGetTypeAtIndex(st, (unsigned)fi_setter);
         zan_store_fit(g,
-            LLVMBuildBitCast(g->builder, set_fn, sslot_t, "b.set.bc"), sptr);
+            LLVMBuildBitCast(g->builder,
+                emit_binding_acc_delegate(g, set_fn,
+                    LLVMGlobalGetValueType(set_fn)),
+                sslot_t, "b.set.bc"), sptr);
         zan_store_fit(g, LLVMConstInt(live_t, 1, 0), live_ptr);
     } else {
         /* const binding: evaluate the RHS once and store it */
@@ -10040,6 +10052,53 @@ static LLVMValueRef build_static_mg_record(zan_irgen_t *g, zan_loc_t loc,
     build_closure_dtor(g, lname, rec_ty, NULL, 0, 0, false);
     return emit_closure_record(g, loc, lname, rec_ty, thunk, thunk,
                                NULL, 0, 0, NULL, false);
+}
+
+/* `inp.Size = vm.density;` synthesizes a live binding whose getter/setter are
+ * the generated accessor functions. Native targets store them as the bare
+ * function pointers they are. wasm32 must take the tagged-record shape
+ * (static-method-group form): a bare "function pointer" there is a small
+ * function-table index, and an odd index trips the ZAN_CLOSURE_TAG bit that
+ * emit_delegate_invoke and __zan_release_Binding_* both test -- the release
+ * then reads index-1 memory as a record and calls a null dtor ("null
+ * function" in the browser). Same root as the method-group shaping above:
+ * one thunk per accessor (dropping the record parameter, rec-first), one
+ * record whose target slot holds the thunk for delegate equality, and a dtor
+ * built with release_target=false because that slot holds a function, not an
+ * object. */
+static LLVMValueRef emit_binding_acc_delegate(zan_irgen_t *g, LLVMValueRef acc,
+                                              LLVMTypeRef acc_ty) {
+    if (!target_is_wasm32(g)) return acc;
+    LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
+    LLVMTypeRef tp[2];
+    unsigned np = LLVMCountParamTypes(acc_ty);
+    if (np == 0 || np > 2) return acc; /* only the 1-target accessors exist */
+    LLVMGetParamTypes(acc_ty, tp);
+    LLVMTypeRef ret = LLVMGetReturnType(acc_ty);
+    const char *accname = LLVMGetValueName(acc);
+    char lname[512];
+    snprintf(lname, sizeof(lname), "mg_%s", accname);
+    /* one thunk per accessor, reused across use sites (stable name) */
+    char tname[560];
+    snprintf(tname, sizeof(tname), "__zan_%s", lname);
+    LLVMValueRef thunk = LLVMGetNamedFunction(g->mod, tname);
+    if (!thunk) {
+        LLVMTypeRef thunk_params[3] = { i8ptr, tp[0], tp[1 % 2] };
+        LLVMTypeRef thunk_ty = LLVMFunctionType(ret, thunk_params, np + 1, 0);
+        thunk = LLVMAddFunction(g->mod, tname, thunk_ty);
+        LLVMSetLinkage(thunk, LLVMInternalLinkage);
+        LLVMBasicBlockRef saved = LLVMGetInsertBlock(g->builder);
+        LLVMPositionBuilderAtEnd(g->builder,
+            LLVMAppendBasicBlockInContext(g->ctx, thunk, "entry"));
+        LLVMValueRef cargs[2] = { LLVMGetParam(thunk, 1), LLVMGetParam(thunk, 2) };
+        LLVMValueRef r = zan_call2(g->builder, acc_ty, acc, cargs, np,
+            LLVMGetTypeKind(ret) == LLVMVoidTypeKind ? "" : "mg.r");
+        if (LLVMGetTypeKind(ret) == LLVMVoidTypeKind) LLVMBuildRetVoid(g->builder);
+        else LLVMBuildRet(g->builder, r);
+        LLVMPositionBuilderAtEnd(g->builder, saved);
+    }
+    return build_static_mg_record(g, zan_loc(0, 0, 0, 0), lname,
+                                  closure_header_type(g), thunk);
 }
 
 static LLVMValueRef emit_lambda_typed(zan_irgen_t *g, zan_ast_node_t *expr,
