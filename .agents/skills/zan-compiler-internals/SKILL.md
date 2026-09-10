@@ -157,6 +157,39 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
   形态（局部 / 字段 / 临时 / 类型名）；并用**旧编译器快照**证明是既有缺陷而非本轮引入
   （本次用 `_scratch/zanc_head.exe`，2026-09-03 构建，同探针同样复现）。
 
+## 属性访问：裸名 static 读静默得 0，裸名实例写让 zanc 段错误（2026-09-11 审计实测）
+
+- **方法体里对「本类带自定义 setter 的属性」写裸名 `Prop = v;` / `Prop++` → zanc
+  rc=139 段错误**。`irgen_expr.c:3058` 把 `recv_type` 传成 `g->cur_inst`（非单体化流程
+  里是 NULL），`emit_property_setter_call` 在 `:1090` 无保护解引用 `recv_type->sym`；
+  getter 对应路径 `:1017-1021` 明写「`recv_type == NULL` 标记 `base.Prop` 读」并做了
+  判定，setter 漏了同一条。`route_generic_method`（`irgen_generics.c:261`）与
+  `subst_type_param_deep` 都容忍 NULL，唯一裸解引用就是 1090。
+  **绕法**：写 `this.Prop = v`（探针 `_scratch/audit2/prop_set_this.zan` 正确 101）；
+  auto 属性走字段槽不受影响，static 属性裸名写走 `:3032` 另一分支也不崩。
+  探针：`_scratch/audit2/prop_set.zan`、`prop_inc.zan`（均 139）。
+- **裸名 static 属性读静默返回 0**：`static int P { get { return b+1; } }` 里
+  `Console.WriteLine(P)` → 0，`A.P` → 正确值；auto static 属性裸名读正常。即同一面
+  上「写正常、读错」。探针 `_scratch/audit2/static_read.zan`（Auto=7 ✓ / GOnly=0 ✗ /
+  Custom=0 ✗ / A.Custom=4 ✓）。**绕法**：静态属性读一律限定 `类名.属性`。
+- **17+ 参数 extern 只能限定名调用**：裸名走 `irgen_call.c:5019` 的
+  `LLVMGetNamedFunction` 兜底，`:5030` 的 `LLVMTypeRef ptypes[16]` 配 `:5031`
+  `if (nparams > 16) nparams = 16;` —— 钳的是后面的 `ptypes[k]` 循环，
+  `LLVMGetParamTypes` 没有容量参数、按真实个数全量写（60 参 = 480B 进 128B 栈数组，
+  越界写），症状是离真实原因很远的
+  `LLVM verification failed ... Call parameter type does not match function signature!`
+  （第 16 参起仍是 i64 未被 coerce）。限定名 `A.big17(...)` 路径正常（探针
+  `p17.zan` / `p60.zan` / `p17b.zan`）。
+- **本类一个构造函数都没有时 `new C(args)` 静默丢实参**（`irgen_expr.c:7281-7287` 的
+  诊断以 `type_has_ctor()` 为门，无 ctor 反而不报）→ 对象只用字段初始化器，args 不
+  求值。探针 `_scratch/audit2/newargs.zan`。
+- **审计纪律（本轮两条代理结论被证伪，别再登记）**：① 「`Task.Delay(long.MaxValue)`
+  有符号溢出→立即触发」不成立——探针 `delaymax2.zan` 打印 start 后睡死，5s 超时仍未醒；
+  ② 「`irgen_emit.c` 的 `fields[32]/names[32]` 缓冲区溢出」不成立——`:1802-1803`、
+  `:1983-1984` 都有 `< 32` 守卫，是**静默截断**（names 侧无可见症状；fields 侧只有
+  「>32 个 T 型字段的泛型类」以 `unresolved call 'F32.ToString'` 暴露，见 TASKS A281）。
+  静态阅读/代理给的结论必须逐条最小探针复验再入账——错报会让人去修不存在的东西。
+
 ## parser：looks_like_var_decl 的分派契约
 
 - 内建类型关键字开头的语句要在「声明」（`int x = 3`、`int[] a`）与
