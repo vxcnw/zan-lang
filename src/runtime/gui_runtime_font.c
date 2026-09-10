@@ -518,10 +518,29 @@ static FT_Face ft_face_for_cp(u32 cp, int font_size) {
                 closedir(d);
             }
         }
+#elif defined(__wasm__)
+        /* wasm ships no fontconfig: the host bundles a UI face at
+         * /fonts/ui.ttf (Latin) and may bundle a wider face — CJK for the
+         * zh demo — at /fonts/cjk.ttf. The face is opened once, on the
+         * first uncovered code point, and then lives in g_ft_fb like the
+         * Android fonts.xml chain; when the file is absent every later
+         * uncovered code point still drops to the 6x10 bitmap path, so a
+         * Latin-only bundle keeps its small footprint. */
+        static int cjk_tried = 0;
+        if (!cjk_tried) {
+            cjk_tried = 1;
+            FT_Face face = NULL;
+            if (FT_New_Face(g_ft_library, "/fonts/cjk.ttf", 0, &face) == 0 &&
+                face) {
+                g_ft_fb[g_ft_fb_count++] = face;
+                if (FT_Get_Char_Index(face, cp)) {
+                    FT_Set_Pixel_Sizes(face, 0, (FT_UInt)font_size);
+                    return face;
+                }
+            }
+        }
 #elif !defined(__wasm__)
-        /* Desktop Linux resolves fallback faces through fontconfig. wasm
-         * ships no fontconfig and only the single /fonts/ui.ttf face: an
-         * uncovered code point falls back to the 6x10 bitmap path. */
+        /* Desktop Linux resolves fallback faces through fontconfig. */
         FcCharSet *charset = FcCharSetCreate();
         FcCharSetAddChar(charset, cp);
         FcPattern *pat = FcPatternCreate();

@@ -481,3 +481,28 @@ Log(q);                          // 打印 11 —— 闭包内外读写同一个
   （p=ptr, j=i64, 其他=i32）。`"iiiii"` 是返回 i32+4 参，不是 5 参——
   摆过一次乌龙。nint 在 IR 恒为 i64（irgen.c TYPE_NINT），C 侧 iptr 是
   i32，wasm-ld 的 signature mismatch 告警就是这对宽度差，逐符号进表。
+
+## wasm32 H5 文本两坑：中文全成"?"是字体面没盖住；"2G 内存"是 V8 预留不是真用（2026-09-11）
+
+> gallery 网页版中文全画成 "?"——不是编码，是 ui.ttf（Segoe UI）cmap 里
+> 中/文/✓ 全是 glyph 0，ft 路径对未覆盖 cp 回退画问号。任务管理器 2G 也
+> 不是泄漏：无 max 声明的 memory32，V8 就预留数 GB 地址空间。
+
+- **wasm 字体回退面**：`ft_face_for_cp` 的 wasm 分支只认 `/fonts/ui.ttf`，
+  拉丁面盖不住 CJK。根修：首遇未覆盖 cp 时 `FT_New_Face("/fonts/cjk.ttf")`
+  一次并进 `g_ft_fb` 链（对齐 Android fonts.xml 模式），文件缺失则记
+  `cjk_tried` 不再重开，纯拉丁包不涨足迹。验证只认浏览器截图（侧栏
+  组件/EN·中 chip/✓已复制 三处齐活才算过）。
+- **CJK 字体子集配方**：`python -m fontTools.subset msyh.ttc
+  --font-number=0 --no-hinting --layout-features='' --unicodes=U+0020-007E,
+  U+3000-303F,U+4E00-9FFF,U+FF00-FFEF,U+2600-27BF,...` → 6.2MB TTF 盖常用
+  区；全量 msyh.ttc 19.7MB 别进包。TTC 用 --font-number=0 取第一面。
+- **--max-memory 收口预留**：wasm-ld 命令加 `--max-memory=536870912` 后
+  模块 memory 段带 max 声明（min 11MB/max 512MB），V8 只预留 512MB，宿主
+  JS **零改动**（memory 仍是模块导出，不用 --import-memory）。增长越界会
+  trap，所以上界别贴着实测给，留一个量级余量。
+- **wasm 冒烟在 node 跑**：`WebAssembly.instantiate(bytes,
+  {wasi_snapshot_preview1: Proxy})` + `ZanWASI(fsBackend, out).attach()`，
+  fsBackend 要有 statSync/readFileSync/writeFileSync（缺 writeFileSync 时
+  path_open 创建文件会静默失败，别误判成编译问题——tests/wasm32 的断言本
+  是"编译+链接"，端到端跑通要自备内存 fs）。

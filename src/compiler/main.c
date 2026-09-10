@@ -6028,9 +6028,16 @@ int main(int argc, char **argv) {
              * frames in the GUI gallery blew it, and the overflow wrote into
              * the statics below the stack (wild string pointers, trashed
              * allocator headers). The larger stack only costs linear-memory
-             * address space; V8 commits pages lazily. */
+             * address space; V8 commits pages lazily.
+             * --max-memory: without a declared maximum V8 reserves a
+             * multi-GB address space for the memory32 (task-manager "2 GB
+             * of RAM" for an 11 MB heap). Declaring 512 MB makes V8 reserve
+             * just that; growth past it traps, which is still better than
+             * the silent reservation. 512 MB headroom covers the gallery's
+             * soak with an order of magnitude to spare. */
             snprintf(cmd, sizeof(cmd),
-                     "wasm-ld%s -z stack-size=4194304 --table-base=2 "
+                     "wasm-ld%s -z stack-size=4194304 --max-memory=536870912 "
+                     "--table-base=2 "
                      "-o \"%s\" \"%s/crt1.o\" \"%s\"",
                      publish_mode ? " -s --gc-sections" : "", obj_path, sys,
                      obj_tmp);
