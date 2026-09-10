@@ -275,7 +275,7 @@ class GenForm {
             out0.Append("    Form __form;\n");
         } else {
             out0.Append("    /// The live form, kept for the non-capturing handler\n");
-            out0.Append("    /// lambdas (delegates are plain function pointers).\n");
+            out0.Append("    /// lambdas (the generator keeps handlers capture-free).\n");
             out0.Append("    /// A window document is a singleton: these fields are\n");
             out0.Append("    /// assigned by __BuildForm() and are only valid once\n");
             out0.Append("    /// __CreateWindow() has returned; showing the window\n");

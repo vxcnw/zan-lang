@@ -78,6 +78,19 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
   入口，都要对到达时的那个值补 retain、在真正的执行点补 release**——这正是
   zan_abi.h store-family 契约的要求。
 
+- **语义修复后要扫"断言旧行为"的每一处，生成器发出的注释也算（2026-09-11）**：
+  A70/A261 让 `Thread.Start` 收得下实例方法组与捕获 lambda 之后，仓里仍留着三处
+  按旧事实写的说明——`Gui/Widget/Upload.zan` 的类注释（"线程入口必须是静态方法组，
+  `zan_thread_start` 只接受裸函数指针"）、`DataTable/DataTable.HttpSource.zan`
+  （"实例方法组/闭包喂给 Thread.Start 会编译通过、调用即崩……该编译器缺陷另案"）、
+  以及 **`System/Compiler/GenForm.zan` 往生成代码里 Append 的
+  `/// ... (delegates are plain function pointers)`**。前两处是注释，第三处是
+  **字符串字面量**（生成物里的注释）——只扫 `docs/` 与指南扫不到它。做法：改完
+  ABI/调用约定类语义，用旧断言的特征词（`plain function pointers`、`必须是静态
+  方法组`、`只接受`）`git grep` 全仓（含 `stdlib/**` 与生成器 Append 串），注释里
+  引用的 `_scratch` 探针结论一并复核。坑出处：这三处是"文档更新已完成"当天漏掉
+  的，"更新 stdlib 注释"被当成做完，实际只改了一半。
+
 ## wasm32 局部数爆炸：V8 每函数 5 万局部硬上限（2026-09-11）
 
 - **症状**：浏览器 `WebAssembly.instantiate` 报 `Compiling function #N:"X"

@@ -86,15 +86,17 @@ class UploadFile {
     }
 }
 
-/// 一项内置 HTTP 上传的工作对象：绑定到具体项（实例方法组，
-/// 规避闭包），在后台线程跑 HttpClient.UploadFileBytesAsync，
-/// 进度/完成经 App.Post 封送回 UI 线程。
+/// 一项内置 HTTP 上传的工作对象：绑定到具体项（实例方法组），
+/// 在后台线程跑 HttpClient.UploadFileBytesAsync，进度/完成经
+/// App.Post 封送回 UI 线程。
 ///
-/// 线程入口必须是静态方法组：实例方法组降级为带 `this` 的闭包
-/// 记录，而 `zan_thread_start` 只接受裸函数指针（ImageHttp、
-/// DataTable.Export 同受此约），故这里走「静态队列 + 单 worker」
-/// 范式：Enqueue 在空闲时拉起 UploadJob.Run，Run 取一项 await
-/// 一项，队列排空即退，下次入队再拉起。
+/// 这里走「静态队列 + 单 worker」范式：Enqueue 在空闲时拉起
+/// UploadJob.Run，Run 取一项 await 一项，队列排空即退，下次
+/// 入队再拉起。线程入口用静态方法组是风格选择，不是语言限制
+/// ——实例方法组与捕获 lambda 自 2026-09 起都能直接交给
+/// Thread.Start（见 docs/ABI.md §3.6）；而作业状态本就要传实例，
+/// 走队列 + 静态字段比每条作业连宿主一起捕获更清楚
+///（ImageHttp、DataTable.Export 同此形状）。
 class UploadJob {
     /// 任务队列互斥锁句柄（懒建）。
     static nint lockHandle;
