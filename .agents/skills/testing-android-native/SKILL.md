@@ -89,6 +89,26 @@ description: Zan GUI 的 Android NativeActivity 实机验证仪式——probe AP
   还是"循环活着但没事件"；再看 logcat（`-s ZanIme zanShell`）。JNI
   侧 RegisterNatives 绑定结果、写入/读出两端都要留一次性日志。
 
+## 画面冻结排查定式（踩坑：40 分钟截图 md5 恒等，进程/EGL 全正常）
+
+- **"画面冻在第一帧"先查整窗帧声明转发，再怀疑渲染**（2026-09
+  3D demo 实锤）：进程活着、`app_time_stats` 每秒都在刷（eglSwapBuffers
+  正常提交）、md5 却恒等。根因=`stdlib/Gui/Backend/Native.zan` 的
+  `PresentFull()` 只有 `#if WINDOWS` 一臂，非 Windows 上 App.PresentFrame
+  的整窗声明被静默丢成空操作，上传范围落到 shell 的脏矩形差分队列；
+  修法=补 `#else zan_gui_present_full()`（OHOS/Android/X11/wasm 四后端
+  均已导出：清空本帧排队矩形=整窗上传）。任何"声明性 API 只写了
+  Windows 分支"都要当坑查一遍——不报错、不崩、只是永远不生效。
+- **冻结≠死循环的判别三板斧**：①`logcat --pid=<pid> | grep -c
+  app_time_stats` 持续增长=EGL 提交活着；②`/proc/<pid>/task/<tid>/stat`
+  的 utime 两次采样在涨=线程在跑；③此时截图 md5 恒等=提交的帧内容
+  不变——三者合起来把根因锁定在"上传/声明层"而不是渲染层。
+- **帧计数走字是"循环活着"的最低标准，不是"画面在动"的证明**：
+  数值收口用三帧像素差分（间隔 5s，`screencap`×3 后逐帧 abs 差分），
+  修好后三张 md5 各异、帧间差分约 2 万像素且 8x6 分带矩阵显示变化
+  集中在动画区（立方体）而非整屏噪声；修复前差分恒 0。
+  视觉上暗色主题 + 线框 + 模拟器慢帧，肉眼根本看不出动没动。
+
 ## 实机驱动（Gboard 全链路）
 
 - adb 在 `C:\Users\QQ\AppData\Local\Android\Sdk\platform-tools\adb.exe`；

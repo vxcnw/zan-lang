@@ -49,6 +49,27 @@ description: Zan 上做 2D 游戏(templates/game/* 与 stdlib/Game)的帧循环�
 - HUD 不显示/不置顶/画布错位，先查三条：合成循环是否根本没跑（空闲
   死锁）、是否绕过了置顶链、锚点算的是窗口还是画布坐标。
 
+## GPU 档 3D（DrawMesh3D）平台事实与 NVIDIA 死锁定式
+
+- **平台可用性查 `gui_gl_context.c` 的分支**：GPU 后端只接了
+  `_WIN32`(WGL) 与 Linux/GLX；`#else` 全 stub 段让 Android/OHOS 上
+  `zan_gl_ctx_create()` 返回 0、GPU 后端根本不装——`SetRenderBackend(1)`
+  返回 0 是**预期行为**，应用按 demo 定式落 2D 线框回退（同一份相机
+  数学画 2D 投影，HUD 标 "CPU wireframe"），不算失败也别为它改平台
+  stub。
+- **NVIDIA wedge 根因（已修，勿回退）**：帧中途对"新纹理名"调
+  TexImage2D 分配存储，1-2 帧后死锁 `nvoglv64!DrvPresentBuffers`
+  （present 线程与渲染线程在 swap 在飞时互等）。修法在
+  `gui_gl_backend.c`：新纹理先入 pending 队列，**present 时**才
+  dataless TexImage2D + TexSubImage2D swizzle 上传 + Finish；且每次
+  3D draw 尾部 `gl.Finish()` 排干 3D pass（每帧一次的代价由帧门控
+  吸收）。症状识别：一上真纹理就整机卡死、纯色几何没事、换 NVIDIA
+  才炸——是时序实现问题，不是显卡问题。
+- **声明性 API 的平台分支缺失=静默失效**：`Native.PresentFull()` 曾只写
+  `#if WINDOWS` 臂，非 Windows 整窗帧声明丢成空操作，Android 画面冻在
+  第一帧（详见 testing-android-native"画面冻结排查定式"）。新加平台
+  分支 API 时把所有 `#if` 臂抄全，缺臂不报错。
+
 ## 面板/弹层摆位：Dock 与手动 Place 的边界
 
 - Panel 默认停靠是 fill——**只调 Place() 不切到手动停靠，面板会被 fill
