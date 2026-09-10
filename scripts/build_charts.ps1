@@ -41,13 +41,19 @@ $zanArgs += @("--embed", "examples\gui_charts\maps")
 $zanArgs += @("--libpath", "build", "--link-lib", "zan_gui_charts_gnu")
 # Native Win32 backend needs only the system libs it imports directly (the
 # runtime's #pragma libs: dwmapi/user32/gdi32/imm32) plus the reactor deps.
+# ole32: WASAPI 音频初始化（CoInitializeEx/CoUninitialize）——缺它链接失败。
 $zanArgs += @("--link-lib", "ws2_32", "--link-lib", "mswsock")
 $zanArgs += @("--link-lib", "psapi", "--link-lib", "advapi32")
 $zanArgs += @("--link-lib", "dwmapi", "--link-lib", "gdi32", "--link-lib", "imm32")
-$zanArgs += @("--link-lib", "user32", "--link-lib", "rpcrt4")
+$zanArgs += @("--link-lib", "user32", "--link-lib", "rpcrt4", "--link-lib", "ole32")
 $zanArgs += @("--icon", (Join-Path (Get-Location) "assets\zan.ico"))
+# zanc 的进度杂音走 stderr；EAP=Stop 会把首个 stderr 行升级成
+# NativeCommandError 并在 zanc 跑完前掐断管道（exe 不会重链）。
+# 这里局部降级到 Continue，让 stderr 落进 $out，成败以 $LASTEXITCODE 判定。
+$ErrorActionPreference = "Continue"
 $out = & build\zanc.exe @zanArgs 2>&1
 $code = $LASTEXITCODE
+$ErrorActionPreference = "Stop"
 if ($code -ne 0) {
     $out | Select-Object -Last 40
     throw "CHARTS_LINK_FAILED code=$code"
