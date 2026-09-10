@@ -1061,7 +1061,7 @@ static void dump_ast_node(zan_ast_node_t *node, int depth) {
  *
  * Allowed: ASCII letters, digits, and `.` `_` `+` `-`. That set covers every
  * library the bundled stdlib and examples import (kernel32, ws2_32, libpq,
- * sqlite3, SDL3, zan_gui, foo.dll, ...). Path separators are deliberately NOT
+ * sqlite3, zan_gui, foo.dll, ...). Path separators are deliberately NOT
  * allowed: a [DllImport] names a library to search for, never a path. */
 static bool zan_dllimport_name_is_safe(const char *name, int len) {
     if (!name || len <= 0) return false;
@@ -2939,7 +2939,7 @@ int main(int argc, char **argv) {
         }
 
         /* ---- native stdlib drivers ------------------------------------
-         * Third-party drivers (libpq, sqlite3, SDL3 bridges, ...) are NOT
+         * Third-party drivers (libpq, sqlite3, native bridges, ...) are NOT
          * present on an
          * arbitrary target, so a published program must carry them. Each driver
          * ships inside the stdlib module that owns it, at
@@ -3708,14 +3708,27 @@ int main(int argc, char **argv) {
              * rt_sync.o, which cannot be built for wasm (no pthread/shm). */
             int needs_sync = 1;   /* conservative default */
             if (target.os == ZAN_OS_WASI) {
-                static const char *const sync_pre[] = {
+                static const char *const disp_pre[] = {
+                    "zan_dispatch_", NULL
+                };
+                static const char *const other_sync_pre[] = {
                     "zan_atomic_int_", "zan_shared_table_",
-                    "zan_thread_", "zan_dispatch_", "zan_monitor_",
+                    "zan_thread_", "zan_monitor_",
                     "zan_monotonic_", "zan_plat_",
                     "zan_exe_dir_into", "zan_dir_list_into",
                     NULL
                 };
-                needs_sync = wasm_obj_refs_any(obj_tmp, sync_pre);
+                static const char *const gui_pre[] = { "zan_gui_", NULL };
+                /* zan_dispatch_* (Gui.Dispatcher's queue) is provided by
+                 * zanrt_gui.o on wasm -- a lock-free ring, since the worker
+                 * has one thread (gui_runtime_wasm.c). So a GUI program
+                 * (one that references zan_gui_*, pulling the gui object)
+                 * may reference the dispatcher; anything else that needs
+                 * rt_sync still cannot link. */
+                int has_disp = wasm_obj_refs_any(obj_tmp, disp_pre);
+                int has_other = wasm_obj_refs_any(obj_tmp, other_sync_pre);
+                needs_sync = has_other
+                    || (has_disp && !wasm_obj_refs_any(obj_tmp, gui_pre));
             }
             if (needs_sync) {
                 fprintf(stderr,
@@ -4875,7 +4888,7 @@ int main(int argc, char **argv) {
                  * subset provide the symbol tables lld needs, and the run
                  * time resolves the real ones from the system (libc/libm/
                  * liblog/libdl) and from the bundled driver dir (zan_gui,
-                 * SDL3). */
+                 * zan_gui). */
                 snprintf(cmd, sizeof(cmd),
                          "ld.lld -pie%s -o \"%s\" \"%s/crtbegin_dynamic.o\""
                          " \"%s\"",

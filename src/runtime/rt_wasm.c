@@ -34,13 +34,17 @@ int zan_w32_snprintf(char *s, i64 n, const char *fmt, ...) {
  * that actually CALL Thread/AtomicInt/SharedTable APIs are rejected earlier
  * (see main.c's wasm_obj_refs_any check).
  *
- * Signature note: irgen emits the EH-table lock calls with a void return
- * (irgen_builtins.c emit_eh_tab_lock_*), and wasm-ld fails signature
- * mismatches only as warnings but noise costs every link -- these must be
- * (i32) -> void, matching that emission. */
+ * Signature note: two reference shapes meet these symbols. irgen's EH-table
+ * lock calls declare (i32) -> void (irgen_builtins.c emit_eh_tab_lock_*),
+ * while stdlib System.Threading declares the POSIX (i32) -> i32 -- and one
+ * module holding both shapes made wasm-ld route every call through a
+ * synthesized trap (.Lpthread_mutex_lock_bitcast_invalid). The definitions
+ * take the POSIX int-returning signature, and the w32adapt table in
+ * irgen_emit.c adapts each call-site type to it, so both shapes link to one
+ * no-op body. */
 int pthread_mutex_init(void *m, const void *a) { (void)m; (void)a; return 0; }
-void pthread_mutex_lock(void *m) { (void)m; }
-void pthread_mutex_unlock(void *m) { (void)m; }
-void pthread_mutex_destroy(void *m) { (void)m; }
+int pthread_mutex_lock(void *m) { (void)m; return 0; }
+int pthread_mutex_unlock(void *m) { (void)m; return 0; }
+int pthread_mutex_destroy(void *m) { (void)m; return 0; }
 
 void longjmp(void *env, int val) { (void)env; (void)val; abort(); }

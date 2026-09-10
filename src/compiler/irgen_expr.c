@@ -24,9 +24,22 @@
  */
 
 /* Binds a receiver to an instance method group (defined with the closure
- * machinery further down); used by the two method-group value sites above it. */
+ * machinery further down); used by the two method-group value sites above it.
+ * `recv == NULL` selects a static method group: same record shape, thunk
+ * drops the record parameter. */
 static LLVMValueRef emit_method_group_closure(zan_irgen_t *g, zan_symbol_t *msym,
                                               LLVMValueRef recv, zan_loc_t loc);
+
+/* The static-method-group record builder (thunk in the target slot, no
+ * retain, dtor leaves the target slot alone). */
+static LLVMValueRef build_static_mg_record(zan_irgen_t *g, zan_loc_t loc,
+                                           const char *lname, LLVMTypeRef rec_ty,
+                                           LLVMValueRef thunk);
+
+/* Whether delegate values must all be tagged closure records (wasm32): a
+ * "function pointer" there is a small table index whose odd values collide
+ * with the closure tag bit (see target_is_wasm32 below). */
+static bool target_is_wasm32(zan_irgen_t *g);
 
 /* Whether `cls` or one of its base classes declares a member named `name`,
  * of any kind (field, method, property, event, constant). */
@@ -800,7 +813,11 @@ static LLVMValueRef emit_expr_identifier(zan_irgen_t *g, zan_ast_node_t *expr,
         }
         /* method reference as delegate value: MethodName used as a value (not
          * called). A static method is the bare function pointer; an instance
-         * method binds the current receiver into a closure (A33-2). */
+         * method binds the current receiver into a closure (A33-2). On wasm32
+         * a static method also takes the closure-record shape: a bare
+         * "function pointer" there is a small table index whose odd value
+         * collides with the closure tag that emit_delegate_invoke tests
+         * (see target_is_wasm32). */
         if (g->current_type_sym) {
             zan_symbol_t *method_sym = get_method_sym(g->current_type_sym, expr->ident.name);
             if (method_sym) {
@@ -821,6 +838,11 @@ static LLVMValueRef emit_expr_identifier(zan_irgen_t *g, zan_ast_node_t *expr,
                         (int)expr->ident.name.len, expr->ident.name.str);
                     return LLVMConstNull(
                         LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0));
+                }
+                if (target_is_wasm32(g)) {
+                    LLVMValueRef clo = emit_method_group_closure(g, method_sym,
+                                                                 NULL, expr->loc);
+                    if (clo) return clo;
                 }
                 for (int fi = irgen_find_function(g, method_sym); fi >= 0; fi = -1) {
                     if (g->functions[fi].sym == method_sym) {
@@ -4522,14 +4544,22 @@ static LLVMValueRef emit_expr_member_access(zan_irgen_t *g, zan_ast_node_t *expr
         }
 
         /* Static method reference used as a delegate value: ClassName.Method
-         * (not immediately called) → the function pointer. Instance-method
-         * groups are not bound here (they'd require a captured receiver). */
+         * (not immediately called) → the function pointer. On wasm32 it takes
+         * a thunk closure record of the same shape as every other delegate
+         * (see target_is_wasm32 -- a bare "function pointer" there collides
+         * with the closure tag). Instance-method groups are not bound here
+         * (they'd require a captured receiver). */
         if (expr->member.object->kind == AST_IDENTIFIER &&
             !local_find(locals, expr->member.object->ident.name)) {
             zan_symbol_t *cs = zan_binder_lookup(g->binder, expr->member.object->ident.name);
             if (cs && (cs->kind == SYM_CLASS || cs->kind == SYM_STRUCT)) {
                 zan_symbol_t *ms = get_method_sym(cs, expr->member.name);
                 if (ms) {
+                    if (target_is_wasm32(g)) {
+                        LLVMValueRef clo = emit_method_group_closure(g, ms, NULL,
+                                                                     expr->loc);
+                        if (clo) return clo;
+                    }
                     for (int fi = irgen_find_function(g, ms); fi >= 0; fi = -1) {
                         if (g->functions[fi].sym == ms) {
                             return g->functions[fi].fn;
@@ -8178,9 +8208,72 @@ static LLVMValueRef emit_user_conversion(zan_irgen_t *g, zan_type_t *from_type,
     return zan_call2(g->builder, mft, mfn, &arg, 1, "uc");
 }
 
+/* A delegate value has two shapes (see irgen_arc.c): a bare function pointer
+ * or a tagged closure record. On wasm32 a "function pointer" is a small
+ * table index, and an odd index is indistinguishable from the closure tag --
+ * so EVERY delegate value must be a tagged record there. Native targets
+ * never collide (real addresses are even) and keep the historical bare
+ * shape, which is what C callbacks (Thread.Start, EnumDisplayMonitors) and
+ * the runtime dispatch queue were built around. */
+static bool target_is_wasm32(zan_irgen_t *g) {
+    return g->target_triple[0] &&
+           strncmp(g->target_triple, "wasm32", 6) == 0;
+}
+
+/* `(nint)SomeMethod` in a callback-address cast: resolve the method (or a
+ * global function of that bare name) to its raw LLVM function pointer, or
+ * return NULL when the operand is not a function reference (the cast then
+ * proceeds on the ordinary value). On wasm32 this reaches past the closure
+ * record every method group gets (target_is_wasm32): the guard wants the
+ * code address itself, not the tagged record. */
+static LLVMValueRef emit_raw_fn_for_cb_cast(zan_irgen_t *g, zan_ast_node_t *e,
+                                            local_scope_t *locals) {
+    zan_symbol_t *msym = NULL;
+    if (e->kind == AST_IDENTIFIER && g->current_type_sym) {
+        msym = get_method_sym(g->current_type_sym, e->ident.name);
+    } else if (e->kind == AST_MEMBER_ACCESS &&
+               e->member.object->kind == AST_IDENTIFIER &&
+               !local_find(locals, e->member.object->ident.name)) {
+        zan_symbol_t *cs = zan_binder_lookup(g->binder, e->member.object->ident.name);
+        if (cs && (cs->kind == SYM_CLASS || cs->kind == SYM_STRUCT))
+            msym = get_method_sym(cs, e->member.name);
+    }
+    if (msym && msym->decl && msym->decl->kind == AST_METHOD_DECL &&
+        (msym->decl->method_decl.modifiers & MOD_STATIC) != 0) {
+        for (int fi = irgen_find_function(g, msym); fi >= 0; fi = -1)
+            if (g->functions[fi].sym == msym)
+                return g->functions[fi].fn;
+    }
+    if (e->kind == AST_IDENTIFIER && !local_find(locals, e->ident.name)) {
+        char nbuf[256];
+        size_t nl = e->ident.name.len < 255 ? e->ident.name.len : 255;
+        memcpy(nbuf, e->ident.name.str, nl);
+        nbuf[nl] = '\0';
+        LLVMValueRef gfn = LLVMGetNamedFunction(g->mod, nbuf);
+        if (gfn && LLVMIsAFunction(gfn)) return gfn;
+    }
+    return NULL;
+}
+
 static LLVMValueRef emit_expr_cast_expr(zan_irgen_t *g, zan_ast_node_t *expr,
         local_scope_t *locals) {
         /* (Type)x — explicit numeric cast honoring the target type. */
+        zan_type_t *tt0 = resolve_type_ctx(g, expr->cast.type);
+        /* `(nint)SomeMethod` hands the raw function pointer to native code as
+         * a callback address. Static method groups are closure records in
+         * every value context now (uniform delegate shape), so this cast is
+         * the one place that must reach past the record and take the function
+         * pointer itself. */
+        if (tt0 && expr->cast.expr &&
+            (expr->cast.expr->kind == AST_IDENTIFIER ||
+             expr->cast.expr->kind == AST_MEMBER_ACCESS) &&
+            tt0->kind != TYPE_DELEGATE) {
+            LLVMTypeRef tgt0 = map_type(g, tt0);
+            if (LLVMGetTypeKind(tgt0) == LLVMIntegerTypeKind) {
+                LLVMValueRef raw = emit_raw_fn_for_cb_cast(g, expr->cast.expr, locals);
+                if (raw) return LLVMBuildPtrToInt(g->builder, raw, tgt0, "cast.fn");
+            }
+        }
         LLVMValueRef val = emit_expr(g, expr->cast.expr, locals);
         zan_type_t *tt = resolve_type_ctx(g, expr->cast.type);
         LLVMTypeRef target = tt ? map_type(g, tt) : LLVMInt64TypeInContext(g->ctx);
@@ -9025,7 +9118,7 @@ static void cap_scan(capture_scan_t *cs, zan_ast_node_t *n) {
 static LLVMValueRef build_closure_dtor(zan_irgen_t *g, const char *lname,
                                        LLVMTypeRef rec_ty,
                                        lambda_capture_t *caps, int capc,
-                                       int has_this) {
+                                       int has_this, bool release_target) {
     LLVMContextRef c = g->ctx;
     LLVMTypeRef i64 = LLVMInt64TypeInContext(c);
     LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(c), 0);
@@ -9056,7 +9149,11 @@ static LLVMValueRef build_closure_dtor(zan_irgen_t *g, const char *lname,
     LLVMPositionBuilderAtEnd(b, drop);
     /* the bound receiver of a method group (null for a lambda; the release is
      * null-tolerant) */
-    {
+    /* the bound receiver of a method group (null for a lambda; the release is
+     * null-tolerant). Static method groups keep the thunk pointer in the
+     * target slot purely so delegate equality can recognize them; that slot
+     * then holds a function, not an object, and must not be released. */
+    if (release_target) {
         LLVMValueRef p = LLVMBuildStructGEP2(b, rec_ty, rec, 2, "tgp");
         emit_arc_release_typed(g, NULL, LLVMBuildLoad2(b, i8ptr, p, "tgv"));
     }
@@ -9093,10 +9190,12 @@ static LLVMValueRef emit_closure_record(zan_irgen_t *g, zan_loc_t loc,
                                         const char *lname, LLVMTypeRef rec_ty,
                                         LLVMValueRef fn_ptr, LLVMValueRef target,
                                         lambda_capture_t *caps, int capc,
-                                        int has_this, LLVMValueRef self) {
+                                        int has_this, LLVMValueRef self,
+                                        bool retain_target) {
     LLVMTypeRef i64 = LLVMInt64TypeInContext(g->ctx);
     LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
-    LLVMValueRef dtor = build_closure_dtor(g, lname, rec_ty, caps, capc, has_this);
+    LLVMValueRef dtor = build_closure_dtor(g, lname, rec_ty, caps, capc,
+                                           has_this, true);
     int site_idx = reserve_closure_site(g);
     LLVMValueRef site_name = LLVMConstNull(i8ptr);
     if (g->check_leaks) {
@@ -9120,7 +9219,7 @@ static LLVMValueRef emit_closure_record(zan_irgen_t *g, zan_loc_t loc,
     if (target) {
         if (LLVMTypeOf(target) != i8ptr)
             target = LLVMBuildBitCast(g->builder, target, i8ptr, "clo.tg8");
-        emit_arc_retain(g, target);
+        if (retain_target) emit_arc_retain(g, target);
     }
     LLVMBuildStore(g->builder, target ? target : LLVMConstNull(i8ptr),
         LLVMBuildStructGEP2(g->builder, rec_ty, rec, 2, "clo.tgp"));
@@ -9469,7 +9568,7 @@ static LLVMValueRef emit_box_cell(zan_irgen_t *g, zan_loc_t loc,
              (int)__atomic_fetch_add(&box_id, 1, __ATOMIC_SEQ_CST));
     lambda_capture_t val = { .name = (zan_istr_t){ NULL, 0 }, .slot = NULL,
                              .type = vtype, .llvm = payload, .boxed = 0 };
-    LLVMValueRef dtor = build_closure_dtor(g, bname, rec_ty, &val, 1, 0);
+    LLVMValueRef dtor = build_closure_dtor(g, bname, rec_ty, &val, 1, 0, true);
     int site_idx = reserve_closure_site(g);
     LLVMValueRef site_name = LLVMConstNull(i8ptr);
     if (g->check_leaks) {
@@ -9507,16 +9606,20 @@ static LLVMValueRef box_value_ptr(zan_irgen_t *g, LLVMValueRef cell,
 
 /* `obj.M` / bare `M` naming an instance method: bind the receiver into a
  * closure whose function is a thunk that re-supplies it, so the delegate is
- * callable through the ordinary (receiver-less) delegate signature. */
+ * callable through the ordinary (receiver-less) delegate signature. A
+ * STATIC method group reaches here only on wasm32 (recv == NULL, see
+ * target_is_wasm32): the record keeps the one uniform delegate shape, but
+ * the thunk drops the record parameter instead of re-supplying a receiver. */
 static LLVMValueRef emit_method_group_closure(zan_irgen_t *g, zan_symbol_t *msym,
                                               LLVMValueRef recv, zan_loc_t loc) {
     int fi = irgen_find_function(g, msym);
-    if (fi < 0 || !recv) return NULL;
+    if (fi < 0) return NULL;
     LLVMValueRef target = g->functions[fi].fn;
     LLVMTypeRef target_ty = g->functions[fi].fn_type;
     LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
+    bool is_static = (recv == NULL);
     unsigned np = LLVMCountParamTypes(target_ty);
-    if (np < 1) return NULL;   /* no receiver parameter: not an instance method */
+    if (!is_static && np < 1) return NULL;   /* no receiver parameter: not an instance method */
     LLVMTypeRef *tp = (LLVMTypeRef *)calloc((size_t)np, sizeof(LLVMTypeRef));
     LLVMGetParamTypes(target_ty, tp);
     LLVMTypeRef ret = LLVMGetReturnType(target_ty);
@@ -9534,10 +9637,18 @@ static LLVMValueRef emit_method_group_closure(zan_irgen_t *g, zan_symbol_t *msym
     LLVMTypeRef rec_ty = LLVMStructCreateNamed(g->ctx, rname);
     LLVMStructSetBody(rec_ty, fields, ZAN_CLOSURE_HDR_FIELDS, 0);
 
-    LLVMTypeRef *thunk_params = (LLVMTypeRef *)calloc((size_t)np, sizeof(LLVMTypeRef));
-    thunk_params[0] = i8ptr;
-    for (unsigned i = 1; i < np; i++) thunk_params[i] = tp[i];
-    LLVMTypeRef thunk_ty = LLVMFunctionType(ret, thunk_params, np, 0);
+    LLVMTypeRef *thunk_params = (LLVMTypeRef *)calloc((size_t)np + 1, sizeof(LLVMTypeRef));
+    unsigned tn;
+    if (is_static) {
+        thunk_params[0] = i8ptr;
+        for (unsigned i = 0; i < np; i++) thunk_params[i + 1] = tp[i];
+        tn = np + 1;
+    } else {
+        thunk_params[0] = i8ptr;
+        for (unsigned i = 1; i < np; i++) thunk_params[i] = tp[i];
+        tn = np;
+    }
+    LLVMTypeRef thunk_ty = LLVMFunctionType(ret, thunk_params, tn, 0);
     char tname[160];
     snprintf(tname, sizeof(tname), "__zan_%s", lname);
     LLVMValueRef thunk = LLVMGetNamedFunction(g->mod, tname);
@@ -9551,19 +9662,26 @@ static LLVMValueRef emit_method_group_closure(zan_irgen_t *g, zan_symbol_t *msym
     if (!thunk_is_new) {
         free(thunk_params);
         free(tp);
+        if (is_static) return build_static_mg_record(g, loc, lname, rec_ty, thunk);
         return emit_closure_record(g, loc, lname, rec_ty, thunk, recv,
-                                   NULL, 0, 0, NULL);
+                                   NULL, 0, 0, NULL, true);
     }
     LLVMPositionBuilderAtEnd(g->builder,
         LLVMAppendBasicBlockInContext(g->ctx, thunk, "entry"));
     LLVMValueRef rec = LLVMGetParam(thunk, 0);
-    LLVMValueRef sp = LLVMBuildStructGEP2(g->builder, rec_ty, rec, 2, "mg.selfp");
-    LLVMValueRef self = LLVMBuildLoad2(g->builder, i8ptr, sp, "mg.self");
-    LLVMValueRef *cargs = (LLVMValueRef *)calloc((size_t)np, sizeof(LLVMValueRef));
-    cargs[0] = LLVMTypeOf(self) == tp[0]
-        ? self : LLVMBuildBitCast(g->builder, self, tp[0], "mg.self.c");
-    for (unsigned i = 1; i < np; i++) cargs[i] = LLVMGetParam(thunk, i);
-    LLVMValueRef r = zan_call2(g->builder, target_ty, target, cargs, np,
+    LLVMValueRef *cargs = (LLVMValueRef *)calloc((size_t)np + 1, sizeof(LLVMValueRef));
+    unsigned ca = 0;
+    LLVMValueRef self = NULL;
+    if (!is_static) {
+        LLVMValueRef sp = LLVMBuildStructGEP2(g->builder, rec_ty, rec, 2, "mg.selfp");
+        self = LLVMBuildLoad2(g->builder, i8ptr, sp, "mg.self");
+        cargs[ca++] = LLVMTypeOf(self) == tp[0]
+            ? self : LLVMBuildBitCast(g->builder, self, tp[0], "mg.self.c");
+        for (unsigned i = 1; i < tn; i++) cargs[ca++] = LLVMGetParam(thunk, i);
+    } else {
+        for (unsigned i = 1; i < tn; i++) cargs[ca++] = LLVMGetParam(thunk, i);
+    }
+    LLVMValueRef r = zan_call2(g->builder, target_ty, target, cargs, ca,
         LLVMGetTypeKind(ret) == LLVMVoidTypeKind ? "" : "mg.r");
     if (LLVMGetTypeKind(ret) == LLVMVoidTypeKind) LLVMBuildRetVoid(g->builder);
     else LLVMBuildRet(g->builder, r);
@@ -9572,7 +9690,22 @@ static LLVMValueRef emit_method_group_closure(zan_irgen_t *g, zan_symbol_t *msym
     free(tp);
     LLVMPositionBuilderAtEnd(g->builder, saved_bb);
 
-    return emit_closure_record(g, loc, lname, rec_ty, thunk, recv, NULL, 0, 0, NULL);
+    if (is_static) return build_static_mg_record(g, loc, lname, rec_ty, thunk);
+    return emit_closure_record(g, loc, lname, rec_ty, thunk, recv, NULL, 0, 0, NULL, true);
+}
+
+/* Build the closure record for a STATIC method group. The target slot holds
+ * the thunk pointer itself -- non-null and stable per method, so delegate
+ * equality recognizes two `M` references as the same handler (`E += M; E -= M;`
+ * removes) -- but a function is not an object, so the record neither retains
+ * it nor releases it in its dtor (pre-built here with release_target=false so
+ * emit_closure_record reuses it by name). */
+static LLVMValueRef build_static_mg_record(zan_irgen_t *g, zan_loc_t loc,
+                                           const char *lname, LLVMTypeRef rec_ty,
+                                           LLVMValueRef thunk) {
+    build_closure_dtor(g, lname, rec_ty, NULL, 0, 0, false);
+    return emit_closure_record(g, loc, lname, rec_ty, thunk, thunk,
+                               NULL, 0, 0, NULL, false);
 }
 
 static LLVMValueRef emit_lambda_typed(zan_irgen_t *g, zan_ast_node_t *expr,
@@ -9620,7 +9753,21 @@ static LLVMValueRef emit_lambda_typed(zan_irgen_t *g, zan_ast_node_t *expr,
     }
     int capc = cs.count;
     int has_this = cs.needs_this ? 1 : 0;
-    bool is_closure = (capc + has_this) > 0;
+    /* Every lambda targeting wasm32 is emitted in the closure shape: the
+     * record always exists and the function always takes the record as the
+     * hidden leading parameter. The old capture-less shortcut (returning the
+     * bare function as the delegate value) breaks there: a wasm32 "function
+     * pointer" is a small table index, and an odd index trips the closure
+     * tag (bit 0) that emit_delegate_invoke tests -- the invoke untags it
+     * and reads garbage memory as the record. Native targets keep the
+     * historical shape: a capture-less lambda IS the bare function pointer
+     * (so C callbacks like Thread.Start keep working and its signature has
+     * only the declared parameters), and emit_delegate_invoke's bare branch
+     * calls it directly. Method groups already always take the record shape
+     * on wasm32 (emit_method_group_closure), so with lambdas in the same
+     * shape the bare branch of emit_delegate_invoke is reachable on wasm32
+     * only with a null delegate. */
+    bool is_closure = (capc + has_this) > 0 || target_is_wasm32(g);
 
     LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(g->ctx), 0);
     /* A closure's function takes the record as a hidden leading parameter. */
@@ -9835,7 +9982,11 @@ static LLVMValueRef emit_lambda_typed(zan_irgen_t *g, zan_ast_node_t *expr,
     }
     free(param_types);
     free(ptypes);
-    if (!is_closure) return lambda_fn;
+
+    if (!is_closure) {
+        cap_scan_free(&cs);
+        return lambda_fn;
+    }
 
     LLVMValueRef self = has_this
         ? LLVMBuildLoad2(g->builder, LLVMGetAllocatedType(saved_this),
@@ -9843,7 +9994,7 @@ static LLVMValueRef emit_lambda_typed(zan_irgen_t *g, zan_ast_node_t *expr,
         : NULL;
     LLVMValueRef clo = emit_closure_record(g, expr->loc, lname, rec_ty,
                                            lambda_fn, NULL, cs.caps, capc,
-                                           has_this, self);
+                                           has_this, self, true);
     cap_scan_free(&cs);
     return clo;
 }

@@ -59,6 +59,14 @@ rem (main.c links it only when wasm_eh_used).
 if not exist toolchain\wasm32 mkdir toolchain\wasm32
 "%ZIG%" cc -target wasm32-wasi -g0 -std=c11 -I %RT% -O2 -c %RT%\rt_file.c  -o toolchain\wasm32\zanrt_file.o  || exit /b 1
 "%ZIG%" cc -target wasm32-wasi -g0 -std=c11 -I %RT% -O2 -c %RT%\rt_timer.c -o toolchain\wasm32\zanrt_timer.o || exit /b 1
+rem GUI runtime for wasm32: the whole software rasterizer + image/text stack as
+rem one object, with the browser window shell (gui_runtime_wasm.c) included by
+rem gui_runtime.c under __wasm__. Linked by main.c only when the program
+rem references zan_gui_*, and exported symbol zan_gui_wasm_feed is the host's
+rem event-injection door (see the JS host in the H5 template).
+rem gnu11, not c11: wasi-libc hides clock_gettime (gui shell's tick) and
+rem stb_vorbis's alloca behind the GNU feature-test macros.
+"%ZIG%" cc -target wasm32-wasi -g0 -std=gnu11 -I %RT% -I %RT%\libwebp\src -O2 -c %RT%\gui_runtime.c -DZAN_GUI_WASM -o toolchain\wasm32\zanrt_gui.o || exit /b 1
 echo built toolchain\wasm32
 
 rem Android (bionic): zig cc has no bionic target, so this block needs the

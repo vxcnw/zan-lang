@@ -2891,6 +2891,21 @@ zan_status_t zan_irgen_write_obj(zan_irgen_t *g, const char *path) {
             { "rmdir", "ip" },       { "opendir", "pp" },
             { "readdir", "pp" },     { "closedir", "ip" },
             { "time", "jp" },        { "poll", "ipii" },
+            /* NativeMemory.FindNotAnyOf lowers to strcspn with a 64-bit run
+             * result (Zan int); wasm/rv32 size_t is 32-bit, so the adapter
+             * extends the return -- the -1 "clean to the end" compare must
+             * see the full-width value. */
+            { "strcspn", "ipp" },
+            /* System.Threading declares the POSIX int-returning mutex ABI
+             * while irgen's EH-table lock calls declare a void return; one
+             * module holding both shapes (a GUI program pulls Threading)
+             * made wasm-ld synthesize trap functions. Route every call-site
+             * type through adapters onto the one POSIX-shaped definition in
+             * rt_wasm.c. */
+            { "pthread_mutex_init", "iii" },
+            { "pthread_mutex_lock", "ii" },
+            { "pthread_mutex_unlock", "ii" },
+            { "pthread_mutex_destroy", "ii" },
             /* the startup stdout line-buffering call (irgen_emit.c) declares
              * size as i64 (Zan int); wasm's setvbuf takes a 32-bit size_t. */
             { "setvbuf", "ipipi" },
