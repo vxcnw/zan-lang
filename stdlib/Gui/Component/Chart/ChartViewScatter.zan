@@ -248,7 +248,9 @@ partial class ChartView {
             if (!s.hidden) {
                 // 形状族 / 尺寸 / 描边按系列声明；逐点 color/size 优先。
                 string shape = s.symbol;
-                int sRad = Chart.SymbolRadius(s.symbolSize, rad);
+                // symbolSize 直径语义随 DPI 缩放（ECharts 画布像素）。
+                int sRad = s.symbolSize > 0
+                    ? app.Scale(Chart.SymbolRadius(s.symbolSize, 0)) : rad;
                 int bCol = s.itemStyle.normal.borderColor;
                 int bW = s.itemStyle.normal.borderWidth > 0 ? app.Scale(s.itemStyle.normal.borderWidth) : 0;
                 // 散点空间中的 Line 序列绘制为连接的
@@ -265,7 +267,8 @@ partial class ChartView {
                             s.points[j0].y, s.pointG));
                         j0 = j0 + 1;
                     }
-                    c.DrawPolyline(lx, ly, s.color, app.Scale(2));
+                    c.DrawPolyline(lx, ly, Chart.FadeFocusColor(r, s.color),
+                        app.Scale(2));
                 } else {
                     int j = i0;
                     while (j <= i1 && j < s.points.Count) {
@@ -286,9 +289,10 @@ partial class ChartView {
                             col = Chart.RampAt(o.rampColors, (dv - dLo) * 1000 / dSpan);
                             if (s.points[j].color != 0) { col = s.points[j].color; }
                         }
+                        col = Chart.FadeFocusColor(r, col);
                         int jr = sRad;
                         if (s.points[j].sizeSet && s.points[j].size > 0) {
-                            jr = s.points[j].size;
+                            jr = app.Scale(s.points[j].size);
                         } else if (s.symbolSizeFn.Length > 0) {
                             // symbolSize 回调的公式化替代：半径随该点的
                             // 坐标值（真实值）变化（面积∝值用 Sqrt 形）。
@@ -337,7 +341,8 @@ partial class ChartView {
                     pb.points[pj].x, pb.pointG);
                 int pcy = Chart.ValueYF(plotY, plotH, yLo, maxYN,
                     pb.points[pj].y, pb.pointG);
-                int pr = pb.points[pj].sizeSet ? pb.points[pj].size : rad;
+                int pr = pb.points[pj].sizeSet
+                    ? app.Scale(pb.points[pj].size) : rad;
                 if (pr < 1) { pr = 1; }
                 long pz = 0;
                 for (int pq = 0; pq < pps.Count; pq = pq + 1) {
@@ -514,8 +519,10 @@ partial class ChartView {
             if (bestS >= 0) {
                 ChartSeries bs0 = o.series[bestS];
                 ChartPoint bp0 = bs0.points[bestJ];
-                hitR = Chart.SymbolRadius(bs0.symbolSize, app.Scale(4));
-                if (bp0.sizeSet && bp0.size > 0) { hitR = bp0.size; }
+                hitR = bs0.symbolSize > 0
+                    ? app.Scale(Chart.SymbolRadius(bs0.symbolSize, 0))
+                    : app.Scale(4);
+                if (bp0.sizeSet && bp0.size > 0) { hitR = app.Scale(bp0.size); }
                 if (bs0.symbolSizeFn.Length > 0) {
                     int sv = (bs0.symbolSizeFn == "y" || bs0.symbolSizeFn == "ySqrt")
                         ? Chart.PointV(bp0.y, bs0.pointG)

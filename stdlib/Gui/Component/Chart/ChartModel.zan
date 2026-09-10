@@ -1367,6 +1367,17 @@ class ChartSeries {
                      //   （厚度 px、垂直中心在 y 值、从 x=0 基线长到 x 值，
                      //   官方 _buildOther 横向分支）；0 = 竖柱
     int barGapPct;   // ECharts bar.barGap：同系列柱间距百分比；-1 = 旧固定缝
+    // 柱布局原始选项（ECharts layout/barGrid.ts:createLayoutInfoListOnAxis
+    // 的系列侧输入）。字符串原样保留 `'N%'` / 数值两种形态，布局期才按
+    // 带宽用 parsePercent 折算：上面几个折算成 int 的字段在 300/7 = 42.857
+    // 这类带宽上丢精度，柱宽因此系统性偏差。"" = 选项缺省。
+    string barWidthRaw;
+    string barGapRaw;
+    string barCategoryGapRaw;
+    string barMinWidthRaw;
+    string barMaxWidthRaw;
+    bool large;      // ECharts bar.large：大数据量退化渲染标志
+    int largeThreshold; // ECharts bar.largeThreshold（缺省 400）
     bool silent;     // ECharts series.silent：true = 不响应鼠标命中（不出
                      //     tooltip），图形照画（waterfall2 占位柱）
     string symbol;   // ECharts series.symbol 形状族（Sanitized：circle/emptyCircle/
@@ -1522,6 +1533,13 @@ class ChartSeries {
         s.barWidthPct = 0;
         s.barHeight = 0;
         s.barGapPct = 0 - 1;
+        s.barWidthRaw = "";
+        s.barGapRaw = "";
+        s.barCategoryGapRaw = "";
+        s.barMinWidthRaw = "";
+        s.barMaxWidthRaw = "";
+        s.large = false;
+        s.largeThreshold = 400;
         s.silent = false;
         s.symbol = "";
         s.symbolSize = 0;
@@ -1932,6 +1950,16 @@ class ChartSeries {
         return this.points.Count;
     }
 
+    /// ECharts `layout/barGrid.ts:510` `isInLargeMode`：`pipelineContext.large`
+    /// 为真 = 声明了 `large` 且数据量超过 `largeThreshold`（缺省 400）。
+    /// 只影响 barMinWidth 的缺省（0.5 而非 1）。
+    bool InLargeMode() {
+        if (!this.large) { return false; }
+        int thr = this.largeThreshold;
+        if (thr < 1) { thr = 400; }
+        return this.Count() > thr;
+    }
+
     /// 第 i 项的 double 值；i 越界返回 0.0，整型项返回其 val。
     /// 值对系列取第 i 对的 y。
     double Number(int i) {
@@ -1998,6 +2026,11 @@ class ChartSeries {
         s.silent = src.silent;
         s.barHeight = src.barHeight;
         s.barGapPct = src.barGapPct; s.symbol = src.symbol;
+        s.barWidthRaw = src.barWidthRaw; s.barGapRaw = src.barGapRaw;
+        s.barCategoryGapRaw = src.barCategoryGapRaw;
+        s.barMinWidthRaw = src.barMinWidthRaw;
+        s.barMaxWidthRaw = src.barMaxWidthRaw;
+        s.large = src.large; s.largeThreshold = src.largeThreshold;
         s.symbolSize = src.symbolSize; s.symbolSizeFn = src.symbolSizeFn;
         s.pointG = src.pointG;
         s.showSymbol = src.showSymbol; s.showBackground = src.showBackground;
@@ -2145,8 +2178,14 @@ class ChartSeries {
 class ChartAxis {
     ChartAxisType type;
     string title;     // 轴名称（ECharts name），"" = 无
-    int min;          // ChartOption.Auto() = 从数据推导
+    // 显式下/上界。int 是旧接口（其它渲染视图/hash 仍读它）；
+    // D 后缀是 double 真值：line-easing 写 min:-0.4 / max:1.4，
+    // 只留 int 会把 -0.4 截成 0，轴整体错位、刻度全变整数。
+    // Auto() / AutoD() = 从数据推导。写的时候两个一起维护（见 SetRange）。
+    int min;
     int max;
+    double minD;
+    double maxD;
     bool reversed;    // 翻转轴（ECharts inverse）
     int ticks;        // 数值轴刻度数（默认 5）
     bool showGrid;    // 为此轴绘制网格线
@@ -2172,8 +2211,7 @@ class ChartAxis {
         ChartAxis a = new ChartAxis();
         a.type = ChartAxisType.Category;
         a.title = "";
-        a.min = ChartOption.Auto();
-        a.max = ChartOption.Auto();
+        a.SetRange(ChartOption.AutoD(), ChartOption.AutoD());
         a.reversed = false;
         a.ticks = 5;
         // ECharts 2 类目轴 splitLine 默认开（竖向 #eee 网格线）。
@@ -2207,8 +2245,7 @@ class ChartAxis {
         ChartAxis a = new ChartAxis();
         a.type = ChartAxisType.Value;
         a.title = "";
-        a.min = ChartOption.Auto();
-        a.max = ChartOption.Auto();
+        a.SetRange(ChartOption.AutoD(), ChartOption.AutoD());
         a.reversed = false;
         a.ticks = 0;
         a.showGrid = true;
@@ -2263,11 +2300,22 @@ class ChartAxis {
         return a;
     }
 
+    /// 同时写 int 与 double 两套范围（JSON 解析/工厂/clone 都必须走这里，
+    /// 否则两套值会漂移：hash 读 int、渲染读 double）。
+    void SetRange(double lo, double hi) {
+        this.minD = lo;
+        this.maxD = hi;
+        this.min = ChartOption.IsAutoD(lo) ? ChartOption.Auto() : (int)lo;
+        this.max = ChartOption.IsAutoD(hi) ? ChartOption.Auto() : (int)hi;
+    }
+
     /// 深复制（含分类标签列表）；src 为 null 时返回 null。
     static ChartAxis Clone(ChartAxis src) {
         if (src == null) { return null; }
         ChartAxis a = new ChartAxis();
-        a.type = src.type; a.title = src.title; a.min = src.min; a.max = src.max;
+        a.type = src.type; a.title = src.title;
+        a.min = src.min; a.max = src.max;
+        a.minD = src.minD; a.maxD = src.maxD;
         a.reversed = src.reversed; a.ticks = src.ticks; a.showGrid = src.showGrid;
         a.splitArea = src.splitArea;
         a.labelRotate = src.labelRotate; a.labelInterval = src.labelInterval;
@@ -2408,6 +2456,17 @@ class ChartOption {
 
     /// 哨兵值，表示"此边界从数据推导"。
     static int Auto() { return 0 - 2000000000; }
+    /// double 版（ChartAxis.min/max 是 double；直接 cast 2000000000 会被
+    /// 强转工具链看作溢出风险，统一走这里）。
+    static double AutoD() { return 0.0 - 2000000000.0; }
+    /// 测试 double 是否为 Auto 哨兵。
+    static bool IsAutoD(double v) { return v <= 0.0 - 1999999999.0; }
+    /// 两个 double 在 1/1000 容差内相等（判断"是不是整数界"用）。
+    static bool SameIsh(double a, double b) {
+        double d = a - b;
+        if (d < 0.0) { d = 0.0 - d; }
+        return d < 0.0005;
+    }
 
     /// 声明本图加入 connect 组（ECharts connect：多图共享交互态）。
     /// 组内所有图传同一个 groupId（任意稳定 int，通常用组长图的
@@ -3501,14 +3560,19 @@ class ChartOption {
     }
 
     /// 解析散点数据：[x,y] 数组或 {x,y,symbolSize?,color?} 对象。
+    /// 坐标按 ×1000 定点存（ECharts 值是浮点：[8.07,6.95]）；调用方
+    /// 必须同时把 cs.pointG 置 1000，否则渲染端不除回。
     static void ParsePoints(JsonValue v, List<ChartPoint> into) {
         if (v == null || !v.IsArray()) { return; }
         for (int i = 0; i < v.Count(); i = i + 1) {
             JsonValue it = v.At(i);
             if (it.IsArray() && it.Count() >= 2) {
-                into.Add(ChartPoint.Of(it.At(0).AsInt(0), it.At(1).AsInt(0)));
+                into.Add(ChartPoint.Of(ChartOption.Mul1000(it.At(0).AsDouble(0.0)),
+                    ChartOption.Mul1000(it.At(1).AsDouble(0.0))));
             } else if (it.IsObject()) {
-                ChartPoint p = ChartPoint.Of(it.Int("x", 0), it.Int("y", 0));
+                ChartPoint p = ChartPoint.Of(
+                    ChartOption.Mul1000(it.Double("x", 0.0)),
+                    ChartOption.Mul1000(it.Double("y", 0.0)));
                 if (it.Has("symbolSize")) {
                     p.size = it.Int("symbolSize", 0);
                     p.sizeSet = true;
@@ -3519,6 +3583,12 @@ class ChartOption {
                 into.Add(p);
             }
         }
+    }
+
+    /// double → ×1000 定点（四舍五入，负数向下）。
+    static int Mul1000(double d) {
+        if (d >= 0.0) { return (int)(d * 1000.0 + 0.5); }
+        return (int)(d * 1000.0 - 0.5);
     }
 
     /// 解析事件数据：{name,start,end,value?}（end < start 交换、
@@ -4926,6 +4996,16 @@ class ChartOption {
                 }
                 cs.barHeight = s.Int("barHeight", cs.barHeight);
                 cs.silent = s.Bool("silent", cs.silent);
+                // 柱布局原始选项（barGrid 的输入）：`Str` 对字符串原样、
+                // 对数字给原始字面量（numRaw），缺省 "" —— 正是
+                // layout/barGrid.ts:createLayoutInfoListOnAxis 需要的形态。
+                cs.barWidthRaw = s.Str("barWidth", "");
+                cs.barGapRaw = s.Str("barGap", "");
+                cs.barCategoryGapRaw = s.Str("barCategoryGap", "");
+                cs.barMinWidthRaw = s.Str("barMinWidth", "");
+                cs.barMaxWidthRaw = s.Str("barMaxWidth", "");
+                cs.large = s.Bool("large", cs.large);
+                cs.largeThreshold = s.Int("largeThreshold", cs.largeThreshold);
                 JsonValue bgp = s.Get("barGap");
                 if (bgp != null && bgp.IsString() && bgp.AsString("").EndsWith("%")) {
                     string pct = bgp.AsString("");
@@ -5080,6 +5160,7 @@ class ChartOption {
                 ChartOption.ParseBoxes(s.Get("boxes"), cs.boxes);
                 ChartOption.ParseErrors(s.Get("errors"), cs.errors);
                 ChartOption.ParsePoints(s.Get("points"), cs.points);
+                if (cs.points.Count > 0 && cs.pointG <= 1) { cs.pointG = 1000; }
                 ChartOption.ParseEvents(s.Get("events"), cs.events);
                 ChartOption.ParseRegions(s.Get("regions"), cs.regions);
                 // 层级数据（tree/treemap/sunburst 的 children 递归）。
@@ -5175,8 +5256,21 @@ class ChartOption {
                                     }
                                 }
                             } else {
+                                // 数值对 [[x,y],...]：必须走 ×1000 定点。
+                                // ECharts 散点坐标是浮点（scatter-simple
+                                // 的 [8.07,6.95]、bubble 的 [31163,77.4]），
+                                // 用 AsInt 会把每一点截到整数格——35 个
+                                // 散点/地图/自定义系列整体走形。定点约定
+                                // 与 dataset 路（Mul1000）一致，渲染端已经
+                                // 按 Chart.PointV(x, s.pointG) 除回。
+                                cs.pointG = 1000;
+                                double rpx = it.At(0).AsDouble(0.0);
+                                double rpy = it.At(1).AsDouble(0.0);
                                 cs.points.Add(ChartPoint.Of(
-                                    it.At(0).AsInt(0), it.At(1).AsInt(0)));
+                                    (int)(rpx >= 0.0 ? rpx * 1000.0 + 0.5
+                                        : rpx * 1000.0 - 0.5),
+                                    (int)(rpy >= 0.0 ? rpy * 1000.0 + 0.5
+                                        : rpy * 1000.0 - 0.5)));
                             }
                         } else if (it.IsObject()) {
                             // 时间轴的对象项 {name, value:[日期串, 值]}
@@ -5830,15 +5924,18 @@ class ChartOption {
         // category 的轴也可能只声明 gridIndex/min/max（anscombe 四
         // 重奏，ECharts 依 series 数据推断数值轴），散点视图按它
         // 固定定义域。
-        if (v.Has("min")) { a.min = v.Int("min", ChartOption.Auto()); }
-        if (v.Has("max")) { a.max = v.Int("max", ChartOption.Auto()); }
+        if (v.Has("min")) { a.minD = v.AsDouble(ChartOption.AutoD()); }
+        if (v.Has("max")) { a.maxD = v.AsDouble(ChartOption.AutoD()); }
+        // int 影子：解析态探针/hash 仍读 min/max。
+        a.min = ChartOption.IsAutoD(a.minD) ? ChartOption.Auto() : (int)a.minD;
+        a.max = ChartOption.IsAutoD(a.maxD) ? ChartOption.Auto() : (int)a.maxD;
         // yAxis.interval：数值轴刻度步长（bump-chart 的 1）。显式
         // min/max 存在时换算成刻度区间数，轴标签按整数步长落。
         JsonValue ivv = v.Get("interval");
-        if (ivv != null && ivv.IsNumber() && a.min != ChartOption.Auto()
-            && a.max != ChartOption.Auto() && a.max > a.min) {
-            int step = ivv.AsInt(1);
-            if (step >= 1) { a.ticks = (a.max - a.min) / step; }
+        if (ivv != null && ivv.IsNumber() && !ChartOption.IsAutoD(a.minD)
+            && !ChartOption.IsAutoD(a.maxD) && a.maxD > a.minD) {
+            double step = ivv.AsDouble(1.0);
+            if (step > 0.0) { a.ticks = (int)((a.maxD - a.minD) / step); }
         }
         a.title = v.Str("name", "");
         a.axisId = v.Str("id", "");

@@ -821,6 +821,197 @@ class Chart {
         return nice * mag;
     }
 
+    // ======== ECharts 6.1 scale 基元（逐函数照抄，勿改语义）========
+    // 源：_scratch/echarts-master/src/util/number.ts 与 src/scale/helper.ts
+    // 上面那个 NiceMax(int) 是本仓库手写的旧近似（`<=5 → 5` 特例 +
+    // 2/5/10 阶梯），与 ECharts 不符；下面 NiceD/NiceMode 才是对照源
+    // 的忠实物。保留旧函数以便逐步迁移调用点。
+
+    /// `number.ts:581 quantityExponent(val)`——十进制指数。
+    /// 9876→3，0.09876→-2，0.0012→-3。val=0 按源码返回 0。
+    /// 注意源码用 mathFloor；(int) 是向零截断，负数会差 1
+    /// （log10(0.0012) = -2.92，必须 -3），故显式下取整。
+    static int QuantityExponent(double val) {
+        if (val == 0.0) { return 0; }
+        double av = val < 0.0 ? 0.0 - val : val;
+        double lg = Math.Log(av) / 2.302585092994046;
+        int exp = (int)lg;
+        if ((double)exp > lg) { exp = exp - 1; }
+        // 源码 :594——Math.log 精度损失用 10^exp 还原，必要时 +1
+        if (av / Chart.Pow10D(exp) >= 10.0) { exp = exp + 1; }
+        return exp;
+    }
+
+    /// 10 的整数次幂（源码 Math.pow(10,e)，整数指数无舍入误差）。
+    /// D 后缀避开本文件既有的 int 版 Pow10。
+    static double Pow10D(int e) {
+        double r = 1.0;
+        int n = e < 0 ? 0 - e : e;
+        for (int i = 0; i < n; i = i + 1) { r = r * 10.0; }
+        return e < 0 ? 1.0 / r : r;
+    }
+
+    /// `number.ts:222 round(x, precision)` = `+x.toFixed(precision)`；
+    /// precision 钳到 [0,20]（TO_FIXED_SUPPORTED_PRECISION_MAX）。
+    static double RoundP(double x, int precision) {
+        int p = precision < 0 ? 0 : precision;
+        if (p > 20) { p = 20; }
+        double sc = Chart.Pow10D(p);
+        double v = x * sc;
+        double r = v >= 0.0 ? (double)(long)(v + 0.5) : (double)(long)(v - 0.5);
+        return r / sc;
+    }
+
+    /// `number.ts:297 getPrecisionSafe(val)`——字符串法小数位数。
+    static int GetPrecisionSafe(double val) {
+        string s = val.ToString();
+        int eIdx = s.IndexOf('e');
+        if (eIdx < 0) { eIdx = s.IndexOf('E'); }
+        int exp = 0;
+        int sigLen = s.Length;
+        if (eIdx > 0) {
+            exp = int.Parse(s.Substring(eIdx + 1));
+            sigLen = eIdx;
+        }
+        int dot = s.IndexOf('.');
+        int decLen = dot < 0 ? 0 : sigLen - 1 - dot;
+        int r = decLen - exp;
+        return r > 0 ? r : 0;
+    }
+
+    /// `number.ts:265 getPrecision(val)`——快路径 15 次循环，
+    /// 否则退字符串法。
+    static int GetPrecision(double val) {
+        double av = val < 0.0 ? 0.0 - val : val;
+        if (av > 1e-14) {
+            double e = 1.0;
+            for (int i = 0; i < 15; i = i + 1) {
+                double v = av * e;
+                double r = v >= 0.0 ? (double)(long)(v + 0.5) : (double)(long)(v - 0.5);
+                if (r / e == av) { return i; }
+                e = e * 10.0;
+            }
+        }
+        return Chart.GetPrecisionSafe(av);
+    }
+
+    /// `helper.ts:147 getIntervalPrecision(niceInterval)`
+    /// = getPrecision(interval) + 2。刻度标签小数位数由它决定。
+    static int GetIntervalPrecision(double niceInterval) {
+        return Chart.GetPrecision(niceInterval) + 2;
+    }
+
+    /// `number.ts:613 nice(val, mode)`。roundMode=true 走
+    /// NICE_MODE_ROUND（helper.ts:103 的调用点）：
+    ///   f<1.5→1  f<2.5→2  f<4→3  f<7→5  else→10
+    /// false 走 mode=0 分支：f<1→1 f<2→2 f<3→3 f<5→5 else→10。
+    /// 校验值（已对源逐值核过）：nice(1.4)=1 nice(3.7)=3 nice(7.2)=10
+    /// nice(0.36)=0.3 nice(0.0012)=0.001 nice(70.1598)=100
+    static double NiceD(double val) {
+        return Chart.NiceMode(val, true);
+    }
+    static double NiceMode(double val, bool roundMode) {
+        double av = val < 0.0 ? 0.0 - val : val;
+        if (av == 0.0) { return 0.0; }
+        int exponent = Chart.QuantityExponent(av);
+        double exp10 = Chart.Pow10D(exponent);
+        double f = av / exp10;
+        double nf = 10.0;
+        if (roundMode) {
+            if (f < 1.5) { nf = 1.0; }
+            else if (f < 2.5) { nf = 2.0; }
+            else if (f < 4.0) { nf = 3.0; }
+            else if (f < 7.0) { nf = 5.0; }
+            else { nf = 10.0; }
+        } else {
+            if (f < 1.0) { nf = 1.0; }
+            else if (f < 2.0) { nf = 2.0; }
+            else if (f < 3.0) { nf = 3.0; }
+            else if (f < 5.0) { nf = 5.0; }
+            else { nf = 10.0; }
+        }
+        int p = 0 - exponent;
+        if (p < 0) { p = 0; }
+        double r = Chart.RoundP(nf * exp10, p);
+        return val < 0.0 ? 0.0 - r : r;
+    }
+
+    /// `helper.ts:93 intervalScaleNiceTicks(extent, span, splitNumber,
+    /// minInterval, maxInterval)`。
+    ///   interval  = nice(span/splitNumber, ROUND)
+    ///   precision = getIntervalPrecision(interval)
+    ///   niceTickExtent = [round(ceil(e0/interval)·interval, precision),
+    ///                     round(floor(e1/interval)·interval, precision)]
+    /// minInterval/maxInterval 传 ChartOption.AutoD() 表示不设。
+    static void IntervalScaleNiceTicks(double e0, double e1, int splitNumber,
+                                       double minInterval, double maxInterval,
+                                       out double interval, out int precision,
+                                       out double nt0, out double nt1) {
+        double span = e1 - e0;
+        double sp = splitNumber > 0 ? span / (double)splitNumber : span;
+        interval = Chart.NiceMode(sp, true);
+        if (!ChartOption.IsAutoD(minInterval) && interval < minInterval) {
+            interval = minInterval;
+        }
+        if (!ChartOption.IsAutoD(maxInterval) && interval > maxInterval) {
+            interval = maxInterval;
+        }
+        precision = Chart.GetIntervalPrecision(interval);
+        if (interval == 0.0) { nt0 = e0; nt1 = e1; return; }
+        nt0 = Chart.RoundP(Math.Ceiling(e0 / interval) * interval, precision);
+        nt1 = Chart.RoundP(Math.Floor(e1 / interval) * interval, precision);
+    }
+
+    /// `Interval.ts:183 getTicks()` —— 刻度序列（略去 break 分支）。
+    /// 结果写进 out 列表；precision 决定标签小数位。
+    static void ScaleTicks(double extent0, double extent1, double nt0, double nt1,
+                           double interval, int precision, List<double> outTicks) {
+        if (interval == 0.0) { return; }
+        // extent 低于 nice 下界时补一个原始端点（源码 :215-221）
+        if (extent0 < nt0) { outTicks.Add(extent0); }
+        double tick = nt0;
+        int guard = 0;
+        while (guard < 3000) {
+            if (tick > nt1) { break; }
+            outTicks.Add(tick);
+            double next = Chart.RoundP(tick + interval, precision);
+            // 浮点饱和保护（源码 :266-270）
+            if (next == outTicks[outTicks.Count - 1]) { break; }
+            tick = next;
+            guard = guard + 1;
+        }
+        double last = outTicks.Count > 0 ? outTicks[outTicks.Count - 1] : nt1;
+        // extent 高于 nice 上界时补一个原始端点（源码 :279-288）
+        if (extent1 > last) { outTicks.Add(extent1); }
+    }
+
+    /// ECharts 语义的数值轴 [lo, hi]（供 BuildAxes* 用）。
+    /// 两个端点必须落在**同一 interval 的整数倍**上，否则两端刻度
+    /// 间距会被截断成不等距——旧的 NiceMin/NiceMax 各自独立取整
+    /// 就是这个毛病。退化域（单点/全等）先按
+    /// `intervalScaleEnsureValidExtent` 撑开。
+    static void AxisNiceRange(double fixedLo, double fixedHi,
+                              double dataMin, double dataMax, int splitNumber,
+                              double minInterval, double maxInterval,
+                              out double lo, out double hi, out double interval,
+                              out int precision) {
+        double d0 = dataMin;
+        double d1 = dataMax;
+        if (d1 <= d0) {
+            double pad = (d0 == 0.0) ? 1.0 : (d0 < 0.0 ? 0.0 - d0 : d0) * 0.5;
+            d0 = d0 - pad;
+            d1 = d1 + pad;
+            if (d1 <= d0) { d1 = d0 + 1.0; }
+        }
+        double nt0 = 0.0;
+        double nt1 = 0.0;
+        Chart.IntervalScaleNiceTicks(d0, d1, splitNumber, minInterval, maxInterval,
+            out interval, out precision, out nt0, out nt1);
+        lo = ChartOption.IsAutoD(fixedLo) ? nt0 : fixedLo;
+        hi = ChartOption.IsAutoD(fixedHi) ? nt1 : fixedHi;
+        if (hi <= lo) { hi = lo + (interval > 0.0 ? interval : 1.0); }
+    }
+
 
     /// AxisMinFor 的 1/1000 定点对偶：与 AxisMaxForF 成对——原始
     /// 数据下界直传（不许钳零），小数轴量程专用。i0/i1 窗口语义
@@ -2958,6 +3149,19 @@ class Chart {
         int nice = 10;
         if (unit < 2) { nice = 2; } else if (unit < 5) { nice = 5; }
         return 0 - nice * mag;
+    }
+
+    /// double 重载：显式界可能是 -0.4 这类小数（line-easing），
+    /// 走 int 会截断成 0。语义改用 ECharts 的 NICE_MODE_MIN
+    /// （number.ts:633 `mode===NICE_MODE_MIN` 恒取 nf=1，即 10^exponent
+    /// 向上覆盖到 |v|），而不是旧的 2/5/10 阶梯。
+    static double NiceMin(double v) {
+        if (v >= 0.0) { return 0.0; }
+        double av = 0.0 - v;
+        int exponent = Chart.QuantityExponent(av);
+        double n = Chart.Pow10D(exponent);
+        if (n < av) { n = n * 10.0; }
+        return 0.0 - n;
     }
 
     /// 从数据 + 固定覆盖解析数值轴的 [lo, hi] 范围（fixedLo/fixedHi

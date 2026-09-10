@@ -1,6 +1,6 @@
 ---
 name: testing-charts-gallery
-description: Zan charts gallery (examples/gui_charts, 335 ECharts 官方对照 demo) 的代码级完整度对照与实机验证定式——scripts/chart_gap_audit.py 的未读配置键倒排/源引用率、源函数逐条对抄、recheck2 截图驱动、bindprobe 探针、--bench 帧计时、stdlib 快照同步坑、多 grid/dataZoom/定点数值三大契约。凡是要盘点图表迁移完整度、修复 stdlib/Gui/Component/Chart 引擎改动、核对某个 demo 与 ECharts 官方语义是否一致、排查"图表空板/缺元素/多面板窗口不同步"时使用。
+description: Zan charts gallery (examples/gui_charts, 335 ECharts 官方对照 demo) 的代码级完整度对照与实机验证定式——scripts/chart_gap_audit.py 的未读配置键倒排/源引用率、源函数逐条对抄、数值 oracle（ECharts getLayout 归一化对比，bar 布局样板）、颜色/字号预算闸门、recheck2 截图驱动、bindprobe 探针、--bench 帧计时、stdlib 快照同步坑、多 grid/dataZoom/定点数值三大契约。凡是要盘点图表迁移完整度、修复 stdlib/Gui/Component/Chart 引擎改动、核对某个 demo 与 ECharts 官方语义是否一致、排查"图表空板/缺元素/多面板窗口不同步"时使用。
 ---
 
 # Charts gallery 验证与修复定式（Windows 实机）
@@ -24,7 +24,8 @@ description: Zan charts gallery (examples/gui_charts, 335 ECharts 官方对照 d
   既不自证正确，也留不住。
 - 着色占比只能抓白板。已核实的三个语义错误在着色占比里全都"正常"：
   ① 柱宽公式 `ChartViewBar.zan:351-354` 手写 `step*7/10`、`Scale(2)` 像素
-  间距，对照 `layout/barGrid.ts:206-349` 的 `barCategoryGap` 求解；
+  间距，对照 `layout/barGrid.ts:206-349` 的 `barCategoryGap` 求解
+  （**已修**：`ChartBarLayout.zan` 严格对抄，见"数值对照 oracle"节）；
   ② 折线符号漏了 `chart/line/LineView.ts:371-410` 的数值轴提前返回与
   `canShowAllSymbolForCategory()` 通过分支；
   ③ `axis.scale` 从不读取，且 `Chart.zan:1019,3006` 的
@@ -39,11 +40,46 @@ description: Zan charts gallery (examples/gui_charts, 335 ECharts 官方对照 d
    这张图不可能对**，先看这里再决定修哪个。
 2. 引擎新增/修改的逻辑，注释必须写 ECharts 源 `文件:行`。没有出处 =
    这条无法审计，等于欠债（审计工具就是按这个引用率给结论的）。
-3. 代码级账本在 `docs/CHART_CODE_GAP_LEDGER.md`，按源函数记账，
+3. 代码级账本：`docs/CHART_PORT_AUDIT_2026-09-10.md` 是**已提交**的
+   完整度审计报告；逐条施工台账在 `_scratch/ECHARTS_PORT_LEDGER.md`
+   （A=缺席 / B=已修 / C=待定位 / D=验证纪律）。按源函数记账，
    **修一条删一条**，不留已完成项。
 4. 截图留给**渲染层**问题：控制点已与源一致、画出来仍不对的那种
    （如 smooth 的"麻花"，见下节——控制点手算与 JS 参考逐值相同，
    病在采样率/描边光栅器）。语义层用截图判等会误判，渲染层才是它的地盘。
+
+## 数值对照 oracle：布局/量程这类纯计算，直接对 ECharts 自己算的数
+
+"逐函数对抄"之后仍要证明抄对了。几何/布局/刻度这类**纯计算**不要靠
+截图，走数值 oracle：让 ECharts 把它的中间结果吐出来，Zan 侧用**同一份
+option** 复算，逐字段 diff。
+
+- **权威钩子**：`seriesModel.getData().getLayout('offset'|'size'|'bandWidth')`
+  ——即 `layout/barGrid.ts:calcBarWidthAndOffset` 的输出，由
+  `createCrossSeriesLayoutHandler.overallReset` 经 `data.setLayout` 挂上。
+  不要量 rect（首帧显示表里第一个矩形常是被裁剪的残片，会得到 3 个假
+  不一致；柱溢出绘图区时尤其）。绘图区原点/跨度用 `grid.getRect()`；
+  `axis.getExtent()` 返回的是相对 [0,span]，**不是**绝对像素。
+- **归一化再比**：`offU = offset/band×1e4`、`wU = size/band×1e4`。两引擎
+  绘图区尺寸不同也不影响；只有 px 形态的选项（`barWidth:20`、
+  `barMinWidth:12`、`barMaxWidth:8`）才依赖 band，**把 ECharts 报的 band
+  原样喂给 Zan 探针**。可直接复用的骨架在 `_scratch/chart_oracle/`
+  （带 README，`clean_scratch` 跳过）：`bardemo.js` 出
+  `bardemo.oracle.txt` → `bardemo.zan` 读 oracle 行取 band/n，走真实
+  `ChartOption.FromJson` + 渲染层同一选取规则 + `ChartView.CalcBarCols`，
+  输出同格式后 `diff --strip-trailing-cr`。探针必须用**工作区** stdlib
+  编译（`--auto-stdlib`，别带 `--stdlib-path _scratch/stdlib_snap`，
+  那份快照会落后——本地 6:13 的 gallery 构建就是拿 3:45 的旧快照跑的，
+  新柱布局根本没进去）。
+- **覆盖要分两层**：① 构造配置打边界（默认/显式 px/%/负 gap/堆叠/混
+  堆叠/min-max 宽度/"末个声明系列覆盖"语义）——23 组；
+  ② **真实 demo 打集成**（`examples/gui_charts/options/bar-*.json`：纵向
+  11 / 横向 4 / 瀑布 2，含 `bar-tick-align` 的 `xAxis` 数组形态）——17 组。
+  两层都 IDENTICAL 才算这条修完。真实 demo 层还能顺带查出类目数推导
+  （Zan 侧 n 与 ECharts 的 n 不一致时输出 `MISMATCH-N`）。
+- **ECharts SSR 进程不退**：`echarts.init(null,null,{renderer:'svg',ssr:true})`
+  留下未清的帧句柄，脚本跑完仍挂住（`head` 管道下表现为"永远在跑"）。
+  末尾 `process.exit(0)`；后台跑时重定向到文件再读。
 
 ## 构建（快照 stdlib，避开并发会话的在途编辑）
 
@@ -163,10 +199,29 @@ powershell -File _scratch/recheck2.ps1 -OutDir D:/project/zan-lang/_scratch/shot
 
 ## ctest 档位
 
-stdlib Chart 改动 → `cd build && ctest -R conformance_chart`（26 例，~96s）。
+stdlib Chart 改动 → `cd build && ctest -R conformance_chart`（26 例，~96s）；
+calendar 相关再加 `ctest -R conformance_gui_chart_calendar`（离屏 Canvas
+几何/墨迹断言）。Chart 目录还挂两条 **smoke 级预算闸门**，改颜色/字号时
+必跑：`policy_theme_color_budget`（`stdlib/Gui/**` 里除 Theme/Style/
+StyleBox/Fx 外不得直读 `t.textPrimary` 这类语义色）、
+`gui_theme_font_budget`（不得直读 `t.fontSize*`）。预算逐文件为 0，
+要取颜色/字号走 `Style.Part(app,"chart","label",...).FgOr(0)` /
+`Style.FontFallback(app,"small")`——皮肤才覆盖得到。（2026-09-10 的
+calendar 提交直读 `t.textPrimary`/`t.fontSizeSmall`，两条闸门常红到
+2026-09-11 才修；闸门是逐行正则扫描，同一行出现两次算两个。）
+
+**离屏"墨迹"判据看不见叠写文字**：`InkStats` 那种"非纯白即算墨"的计数
+在**填色格**上失效——格子本身已被计入，往上写黑字不新增任何像素
+（`conformance_gui_chart_calendar` 的"农历日名确实写出来"断言就这么假红
+过，实现其实是对的）。判"文字画出来了"要数**深色像素**（RGB 三通道
+< 96），且用"开/关 label 两趟之差"消掉网格自带的深色轴标签。
+
 两个 golden（chart_option_behavior.out 的 sr、chart_pie_layout.out 的 pal）
 曾在语义提交（symbolSize 直径、v6 色板）时没跟上，属欠账——引擎语义
 提交必须连 golden 一起核对，否则 standard 档永远挂着看不见的失败。
+断言里读**定点存储**字段（`points[].x` 存 值×pointG）要先
+`Chart.PointV(v, s.pointG)` 除回，否则改定点倍率就把解析测试扫成假红
+（chart_specialized_json 的 `points[0].x` 就这么红过）。
 
 ## 渲染帧克隆税（大数据 demo 卡顿排查顺序）
 

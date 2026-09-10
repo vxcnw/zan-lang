@@ -1267,6 +1267,17 @@ partial class ChartView {
 
         // 把每种图表裁剪到自己的矩形，防止绘图线、柱条、
         // 轴标签和图例溢出到相邻控件。
+        // emphasis.focus='series' 渐隐的帧内状态源：下面的渲染会
+        // 重置并重测命中，先把上一帧悬停系列记进 Chart 帧内静态；
+        // 该系列声明 focus:'series' 时渲染器把其余系列乘残透明
+        // （官方 bump 图"鼠标经过其余线渐变"的观感）。
+        Chart.fadeFocusIdx = -1;
+        if (this.currentHit != null && this.currentHit.seriesIndex >= 0
+            && this.currentHit.seriesIndex < drawOption.series.Count
+            && drawOption.series[this.currentHit.seriesIndex].emphasisFocus
+                == "series") {
+            Chart.fadeFocusIdx = this.currentHit.seriesIndex;
+        }
         ChartView.activeEventView = this;
         this.currentHit = null;
         string pointerKind = ChartView.DispatchKind(drawOption);

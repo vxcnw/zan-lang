@@ -84,6 +84,24 @@ class Program {
         }
     }
 
+    /// 深色像素数（RGB 三通道都 < 96）。文字是近黑，而 heatmap 填色是
+    /// 浅蓝/浅青——"墨迹"计数（非纯白即算）在填色格上分辨不出叠写的
+    /// 文字：格子本身已被计入，写上去的黑字不新增任何像素。要判"日名
+    /// 确实写出来了"必须只数深色像素。
+    static int DarkCount(Canvas c, int w, int h) {
+        int n = 0;
+        for (int y = 0; y < h; y = y + 1) {
+            for (int x = 0; x < w; x = x + 1) {
+                int px = c.GetPixel(x, y) & 0x00FFFFFF;
+                if (((px >> 16) & 0xFF) < 96 && ((px >> 8) & 0xFF) < 96
+                    && (px & 0xFF) < 96) {
+                    n = n + 1;
+                }
+            }
+        }
+        return n;
+    }
+
     /// 离屏渲染一个 calendar 示例，返回是否落墨 + 墨迹包围盒。
     /// 用一个足够大的 App 面板渲染某示例，返回墨迹统计。
     /// App 尺寸即面板尺寸（RenderOnce 按传入的 w/h 绘制）。
@@ -267,6 +285,33 @@ class Program {
                 }
             }
             True("colored child series " + colored[i], coloredPx > 100);
+        }
+
+        // ---- 6. lunar 农历日名确实写在格子上 ----
+        // 官方 lunar 的 scatter 用 label.show + data 第 3 元的农历日名
+        // ("初四") 铺满整月。判据：关掉 label 后**深色**像素显著减少
+        // （少掉的就是那些日名——黑字叠在半透明 heatmap 填色上，用
+        // 非白像素数是看不出来的，见 DarkCount 注释）。
+        if (Program.Has("calendar-lunar")) {
+            int darkOn = 0; int darkOff = 0;
+            for (int pass = 0; pass < 2; pass = pass + 1) {
+                ChartOption lo = Program.Load("calendar-lunar");
+                if (pass == 1) {
+                    // 关掉两条 scatter 的 label，只留网格 + heatmap
+                    for (int si = 0; si < lo.series.Count; si = si + 1) {
+                        if (lo.series[si].typeName == "scatter") {
+                            lo.series[si].labelShow = false;
+                        }
+                    }
+                }
+                App la = new App("callunar-" + Convert.ToString(pass), W, H);
+                la.BeginFrame();
+                la.canvas.Clear(0xFFFFFFFF);
+                ChartView.RenderOnce(la, 0, 0, W, H, lo, 0);
+                int dk = Program.DarkCount(la.canvas, W, H);
+                if (pass == 0) { darkOn = dk; } else { darkOff = dk; }
+            }
+            True("lunar labels add ink", darkOn > darkOff);
         }
 
         if (fails > 0) {

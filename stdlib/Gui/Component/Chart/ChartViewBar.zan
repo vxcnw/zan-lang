@@ -97,43 +97,38 @@ partial class ChartView {
         int maxV = f.leftMax;
         if (ns < 1) { return; }
 
-        int step = f.plotW / n;
+        // 柱布局：`ChartBarLayout.zan` 照抄 ECharts 6.1
+        // coord/axisBand.ts + layout/barGrid.ts。带 = plotW/类目数（double，
+        // 不再先截断成 int step），每条柱系列取自己 stack 的列
+        // {offset, width}；柱左缘 = 带中心 + offset。
+        double band = ChartView.BarBandWidth(f.plotW, n);
+        // 占槽位的系列（可见 bar 族，双数值轴的值对系列除外——后者按
+        // points 画，不占类目槽），以及系列下标 → 列的映射。
+        List<ChartSeries> barSer = new List<ChartSeries>();
+        List<string> barStackIds = new List<string>();
+        List<int> barSi = new List<int>();
+        for (int bs = 0; bs < ns; bs = bs + 1) {
+            ChartSeries bsc = series[bs];
+            if (!bsc.hidden && ChartView.IsBarFamily(bsc.type)
+                && !(xValBars && bsc.points.Count > 0)) {
+                barSer.Add(bsc);
+                barSi.Add(bs);
+                // ECharts getSeriesStackId：stack 名，未设则每条系列独占
+                // 一列（`__ec_stack_<seriesIndex>`）。
+                if (bsc.stackName.Length > 0) { barStackIds.Add(bsc.stackName); }
+                else { barStackIds.Add("__ec_stack_" + Convert.ToString(bs)); }
+            }
+        }
+        List<ChartBarCol> barCols = ChartView.CalcBarCols(band, barSer, barStackIds);
+        List<ChartBarCol> colOf = new List<ChartBarCol>();
+        for (int ci = 0; ci < ns; ci = ci + 1) { colOf.Add(null); }
+        for (int bi = 0; bi < barSi.Count; bi = bi + 1) { colOf[barSi[bi]] = barCols[bi]; }
         int rad = app.Scale(3);
         if (!o.rounded) { rad = app.Scale(1); }
         int mxB = app.mouseX;
         int myB = app.mouseY;
         ChartHit barHit = null;
         ChartView.PushPlotClip(app, f.plotX, f.plotY, f.plotW, f.plotH);
-
-        // 可见柱状族序列数量（折线族与 pie/gauge/funnel 混搭覆盖
-        // 系列都不占槽位）
-        int nsVis = 0;
-        for (int cs = 0; cs < ns; cs = cs + 1) {
-            ChartSeries sc = series[cs];
-            if (!sc.hidden && ChartView.IsBarFamily(sc.type)) { nsVis = nsVis + 1; }
-        }
-        if (nsVis < 1) { nsVis = 1; }
-
-        // markPoint 柱内锚点（ECharts2 bar.js xMarkMap 同源）：组
-        // 几何在堆叠/分组两支里更新，markPoint 循环按同式取本系列
-        // 柱中线；堆叠组名单物化到循环外共用。
-        int markGroupW = step * 7 / 10;
-        int markGap = app.Scale(2);
-        int markBarW = (markGroupW - markGap * (nsVis - 1)) / nsVis;
-        if (markBarW < app.Scale(2)) { markBarW = app.Scale(2); }
-        int markX0off = 0;
-        int markStackBarW = 0;
-        List<string> markGrp = new List<string>();
-        if (stacked) {
-            for (int gsi = 0; gsi < ns; gsi = gsi + 1) {
-                ChartSeries sc = series[gsi];
-                if (!sc.hidden && ChartView.IsBarFamily(sc.type)) {
-                    if (ChartView.GroupIndex(markGrp, sc.stackName) < 0) {
-                        markGrp.Add(sc.stackName);
-                    }
-                }
-            }
-        }
 
         if (stacked) {
             // 按 stackName 分组的堆叠柱（ECharts `stack` 分组）：
@@ -148,21 +143,6 @@ partial class ChartView {
             }
             int ng = grp.Count;
             if (ng < 1) { ng = 1; }
-            // barWidth 百分比（"60%"）取首条可见柱系列声明：堆叠组
-            // 带宽直接按类目带百分比（normalization 单组 60%）。
-            int bwPctSt = 0;
-            for (int pw = 0; pw < ns; pw = pw + 1) {
-                ChartSeries pws = series[pw];
-                if (!pws.hidden && ChartView.IsBarFamily(pws.type)) {
-                    bwPctSt = pws.barWidthPct;
-                    break;
-                }
-            }
-            int groupW = step * 9 / 10;
-            if (bwPctSt > 0) { groupW = step * bwPctSt / 100; }
-            int barW = groupW / ng;
-            if (barW < app.Scale(2)) { barW = app.Scale(2); }
-            int groupX0 = (step - groupW) / 2;
             // 累加器 long：亿级值 ×1000 定点后 8.6e10 超 int32，
             // 堆叠累计随之升宽（candlestick-touch 成交量堆不上的根因）。
             List<long> accs = new List<long>();
@@ -200,10 +180,19 @@ partial class ChartView {
                             double dvK = sc.Number(oi);
                             vF = (long)(dvK * 1000.0 + (dvK >= 0 ? 0.5 : 0 - 0.5));
                         }
-                        int cellL = f.CatLeft(i, n);
-                        int cellW = f.CatWidth(i, n);
-                        int g0 = (cellW - groupW) / 2;
-                        int bx = cellL + g0 + gi * barW;
+                        // 本系列所在 stack 的列（barGrid 解算结果）：柱左缘
+                        // = 带中心 + offset，宽 = [左缘, 右缘] 取整后之差。
+                        ChartBarCol bc = colOf[si];
+                        int bx = ChartView.BarX0(f, i, band, bc.offset);
+                        int bxE = ChartView.RoundPx((double)f.plotX
+                            + ((double)i + 0.5) * band + bc.offset + bc.width);
+                        // 列宽为 0（显式 barWidth 挤掉 auto 列）时 ECharts
+                        // 画的是 0 宽矩形（不可见），不补 1px。
+                        int barW = 0;
+                        if (bc.width > 0.0) {
+                            barW = bxE - bx;
+                            if (barW < 1) { barW = 1; }
+                        }
                         // 负向堆积：负值段挂在本组负累加器上，从零轴向
                         // 下方生长；正值段照旧从正累加器顶向上。
                         bool segNeg = vF < 0;
@@ -344,20 +333,11 @@ partial class ChartView {
                     }
                 }
             }
-            markStackBarW = step * 9 / 10 / ng;
-            if (markStackBarW < app.Scale(2)) { markStackBarW = app.Scale(2); }
         } else {
             // 分组柱 + 可选折线族覆盖层（混合图表）
-            int groupW = step * 7 / 10;
-            int gap = app.Scale(2);
-            int barW = (groupW - gap * (nsVis - 1)) / nsVis;
-            if (barW < app.Scale(2)) { barW = app.Scale(2); }
-            int groupX0 = (step - groupW) / 2;
-            // barWidth/barGap/showBackground 取首条可见柱系列
-            // 的声明（ECharts 允许逐系列，这里取主导系列统一）。
-            int bwOverride = 0;
-            int bwPct = 0;
-            int bgPct = 0 - 1;
+            // showBackground / itemStyle.borderRadius 取首条可见柱系列的
+            // 声明（ECharts 允许逐系列，这里取主导系列统一）。柱宽与组内
+            // 偏移不再本地近似，全部来自 barGrid 解算的列（colOf）。
             bool showBg = false;
             int bgCol = 0;
             List<int> barRad = null;
@@ -365,9 +345,6 @@ partial class ChartView {
                 ChartSeries pc = series[ps];
                 if (!pc.hidden && !ChartView.IsLineFamily(pc.type)
                     && pc.type != ChartType.Scatter) {
-                    bwOverride = pc.barWidth;
-                    bwPct = pc.barWidthPct;
-                    bgPct = pc.barGapPct;
                     showBg = pc.showBackground;
                     bgCol = pc.backgroundColor;
                     if (pc.itemStyle.normal.borderRadius.Count > 0) {
@@ -376,30 +353,6 @@ partial class ChartView {
                     break;
                 }
             }
-            if (bwPct > 0) {
-                // barWidth "60%"：类目带宽的百分比（tick-align 语义），
-                // 相对类目带宽、与组内序列数无关。
-                barW = step * bwPct / 100;
-                if (barW < app.Scale(2)) { barW = app.Scale(2); }
-                if (barW > groupW) { barW = groupW; }
-            } else if (bwOverride > 0) {
-                barW = app.Scale(bwOverride);
-                if (barW > groupW / nsVis) { barW = groupW / nsVis; }
-                if (bgPct >= 0) { gap = barW * bgPct / 100; }
-            } else if (bgPct >= 0 && barW > 0 && nsVis > 1) {
-                gap = barW * bgPct / 100;
-            }
-            if (bwOverride > 0 || bwPct > 0 || bgPct >= 0) {
-                int totGw = nsVis * barW + (nsVis - 1) * gap;
-                if (totGw < groupW) { groupX0 = groupX0 + (groupW - totGw) / 2; }
-            }
-            // markPoint 柱内锚点复用（xMarkMap 同源）：主循环的组
-            // 几何在此物化成标量，markPoint 循环按同一套式子取
-            // 本系列柱中线。
-            markGroupW = groupW;
-            markGap = gap;
-            markBarW = barW;
-            markX0off = groupX0 - (step - groupW) / 2;
             int mxB = app.mouseX;
             int myB = app.mouseY;
             // showBackground 底带缺省色 = 网格线色。
@@ -409,7 +362,6 @@ partial class ChartView {
                                    Style.SNormal()).BgOr(0);
             }
 
-            int barSlot = 0;
             for (int si = 0; si < ns; si = si + 1) {
                 ChartSeries s = series[si];
                 if (!s.hidden) {
@@ -469,7 +421,8 @@ partial class ChartView {
                         // ECharts 双数值轴柱形（bar13）：值对系列，
                         // 柱画在 x 值处、从零线长到 y。
                         ChartView.DrawValueXBars(app, f, s, si, i0, i1, g, o);
-                } else if (ChartView.IsBarFamily(s.type)) {
+                } else if (ChartView.IsBarFamily(s.type) && colOf[si] != null) {
+                    ChartBarCol bc = colOf[si];
                     int zeroY = f.YOfF(0, ax);
                     for (int i = 0; i < n; i = i + 1) {
                         int oi = i0 + i;
@@ -492,10 +445,16 @@ partial class ChartView {
                         if (oi < s.data.Count && s.data[oi].color != 0) { col = s.data[oi].color; }
                         col = Chart.FadeFocusColor(si, col);
                         int by = f.YOfFL(vF * (long)g / 1000L, ax);
-                            int cellL = f.CatLeft(i, n);
-                            int cellW = f.CatWidth(i, n);
-                            int g0 = (cellW - groupW) / 2;
-                            int bx = cellL + g0 + barSlot * (barW + gap);
+                            // 本系列在本类目带的柱列：左缘 = 带中心 +
+                            // offset，右缘再取整相减（避免取整出缝）。
+                            int bx = ChartView.BarX0(f, i, band, bc.offset);
+                            int bxE = ChartView.RoundPx((double)f.plotX
+                                + ((double)i + 0.5) * band + bc.offset + bc.width);
+                            int barW = 0;
+                            if (bc.width > 0.0) {
+                                barW = bxE - bx;
+                                if (barW < 1) { barW = 1; }
+                            }
                             if (showBg) {
                                 // 底带：零线到满刻度方向铺满（ECharts
                                 // showBackground），随柱条正负取方向。
@@ -634,9 +593,6 @@ partial class ChartView {
                                 }
                             }
                         }
-                        if (!(xValBars && s.points.Count > 0)) {
-                            barSlot = barSlot + 1;
-                        }
                     }
                 }
             }
@@ -659,8 +615,9 @@ partial class ChartView {
         c.PopClip();
         // markPoint：自动 max/min + 显式 marks（仅柱状族）。
         // ECharts2 bar.js xMarkMap：自动与显式 markPoint 的 x 都取
-        // 本系列柱条中线（组内第 slot 根），不是类目带中线——
-        // bar1 的年最高徽标钉在降水量自己那根柱顶。
+        // 本系列柱条中线（本 stack 的列中心），不是类目带中线——
+        // bar1 的年最高徽标钉在降水量自己那根柱顶。列中心一并给出，
+        // BarMarkX 按类目序平移 band。
         for (int msi = 0; msi < ns; msi = msi + 1) {
             ChartSeries ms = series[msi];
             // 值对柱形（bar13）的 marks 走下方 points 路径：这里的
@@ -668,29 +625,11 @@ partial class ChartView {
             // 同画还会出双标记。
             if (xValBars && ms.points.Count > 0) { continue; }
             if (ms.hidden || ChartView.IsLineFamily(ms.type)) { continue; }
-            int markX = 0;
-            if (stacked) {
-                // 堆叠：各 stack 组并排成一列（主循环 bx = cellL +
-                // g0 + gi*stkBarW 同式）。
-                int gi = ChartView.GroupIndex(markGrp, ms.stackName);
-                if (gi < 0) { gi = 0; }
-                markX = f.CatMid(0, n) - (step * 9 / 10) / 2
-                    + gi * markStackBarW + markStackBarW / 2;
-            } else {
-                int slotIdx = 0;
-                for (int psi = 0; psi < msi; psi = psi + 1) {
-                    ChartSeries pc = series[psi];
-                    if (!pc.hidden && !ChartView.IsLineFamily(pc.type)
-                        && pc.type != ChartType.Scatter) { slotIdx = slotIdx + 1; }
-                }
-                // 组内第 slot 根柱的中线：主循环 bx = cellL + g0 +
-                // slot*(barW+gap)，g0 = (cellW-groupW)/2 + markX0off
-                // （barWidth 覆盖致组不满宽时的居中修正）。
-                markX = f.CatMid(0, n) - markGroupW / 2
-                    + slotIdx * (markBarW + markGap) + markBarW / 2
-                    + markX0off;
-            }
-            ChartView.DrawSeriesMarks(app, f, ms, i0, i1, step, markX, o);
+            if (colOf[msi] == null) { continue; }
+            ChartBarCol mbc = colOf[msi];
+            int markX = ChartView.BarX0(f, 0, band, mbc.offset)
+                + ChartView.RoundPx(mbc.width) / 2;
+            ChartView.DrawSeriesMarks(app, f, ms, i0, i1, band, markX, o);
         }
         // 值对系列（双数值轴）：横轴标注走 points 路径（bar13 的
         // 蓝色 x 轴 max/min 标注），悬停按最近点出 tooltip 卡。
@@ -715,7 +654,8 @@ partial class ChartView {
             if (xValBars && anyPts) {
                 ChartView.PointsHover(app, f, series, i0, i1, g, o.pointerCross);
             } else {
-                ChartView.CartesianTooltip(app, f, winLabels, series, maxV, step, step / 2, i0);
+                ChartView.CartesianTooltip(app, f, winLabels, series, maxV,
+                    ChartView.RoundPx(band), ChartView.RoundPx(band) / 2, i0);
             }
         }
     }
@@ -951,8 +891,8 @@ partial class ChartView {
                     }
                 }
             }
-            lo = Chart.NiceMin(dataMin);
-            hi = Chart.NiceMax(dataMax);
+            lo = (int)Chart.NiceMin((double)dataMin);
+            hi = (int)Chart.NiceMax(dataMax);
         }
         if (stacked) {
             int stMax = 0;
@@ -978,7 +918,7 @@ partial class ChartView {
                 ticksH = spN.ticks;
             } else {
                 hi = Chart.NiceMax(Chart.MaxBarStackGroupsW(series, stMax, baseIdx));
-                lo = Chart.NiceMin(Chart.MinBarStackGroupsW(series, stMax, baseIdx));
+                lo = (int)Chart.NiceMin((double)Chart.MinBarStackGroupsW(series, stMax, baseIdx));
             }
         }
         if (hi <= lo) { hi = lo + 1; }
@@ -1029,8 +969,26 @@ partial class ChartView {
 
         int rowH = plotH / n;
         if (rowH < 1) { rowH = 1; }
+        // 水平柱的行带与柱列同样由 barGrid 解算（类目轴在 y：带宽按
+        // plotH/类目数，见 ChartBarLayout.BarBandWidth）。旧实现用
+        // `rowH*9/10` / `rowH*7/10` + 固定 2px 缝近似。
+        double band = ChartView.BarBandWidth(plotH, n);
+        List<ChartSeries> hSer = new List<ChartSeries>();
+        List<string> hIds = new List<string>();
+        List<int> hSi = new List<int>();
+        for (int hi2 = 0; hi2 < ns; hi2 = hi2 + 1) {
+            if (!series[hi2].hidden) {
+                hSer.Add(series[hi2]);
+                hSi.Add(hi2);
+                if (series[hi2].stackName.Length > 0) { hIds.Add(series[hi2].stackName); }
+                else { hIds.Add("__ec_stack_" + Convert.ToString(hi2)); }
+            }
+        }
+        List<ChartBarCol> hCols = ChartView.CalcBarCols(band, hSer, hIds);
+        List<ChartBarCol> hColOf = new List<ChartBarCol>();
+        for (int hc = 0; hc < ns; hc = hc + 1) { hColOf.Add(null); }
+        for (int hb = 0; hb < hSi.Count; hb = hb + 1) { hColOf[hSi[hb]] = hCols[hb]; }
         int rad = app.Scale(2);
-        bool bipolar = (lo < 0) && !stacked;
         int mx = app.mouseX;
         int my = app.mouseY;
         ChartHit hbarHit = null;
@@ -1062,10 +1020,6 @@ partial class ChartView {
             }
             int ng = grp.Count;
             if (ng < 1) { ng = 1; }
-            int groupH = rowH * 9 / 10;
-            int barH = groupH / ng;
-            if (barH < app.Scale(2)) { barH = app.Scale(2); }
-            int groupY0 = (rowH - groupH) / 2;
             List<int> accs = new List<int>();
             for (int ai = 0; ai < ng; ai = ai + 1) { accs.Add(0); }
             // 负向堆积（ECharts 2.2.x bar.js）：正负独立累加器，
@@ -1108,7 +1062,16 @@ partial class ChartView {
                         int drawX = x0;
                         int segW = x1 - x0;
                         if (segW < 0) { drawX = x1; segW = 0 - segW; }
-                        int by = rowY + groupY0 + gi * barH;
+                        // 本系列所在 stack 的行列（barGrid 解算）：上缘 =
+                        // 带中心 + offset，高 = [上缘, 下缘] 取整后之差。
+                        ChartBarCol hbc = hColOf[si];
+                        int by = ChartView.BarY0(plotY, i, band, hbc.offset);
+                        int barH = 0;
+                        if (hbc.width > 0.0) {
+                            barH = ChartView.RoundPx((double)plotY + ((double)i + 0.5) * band
+                                + hbc.offset + hbc.width) - by;
+                            if (barH < 1) { barH = 1; }
+                        }
                         int segRad = rad;
                         if (si != topSi[gi]) { segRad = 0; }
                         bool hov = mx >= drawX && mx < drawX + segW
@@ -1174,26 +1137,15 @@ partial class ChartView {
                 }
             }
         } else {
-            int groupH = rowH * 7 / 10;
-            int gap = app.Scale(2);
-            int barH = (groupH - gap * (ns - 1)) / ns;
-            if (bipolar) {
-                groupH = rowH * 6 / 10;
-                barH = groupH;
-                gap = 0;
-            }
-            if (barH < app.Scale(2)) { barH = app.Scale(2); }
-            int groupY0 = (rowH - groupH) / 2;
-            int bhOverride = 0;
-            int bgPct2 = 0 - 1;
+            // showBackground / itemStyle.borderRadius 取首条可见系列的
+            // 声明（ECharts 允许逐系列，这里取主导系列统一）。行高与
+            // 行内偏移全部来自 barGrid 解算的列（hColOf）。
             bool showBg2 = false;
             int bgCol2 = 0;
             List<int> barRad2 = null;
             for (int ps2 = 0; ps2 < ns; ps2 = ps2 + 1) {
                 ChartSeries pc2 = series[ps2];
                 if (!pc2.hidden) {
-                    bhOverride = pc2.barWidth;
-                    bgPct2 = pc2.barGapPct;
                     showBg2 = pc2.showBackground;
                     bgCol2 = pc2.backgroundColor;
                     if (pc2.itemStyle.normal.borderRadius.Count > 0) {
@@ -1201,17 +1153,6 @@ partial class ChartView {
                     }
                     break;
                 }
-            }
-            if (!bipolar && bhOverride > 0) {
-                barH = app.Scale(bhOverride);
-                if (barH > groupH / ns) { barH = groupH / ns; }
-                if (bgPct2 >= 0) { gap = barH * bgPct2 / 100; }
-            } else if (!bipolar && bgPct2 >= 0 && barH > 0 && ns > 1) {
-                gap = barH * bgPct2 / 100;
-            }
-            if (!bipolar && (bhOverride > 0 || bgPct2 >= 0)) {
-                int totGh = ns * barH + (ns - 1) * gap;
-                if (totGh < groupH) { groupY0 = groupY0 + (groupH - totGh) / 2; }
             }
             int bgInk2 = 0;
             if (showBg2 && bgCol2 == 0) {
@@ -1239,9 +1180,16 @@ partial class ChartView {
                     int bw = x1 - x0;
                     bool toRight = true;
                     if (bw < 0) { bx = x1; bw = 0 - bw; toRight = false; }
-                    int by = rowY + groupY0 + si * (barH + gap);
-                    if (bipolar) { by = rowY + groupY0; }
-                    if (showBg2 && plotW > 2 && !bipolar) {
+                    // 本系列在行带内的柱列（barGrid 解算）。
+                    ChartBarCol hbc2 = hColOf[si];
+                    int by = ChartView.BarY0(plotY, i, band, hbc2.offset);
+                    int barH = 0;
+                    if (hbc2.width > 0.0) {
+                        barH = ChartView.RoundPx((double)plotY + ((double)i + 0.5) * band
+                            + hbc2.offset + hbc2.width) - by;
+                        if (barH < 1) { barH = 1; }
+                    }
+                    if (showBg2 && plotW > 2) {
                         c.FillRoundRect(plotX + 1, by, plotW - 2, barH,
                             rad < 1 ? 1 : (rad > 3 ? 3 : rad),
                             bgCol2 != 0 ? bgCol2 : bgInk2);
@@ -1408,11 +1356,22 @@ partial class ChartView {
             Chart.DrawZoomBar(app, f.plotX, f.plotW, y + h - app.Scale(18),
                 app.Scale(12), o.iwid, fullN);
         }
-        int step = f.plotW / n;
-        if (step < 1) { step = 1; }
-        int barW = step * 5 / 10;
-        if (barW < app.Scale(2)) { barW = app.Scale(2); }
-        int bx0 = (step - barW) / 2;
+        // 瀑布柱列仍由 barGrid 解算（官方 bar-waterfall 的两/三条系列
+        // 共用 stack 'Total' → 一条列），不再用 `step*5/10` 近似。
+        double band = ChartView.BarBandWidth(f.plotW, n);
+        List<ChartSeries> wfSer = new List<ChartSeries>();
+        List<string> wfIds = new List<string>();
+        for (int wi = 0; wi < series.Count; wi = wi + 1) {
+            if (!series[wi].hidden) {
+                wfSer.Add(series[wi]);
+                if (series[wi].stackName.Length > 0) { wfIds.Add(series[wi].stackName); }
+                else { wfIds.Add("__ec_stack_" + Convert.ToString(wi)); }
+            }
+        }
+        List<ChartBarCol> wfCols = ChartView.CalcBarCols(band, wfSer, wfIds);
+        double wfOff = 0.0;
+        double wfW = 0.0;
+        if (wfCols.Count > 0) { wfOff = wfCols[0].offset; wfW = wfCols[0].width; }
         int rad = app.Scale(3);
         if (!o.rounded) { rad = app.Scale(1); }
 
@@ -1424,6 +1383,8 @@ partial class ChartView {
                                     Style.SNormal());
         int prev = 0;
         if (i0 > 0) { prev = cumAll[i0 - 1]; }
+        int prevBx = 0;
+        int prevBw = 0;
         for (int ci = 0; ci < n; ci = ci + 1) {
             int oi = i0 + ci;
             int v = 0;
@@ -1440,15 +1401,25 @@ partial class ChartView {
             if (col == 0) { col = Chart.Palette(t, 0); }
             if (isTotal) { col = sAccent.BgOr(0); }
             else if (v < 0) { col = sMark.BgOr(0); }
-            ChartView.BarCell(c, f.CatLeft(ci, n) + bx0, yTop, barW, yBot - yTop, rad, col, o.gradient);
+            // 本类目的柱列：左缘 = 带中心 + offset，右缘取整后相减。
+            int bx = ChartView.BarX0(f, ci, band, wfOff);
+            int bw = 0;
+            if (wfW > 0.0) {
+                bw = ChartView.RoundPx((double)f.plotX + ((double)ci + 0.5) * band
+                    + wfOff + wfW) - bx;
+                if (bw < 1) { bw = 1; }
+            }
+            ChartView.BarCell(c, bx, yTop, bw, yBot - yTop, rad, col, o.gradient);
 
             // 从前一柱顶到当前柱底的连接线
             if (ci > 0) {
-                int px0 = f.CatLeft(ci - 1, n) + bx0 + barW;
-                int px1 = f.CatLeft(ci, n) + bx0;
+                int px0 = prevBx + prevBw;
+                int px1 = bx;
                 int pyc = f.YOf(prev, 0);
                 c.DrawLine(px0, pyc, px1, pyc, sGrid.BgOr(0), app.Scale(1));
             }
+            prevBx = bx;
+            prevBw = bw;
             if (!isTotal) { prev = prev + v; }
 
             if (o.showValues || s.labelShow) {
@@ -1464,7 +1435,7 @@ partial class ChartView {
                 if (isTotal && oi >= 0 && oi < cumAll.Count) { wfVal = cumAll[oi]; }
                 string lbl = Convert.ToString(wfVal);
                 int lw = Canvas.MeasureText(lbl, wfFs);
-                int lx2 = f.CatLeft(ci, n) + bx0 + (barW - lw) / 2;
+                int lx2 = bx + (bw - lw) / 2;
                 if (lx2 < f.plotX) { lx2 = f.plotX; }
                 if (lx2 + lw > f.plotX + f.plotW) { lx2 = f.plotX + f.plotW - lw; }
                 // 数值底边离柱顶留缝（按实测字高）；顶格柱翻进柱内。
@@ -1492,7 +1463,7 @@ partial class ChartView {
             int my = app.mouseY;
             if (mx >= f.plotX && mx < f.plotX + f.plotW
                 && my >= f.plotY && my < f.plotY + f.plotH) {
-                int tIdx = (mx - f.plotX) / step;
+                int tIdx = (mx - f.plotX) / ChartView.RoundPx(band);
                 if (tIdx < 0) { tIdx = 0; }
                 if (tIdx > n - 1) { tIdx = n - 1; }
                 int oiT = i0 + tIdx;

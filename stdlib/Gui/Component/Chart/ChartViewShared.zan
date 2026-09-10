@@ -1251,13 +1251,13 @@ partial class ChartView {
     /// 数据点挂在第 slot 类目 —— 按类目带宽平移（CatMid 差值含末格
     /// 余数摊薄，与主循环 bx = CatLeft + g0 + slot*(barW+gap) 精确
     /// 同式）。barX == 0 是折线模式的哨兵：走数据点 CatX。
-    static int BarMarkX(ChartFrame f, int barX, int slot, int nWin) {
+    static int BarMarkX(ChartFrame f, int barX, int slot, double band) {
         if (barX == 0) { return 0; }
-        return barX + f.CatMid(slot, nWin) - f.CatMid(0, nWin);
+        return barX + ChartView.RoundPx((double)slot * band);
     }
 
     static void DrawSeriesMarks(App app, ChartFrame f, ChartSeries s,
-                                int i0, int i1, int step, int barX,
+                                int i0, int i1, double band, int barX,
                                 ChartOption o) {
         if (!o.markPoint && s.marks.Count < 1) { return; }
         int maxI = ChartView.SeriesMaxIndex(s, i0, i1);
@@ -1271,12 +1271,12 @@ partial class ChartView {
             if (maxI >= 0) {
                 ChartView.MarkAt(app, f, s, maxI, maxI - i0, nWin,
                     Convert.ToString(s.Value(maxI)), below, 0, "", 0,
-                    ChartView.BarMarkX(f, barX, maxI - i0, nWin));
+                    ChartView.BarMarkX(f, barX, maxI - i0, band));
             }
             if (minI >= 0 && minI != maxI) {
                 ChartView.MarkAt(app, f, s, minI, minI - i0, nWin,
                     Convert.ToString(s.Value(minI)), below, 0, "", 0,
-                    ChartView.BarMarkX(f, barX, minI - i0, nWin));
+                    ChartView.BarMarkX(f, barX, minI - i0, band));
             }
         }
         for (int mi = 0; mi < s.marks.Count; mi = mi + 1) {
@@ -1300,7 +1300,7 @@ partial class ChartView {
             ChartView.MarkAt(app, f, s, idx, idx - i0, nWin, lbl,
                 o.showValues || s.labelShow, m.color, m.symbol,
                 m.sizeSet ? m.size : 0,
-                ChartView.BarMarkX(f, barX, idx - i0, nWin));
+                ChartView.BarMarkX(f, barX, idx - i0, band));
         }
     }
 

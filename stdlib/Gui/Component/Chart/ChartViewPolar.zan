@@ -172,7 +172,9 @@ partial class ChartView {
                 ly.Add(py);
                 if (s.showSymbol != 0) {
                     Chart.DrawSymbol(c, px, py,
-                        Chart.SymbolRadius(s.symbolSize, app.Scale(3)),
+                        s.symbolSize > 0
+                            ? app.Scale(Chart.SymbolRadius(s.symbolSize, 0))
+                            : app.Scale(3),
                         s.symbol, col, 0, 0);
                 }
             }
@@ -454,7 +456,9 @@ partial class ChartView {
                     ly.Add(py);
                     if (s.showSymbol != 0) {
                         Chart.DrawSymbol(c, px, py,
-                            Chart.SymbolRadius(s.symbolSize, app.Scale(3)),
+                            s.symbolSize > 0
+                                ? app.Scale(Chart.SymbolRadius(s.symbolSize, 0))
+                                : app.Scale(3),
                             s.symbol, col, 0, 0);
                     }
                 }

@@ -70,9 +70,12 @@ class Program {
             + ":" + Convert.ToString(s4.candles[0].high) + ":" + Convert.ToString(s4.candles[0].low)
             + ":" + Convert.ToString(s4.candles[0].close));
 
-        // bubbles + scatter points。
+        // bubbles + scatter points。points 的 x/y 按 ×pointG 定点存
+        // （ChartModel.ParsePoints），断言真实坐标要走 Chart.PointV 除回，
+        // 否则一改定点倍率这条解析测试就跟着假红。
         Console.WriteLine(Convert.ToString(s5.bubbles.Count) + ":" + Convert.ToString(s5.bubbles[0].weight)
-            + ":" + Convert.ToString(s5.points.Count) + ":" + Convert.ToString(s5.points[0].x));
+            + ":" + Convert.ToString(s5.points.Count) + ":"
+            + Convert.ToString(Chart.PointV(s5.points[0].x, s5.pointG)));
 
         // boxes + errors（custom 键）。
         Console.WriteLine(s6.custom + ":" + Convert.ToString(s6.boxes.Count)

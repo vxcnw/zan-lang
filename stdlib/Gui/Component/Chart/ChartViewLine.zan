@@ -73,56 +73,145 @@ partial class ChartView {
             for (int i = 0; i < n; i = i + 1) { ox.Add(fx[i]); oy.Add(fy[i]); }
             return;
         }
-        // 单调三次 Hermite（Fritsch–Carlson）：切线取相邻割线的平均，
-        // 割线变号（局部极值点）处切线归零、并限幅到两侧割线的
-        // 3 倍以内。曲线因此永远落在相邻两点的包络内——极值圆滑地
-        // 掠过真实数据点，既不像 Catmull-Rom 那样冲出假极值（数据
-        // 顶格时越过最高格线），也不会像"过冲后钳平"那样把峰顶
-        // 削成搁架。x/y 两轴独立套用，值对/轴互换模式同样成立。
-        long[] mx = ChartView.MonoTangents(fx, n);
-        long[] my = ChartView.MonoTangents(fy, n);
+        // 严格照抄 ECharts 6.1 `src/chart/line/poly.ts:drawSegment`
+        // 的 no-monotone 分支（poly.ts:86-198）——smooth 缺省路径。
+        //
+        // 切线是 Catmull-Rom 式的：v = next − prev，控制点沿 v 按
+        // `k·ratio` 伸出，k = getSmooth() = 0.5（smooth:true）。
+        // 关键在 poly.ts:166-190 的"包络约束"：把 **控制点**（不是
+        // 采样点）逐轴钳进相邻两点构成的矩形，然后**用钳后的 cp0 反
+        // 算 cp1**，再用钳后的 cp1 反算 cp0——两轮互相反算，保证样条
+        // 不冲出两点之间。ECharts 只在控制点上做这件事；采样点一律
+        // 不钳。
+        //
+        // 旧实现（Fritsch–Carlson 切线 + 逐采样点包围盒钳制）已废弃：
+        // 割线变号处把切线强制归零（:141-142）会让每个局部极值都成
+        // 水平搁架；逐采样点钳制（:120-121）则把合法的切向逼近削平。
+        // 两者叠加就是 bump-chart 那种"峰顶变水平、曲线歪扭"的来源。
+        //
+        // 定点：输入 16.8（1/256 px），控制点运算在 long 域按 ×1000
+        // 中间精度做（k 用千分数 500），最后除回 1/256。
+        const long kK = 500;          // smooth = 0.5，千分表示
+        int nSeg = n - 1;
+        // 每个数据点在后一段里的 cp0（ECharts 的 nextCpx0/nextCpy0
+        // 跨迭代传递）。索引按"段"存：c0x[seg] = 进入 seg 时用的 cp0。
+        List<long> c0x = new List<long>();
+        List<long> c0y = new List<long>();
+        for (int i = 0; i <= nSeg; i = i + 1) { c0x.Add(0); c0y.Add(0); }
+        // 起始 cp0 = 第一个点本身（poly.ts:64 初始化）。
+        long cpx0 = fx[0];
+        long cpy0 = fy[0];
         ox.Add(fx[0]); oy.Add(fy[0]);
         for (int seg = 0; seg + 1 < n; seg = seg + 1) {
-            long x1 = fx[seg]; long y1 = fy[seg];
-            long x2 = fx[seg + 1]; long y2 = fy[seg + 1];
-            // 包络钳制兜底：正常切限下永不触发。
-            long xlo = x1 < x2 ? x1 : x2;
-            long xhi = x1 < x2 ? x2 : x1;
-            long ylo = y1 < y2 ? y1 : y2;
-            long yhi = y1 < y2 ? y2 : y1;
-            // 细分步数按段跨度自适应（定点 1/256 px 域）：固定 48 步
-            // 在 600 段 × 2 条边界的时间轴面积图上每帧近百万插值点
-            //（area-time-axis 110ms/帧），而屏幕上该段往往不足 2px。
-            // 步数 = 段的对角像素跨度（1/256 域 ÷256），钳到 2..48：
-            // 宽段保持与旧固定步相同的平滑度，窄段亚像素插值照常
-            // 由描边光栅化器采样，收窄到 1 步也不产生可见折角。
+            long prevX = fx[seg]; long prevY = fy[seg];
+            long x = fx[seg + 1]; long y = fy[seg + 1];
+            long cpx1 = 0; long cpy1 = 0;
+            long nextCpx0 = 0; long nextCpy0 = 0;
+            bool last = (seg + 2 >= n);
+            if (last) {
+                // poly.ts:120-123 —— 末点：CP1 收在点上。
+                cpx1 = x; cpy1 = y;
+                nextCpx0 = x; nextCpy0 = y;
+            } else {
+                // poly.ts:124-191
+                long nextX = fx[seg + 2]; long nextY = fy[seg + 2];
+                long vx = nextX - prevX;
+                long vy = nextY - prevY;
+                long dx0 = x - prevX; long dy0 = y - prevY;
+                long dx1 = nextX - x; long dy1 = nextY - y;
+                // lenPrevSeg/lenNextSeg = sqrt(dx²+dy²)（16.8 域）。
+                // 用整数平方根：ECharts 用浮点，但 ratio 只需 3 位有效
+                // 数字即可，整数 sqrt 的误差远小于 1/256 px。
+                long lenPrev = ChartView.ISqrt(dx0 * dx0 + dy0 * dy0);
+                long lenNext = ChartView.ISqrt(dx1 * dx1 + dy1 * dy1);
+                long lenSum = lenPrev + lenNext;
+                // ratioNextSeg = lenNext / (lenNext + lenPrev)，千分定点
+                long ratio = lenSum > 0 ? (lenNext * 1000 / lenSum) : 500;
+
+                // poly.ts:159-164
+                // cpx1 = x − vx·k·(1−ratio)
+                // nextCpx0 = x + vx·k·ratio
+                cpx1 = x - vx * kK * (1000 - ratio) / 1000000;
+                cpy1 = y - vy * kK * (1000 - ratio) / 1000000;
+                nextCpx0 = x + vx * kK * ratio / 1000000;
+                nextCpy0 = y + vy * kK * ratio / 1000000;
+
+                // poly.ts:166-171 —— 把 next cp0 钳进 [x,nextX]×[y,nextY]
+                if (nextCpx0 > (nextX > x ? nextX : x)) { nextCpx0 = nextX > x ? nextX : x; }
+                if (nextCpx0 < (nextX < x ? nextX : x)) { nextCpx0 = nextX < x ? nextX : x; }
+                if (nextCpy0 > (nextY > y ? nextY : y)) { nextCpy0 = nextY > y ? nextY : y; }
+                if (nextCpy0 < (nextY < y ? nextY : y)) { nextCpy0 = nextY < y ? nextY : y; }
+
+                // poly.ts:172-177 —— 用钳后的 cp0 反算 cp1
+                long vx2 = nextCpx0 - x;
+                long vy2 = nextCpy0 - y;
+                if (lenNext > 0) {
+                    cpx1 = x - vx2 * lenPrev / lenNext;
+                    cpy1 = y - vy2 * lenPrev / lenNext;
+                } else {
+                    cpx1 = x; cpy1 = y;
+                }
+
+                // poly.ts:179-184 —— 把 cp1 钳进 [prevX,x]×[prevY,y]
+                if (cpx1 > (prevX > x ? prevX : x)) { cpx1 = prevX > x ? prevX : x; }
+                if (cpx1 < (prevX < x ? prevX : x)) { cpx1 = prevX < x ? prevX : x; }
+                if (cpy1 > (prevY > y ? prevY : y)) { cpy1 = prevY > y ? prevY : y; }
+                if (cpy1 < (prevY < y ? prevY : y)) { cpy1 = prevY < y ? prevY : y; }
+
+                // poly.ts:186-190 —— 再用钳后的 cp1 反算 next cp0（无二次钳）
+                long vx3 = x - cpx1;
+                long vy3 = y - cpy1;
+                if (lenPrev > 0) {
+                    nextCpx0 = x + vx3 * lenNext / lenPrev;
+                    nextCpy0 = y + vy3 * lenNext / lenPrev;
+                } else {
+                    nextCpx0 = x; nextCpy0 = y;
+                }
+            }
+            // 采样：ECharts 把 bezierCurveTo 交给 zrender 的 path 光栅化
+            //（按弧长自适应细分）。这里按段像素跨度自适应采样，钳 2..48。
+            long xlo = prevX < x ? prevX : x;
+            long xhi = prevX < x ? x : prevX;
+            long ylo = prevY < y ? prevY : y;
+            long yhi = prevY < y ? y : prevY;
             long segW = (xhi - xlo) > (yhi - ylo) ? (xhi - xlo) : (yhi - ylo);
             int steps = (int)(segW / 256);
             if (steps > 48) { steps = 48; }
             if (steps < 2) { steps = 2; }
-            int s = 1;
-            while (s <= steps) {
-                int tt = s * 1000 / steps;
+            int sIdx = 1;
+            while (sIdx <= steps) {
+                int tt = sIdx * 1000 / steps;
                 int tt2 = tt * tt / 1000;
                 int tt3 = tt2 * tt / 1000;
-                // Hermite 基（t 已归一化到本段）：
-                // h00 = 2t³-3t²+1  h10 = t³-2t²+t
-                // h01 = -2t³+3t²   h11 = t³-t²
-                // 64 位中间值全程保持 1/256 精度。
-                long qx = ((2 * tt3 - 3 * tt2 + 1000) * x1
-                    + (tt3 - 2 * tt2 + tt) * mx[seg]
-                    + (0 - 2 * tt3 + 3 * tt2) * x2
-                    + (tt3 - tt2) * mx[seg + 1]) / 1000;
-                long qy = ((2 * tt3 - 3 * tt2 + 1000) * y1
-                    + (tt3 - 2 * tt2 + tt) * my[seg]
-                    + (0 - 2 * tt3 + 3 * tt2) * y2
-                    + (tt3 - tt2) * my[seg + 1]) / 1000;
-                if (qx < xlo) { qx = xlo; } else if (qx > xhi) { qx = xhi; }
-                if (qy < ylo) { qy = ylo; } else if (qy > yhi) { qy = yhi; }
+                // 3 次贝塞尔基（P0=prev, C0=cpx0/cpy0, C1=cpx1/cpy1, P1=x/y）
+                long b0 = 1000000 - 3 * tt2 + 2 * tt3;
+                long b1 = 3 * tt2 - 2 * tt3;
+                long b2 = tt3 - 2 * tt2 + tt;
+                long b3 = tt2 - tt3;
+                long qx = (b0 * prevX + b2 * cpx0 + b3 * cpx1 + b1 * x) / 1000000;
+                long qy = (b0 * prevY + b2 * cpy0 + b3 * cpy1 + b1 * y) / 1000000;
                 ox.Add((int)qx); oy.Add((int)qy);
-                s = s + 1;
+                sIdx = sIdx + 1;
             }
+            // 采样点不钳（ECharts 只钳控制点）——交给描边光栅化器。
+            cpx0 = nextCpx0;
+            cpy0 = nextCpy0;
         }
+    }
+
+    /// 整数平方根（牛顿迭代，long 域）。用于段长比；
+    /// ECharts 用 Math.sqrt，此处定点域只需 3 位有效数字。
+    static long ISqrt(long v) {
+        if (v <= 0) { return 0; }
+        long r = v;
+        long last = 0;
+        int guard = 0;
+        while (r != last && guard < 64) {
+            last = r;
+            r = (r + v / r) / 2;
+            guard = guard + 1;
+        }
+        return r;
     }
 
     /// Fritsch–Carlson 切线（16.8 定点输入，返回 n 条切线）：
@@ -1012,9 +1101,15 @@ partial class ChartView {
                                     pr = app.Scale(s.data[oiN].size);
                                 }
                             }
+                            // data[oiN] 只有 oiN 在表内才可读——line-easing
+                            // 这类系列点数多于 data 表（或窗口偏移越界）时，
+                            // 越界访问报 "list index out of bounds" +
+                            // "null reference ... (length probe)"。
+                            bool dataSym = oiN < s.data.Count
+                                && s.data[oiN].symbol.Length > 0;
                             bool showSym = sym2 != "none" && sym2 != "pass"
                                 && (s.symbol.Length > 0 || s.showSymbol != 0
-                                    || s.data[oiN].symbol.Length > 0);
+                                    || dataSym);
                             if (showSym && symTicks != null
                                 && s.symbol.Length == 0 && s.showSymbol < 0
                                 && !(oiN < s.data.Count
@@ -1093,7 +1188,7 @@ partial class ChartView {
         for (int msi = 0; msi < series.Count; msi = msi + 1) {
             ChartSeries ms = series[msi];
             if (!ms.hidden && ms.points.Count < 1 && !ChartView.IsBarFamily(ms.type)) {
-                ChartView.DrawSeriesMarks(app, f, ms, i0, i1, step, 0, o);
+                ChartView.DrawSeriesMarks(app, f, ms, i0, i1, 0.0, 0, o);
             }
         }
         // 系列级 markLine（average/min/max/阈值），画在系列之上。
@@ -1268,17 +1363,17 @@ partial class ChartView {
         if (o.yAxes.Count == 0) { o.Y(ChartAxis.Value()); }
         ChartAxis y0a = o.YAxis0();
         int savedTicks = y0a.ticks;
-        int savedMax = y0a.max;
+        double savedMax = y0a.maxD;
         // 小数堆叠：域交给 BuildAxesR 的 frac 分支（FracAxisHiF 并
         // StackExtentF 抬升到堆叠顶），钉 int max 会把定点域截断。
         if (!fracStack) {
             if (sv.ticks > 0) { y0a.ticks = sv.ticks; }
-            y0a.max = maxV;
+            y0a.SetRange(y0a.minD, (double)maxV);
         }
         ChartFrame f = Chart.BuildAxesR(app, x, y, w, h - zoomH, plotTop,
             winLabels, o, series, maxV, 0 - 1, i0, i1);
         y0a.ticks = savedTicks;
-        y0a.max = savedMax;
+        y0a.SetRange(y0a.minD, savedMax);
         if (zoomH > 0) {
             Chart.DrawZoomBar(app, f.plotX, f.plotW, y + h - app.Scale(18),
                 app.Scale(12), o.iwid, fullN);
