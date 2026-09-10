@@ -362,9 +362,11 @@ partial class ChartView {
                     d2 = (mx - px) * (mx - px);
                     et = ChartElementType.Bar;
                 } else if (s.type == ChartType.Scatter) {
-                    int rr = Chart.SymbolRadius(s.symbolSize, app.Scale(3));
+                    int rr = s.symbolSize > 0
+                        ? app.Scale(Chart.SymbolRadius(s.symbolSize, 0))
+                        : app.Scale(3);
                     if (oi < s.data.Count && s.data[oi].sizeSet && s.data[oi].size > 0) {
-                        rr = s.data[oi].size;
+                        rr = app.Scale(s.data[oi].size);
                     }
                     rr = rr + app.Scale(2);
                     int dx = mx - px;
@@ -629,7 +631,10 @@ partial class ChartView {
 
         int maxV = Chart.NiceMax(Chart.MaxOfWindow(series, i0, i1));
         int plotTop = Chart.DrawPanelI(app, x, y, w, h, o.title, series, o.iwid, o.showLegend);
-        ChartFrame f = Chart.BuildAxes(app, x, y, w, h - zoomH, plotTop, winLabels, o, series);
+        // Y 量程按 dataZoom 窗口扫描（winLabels 已是切片，窗口下标
+        // 直接传给 BuildAxesR，避免二次开窗）。
+        ChartFrame f = Chart.BuildAxesW(app, x, y, w, h - zoomH, plotTop, winLabels, o, series,
+            i0, i1);
         if (zoomH > 0) {
             Chart.DrawZoomBar(app, f.plotX, f.plotW, y + h - app.Scale(18),
                 app.Scale(12), o.iwid, fullN);
@@ -667,6 +672,16 @@ partial class ChartView {
         List<int> endLblY = new List<int>();
         List<int> endLblColor = new List<int>();
         List<string> endLblText = new List<string>();
+        // 数据点符号帧内收集：绘图区 clip 只该裁折线路径本体
+        // （ECharts clip 语义），顶/底轨道上的符号（bump 排名图的
+        // #1/#9 圆环）要完整圆——PopClip 后统一补画，保系列顺序。
+        List<int> symX = new List<int>();
+        List<int> symY = new List<int>();
+        List<int> symR = new List<int>();
+        List<string> symShape = new List<string>();
+        List<int> symCol = new List<int>();
+        List<int> symBorderCol = new List<int>();
+        List<int> symBorderW = new List<int>();
         for (int bz = 0; bz < n; bz = bz + 1) { barStackAcc.Add(0); }
         for (int si = 0; si < series.Count; si = si + 1) {
             ChartSeries s = series[si];
@@ -676,6 +691,8 @@ partial class ChartView {
                 if (s.itemStyle.normal.lineStyle.color != 0) {
                     drawColor = s.itemStyle.normal.lineStyle.color;
                 }
+                // emphasis.focus 渐隐：本系列非聚焦时整族乘残透明。
+                drawColor = Chart.FadeFocusColor(si, drawColor);
                 int drawWidth = s.itemStyle.normal.lineStyle.width;
                 if (drawWidth <= 0) { drawWidth = 2; }
                 drawWidth = app.Scale(drawWidth);
@@ -713,6 +730,7 @@ partial class ChartView {
                         int v = (int)((long)s.Value(oi) * g / 1000L);
                         int col = s.color;
                         if (oi < s.data.Count && s.data[oi].color != 0) { col = s.data[oi].color; }
+                        col = Chart.FadeFocusColor(si, col);
                         if (gi < 0) {
                             int by = f.YOf(v, ax);
                             int bh = f.ZeroBase(ax) - by;
@@ -738,8 +756,10 @@ partial class ChartView {
                         int py2 = f.YOf(v, ax);
                         int scol = drawColor;
                         if (oi < s.data.Count && s.data[oi].color != 0) { scol = s.data[oi].color; }
-                        Chart.DrawSymbol(c, px2, py2,
-                            Chart.SymbolRadius(s.symbolSize, rad), s.symbol,
+                        scol = Chart.FadeFocusColor(si, scol);
+                        int ovR = s.symbolSize > 0
+                            ? app.Scale(Chart.SymbolRadius(s.symbolSize, 0)) : rad;
+                        Chart.DrawSymbol(c, px2, py2, ovR, s.symbol,
                             scol, s.itemStyle.normal.borderColor,
                             s.itemStyle.normal.borderWidth);
                     }
@@ -758,11 +778,17 @@ partial class ChartView {
                         int oi = i0 + j;
                         if (geoMode == 1) {
                             if (oi >= s.points.Count) { continue; }
-                            // 时间轴点按 epoch 秒落 XOfTime（域 =
+                            // 时间轴点按 epoch 天落 XOfTime（域 =
                             // BuildAxesR 的数据 min/max）；数值轴仍走
-                            // XOfValue。
-                            pxs.Add(f.isTime ? f.XOfTime(s.points[oi].x)
-                                : f.XOfValue(s.points[oi].x));
+                            // XOfValue。两条域都是**裸值**（时间域 =
+                            // epoch 天，值域 = XMinFor/XMaxFor 经
+                            // PointV 除回），所以这里必须先用 PointV
+                            // 把 points.x 的 ×pointG 定点除回——直接传
+                            // 定点值会让时间轴读到 1000× 的天数（比例
+                            // 坏掉/整图挤到左端）。
+                            pxs.Add(f.isTime
+                                ? f.XOfTime(Chart.PointV(s.points[oi].x, s.pointG))
+                                : f.XOfValue(Chart.PointV(s.points[oi].x, s.pointG)));
                             pys.Add(f.YOf(s.points[oi].y, ax));
                             gaps.Add(false);
                             continue;
@@ -962,7 +988,11 @@ partial class ChartView {
                     // 数值标签与符号解耦：无论符号画否都按 showSeriesValues
                     // 绘制（与原 if/else 两支行为一致）。
                     {
-                        int nr = Chart.SymbolRadius(s.symbolSize, rad);
+                        // ECharts symbolSize 是画布像素直径，随 DPI 缩放
+                        // （bump-chart 20 → 缩放后半径 10）——此前未缩放，
+                        // 高分窗口上符号只有标称一半大。
+                        int nr = s.symbolSize > 0
+                            ? app.Scale(Chart.SymbolRadius(s.symbolSize, 0)) : rad;
                         int tickCur2 = 0;
                         for (int m2 = 0; m2 < pxs.Count; m2 = m2 + 1) {
                             if (gaps[m2]) { continue; }
@@ -979,7 +1009,7 @@ partial class ChartView {
                                 // ECharts 数据级 symbolSize 覆盖（star 15、
                                 // emptypin 8、star6 20…）：值即半径。
                                 if (s.data[oiN].sizeSet && s.data[oiN].size > 0) {
-                                    pr = s.data[oiN].size;
+                                    pr = app.Scale(s.data[oiN].size);
                                 }
                             }
                             bool showSym = sym2 != "none" && sym2 != "pass"
@@ -999,9 +1029,11 @@ partial class ChartView {
                                     && symTicks[tickCur2] == m2;
                             }
                             if (showSym) {
-                                Chart.DrawSymbol(c, pxs[m2], pys[m2], pr, sym2,
-                                    ncol, s.itemStyle.normal.borderColor,
-                                    s.itemStyle.normal.borderWidth);
+                                symX.Add(pxs[m2]); symY.Add(pys[m2]);
+                                symR.Add(pr); symShape.Add(sym2);
+                                symCol.Add(ncol);
+                                symBorderCol.Add(s.itemStyle.normal.borderColor);
+                                symBorderW.Add(s.itemStyle.normal.borderWidth);
                             }
                             if (showSeriesValues) {
                                 string lbl = geoMode == 1
@@ -1040,6 +1072,12 @@ partial class ChartView {
             }
         }
         c.PopClip();
+        // 数据点符号补画（绘图区 clip 外）：ECharts clip 只裁折线
+        // 路径本体，bump 排名图顶/底轨道上的 #1/#9 圆环必须完整。
+        for (int spi = 0; spi < symX.Count; spi = spi + 1) {
+            Chart.DrawSymbol(c, symX[spi], symY[spi], symR[spi], symShape[spi],
+                symCol[spi], symBorderCol[spi], symBorderW[spi]);
+        }
         // ECharts line.endLabel 补画（绘图区 clip 外）。
         if (endLblText.Count > 0) {
             int elFs = ChartFonts.SeriesLabel(app);
@@ -1238,7 +1276,7 @@ partial class ChartView {
             y0a.max = maxV;
         }
         ChartFrame f = Chart.BuildAxesR(app, x, y, w, h - zoomH, plotTop,
-            winLabels, o, series, maxV, 0 - 1);
+            winLabels, o, series, maxV, 0 - 1, i0, i1);
         y0a.ticks = savedTicks;
         y0a.max = savedMax;
         if (zoomH > 0) {
@@ -1470,7 +1508,9 @@ partial class ChartView {
                 // 符号——数据级 symbol 覆盖（mail 的 droplet）仍要画。
                 {
                     int rad = app.Scale(3);
-                    int nr = Chart.SymbolRadius(s.symbolSize, rad);
+                    // symbolSize 直径语义随 DPI 缩放（同主线 pass）。
+                    int nr = s.symbolSize > 0
+                        ? app.Scale(Chart.SymbolRadius(s.symbolSize, 0)) : rad;
                     int tickCur3 = 0;
                     for (int u = 0; u < n; u = u + 1) {
                         int oi2 = i0 + u;
@@ -1487,7 +1527,7 @@ partial class ChartView {
                             // ECharts 数据级 symbolSize 覆盖（star 15、
                             // emptypin 8、star6 20…）：值即半径。
                             if (s.data[oi2].sizeSet && s.data[oi2].size > 0) {
-                                pr = s.data[oi2].size;
+                                pr = app.Scale(s.data[oi2].size);
                             }
                         }
                         if (sym2 == "none" || sym2 == "pass") { continue; }

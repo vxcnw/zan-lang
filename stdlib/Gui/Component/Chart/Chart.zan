@@ -462,6 +462,24 @@ class Chart {
         return Chart.Rgb(255, 255, 255);
     }
 
+    // ---- emphasis.focus 渐隐（帧内静态，ChartView 每帧重算） ----
+
+    /// 本帧悬停且声明 emphasis.focus:'series' 的系列下标；-1 =
+    /// 无聚焦。ChartView 绘制入口在重置命中前用上一帧 currentHit
+    /// 重算（渲染期会重测命中），渲染器逐系列经 FadeFocusColor 查表。
+    static int fadeFocusIdx = -1;
+
+    /// 官方 blur 残透明：ECharts focus 聚焦时非聚焦系列乘默认
+    /// blur opacity 0.1（bump 图悬停其余线淡出的量）。
+    static int FadeFocusAlpha() { return 26; }
+
+    /// 聚焦渐隐取色：无聚焦或 si 即聚焦系列时原色返回，其余
+    /// 系列乘残透明。
+    static int FadeFocusColor(int si, int color) {
+        if (Chart.fadeFocusIdx < 0 || si == Chart.fadeFocusIdx) { return color; }
+        return Chart.WithAlpha(color, Chart.FadeFocusAlpha());
+    }
+
     /// 本帧工具箱占用的右上角宽度；DrawPanelI / PanelHead 让开它。
     static int toolReserve;
 
@@ -805,18 +823,33 @@ class Chart {
 
 
     /// AxisMinFor 的 1/1000 定点对偶：与 AxisMaxForF 成对——原始
-    /// 数据下界直传（不许钳零），小数轴量程专用。
-    static int AxisMinForF(List<ChartSeries> series, int axisIndex) {
+    /// 数据下界直传（不许钳零），小数轴量程专用。i0/i1 窗口语义
+    /// 同 AxisMaxFor。
+    static int AxisMinForF(List<ChartSeries> series, int axisIndex, int i0, int i1) {
         int mn = 0;
         for (int i = 0; i < series.Count; i = i + 1) {
             ChartSeries s = series[i];
             if (!s.hidden && s.axisIndex == axisIndex) {
-                for (int j = 0; j < s.Count(); j = j + 1) {
+                int j0 = 0; int j1 = s.Count() - 1;
+                if (i0 >= 0 && i1 >= 0) {
+                    j0 = i0; j1 = i1;
+                    if (j0 > s.Count() - 1) { j0 = s.Count() - 1; }
+                    if (j1 > s.Count() - 1) { j1 = s.Count() - 1; }
+                    if (j1 < j0) { j1 = j0; }
+                }
+                for (int j = j0; j <= j1; j = j + 1) {
                     double v = s.Number(j);
                     int vi = (int)(v * 1000 + (v >= 0 ? 0.5 : 0 - 0.5));
                     if (vi < mn) { mn = vi; }
                 }
-                for (int j2 = 0; j2 < s.points.Count; j2 = j2 + 1) {
+                int p0 = 0; int p1 = s.points.Count - 1;
+                if (i0 >= 0 && i1 >= 0) {
+                    p0 = i0; p1 = i1;
+                    if (p0 > s.points.Count - 1) { p0 = s.points.Count - 1; }
+                    if (p1 > s.points.Count - 1) { p1 = s.points.Count - 1; }
+                    if (p1 < p0) { p1 = p0; }
+                }
+                for (int j2 = p0; j2 <= p1; j2 = j2 + 1) {
                     int py = Chart.PointV(s.points[j2].y, s.pointG) * 1000;
                     if (py < mn) { mn = py; }
                 }
@@ -856,7 +889,9 @@ class Chart {
     /// 堆叠柱（共享 stackName 的柱族）逐类目正/负堆叠和（×1000
     /// 定点）：hi = 正累加器最大值，lo = 负累加器最小值。正负独立
     /// 累计与渲染路径同一语义（负段不与正段相加）。
-    static ChartSpan StackExtentF(List<ChartSeries> series, int axisIndex) {
+    /// i0/i1 窗口语义同 AxisMaxFor：限制各类目逐组累加到可见段
+    /// （与 ECharts filterMode:'weakFilter' Y 重定一致）。
+    static ChartSpan StackExtentF(List<ChartSeries> series, int axisIndex, int i0, int i1) {
         List<string> grp = new List<string>();
         for (int g = 0; g < series.Count; g = g + 1) {
             ChartSeries cs = series[g];
@@ -874,9 +909,14 @@ class Chart {
                 if (cs2.Count() > n) { n = cs2.Count(); }
             }
         }
+        int loI = (i0 >= 0 && i1 >= 0) ? i0 : 0;
+        int hiI = (i0 >= 0 && i1 >= 0) ? i1 : n - 1;
+        if (loI > n - 1) { loI = n - 1; }
+        if (hiI > n - 1) { hiI = n - 1; }
+        if (hiI < loI) { hiI = loI; }
         int hi = 0;
         int lo = 0;
-        for (int i = 0; i < n; i = i + 1) {
+        for (int i = loI; i <= hiI; i = i + 1) {
             List<int> accs = new List<int>();
             List<int> negAccs = new List<int>();
             for (int a = 0; a < ng; a = a + 1) { accs.Add(0); negAccs.Add(0); }
@@ -909,7 +949,12 @@ class Chart {
                 if (cs4.Count() > ln) { ln = cs4.Count(); }
             }
         }
-        for (int i3 = 0; i3 < ln; i3 = i3 + 1) {
+        int loI3 = (i0 >= 0 && i1 >= 0) ? i0 : 0;
+        int hiI3 = (i0 >= 0 && i1 >= 0) ? i1 : ln - 1;
+        if (loI3 > ln - 1) { loI3 = ln - 1; }
+        if (hiI3 > ln - 1) { hiI3 = ln - 1; }
+        if (hiI3 < loI3) { hiI3 = loI3; }
+        for (int i3 = loI3; i3 <= hiI3; i3 = i3 + 1) {
             int accL = 0;
             for (int s4 = 0; s4 < series.Count; s4 = s4 + 1) {
                 ChartSeries cs5 = series[s4];
@@ -935,12 +980,12 @@ class Chart {
     /// 小数轴 extent 下界（×1000 定点）：固定 min 直接生效，否则
     /// 原始数据下界直传（不预设 nice——向下取整是 smartSteps 的
     /// 职责，valueAxis._calculateValue 语义）。堆叠柱并入类目堆叠
-    /// 和的负向极值。
-    static int FracAxisLoF(int fixedLo, List<ChartSeries> series, int axisIndex) {
+    /// 和的负向极值。i0/i1 窗口语义同 AxisMaxFor。
+    static int FracAxisLoF(int fixedLo, List<ChartSeries> series, int axisIndex, int i0, int i1) {
         if (fixedLo != ChartOption.Auto()) { return fixedLo * 1000; }
-        int lo = Chart.AxisMinForF(series, axisIndex);
+        int lo = Chart.AxisMinForF(series, axisIndex, i0, i1);
         if (Chart.HasStackedBarsF(series, axisIndex)) {
-            ChartSpan se = Chart.StackExtentF(series, axisIndex);
+            ChartSpan se = Chart.StackExtentF(series, axisIndex, i0, i1);
             if (se.lo < lo) { lo = se.lo; }
         }
         return lo;
@@ -948,11 +993,12 @@ class Chart {
 
     /// 小数轴 extent 上界（×1000 定点）：固定 max 直接生效，否则
     /// 原始数据上界直传。堆叠柱并入类目堆叠和的正向极值。
-    static int FracAxisHiF(int fixedHi, List<ChartSeries> series, int axisIndex) {
+    /// i0/i1 窗口语义同 AxisMaxFor。
+    static int FracAxisHiF(int fixedHi, List<ChartSeries> series, int axisIndex, int i0, int i1) {
         if (fixedHi != ChartOption.Auto()) { return fixedHi * 1000; }
-        int hi = Chart.AxisMaxForF(series, axisIndex);
+        int hi = Chart.AxisMaxForF(series, axisIndex, i0, i1);
         if (Chart.HasStackedBarsF(series, axisIndex)) {
-            ChartSpan se = Chart.StackExtentF(series, axisIndex);
+            ChartSpan se = Chart.StackExtentF(series, axisIndex, i0, i1);
             if (se.hi > hi) { hi = se.hi; }
         }
         return hi;
@@ -2727,13 +2773,32 @@ class Chart {
     }
 
     /// 绑定到给定数值轴的（可见）系列中的最大值。
-    static int AxisMaxFor(List<ChartSeries> series, int axisIndex) {
+    /// 窗口参数 i0/i1 把扫描范围限制到 dataZoom 可见段（ECharts 6
+    /// 默认 filterMode:'weakFilter' 即窗口内数据重定 Y 量程；此前
+    /// 一律全量扫描，area-time-axis / area-rainfall 这类 65..85%
+    /// 窗口图保留 -2000..2000 全域，画面被压到顶端 1% 像素可见）。
+    /// i0<0 || i1<0 = 扫描全量（旧默认行为）。
+    static int AxisMaxFor(List<ChartSeries> series, int axisIndex, int i0, int i1) {
         int mx = 0;
         for (int i = 0; i < series.Count; i = i + 1) {
             ChartSeries s = series[i];
             if (!s.hidden && s.axisIndex == axisIndex) {
-                for (int j = 0; j < s.Count(); j = j + 1) { if (s.Value(j) > mx) { mx = s.Value(j); } }
-                for (int j2 = 0; j2 < s.points.Count; j2 = j2 + 1) {
+                int j0 = 0; int j1 = s.Count() - 1;
+                if (i0 >= 0 && i1 >= 0) {
+                    j0 = i0; j1 = i1;
+                    if (j0 > s.Count() - 1) { j0 = s.Count() - 1; }
+                    if (j1 > s.Count() - 1) { j1 = s.Count() - 1; }
+                    if (j1 < j0) { j1 = j0; }
+                }
+                for (int j = j0; j <= j1; j = j + 1) { if (s.Value(j) > mx) { mx = s.Value(j); } }
+                int p0 = 0; int p1 = s.points.Count - 1;
+                if (i0 >= 0 && i1 >= 0) {
+                    p0 = i0; p1 = i1;
+                    if (p0 > s.points.Count - 1) { p0 = s.points.Count - 1; }
+                    if (p1 > s.points.Count - 1) { p1 = s.points.Count - 1; }
+                    if (p1 < p0) { p1 = p0; }
+                }
+                for (int j2 = p0; j2 <= p1; j2 = j2 + 1) {
                     int py = Chart.PointV(s.points[j2].y, s.pointG);
                     if (py > mx) { mx = py; }
                 }
@@ -2746,17 +2811,32 @@ class Chart {
     /// 比较，整数按 Value×1000。ECharts extent 语义：原始数据上界
     /// 直传（不许钳零），锚定/取整全部由 NiceRange（smartSteps）
     /// 承担——见 valueAxis._calculateValue/_reformValue。
-    static int AxisMaxForF(List<ChartSeries> series, int axisIndex) {
+    /// i0/i1 窗口语义同 AxisMaxFor。
+    static int AxisMaxForF(List<ChartSeries> series, int axisIndex, int i0, int i1) {
         int mx = 0;
         for (int i = 0; i < series.Count; i = i + 1) {
             ChartSeries s = series[i];
             if (!s.hidden && s.axisIndex == axisIndex) {
-                for (int j = 0; j < s.Count(); j = j + 1) {
+                int j0 = 0; int j1 = s.Count() - 1;
+                if (i0 >= 0 && i1 >= 0) {
+                    j0 = i0; j1 = i1;
+                    if (j0 > s.Count() - 1) { j0 = s.Count() - 1; }
+                    if (j1 > s.Count() - 1) { j1 = s.Count() - 1; }
+                    if (j1 < j0) { j1 = j0; }
+                }
+                for (int j = j0; j <= j1; j = j + 1) {
                     double v = s.Number(j);
                     int vi = (int)(v * 1000 + (v >= 0 ? 0.5 : 0 - 0.5));
                     if (vi > mx) { mx = vi; }
                 }
-                for (int j2 = 0; j2 < s.points.Count; j2 = j2 + 1) {
+                int p0 = 0; int p1 = s.points.Count - 1;
+                if (i0 >= 0 && i1 >= 0) {
+                    p0 = i0; p1 = i1;
+                    if (p0 > s.points.Count - 1) { p0 = s.points.Count - 1; }
+                    if (p1 > s.points.Count - 1) { p1 = s.points.Count - 1; }
+                    if (p1 < p0) { p1 = p0; }
+                }
+                for (int j2 = p0; j2 <= p1; j2 = j2 + 1) {
                     int py = Chart.PointV(s.points[j2].y, s.pointG) * 1000;
                     if (py > mx) { mx = py; }
                 }
@@ -2779,14 +2859,29 @@ class Chart {
     }
 
     /// 绑定到给定数值轴的（可见）系列中的最小值
-    /// （无负数时为 0），使轴天然覆盖负数。
-    static int AxisMinFor(List<ChartSeries> series, int axisIndex) {
+    /// （无负数时为 0），使轴天然覆盖负数。i0/i1 窗口语义同
+    /// AxisMaxFor。
+    static int AxisMinFor(List<ChartSeries> series, int axisIndex, int i0, int i1) {
         int mn = 0;
         for (int i = 0; i < series.Count; i = i + 1) {
             ChartSeries s = series[i];
             if (!s.hidden && s.axisIndex == axisIndex) {
-                for (int j = 0; j < s.Count(); j = j + 1) { if (s.Value(j) < mn) { mn = s.Value(j); } }
-                for (int j2 = 0; j2 < s.points.Count; j2 = j2 + 1) {
+                int j0 = 0; int j1 = s.Count() - 1;
+                if (i0 >= 0 && i1 >= 0) {
+                    j0 = i0; j1 = i1;
+                    if (j0 > s.Count() - 1) { j0 = s.Count() - 1; }
+                    if (j1 > s.Count() - 1) { j1 = s.Count() - 1; }
+                    if (j1 < j0) { j1 = j0; }
+                }
+                for (int j = j0; j <= j1; j = j + 1) { if (s.Value(j) < mn) { mn = s.Value(j); } }
+                int p0 = 0; int p1 = s.points.Count - 1;
+                if (i0 >= 0 && i1 >= 0) {
+                    p0 = i0; p1 = i1;
+                    if (p0 > s.points.Count - 1) { p0 = s.points.Count - 1; }
+                    if (p1 > s.points.Count - 1) { p1 = s.points.Count - 1; }
+                    if (p1 < p0) { p1 = p0; }
+                }
+                for (int j2 = p0; j2 <= p1; j2 = j2 + 1) {
                     int py = Chart.PointV(s.points[j2].y, s.pointG);
                     if (py < mn) { mn = py; }
                 }
@@ -2961,14 +3056,30 @@ class Chart {
     /// f.YOf(v, axisIndex) 映射数值。
     static ChartFrame BuildAxes(App app, int x, int y, int w, int h, int plotTop,
                                 List<string> labels, ChartOption o, List<ChartSeries> series) {
-        return Chart.BuildAxesR(app, x, y, w, h, plotTop, labels, o, series, 0 - 1, 0 - 1);
+        return Chart.BuildAxesR(app, x, y, w, h, plotTop, labels, o, series, 0 - 1, 0 - 1,
+            0 - 1, 0 - 1);
+    }
+
+    /// 带 dataZoom 窗口的 BuildAxes：Y 量程按原始系列上的
+    /// [i0, i1] 扫描（labels 须已是对应窗口切片）。
+    static ChartFrame BuildAxesW(App app, int x, int y, int w, int h, int plotTop,
+                                 List<string> labels, ChartOption o, List<ChartSeries> series,
+                                 int i0, int i1) {
+        return Chart.BuildAxesR(app, x, y, w, h, plotTop, labels, o, series, 0 - 1, 0 - 1, i0, i1);
     }
 
     /// 同 BuildAxes，但左/右轴使用显式数据最大值
     /// （-1 = 从系列逐点推导）；堆叠图传入堆叠总和。
+    /// winI0/winI1 = dataZoom 可见窗口在**原始系列**上的下标区间
+    /// （-1,-1 = 无窗口）。Y 量程必须按该区间扫描：调用方（渲染器）
+    /// 传入的 labels 已是窗口切片，在这里再按 labels.Count 反解窗口
+    /// 会**二次开窗**（area-simple：2000 个窗口标签再取 10% → 200 点，
+    /// 量程被压到首个 1%，填充被放大到 1.65×）。窗口只有一个来源：
+    /// 渲染器算好传进来。
     static ChartFrame BuildAxesR(App app, int x, int y, int w, int h, int plotTop,
                                  List<string> labels, ChartOption o, List<ChartSeries> series,
-                                 int leftDataMax, int rightDataMax) {
+                                 int leftDataMax, int rightDataMax,
+                                 int winI0, int winI1) {
         Canvas c = app.canvas;
         Theme t = app.theme;
         int pad = t.paddingMedium;
@@ -2980,10 +3091,21 @@ class Chart {
         int ticks = y0.ticks;
         if (ticks < 1) { ticks = 5; }
 
+        // dataZoom 可见窗口 [zI0, zI1]（-1,-1 = 无窗口，按全量）。
+        // ECharts 6 默认 filterMode 下 Y 量程随窗口重定：窗口化只
+        // 在真的缩放（窗口 ≠ 全量）时生效，未缩放图与旧行为逐像素
+        // 一致。长度基准与渲染器 DrawLines/Scatter 的 fullN 同源：
+        // 类目 X 用 labels.Count，数值/时间 X 用最长系列长度。
+        int zI0 = 0 - 1;
+        // dataZoom 可见窗口（-1,-1 = 无窗口，按全量）。窗口由调用方
+        // 传入——本函数收到的 labels 已经是窗口切片，不能再自行反解。
+        int zI0 = winI0;
+        int zI1 = winI1;
+
         int lData = leftDataMax;
-        if (lData < 0) { lData = Chart.AxisMaxFor(series, 0); }
+        if (lData < 0) { lData = Chart.AxisMaxFor(series, 0, zI0, zI1); }
         bool leftFrac = Chart.SeriesFracAny(series, 0);
-        int leftLo = Chart.AxisLo(y0.min, Chart.AxisMinFor(series, 0));
+        int leftLo = Chart.AxisLo(y0.min, Chart.AxisMinFor(series, 0, zI0, zI1));
         int leftHi = Chart.AxisHi(y0.max, lData, leftLo);
         int leftLoF = 0;
         int leftHiF = 0;
@@ -2994,8 +3116,8 @@ class Chart {
             // 承担（line6 流量 0.46..365 + 固定 max 500 → 0..500000
             // 定点 5 段）。两端都固定走 _customerValue——精确等分
             // 不取整（line8 0..30）。
-            leftLoF = Chart.FracAxisLoF(y0.min, series, 0);
-            leftHiF = Chart.FracAxisHiF(y0.max, series, 0);
+            leftLoF = Chart.FracAxisLoF(y0.min, series, 0, zI0, zI1);
+            leftHiF = Chart.FracAxisHiF(y0.max, series, 0, zI0, zI1);
             if (y0.min != ChartOption.Auto() && y0.max != ChartOption.Auto()) {
                 leftLo = y0.min;
                 leftHi = y0.max;
@@ -3018,15 +3140,15 @@ class Chart {
         int rt = ticks;
         if (hasRight) {
             int rData = rightDataMax;
-            if (rData < 0) { rData = Chart.AxisMaxFor(series, 1); }
-            rightLo = Chart.AxisLo(y1.min, Chart.AxisMinFor(series, 1));
+            if (rData < 0) { rData = Chart.AxisMaxFor(series, 1, zI0, zI1); }
+            rightLo = Chart.AxisLo(y1.min, Chart.AxisMinFor(series, 1, zI0, zI1));
             rightHi = Chart.AxisHi(y1.max, rData, rightLo);
             rightFrac = Chart.SeriesFracAny(series, 1);
             if (rightFrac) {
                 // 右小数轴（line6 降雨量 -0.955..-0.005 → 定点域
                 // -1000..0 步长 200），同左轴流程。
-                rightLoF = Chart.FracAxisLoF(y1.min, series, 1);
-                rightHiF = Chart.FracAxisHiF(y1.max, series, 1);
+                rightLoF = Chart.FracAxisLoF(y1.min, series, 1, zI0, zI1);
+                rightHiF = Chart.FracAxisHiF(y1.max, series, 1, zI0, zI1);
                 if (y1.min != ChartOption.Auto() && y1.max != ChartOption.Auto()) {
                     rt = y1.ticks < 1 ? 5 : y1.ticks;
                 } else {
@@ -3047,7 +3169,7 @@ class Chart {
         if (!leftLog && !leftFrac && y0.type == ChartAxisType.Value
             && y0.min == ChartOption.Auto() && y0.max == ChartOption.Auto()
             && leftDataMax < 0) {
-            ChartSpan ls = Chart.NiceRange(Chart.AxisMinFor(series, 0), lData);
+            ChartSpan ls = Chart.NiceRange(Chart.AxisMinFor(series, 0, zI0, zI1), lData);
             leftLo = ls.lo;
             leftHi = ls.hi;
             ticks = ls.ticks;
@@ -3063,8 +3185,8 @@ class Chart {
         } else if (hasRight && !rightFrac && y1.type == ChartAxisType.Value
             && y1.min == ChartOption.Auto() && y1.max == ChartOption.Auto()
             && rightDataMax < 0) {
-            ChartSpan rs = Chart.NiceRange(Chart.AxisMinFor(series, 1),
-                Chart.AxisMaxFor(series, 1));
+            ChartSpan rs = Chart.NiceRange(Chart.AxisMinFor(series, 1, zI0, zI1),
+                Chart.AxisMaxFor(series, 1, zI0, zI1));
             rightLo = rs.lo;
             rightHi = rs.hi;
             rt = rs.ticks;
@@ -3100,7 +3222,11 @@ class Chart {
                 int pcnt = tss.points.Count;
                 if (pcnt > w1 + 1) { pcnt = w1 + 1; }
                 for (int tpi = w0; tpi < pcnt; tpi = tpi + 1) {
-                    int tx = tss.points[tpi].x;
+                    // points.x 是 epoch 天 × pointG 的定点值（值对/时间
+                    // 系列 pointG=1000），时间域是**裸天**整数：不除回
+                    // 会得到 1000× 的天数，TimeLabel 再按天解释就跳回
+                    // 1961 年（area-time-axis 比例坏掉的根因）。
+                    int tx = Chart.PointV(tss.points[tpi].x, tss.pointG);
                     if (!have || tx < dMin) { dMin = tx; }
                     if (!have || tx > dMax) { dMax = tx; }
                     have = true;
@@ -3153,26 +3279,26 @@ class Chart {
                 int wgi = Canvas.MeasureText(cgl, fs);
                 if (wgi > mw) { mw = wgi; }
             }
-            leftGut = mw + app.Scale(12);
+            leftGut = mw + app.Scale(12) + app.Scale(y0.labelMargin);
         } else {
-            leftGut = Chart.TickLabelW(leftLo, leftHi, ticks, fs) + app.Scale(12);
+            leftGut = Chart.TickLabelW(leftLo, leftHi, ticks, fs) + app.Scale(12) + app.Scale(y0.labelMargin);
             if (leftFrac) {
                 // 小数轴标签（"0.5"）比整数影子值（"0"）宽，按定点
                 // 域重估最宽刻度文本。
                 int fw = Chart.TickLabelWF(leftLoF, leftHiF, ticks, fs);
-                if (fw > leftGut) { leftGut = fw + app.Scale(12); }
+                if (fw > leftGut) { leftGut = fw + app.Scale(12) + app.Scale(y0.labelMargin); }
             }
             if (y0.labelFormatter.Length > 0) {
                 leftGut = leftGut + Chart.FormatterExtraW(y0.labelFormatter, leftHi, fs);
             }
         }
-        int rightGut = pad;
-        if (hasRight) { rightGut = Chart.TickLabelW(rightLo, rightHi, rt, fs) + app.Scale(12); }
+        int rightGut = pad + app.Scale(y1.labelMargin);
+        if (hasRight) { rightGut = Chart.TickLabelW(rightLo, rightHi, rt, fs) + app.Scale(12) + app.Scale(y1.labelMargin); }
         if (rightFrac) {
-            int rw = Chart.TickLabelWF(rightLoF, rightHiF, rt, fs) + app.Scale(12);
+            int rw = Chart.TickLabelWF(rightLoF, rightHiF, rt, fs) + app.Scale(12) + app.Scale(y1.labelMargin);
             if (rw > rightGut) { rightGut = rw; }
         }
-        int botGut = fh + app.Scale(12);
+        int botGut = fh + app.Scale(12) + app.Scale(x0.labelMargin);
         if (x0.title.Length > 0) { botGut = botGut + fh + app.Scale(2); }
         if (xValue) { botGut = botGut + fh + app.Scale(2); }
         // 旋转分类标签：按最宽标签的旋转后垂直跨度扩底栏（未旋转
@@ -3254,7 +3380,7 @@ class Chart {
         if (anyYMark0 && !leftLog && y0.min == ChartOption.Auto()
             && y0.max == ChartOption.Auto()) {
             int lpad = ((leftHi - leftLo) * pxPad + plotH - 1) / plotH;
-            int lDataMin = Chart.AxisMinFor(series, 0);
+            int lDataMin = Chart.AxisMinFor(series, 0, zI0, zI1);
             if (lpad > 0) {
                 if (leftHi - lData < lpad) { leftHi = lData + lpad; }
                 if (leftLo != 0 && lDataMin > leftLo
@@ -3269,8 +3395,8 @@ class Chart {
             && y1.max == ChartOption.Auto()) {
             int rpad = ((rightHi - rightLo) * pxPad + plotH - 1) / plotH;
             int rDataMax = rightDataMax;
-            if (rDataMax < 0) { rDataMax = Chart.AxisMaxFor(series, 1); }
-            int rDataMin = Chart.AxisMinFor(series, 1);
+            if (rDataMax < 0) { rDataMax = Chart.AxisMaxFor(series, 1, zI0, zI1); }
+            int rDataMin = Chart.AxisMinFor(series, 1, zI0, zI1);
             if (rpad > 0) {
                 if (rightHi - rDataMax < rpad) { rightHi = rDataMax + rpad; }
                 if (rightLo != 0 && rDataMin > rightLo

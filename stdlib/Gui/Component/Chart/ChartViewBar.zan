@@ -86,7 +86,7 @@ partial class ChartView {
         if (xValBars) { n = 1; }
         if (stacked) { leftData = Chart.MaxStackW(series, n, i0); }
         int plotTop = Chart.DrawPanelI(app, x, y, w, h, o.title, series, o.iwid, o.showLegend);
-        ChartFrame f = Chart.BuildAxesR(app, x, y, w, h - zoomH, plotTop, winLabels, o, series, leftData, 0 - 1);
+        ChartFrame f = Chart.BuildAxesR(app, x, y, w, h - zoomH, plotTop, winLabels, o, series, leftData, 0 - 1, i0, i1);
         if (zoomH > 0) {
             Chart.DrawZoomBar(app, f.plotX, f.plotW, y + h - app.Scale(18),
                 app.Scale(12), o.iwid, fullN);
@@ -335,7 +335,9 @@ partial class ChartView {
                     if (s.showSymbol != 0) {
                         for (int d2 = 0; d2 < lpx.Count; d2 = d2 + 1) {
                             Chart.DrawSymbol(c, lpx[d2], lpy[d2],
-                                Chart.SymbolRadius(s.symbolSize, app.Scale(3)),
+                                s.symbolSize > 0
+                                    ? app.Scale(Chart.SymbolRadius(s.symbolSize, 0))
+                                    : app.Scale(3),
                                 s.symbol, s.color, s.itemStyle.normal.borderColor,
                                 s.itemStyle.normal.borderWidth);
                         }
@@ -439,7 +441,9 @@ partial class ChartView {
                         if (s.showSymbol != 0) {
                             for (int di = 0; di < lpx.Count; di = di + 1) {
                                 Chart.DrawSymbol(c, lpx[di], lpy[di],
-                                    Chart.SymbolRadius(s.symbolSize, app.Scale(3)),
+                                    s.symbolSize > 0
+                                        ? app.Scale(Chart.SymbolRadius(s.symbolSize, 0))
+                                        : app.Scale(3),
                                     s.symbol, s.color, s.itemStyle.normal.borderColor,
                                     s.itemStyle.normal.borderWidth);
                             }
@@ -455,7 +459,9 @@ partial class ChartView {
                             int scol = s.color;
                             if (oiS < s.data.Count && s.data[oiS].color != 0) { scol = s.data[oiS].color; }
                             Chart.DrawSymbol(c, px2, py2,
-                                Chart.SymbolRadius(s.symbolSize, app.Scale(3)),
+                                s.symbolSize > 0
+                                    ? app.Scale(Chart.SymbolRadius(s.symbolSize, 0))
+                                    : app.Scale(3),
                                 s.symbol, scol, s.itemStyle.normal.borderColor,
                                 s.itemStyle.normal.borderWidth);
                         }
@@ -484,6 +490,7 @@ partial class ChartView {
                         // 序列颜色 —— ECharts 的三级颜色控制。
                         int col = s.color;
                         if (oi < s.data.Count && s.data[oi].color != 0) { col = s.data[oi].color; }
+                        col = Chart.FadeFocusColor(si, col);
                         int by = f.YOfFL(vF * (long)g / 1000L, ax);
                             int cellL = f.CatLeft(i, n);
                             int cellW = f.CatWidth(i, n);
@@ -756,6 +763,7 @@ partial class ChartView {
             int yv = (int)((long)s.points[j].y * g / 1000L);
             int col = s.color;
             if (s.points[j].color != 0) { col = s.points[j].color; }
+            col = Chart.FadeFocusColor(si, col);
             int px = f.XOfValue(xv);
             int py = f.YOf(yv, s.axisIndex);
             if (s.barHeight > 0) {
@@ -952,9 +960,18 @@ partial class ChartView {
                 if (series[qi].Count() > stMax) { stMax = series[qi].Count(); }
             }
             // 正负独立累加器下的组顶/组底定标（MaxStackAll 会把
-            // 正负相加，量程缩水）。
+            // 正负相加，量程缩水）。Y 量程随 dataZoom 可见窗口重定
+            // （与 Chart.BuildAxesR 同一契约）：窗口化只在真的缩放
+            // 时启用，未缩放图逐像素不变。
             if (vFrac) {
-                ChartSpan seH = Chart.StackExtentF(series, 0);
+                int hz0 = 0 - 1;
+                int hz1 = 0 - 1;
+                if (o.zoom && o.iwid != 0 && n > 1) {
+                    int hw0 = Chart.ZoomI0(app, o, o.iwid, n);
+                    int hw1 = Chart.ZoomI1(app, o, o.iwid, n);
+                    if (hw0 > 0 || hw1 < n - 1) { hz0 = hw0; hz1 = hw1; }
+                }
+                ChartSpan seH = Chart.StackExtentF(series, 0, hz0, hz1);
                 ChartSpan spN = Chart.NiceRange(seH.lo, seH.hi);
                 lo = spN.lo;
                 hi = spN.hi;
@@ -1386,7 +1403,7 @@ partial class ChartView {
             o.yAxes.Add(ChartAxis.ValueRange(minC, Chart.NiceMax(maxC)));
         }
         int plotTop = Chart.DrawPanelI(app, x, y, w, h, o.title, series, o.iwid, o.showLegend);
-        ChartFrame f = Chart.BuildAxesR(app, x, y, w, h - zoomH, plotTop, winLabels, o, series, maxC, 0 - 1);
+        ChartFrame f = Chart.BuildAxesR(app, x, y, w, h - zoomH, plotTop, winLabels, o, series, maxC, 0 - 1, i0, i1);
         if (zoomH > 0) {
             Chart.DrawZoomBar(app, f.plotX, f.plotW, y + h - app.Scale(18),
                 app.Scale(12), o.iwid, fullN);
