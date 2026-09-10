@@ -1,6 +1,6 @@
 ---
 name: zan-compiler-internals
-description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑——Dict 内建布局契约（插入序 keys/values + 惰性哈希索引 + Remove 整体失效）、LLVM select 两臂都求值导致的死臂分配泄漏（用 branch+phi）、looks_like_var_decl 的内建关键字分派契约（rank specifier 必须容忍逗号）、交叉工具链 .o 重出配方（zig cc + build/ 暂存副本不会自动刷新）、可空值类型在字符串位的解包形状、编译器调试的 scratch 卫生（bisect 用 worktree 即用即删、A/B 对照复用固定目录名）。做或改 src/compiler/*、交叉运行时对象、conformance golden 时使用。
+description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑——Dict 内建布局契约（插入序 keys/values + 惰性哈希索引 + Remove 整体失效）、LLVM select 两臂都求值导致的死臂分配泄漏（用 branch+phi）、delegate 两形态与 wasm32 函数表索引撞 ZAN_CLOSURE_TAG 的根修定式（形状按 target_is_wasm32 条件化）、looks_like_var_decl 的内建关键字分派契约（rank specifier 必须容忍逗号）、交叉工具链 .o 重出配方（zig cc + build/ 暂存副本不会自动刷新）、可空值类型在字符串位的解包形状、编译器调试的 scratch 卫生（bisect 用 worktree 即用即删、A/B 对照复用固定目录名）。做或改 src/compiler/*、交叉运行时对象、conformance golden 时使用。
 ---
 
 # zanc 编译器内部定式与坑
@@ -33,6 +33,28 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
   branch+phi：两块各算各的，merge 处 phi 合流。
 - 返回 NULL 字符串是合法的空串形状：emit_str_concat 有 NULL→""、
   zan_rt_str_release 有 NULL 守卫，全链路安全。
+
+## delegate 两形态与 wasm32 的 tag 碰撞（2026-09-10）
+
+- **形态契约（zan_abi.h）**：delegate 值一个指针两形态，bit 0 区分——偶数
+  =裸 fn 指针（静态方法组/无捕获 lambda），奇数=tag 过的堆 closure 记录
+  `{fn,dtor,target,<captures>}`，invoke 是 `fn(rec, args...)`（rec-first）。
+  runtime 侧 store-family（rt_sync 的 dispatch 队列、gui_runtime_wasm 的
+  wdisp）用 `v & ZAN_CLOSURE_TAG` tag-test 收纳两形态，retain 打
+  `rec-16` 的 rc 槽。
+- **wasm32 没有真实函数指针**：裸 fn 是 wasm 函数表索引（小整数，奇偶皆
+  有），奇数索引撞 tag 位 → irgen 把表索引解引用成记录，fn 槽读到索引处
+  内存 → 浏览器报 `null function at <调用帧>`。**修法是形状按目标条件化
+  （irgen_expr.c `target_is_wasm32(g)` 门控），native/wasm 各自复现历史
+  契约**：native 全裸形状零变化；wasm32 全走 tagged record——静态方法组
+  造 `__zan_mg_<method>` thunk 记录（thunk 丢 rec 调 target），thunk 同放
+  fn+target 双槽保 `E+=M;E-=M` 相等性语义（equality 按 target 槽比对），
+  dtor/retain 跳过 target 槽（是函数非对象）；无捕获 lambda 也走 rec-first
+  （`is_closure || target_is_wasm32`）。C 回调 cast `(nint)M` 走裸 fn 指针
+  路径（emit_raw_fn_for_cb_cast），与记录互不干扰。
+- **教训**：中间层用「指针低位 tag」复用值位时，必须审计目标平台上"这个
+  位模式是否真的不可能出现"——函数表索引/句柄/压缩指针都可能撞 tag。
+  新 target 落地时对"native 偶数才合法"的隐含假设逐个显式化。
 
 ## parser：looks_like_var_decl 的分派契约
 
