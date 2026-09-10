@@ -118,7 +118,15 @@ class WqGame {
     // 9 路棋盘水平居中放大（格距 92），顶部对手条 + 回合徽标，底部
     // 停一手按钮行；横屏维持"左棋盘 + 右信息栏"原布局。
     static bool Portrait() { return WqGame.VW() < WqGame.VH(); }
-    static int Cell() { return WqGame.Portrait() ? 92 : 64; }
+    static int Cell() {
+        if (!WqGame.Portrait()) { return 64; }
+        // 竖屏自适应：格距收进当前舞台宽（盘面 8c+76 ≤ VW-20），
+        // 否则 92 格距在 720 宽的延展舞台上棋盘会左右出界被裁。
+        int c = (WqGame.VW() - 96) / 8;
+        if (c > 92) { c = 92; }
+        if (c < 24) { c = 24; }
+        return c;
+    }
     static int BX() { return (WqGame.VW() - 8 * WqGame.Cell()) / 2; }
     static int BY() {
         if (!WqGame.Portrait()) { return 104; }
@@ -743,11 +751,12 @@ class WqGame {
                 if (v > 0) {
                     int sx = x0 + x * c;
                     int sy = y0 + y * c;
-                    int rad = 27;
+                    int rad = c * 27 / 92;
                     bool isLast = this.lastSq == y * n + x;
                     if (isLast) {
                         int age = now - this.placedAt;
-                        if (age < 220 && age >= 0) { rad = 21 + age * 6 / 220; }
+                        int grow = rad * 2 / 9;
+                        if (age < 220 && age >= 0) { rad = rad - grow + age * grow / 220; }
                         CDraw.FillCircle(this.c, sx, sy, rad + 8, 255, 200, 110, 60);
                     }
                     CDraw.FillCircle(this.c, sx + 2, sy + 4, rad, 30, 18, 8, 90);
@@ -774,14 +783,15 @@ class WqGame {
         if (this.koSq >= 0) {
             int kx = x0 + (this.koSq % n) * c;
             int ky = y0 + (this.koSq / n) * c;
-            CDraw.RingRect(this.c, kx - 10, ky - 10, 20, 20, 2, 220, 90, 80, 200);
+            int km = c * 10 / 92;
+            CDraw.RingRect(this.c, kx - km, ky - km, km * 2, km * 2, 2, 220, 90, 80, 200);
         }
         // hover ghost
         if (this.scene == 1 && !this.aiTurn) {
             int gx = (this.mouseX - x0 + c / 2) / c;
             int gy = (this.mouseY - y0 + c / 2) / c;
             if (gx >= 0 && gy >= 0 && gx < n && gy < n && this.At(gx, gy) == 0) {
-                CDraw.FillCircle(this.c, x0 + gx * c, y0 + gy * c, 24, 34, 36, 44, 90);
+                CDraw.FillCircle(this.c, x0 + gx * c, y0 + gy * c, c * 24 / 92, 34, 36, 44, 90);
             }
         }
     }
