@@ -434,6 +434,15 @@ static int expr_yields_owned_rc_value(zan_irgen_t *g, zan_ast_node_t *e,
         }
     }
     if (e->kind == AST_CALL) {
+        /* NativeMemory.GetString is a compiler intrinsic (emit_native_memory_call):
+         * the [DllImport] declaration only types the call for the checker, while
+         * the lowering builds a real ARC string via emit_string_alloc_rc and hands
+         * the caller +1. The borrowed-extern rule below must not claim it, or
+         * every consumer site -- arg temps, discards, local captures, returns --
+         * leaks exactly one reference per execution (one leaked copy of the raw
+         * HTTP request head per request on every WebApp/HttpServer connection). */
+        if (is_call_to(e, "NativeMemory", "GetString") && e->call.args.count == 3)
+            return 1;
         /* A bodyless [DllImport] declared to return `string` hands back a
          * borrowed C pointer (extern memory, or a buffer the caller passed
          * in) with no rc header behind it: releasing the discarded result

@@ -1,6 +1,6 @@
 ---
 name: zan-compiler-internals
-description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑——Dict 内建布局契约（插入序 keys/values + 惰性哈希索引 + Remove 整体失效）、LLVM select 两臂都求值导致的死臂分配泄漏（用 branch+phi）、delegate 两形态与 wasm32 函数表索引撞 ZAN_CLOSURE_TAG 的根修定式（形状按 target_is_wasm32 条件化）、looks_like_var_decl 的内建关键字分派契约（rank specifier 必须容忍逗号）、交叉工具链 .o 重出配方（zig cc + build/ 暂存副本不会自动刷新）、可空值类型在字符串位的解包形状、编译器调试的 scratch 卫生（bisect 用 worktree 即用即删、A/B 对照复用固定目录名）。做或改 src/compiler/*、交叉运行时对象、conformance golden 时使用。
+description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑——Dict 内建布局契约（插入序 keys/values + 惰性哈希索引 + Remove 整体失效）、LLVM select 两臂都求值导致的死臂分配泄漏（用 branch+phi）、delegate 两形态与 wasm32 函数表索引撞 ZAN_CLOSURE_TAG 的根修定式（形状按 target_is_wasm32 条件化）、ARC 所有权判定内建优先于 extern 借用（GetString 误判=每 HTTP 请求泄一条请求头）、looks_like_var_decl 的内建关键字分派契约（rank specifier 必须容忍逗号）、交叉工具链 .o 重出配方（zig cc + build/ 暂存副本不会自动刷新）、可空值类型在字符串位的解包形状、编译器调试的 scratch 卫生（bisect 用 worktree 即用即删、A/B 对照复用固定目录名）。做或改 src/compiler/*、交叉运行时对象、conformance golden 时使用。
 ---
 
 # zanc 编译器内部定式与坑
@@ -125,8 +125,21 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
 如无约束 T 的 string 拼接改 .ToString()）、「真回归」（git 考古最后
 通过点定位元凶提交修编译器）。混着处置就会把行为改错。
 
-## ARC 契约：DllImport 的 string 返回值是借用指针，永不释放
+## ARC 契约：DllImport 的 string 返回值是借用指针，永不释放（内建除外！）
 
+- **内建优先于 extern 借用规则（A262，2026-09-10）**：`NativeMemory.GetString`
+  是编译器内建（emit_native_memory_call，irgen_expr.c 用 emit_string_alloc_rc
+  建真 ARC 串、memcpy、NUL 收尾，交调用方 +1），`[DllImport]` 声明只为
+  checker 提供类型。extern 借用判定必须先给内建开白名单
+  （`is_call_to(e,"NativeMemory","GetString") && args==3` → return 1），
+  否则所有消费点（实参临时/丢弃/局部捕获/返回）各泄一条串——stdlib 里
+  ByteBuffer.Str → HttpFramer.Head/Slice/ReadBody 等约百处调用全中招，
+  服务端每 HTTP 请求泄一份原始请求头，RSS 线性上涨（WSL 3×60s 登录压测
+  13.7→313 MB；修复后 10.3→13.1 MB 趋平）。诊断定式：**泄漏报告的分配点
+  不是泄漏原因**（报在消费点，根因在所有权判定）；**RSS 随请求数线性
+  上涨=每请求泄漏，段间恒定=有界设计成本**；async frame 对 `this` 的
+  receiver-retain（防 fluent 接收者 use-after-free）是设计内所有权，
+  leakcheck 残余 1 条非缺陷。
 - **expr_yields_owned_rc_value 对 extern 调用必须返回 0**（irgen_generics.c）：
   声明返回 `string` 的 bodyless [DllImport] 返回的是裸 `char*`——extern 内存
   或**调用方传入的缓冲**，没有 rc 头。通用丢弃路径（AST_EXPR_STMT）把所有

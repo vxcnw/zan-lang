@@ -15,14 +15,21 @@ class Prog {
             int n = cwd.Length;
             /* read every byte of the result: a premature free of the
                underlying buffer makes the read crash instead of a wrong 0.
-               Length > 0 and a full read through every index is the
-               platform-independent assertion (Windows answers with
-               backslashes, so the slash count is not stable). */
+               Environment-independent assertions only: ctest --test-dir runs
+               the child with cwd = build directory, so no golden may encode
+               the path length or its exact text. Non-empty length, at least
+               one path separator, and two reads agreeing byte-for-byte. */
             int acc = 0;
             for (int j = 0; j < n; j = j + 1) {
                 acc = acc + (cwd[j] == '/' || cwd[j] == '\\' ? 1 : 0);
             }
-            Console.WriteLine("cwd=" + Convert.ToString(n) + " ok=" + Convert.ToString(n > 0 && acc > 0));
+            string cwd2 = Directory.GetCurrentDirectory();
+            int same = 1;
+            if (cwd2.Length != n) same = 0;
+            for (int j = 0; j < n; j = j + 1) {
+                if (same == 1 && cwd[j] != cwd2[j]) same = 0;
+            }
+            Console.WriteLine("ok=" + Convert.ToString(n > 0 && acc > 0 && same == 1));
         }
         Console.WriteLine("done");
     }
