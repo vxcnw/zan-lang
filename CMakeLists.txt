@@ -1955,6 +1955,20 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
   #  SetItem* 与 Finish/Error/Remove/Clear 计数、LastItem、Upload
   # 别名路由），以及无头渲染一帧后的触发/行/链接/下载命中区、
   # 拖放落区与 ::trigger 主题色非回退断言。进度全部显式驱动。
+  # 共享富文本：Gui.RichTextParser 解析语义（快捷色/#c 十六进制与
+  # 十进制/## 转义/未知标签字面保留/换行断行/#md #rt #lf 对齐/链接
+  # 标记/#item #z）、Game.Arpg 薄适配层转发与颜色互换，以及
+  # Gui.Widget.RichText 无头渲染一帧后的排版契约（折行跨行同色段
+  # 延续、行对齐快照、底端锚定 maxScroll 写出与滚动钳制）。
+  add_test(NAME conformance_gui_richtext
+    COMMAND ${CMAKE_COMMAND}
+      -DZANC=$<TARGET_FILE:zanc>
+      -DSRC=${CMAKE_SOURCE_DIR}/tests/gui/richtext_test.zan
+      "-DZANC_ARGS=--auto-stdlib${_gui_driver_tail}"
+      -DEXPECTED=${CMAKE_SOURCE_DIR}/tests/conformance/gui_richtext.out
+      -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_richtext${_exe_ext}
+      -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
+
   add_test(NAME conformance_gui_upload
     COMMAND ${CMAKE_COMMAND}
       -DZANC=$<TARGET_FILE:zanc>

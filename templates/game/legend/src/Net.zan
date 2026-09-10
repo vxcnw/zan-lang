@@ -335,8 +335,49 @@ class GameNet {
     }
 
     void AddChat(string who, string text) {
-        this.chat.Add(who + " " + text);
+        string line;
+        if (who == "[系统]" || who == "[公告]") {
+            line = "#H" + who + "#W " + EscRich(text);
+        } else {
+            line = "#H[聊天] " + NameColor(who) + who + "#W " + EscRich(text);
+        }
+        this.chat.Add(line);
         if (this.chat.Count > 40) { this.chat.RemoveAt(0); }
+    }
+
+    /* 玩家名颜色：按名字散列从固定色板挑一个（色板取自原版聊天截图
+       的玩家名配色）。 */
+    static string[] ChatColors = new string[] {
+        "#L", "#G", "#Y", "#c(0xFFB070FF)", "#R", "#c(0xFF60C8FF)",
+        "#c(0xFFFF80DF)"
+    };
+
+    static string NameColor(string who) {
+        int h = 0;
+        for (int i = 0; i < who.Length; i = i + 1) {
+            h = h + who[i];
+        }
+        return ChatColors[h % ChatColors.Length];
+    }
+
+    /* 正文里的 '#' 转义成 '##'，避免被富文本当标签吃掉。 */
+    static string EscRich(string text) {
+        string t = "";
+        for (int i = 0; i < text.Length; i = i + 1) {
+            if (text.Substring(i, 1) == "#") { t = t + "##"; }
+            else { t = t + text.Substring(i, 1); }
+        }
+        return t;
+    }
+
+    /* 离线壳的演示聊天：不拨号也能验证聊天区配色与折行
+       （LEGEND_OFFLINE=1 时在启动后播一次）。 */
+    void SeedDemoChat() {
+        this.AddChat("[s31.海草你嘻嘻嘻]", "我记得之前的新区，貌似是去年国庆开的？");
+        this.AddChat("[s21.梦幻进行曲]", "一年也就2个区，今年是没开新区的吗");
+        this.AddChat("[s11.静怀不归路]", "各位大佬们 晚上好啊，一天没上了，刷刷副本先");
+        this.AddChat("[s21.名枝——影月]", "疯狂星期四 冲冲冲！");
+        this.AddChat("[系统]", "欢迎来到迷你传奇，祝大家游戏愉快。");
     }
 
     void AddFeed(string text) {

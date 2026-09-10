@@ -103,12 +103,16 @@ partial class LegendApp {
 
     /* ---- 右侧聊天区 ----
        面板满高（内容 y 0..610）；底部输入行与左栏底簇同一水平线。 */
-    Label chatText;
+    RichText chatText;
     Panel chatPanel_;
     void BuildChat(Panel panel) {
         chatPanel_ = panel;
         panel.Class = "chat-panel"; panel.Pad(Spec.Px(6)); panel.Gap(Spec.Px(4));
-        chatText = Text("", "chat-text", 0);
+        /* 富文本聊天：多色段（[聊天]灰 + 玩家名配色 + 正文白）在
+           一段流式排版里折行不断色，Label 拼不出来。 */
+        chatText = new RichText();
+        chatText.SetFontPx(Spec.ChatFontPx());
+        chatText.scrollBar = new SignalInt(0);
         chatText.Grow(); panel.With(chatText);
         /* 输入行贴内容区底：尾部留白先加，后加的 DockBottom 才落在它上面
            （停靠按加入顺序取剩余区）。 */
@@ -123,6 +127,8 @@ partial class LegendApp {
 
     /* ---- 每帧刷新左栏数值（标签是定色定宽的文字，只有数值段在变）---- */
     void Refresh() {
+        /* 聊天先刷：离线（Self 为空）时聊天区也要跟着 SeedDemoChat 走。 */
+        if (chatText != null) { chatText.SetMarkup(net.ChatDump()); }
         JsonValue st = net.Self();
         if (st == null) { return; }
         if (heroHp != null) { heroHp.Text = Rules.N(st.Int("hp", 0)); }
@@ -142,7 +148,7 @@ partial class LegendApp {
         }
         if (expText != null) { expText.Text = Rules.N(exp) + "/" + Rules.N(expNext); }
         if (newsFeed != null) { newsFeed.Text = net.FeedDump(); }
-        if (chatText != null) { chatText.Text = net.ChatDump(); }
+
     }
 
     /* ---- 登录窗（占位，稍后按原版三窗流程还原）---- */

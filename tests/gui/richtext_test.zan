@@ -1,0 +1,171 @@
+using System;
+using Game.Arpg;
+using Gui;
+using Gui.Widget;
+
+/// 共享富文本（Gui.RichTextParser 解析层 + Gui.Widget.RichText 控件
+/// + Game.Arpg 薄适配层）的无窗口回归：解析语义（快捷色、#c 十六
+/// 进制/十进制、## 转义、未知标签字面保留、\n 断行、对齐标签、
+/// 链接标记、#item/#z）、适配层转发与颜色互换，以及无头渲染一帧
+/// 后的排版契约（折行跨行同色段延续、行对齐快照、底端锚定的
+/// maxScroll 写出与滚动钳制）。
+class RichTextTest {
+    static int fails;
+
+    static void Eq(string what, int got, int want) {
+        if (got == want) { return; }
+        fails = fails + 1;
+        Console.WriteLine($"FAIL {what}: got {got} want {want}");
+    }
+
+    static void EqStr(string what, string got, string want) {
+        if (got == want) { return; }
+        fails = fails + 1;
+        Console.WriteLine($"FAIL {what}: got '{got}' want '{want}'");
+    }
+
+    static void True(string what, bool ok) {
+        if (ok) { return; }
+        fails = fails + 1;
+        Console.WriteLine($"FAIL {what}");
+    }
+
+    static void Main() {
+        fails = 0;
+
+        // ---- 解析：文本与未知标签 -----------------------------------
+        RichTextDocument d = RichTextParser.ParseText("你好");
+        Eq("plain runs", d.RunCount(), 1);
+        Eq("plain kind", d.RunAt(0).Kind(), RichTextRunKind.Text());
+        EqStr("plain text", d.RunAt(0).Text(), "你好");
+        // 未识别的 # 标签整字面保留，不吞字符。
+        RichTextDocument unk = RichTextParser.ParseText("#x尾");
+        Eq("unknown runs", unk.RunCount(), 1);
+        EqStr("unknown literal", unk.RunAt(0).Text(), "#x尾");
+        // ## 转义成字面 '#'。
+        RichTextDocument esc = RichTextParser.ParseText("a##b");
+        Eq("escape runs", esc.RunCount(), 1);
+        EqStr("escape text", esc.RunAt(0).Text(), "a#b");
+
+        // ---- 解析：颜色 ---------------------------------------------
+        RichTextDocument c = RichTextParser.ParseText("#R红#W白");
+        Eq("shortcut runs", c.RunCount(), 2);
+        Eq("#R color", c.RunAt(0).Style().Color(), (int)0xFFFF0000);
+        Eq("#W color", c.RunAt(1).Style().Color(), (int)0xFFFFFFFF);
+        // #c 十六进制按 0xRRGGBBAA 书写、存为 0xAARRGGBB：
+        // FF,00,FF,00 → alpha=00（未提供语义）。
+        RichTextDocument hex = RichTextParser.ParseText("#c(0xFF00FF00)x");
+        Eq("hex color", hex.RunAt(0).Style().Color(), 0x00FF00FF);
+        // #c 十进制按 r,g,b,a：0,128,255,255 → 0xFF|00|80|FF。
+        RichTextDocument dec = RichTextParser.ParseText("#c(0,128,255,255)x");
+        Eq("dec color", dec.RunAt(0).Style().Color(), (int)0xFF0080FF);
+
+        // ---- 解析：断行与对齐 ---------------------------------------
+        RichTextDocument br = RichTextParser.ParseText("a\nb");
+        Eq("break runs", br.RunCount(), 3);
+        Eq("break kind", br.RunAt(1).Kind(), RichTextRunKind.LineBreak());
+        RichTextDocument al = RichTextParser.ParseText("#md居中\n#lf回左");
+        Eq("md align", al.RunAt(0).Style().Alignment(), 1);
+        Eq("lf align", al.RunAt(2).Style().Alignment(), 0);
+
+        // ---- 解析：链接标记 -----------------------------------------
+        RichTextDocument lk = RichTextParser.ParseText(
+            "#@show|2,0xFFFFFF00,0xFF00FF00@点我@");
+        Eq("link runs", lk.RunCount(), 1);
+        RichTextLink l = lk.RunAt(0).Link();
+        True("link present", l != null);
+        if (l != null) {
+            EqStr("link action", l.Raw(), "show");
+            Eq("link style", l.Style(), 2);
+            // 颜色按 0xRRGGBBAA 换算；FFFFFF00 的 alpha=00 → 0x00FFFFFF。
+            Eq("link normal", l.NormalColor(), 0x00FFFFFF);
+            Eq("link hover", l.HoverColor(), 0x00FF00FF);
+            Eq("link pressed unset", l.PressedColor(), 0);
+        }
+
+        // ---- 解析：物品与占位 ---------------------------------------
+        RichTextDocument it = RichTextParser.ParseText("#item(iron,3)#z(30,8)");
+        Eq("item+spacer runs", it.RunCount(), 2);
+        Eq("item kind", it.RunAt(0).Kind(), RichTextRunKind.Item());
+        EqStr("item res", it.RunAt(0).Resource(), "iron");
+        Eq("item qty", it.RunAt(0).Quantity(), 3);
+        Eq("spacer kind", it.RunAt(1).Kind(), RichTextRunKind.Spacer());
+        Eq("spacer w", it.RunAt(1).Width(), 30);
+        Eq("spacer h", it.RunAt(1).Height(), 8);
+
+        // ---- Arpg 适配层：转发与颜色互换 ----------------------------
+        ArpgRichTextDocument ad = ArpgRichText.Parse("#R红", null);
+        Eq("arpg runs", ad.RunCount(), 1);
+        ArpgRichTextRun ar = ad.RunAt(0);
+        Eq("arpg kind", ar.Kind(), ArpgRichTextRunKind.Text());
+        ArpgRichTextStyle ast = ar.Style();
+        True("arpg style", ast != null);
+        if (ast != null) {
+            Eq("arpg color red", ast.Color().Red(), 255);
+            Eq("arpg color alpha", ast.Color().Alpha(), 255);
+            Eq("arpg color green", ast.Color().Green(), 0);
+        }
+        ArpgRichTextLink al2 = ar.Link();
+        True("arpg link absent", al2 == null);
+        // Gui 打包色 ↔ ArpgColor 往返。
+        ArpgColor back = ArpgRichText.UnpackColor(
+            ArpgRichText.PackColor(new ArpgColor(1, 2, 3, 4)));
+        Eq("pack roundtrip r", back.Red(), 1);
+        Eq("pack roundtrip g", back.Green(), 2);
+        Eq("pack roundtrip b", back.Blue(), 3);
+        Eq("pack roundtrip a", back.Alpha(), 4);
+
+        // ---- 控件：未排版哨兵与无头渲染 -----------------------------
+        RichText fresh = new RichText();
+        Eq("unlaid sentinel", fresh.LineCount(), 0 - 1);
+
+        App app = new App("richtexttest", 400, 300);
+        // 折行跨行同色延续：整段红色在窄容器里逐字折行，任何一段都
+        // 不许掉回默认前景色（掉色即断言失败）。
+        RichText rt = new RichText();
+        rt.SetMarkup("#R甲乙丙丁戊己庚辛壬癸");
+        rt.RenderInside(app, new Rect(10, 10, 40, 200));
+        True("wrapped to multiple lines", rt.LineCount() > 1);
+        bool allRed = rt.LineCount() > 0;
+        for (int i = 0; i < rt.LineCount(); i = i + 1) {
+            RichTextLine ln = rt.lines[i];
+            True("line not empty", ln.segments.Count > 0);
+            for (int j = 0; j < ln.segments.Count; j = j + 1) {
+                RichTextSegment s = ln.segments[j];
+                True("segment text", s.text.Length > 0);
+                True("segment width", s.width > 0);
+                if (s.color != (int)0xFFFF0000) { allRed = false; }
+            }
+        }
+        True("wrap keeps color", allRed);
+
+        // 行对齐快照：#md 行居中，#lf 后的行回左。
+        RichText ra = new RichText();
+        ra.SetMarkup("#md居中\n#lf回左");
+        ra.RenderInside(app, new Rect(10, 10, 300, 100));
+        Eq("align line0", ra.lines[0].alignment, 1);
+        Eq("align line1", ra.lines[1].alignment, 0);
+
+        // 底端锚定：内容远高于视口时 maxScroll 写出；滚动值钳制。
+        RichText rs = new RichText();
+        string many = "";
+        for (int i = 0; i < 30; i = i + 1) {
+            many = many + "行" + Convert.ToString(i) + "\n";
+        }
+        rs.SetMarkup(many);
+        rs.RenderInside(app, new Rect(0, 0, 300, 40));
+        True("maxScroll positive", rs.maxScroll > 0);
+        rs.scroll = 1000000;
+        rs.RenderInside(app, new Rect(0, 0, 300, 40));
+        Eq("scroll clamped high", rs.scroll, rs.maxScroll);
+        rs.scroll = 0 - 3;
+        rs.RenderInside(app, new Rect(0, 0, 300, 40));
+        Eq("scroll clamped low", rs.scroll, 0);
+
+        if (fails == 0) {
+            Console.WriteLine("richtext_test OK");
+        } else {
+            Console.WriteLine($"richtext_test FAILURES {fails}");
+        }
+    }
+}

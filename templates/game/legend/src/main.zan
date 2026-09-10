@@ -85,9 +85,10 @@ partial class LegendApp {
         app.SetClientSize(Spec.WindowW(), Spec.WindowH());
         app.UseSkin("legend"); app.SetBackdropFx(false);
 
-        BuildShell();
-        BuildPage();
-        Refresh();
+        /* 离线/连接分流要放在建壳之前：种子聊天是纯本地数据，建壳前
+           播好，启动第一帧（同步的那次 Refresh）聊天区就有内容——
+           不必等第一个秒刻度（实测刻度在忙机器上会被拖到数秒外，
+           挂到刻度上会让聊天区时有时无）。 */
         if (KnownFolders.GetEnv("LEGEND_OFFLINE").Length > 0) {
             /* 离线壳：LEGEND_OFFLINE=1 时不拨号（UI 自动化回归与
                无服务器试玩走这条路），窗口标题标明离线。 */
@@ -96,6 +97,10 @@ partial class LegendApp {
         } else {
             ConnectPublished(dataDir);
         }
+
+        BuildShell();
+        BuildPage();
+        Refresh();
 
         form.Every(120, () => {
             try { net.PollHttp(); } catch (Exception) { }
@@ -145,7 +150,6 @@ partial class LegendApp {
                 if (t - lastSave >= 15) { Save(); }
                 Refresh();
             } catch (Exception e) {
-                try { File.WriteAllText("dbg-tick-err.txt", e.ToString()); } catch (Exception e2) { }
                 if (UiDriver.Active()) {
                     try { UiDriver.SetProbe("tick-err", e.ToString()); } catch (Exception e2) { }
                 }

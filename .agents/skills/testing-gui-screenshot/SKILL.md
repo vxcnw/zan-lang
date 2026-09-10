@@ -86,6 +86,20 @@ CJK titles.
   `list_windows`), that is window-scoped and background-safe — prefer it and
   skip the script. The harness's full-`screenshot` tool is a display grab: last
   resort only.
+- **Launch the exe from ONE PowerShell script, never a bash `&` background
+  chain** (2026-09, legend chat probe: three "the fix didn't work" verdicts
+  were all measurement pollution). The bash shape `cd build/X && ./App.exe >
+  log 2>&1 &` backgrounds the whole `&&` chain as a subshell: later `kill $!`
+  kills only the subshell and orphans the exe (it keeps running and keeps
+  writing its diag files), and the parent shell's CWD is not `build/X`, so
+  every relative `cat`/`rm` silently reads the wrong directory or leaves the
+  old file in place. Two launched instances then overwrite the same
+  `dbg-*.txt` and a stale file is read as today's result. Defence: before
+  trusting ANY diag file, compare its mtime against "now" — a diag file not
+  rewritten within one timer period is stale, full stop. Protocol that works:
+  one .ps1 that does kill-loop until zero instances → `Start-Process
+  -PassThru` → sleep → dump diag files → win-shot → kill, all with absolute
+  paths.
 
 ## Linux (X11)
 
@@ -121,3 +135,7 @@ import -window <hwnd> -strip _scratch/shot.png   # ImageMagick, per-window
   contains whichever window happened to overlap.
 - Judging hover/selection state on a shot taken with the synthetic cursor still
   parked over the widget.
+- "The fix didn't work" verdicts from stale diag files: the exe had been
+  launched via a bash background chain, an orphaned first instance kept
+  overwriting the diag files, and the "new" numbers were last run's (mtime
+  check exposed it).
