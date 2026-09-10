@@ -1,0 +1,120 @@
+using System;
+using Gui.Component.Chart;
+
+namespace Conf;
+
+/// axis.scale 语义（ECharts `coord/axisModelCommonMixin.ts:33`
+/// `needIncludeZero() = !option.scale`；`coord/scaleRawExtentInfo.ts:301-312`
+/// 只有 !scale 且是 interval scale 时单侧并入 0，固定 min/max 的那一端
+/// 不并入（fixMM）；ECharts 2 `component/valueAxis.js:666 _reformValue(scale)`
+/// 是被移植进 NiceRange 的同一条 `!scale && min>=0 && max>=0 → min=0`）。
+///
+/// 断言三件事：①原始数据极值在 scale:true 下不含 0、缺省含 0；
+/// ②NiceRange 的收紧包络只在 !scale 时把 0 拉进量程（数据离 0 远时
+/// 差异可见——prices 2300 段的蜡烛图原来被压到顶部 1%）；
+/// ③显式 min/max 一端不并入 0（fixMM），空系列回退 0（空轴仍可渲染）。
+class Program {
+    static List<ChartSeries> One(ChartSeries s) {
+        List<ChartSeries> l = new List<ChartSeries>();
+        l.Add(s);
+        return l;
+    }
+
+    /// 值对系列 y = ys，x = 下标，pointG 缺省 1（原值）。
+    static ChartSeries PV(string name, List<int> ys) {
+        List<ChartPoint> ps = new List<ChartPoint>();
+        for (int i = 0; i < ys.Count; i = i + 1) {
+            ps.Add(ChartPoint.Of(i, ys[i]));
+        }
+        return ChartSeries.OfPoints(name, ps);
+    }
+
+    static void Main() {
+        // 量级离 0 很远（价格/体重）：包含 0 与否肉眼可见。
+        List<ChartSeries> far = Program.One(Program.PV("far", new List<int>{1080, 1050, 1100, 1030}));
+        // 全正 / 全负 / 跨零。
+        List<ChartSeries> pos = Program.One(Program.PV("pos", new List<int>{3, 30}));
+        List<ChartSeries> neg = Program.One(Program.PV("neg", new List<int>{0 - 3, 0 - 30}));
+        List<ChartSeries> strad = Program.One(Program.PV("strad", new List<int>{0 - 30, 30}));
+        // 空系列：scale 下取不到数据也必须回退 0（空轴要能渲染）。
+        List<ChartSeries> empty = Program.One(ChartSeries.Of("E", ChartType.Line, new List<int>()));
+
+        // ---- ① 原始数据极值：scale 不含 0，!scale 单侧并入 0 ----
+        Console.WriteLine("far-int="
+            + Convert.ToString(Chart.AxisMinFor(far, 0, 0 - 1, 0 - 1, false)) + ","
+            + Convert.ToString(Chart.AxisMaxFor(far, 0, 0 - 1, 0 - 1, false)) + ";"
+            + Convert.ToString(Chart.AxisMinFor(far, 0, 0 - 1, 0 - 1, true)) + ","
+            + Convert.ToString(Chart.AxisMaxFor(far, 0, 0 - 1, 0 - 1, true)));
+        Console.WriteLine("far-fixed="
+            + Convert.ToString(Chart.AxisMinForF(far, 0, 0 - 1, 0 - 1, false)) + ","
+            + Convert.ToString(Chart.AxisMaxForF(far, 0, 0 - 1, 0 - 1, false)) + ";"
+            + Convert.ToString(Chart.AxisMinForF(far, 0, 0 - 1, 0 - 1, true)) + ","
+            + Convert.ToString(Chart.AxisMaxForF(far, 0, 0 - 1, 0 - 1, true)));
+        Console.WriteLine("pos-neg="
+            + Convert.ToString(Chart.AxisMinFor(pos, 0, 0 - 1, 0 - 1, false)) + ","
+            + Convert.ToString(Chart.AxisMaxFor(pos, 0, 0 - 1, 0 - 1, true)) + ";"
+            + Convert.ToString(Chart.AxisMinFor(neg, 0, 0 - 1, 0 - 1, true)) + ","
+            + Convert.ToString(Chart.AxisMaxFor(neg, 0, 0 - 1, 0 - 1, false)));
+        // 跨零：两种语义同值（0 本来就在量程内）。
+        Console.WriteLine("strad="
+            + Convert.ToString(Chart.AxisMinFor(strad, 0, 0 - 1, 0 - 1, false)) + ","
+            + Convert.ToString(Chart.AxisMaxFor(strad, 0, 0 - 1, 0 - 1, false)) + ";"
+            + Convert.ToString(Chart.AxisMinForF(strad, 0, 0 - 1, 0 - 1, true)) + ","
+            + Convert.ToString(Chart.AxisMaxForF(strad, 0, 0 - 1, 0 - 1, true)));
+        // 空系列两侧都回退 0。
+        Console.WriteLine("empty="
+            + Convert.ToString(Chart.AxisMinForF(empty, 0, 0 - 1, 0 - 1, true)) + ","
+            + Convert.ToString(Chart.AxisMaxForF(empty, 0, 0 - 1, 0 - 1, true)));
+        // X 数值轴同语义（散点/值对）：x 也取离 0 远的值。
+        List<ChartSeries> xfar = Program.One(ChartSeries.OfPoints("xfar", new List<ChartPoint>{
+            ChartPoint.Of(1080, 1), ChartPoint.Of(1050, 2), ChartPoint.Of(1100, 3) }));
+        Console.WriteLine("x="
+            + Convert.ToString(Chart.XMinFor(xfar, false, false)) + ","
+            + Convert.ToString(Chart.XMinFor(xfar, false, true)) + ";"
+            + Convert.ToString(Chart.XMaxFor(xfar, false, false)) + ","
+            + Convert.ToString(Chart.XMaxFor(xfar, false, true)));
+
+        // ---- ② 收紧包络：NiceRange 只在 !scale 拉进 0 ----
+        ChartSpan nf = Chart.NiceRange(1030, 1100, false);
+        ChartSpan nt = Chart.NiceRange(1030, 1100, true);
+        Console.WriteLine("nice-pos=" + Convert.ToString(nf.lo) + "," + Convert.ToString(nf.hi)
+            + ";" + Convert.ToString(nt.lo) + "," + Convert.ToString(nt.hi));
+        ChartSpan mf = Chart.NiceRange(0 - 1100, 0 - 1030, false);
+        ChartSpan mt = Chart.NiceRange(0 - 1100, 0 - 1030, true);
+        Console.WriteLine("nice-neg=" + Convert.ToString(mf.lo) + "," + Convert.ToString(mf.hi)
+            + ";" + Convert.ToString(mt.lo) + "," + Convert.ToString(mt.hi));
+        // !scale 时与旧行为逐位一致（0..1100 的原样包络）。
+        ChartSpan of = Chart.NiceRange(0, 1100, false);
+        Console.WriteLine("nice-legacy=" + Convert.ToString(of.lo) + "," + Convert.ToString(of.hi)
+            + ":" + Convert.ToString(of.ticks));
+
+        // ---- ③ 固定端不并入 0（fixMM）；AxisHi 的全负归零不受 scale 管
+        // （整数近似管道：NiceMax 对负数返回 5，归 0 才接近源；scale 的
+        // 自动量程由上面的 NiceRange 分支接管）----
+        Console.WriteLine("axislo="
+            + Convert.ToString(Chart.AxisLo(ChartOption.Auto(), 1030, false)) + ","
+            + Convert.ToString(Chart.AxisLo(ChartOption.Auto(), 1030, true)) + ";"
+            + Convert.ToString(Chart.AxisLo(0 - 5, 1030, true)) + ","
+            + Convert.ToString(Chart.AxisLo(ChartOption.Auto(), 0 - 30, true)));
+        Console.WriteLine("axishi="
+            + Convert.ToString(Chart.AxisHi(ChartOption.Auto(), 0 - 30, 0 - 1100)) + ","
+            + Convert.ToString(Chart.AxisHi(7, 0 - 30, 0 - 1100)));
+        Console.WriteLine("anchor="
+            + Convert.ToString(Chart.ZeroAnchorLo(false, false, 30, 50)) + ","
+            + Convert.ToString(Chart.ZeroAnchorLo(true, false, 30, 50)) + ","
+            + Convert.ToString(Chart.ZeroAnchorLo(false, true, 30, 50)) + ","
+            + Convert.ToString(Chart.ZeroAnchorLo(false, false, 0 - 50, 0 - 30)) + ";"
+            + Convert.ToString(Chart.ZeroAnchorHi(false, false, 0 - 50, 0 - 30)) + ","
+            + Convert.ToString(Chart.ZeroAnchorHi(true, false, 0 - 50, 0 - 30)) + ","
+            + Convert.ToString(Chart.ZeroAnchorHi(false, true, 0 - 50, 0 - 30)) + ","
+            + Convert.ToString(Chart.ZeroAnchorHi(false, false, 30, 50)));
+
+        // ---- JSON 解析：axis.scale 进模型，缺省 false ----
+        ChartOption o = ChartOption.FromJson(
+            "{\"xAxis\":{\"scale\":true},\"yAxis\":{},\"series\":[{\"type\":\"line\",\"data\":[1,2]}]}");
+        Console.WriteLine("parse=" + Convert.ToString(o.XAxis0().scale) + ":"
+            + Convert.ToString(o.YAxis0().scale) + ":"
+            + Convert.ToString(ChartAxis.Value().scale) + ":"
+            + Convert.ToString(ChartAxis.Category(new List<string>{"a"}).scale));
+    }
+}

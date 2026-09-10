@@ -1016,8 +1016,11 @@ class Chart {
     /// AxisMinFor 的 1/1000 定点对偶：与 AxisMaxForF 成对——原始
     /// 数据下界直传（不许钳零），小数轴量程专用。i0/i1 窗口语义
     /// 同 AxisMaxFor。
-    static int AxisMinForF(List<ChartSeries> series, int axisIndex, int i0, int i1) {
+    static int AxisMinForF(List<ChartSeries> series, int axisIndex, int i0, int i1, bool scale) {
         int mn = 0;
+        // !scale：0 本身算一个候选点（`_reformValue` 的同号归零前置条件）；
+        // scale：0 不参与，必须扫到真实数据才更新（否则正数据轴会被锚到 0）。
+        bool any = !scale;
         for (int i = 0; i < series.Count; i = i + 1) {
             ChartSeries s = series[i];
             if (!s.hidden && s.axisIndex == axisIndex) {
@@ -1031,7 +1034,7 @@ class Chart {
                 for (int j = j0; j <= j1; j = j + 1) {
                     double v = s.Number(j);
                     int vi = (int)(v * 1000 + (v >= 0 ? 0.5 : 0 - 0.5));
-                    if (vi < mn) { mn = vi; }
+                    if (!any || vi < mn) { mn = vi; any = true; }
                 }
                 // 类目 data 系列（`data:[2,7,...]`）没有点坐标。dataZoom
                 // 窗口下 i0/i1>=0，p0/p1 会被钳成 -1，而 `j2 <= p1` 在
@@ -1048,7 +1051,7 @@ class Chart {
                 }
                 for (int j2 = p0; j2 <= p1; j2 = j2 + 1) {
                     int py = Chart.PointV(s.points[j2].y, s.pointG) * 1000;
-                    if (py < mn) { mn = py; }
+                    if (!any || py < mn) { mn = py; any = true; }
                 }
             }
         }
@@ -1178,9 +1181,10 @@ class Chart {
     /// 原始数据下界直传（不预设 nice——向下取整是 smartSteps 的
     /// 职责，valueAxis._calculateValue 语义）。堆叠柱并入类目堆叠
     /// 和的负向极值。i0/i1 窗口语义同 AxisMaxFor。
-    static int FracAxisLoF(int fixedLo, List<ChartSeries> series, int axisIndex, int i0, int i1) {
+    static int FracAxisLoF(int fixedLo, List<ChartSeries> series, int axisIndex, int i0, int i1,
+                           bool scale) {
         if (fixedLo != ChartOption.Auto()) { return fixedLo * 1000; }
-        int lo = Chart.AxisMinForF(series, axisIndex, i0, i1);
+        int lo = Chart.AxisMinForF(series, axisIndex, i0, i1, scale);
         if (Chart.HasStackedBarsF(series, axisIndex)) {
             ChartSpan se = Chart.StackExtentF(series, axisIndex, i0, i1);
             if (se.lo < lo) { lo = se.lo; }
@@ -1191,9 +1195,10 @@ class Chart {
     /// 小数轴 extent 上界（×1000 定点）：固定 max 直接生效，否则
     /// 原始数据上界直传。堆叠柱并入类目堆叠和的正向极值。
     /// i0/i1 窗口语义同 AxisMaxFor。
-    static int FracAxisHiF(int fixedHi, List<ChartSeries> series, int axisIndex, int i0, int i1) {
+    static int FracAxisHiF(int fixedHi, List<ChartSeries> series, int axisIndex, int i0, int i1,
+                           bool scale) {
         if (fixedHi != ChartOption.Auto()) { return fixedHi * 1000; }
-        int hi = Chart.AxisMaxForF(series, axisIndex, i0, i1);
+        int hi = Chart.AxisMaxForF(series, axisIndex, i0, i1, scale);
         if (Chart.HasStackedBarsF(series, axisIndex)) {
             ChartSpan se = Chart.StackExtentF(series, axisIndex, i0, i1);
             if (se.hi > hi) { hi = se.hi; }
@@ -1449,7 +1454,17 @@ class Chart {
     /// 同号数据一端归零（全正 min→0、全负 max→0）与 min==max 整形。
     /// -2..15 → -5..15/4 段、0..1320 → 0..1500/6 段、0..2570 →
     /// 0..3000/6 段。固定 min/max 不走此函数（尊重不取整）。
-    static ChartSpan NiceRange(int lo, int hi) {        int min = lo;
+    static ChartSpan NiceRange(int lo, int hi) {
+        return Chart.NiceRange(lo, hi, false);
+    }
+
+    /// scale 版（axis.scale:true）：跳过 `_reformValue` 的同号归零——
+    /// 出处 ECharts 2 `component/valueAxis.js:666 _reformValue(scale)`：
+    /// `if (!scale && this._min >= 0 && this._max >= 0) this._min = 0;`
+    /// `if (!scale && this._min <= 0 && this._max <= 0) this._max = 0;`
+    /// 其余（min==max 整形、smartSteps）与 !scale 完全一致。
+    static ChartSpan NiceRange(int lo, int hi, bool scale) {
+        int min = lo;
         int max = hi;
         if (max < min) {
             int tmp = min;
@@ -1459,7 +1474,8 @@ class Chart {
         if (min == max) {
             // valueAxis 的 min==max 修复：全 0 → max=1；正数把 min
             // 压到 0（源码 splitNumber ?? 5 实际取 null→0）；负数把
-            // max 抬到 0。
+            // max 抬到 0。此段在源码里位于 _reformValue 之前
+            // （_calculateValue 内），不受 scale 影响。
             if (max == 0) {
                 max = 1;
             } else if (max > 0) {
@@ -1468,8 +1484,10 @@ class Chart {
                 max = 0;
             }
         }
-        if (min >= 0 && max >= 0) { min = 0; }
-        if (min <= 0 && max <= 0) { max = 0; }
+        if (!scale) {
+            if (min >= 0 && max >= 0) { min = 0; }
+            if (min <= 0 && max <= 0) { max = 0; }
+        }
         if (min == max) { max = min + 1; }
         if (max - min < 5) {
             return Chart.SmartForInteger(min, max, 0);
@@ -2927,6 +2945,24 @@ class Chart {
     /// 类有自然域的散点会把云挤进角落，ECharts2 原版贴数据包络）。
     /// 步长候选同 echarts2 smartSteps：1/2/2.5/5 × 10^k，splitNumber
     /// （5）只是预估——实际分段数取包络/步长。
+    /// ECharts 6 单侧并入 0（`coord/scaleRawExtentInfo.ts:302-312`）：
+    /// `if (eff[0] > 0 && eff[1] > 0 && !fixMM[0]) eff[0] = 0;`
+    /// `if (eff[0] < 0 && eff[1] < 0 && !fixMM[1]) eff[1] = 0;`
+    /// 仅在需要并入 0（!scale）且该端未被显式 min/max 固定时生效。
+    /// 调用顺序必须是 lo 再 hi——源码按序读改写后的数组。
+    static int ZeroAnchorLo(bool scale, bool fixLo, int lo, int hi) {
+        if (scale || fixLo) { return lo; }
+        if (lo > 0 && hi > 0) { return 0; }
+        return lo;
+    }
+
+    /// 见 ZeroAnchorLo：全负数据把上界归 0。
+    static int ZeroAnchorHi(bool scale, bool fixHi, int lo, int hi) {
+        if (scale || fixHi) { return hi; }
+        if (lo < 0 && hi < 0) { return 0; }
+        return hi;
+    }
+
     static ChartSpan ScatterAutoRange(int lo, int hi) {
         if (hi < lo) {
             int tmp = lo;
@@ -2975,8 +3011,11 @@ class Chart {
     /// 一律全量扫描，area-time-axis / area-rainfall 这类 65..85%
     /// 窗口图保留 -2000..2000 全域，画面被压到顶端 1% 像素可见）。
     /// i0<0 || i1<0 = 扫描全量（旧默认行为）。
-    static int AxisMaxFor(List<ChartSeries> series, int axisIndex, int i0, int i1) {
+    static int AxisMaxFor(List<ChartSeries> series, int axisIndex, int i0, int i1, bool scale) {
         int mx = 0;
+        // scale（axis.scale:true）：0 不并入量程——ECharts 的 incl0 由
+        // `needIncludeZero() = !option.scale` 决定（axisModelCommonMixin.ts:33）。
+        bool any = !scale;
         for (int i = 0; i < series.Count; i = i + 1) {
             ChartSeries s = series[i];
             if (!s.hidden && s.axisIndex == axisIndex) {
@@ -2987,7 +3026,10 @@ class Chart {
                     if (j1 > s.Count() - 1) { j1 = s.Count() - 1; }
                     if (j1 < j0) { j1 = j0; }
                 }
-                for (int j = j0; j <= j1; j = j + 1) { if (s.Value(j) > mx) { mx = s.Value(j); } }
+                for (int j = j0; j <= j1; j = j + 1) {
+                    int v = s.Value(j);
+                    if (!any || v > mx) { mx = v; any = true; }
+                }
                 if (s.points.Count < 1) { continue; }
                 int p0 = 0; int p1 = s.points.Count - 1;
                 if (i0 >= 0 && i1 >= 0) {
@@ -2998,7 +3040,7 @@ class Chart {
                 }
                 for (int j2 = p0; j2 <= p1; j2 = j2 + 1) {
                     int py = Chart.PointV(s.points[j2].y, s.pointG);
-                    if (py > mx) { mx = py; }
+                    if (!any || py > mx) { mx = py; any = true; }
                 }
             }
         }
@@ -3010,8 +3052,11 @@ class Chart {
     /// 直传（不许钳零），锚定/取整全部由 NiceRange（smartSteps）
     /// 承担——见 valueAxis._calculateValue/_reformValue。
     /// i0/i1 窗口语义同 AxisMaxFor。
-    static int AxisMaxForF(List<ChartSeries> series, int axisIndex, int i0, int i1) {
+    static int AxisMaxForF(List<ChartSeries> series, int axisIndex, int i0, int i1, bool scale) {
         int mx = 0;
+        // 与 AxisMinForF 成对：scale 时 0 不参与，取不到数据才回退 0
+        // （空轴仍要能渲染）。
+        bool any = !scale;
         for (int i = 0; i < series.Count; i = i + 1) {
             ChartSeries s = series[i];
             if (!s.hidden && s.axisIndex == axisIndex) {
@@ -3025,7 +3070,7 @@ class Chart {
                 for (int j = j0; j <= j1; j = j + 1) {
                     double v = s.Number(j);
                     int vi = (int)(v * 1000 + (v >= 0 ? 0.5 : 0 - 0.5));
-                    if (vi > mx) { mx = vi; }
+                    if (!any || vi > mx) { mx = vi; any = true; }
                 }
                 if (s.points.Count < 1) { continue; }
                 int p0 = 0; int p1 = s.points.Count - 1;
@@ -3037,7 +3082,7 @@ class Chart {
                 }
                 for (int j2 = p0; j2 <= p1; j2 = j2 + 1) {
                     int py = Chart.PointV(s.points[j2].y, s.pointG) * 1000;
-                    if (py > mx) { mx = py; }
+                    if (!any || py > mx) { mx = py; any = true; }
                 }
             }
         }
@@ -3060,8 +3105,10 @@ class Chart {
     /// 绑定到给定数值轴的（可见）系列中的最小值
     /// （无负数时为 0），使轴天然覆盖负数。i0/i1 窗口语义同
     /// AxisMaxFor。
-    static int AxisMinFor(List<ChartSeries> series, int axisIndex, int i0, int i1) {
+    static int AxisMinFor(List<ChartSeries> series, int axisIndex, int i0, int i1, bool scale) {
         int mn = 0;
+        // 见 AxisMaxFor：scale 时 0 不参与（incl0 = !scale）。
+        bool any = !scale;
         for (int i = 0; i < series.Count; i = i + 1) {
             ChartSeries s = series[i];
             if (!s.hidden && s.axisIndex == axisIndex) {
@@ -3072,7 +3119,10 @@ class Chart {
                     if (j1 > s.Count() - 1) { j1 = s.Count() - 1; }
                     if (j1 < j0) { j1 = j0; }
                 }
-                for (int j = j0; j <= j1; j = j + 1) { if (s.Value(j) < mn) { mn = s.Value(j); } }
+                for (int j = j0; j <= j1; j = j + 1) {
+                    int v = s.Value(j);
+                    if (!any || v < mn) { mn = v; any = true; }
+                }
                 if (s.points.Count < 1) { continue; }
                 int p0 = 0; int p1 = s.points.Count - 1;
                 if (i0 >= 0 && i1 >= 0) {
@@ -3083,7 +3133,7 @@ class Chart {
                 }
                 for (int j2 = p0; j2 <= p1; j2 = j2 + 1) {
                     int py = Chart.PointV(s.points[j2].y, s.pointG);
-                    if (py < mn) { mn = py; }
+                    if (!any || py < mn) { mn = py; any = true; }
                 }
             }
         }
@@ -3092,38 +3142,47 @@ class Chart {
 
     /// X 数值轴最小值：值对系列取 points.x，轴互换系列取 values
     ///（gap 项不计）；固定覆盖在调用方处理。
-    static int XMinFor(List<ChartSeries> series, bool fromValues) {
+    static int XMinFor(List<ChartSeries> series, bool fromValues, bool scale) {
         int mn = 0;
+        // scale（axis.scale:true）时不并入 0，同 AxisMinFor。
+        bool any = !scale;
         for (int i = 0; i < series.Count; i = i + 1) {
             ChartSeries s = series[i];
             if (s.hidden) { continue; }
             if (fromValues) {
                 for (int j = 0; j < s.data.Count; j = j + 1) {
-                    if (!s.data[j].gap && s.data[j].val < mn) { mn = s.data[j].val; }
+                    if (!s.data[j].gap) {
+                        int v = s.data[j].val;
+                        if (!any || v < mn) { mn = v; any = true; }
+                    }
                 }
             } else {
                 for (int j = 0; j < s.points.Count; j = j + 1) {
                     int px = Chart.PointV(s.points[j].x, s.pointG);
-                    if (px < mn) { mn = px; }
+                    if (!any || px < mn) { mn = px; any = true; }
                 }
             }
         }
         return mn;
     }
     /// X 数值轴最大值（XMinFor 的对偶）。
-    static int XMaxFor(List<ChartSeries> series, bool fromValues) {
+    static int XMaxFor(List<ChartSeries> series, bool fromValues, bool scale) {
         int mx = 0;
+        bool any = !scale;
         for (int i = 0; i < series.Count; i = i + 1) {
             ChartSeries s = series[i];
             if (s.hidden) { continue; }
             if (fromValues) {
                 for (int j = 0; j < s.data.Count; j = j + 1) {
-                    if (!s.data[j].gap && s.data[j].val > mx) { mx = s.data[j].val; }
+                    if (!s.data[j].gap) {
+                        int v = s.data[j].val;
+                        if (!any || v > mx) { mx = v; any = true; }
+                    }
                 }
             } else {
                 for (int j = 0; j < s.points.Count; j = j + 1) {
                     int px = Chart.PointV(s.points[j].x, s.pointG);
-                    if (px > mx) { mx = px; }
+                    if (!any || px > mx) { mx = px; any = true; }
                 }
             }
         }
@@ -3177,12 +3236,26 @@ class Chart {
     /// 取 ChartOption.Auto() 时从数据推导）。有负值时下界自动扩展
     /// 到 0 以下。
     static int AxisLo(int fixedLo, int dataMin) {
+        return Chart.AxisLo(fixedLo, dataMin, false);
+    }
+    /// scale 版：axis.scale:true 时不做同号归零（原始数据下界直传，
+    /// 取整交给 NiceRange/smartSteps）。出处 ECharts 2
+    /// `valueAxis._reformValue(scale)`：`!scale && _min>=0 && _max>=0`
+    /// 才 `_min = 0`。
+    static int AxisLo(int fixedLo, int dataMin, bool scale) {
         if (fixedLo != ChartOption.Auto()) { return fixedLo; }
+        if (scale) { return dataMin; }
         return Chart.NiceMin(dataMin);
     }
     /// 数值轴上界：固定覆盖优先，否则 NiceMax；保证 hi > lo。
     /// 数据全为非正（dataMax <= 0 且有负值）时上界归 0——雨量图
     /// 这类全负系列的上界不该被 NiceMax(0)=5 顶出一段空白。
+    ///
+    /// 注意这里**不**按 axis.scale 分叉：ECharts 6 的 ECharts 侧
+    /// `scaleRawExtentInfo` 在 scale:true 下确实不做单侧并入 0，但本函
+    /// 数只服务"整数近似"这条老管道（NiceMax 对负数返回 5 本身就不合
+    /// 源），归 0 比 5 更接近源；自动量程那条路（leftDataMax<0 或
+    /// y0.scale）由 NiceRange 接管，scale 语义在那里生效。
     static int AxisHi(int fixedHi, int dataMax, int lo) {
         int hi = Chart.NiceMax(dataMax);
         if (fixedHi != ChartOption.Auto()) { hi = fixedHi; }
@@ -3316,9 +3389,9 @@ class Chart {
         int zI1 = winI1;
 
         int lData = leftDataMax;
-        if (lData < 0) { lData = Chart.AxisMaxFor(series, 0, zI0, zI1); }
+        if (lData < 0) { lData = Chart.AxisMaxFor(series, 0, zI0, zI1, y0.scale); }
         bool leftFrac = Chart.SeriesFracAny(series, 0);
-        int leftLo = Chart.AxisLo(y0.min, Chart.AxisMinFor(series, 0, zI0, zI1));
+        int leftLo = Chart.AxisLo(y0.min, Chart.AxisMinFor(series, 0, zI0, zI1, y0.scale), y0.scale);
         int leftHi = Chart.AxisHi(y0.max, lData, leftLo);
         int leftLoF = 0;
         int leftHiF = 0;
@@ -3329,13 +3402,13 @@ class Chart {
             // 承担（line6 流量 0.46..365 + 固定 max 500 → 0..500000
             // 定点 5 段）。两端都固定走 _customerValue——精确等分
             // 不取整（line8 0..30）。
-            leftLoF = Chart.FracAxisLoF(y0.min, series, 0, zI0, zI1);
-            leftHiF = Chart.FracAxisHiF(y0.max, series, 0, zI0, zI1);
+            leftLoF = Chart.FracAxisLoF(y0.min, series, 0, zI0, zI1, y0.scale);
+            leftHiF = Chart.FracAxisHiF(y0.max, series, 0, zI0, zI1, y0.scale);
             if (y0.min != ChartOption.Auto() && y0.max != ChartOption.Auto()) {
                 leftLo = y0.min;
                 leftHi = y0.max;
             } else {
-                ChartSpan fs2 = Chart.NiceRange(leftLoF, leftHiF);
+                ChartSpan fs2 = Chart.NiceRange(leftLoF, leftHiF, y0.scale);
                 leftLoF = fs2.lo;
                 leftHiF = fs2.hi;
                 ticks = fs2.ticks;
@@ -3353,19 +3426,19 @@ class Chart {
         int rt = ticks;
         if (hasRight) {
             int rData = rightDataMax;
-            if (rData < 0) { rData = Chart.AxisMaxFor(series, 1, zI0, zI1); }
-            rightLo = Chart.AxisLo(y1.min, Chart.AxisMinFor(series, 1, zI0, zI1));
+            if (rData < 0) { rData = Chart.AxisMaxFor(series, 1, zI0, zI1, y1.scale); }
+            rightLo = Chart.AxisLo(y1.min, Chart.AxisMinFor(series, 1, zI0, zI1, y1.scale), y1.scale);
             rightHi = Chart.AxisHi(y1.max, rData, rightLo);
             rightFrac = Chart.SeriesFracAny(series, 1);
             if (rightFrac) {
                 // 右小数轴（line6 降雨量 -0.955..-0.005 → 定点域
                 // -1000..0 步长 200），同左轴流程。
-                rightLoF = Chart.FracAxisLoF(y1.min, series, 1, zI0, zI1);
-                rightHiF = Chart.FracAxisHiF(y1.max, series, 1, zI0, zI1);
+                rightLoF = Chart.FracAxisLoF(y1.min, series, 1, zI0, zI1, y1.scale);
+                rightHiF = Chart.FracAxisHiF(y1.max, series, 1, zI0, zI1, y1.scale);
                 if (y1.min != ChartOption.Auto() && y1.max != ChartOption.Auto()) {
                     rt = y1.ticks < 1 ? 5 : y1.ticks;
                 } else {
-                    ChartSpan rs2 = Chart.NiceRange(rightLoF, rightHiF);
+                    ChartSpan rs2 = Chart.NiceRange(rightLoF, rightHiF, y1.scale);
                     rightLoF = rs2.lo;
                     rightHiF = rs2.hi;
                     rt = rs2.ticks;
@@ -3381,8 +3454,9 @@ class Chart {
         // 0..1320 → 0..1400），刻度数随步长；固定 min/max 尊重不取整。
         if (!leftLog && !leftFrac && y0.type == ChartAxisType.Value
             && y0.min == ChartOption.Auto() && y0.max == ChartOption.Auto()
-            && leftDataMax < 0) {
-            ChartSpan ls = Chart.NiceRange(Chart.AxisMinFor(series, 0, zI0, zI1), lData);
+            && (leftDataMax < 0 || y0.scale)) {
+            ChartSpan ls = Chart.NiceRange(
+                Chart.AxisMinFor(series, 0, zI0, zI1, y0.scale), lData, y0.scale);
             leftLo = ls.lo;
             leftHi = ls.hi;
             ticks = ls.ticks;
@@ -3397,9 +3471,9 @@ class Chart {
             if (rightHi < rightLo + 1) { rightHi = rightLo + 1; }
         } else if (hasRight && !rightFrac && y1.type == ChartAxisType.Value
             && y1.min == ChartOption.Auto() && y1.max == ChartOption.Auto()
-            && rightDataMax < 0) {
-            ChartSpan rs = Chart.NiceRange(Chart.AxisMinFor(series, 1, zI0, zI1),
-                Chart.AxisMaxFor(series, 1, zI0, zI1));
+            && (rightDataMax < 0 || y1.scale)) {
+            ChartSpan rs = Chart.NiceRange(Chart.AxisMinFor(series, 1, zI0, zI1, y1.scale),
+                Chart.AxisMaxFor(series, 1, zI0, zI1, y1.scale), y1.scale);
             rightLo = rs.lo;
             rightHi = rs.hi;
             rt = rs.ticks;
@@ -3469,13 +3543,13 @@ class Chart {
             // -80..20 步长 20）；固定 min/max 尊重不取整。
             if (x0.min != ChartOption.Auto() || x0.max != ChartOption.Auto()) {
                 xLo = x0.min;
-                if (xLo == ChartOption.Auto()) { xLo = Chart.XMinFor(series, catY); }
+                if (xLo == ChartOption.Auto()) { xLo = Chart.XMinFor(series, catY, x0.scale); }
                 xHi = x0.max;
-                if (xHi == ChartOption.Auto()) { xHi = Chart.XMaxFor(series, catY); }
+                if (xHi == ChartOption.Auto()) { xHi = Chart.XMaxFor(series, catY, x0.scale); }
                 if (xHi <= xLo) { xHi = xLo + 1; }
             } else {
-                ChartSpan xsp = Chart.NiceRange(Chart.XMinFor(series, catY),
-                    Chart.XMaxFor(series, catY));
+                ChartSpan xsp = Chart.NiceRange(Chart.XMinFor(series, catY, x0.scale),
+                    Chart.XMaxFor(series, catY, x0.scale), x0.scale);
                 xLo = xsp.lo;
                 xHi = xsp.hi;
                 xt = xsp.ticks;
@@ -3593,7 +3667,7 @@ class Chart {
         if (anyYMark0 && !leftLog && y0.min == ChartOption.Auto()
             && y0.max == ChartOption.Auto()) {
             int lpad = ((leftHi - leftLo) * pxPad + plotH - 1) / plotH;
-            int lDataMin = Chart.AxisMinFor(series, 0, zI0, zI1);
+            int lDataMin = Chart.AxisMinFor(series, 0, zI0, zI1, y0.scale);
             if (lpad > 0) {
                 if (leftHi - lData < lpad) { leftHi = lData + lpad; }
                 if (leftLo != 0 && lDataMin > leftLo
@@ -3608,8 +3682,8 @@ class Chart {
             && y1.max == ChartOption.Auto()) {
             int rpad = ((rightHi - rightLo) * pxPad + plotH - 1) / plotH;
             int rDataMax = rightDataMax;
-            if (rDataMax < 0) { rDataMax = Chart.AxisMaxFor(series, 1, zI0, zI1); }
-            int rDataMin = Chart.AxisMinFor(series, 1, zI0, zI1);
+            if (rDataMax < 0) { rDataMax = Chart.AxisMaxFor(series, 1, zI0, zI1, y1.scale); }
+            int rDataMin = Chart.AxisMinFor(series, 1, zI0, zI1, y1.scale);
             if (rpad > 0) {
                 if (rightHi - rDataMax < rpad) { rightHi = rDataMax + rpad; }
                 if (rightLo != 0 && rDataMin > rightLo
@@ -3623,8 +3697,8 @@ class Chart {
         if (anyXMark && xValue && !isTime && x0.min == ChartOption.Auto()
             && x0.max == ChartOption.Auto()) {
             int xpad = ((xHi - xLo) * pxPad + plotW - 1) / plotW;
-            int xDataMin = Chart.XMinFor(series, catY);
-            int xDataMax = Chart.XMaxFor(series, catY);
+            int xDataMin = Chart.XMinFor(series, catY, x0.scale);
+            int xDataMax = Chart.XMaxFor(series, catY, x0.scale);
             if (xpad > 0) {
                 if (xHi - xDataMax < xpad) { xHi = xDataMax + xpad; }
                 if (xLo != 0 && xDataMin > xLo && xDataMin - xLo < xpad) {

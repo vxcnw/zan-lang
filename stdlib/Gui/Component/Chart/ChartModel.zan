@@ -2186,6 +2186,11 @@ class ChartAxis {
     int max;
     double minD;
     double maxD;
+    // ECharts ValueAxisBaseOption.scale：true = 量程只按数据（不并入 0）。
+    // 出处 `coord/axisModelCommonMixin.ts:33 needIncludeZero() = !option.scale`，
+    // 且只对 interval scale（数值轴）适用——对数/时间/类目轴不适用
+    // （`coord/scaleRawExtentInfo.ts:301-303`）。
+    bool scale;
     bool reversed;    // 翻转轴（ECharts inverse）
     int ticks;        // 数值轴刻度数（默认 5）
     bool showGrid;    // 为此轴绘制网格线
@@ -2212,6 +2217,7 @@ class ChartAxis {
         a.type = ChartAxisType.Category;
         a.title = "";
         a.SetRange(ChartOption.AutoD(), ChartOption.AutoD());
+        a.scale = false;
         a.reversed = false;
         a.ticks = 5;
         // ECharts 2 类目轴 splitLine 默认开（竖向 #eee 网格线）。
@@ -2246,6 +2252,7 @@ class ChartAxis {
         a.type = ChartAxisType.Value;
         a.title = "";
         a.SetRange(ChartOption.AutoD(), ChartOption.AutoD());
+        a.scale = false;
         a.reversed = false;
         a.ticks = 0;
         a.showGrid = true;
@@ -2316,6 +2323,7 @@ class ChartAxis {
         a.type = src.type; a.title = src.title;
         a.min = src.min; a.max = src.max;
         a.minD = src.minD; a.maxD = src.maxD;
+        a.scale = src.scale;
         a.reversed = src.reversed; a.ticks = src.ticks; a.showGrid = src.showGrid;
         a.splitArea = src.splitArea;
         a.labelRotate = src.labelRotate; a.labelInterval = src.labelInterval;
@@ -5940,6 +5948,9 @@ class ChartOption {
         a.title = v.Str("name", "");
         a.axisId = v.Str("id", "");
         a.reversed = v.Bool("inverse", false);
+        // axis.scale：ECharts 无默认值（`axisCommonTypes.ts:235 scale?: boolean`），
+        // 只在 scaleRawExtentInfo 里按真值判断，缺省等价 false。
+        a.scale = v.Bool("scale", a.scale);
         a.nameLocation = v.Str("nameLocation", a.nameLocation);
         a.splitArea = v.Bool("splitArea", a.splitArea);
         // ECharts axis.show：整条轴（轴线/刻度/标签）显隐。

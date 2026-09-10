@@ -1,6 +1,6 @@
 ---
 name: testing-charts-gallery
-description: Zan charts gallery (examples/gui_charts, 335 ECharts 官方对照 demo) 的代码级完整度对照与实机验证定式——scripts/chart_gap_audit.py 的未读配置键倒排/源引用率、源函数逐条对抄、数值 oracle（ECharts getLayout 归一化对比，bar 布局样板）、颜色/字号预算闸门、recheck2 截图驱动、bindprobe 探针、--bench 帧计时、stdlib 快照同步坑、多 grid/dataZoom/定点数值三大契约。凡是要盘点图表迁移完整度、修复 stdlib/Gui/Component/Chart 引擎改动、核对某个 demo 与 ECharts 官方语义是否一致、排查"图表空板/缺元素/多面板窗口不同步"时使用。
+description: Zan charts gallery (examples/gui_charts, 335 ECharts 官方对照 demo) 的代码级完整度对照与实机验证定式——scripts/chart_gap_audit.py 的未读配置键倒排/源引用率、源函数逐条对抄、数值 oracle（ECharts getLayout 归一化对比、bar 布局样板、scale 翻转对照——布尔语义只比方向不比端点）、颜色/字号预算闸门、recheck2 截图驱动、bindprobe 探针、--bench 帧计时、stdlib 快照同步坑、多 grid/dataZoom/定点数值三大契约。凡是要盘点图表迁移完整度、修复 stdlib/Gui/Component/Chart 引擎改动、核对某个 demo 与 ECharts 官方语义是否一致、排查"图表空板/缺元素/多面板窗口不同步"时使用。
 ---
 
 # Charts gallery 验证与修复定式（Windows 实机）
@@ -28,9 +28,12 @@ description: Zan charts gallery (examples/gui_charts, 335 ECharts 官方对照 d
   （**已修**：`ChartBarLayout.zan` 严格对抄，见"数值对照 oracle"节）；
   ② 折线符号漏了 `chart/line/LineView.ts:371-410` 的数值轴提前返回与
   `canShowAllSymbolForCategory()` 通过分支；
-  ③ `axis.scale` 从不读取，且 `Chart.zan:1019,3006` 的
-  `AxisMinForF/AxisMaxForF` 初值为 0 → 量程无条件并入 0，
-  但 `coord/axisModelCommonMixin.ts:33` 只在 `!scale` 时并入。
+  ③ `axis.scale` 从不读取，且 `AxisMinForF/AxisMaxForF` 初值为 0 →
+  量程无条件并入 0，但 `coord/axisModelCommonMixin.ts:33` 只在
+  `!scale` 时并入。**已修**：`ChartModel.zan` 读 `"scale"`、
+  `Chart.zan` 四个 extent 函数增 `bool scale`、`NiceRange(lo,hi,scale)`
+  做**单侧零并入**、`ChartViewScatter.zan` 的 `ScatterRangeX/Y` 成为
+  绘制与命中唯一的域推导（见 oracle 节的"scale 翻转对照"）。
 
 定式：
 
@@ -85,6 +88,48 @@ option** 复算，逐字段 diff。
 - **ECharts SSR 进程不退**：`echarts.init(null,null,{renderer:'svg',ssr:true})`
   留下未清的帧句柄，脚本跑完仍挂住（`head` 管道下表现为"永远在跑"）。
   末尾 `process.exit(0)`；后台跑时重定向到文件再读。
+
+### scale 翻转对照（布尔语义配置的通用手法）
+
+`axis.scale` 这类**布尔开关**的正确性不是"算出一个数"就能验的，要比
+"翻转后往哪边动"。做法（骨架 `_scratch/chart_oracle/axisdemo.js` →
+`axisdemo.oracle.txt`）：把同一个真实 demo 文件喂 ECharts **两遍**
+（原样 / `scale` 取反），各报 `axis.getExtent()` 的 lo,hi，输出
+`written=T|t=lo,hi|f=lo,hi|diff=loDiff,hiDiff`；Zan 侧对同一文件跑同样
+两遍（`axiswire.zan` 走真实 `Chart.BuildAxes`，`scatterwire.zan` 直接调
+`ScatterRangeX/Y`）。
+
+- **只比方向，不比绝对值**：本引擎 nice 步长是 ECharts 2.2.4
+  `smartSteps` 的 1/2/2.5/5 候选，ECharts 6 是 `intervalScaleNiceTicks`
+  的 1/2/5——`scatter-simple` scale:true 时 ECharts `y=[3,9]`、本引擎
+  `y=[2,10]`，都"紧致"却是不同端点。**端点差异是噪声，`diff` 的符号
+  才是语义**。这条同样适用于 min/max、inverse、stack、boundaryGap。
+- 结果口径（2026-09-11）：`axisdemo` 20 条可比案例，Zan 14/15 行/柱
+  方向一致；唯一例外 `line-gradient` 是多 grid demo（引擎不支持，记债）。
+  散点侧原样值与 oracle **逐位相同**（`scatter-weight`/`scatter-effect`/
+  `scatter-aggregate-bar` = `x[140,200] y[40,120]`），`scatter-simple`
+  缺省 `y[0,10]` 也相同——同时证明了"旧代码硬编码 scale-true"确实是可见
+  错误（旧值 `[3,9]` 形态）。
+- **不可比的 demo 别硬比**：`custom-*`（ECharts 侧报 series.render 缺失）、
+  ecStat 变换（`bar-histogram`/`data-transform-*`/`scatter-*-regression`）、
+  中国地图/geo（`scatter-map-brush`/`effectScatter-map`）在 oracle 侧
+  本身就跑不出来；标 `SKIP=原因` 而不是塞进对照。
+
+### 别用像素当"数据墨迹"的探针（本仓库无头 App 下不可用）
+
+想验量程紧不紧，直觉是"渲染两遍、diff 出数据像素的包围盒"。两条都
+踩死过：
+
+- **隐藏系列再 diff**：隐藏会连带改轴范围与图例，两遍**不可比**
+  （得到 `botDelta=0|topDelta=0` 的假阴性）。
+- **按饱和度筛数据点**：本构建无头 `App` 整屏铺高饱和主题底色
+  （实测 `0x448C7B`），任意行带都命中，筛不出数据点（三个 demo 输出
+  完全相同）。
+
+正确做法：**把定义域提成纯函数 seam，直接调引擎函数**。为此
+`ChartView.ScatterRangeX/Y(o, series, i0, i1)` 从 `DrawScatterCore` 与
+`ScatterHover` **两处各写一遍**的重复块里提取出来——重复本身就是 bug
+源（0 锚定只改了一边 → 命中错位），提取后探针和渲染读的是同一份代码。
 
 ## 构建（快照 stdlib，避开并发会话的在途编辑）
 
@@ -194,6 +239,14 @@ powershell -File _scratch/recheck2.ps1 -OutDir D:/project/zan-lang/_scratch/shot
    逆时针为正；angleAxis extent = [startAngle, startAngle+360]；
    屏幕 x = cx + r·cos(θ)，y = cy − r·sin(θ)（y 翻转）。
    line-polar 官方是 r=5+5sinθ 的心脏线、cusp 朝下——不是圆。
+10. **布尔配置门控只加到"零并入"这一处，别顺手门控 nice 上界**：
+   `scale:true` 的正确改法是把零并入（`NiceRange` 的 `!scale` 块 /
+   `AxisLo`）关掉，**不是**把上界推导也门控。全负数据 + 显式固定 min 时
+   门控会让 `NiceMax(-30)`（本仓库对 2.2.4 的旧近似，返回 `5`）当成上界
+   ——比原来的 `hi=0` 锚更歪（ECharts 6 的 interval ceil 落在 0）。
+   同理 `min == max` 的兜底在 ECharts 里位于 `_calculateValue`、
+   `_reformValue`（零并入）**之前**，所以它**不受 scale 门控**——Zan 的
+   `NiceRange` 也把这段留在 `!scale` 块外。
 
 ## 已知刻意偏差（勿当 bug 修）
 

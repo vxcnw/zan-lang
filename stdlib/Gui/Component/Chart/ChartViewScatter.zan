@@ -35,6 +35,44 @@ partial class ChartView {
 
     // ---- 散点图（双数值轴） ----
 
+    /// X 定义域（含 nice 包络与显式 min/max 覆盖）：数据极值 → axis.scale
+    /// 语义（缺省并入 0，ECharts 单侧、固定端不并入）→ nice 步长包络。
+    /// 时间轴不做包络（数据域即定义域，刻度走 TimeTicks）。
+    /// 绘制主体与悬停命中**共用**此定义——两处各写一遍时漏改一处就是
+    /// 命中错位（历史教训：0 锚定只改了一边）。
+    static ChartSpan ScatterRangeX(ChartOption o, List<ChartSeries> series, int i0, int i1) {
+        int mn = 0; int mx = 0; int my = 0; int mY = 0;
+        ChartView.ScatterSpan(series, i0, i1, out mn, out mx, out my, out mY);
+        ChartAxis ax = o.XAxis0();
+        ChartSpan s = new ChartSpan();
+        if (ax.type == ChartAxisType.Time) {
+            s.lo = mn; s.hi = mx; s.ticks = 0;
+            return s;
+        }
+        int lo = Chart.ZeroAnchorLo(ax.scale, ax.min != ChartOption.Auto(), mn, mx);
+        int hi = Chart.ZeroAnchorHi(ax.scale, ax.max != ChartOption.Auto(), lo, mx);
+        ChartSpan auto = Chart.ScatterAutoRange(lo, hi);
+        s.lo = auto.lo; s.hi = auto.hi; s.ticks = auto.ticks;
+        if (ax.min != ChartOption.Auto()) { s.lo = ax.min; }
+        if (ax.max != ChartOption.Auto()) { s.hi = ax.max; }
+        return s;
+    }
+
+    /// Y 定义域：同 ScatterRangeX（散点 Y 轴没有时间形态）。
+    static ChartSpan ScatterRangeY(ChartOption o, List<ChartSeries> series, int i0, int i1) {
+        int mn = 0; int mx = 0; int my = 0; int mY = 0;
+        ChartView.ScatterSpan(series, i0, i1, out mn, out mx, out my, out mY);
+        ChartAxis ax = o.YAxis0();
+        int lo = Chart.ZeroAnchorLo(ax.scale, ax.min != ChartOption.Auto(), my, mY);
+        int hi = Chart.ZeroAnchorHi(ax.scale, ax.max != ChartOption.Auto(), lo, mY);
+        ChartSpan auto = Chart.ScatterAutoRange(lo, hi);
+        ChartSpan s = new ChartSpan();
+        s.lo = auto.lo; s.hi = auto.hi; s.ticks = auto.ticks;
+        if (ax.min != ChartOption.Auto()) { s.lo = ax.min; }
+        if (ax.max != ChartOption.Auto()) { s.hi = ax.max; }
+        return s;
+    }
+
     /// 散点图入口：同帧先画主体 DrawScatterCore，再画悬停
     /// 覆盖层 ScatterHover（Core 可被缓存，命中提示始终实时）。
     static void DrawScatter(App app, int x, int y, int w, int h,
@@ -73,41 +111,19 @@ partial class ChartView {
             zoomH = Chart.zoomBarHidden ? 0 : app.Scale(24);
         }
 
-        int minX = 0; int maxX = 0; int minY = 0; int maxY = 0;
-        ChartView.ScatterSpan(o.series, i0, i1, out minX, out maxX, out minY, out maxY);
-        // ECharts2 双 value 轴缺省 scale:true：不强制含 0，数据域走
-        // nice 步长的紧致包络；显式 min/max（下方覆盖）仍固定定义域。
-        ChartSpan xsp = Chart.ScatterAutoRange(minX, maxX);
-        ChartSpan ysp = Chart.ScatterAutoRange(minY, maxY);
+        // 定义域：ScatterRangeX/Y 一处定义（scale 语义 + 显式 min/max +
+        // 时间轴），绘制与命中检测共用，避免两套域推导漂移。
+        ChartSpan xsp = ChartView.ScatterRangeX(o, o.series, i0, i1);
+        ChartSpan ysp = ChartView.ScatterRangeY(o, o.series, i0, i1);
         int xLo = xsp.lo;
         int yLo = ysp.lo;
         int maxXN = xsp.hi;
         int maxYN = ysp.hi;
         int xTicksAuto = xsp.ticks;
         int yTicksAuto = ysp.ticks;
-        bool xTime = o.xAxes.Count > 0 && o.xAxes[0].type == ChartAxisType.Time;
-        if (xTime) {
-            // 时间轴不做 nice 包络：数据域即定义域，刻度交给 TimeTicks
-            // （整数天数，与折线时间轴同一套）。
-            xLo = minX;
-            maxXN = maxX;
-            xTicksAuto = 0;
-        }
-        // 显式数值轴范围（ECharts xAxis/yAxis.min/max）：设了就固定
-        // 定义域，数据不再参与推导——身高体重这类有自然域的散点
-        // 靠它贴合原例的坐标格。
-        if (o.xAxes.Count > 0 && o.xAxes[0].min != ChartOption.Auto()) {
-            xLo = o.xAxes[0].min;
-        }
-        if (o.yAxes.Count > 0 && o.yAxes[0].min != ChartOption.Auto()) {
-            yLo = o.yAxes[0].min;
-        }
-        if (o.xAxes.Count > 0 && o.xAxes[0].max != ChartOption.Auto()) {
-            maxXN = o.xAxes[0].max;
-        }
-        if (o.yAxes.Count > 0 && o.yAxes[0].max != ChartOption.Auto()) {
-            maxYN = o.yAxes[0].max;
-        }
+        // 时间轴的刻度/标签走 TimeTicks，ScatterRangeX 已把 ticks 归零。
+        bool xTime = xTicksAuto == 0
+            && o.XAxis0().type == ChartAxisType.Time;
         // visualMap 色带：Y 值映射到颜色（与热力图同语义，通用值→色）。
         bool ramp = o.rampColors != null && o.rampColors.Count >= 2;
         // 值域数据窗：色带映射与 dataRange 过滤共用（无 ramp 时
@@ -440,33 +456,14 @@ partial class ChartView {
             zoomH = Chart.zoomBarHidden ? 0 : app.Scale(24);
         }
 
-        int minX = 0; int maxX = 0; int minY = 0; int maxY = 0;
-        ChartView.ScatterSpan(o.series, i0, i1, out minX, out maxX, out minY, out maxY);
-        // 与 DrawScatterCore 相同的 scale:true 自动范围、显式轴范围
-        // 与映射，命中检测才能落在真实的点上。
-        ChartSpan xsp = Chart.ScatterAutoRange(minX, maxX);
-        ChartSpan ysp = Chart.ScatterAutoRange(minY, maxY);
+        // 定义域与 DrawScatterCore 同一处推导（含 scale 语义、显式
+        // min/max、时间轴）：两套各写一遍就会命中错位。
+        ChartSpan xsp = ChartView.ScatterRangeX(o, o.series, i0, i1);
+        ChartSpan ysp = ChartView.ScatterRangeY(o, o.series, i0, i1);
         int xLo = xsp.lo;
         int yLo = ysp.lo;
         int maxXN = xsp.hi;
         int maxYN = ysp.hi;
-        if (o.xAxes.Count > 0 && o.xAxes[0].type == ChartAxisType.Time) {
-            // 时间轴与 DrawScatterCore 相同：数据域即定义域。
-            xLo = minX;
-            maxXN = maxX;
-        }
-        if (o.xAxes.Count > 0 && o.xAxes[0].min != ChartOption.Auto()) {
-            xLo = o.xAxes[0].min;
-        }
-        if (o.yAxes.Count > 0 && o.yAxes[0].min != ChartOption.Auto()) {
-            yLo = o.yAxes[0].min;
-        }
-        if (o.xAxes.Count > 0 && o.xAxes[0].max != ChartOption.Auto()) {
-            maxXN = o.xAxes[0].max;
-        }
-        if (o.yAxes.Count > 0 && o.yAxes[0].max != ChartOption.Auto()) {
-            maxYN = o.yAxes[0].max;
-        }
         int xSpan = maxXN - xLo;
         int ySpan = maxYN - yLo;
         if (xSpan < 1) { xSpan = 1; }
