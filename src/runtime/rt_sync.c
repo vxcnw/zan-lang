@@ -886,6 +886,31 @@ static void zan_shared_table_free(zan_shared_table *table) {
 
 typedef void (*zan_thread_body_fn)(void);
 
+/* A delegate value has one of two shapes (zan_abi.h): a bare function
+ * pointer -- a static method or non-capturing lambda -- or a tagged heap
+ * closure record -- an instance method group or a capturing lambda -- whose
+ * thunk sits at record slot 0 and is invoked rec-first, fn(record). Calling a
+ * record's bare pointer used to jump straight at the thunk with a garbage
+ * receiver. Run whichever shape arrived: the record also owns the bound
+ * target and the captures, and the worker outlives the Thread.Start call, so
+ * the thread holds its own reference (retain before spawn, release after the
+ * body). The helpers are shared with the UI dispatch queue below, which keeps
+ * delegates across calls under the same contract. */
+static void *zan_delegate_record(void *d);
+static void zan_delegate_retain(void *d);
+static void zan_delegate_release(void *d);
+
+static void zan_thread_invoke(void *body) {
+    void *rec = zan_delegate_record(body);
+    if (!rec) {
+        ((zan_thread_body_fn)body)();
+        return;
+    }
+    void (*fn)(void *) =
+        *(void (**)(void *))((char *)rec + ZAN_CLOSURE_FN_OFF);
+    if (fn) fn(rec);
+}
+
 /* Emitted code defines this when the program can throw; it drops the calling
  * thread's exception-handling state. The fallback here is a weak *definition*
  * rather than a weak reference: a weak undefined symbol resolves to null on
@@ -907,31 +932,45 @@ void zan_thread_detach(void) {
 
 #ifdef _WIN32
 static DWORD WINAPI zan_thread_trampoline(LPVOID arg) {
-    zan_thread_body_fn body = (zan_thread_body_fn)arg;
-    if (body) body();
+    zan_thread_invoke(arg);
+    zan_delegate_release(arg); /* drop the reference zan_thread_start took */
     zan_thread_detach();
     return 0;
 }
 
 int32_t zan_thread_start(void *body) {
     if (!body) return 0;
+    /* The caller still owns the temporary it passed -- it releases it at the
+     * end of its statement -- while the worker outlives this call, so the
+     * thread takes its own reference and drops it in the trampoline. */
+    zan_delegate_retain(body);
     HANDLE h = CreateThread(NULL, 0, zan_thread_trampoline, body, 0, NULL);
-    if (!h) return 0;
+    if (!h) {
+        zan_delegate_release(body); /* never ran: drop the thread's reference */
+        return 0;
+    }
     CloseHandle(h); /* detach: the worker runs to completion on its own */
     return 1;
 }
 #else
 static void *zan_thread_trampoline(void *arg) {
-    zan_thread_body_fn body = (zan_thread_body_fn)arg;
-    if (body) body();
+    zan_thread_invoke(arg);
+    zan_delegate_release(arg); /* drop the reference zan_thread_start took */
     zan_thread_detach();
     return NULL;
 }
 
 int32_t zan_thread_start(void *body) {
     if (!body) return 0;
+    /* The caller still owns the temporary it passed -- it releases it at the
+     * end of its statement -- while the worker outlives this call, so the
+     * thread takes its own reference and drops it in the trampoline. */
+    zan_delegate_retain(body);
     pthread_t t;
-    if (pthread_create(&t, NULL, zan_thread_trampoline, body) != 0) return 0;
+    if (pthread_create(&t, NULL, zan_thread_trampoline, body) != 0) {
+        zan_delegate_release(body); /* never ran: drop the thread's reference */
+        return 0;
+    }
     pthread_detach(t);
     return 1;
 }

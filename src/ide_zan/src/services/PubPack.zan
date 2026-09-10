@@ -17,8 +17,8 @@ class PubPack {
     /// 事件循环正在等的那一次打包。
     static PubJob sCur;
 
-    /// 交给线程但还没被领走的活，以及看守它的锁。线程入口不能捕获变量
-    /// （`Thread.Start` 只收非捕获的委托），所以活本身走这个队列。
+    /// 交给线程但还没被领走的活，以及看守它的锁。活本身走这个队列：
+    /// 线程入口是静态方法组，只认队列，不碰共享字段。
     static List<PubJob> sPend;
     #if WINDOWS
     static nint sLock;

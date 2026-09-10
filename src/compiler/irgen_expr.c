@@ -2677,6 +2677,20 @@ static void emit_implicit_field_initializers(zan_irgen_t *g,
     emit_decl_field_initializers(g, type_sym, recv_type, object_ptr, locals);
 }
 
+/* Does this receiver own a reference its consumer must drop? A receiver that is
+ * itself a temporary -- Make().name, Get().Inner, new Job(i).Run -- carries the
+ * one +1 from its own construction; a plain local or a borrowed value is owned
+ * by the caller and owns nothing here. Every consumer that keeps a reference of
+ * its own (a retained field read, a bound method group) must release a receiver
+ * this returns true for, or each such expression leaks the receiver. */
+static int receiver_is_owned_temp(zan_irgen_t *g, zan_ast_node_t *object,
+                                  local_scope_t *locals, zan_type_t *obj_type,
+                                  LLVMValueRef obj_val) {
+    return obj_val && obj_type && is_rc_managed_type(obj_type) &&
+           !expr_is_local_ident(object, locals) &&
+           expr_yields_owned_rc_value(g, object, locals);
+}
+
 /* A receiver that is itself a temporary -- Make().name, Get().Inner -- must be
  * released once the field is out, and an rc-managed field retained first so it
  * outlives the object it was read from. expr_member_of_owned_temp reports the
@@ -2685,9 +2699,7 @@ static LLVMValueRef finish_member_of_temp(zan_irgen_t *g, zan_ast_node_t *expr,
                                           local_scope_t *locals,
                                           zan_type_t *obj_type,
                                           LLVMValueRef obj_val, LLVMValueRef fv) {
-    if (!obj_val || !obj_type || !is_rc_managed_type(obj_type) ||
-        expr_is_local_ident(expr->member.object, locals) ||
-        !expr_yields_owned_rc_value(g, expr->member.object, locals))
+    if (!receiver_is_owned_temp(g, expr->member.object, locals, obj_type, obj_val))
         return fv;
     zan_type_t *ft = member_owned_field_type(g, expr, locals);
     if (ft && is_rc_managed_type(ft) &&
@@ -5077,7 +5089,17 @@ static LLVMValueRef emit_expr_member_access(zan_irgen_t *g, zan_ast_node_t *expr
                     LLVMValueRef clo = recv
                         ? emit_method_group_closure(g, ms, recv, expr->loc)
                         : NULL;
-                    if (clo) return clo;
+                    if (clo) {
+                        /* The closure retained the receiver; a receiver that
+                         * was an owned temporary (`new Job(i).Run`) releases
+                         * its own +1 here, exactly as finish_member_of_temp
+                         * does for a field read. */
+                        zan_type_t *rct = infer_expr_type(g, expr->member.object, locals);
+                        if (receiver_is_owned_temp(g, expr->member.object, locals,
+                                                   rct, recv))
+                            emit_rc_release_for_type(g, rct, recv);
+                        return clo;
+                    }
                     zan_diag_emit(g->diag, DIAG_ERROR, expr->loc,
                         "instance method group '%.*s' cannot be used as a value",
                         (int)expr->member.name.len, expr->member.name.str);

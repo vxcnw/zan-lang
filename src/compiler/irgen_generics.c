@@ -224,6 +224,8 @@ static void discover_generic_insts(zan_irgen_t *g, zan_ast_node_t *unit) {
         }
         guard++;
     }
+    zan_compile_trace("generic insts: %d after %d round(s)",
+                      g->generic_inst_count, guard);
 }
 
 /* The instantiation an identifier names when it is a constructed generic type
@@ -292,6 +294,11 @@ static LLVMValueRef route_generic_method(zan_irgen_t *g, zan_type_t *recv_ty,
         if (out_ty) *out_ty = st;
         return sfn;
     }
+    zan_compile_trace("route miss: %.*s.%.*s argc=%d arg0type=%d concrete=%d",
+                      (int)recv_ty->sym->name.len, recv_ty->sym->name.str,
+                      (int)method_sym->name.len, method_sym->name.str,
+                      argc, args && args[0] ? (int)args[0]->kind : -1,
+                      type_is_concrete(recv_ty));
     return erased_fn;
 }
 

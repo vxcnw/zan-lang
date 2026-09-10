@@ -4349,6 +4349,14 @@ static LLVMValueRef emit_expr_call(zan_irgen_t *g, zan_ast_node_t *expr,
                     if (method_sym) fill_default_args(g, expr, method_sym);
                     if (method_sym) pack_params_args(g, expr, method_sym, locals);
                     if (method_sym) {
+                        /* `d.StaticMethod(args)` through a local variable is
+                         * legal: a static method has no receiver parameter, so
+                         * the receiver is not passed. Emitting it anyway shifted
+                         * every argument by one and failed LLVM verification with
+                         * a count mismatch far from this call site -- the
+                         * `recv_cls` branch below has always handled this shape. */
+                        bool callee_static = (method_sym->modifiers & MOD_STATIC) != 0;
+                        int recv_off = callee_static ? 0 : 1;
                         /* a generic instance method monomorphizes with the
                          * receiver handed over as the implicit `this` */
                         int spec = try_method_spec(g, method_sym, expr,
@@ -4358,19 +4366,22 @@ static LLVMValueRef emit_expr_call(zan_irgen_t *g, zan_ast_node_t *expr,
                                                          callee->member.object, locals);
                         for (int fi = irgen_find_function(g, method_sym); fi >= 0; fi = -1) {
                             if (g->functions[fi].sym == method_sym) {
-                                int argc = expr->call.args.count + 1;
-                                LLVMValueRef *call_args = (LLVMValueRef *)calloc((size_t)argc, sizeof(LLVMValueRef));
-                                /* receiver: class refs hold the object pointer in
-                                 * the local, so load it; struct value types pass
-                                 * the storage address directly. */
-                                LLVMTypeRef at = local_slot_type(g, local);
-                                if (LLVMGetTypeKind(at) == LLVMPointerTypeKind) {
-                                    call_args[0] = LLVMBuildLoad2(g->builder, at, local->alloca, "recv");
-                                } else {
-                                    call_args[0] = local->alloca;
+                                int argc = expr->call.args.count + recv_off;
+                                LLVMValueRef *call_args = (LLVMValueRef *)calloc(
+                                    (size_t)(argc > 0 ? argc : 1), sizeof(LLVMValueRef));
+                                if (!callee_static) {
+                                    /* receiver: class refs hold the object pointer in
+                                     * the local, so load it; struct value types pass
+                                     * the storage address directly. */
+                                    LLVMTypeRef at = local_slot_type(g, local);
+                                    if (LLVMGetTypeKind(at) == LLVMPointerTypeKind) {
+                                        call_args[0] = LLVMBuildLoad2(g->builder, at, local->alloca, "recv");
+                                    } else {
+                                        call_args[0] = local->alloca;
+                                    }
                                 }
                                 for (int k = 0; k < expr->call.args.count; k++) {
-                                    call_args[k + 1] = emit_arg_typed(g, expr->call.args.items[k],
+                                    call_args[k + recv_off] = emit_arg_typed(g, expr->call.args.items[k],
                                         method_param_type_at(g, method_sym, k, expr,
                                                              callee->member.object, locals), locals);
                                 }
@@ -4378,12 +4389,13 @@ static LLVMValueRef emit_expr_call(zan_irgen_t *g, zan_ast_node_t *expr,
                                 LLVMValueRef mfn = route_generic_method(g, local->type,
                                     method_sym, g->functions[fi].fn, mft, &mft);
                                 const char *cn = (LLVMGetTypeKind(LLVMGetReturnType(mft)) == LLVMVoidTypeKind) ? "" : "mcall";
-                                LLVMValueRef result = emit_dispatch_call(g, type_sym, method_sym,
+                                LLVMValueRef result = emit_dispatch_call(g,
+                                    callee_static ? NULL : type_sym, method_sym,
                                     mfn, mft, call_args, argc, cn);
                                 result = coerce_generic_result(g, result, method_sym, local->type);
                                 for (int k = 0; k < expr->call.args.count; k++) {
                                     emit_release_owned_call_temp(g, expr->call.args.items[k],
-                                        call_args[k + 1], locals);
+                                        call_args[k + recv_off], locals);
                                 }
                                 free(call_args);
                                 return result;

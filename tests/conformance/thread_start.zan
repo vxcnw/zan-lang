@@ -3,10 +3,18 @@ using System.Threading;
 
 namespace Conf;
 
-// Verifies Thread.Start spawns real OS threads that run a delegate: both a
-// static method group (Work) and a lambda. AtomicInt makes the shared counter
-// race-free and lets the main thread spin-wait for a deterministic result
-// regardless of scheduling.
+// Verifies Thread.Start spawns real OS threads that run a delegate: a static
+// method group (Work), a bound instance method group on a temporary receiver
+// (new Job(7).Run -- the closure record must survive the receiver temporary the
+// caller drops), and lambdas, one with a real captured value. AtomicInt makes
+// the shared counter race-free and lets the main thread spin-wait for a
+// deterministic result regardless of scheduling.
+class Job {
+    public int n;
+    public Job(int x) { n = x; }
+    public void Run() { Prog.counter.Add(this.n); }
+}
+
 class Prog {
     static AtomicInt counter;
 
@@ -20,12 +28,20 @@ class Prog {
         for (int i = 0; i < 4; i = i + 1) {
             Thread.Start(Prog.Work);
         }
+        Thread.Start(new Job(7).Run);
         Thread.Start(() => { Prog.counter.Add(100); });
+        int bonus = 40;
+        Thread.Start(() => { Prog.counter.Add(bonus); });
 
-        // 4 * 3 + 100 = 112. Wait until every worker has applied its delta.
-        while (Prog.counter.Load() < 112) {
+        // 4 * 3 + 7 + 100 + 40 = 159. Wait until every worker has applied its
+        // delta. The counter says the body ran, not that the worker finished --
+        // it still has to release the closure record zan_thread_start retained
+        // for it -- so give the trampolines a moment before the process exits,
+        // or the leakcheck/arcguard twins race the last release.
+        while (Prog.counter.Load() < 159) {
             Thread.Sleep(1);
         }
+        Thread.Sleep(50);
         Console.WriteLine(Convert.ToString(Prog.counter.Load()));
     }
 }

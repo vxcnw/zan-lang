@@ -20,9 +20,8 @@ class AiWork {
     /// 每次 Start / Abandon 都加一，线程据此判断自己这份结果还有没有人要。
     static int sGen;
 
-    /// 交给线程但还没被领走的调用，以及看守它的锁。线程入口不能捕获变量
-    /// （`Thread.Start` 只收非捕获的委托），所以调用本身走这个队列而不是共享
-    /// 字段：一次 Start 只推一个、只起一条线程，两次调用不可能领到同一份活。
+    /// 交给线程但还没被领走的调用，以及看守它的锁。调用本身走这个队列而不是
+    /// 共享字段：一次 Start 只推一个、只起一条线程，两次调用不可能领到同一份活。
     static List<AiJob> sPend;
     #if WINDOWS
     static nint sLock;

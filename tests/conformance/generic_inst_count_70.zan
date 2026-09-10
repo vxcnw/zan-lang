@@ -1,0 +1,313 @@
+// A generic instantiation table that stops at 64 silently drops the last
+// entries: the 64th instantiation's specialized method body was never
+// emitted (irgen_emit.c variants[64] held the erased variant plus only 63
+// concrete ones), so its call fell back to the erased stub -- `call abort()`
+// -- and the program died with no diagnostic. The per-instantiation static
+// initializer list had the same 64 slot cap (insts[64]), leaving the 65th+
+// instantiation's static field at zero. 70 instantiations cross both.
+using System;
+
+namespace GenericInstCount;
+
+class T0 { public string Name() { return "0"; } }
+class T1 { public string Name() { return "1"; } }
+class T2 { public string Name() { return "2"; } }
+class T3 { public string Name() { return "3"; } }
+class T4 { public string Name() { return "4"; } }
+class T5 { public string Name() { return "5"; } }
+class T6 { public string Name() { return "6"; } }
+class T7 { public string Name() { return "7"; } }
+class T8 { public string Name() { return "8"; } }
+class T9 { public string Name() { return "9"; } }
+class T10 { public string Name() { return "0"; } }
+class T11 { public string Name() { return "1"; } }
+class T12 { public string Name() { return "2"; } }
+class T13 { public string Name() { return "3"; } }
+class T14 { public string Name() { return "4"; } }
+class T15 { public string Name() { return "5"; } }
+class T16 { public string Name() { return "6"; } }
+class T17 { public string Name() { return "7"; } }
+class T18 { public string Name() { return "8"; } }
+class T19 { public string Name() { return "9"; } }
+class T20 { public string Name() { return "0"; } }
+class T21 { public string Name() { return "1"; } }
+class T22 { public string Name() { return "2"; } }
+class T23 { public string Name() { return "3"; } }
+class T24 { public string Name() { return "4"; } }
+class T25 { public string Name() { return "5"; } }
+class T26 { public string Name() { return "6"; } }
+class T27 { public string Name() { return "7"; } }
+class T28 { public string Name() { return "8"; } }
+class T29 { public string Name() { return "9"; } }
+class T30 { public string Name() { return "0"; } }
+class T31 { public string Name() { return "1"; } }
+class T32 { public string Name() { return "2"; } }
+class T33 { public string Name() { return "3"; } }
+class T34 { public string Name() { return "4"; } }
+class T35 { public string Name() { return "5"; } }
+class T36 { public string Name() { return "6"; } }
+class T37 { public string Name() { return "7"; } }
+class T38 { public string Name() { return "8"; } }
+class T39 { public string Name() { return "9"; } }
+class T40 { public string Name() { return "0"; } }
+class T41 { public string Name() { return "1"; } }
+class T42 { public string Name() { return "2"; } }
+class T43 { public string Name() { return "3"; } }
+class T44 { public string Name() { return "4"; } }
+class T45 { public string Name() { return "5"; } }
+class T46 { public string Name() { return "6"; } }
+class T47 { public string Name() { return "7"; } }
+class T48 { public string Name() { return "8"; } }
+class T49 { public string Name() { return "9"; } }
+class T50 { public string Name() { return "0"; } }
+class T51 { public string Name() { return "1"; } }
+class T52 { public string Name() { return "2"; } }
+class T53 { public string Name() { return "3"; } }
+class T54 { public string Name() { return "4"; } }
+class T55 { public string Name() { return "5"; } }
+class T56 { public string Name() { return "6"; } }
+class T57 { public string Name() { return "7"; } }
+class T58 { public string Name() { return "8"; } }
+class T59 { public string Name() { return "9"; } }
+class T60 { public string Name() { return "0"; } }
+class T61 { public string Name() { return "1"; } }
+class T62 { public string Name() { return "2"; } }
+class T63 { public string Name() { return "3"; } }
+class T64 { public string Name() { return "4"; } }
+class T65 { public string Name() { return "5"; } }
+class T66 { public string Name() { return "6"; } }
+class T67 { public string Name() { return "7"; } }
+class T68 { public string Name() { return "8"; } }
+class T69 { public string Name() { return "9"; } }
+
+class Seq {
+    static int n;
+    public static int Next() { Seq.n = Seq.n + 1; return Seq.n; }
+}
+
+class Wrap<T> {
+    public static int seq = Seq.Next();
+    public T item;
+    public Wrap(T x) { item = x; }
+    // reaches into T, so this body needs a copy per instantiation
+    public string Show() { return item.Name(); }
+}
+
+class Prog {
+    static void Main() {
+        int total = 0;
+        string names = "";
+        Wrap<T0> w0 = new Wrap<T0>(new T0());
+        total = total + Wrap<T0>.seq;
+        names = names + w0.Show();
+        Wrap<T1> w1 = new Wrap<T1>(new T1());
+        total = total + Wrap<T1>.seq;
+        names = names + w1.Show();
+        Wrap<T2> w2 = new Wrap<T2>(new T2());
+        total = total + Wrap<T2>.seq;
+        names = names + w2.Show();
+        Wrap<T3> w3 = new Wrap<T3>(new T3());
+        total = total + Wrap<T3>.seq;
+        names = names + w3.Show();
+        Wrap<T4> w4 = new Wrap<T4>(new T4());
+        total = total + Wrap<T4>.seq;
+        names = names + w4.Show();
+        Wrap<T5> w5 = new Wrap<T5>(new T5());
+        total = total + Wrap<T5>.seq;
+        names = names + w5.Show();
+        Wrap<T6> w6 = new Wrap<T6>(new T6());
+        total = total + Wrap<T6>.seq;
+        names = names + w6.Show();
+        Wrap<T7> w7 = new Wrap<T7>(new T7());
+        total = total + Wrap<T7>.seq;
+        names = names + w7.Show();
+        Wrap<T8> w8 = new Wrap<T8>(new T8());
+        total = total + Wrap<T8>.seq;
+        names = names + w8.Show();
+        Wrap<T9> w9 = new Wrap<T9>(new T9());
+        total = total + Wrap<T9>.seq;
+        names = names + w9.Show();
+        Wrap<T10> w10 = new Wrap<T10>(new T10());
+        total = total + Wrap<T10>.seq;
+        names = names + w10.Show();
+        Wrap<T11> w11 = new Wrap<T11>(new T11());
+        total = total + Wrap<T11>.seq;
+        names = names + w11.Show();
+        Wrap<T12> w12 = new Wrap<T12>(new T12());
+        total = total + Wrap<T12>.seq;
+        names = names + w12.Show();
+        Wrap<T13> w13 = new Wrap<T13>(new T13());
+        total = total + Wrap<T13>.seq;
+        names = names + w13.Show();
+        Wrap<T14> w14 = new Wrap<T14>(new T14());
+        total = total + Wrap<T14>.seq;
+        names = names + w14.Show();
+        Wrap<T15> w15 = new Wrap<T15>(new T15());
+        total = total + Wrap<T15>.seq;
+        names = names + w15.Show();
+        Wrap<T16> w16 = new Wrap<T16>(new T16());
+        total = total + Wrap<T16>.seq;
+        names = names + w16.Show();
+        Wrap<T17> w17 = new Wrap<T17>(new T17());
+        total = total + Wrap<T17>.seq;
+        names = names + w17.Show();
+        Wrap<T18> w18 = new Wrap<T18>(new T18());
+        total = total + Wrap<T18>.seq;
+        names = names + w18.Show();
+        Wrap<T19> w19 = new Wrap<T19>(new T19());
+        total = total + Wrap<T19>.seq;
+        names = names + w19.Show();
+        Wrap<T20> w20 = new Wrap<T20>(new T20());
+        total = total + Wrap<T20>.seq;
+        names = names + w20.Show();
+        Wrap<T21> w21 = new Wrap<T21>(new T21());
+        total = total + Wrap<T21>.seq;
+        names = names + w21.Show();
+        Wrap<T22> w22 = new Wrap<T22>(new T22());
+        total = total + Wrap<T22>.seq;
+        names = names + w22.Show();
+        Wrap<T23> w23 = new Wrap<T23>(new T23());
+        total = total + Wrap<T23>.seq;
+        names = names + w23.Show();
+        Wrap<T24> w24 = new Wrap<T24>(new T24());
+        total = total + Wrap<T24>.seq;
+        names = names + w24.Show();
+        Wrap<T25> w25 = new Wrap<T25>(new T25());
+        total = total + Wrap<T25>.seq;
+        names = names + w25.Show();
+        Wrap<T26> w26 = new Wrap<T26>(new T26());
+        total = total + Wrap<T26>.seq;
+        names = names + w26.Show();
+        Wrap<T27> w27 = new Wrap<T27>(new T27());
+        total = total + Wrap<T27>.seq;
+        names = names + w27.Show();
+        Wrap<T28> w28 = new Wrap<T28>(new T28());
+        total = total + Wrap<T28>.seq;
+        names = names + w28.Show();
+        Wrap<T29> w29 = new Wrap<T29>(new T29());
+        total = total + Wrap<T29>.seq;
+        names = names + w29.Show();
+        Wrap<T30> w30 = new Wrap<T30>(new T30());
+        total = total + Wrap<T30>.seq;
+        names = names + w30.Show();
+        Wrap<T31> w31 = new Wrap<T31>(new T31());
+        total = total + Wrap<T31>.seq;
+        names = names + w31.Show();
+        Wrap<T32> w32 = new Wrap<T32>(new T32());
+        total = total + Wrap<T32>.seq;
+        names = names + w32.Show();
+        Wrap<T33> w33 = new Wrap<T33>(new T33());
+        total = total + Wrap<T33>.seq;
+        names = names + w33.Show();
+        Wrap<T34> w34 = new Wrap<T34>(new T34());
+        total = total + Wrap<T34>.seq;
+        names = names + w34.Show();
+        Wrap<T35> w35 = new Wrap<T35>(new T35());
+        total = total + Wrap<T35>.seq;
+        names = names + w35.Show();
+        Wrap<T36> w36 = new Wrap<T36>(new T36());
+        total = total + Wrap<T36>.seq;
+        names = names + w36.Show();
+        Wrap<T37> w37 = new Wrap<T37>(new T37());
+        total = total + Wrap<T37>.seq;
+        names = names + w37.Show();
+        Wrap<T38> w38 = new Wrap<T38>(new T38());
+        total = total + Wrap<T38>.seq;
+        names = names + w38.Show();
+        Wrap<T39> w39 = new Wrap<T39>(new T39());
+        total = total + Wrap<T39>.seq;
+        names = names + w39.Show();
+        Wrap<T40> w40 = new Wrap<T40>(new T40());
+        total = total + Wrap<T40>.seq;
+        names = names + w40.Show();
+        Wrap<T41> w41 = new Wrap<T41>(new T41());
+        total = total + Wrap<T41>.seq;
+        names = names + w41.Show();
+        Wrap<T42> w42 = new Wrap<T42>(new T42());
+        total = total + Wrap<T42>.seq;
+        names = names + w42.Show();
+        Wrap<T43> w43 = new Wrap<T43>(new T43());
+        total = total + Wrap<T43>.seq;
+        names = names + w43.Show();
+        Wrap<T44> w44 = new Wrap<T44>(new T44());
+        total = total + Wrap<T44>.seq;
+        names = names + w44.Show();
+        Wrap<T45> w45 = new Wrap<T45>(new T45());
+        total = total + Wrap<T45>.seq;
+        names = names + w45.Show();
+        Wrap<T46> w46 = new Wrap<T46>(new T46());
+        total = total + Wrap<T46>.seq;
+        names = names + w46.Show();
+        Wrap<T47> w47 = new Wrap<T47>(new T47());
+        total = total + Wrap<T47>.seq;
+        names = names + w47.Show();
+        Wrap<T48> w48 = new Wrap<T48>(new T48());
+        total = total + Wrap<T48>.seq;
+        names = names + w48.Show();
+        Wrap<T49> w49 = new Wrap<T49>(new T49());
+        total = total + Wrap<T49>.seq;
+        names = names + w49.Show();
+        Wrap<T50> w50 = new Wrap<T50>(new T50());
+        total = total + Wrap<T50>.seq;
+        names = names + w50.Show();
+        Wrap<T51> w51 = new Wrap<T51>(new T51());
+        total = total + Wrap<T51>.seq;
+        names = names + w51.Show();
+        Wrap<T52> w52 = new Wrap<T52>(new T52());
+        total = total + Wrap<T52>.seq;
+        names = names + w52.Show();
+        Wrap<T53> w53 = new Wrap<T53>(new T53());
+        total = total + Wrap<T53>.seq;
+        names = names + w53.Show();
+        Wrap<T54> w54 = new Wrap<T54>(new T54());
+        total = total + Wrap<T54>.seq;
+        names = names + w54.Show();
+        Wrap<T55> w55 = new Wrap<T55>(new T55());
+        total = total + Wrap<T55>.seq;
+        names = names + w55.Show();
+        Wrap<T56> w56 = new Wrap<T56>(new T56());
+        total = total + Wrap<T56>.seq;
+        names = names + w56.Show();
+        Wrap<T57> w57 = new Wrap<T57>(new T57());
+        total = total + Wrap<T57>.seq;
+        names = names + w57.Show();
+        Wrap<T58> w58 = new Wrap<T58>(new T58());
+        total = total + Wrap<T58>.seq;
+        names = names + w58.Show();
+        Wrap<T59> w59 = new Wrap<T59>(new T59());
+        total = total + Wrap<T59>.seq;
+        names = names + w59.Show();
+        Wrap<T60> w60 = new Wrap<T60>(new T60());
+        total = total + Wrap<T60>.seq;
+        names = names + w60.Show();
+        Wrap<T61> w61 = new Wrap<T61>(new T61());
+        total = total + Wrap<T61>.seq;
+        names = names + w61.Show();
+        Wrap<T62> w62 = new Wrap<T62>(new T62());
+        total = total + Wrap<T62>.seq;
+        names = names + w62.Show();
+        Wrap<T63> w63 = new Wrap<T63>(new T63());
+        total = total + Wrap<T63>.seq;
+        names = names + w63.Show();
+        Wrap<T64> w64 = new Wrap<T64>(new T64());
+        total = total + Wrap<T64>.seq;
+        names = names + w64.Show();
+        Wrap<T65> w65 = new Wrap<T65>(new T65());
+        total = total + Wrap<T65>.seq;
+        names = names + w65.Show();
+        Wrap<T66> w66 = new Wrap<T66>(new T66());
+        total = total + Wrap<T66>.seq;
+        names = names + w66.Show();
+        Wrap<T67> w67 = new Wrap<T67>(new T67());
+        total = total + Wrap<T67>.seq;
+        names = names + w67.Show();
+        Wrap<T68> w68 = new Wrap<T68>(new T68());
+        total = total + Wrap<T68>.seq;
+        names = names + w68.Show();
+        Wrap<T69> w69 = new Wrap<T69>(new T69());
+        total = total + Wrap<T69>.seq;
+        names = names + w69.Show();
+        // every initializer ran exactly once, in instantiation order
+        Console.WriteLine(Convert.ToString(total) + "/" + Convert.ToString(names.Length));
+    }
+}

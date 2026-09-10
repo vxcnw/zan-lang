@@ -207,18 +207,27 @@ static void emit_main_method(zan_irgen_t *g, zan_ast_node_t *method, zan_symbol_
                 /* A generic class's static is per closed instantiation, so its
                  * initializer runs once for each instantiation the program
                  * uses -- one store into one shared global would leave every
-                 * other instantiation at zero. */
-                zan_type_t *insts[64];
-                int ninst = 0;
+                 * other instantiation at zero. The list grows with the
+                 * instantiation count: a fixed 64-slot table silently stopped
+                 * initializing past the 64th instantiation. */
+                zan_type_t **insts = NULL;
+                int ninst = 0, inst_cap = 0;
                 if (d->type_decl.type_params.count > 0) {
-                    for (int gi = 0; gi < g->generic_inst_count && ninst < 64; gi++) {
+                    for (int gi = 0; gi < g->generic_inst_count; gi++) {
                         if (g->generic_insts[gi].type_sym != csym) continue;
                         bool seen = false;
                         for (int k = 0; k < ninst && !seen; k++)
                             seen = types_equal(insts[k], g->generic_insts[gi].inst);
-                        if (!seen) insts[ninst++] = g->generic_insts[gi].inst;
+                        if (seen) continue;
+                        if (ninst == inst_cap) {
+                            inst_cap = inst_cap ? inst_cap * 2 : 8;
+                            insts = (zan_type_t **)realloc(insts,
+                                (size_t)inst_cap * sizeof(*insts));
+                        }
+                        insts[ninst++] = g->generic_insts[gi].inst;
                     }
                 } else {
+                    insts = (zan_type_t **)malloc(sizeof(*insts));
                     insts[ninst++] = NULL;
                 }
                 for (int ii = 0; ii < ninst; ii++) {
@@ -248,6 +257,7 @@ static void emit_main_method(zan_irgen_t *g, zan_ast_node_t *method, zan_symbol_
                 }
                 g->cur_inst = saved_field_inst;
                 }
+                free(insts);
             }
         }
         /* ...then run each `static T()` type initializer, in declaration
@@ -1083,14 +1093,24 @@ static void emit_user_methods(zan_irgen_t *g, zan_ast_node_t *unit) {
          * and registration; specialized variants add a name suffix and register
          * into the generic fn/ctor tables. Signatures are identical across
          * variants (type parameters still lower to the erased representation);
-         * only the body differs, via g->cur_inst set in Pass B. */
-        zan_type_t *variants[64];
-        int nvar = 0;
+         * only the body differs, via g->cur_inst set in Pass B. The list grows
+         * with the instantiation count: a fixed 64-slot table left the last
+         * instantiation's specialized body undefined, so its call sites fell
+         * back to the erased "abort" stub at run time. */
+        int nvar = 0, var_cap = 8;
+        zan_type_t **variants =
+            (zan_type_t **)malloc((size_t)var_cap * sizeof(*variants));
         variants[nvar++] = NULL;
         if (is_user_generic_sym(type_sym)) {
-            for (int gi = 0; gi < g->generic_inst_count && nvar < 64; gi++)
-                if (g->generic_insts[gi].type_sym == type_sym)
-                    variants[nvar++] = g->generic_insts[gi].inst;
+            for (int gi = 0; gi < g->generic_inst_count; gi++) {
+                if (g->generic_insts[gi].type_sym != type_sym) continue;
+                if (nvar == var_cap) {
+                    var_cap *= 2;
+                    variants = (zan_type_t **)realloc(variants,
+                        (size_t)var_cap * sizeof(*variants));
+                }
+                variants[nvar++] = g->generic_insts[gi].inst;
+            }
         }
 
         for (int vi = 0; vi < nvar; vi++) {
@@ -1468,6 +1488,7 @@ static void emit_user_methods(zan_irgen_t *g, zan_ast_node_t *unit) {
             }
         }
         } /* end variant loop */
+        free(variants);
     }
 
     /* Pass B: emit every deferred body now that all functions are declared. */

@@ -63,6 +63,21 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
   位模式是否真的不可能出现"——函数表索引/句柄/压缩指针都可能撞 tag。
   新 target 落地时对"native 偶数才合法"的隐含假设逐个显式化。
 
+- **跨调用保活 delegate 必须 retain，线程入口必须 tag-test（A70/A261，
+  2026-09-11）**：`Thread.Start(job.Run)`（实例方法组 = tagged closure 记录）
+  此前在 native `zan_thread_start` 里被原样当裸 `void(*)()` 调用 → 启动瞬间
+  SIGSEGV；同形的 `Thread.Start(() => {...})`（捕获 lambda）一样崩，裸静态
+  方法组却正常（checker 不拦，编译期无诊断）。native 两路（Win32
+  CreateThread / POSIX pthread_create）与 wasm 版、UI 派发队列同构化：
+  trampoline 先 `v & ZAN_CLOSURE_TAG` 判形态（带 tag 就卸 tag 取记录 fn 槽按
+  `fn(rec, ...)` rec-first 调；裸指针才直接调），`zan_thread_start` 侧
+  `zan_delegate_retain(body)`、trampoline 收尾 `zan_delegate_release(arg)`。
+  **retain 是必需的，不是保险**：调用方在 `Thread.Start(...)` 语句结束就释放
+  自己的临时量，工作线程可能还没跑（实测去掉 retain 后 `-g` 下即段错误）。
+  **通则：任何把 delegate 存下来留给"另一次调用 / 另一线程"执行的 runtime
+  入口，都要对到达时的那个值补 retain、在真正的执行点补 release**——这正是
+  zan_abi.h store-family 契约的要求。
+
 ## wasm32 局部数爆炸：V8 每函数 5 万局部硬上限（2026-09-11）
 
 - **症状**：浏览器 `WebAssembly.instantiate` 报 `Compiling function #N:"X"
@@ -88,6 +103,46 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
 - **stdlib 快照坑**：wasm gallery 构建用 `--stdlib-path _scratch/h5gui/
   stdlib_min`（带 WASI 分支的裁剪快照），**repo stdlib 的修复必须镜像进
   快照**（Effects.zan TakeDamage 首帧 null 守卫），否则构建用的还是旧代码。
+
+## 泛型实例化定长表：第 64 个起静默丢弃（A78-3，2026-09-11）
+
+- `irgen_emit.c` 里两张"按实例逐份"的表曾用定长栈数组：`variants[64]`
+  （每实例一份方法体）与 `insts[64]`（泛型类静态字段的按实例初始化器）。
+  `variants` 有一槽留给擦除版，循环守卫 `nvar < 64` 只装得下 **63** 个具体
+  实例化：第 64 个实例化的专用体 `Wrap_Show$T63` 从未发射，调用点
+  `route_generic_method` 查 `find_generic_fn` 落空后**静默退回擦除版**，而擦除
+  版的体就是 `call abort(); unreachable` → 程序无输出、退出码 3。同族的
+  `insts` 从第 65 个起静默丢弃，那些实例化的静态字段停在 0。
+- **触发条件是"体的发射需要按实例特化"**（体里用到类型参数，如 `Wrap<T>` 的
+  `Show()` 调 `item.Name()`）。只靠擦除形态就够的实例化（类实参、体不碰 T）
+  到 100 个也正常——所以早期记录把它误判成"≥64 个实例化堆损坏、非确定性、
+  ASLR 相关"，实际是**确定性的运行期 abort**，只跟"需要几份专用体"有关。
+- **修法**：两张表改按需倍增的堆数组。**任何容量上限都不许静默截断**——截断
+  等于悄悄改变行为，且症状与原因相隔极远。
+- **诊断定式**：`ZANC_TRACE=1` 下 `discover_generic_insts` 报实例化总数、
+  `route_generic_method` 在"具体实例化找不到专用体而退回擦除版"时报
+  `route miss: Type.Method argc=..`——见到 `route miss` 就是这张表漏了实例。
+- **回归**：`tests/conformance/generic_inst_count_70.zan`（70 个实例化，同时
+  覆盖 64 边界的专用体与 65 边界的静态初始化器）输出 `2485/70`。
+
+## 调用形状：接收者槽必须按静态性判定（A270，2026-09-11）
+
+- `obj.Method(args)` 在 irgen_call.c 里按接收者形态走**两条互不相交的分支**：
+  局部变量接收者（`local.Method(...)`）与表达式接收者（`expr.Method(...)`，`if (recv_cls)`）。
+  两条都必须先判 `method_sym` 的 MOD_STATIC：静态方法签名里没有接收者槽，契约是
+  「不传接收者」（另一分支的注释明写 `expr.StaticMethod(args)` is legal；C# 会 CS0176
+  拒绝、Java 允许，Zan 选了允许）。
+- 局部变量那条曾**无条件** `argc = args.count + 1`、把接收者塞进 slot 0、参数整体后移
+  一位 → 静态方法调用生成 3 参 call 打 2 参函数，LLVM 校验报
+  `Incorrect number of arguments passed to called function!`；报错点离调用点很远，调用者
+  只看得到一个参数个数不符的 call。触发面就是 `d.StaticMethod()` 这一种写法
+  （`tests/gui/compref_designer_test.zan` 曾长期挂在 standard 档）。
+- **定式**：新增或改动任何 call 发射分支，先问三件事——接收者槽要不要（静态性）、
+  参数索引用不用偏移（`recv_off`）、`emit_dispatch_call` 的类参数要不要传（静态方法
+  没有 vtable，传 NULL 走直接调用）。三者是一组，漏一个就是形状错配。
+- **归属定式**：这类"参数个数不符"报错不明说谁多传了，定位靠最小探针 + 逐一遍历接收者
+  形态（局部 / 字段 / 临时 / 类型名）；并用**旧编译器快照**证明是既有缺陷而非本轮引入
+  （本次用 `_scratch/zanc_head.exe`，2026-09-03 构建，同探针同样复现）。
 
 ## parser：looks_like_var_decl 的分派契约
 
@@ -201,6 +256,19 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
   （__malloc_allzerop）且 RSS 平台化后不重现，优先怀疑高压竞争而非
   Zan 侧 UAF——先用低速率复跑分型。
 
+- **消费方要留引用时，拥有所有权的临时接收者必须释放（A269，2026-09-11）**：
+  委托绑定（`Action a = new Job(i).Run;`）与 retained 字段读一样，会让闭包
+  记录 retain 接收者（`emit_closure_record(..., retain_target=true)`），但方法组
+  这条路径原先没有像 `finish_member_of_temp` 那样把"临时量自带的那一份 +1"
+  释放掉 → 每次 `new Job(i).Run` 恒定泄漏一个 `Job`（20000 次循环泄漏 20000
+  个；`--check-leaks` 报的分配点是那行 `new`，一眼看像"新对象泄漏"）。修法：
+  把判据抽成 `receiver_is_owned_temp`（`obj_val && is_rc_managed_type(obj_type)
+  && !expr_is_local_ident(object) && expr_yields_owned_rc_value(g, object)`），
+  字段读与方法组绑定共用；**局部变量接收者不释放**（它不拥有 +1，释放会提前
+  free）。诊断定式：**泄漏报告的分配点是"被泄漏的对象"，不是"忘记 release 的
+  那条路径"**——按"谁 retain 了它"反查消费点（这里是 emit_closure_record 的
+  retain_target），别只盯着 new。
+
 ## 字节串 ABI 契约（stdlib crypto EVP 换装踩坑，2026-09-10）
 
 - **byte[] 按 string 形参传入时 `.Length` = strlen**：共享的是 payload
@@ -267,6 +335,29 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
   GuiHost→App/Style/Fx 的活代码闭包 + Zan 运行时，与 unused 无关。
 - stdlib 文件引用跨命名空间类型必须写 using（ChartHost 曾裸写 `App`，
   靠用户程序恰好也有 `class App` 才碰巧编译——prune 把它藏成了哑弹）。
+
+## 并行会话下的 ctest 假红（2026-09-11）
+
+同一工作树里有别的会话在改 stdlib 时，standard 档会出现**与自己无关的红**。
+先归因，别急着改自己的代码：
+
+- **编译/检查类失败**：报错落在某个 stdlib 文件、而该文件在工作区是 `M`（在途
+  改动）→ 属于那条车道。关键判据是**报错来自哪个阶段**：只改了 irgen/runtime
+  时，checker/binder 的报错（"after type checking"、未解析调用、null 安全）不
+  可能是你引入的——那些阶段在你的改动之前跑。
+- **陈旧产物导致的挂起/超时**：`tests/run_case.cmake` 只在 exe 不存在或比
+  `.zan` 源旧时才重编，**不看 stdlib 时间戳**。别的会话在你上次跑之后改了
+  stdlib，ctest 仍会复用旧的 `build/conf_*.exe`，于是出现"单跑必挂、手编必过"
+  的怪象（本次 `conformance_gui_listview_scrollbar_drag` 挂死在 5:09 的中间态
+  产物上 10 分钟，`rm build/conf_<name>.exe` 重编即 PASS）。
+- **归因顺序（四步）**：单跑该用例 → 删 `build/conf_<name>.exe` 重编单跑 →
+  手工 `zanc` 编译 + 直接跑 exe → 旧编译器快照（如 `_scratch/zanc_head.exe`）
+  复现。四步都指向"不是我"再继续；否则停下来查自己。
+- 另一条常客：**端口/资源竞争与真 flaky**。判别法是把**同一个二进制**（不重编）
+  连跑 5 次——通过/挂起交错就说明是被测代码里的竞争，单次的超时/失败不能当回归
+  （本次 `conformance_gui_listview_scrollbar_drag` 同一 exe 3 过 2 挂，而它属
+  Gui 车道在途改动；`conformance_http_client_keepalive` 则是全量并行 120s 超时、
+  单跑 0.5s 过，属端口竞争）。并行档的超时值一律先单跑复核。
 
 ## 编译器调试的 scratch 卫生（bisect / A-B 对照）
 

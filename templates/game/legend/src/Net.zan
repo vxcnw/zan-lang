@@ -454,7 +454,7 @@ class GameNet {
         return t.Replace("\"", "\\\"");
     }
 
-    /* Thread.Start 需要非捕获委托：经静态中转拿到当前会话实例。*/
+    /* 经静态中转拿到当前会话实例（线程入口是静态方法组）。*/
     static GameNet worker;
     static void ThreadEntry() { GameNet.worker.NetMain(); }
 
