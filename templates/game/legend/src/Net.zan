@@ -1326,6 +1326,13 @@ class GameNet {
         });
     }
 
+    /* 竞技场「刷新数据」：丢掉缓存再拉一次（战功/次数/挑战榜都是服务端
+       权威）。回复到达时 Bump 会让主循环整页重建，新数据自然显示出来。 */
+    void ReloadArena() {
+        this.playArena = null;
+        this.MaybeRefreshArena();
+    }
+
     void ArenaFight(int rival) {
         this.Op("{\"op\":\"arena\",\"fight\":" + Convert.ToString(rival) + "}", (JsonValue r) => {
             if (this.TakeSelf(r)) {

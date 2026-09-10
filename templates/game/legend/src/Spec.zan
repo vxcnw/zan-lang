@@ -161,4 +161,54 @@ class Spec {
        用标准库 Pagination 组件（用户：「分页有分页组件」，不再自绘数字方块）。
        组件高度 = 主题 heightMedium（Theme.zan = 34 逻辑），块高按它预算。 */
     static int PagerH() { return Px(34); }
+
+    /* ---- PK竞技场（页 1）----
+       原版实测（mir2/mir/竞技场.png，就是 150% 下的设备像素，与地图页同标尺）：
+         · 挑战卡 8 列 × 2 行 = 16 张
+         · 卡 106×103 物理 = 71×68 逻辑；列距 138 物理 = 92 逻辑 → 卡间 21
+           （8 列共宽 8×71+7×21 = 715 逻辑 = 1072 物理，与实测 399..1471 吻合）
+         · 行距 231 物理 = 154 逻辑：卡 131 逻辑 + 行间 23
+         · 卡内自上而下：头像 → 名字（黄）→「排名: N」（绿标签 / 青数字）
+           →「挑战」钮（深底亮蓝框蓝字，约 65×17 逻辑）
+         · 卡阵顶 184 物理、页内容顶 166 → 上留白 18 物理；与地图页同口径
+           取 MapMargin（原版这两页的上留白本来就同值）
+         · 下段：顶部一条整宽分隔线，x=1119 处一条竖线把下段切成左
+           「系统/提示」日志面板（743 物理）与右统计面板（370 物理）；
+           日志 5 行（首行距线 17 物理、行距 34.5），统计 4 行（距线 28、
+           行距 36）+ 领取战功/刷新数据 两钮（131×42 物理）；日志面板底部
+           压一行橙字提示「击败对手会获得100战功…」。 */
+    static int ArenaCols() { return 8; }
+    static int ArenaRows() { return 2; }
+    /// 挑战编号上限 = 卡片张数（服务端 rival 取值 1..ArenaCards）。
+    static int ArenaCards() { return ArenaCols() * ArenaRows(); }
+    static int ArenaCardW() { return Px(71); }
+    static int ArenaCardH() { return Px(68); }
+    static int ArenaColGap() { return Px(21); }
+    static int ArenaRowGap() { return Px(26); }
+    static int ArenaTextGap() { return Px(5); }     // 头像/名字/排名/钮 的行间
+    static int ArenaNameH() { return Px(14); }
+    static int ArenaRankH() { return Px(14); }
+    static int ArenaBtnH() { return Px(17); }       // 「挑战」钮高
+    static int ArenaEntryH() {
+        return ArenaCardH() + ArenaNameH() + ArenaRankH() + ArenaBtnH()
+            + 3 * ArenaTextGap();
+    }
+    static int ArenaWallW() {
+        return ArenaCols() * ArenaCardW() + (ArenaCols() - 1) * ArenaColGap();
+    }
+    static int ArenaWallH() {
+        return ArenaRows() * ArenaEntryH() + (ArenaRows() - 1) * ArenaRowGap();
+    }
+    /// 下段兜底高（原版实测 248 物理 = 165 逻辑）。窗口够高时下段吃掉
+    /// 卡阵与页底之间的全部余量（日志面板显得更空，与原版一致），
+    /// 只有窗口被压矮时才退回这个下限。
+    static int ArenaBandH() { return Px(165); }
+    static int ArenaStatsW() { return Px(247); }    // 右侧统计面板宽
+    static int ArenaLogTop() { return Px(11); }     // 日志首行距分隔线
+    static int ArenaLogRowH() { return Px(23); }
+    static int ArenaStatsTop() { return Px(19); }   // 统计首行距分隔线
+    static int ArenaStatsRowH() { return Px(24); }
+    static int ArenaBtnW() { return Px(87); }
+    static int ArenaBtnBoxH() { return Px(28); }    // 统计面板底部两个钮
+    static int ArenaPadBot() { return Px(15); }     // 钮/提示行距下段底
 }

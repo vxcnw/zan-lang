@@ -105,10 +105,24 @@ progress::fill { background: #2a394d; }
    文字 #00aeff 字号 14。当前页原版**没有**高亮（实测三项完全一致），
    `.navtile-active` 是我们自己补的选中反馈（用户拍板可加）。 */
 .nav-band, .nav-band-bottom, .nav-row { background: transparent; border-width: 0; }
+/* 导航行必须是 flex 容器：行首/行末的边距撑条 + 各瓦片的实测宽先占位，
+   再用后代的 flex-grow 分掉剩余宽度。默认的停靠布局不做剩余空间分配，
+   只按各控件的 StyleWidth 摆位——不写 display:flex 时下面的
+   `.navtile { flex-grow }` 一点作用都没有（实测踩过）。 */
+.nav-row { display: flex; flex-direction: row; }
+/* flex-grow：行末留出与行首同宽的边距后，剩下的宽度**平分给各瓦片**
+   （用户：「两排按钮各自增加几个像素宽也能达到对齐效果」）——格间隙是
+   撑条（flex-grow 0）一个不动，只有按钮本身宽几个像素。这样每排的右端
+   都落在「主区右缘 − LeftPad」，与行首边距一致（用户：「右侧应该跟左侧
+   间距保持一致」）。不要改成均分格间隙：那会动到实测间距，已被否掉。 */
 .navtile { display: flex; flex-direction: row; align-items: center;
     justify-content: center;   /* 图标+文字整组居中（原版实测如此） */
+    flex-grow: 1;
     background: #1f2936; border: 1px #3f4a57; border-radius: 0; }
 .navtile:hover { border-color: var(--primary); }
+/* 设置齿轮是行末的窄格（实测 33×33 逻辑），不参与均分：让它保持正方形，
+   多出来的宽度归前面 10 个正常格。 */
+.navtile-gear { flex-grow: 0; }
 /* 选中态：只换边框 + 提亮底色，字号/字色不动（避免文字宽度跳变）。 */
 .navtile-active { background: #2b3f57; border-color: #00aeff; }
 .navicon { flex-shrink: 0; }
@@ -193,6 +207,49 @@ button.tiny { font-size: var(--font-size-small); }
                  1px -1px 0 #000000, -1px 1px 0 #000000; }
 /* 页码改用标准库 Pagination（用户：「分页有分页组件」），
    .map-pager / .map-pageno* 那套自绘方块的样式已随代码删除。 */
+
+/* ===================== PK竞技场（页 1）=====================
+   8 列 × 2 行挑战卡；下段 = 左「系统/提示」日志 + 右统计，中间一条竖线。
+   尺寸全部在 Spec/PageArena 里落定（帧里不写死像素），这里只管颜色字号。
+   字号取 12：原版名字「风之魔装神机」6 字正好占满 71 逻辑宽的卡（106 设备
+   / 6 = 17.6 设备 = 11.7 逻辑一字），13 号会把 6 字名字截断。 */
+.arena-page { background: transparent; padding: 0; }
+.arena-wall { background: transparent; padding: 0; }
+.arena-row { background: transparent; padding: 0; }
+.arena-card { background: transparent; padding: 0; align-items: center; }
+.arena-face { background: #0c0d0e; border: 1px #2b3a4a; }
+/* 前三名的头像带彩框（金 / 品红 / 青），原版就是这三个颜色。 */
+.arena-face-1 { border: 2px var(--game-yellow); }
+.arena-face-2 { border: 2px var(--game-magenta); }
+.arena-face-3 { border: 2px var(--game-cyan); }
+/* 名字用 11 号：6 字名字（「风之魔装神机」）在 12 号下宽 72 逻辑 > 卡宽 71，
+   会被省略号截断（实测「龙卫——天…」）；11 号 6 字 = 66 逻辑，整名显示。 */
+.arena-name { color: var(--game-yellow); font-size: 11; font-weight: 700; }
+.arena-rank { background: transparent; }
+.arena-rank-k { color: var(--game-green); font-size: 12; }
+.arena-rank-v { color: var(--game-cyan); font-size: 12; font-weight: 700; }
+.arena-challenge { background: #10141c; border: 1px #2a5580; color: #4a90d0;
+    font-size: 12; }
+.arena-challenge:hover { background: #16324e; border: 1px #4a90d0; color: #9cc8f0; }
+
+/* 下段：顶部一条整宽分隔线；右面板左边一条竖线把它和日志分开。 */
+.arena-band { background: transparent; border-top: 1px #2a3348; }
+.arena-log { background: transparent; align-items: flex-start; }
+.arena-log-text { color: #c4c9d0; font-size: 12; }
+.arena-tag-sys { color: var(--game-red); font-size: 12; }
+.arena-tag-tip { color: var(--game-yellow); font-size: 12; }
+.arena-hint { background: transparent; }
+.arena-hint-text { color: var(--game-orange); font-size: 12; }
+.arena-stats { background: transparent; border-left: 1px #2a3348; }
+.arena-stat-k { color: var(--game-green); font-size: 12; }
+.arena-stat-v { color: var(--game-cyan); font-size: 12; font-weight: 700; }
+.arena-stat-k2 { color: var(--game-pink); font-size: 12; }
+.arena-stat-v2 { color: var(--game-pink); font-size: 12; }
+.arena-btnbox { background: transparent; justify-content: center;
+    align-items: center; }
+.arena-plain { background: #16324e; border: 1px #2a5580; color: #9cc8f0;
+    font-size: 12; }
+.arena-plain:hover { background: #234d78; }
 
 /* 场景页（幻境/秘境/BOSS之家/世界BOSS/押镖/挂机主界面） */
 .boss-scene { background: #0d131c; border: 1px #29323b; }

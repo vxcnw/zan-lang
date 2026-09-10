@@ -109,7 +109,13 @@ partial class LegendApp {
                     lastClientW = app.ClientWidth();
                     lastClientH = app.ClientHeight();
                 }
-            } catch (Exception) { }
+            } catch (Exception e) {
+                /* 静默吞异常会让页面停在"内容全空"上而无从下手，跑 UI 自动化
+                   时把原因挂到 probe 上（同 1000ms 刻度的 tick-err）。 */
+                if (UiDriver.Active()) {
+                    try { UiDriver.SetProbe("rebuild-err", e.ToString()); } catch (Exception e2) { }
+                }
+            }
         });
         form.Every(1000, () => {
             try {
@@ -208,10 +214,12 @@ partial class LegendApp {
         content.Pad(0); content.Gap(0); content.Grow(); right.With(content);
     }
 
-    /* 一行顶部导航瓦片：按实测 x/w 逐格落位（间隙用空白撑开）。
-       左端整体左移（Spec.NavX）：原版第 1 格 x=11 比它正下方的左栏面板
-       左缘（LeftPad=3）缩进 8 逻辑像素，用户要求「按钮左移，与下面的最
-       左侧对齐」——瓦片宽与格间隙仍是实测值，只有这一行的起点改过。 */
+    /* 一行顶部导航瓦片：瓦片宽逐格取实测（navigation.csv），格间隙就是
+       实测的 5..8 逻辑（撑条，一个不动）。行首边距 = LeftPad（用户：
+       「按钮左移，与下面的最左侧对齐」），行末同样留 LeftPad，中间的
+       富余宽度由 CSS 的 flex-grow 平分给各瓦片（按钮各宽几个像素）——
+       故两排右端都落在「主区右缘 − LeftPad」，与左端间距一致（用户：
+       「两排按钮各自增加几个像素宽也能达到对齐效果」）。 */
     Panel NavRow(int r) {
         Panel row = Panel.Row(); row.Class = "nav-row"; row.Pad(0); row.Gap(0);
         row.Prefer(0, Spec.NavTileH());
@@ -231,10 +239,12 @@ partial class LegendApp {
             if (gap > 0) { row.With(SpacerW(gap)); }
             row.With(NavTile(30));
         }
+        row.With(SpacerW(Spec.LeftPad()));
         return row;
     }
 
-    /* 一行底部导航瓦片：x 是整窗坐标，主区列起点在 250，故减去左栏区宽。 */
+    /* 一行底部导航瓦片：x 是整窗坐标，主区列起点在 250，故减去左栏区宽。
+       行末同样留 LeftPad，与上面两排右端对齐（原版三排右端也在同一列）。 */
     Panel BottomTileRow() {
         Panel row = Panel.Row(); row.Class = "nav-row"; row.Pad(0); row.Gap(0);
         row.Prefer(0, Spec.BotTileRowH());
@@ -246,6 +256,7 @@ partial class LegendApp {
             row.With(NavTile(i));
             prev = x + Spec.NavTileW(navigationData.At(i).Int("w"));
         }
+        row.With(SpacerW(Spec.LeftPad()));
         return row;
     }
 
@@ -275,7 +286,8 @@ partial class LegendApp {
        三条 9px 的缝把内容挤到溢出，标签反而被省略号截断（实测踩过）。 */
     Panel NavTile(int n) {
         bool iconOnly = navigationData.At(n).Text("label").Length == 0 || n == 30;
-        Panel b = Panel.Row(); b.Class = "navtile";
+        Panel b = Panel.Row();
+        b.Class = n == 30 ? "navtile navtile-gear" : "navtile";
         b.Pad(0); b.Gap(Spec.Px(6));
         b.Prefer(Spec.NavTileW(navigationData.At(n).Int("w")), Spec.NavTileH());
         b.Named("nav-" + Rules.N(n));
@@ -298,7 +310,8 @@ partial class LegendApp {
     void MarkNavActive() {
         for (int i = 0; i < 31; i = i + 1) {
             if (navTiles[i] == null) { continue; }
-            navTiles[i].Class = i == page ? "navtile navtile-active" : "navtile";
+            string cls = i == 30 ? "navtile navtile-gear" : "navtile";
+            navTiles[i].Class = i == page ? cls + " navtile-active" : cls;
         }
     }
 
@@ -355,6 +368,7 @@ partial class LegendApp {
         content.RemoveAll();
         MarkNavActive();
         if (page == 0) { BuildMapTravel(); return; }
+        if (page == 1) { BuildArena(); return; }
         if (page == 20) { BuildBag(); return; }
         if (page == 31) { BuildMapInner(); return; }
         BuildPlaceholder();
