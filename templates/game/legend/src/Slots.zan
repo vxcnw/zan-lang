@@ -80,8 +80,43 @@ partial class LegendApp {
 
     /// 按装备对象出格子：e == null 出空格。图标走定义表，角标走强化等级。
     Panel EquipSlot(string cls, int wDevice, int hDevice, Equipment e) {
-        if (e == null) { return SlotBox(cls, wDevice, hDevice); }
+        if (e == null) { return GoldSlotBox(cls, wDevice, hDevice); }
         return ItemSlot(cls, wDevice, hDevice, ItemArtById(e.definitionId),
             SlotBadge(e, 1));
+    }
+
+    /// 当前 8 帧金边相位（主线程读，form.Every(100) 写）。
+    static int GoldPhase() { return goldPhase; }
+
+    /// 装备/物品/技能格的金边相位类：idx + phase 决定当前帧的视觉。
+    /// 同一行的格子在动画上**错相位 1 帧**，所以 6×6 会出现逐格流动的
+    /// 感觉（原版截屏里就是这个效果）。
+    static string GoldSlotCls(string prefix, int idx) {
+        int p = (idx + goldPhase) & 7;
+        return prefix + " " + prefix + "-p" + Rules.N(p);
+    }
+
+    /// 金边空格（无道具）。原版所有空装备格都画金边、边角随帧变化。
+    static Panel GoldSlotBox(string prefix, int wDevice, int hDevice) {
+        Panel s = Panel.Row();
+        s.Class = GoldSlotCls(prefix, 0);
+        s.Pad(0); s.Prefer(wDevice, hDevice);
+        return s;
+    }
+
+    /// 金边道具格。
+    Panel GoldItemSlot(string prefix, int wDevice, int hDevice,
+                       string artPath, string badge, int idx) {
+        Panel s = Panel.Row(); s.Class = GoldSlotCls(prefix, idx);
+        s.Pad(SlotInset()); s.Prefer(wDevice, hDevice);
+        Image ic = new Image(artPath, "道具", "contain");
+        ic.DockFill(); s.Add(ic);
+        if (badge.Length > 0) {
+            Label t = Text(badge, "slot-badge", 0);
+            t.DockManual(); t.Place(SlotInset(), 0);
+            t.Prefer(0, Spec.Px(11));
+            s.Add(t);
+        }
+        return s;
     }
 }

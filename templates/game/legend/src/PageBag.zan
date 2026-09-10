@@ -32,12 +32,15 @@ partial class LegendApp {
         Panel page0 = Panel.Column(); page0.Class = "bag-page";
         page0.Pad(0); page0.Gap(0); page0.Grow(); content.With(page0);
 
-        /* 上段：定高。 */
+        /* 上段：定高 366 + 自然宽（不调 Grow，否则会吃光整列把下段挤没）。
+           宽度由 `mid` 列 Grow 撑满，所以即便不调 Grow，上段也会占满
+           content 的整宽——下面 mid.Grow() 是关键。 */
         Panel top = Panel.Row(); top.Class = "bag-top";
         top.Pad(6); top.Gap(8); top.Prefer(0, 366); page0.With(top);
         BuildBagTop(top);
 
-        /* 下段：吃掉剩余高度。 */
+        /* 下段：吃掉剩余高度。Grow 沿垂直方向（page0 是 column，垂直是
+           第二维）。 */
         bagLower = Panel.Row(); bagLower.Class = "bag-lower";
         bagLower.Pad(6); bagLower.Gap(8); bagLower.Grow(); page0.With(bagLower);
         BuildBagLower();
@@ -94,15 +97,16 @@ partial class LegendApp {
         }
     }
 
-    /// 一个空的装备格。
+    /// 一个空的装备格（金边动画）。
     Panel BagSlot(int count) {
-        Panel c = Panel.Row(); c.Class = "bag-slot";
+        Panel c = Panel.Row();
+        c.Class = GoldSlotCls("bag-slot", count);
         c.Pad(0); c.Prefer(BagCell(), BagCell());
         c.Named("bag-slot-" + Rules.N(count));
         return c;
     }
 
-    /// 物品栏里第 i 格（行优先，0 起）。
+    /// 物品栏里第 i 格（行优先，0 起）——空格子走普通 slot（无金边动画）。
     Panel BagCellView(int i) {
         Panel c = Panel.Row(); c.Class = "bag-cell";
         c.Pad(0); c.Prefer(BagCell(), BagCell());

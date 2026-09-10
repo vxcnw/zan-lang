@@ -260,6 +260,11 @@ button.tiny { font-size: var(--font-size-small); }
    上段：立绘(235) + 装备环格 + 6×6 物品栏 + 竖排 9 钮
    下段：左建角面板(196) + 右 6 tab + 内容 */
 .bag-page { background: #1e2633; padding: 0; }
+/* 上下两段都要 flex + row 才会让中间子项的 Grow 真的分配剩余空间——
+   默认停靠布局只按 StyleWidth 摆位，不分剩余宽度（皮肤 css 注释里
+   写过的同一个坑，nav-row / scene-center / scene-hp-row 都有，这里
+   bag-top / bag-lower 也要补）。 */
+.bag-top, .bag-lower { display: flex; flex-direction: row; }
 .bag-top { background: #1a2230; border-bottom: 1px #2a3348; }
 
 /* 人物立绘区（装备格压在两侧，绝对定位） */
@@ -277,7 +282,20 @@ button.tiny { font-size: var(--font-size-small); }
 /* 物品格 */
 .bag-cell { background: var(--game-slot); border: 1px var(--game-slot-line); }
 .bag-cell:hover { border: 1px var(--game-yellow); }
+
+/* 金边装备/物品/技能格（8 帧相位动画，100ms/帧，整圈 800ms）——原版里所有
+   空装备格都用这套金边，边角亮度按帧循环。相位由 PageBag/PageScene 调
+   GoldSlotCls(idx) 注入 class `bag-slot-pN`（N=0..7）。 */
 .bag-slot { background: var(--game-slot); border: 1px var(--game-slot-gold); }
+.bag-slot-p0 { border-color: #8a7546; }
+.bag-slot-p1 { border-color: #a88a55; }
+.bag-slot-p2 { border-color: #c4a16a; }
+.bag-slot-p3 { border-color: #e0ba80; }
+.bag-slot-p4 { border-color: #f0d098; }
+.bag-slot-p5 { border-color: #d8b478; }
+.bag-slot-p6 { border-color: #b89560; }
+.bag-slot-p7 { border-color: #95794a; }
+
 .bag-count { color: #ffffff; font-size: var(--font-size-tiny); }
 
 /* 竖排 9 功能钮 */
