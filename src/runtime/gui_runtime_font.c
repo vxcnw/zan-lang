@@ -353,7 +353,15 @@ static int ft_prepare(int font_size) {
     if (g_ft_state == 0) {
         g_ft_state = -1;
         if (FT_Init_FreeType(&g_ft_library) != 0) return 0;
-#if defined(__ANDROID__) || defined(__OHOS__)
+#if defined(__wasm__)
+        /* Browser: no fontconfig and no filesystem fonts. The H5 driver
+         * loads a .ttf into WASI at /fonts/ui.ttf (gui_runtime_wasm.c's
+         * zan_gui_wasm_load_font copies it out of linear memory), so
+         * try that first; a missing font degrades to "no text". */
+        if (FT_New_Face(g_ft_library, "/fonts/ui.ttf", 0, &g_ft_face) == 0) {
+            g_ft_state = 1;
+        }
+#elif defined(__ANDROID__) || defined(__OHOS__)
         /* Android ships no fontconfig; the system faces live in
          * /system/fonts. Primary face follows the ROM's own default
          * (fonts.xml first nameless family -- MiSans on MIUI, ...),
@@ -510,7 +518,10 @@ static FT_Face ft_face_for_cp(u32 cp, int font_size) {
                 closedir(d);
             }
         }
-#else
+#elif !defined(__wasm__)
+        /* Desktop Linux resolves fallback faces through fontconfig. wasm
+         * ships no fontconfig and only the single /fonts/ui.ttf face: an
+         * uncovered code point falls back to the 6x10 bitmap path. */
         FcCharSet *charset = FcCharSetCreate();
         FcCharSetAddChar(charset, cp);
         FcPattern *pat = FcPatternCreate();
@@ -962,7 +973,6 @@ static uint64_t ft_meas_hash(const char *s, int size) {
 
 static i64 ft_measure_text(const char *text, int font_size) {
     if (!text || !*text) return 0;
-
     uint64_t h = ft_meas_hash(text, font_size);
     int base = (int)(h % FT_MEAS_CACHE_CAP);
     ft_measure_cache_t *victim = NULL;
@@ -987,7 +997,6 @@ static i64 ft_measure_text(const char *text, int font_size) {
         if (glyph && FT_Load_Glyph(face, glyph, FT_LOAD_DEFAULT) == 0)
             width += (int)(face->glyph->advance.x >> 6);
     }
-
     if (victim) {
         free(victim->text);
         victim->text = NULL;

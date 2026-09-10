@@ -6022,10 +6022,18 @@ int main(int argc, char **argv) {
              * odd indices legal raw addresses -- one odd index read through a
              * tag-test misroutes to function N-1 (Canvas_DrawGlyph landing in
              * getenv was exactly that). Basing the table at 2 keeps every
-             * raw index even, so the native assumption holds on wasm too. */
+             * raw index even, so the native assumption holds on wasm too.
+             * -z stack-size: lld's 64 KiB default is smaller than real apps'
+             * recursion needs -- Control_RenderTree x easing x stylesheet
+             * frames in the GUI gallery blew it, and the overflow wrote into
+             * the statics below the stack (wild string pointers, trashed
+             * allocator headers). The larger stack only costs linear-memory
+             * address space; V8 commits pages lazily. */
             snprintf(cmd, sizeof(cmd),
-                     "wasm-ld%s --table-base=2 -o \"%s\" \"%s/crt1.o\" \"%s\"",
-                     publish_mode ? " -s --gc-sections" : "", obj_path, sys, obj_tmp);
+                     "wasm-ld%s -z stack-size=4194304 --table-base=2 "
+                     "-o \"%s\" \"%s/crt1.o\" \"%s\"",
+                     publish_mode ? " -s --gc-sections" : "", obj_path, sys,
+                     obj_tmp);
             for (int ei = 0; ei < extra_link_input_count; ei++) {
                 size_t cur = strlen(cmd);
                 snprintf(cmd + cur, sizeof(cmd) - cur, " \"%s\"",
@@ -6073,6 +6081,18 @@ int main(int argc, char **argv) {
                     size_t cur = strlen(cmd);
                     snprintf(cmd + cur, sizeof(cmd) - cur,
                              " \"%s\" --export=zan_gui_wasm_feed", guiobj);
+                    /* FreeType text: zanrt_gui.o is built with
+                     * ZAN_GUI_FREETYPE (build_cross_rt.cmd), so it references
+                     * FT_* -- the archive is staged next to the other runtime
+                     * objects and linked only when present, so an older
+                     * toolchain layout without it still links (bitmap font). */
+                    char ftlib[1300];
+                    snprintf(ftlib, sizeof(ftlib), "%s/libfreetype.a", sys);
+                    if (zan_file_exists(ftlib)) {
+                        size_t curf = strlen(cmd);
+                        snprintf(cmd + curf, sizeof(cmd) - curf,
+                                 " \"%s\"", ftlib);
+                    }
                     /* Sync-family symbols the GUI stdlib pulls in
                      * (threads/atomics/monotonic/monitor): single-threaded
                      * equivalents from rt_sync_wasm.c. Linked only for GUI

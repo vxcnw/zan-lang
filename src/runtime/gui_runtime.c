@@ -36,9 +36,9 @@
 #else
 #define EXPORT __declspec(dllexport)
 #endif
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__wasm__)
 /* X11 headers back the native Linux window shell. */
-#if !defined(ZAN_GUI_OHOS) && !defined(__ANDROID__)
+#if !defined(ZAN_GUI_OHOS) && !defined(__ANDROID__) && !defined(__wasm__)
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
@@ -57,7 +57,7 @@
 #include FT_FREETYPE_H
 #include <freetype/ftcolor.h>
 #include <freetype/ftbitmap.h>
-#if !defined(__ANDROID__) && !defined(ZAN_GUI_OHOS)
+#if !defined(__ANDROID__) && !defined(ZAN_GUI_OHOS) && !defined(__wasm__)
 #include <fontconfig/fontconfig.h>
 #endif
 #endif

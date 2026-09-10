@@ -66,7 +66,22 @@ rem references zan_gui_*, and exported symbol zan_gui_wasm_feed is the host's
 rem event-injection door (see the JS host in the H5 template).
 rem gnu11, not c11: wasi-libc hides clock_gettime (gui shell's tick) and
 rem stb_vorbis's alloca behind the GNU feature-test macros.
+rem ZAN_GUI_FREETYPE: proportional text on wasm32. Needs freetype headers
+rem (external checkout, e.g. %FREETYPE_INC%) and the prebuilt
+rem toolchain\wasm32\libfreetype.a plus the setjmp/ftmodule shims under
+rem toolchain\wasm32\freetype-shim (zig's wasi setjmp hard-errors without the
+rem wasm EH proposal; the shim stubs it -- trusted UI fonts never enter the
+rem untrusted-font validator paths that reach setjmp). When the header tree or
+rem the archive is missing, rebuild WITHOUT the define: programs degrade to the
+rem 6x10 bitmap font.
+set FT_INC=%FREETYPE_INC%
+if "%FT_INC%"=="" set FT_INC=D:/project/firefox/modules/freetype2/include
+if exist "%FT_INC%\ft2build.h" if exist toolchain\wasm32\libfreetype.a goto ft_gui
 "%ZIG%" cc -target wasm32-wasi -g0 -std=gnu11 -I %RT% -I %RT%\libwebp\src -O2 -c %RT%\gui_runtime.c -DZAN_GUI_WASM -o toolchain\wasm32\zanrt_gui.o || exit /b 1
+goto gui_done
+:ft_gui
+"%ZIG%" cc -target wasm32-wasi -g0 -std=gnu11 -I %RT% -I %RT%\libwebp\src -I "%FT_INC%" -I toolchain\wasm32\freetype-shim -O2 -c %RT%\gui_runtime.c -DZAN_GUI_WASM -DZAN_GUI_FREETYPE -o toolchain\wasm32\zanrt_gui.o || exit /b 1
+:gui_done
 rem Single-threaded sync equivalents for wasm32 GUI programs (rt_sync_wasm.c):
 rem threads run their body synchronously, atomics are plain cells, the shared
 rem table degrades to "unavailable", clocks are real. main.c links this next to

@@ -419,3 +419,32 @@ Log(q);                          // 打印 11 —— 闭包内外读写同一个
   条目，其余按 7 天清。
 - **提交前自检**：本次会话在 `_scratch` 造的东西还在吗？在，删掉再提交。
   会话验收只看"任务完成"，没人替你收尾。
+
+## wasm32 默认栈只有 64KB——GUI 深递归必打穿，症状是"乱指针"不是"栈溢出"（2026-09-11）
+
+> gui_gallery wasm 版随机崩在 measure/strcmp/str_retain：野字符串指针
+> （a=0x72='r'）、emmalloc 块头被清零、缓存 payload 变成别的 JSON 文本——
+> 全是**栈向下溢进静态区**的二次假象，按 UAF/堆损坏查了一整轮都白查。
+
+- **根修已入库**：main.c 的 wasm-ld 命令加 `-z stack-size=4194304`。lld 默认
+  64KB，对 `Control_RenderTree × 样式缓动 × StyleSheet` 这种深度递归远远不够
+  （原生 x64 有 8MB 所以永远复现不了 wasm 侧的问题）。栈只占线性内存地址
+  空间，V8 惰性提交页面，4MB 不花真钱。
+- **症状→怀疑排序要倒过来**：wasm32 上"野指针/堆头损坏"先查栈大小再查
+  堆。判别法：**把 free 改成只记账不回收（quarantine），崩溃依旧 ⇒ 读侧
+  （栈/类型错），崩溃消失 ⇒ 真 UAF**。本次 quarantine 后崩溃照旧且指针
+  大于内存顶——曾经合法的指针永远不会超顶，必是被写坏的值。
+- **有效侦插三件套**（都进 zanrt_gui.o 编一次）：① `--wrap=strcmp` 的
+  `__wrap_strcmp` 打印界外实参（wasm 没有 `__builtin_return_address`，调用方
+  看 V8 栈）；② emmalloc free 前置 ptr/size 合法性检查+分配环形账本，
+  BAD FREE 时倒出来；③ 每 64 次 measure 全量 emmalloc_validate。注意
+  `--wrap` 需要**手工 wasm-ld 链接**（zanc 的命令行不带它），libzigc.a 是
+  单成员大对象不能删成员，全局重定义 strcmp 会 duplicate symbol。
+- **手工复刻链接看归属**：zanc 删 app 对象（`<out>.o`）在链接后，竞速
+  `cp` 抢一份，再按 main.c 6027 的顺序手工 `wasm-ld -Map=` ——map 直接
+  告诉你 `free` 来自哪个归档成员。归档成员解析：对象文件定义 > 先扫描的
+  归档；改归档不生效先怀疑"定义在别的输入里"。
+- **w32adapt 签名串格式**：首字符=返回类型（v/p/j/其他=i32），其余=参数
+  （p=ptr, j=i64, 其他=i32）。`"iiiii"` 是返回 i32+4 参，不是 5 参——
+  摆过一次乌龙。nint 在 IR 恒为 i64（irgen.c TYPE_NINT），C 侧 iptr 是
+  i32，wasm-ld 的 signature mismatch 告警就是这对宽度差，逐符号进表。

@@ -2951,6 +2951,14 @@ zan_status_t zan_irgen_write_obj(zan_irgen_t *g, const char *path) {
              * mismatch and picks one side's signature. */
             { "zan_gui_draw_polyline", "vppiii" },
             { "zan_gui_draw_polyline_fx", "vppiii" },
+            /* More GUI nint-handle shapes: the hit-guard pair take i32
+             * window handles in C (iptr) against i64 nint call sites, and
+             * zan_gui_text_stat_read returns i64 in C while Render.zan
+             * declares int -- the x64 ABI overlaps the two widths in RAX,
+             * wasm32 needs an explicit adapter. */
+            { "zan_gui_clear_hit_guards", "ii" },
+            { "zan_gui_add_hit_guard", "iiiiii" },
+            { "zan_gui_text_stat_read", "ji" },
             /* NativeMemory.Copy/Find lower to memmove/memchr with a 64-bit
              * length (Zan int); wasm32 size_t is 32-bit. The coroutine
              * drivers declare zan_timer_cancel_delay as void while
