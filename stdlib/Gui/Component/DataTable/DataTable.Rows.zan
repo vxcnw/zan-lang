@@ -103,10 +103,23 @@ partial class DataTable {
             }
         }
         while (st.selected.Count < src.RowCount()) { st.selected.Add(false); }
-        // 列 schema 可能整体替换（公式增删改列集形状）：
-        // 表达式编译缓存随列列表指针绑定，跨列集调用会
-        // 命中旧缓存，这里整体作废。
-        DataTable.InvalidateFormulaCache();
+        // 公式编译缓存只在公式面变化时作废（列数或任一公式串
+        // 变了）。EnsureInit 每帧执行，此前每帧无条件作废让持
+        // 稳定列集的应用每帧重编译全部表达式。指针/列数变化本就
+        // 由 FormulaExprOf 的命中条件兜住，这里逐列比对补上
+        // "同列表原地改写公式"的最后一种变化。
+        bool fdirty = st.formulaSeen == null || st.formulaSeen.Count != cols.Count;
+        if (!fdirty) {
+            for (int fc = 0; fc < cols.Count; fc = fc + 1) {
+                if (cols[fc].formula != st.formulaSeen[fc]) { fdirty = true; fc = cols.Count; }
+            }
+        }
+        if (fdirty) {
+            if (st.formulaSeen == null) { st.formulaSeen = new List<string>(); }
+            st.formulaSeen.Clear();
+            for (int fc = 0; fc < cols.Count; fc = fc + 1) { st.formulaSeen.Add(cols[fc].formula); }
+            DataTable.InvalidateFormulaCache();
+        }
         // 新绑定或外部刷新后，键快照必须与当前源重新对齐。
         if (st.rowKeys.Count != src.RowCount()) {
             DataTable.InvalidateData(st);

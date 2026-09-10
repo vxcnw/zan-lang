@@ -291,7 +291,9 @@ partial class DataTable {
                 // 名次（cfRank 与 min/max 同周期重建，下标是过滤
                 // 集合里的显示序）。N 按项数或百分比解释
                 // （cfRankPct），名次并列全部命中（Excel Top N 语义）。
-                int opos = st.order.IndexOf(rowIdx);
+                // 显示序走 ComputeColStats 建的字典 O(1) 查表——
+                // 每格对 st.order 线性查找在大表上是每帧的热点。
+                int opos = DataTable.CfOrderPos(st, rowIdx);
                 if (opos >= 0) {
                     // cfRank 与 cfMin/cfMax 同布局：按列分段
                     // （col 段起点 = col * n），段内下标是过滤

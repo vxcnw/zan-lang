@@ -1272,6 +1272,14 @@ class DataTableState {
     // = 该行在此列过滤集合中的名次（0 起，值相同并列按先见者高）。
     // 与 min/max 同周期重建（Recompute -> ComputeColStats）。
     List<int> cfRank;
+    // 行源索引 -> st.order 显示序，仅当存在 Top/Bottom 规则列时
+    // 维护（ComputeColStats 同周期重建）。渲染的命中判定 O(1)
+    // 查表，替代对 st.order 的逐格线性查找。
+    Dict<int, int> cfOrderPos;
+    // 上一帧 EnsureInit 见到的逐列公式串：只在公式面真的变化时
+    // 作废全局编译缓存（此前每帧无条件作废，稳定列集的应用
+    // 每帧重编译全部表达式）。
+    List<string> formulaSeen;
 
     // ---- 条件格式：右键菜单应用的规则 ----
     // 调用方常每帧重建列（新 DataColumn 实例），菜单 dispatch
@@ -1704,6 +1712,8 @@ class DataTableState {
         this.cfMinR = new List<double>();
         this.cfMaxR = new List<double>();
         this.cfRank = new List<int>();
+        this.cfOrderPos = null;
+        this.formulaSeen = null;
         this.menuCfMode = new List<int>();
         this.menuCfColor = new List<int>();
         this.menuCfColor2 = new List<int>();
