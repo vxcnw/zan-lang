@@ -451,4 +451,40 @@ class Spec {
     /// 一页 6 行 × 3 列（页脚再往下才到底部导航瓦片）。
     static int ShopPerPage() { return 18; }
     static int ShopCols() { return 3; }
+
+    /* ---- 表格页（称谓 25 / 爵位 24 / 排行榜 9 / 图鉴 23 / 交易市场 22 …）----
+       实测（`mir2/mir/称谓.png`，与商店页同一标尺的 150% 设备像素）：
+         · 表格容器 x 374..1490（页内容满宽），上缘 y 164 = **页内容顶**
+           → 表内留白都从页内容顶算，调用方不用再加全局顶距
+         · 容器底 = 格间缝的底色 `#1d2633`，1 设备外框 `#3d4756`
+         · 表头带 167..207（高 41）底色 `#103555`；带**满宽**，带内文字却
+           与数据列同栅格（左内缩 12 设备）——带色铺到左缘、字从 12 起
+         · 12 行数据，行高 45、行缝 4.5（节距 49.6），格子底 `#121f2d`
+         · 列宽（设备）131/123/142/102/93×5/100，列缝 4.5；首列左缘 386
+         · 表格底 811；页脚钮 829..859（高 30、距表底 18） */
+    static int TblHeadTopPad() { return Px(2); }    // 容器顶 → 表头带 3 设备
+    static int TblHeadH() { return Px(27); }        // 表头带高 41 设备
+    static int TblHeadGap() { return Px(4); }       // 表头带 → 首行 6 设备
+    static int TblRowH() { return Px(30); }         // 行高 45 设备
+    static int TblRowGap() { return Px(3); }        // 行缝 4.5 设备
+    static int TblBottomPad() { return Px(4); }     // 末行 → 容器底 6 设备
+    static int TblPadL() { return Px(8); }          // 容器左缘 → 首列 12 设备
+    static int TblColGap() { return Px(3); }        // 列缝 4.5 设备
+    static int TblRows() { return 12; }
+    static int TblCols() { return 10; }
+    /// 第 i 列宽（设备实测 ÷1.5）。
+    static int TblColW(int i) {
+        if (i == 0) { return Px(87); }              // 称谓    131
+        if (i == 1) { return Px(82); }              // 需要声望 123
+        if (i == 2) { return Px(95); }              // 需要金钱 142
+        if (i == 3) { return Px(68); }              // 等级    102
+        if (i == 9) { return Px(67); }              // 领取    100
+        return Px(62);                              // 攻击/魔法/道术/防御/魔防 93
+    }
+    static int TblFootGap() { return Px(12); }      // 表底 → 页脚 18 设备
+    static int TblFootH() { return Px(20); }        // 页脚钮高 30 设备
+    static int TblFootPadL() { return Px(12); }     // 页脚左内缩 18 设备
+    static int TblFootPadR() { return Px(6); }      // 页脚右内缩 9 设备
+    static int TblFootNoteW() { return Px(39); }    // 「说明」钮 59 设备
+    static int TblFootBtnW() { return Px(55); }     // 上一页/下一页 83 设备
 }

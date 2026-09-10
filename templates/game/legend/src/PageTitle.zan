@@ -1,0 +1,116 @@
+using System;
+using Gui;
+using Gui.Widget;
+using Legend;
+
+/// 页 25「称谓」——照原版逐像素还原（`mir2/mir/称谓.png`）。
+///
+/// 10 列 × 12 行：称谓 / 需要声望 / 需要金钱 / 等级 / 攻击 / 魔法 / 道术 /
+/// 防御 / 魔防 / 领取。表头带满宽青字，数据格各自成框（格间缝露出容器
+/// 底色），末列「领取」是深底亮蓝框钮。页脚：左「当前称谓：无」、右
+/// 「说明」钮 + 标准库 Pagination（「上一页 1/21 下一页」）。
+///
+/// 表格本体全部走共享组件 `TableUi.zan`（`TblBox/TblHead/TblRow/
+/// TblActionRow/TblFoot`），本页只提供数据与逐列配色类名。
+///
+/// 配色（原版实测）：称谓橙、声望白、金钱黄、等级青；属性五列各有固定色
+/// （攻击品红 / 魔法蓝 / 道术绿 / 防御黄 / 魔防紫），**值为 `0 - 0` 时统一
+/// 转灰**——原版就是这样把「这一阶还没这项加成」区分出来的。
+partial class LegendApp {
+    /// 表头十列。
+    static List<string> TitleHeads() {
+        List<string> h = new List<string>();
+        h.Add("称谓"); h.Add("需要声望"); h.Add("需要金钱"); h.Add("等级");
+        h.Add("攻击"); h.Add("魔法"); h.Add("道术"); h.Add("防御");
+        h.Add("魔防"); h.Add("领取");
+        return h;
+    }
+
+    /// 属性列配色类名：`0 - 0` 一律灰（原版语义），否则按列取色。
+    static string TitleAttrCls(int col, string val) {
+        if (val == "0 - 0") { return "tbl-attr tbl-zero"; }
+        if (col == 4) { return "tbl-attr tbl-atk"; }
+        if (col == 5) { return "tbl-attr tbl-mag"; }
+        if (col == 6) { return "tbl-attr tbl-tao"; }
+        if (col == 7) { return "tbl-attr tbl-def"; }
+        return "tbl-attr tbl-mdef";
+    }
+
+    void BuildTitlePage() {
+        Panel page0 = Panel.Column(); page0.Class = "tbl-page";
+        page0.Pad(0); page0.Gap(0); page0.Grow(); content.With(page0);
+
+        /* 表格容器上缘 = 页内容顶（原版 164），故不加任何前导留白。 */
+        Panel box = TblBox(); page0.With(box);
+        box.With(TblHead(TitleHeads()));
+
+        Panel headGap = Panel.Row(); headGap.Pad(0);
+        headGap.Prefer(0, Spec.TblHeadGap()); box.With(headGap);
+
+        Panel wall = Panel.Column(); wall.Pad(0); wall.Gap(Spec.TblRowGap());
+        box.With(wall);
+
+        string[] nm = new string[] {
+            "筑基·一阶", "筑基·二阶", "筑基·三阶", "筑基·四阶", "筑基·五阶",
+            "开光·一阶", "开光·二阶", "开光·三阶", "开光·四阶", "开光·五阶",
+            "融合·一阶", "融合·二阶" };
+        string[] fame = new string[] {
+            "100", "1000", "2000", "5000", "1,0000", "1,5000",
+            "2,0000", "5,0000", "8,0000", "11,0000", "14,0000", "17,0000" };
+        string[] gold = new string[] {
+            "10,0000", "50,0000", "100,0000", "200,0000", "300,0000", "400,0000",
+            "500,0000", "1000,0000", "1350,0000", "1700,0000", "2050,0000",
+            "2400,0000" };
+        string[] lvl = new string[] {
+            "1级", "10级", "20级", "30级", "40级", "50级",
+            "60级", "1转10级", "1转20级", "1转30级", "1转40级", "1转50级" };
+        string[] atk = new string[] {
+            "0 - 1", "0 - 1", "0 - 2", "0 - 3", "0 - 4", "0 - 5",
+            "0 - 6", "1 - 7", "1 - 9", "1 - 11", "1 - 13", "1 - 15" };
+        string[] tao = new string[] {
+            "0 - 0", "0 - 1", "0 - 2", "0 - 3", "0 - 4", "0 - 5",
+            "0 - 6", "1 - 7", "1 - 9", "1 - 11", "1 - 13", "1 - 15" };
+        string[] def = new string[] {
+            "0 - 0", "0 - 0", "0 - 1", "0 - 2", "0 - 3", "0 - 4",
+            "0 - 5", "1 - 6", "1 - 7", "1 - 8", "1 - 9", "1 - 10" };
+        string[] mdef = new string[] {
+            "0 - 0", "0 - 0", "0 - 0", "0 - 1", "0 - 2", "0 - 3",
+            "0 - 4", "1 - 5", "1 - 6", "1 - 7", "1 - 8", "1 - 9" };
+
+        for (int r = 0; r < Spec.TblRows(); r = r + 1) {
+            List<string> cells = new List<string>();
+            cells.Add(nm[r]); cells.Add(fame[r]); cells.Add(gold[r]);
+            cells.Add(lvl[r]); cells.Add(atk[r]); cells.Add(atk[r]);
+            cells.Add(tao[r]); cells.Add(def[r]); cells.Add(mdef[r]);
+            List<string> cls = new List<string>();
+            cls.Add("tbl-c0"); cls.Add("tbl-c1"); cls.Add("tbl-c2");
+            cls.Add("tbl-c3");
+            cls.Add(TitleAttrCls(4, atk[r]));
+            cls.Add(TitleAttrCls(5, atk[r]));
+            cls.Add(TitleAttrCls(6, tao[r]));
+            cls.Add(TitleAttrCls(7, def[r]));
+            cls.Add(TitleAttrCls(8, mdef[r]));
+            int row = r;
+            wall.With(TblActionRow(cells, cls, r, "领取", "tbl-btn",
+                                   () => { TitleClaim(row); }));
+        }
+        box.With(TblPad(Spec.TblBottomPad()));
+
+        Panel footGap = Panel.Row(); footGap.Pad(0);
+        footGap.Prefer(0, Spec.TblFootGap()); page0.With(footGap);
+
+        SignalInt pgSig = new SignalInt(1);
+        Pagination pg = new Pagination(21, pgSig);
+        pg.Class = "simple";
+        pg.PrevText("上一页"); pg.NextText("下一页");
+        pg.Named("title-pager");
+        page0.With(TblFoot(TblFootNote("当前称谓：", "无", "tbl-note-v"), pg));
+    }
+
+    /// 「领取」钮：尚未接玩法，按本模板惯例给明确反馈（不假装已实现）。
+    void TitleClaim(int row) {
+        string msg = "领取称谓：" + Rules.N(row + 1) + " 阶";
+        if (net.Self() != null) { net.AddChat("[系统]", msg); return; }
+        g.Log(msg);
+    }
+}

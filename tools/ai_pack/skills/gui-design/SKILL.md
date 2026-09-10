@@ -254,6 +254,20 @@ CSS 里非 token 的长度由 `Style.ScaleLayout` 补乘,`StyleBox.IsPrescaled`
    所以「页脚之下那条底缝」要在页脚之前 Add。实证(商店页):页脚原本落在
    卡阵下 15 设备处，改 DockBottom 后才回到页底。
 
+10. **流式容器里要手摆一个子项，必须 `Add()` + `DockManual()` + `Place()`，
+    不能用 `With()` 再指望 `Place()` 生效**。`With()` 在 `Panel.Row()/Column()`
+    里会按容器方向重设 `dock`（Row→3 左停靠、Column→1 上停靠），子项于是被
+    摆到流的位置上，`Place()` 的坐标被忽略——实证（称谓页）「领取」钮本来要
+    在格子里居中，用 `With()` 后贴在格子左边还拉满高；改成
+    `b.DockManual(); b.Place(dx, dy); box.Add(b);` 才落回量出来的位置。
+    注意 `DockManual()` 是 `dock = 0`，容器只在 `dock==0` 分支读 `mx/my`，
+    所以这条也意味着**这个子项退出了自动流**，尺寸要自己给（`Prefer`）。
+11. **控件默认对齐/尺寸跟原图不一致时，先改皮肤规则，不回去自绘也不在手摆里
+    凑**。两个实测：`Label` 默认**左对齐**，表头/数据格要居中得写
+    `text-align: center`；stdlib `Pagination` 默认吃 `heightMedium`（34 逻辑），
+    比原图的页码条高一截，用一条 `pagination { height: 20; font-size: 12; }`
+    压回去。皮肤按类名全局生效，比在每个使用处补坐标稳。
+
 这两道闸门随工具链走:安装版 SDK 是发布时刻的冻结副本——早于 2026-09-09
 的安装里没有它们,环境变量静默无效(skill 跑在工具链前面时先查工具链日期,
 如安装目录 zanc.exe/stdlib 的时间戳)。正确动作是升级工具链后用内建闸门;
