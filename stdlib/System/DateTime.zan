@@ -162,6 +162,28 @@ class DateTime {
         return era * 146097 + doe - 719468;
     }
 
+    /// <summary>
+    /// <see cref="DaysFromCivil"/> 的逆运算：把 Unix 纪元天序换算回公历年月日。
+    /// 结果按 <paramref name="year"/>/<paramref name="month"/>/<paramref name="day"/>
+    /// 三个 out 参数返回（1970 年之前的天序为负，同样成立）。
+    /// </summary>
+    static void CivilFromDays(int days, out int year, out int month, out int day) {
+        int z = days + 719468;
+        int era = FloorDiv(z, 146097);
+        int doe = z - era * 146097;                          // 0..146096
+        int yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        int y = yoe + era * 400;
+        int doy = doe - (365 * yoe + yoe / 4 - yoe / 100);   // 0..365
+        int mp = (5 * doy + 2) / 153;                        // 0..11
+        int d = doy - (153 * mp + 2) / 5 + 1;                // 1..31
+        int m = mp + 3;
+        if (mp >= 10) { m = mp - 9; }
+        if (m <= 2) { y = y + 1; }
+        year = y;
+        month = m;
+        day = d;
+    }
+
     /// <summary><paramref name="year"/> 年 <paramref name="month"/> 月的天数。</summary>
     static int DaysInMonth(int year, int month) {
         if (month < 1 || month > 12) { return 0; }

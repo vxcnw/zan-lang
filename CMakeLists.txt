@@ -2093,6 +2093,23 @@ if(ZAN_BUILD_GUI_TESTS AND ZAN_GUI_AVAILABLE)
       -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_chart_theme${_exe_ext}
       -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
 
+  # calendar 坐标系回归（此前"整类零实现"：10 个官方 calendar 示例在
+  # 注册表里挂着但渲染全空）。覆盖分发（option.calendar[] -> kind
+  # "calendar"）、range 归一化（整年/整月/单日/数组）、orient/cellSize/
+  # firstDay、子系列（heatmap/scatter/effectScatter/graph/pie/custom）
+  # 的日期落格与上色。读到 examples/gui_charts/options/ 的官方 option，
+  # 故 WORKDIR 给源树根、argv[0] 给 options 目录（用例内支持两种调用）。
+  add_test(NAME conformance_gui_chart_calendar
+    COMMAND ${CMAKE_COMMAND}
+      -DZANC=$<TARGET_FILE:zanc>
+      -DSRC=${CMAKE_SOURCE_DIR}/tests/gui/chart_calendar_test.zan
+      "-DZANC_ARGS=--auto-stdlib${_gui_driver_tail}"
+      -DEXPECTED=${CMAKE_SOURCE_DIR}/tests/conformance/gui_chart_calendar.out
+      -DOUT_EXE=${CMAKE_BINARY_DIR}/conf_gui_chart_calendar${_exe_ext}
+      -DRUN_ARGS=${CMAKE_SOURCE_DIR}/examples/gui_charts/options
+      -DWORKDIR=${CMAKE_SOURCE_DIR}
+      -P ${CMAKE_SOURCE_DIR}/tests/run_case.cmake)
+
   # 堆叠面积带边界亚像素 AA 回归（用户报告 Line4 条带边缘毛刺）：
   # 带边界此前用整数 YOf 计算并被量化到整行，FillBandFx 的亚像素
   # 光栅化拿不到 1/256 精度，缓坡每列硬跳一行成阶梯锯齿。修复后

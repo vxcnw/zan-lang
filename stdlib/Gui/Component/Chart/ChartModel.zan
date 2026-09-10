@@ -165,6 +165,9 @@ class ChartData {
                               //   的逐柱颜色、bar-stack-borderRadius 的逐柱
                               //   圆角）；null = 跟随系列 itemStyle。渲染器
                               //   只读 normal 态，读前须判空。
+    int calDay;       // calendar 坐标系：该项的日期（1970 起天序）；-1 = 无
+                      //   （series.coordinateSystem == "calendar" 时由解析器
+                      //   从 [[日期串,值],...] 或 {value:[日期串,值]} 解出）
 
     /// 以整数值构造数据点（名称空、继承系列色、不隐藏、无逐项尺寸）。
     static ChartData Of(int v) {
@@ -182,6 +185,7 @@ class ChartData {
         d.symbol = "";
         d.labelText = "";
         d.labelSide = 0;
+        d.calDay = 0 - 1;
         return d;
     }
 
@@ -237,6 +241,7 @@ class ChartData {
         d.selected = src.selected; d.size = src.size; d.sizeSet = src.sizeSet;
         d.gap = src.gap; d.symbol = src.symbol;
         d.labelText = src.labelText; d.labelSide = src.labelSide;
+        d.calDay = src.calDay;
         d.itemStyle = ChartItemStyle.Clone(src.itemStyle);
         return d;
     }
@@ -1431,7 +1436,14 @@ class ChartSeries {
     List<string> graphCats; // graph categories 名称表（图例 + 类别调色板）
     string coordSys;      // ECharts series.coordinateSystem："geo" = 地理坐标
                           //   （散点/lines/graph 系列叠加在地图底图上）；
+                          //   "calendar" = 日历坐标（日期落在日历格）；
                           //   "" = 直角/默认坐标系
+    int calIndex;         // series.calendarIndex（coordSys == "calendar" 的目标日历）
+    int calCenter;        // calendar 坐标系下 pie.center 的日期（1970 起天序）；-1 = 未给
+    string typeName;      // 原始 ECharts type 字符串（"effectScatter"/"graph"/
+                          //   "candlestick"..."）。ChartType 是粗粒度归并
+                          //   （effectScatter->Scatter、graph->Force），
+                          //   渲染器需要细分时读它。
     List<List<ChartPoint>> geoLines; // lines(coordSys=geo)：每项一条折线
                                      //   （coords 0.01° 定点，y = -lat×100）
 
@@ -1545,6 +1557,9 @@ class ChartSeries {
         s.nodeY = new List<int>();
         s.graphCats = new List<string>();
         s.coordSys = "";
+        s.calIndex = 0;
+        s.calCenter = 0 - 1;
+        s.typeName = "";
         s.geoLines = new List<List<ChartPoint>>();
         s.gauge = GaugeOption.Create();
         return s;
@@ -1974,6 +1989,9 @@ class ChartSeries {
         s.labelRotate = src.labelRotate;
         s.graphLayout = src.graphLayout;
         s.coordSys = src.coordSys;
+        s.calIndex = src.calIndex;
+        s.calCenter = src.calCenter;
+        s.typeName = src.typeName;
         if (shareData) {
             // 阶段 B：渲染帧对数据集合只读，直接共享引用（scatter-large
             // /scatter-weibo 的逐项克隆税由此归零）。写方（图例态
@@ -2239,6 +2257,7 @@ class ChartOption {
     List<ChartAxis> yAxes;
     List<ChartSeries> series;
     List<ChartGeo> geos;   // ECharts geo 组件（底图地图，可多个）
+    List<ChartCalendarSpec> calendars; // ECharts calendar[]（日历坐标系）
     List<ChartParAxis> parAxes; // ECharts parallelAxis[]（平行坐标维）
     // parallel 组件：layout 命名轴的"排布方向"——'vertical'（轴自上
     // 而下堆叠，每根轴横置，nutrients 官方图）| 'horizontal'（轴从
@@ -2417,6 +2436,10 @@ class ChartOption {
         for (int gci = 0; gci < src.geos.Count; gci = gci + 1) {
             o.geos.Add(ChartGeo.Clone(src.geos[gci]));
         }
+        o.calendars = new List<ChartCalendarSpec>();
+        for (int cai = 0; cai < src.calendars.Count; cai = cai + 1) {
+            o.calendars.Add(src.calendars[cai]);
+        }
         o.parAxes = new List<ChartParAxis>();
         for (int pai = 0; pai < src.parAxes.Count; pai = pai + 1) {
             o.parAxes.Add(ChartParAxis.Clone(src.parAxes[pai]));
@@ -2442,6 +2465,7 @@ class ChartOption {
         o.yAxes = new List<ChartAxis>();
         o.series = new List<ChartSeries>();
         o.geos = new List<ChartGeo>();
+        o.calendars = new List<ChartCalendarSpec>();
         o.parAxes = new List<ChartParAxis>();
         o.parLayout = "";
         o.defaultType = ChartType.Line;
@@ -3700,6 +3724,299 @@ class ChartOption {
         return ts;
     }
 
+    /// calendar 单项。range 归一化到天序区间，cellSize 归一化到 cellW/cellH
+    /// （-1 = auto）；显式 width/height 或 left+right / top+bottom 会把对应
+    /// 维强制 auto（官方 mergeAndNormalizeLayoutParams 的 sizeCalculable）。
+    static ChartCalendarSpec ParseCalendarOne(JsonValue it) {
+        ChartCalendarSpec c = ChartCalendarSpec.Of();
+        c.vertical = it.Str("orient", "horizontal") == "vertical";
+
+        // ---- range ----
+        JsonValue rv = it.Get("range");
+        if (rv != null) {
+            string rs0 = "";
+            string rs1 = "";
+            bool isArr = rv.IsArray();
+            if (isArr) {
+                if (rv.Count() > 0) { rs0 = rv.At(0).AsString(""); }
+                if (rv.Count() > 1) { rs1 = rv.At(1).AsString(""); }
+                else { rs1 = rs0; }
+            } else {
+                rs0 = rv.AsString("");
+                rs1 = rs0;
+            }
+            int t0 = ChartOption.ParseDateDay(rs0, 0 - 1);
+            int t1 = t0;
+            if (!isArr && ChartOption.IsYearOnly(rs0)) {
+                // "2017" -> 整年（官方 _initRangeOption）
+                int yy = Convert.ToInt(rs0);
+                t0 = DateTime.DaysFromCivil(yy, 1, 1);
+                t1 = DateTime.DaysFromCivil(yy, 12, 31);
+            } else if (!isArr && ChartOption.IsYearMonthOnly(rs0)) {
+                // "2017-2" -> 整月
+                int sl = rs0.IndexOf("-");
+                if (sl < 0) { sl = rs0.IndexOf("/"); }
+                int yy = Convert.ToInt(rs0.Substring(0, sl));
+                int mm = Convert.ToInt(rs0.Substring(sl + 1));
+                if (mm < 1) { mm = 1; }
+                if (mm > 12) { mm = 12; }
+                t0 = DateTime.DaysFromCivil(yy, mm, 1);
+                t1 = DateTime.DaysFromCivil(yy, mm,
+                                            DateTime.DaysInMonth(yy, mm));
+            } else if (isArr && rs1 != rs0) {
+                t1 = ChartOption.ParseDateDay(rs1, t0);
+                // 数组两端也允许缩写（["2017-02","2017-03-31"] 的左端）
+                if (ChartOption.IsYearOnly(rs0)) {
+                    int yy = Convert.ToInt(rs0);
+                    t0 = DateTime.DaysFromCivil(yy, 1, 1);
+                } else if (ChartOption.IsYearMonthOnly(rs0)) {
+                    int sl = rs0.IndexOf("-");
+                    if (sl < 0) { sl = rs0.IndexOf("/"); }
+                    int yy = Convert.ToInt(rs0.Substring(0, sl));
+                    int mm = Convert.ToInt(rs0.Substring(sl + 1));
+                    if (mm < 1) { mm = 1; }
+                    if (mm > 12) { mm = 12; }
+                    t0 = DateTime.DaysFromCivil(yy, mm, 1);
+                }
+            }
+            if (t0 >= 0 && t1 >= 0) {
+                if (t0 <= t1) { c.rangeT0 = t0; c.rangeT1 = t1; }
+                else { c.rangeT0 = t1; c.rangeT1 = t0; }
+            }
+        }
+
+        // ---- 盒模型锚（官方默认 left 80 / top 60）----
+        // 支持三种形态：
+        //   数值 / 数字串      -> 边距像素（hasXxx = true, xxxCenter = false）
+        //   "center"/"middle"  -> 该维居中（xxxCenter = true，渲染器算偏移）
+        //   "N%"               -> 本引擎按未声明处理（回落默认锚）
+        string[] anks = new string[] { "left", "right", "top", "bottom" };
+        for (int ai = 0; ai < anks.Length; ai = ai + 1) {
+            if (!it.Has(anks[ai])) { continue; }
+            JsonValue av = it.Get(anks[ai]);
+            int ax = 0 - 1;
+            bool isCenter = false;
+            if (av != null && av.IsNumber()) { ax = av.AsInt(0 - 1); }
+            else if (av != null && av.IsString()) {
+                string sv = av.AsString("");
+                if (sv == "center" || sv == "middle") { isCenter = true; }
+                else if (sv.EndsWith("%")) { continue; }
+                else if (!ChartOption.AllDigits(sv)) { continue; }
+                else { ax = Convert.ToInt(sv); }
+            }
+            if (!isCenter && ax < 0) { continue; }
+            if (anks[ai] == "left") {
+                if (isCenter) { c.leftCenter = true; }
+                else { c.leftPx = ax; c.hasLeft = true; }
+            } else if (anks[ai] == "right") {
+                if (isCenter) { c.rightCenter = true; }
+                else { c.rightPx = ax; c.hasRight = true; }
+            } else if (anks[ai] == "top") {
+                if (isCenter) { c.topCenter = true; }
+                else { c.topPx = ax; c.hasTop = true; }
+            } else {
+                if (isCenter) { c.bottomCenter = true; }
+                else { c.bottomPx = ax; c.hasBottom = true; }
+            }
+        }
+        if (it.Has("width")) {
+            JsonValue wv = it.Get("width");
+            if (wv != null && wv.IsNumber()) { c.widthPx = wv.AsInt(0 - 1); }
+        }
+        if (it.Has("height")) {
+            JsonValue hv = it.Get("height");
+            if (hv != null && hv.IsNumber()) { c.heightPx = hv.AsInt(0 - 1); }
+        }
+
+        // ---- cellSize（官方默认 20；数字 -> 两维同；数组 -> [w,h]）----
+        JsonValue cv = it.Get("cellSize");
+        int cw = 0 - 1;
+        int chh = 0 - 1;
+        if (cv != null && cv.IsArray()) {
+            cw = ChartOption.CellSizeOf(cv.At(0));
+            if (cv.Count() > 1) { chh = ChartOption.CellSizeOf(cv.At(1)); }
+            else { chh = cw; }
+        } else if (cv != null) {
+            cw = ChartOption.CellSizeOf(cv);
+            chh = cw;
+        } else {
+            cw = 20; chh = 20;
+        }
+        // sizeCalculable：显式 width/height 或 left+right / top+bottom 时该维 auto
+        if (c.widthPx >= 0 || (c.hasLeft && c.hasRight)) { cw = 0 - 1; }
+        if (c.heightPx >= 0 || (c.hasTop && c.hasBottom)) { chh = 0 - 1; }
+        c.cellW = cw;
+        c.cellH = chh;
+
+        // ---- itemStyle ----
+        JsonValue isv = it.Get("itemStyle");
+        if (isv != null && isv.IsObject()) {
+            if (isv.Has("borderWidth")) {
+                JsonValue bwv = isv.Get("borderWidth");
+                if (bwv != null && bwv.IsNumber()) { c.itemBorderWidth = bwv.AsInt(0); }
+            }
+            c.itemColor = ChartOption.ParseColor(isv.Get("color"), 0);
+            c.itemBorderColor = ChartOption.ParseColor(isv.Get("borderColor"), 0);
+        }
+
+        // ---- splitLine ----
+        JsonValue slv = it.Get("splitLine");
+        if (slv != null && slv.IsObject()) {
+            c.showSplitLine = slv.Bool("show", true);
+            JsonValue lsv = slv.Get("lineStyle");
+            if (lsv != null && lsv.IsObject()) {
+                c.splitColor = ChartOption.ParseColor(lsv.Get("color"), 0);
+                JsonValue swv = lsv.Get("width");
+                if (swv != null && swv.IsNumber()) { c.splitWidth = swv.AsInt(1); }
+            }
+        }
+
+        // ---- dayLabel / monthLabel / yearLabel ----
+        JsonValue dl = it.Get("dayLabel");
+        if (dl != null && dl.IsObject()) {
+            c.showDayLabel = dl.Bool("show", true);
+            c.dayMargin = dl.Int("margin", c.dayMargin);
+            c.dayPos = dl.Str("position", c.dayPos);
+            c.dayFirstDay = dl.Int("firstDay", c.dayFirstDay);
+            c.dayNameMap = ChartOption.NameMapOf(dl.Get("nameMap"));
+            c.dayColor = ChartOption.ParseColor(dl.Get("color"), 0);
+            c.dayFontSize = ChartOption.FontSizeOf(dl.Get("fontSize"), c.dayFontSize);
+        }
+        JsonValue ml = it.Get("monthLabel");
+        if (ml != null && ml.IsObject()) {
+            c.showMonthLabel = ml.Bool("show", true);
+            c.monthMargin = ml.Int("margin", c.monthMargin);
+            c.monthPos = ml.Str("position", c.monthPos);
+            c.monthAlign = ml.Str("align", c.monthAlign);
+            c.monthNameMap = ChartOption.NameMapOf(ml.Get("nameMap"));
+            c.monthColor = ChartOption.ParseColor(ml.Get("color"), 0);
+            c.monthFontSize = ChartOption.FontSizeOf(ml.Get("fontSize"), c.monthFontSize);
+        }
+        JsonValue yl = it.Get("yearLabel");
+        if (yl != null && yl.IsObject()) {
+            c.showYearLabel = yl.Bool("show", true);
+            c.yearMargin = yl.Int("margin", c.yearMargin);
+            c.yearPos = yl.Str("position", c.yearPos);
+            c.yearFormatter = yl.Str("formatter", c.yearFormatter);
+            c.yearColor = ChartOption.ParseColor(yl.Get("color"), 0);
+            c.yearFontSize = ChartOption.FontSizeOf(yl.Get("fontSize"), c.yearFontSize);
+        }
+        return c;
+    }
+
+    /// 解析 calendar（对象或数组，逐项调 ParseCalendarOne）。
+    static void ParseCalendar(JsonValue v, ChartOption o) {
+        if (v == null) { return; }
+        if (v.IsArray()) {
+            for (int i = 0; i < v.Count(); i = i + 1) {
+                if (v.At(i) != null && v.At(i).IsObject()) {
+                    o.calendars.Add(ChartOption.ParseCalendarOne(v.At(i)));
+                }
+            }
+            return;
+        }
+        if (v.IsObject()) { o.calendars.Add(ChartOption.ParseCalendarOne(v)); }
+    }
+
+    /// cellSize 单项：数字 -> 值（<=0 视作 auto）；"auto"/其它 -> -1。
+    static int CellSizeOf(JsonValue v) {
+        if (v == null) { return 0 - 1; }
+        if (v.IsNumber()) {
+            int px = v.AsInt(0 - 1);
+            if (px <= 0) { return 0 - 1; }
+            return px;
+        }
+        return 0 - 1;
+    }
+
+    /// nameMap：字符串（"cn"）原样；数组 -> 逗号拼接；其它 -> ""。
+    static string NameMapOf(JsonValue v) {
+        if (v == null) { return ""; }
+        if (v.IsString()) { return v.AsString(""); }
+        if (!v.IsArray()) { return ""; }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < v.Count(); i = i + 1) {
+            if (i > 0) { sb.Append(","); }
+            sb.Append(v.At(i).AsString(""));
+        }
+        return sb.ToString();
+    }
+
+    /// fontSize 解析：数字取整；数字字符串也接受；否则 dflt。
+    static int FontSizeOf(JsonValue v, int dflt) {
+        if (v == null) { return dflt; }
+        if (v.IsNumber()) { return v.AsInt(dflt); }
+        if (v.IsString()) {
+            string sv = v.AsString("");
+            if (ChartOption.AllDigits(sv)) { return Convert.ToInt(sv); }
+        }
+        return dflt;
+    }
+
+    /// "2017" / "2017-02" / "2017/2/1" / "2017-02-01" -> 天序；
+    /// 无法解析 -> dflt。也接受纯天序数字（官方允许 time 数值）。
+    static int ParseDateDay(string s, int dflt) {
+        if (s == "") { return dflt; }
+        int dash = s.IndexOf("-");
+        if (dash < 0) { dash = s.IndexOf("/"); }
+        if (dash < 0) {
+            if (!ChartOption.AllDigits(s)) { return dflt; }
+            return Convert.ToInt(s);
+        }
+        if (!ChartOption.AllDigits(s.Substring(0, dash))) { return dflt; }
+        int y = Convert.ToInt(s.Substring(0, dash));
+        int rest = dash + 1;
+        int dash2 = s.IndexOf("-", rest);
+        if (dash2 < 0) { dash2 = s.IndexOf("/", rest); }
+        int mo = 1;
+        int da = 1;
+        if (dash2 < 0) {
+            if (!ChartOption.AllDigits(s.Substring(rest))) { return dflt; }
+            mo = Convert.ToInt(s.Substring(rest));
+        } else {
+            string ms = s.Substring(rest, dash2 - rest);
+            string ds = s.Substring(dash2 + 1);
+            if (!ChartOption.AllDigits(ms) || !ChartOption.AllDigits(ds)) {
+                return dflt;
+            }
+            mo = Convert.ToInt(ms);
+            da = Convert.ToInt(ds);
+        }
+        if (mo < 1) { mo = 1; }
+        if (mo > 12) { mo = 12; }
+        if (da < 1) { da = 1; }
+        int dim = DateTime.DaysInMonth(y, mo);
+        if (da > dim) { da = dim; }
+        return DateTime.DaysFromCivil(y, mo, da);
+    }
+
+    /// range 字符串形如 "2017"（4 位纯年）。
+    static bool IsYearOnly(string s) {
+        if (s.Length != 4) { return false; }
+        return ChartOption.AllDigits(s);
+    }
+
+    /// range 字符串形如 "2017-2" / "2017/02"（年月，无日）。
+    static bool IsYearMonthOnly(string s) {
+        int dash = s.IndexOf("-");
+        if (dash < 0) { dash = s.IndexOf("/"); }
+        if (dash <= 0) { return false; }
+        if (s.IndexOf("-", dash + 1) >= 0) { return false; }
+        if (s.IndexOf("/", dash + 1) >= 0) { return false; }
+        return ChartOption.AllDigits(s.Substring(0, dash))
+            && ChartOption.AllDigits(s.Substring(dash + 1));
+    }
+
+    /// 全数字串（非空）。
+    static bool AllDigits(string s) {
+        if (s.Length == 0) { return false; }
+        for (int i = 0; i < s.Length; i = i + 1) {
+            char ch = s[i];
+            if (ch < '0' || ch > '9') { return false; }
+        }
+        return true;
+    }
+
     /// grid 数组单项：四边 inset 解析（数字 px / "N%" pct）。
     static ChartGridSpec ParseGridOne(JsonValue it) {
         ChartGridSpec gs = ChartGridSpec.Of();
@@ -4231,6 +4548,7 @@ class ChartOption {
         // ECharts geo 组件：底图地图（对象或数组），系列解析后
         // 由合成块挂载。
         ChartOption.ParseGeo(v.Get("geo"), o);
+        ChartOption.ParseCalendar(v.Get("calendar"), o);
         ChartOption.ParseParAxes(v.Get("parallelAxis"), o);
         // parallel 组件块：layout 命名轴排布方向（'vertical' = 轴横
         // 置自上而下堆叠，nutrients 官方图；'horizontal'/缺省 = 既有
@@ -4256,6 +4574,7 @@ class ChartOption {
                 ChartSeries cs = ChartSeries.Of(s.Str("name", ""),
                     ChartKinds.TypeOf(sty), new List<int>());
                 cs.custom = ChartKinds.CustomOf(sty);
+                cs.typeName = sty;
                 cs.selectedMode = ChartKinds.SelectedModeSanitize(
                     s.Str("selectedMode", ""));
                 cs.mapName = s.Str("map", "");
@@ -4263,6 +4582,22 @@ class ChartOption {
                 // coordinateSystem:"geo"（散点/lines/graph 叠加地图）。
                 string csys = s.Str("coordinateSystem", "");
                 if (csys == "geo") { cs.coordSys = "geo"; }
+                // coordinateSystem:"calendar"（calendar-heatmap/scatter/
+                // graph/pie 叠加日历）。calendarIndex 选目标日历。
+                if (csys == "calendar") {
+                    cs.coordSys = "calendar";
+                    cs.calIndex = s.Int("calendarIndex", 0);
+                    // pie.center 在 calendar 坐标系下是日期串（"2017-02-01"）
+                    // 而非 [x,y] 坐标，ParsePoint 的解不出像素，改存 calDay。
+                    if (cs.type == ChartType.Pie) {
+                        JsonValue ctr = s.Get("center");
+                        if (ctr != null && ctr.IsString()) {
+                            int cdd = ChartOption.ParseDateDay(ctr.AsString(""), 0 - 1);
+                            if (cdd < 0) { cdd = ChartOption.TimeDayOf(ctr); }
+                            if (cdd >= 0) { cs.calCenter = cdd; }
+                        }
+                    }
+                }
                 if (cs.custom == "pictorialBar") {
                     JsonValue psm = s.Get("symbol");
                     if (psm != null && psm.IsString()) {
@@ -4575,8 +4910,11 @@ class ChartOption {
                         JsonValue it = da.At(j);
                         int xai = cs.axisIndex < o.xAxes.Count
                             ? cs.axisIndex : 0;
-                        bool timePair = o.xAxes.Count > 0
-                            && o.xAxes[xai].type == ChartAxisType.Time;
+                        // calendar 坐标系没有直角轴，但 series.data 同样是
+                        // [[日期串, 值],...] 形态，必须走时间值对通道。
+                        bool timePair = (o.xAxes.Count > 0
+                            && o.xAxes[xai].type == ChartAxisType.Time)
+                            || cs.coordSys == "calendar";
                         if (it.IsArray() && it.Count() >= 2) {
                             // K 线四元裸数组 [open,high,low,close]（可带
                             // 第 5 位 itemStyle 对象）：进 candles。此前
@@ -4619,6 +4957,19 @@ class ChartOption {
                                     double dv2 = it.At(1).AsDouble(0.0);
                                     cs.points.Add(ChartPoint.Of(td,
                                         (int)(dv2 >= 0 ? dv2 + 0.5 : dv2 - 0.5)));
+                                    // calendar：同一对也进 data（日历渲染器
+                                    // 按 data 逐日取色，heat/pie 两用）。
+                                    if (cs.coordSys == "calendar") {
+                                        ChartData cd2 = ChartData.Numeric(dv2);
+                                        cd2.calDay = td;
+                                        // 第 3 元是官方 lunar 示例的农历日名
+                                        // （["2017-1-1", 1, "初四", null]），
+                                        // 直接当逐项 label 文本用。
+                                        if (it.Count() >= 3 && it.At(2).IsString()) {
+                                            cd2.labelText = it.At(2).AsString("");
+                                        }
+                                        cs.data.Add(cd2);
+                                    }
                                 }
                             } else {
                                 cs.points.Add(ChartPoint.Of(
@@ -4643,6 +4994,17 @@ class ChartOption {
                             item.color = it.Int("color", 0);
                             item.hidden = it.Bool("hidden", item.hidden);
                             item.selected = it.Bool("selected", item.selected);
+                            // calendar + 对象项（calendar-graph 的节点 /
+                            // calendar-pie 的扇区）：value 是 [日期串, 值]，
+                            // 日期进 calDay 供日历布局定位。
+                            if (timePair && cs.coordSys == "calendar"
+                                && vv != null && vv.IsArray() && vv.Count() >= 1) {
+                                int cdd = ChartOption.TimeDayOf(vv.At(0));
+                                if (cdd < 0) {
+                                    cdd = ChartOption.ParseDateDay(vv.At(0).AsString(""), 0 - 1);
+                                }
+                                if (cdd >= 0) { item.calDay = cdd; }
+                            }
                             if (it.Has("symbolSize")) {
                                 item.size = it.Int("symbolSize", 0);
                                 item.sizeSet = true;
@@ -5119,6 +5481,14 @@ class ChartOption {
                         }
                     }
                 }
+                // 全部子系列解析完后：calendar 坐标系的系列若数据项自身不带
+                // 日期（calendar-pie 的 {name,value}），统一落到系列的
+                // calCenter（即 pie.center 的日期），否则渲染器无处定位。
+                if (cs.coordSys == "calendar" && cs.calCenter >= 0) {
+                    for (int q = 0; q < cs.data.Count; q = q + 1) {
+                        if (cs.data[q].calDay < 0) { cs.data[q].calDay = cs.calCenter; }
+                    }
+                }
                 o.series.Add(cs);
             }
         }
@@ -5309,6 +5679,69 @@ class ChartTitleSpec {
         t.leftPct = 0 - 1; t.leftPx = 0 - 1;
         t.align = "";
         return t;
+    }
+}
+
+/// ECharts calendar 坐标系的一项（calendar 可为对象或数组）。
+/// 语义（官方 CalendarModel.defaultOption + Calendar.ts + CalendarView.ts）：
+///   range    : "2017"（整年）| "2017-02"（整月）| "2017-02-01"（单日）
+///              | ["起点","终点"]
+///   orient   : "horizontal"（默认，周为行、横向排月）|
+///              "vertical"（周为列、纵向排月）
+///   cellSize : 20（两维同）| [w,h]，任一维可为 "auto"（按容器等分）；
+///              显式声明 width/height 或 left+right 时该维强制 auto
+///   left/top : 官方默认 80 / 60（不是 0）
+///   dayLabel/monthLabel/yearLabel : 刻度文字
+/// 日期一律存成 1970-01-01 起的天序（负值 = 之前），与时间轴同基准。
+class ChartCalendarSpec {
+    int rangeT0;        // 起始天序
+    int rangeT1;        // 结束天序（含）
+    bool vertical;      // orient == "vertical"
+    int cellW;          // 单元格宽 px；-1 = auto（按容器等分）
+    int cellH;          // 单元格高 px；-1 = auto
+    int leftPx; int rightPx; int topPx; int bottomPx;
+    bool hasLeft; bool hasRight; bool hasTop; bool hasBottom;
+    bool leftCenter; bool rightCenter; bool topCenter; bool bottomCenter;
+    int widthPx; int heightPx;   // 显式 width/height（-1 = 未声明）
+
+    // ---- 三种刻度文字（官方默认全部 show:true）----
+    bool showDayLabel;    int dayMargin;    string dayPos;    // "start"/"end"
+    int dayFirstDay;      string dayNameMap;  int dayColor;   int dayFontSize;
+    bool showMonthLabel;  int monthMargin;  string monthPos;  string monthAlign;
+    string monthNameMap;  int monthColor;   int monthFontSize;
+    bool showYearLabel;   int yearMargin;   string yearPos;
+    string yearFormatter; int yearColor;    int yearFontSize;
+
+    // ---- 网格/格线 ----
+    bool showSplitLine;   int splitColor;   int splitWidth;
+    int itemColor;        int itemBorderWidth; int itemBorderColor;
+
+    static ChartCalendarSpec Of() {
+        ChartCalendarSpec c = new ChartCalendarSpec();
+        c.rangeT0 = 0; c.rangeT1 = 0;
+        c.vertical = false;
+        c.cellW = 0 - 1; c.cellH = 0 - 1;
+        // 官方 CalendarModel.defaultOption: left 80, top 60
+        c.leftPx = 80; c.rightPx = 0 - 1; c.topPx = 60; c.bottomPx = 0 - 1;
+        c.hasLeft = true; c.hasRight = false; c.hasTop = true; c.hasBottom = false;
+        c.leftCenter = false; c.rightCenter = false;
+        c.topCenter = false; c.bottomCenter = false;
+        c.widthPx = 0 - 1; c.heightPx = 0 - 1;
+
+        // dayLabel: show true, margin size.s=10, position "start", firstDay 0
+        c.showDayLabel = true; c.dayMargin = 10; c.dayPos = "start";
+        c.dayFirstDay = 0; c.dayNameMap = ""; c.dayColor = 0; c.dayFontSize = 12;
+        // monthLabel: show true, margin 10, position "start", align "center"
+        c.showMonthLabel = true; c.monthMargin = 10; c.monthPos = "start";
+        c.monthAlign = "center"; c.monthNameMap = ""; c.monthColor = 0;
+        c.monthFontSize = 12;
+        // yearLabel: show true, margin size.xl=30, position null（按 orient 推）
+        c.showYearLabel = true; c.yearMargin = 30; c.yearPos = "";
+        c.yearFormatter = ""; c.yearColor = 0; c.yearFontSize = 20;
+
+        c.showSplitLine = true; c.splitColor = 0; c.splitWidth = 1;
+        c.itemColor = 0; c.itemBorderWidth = 1; c.itemBorderColor = 0;
+        return c;
     }
 }
 

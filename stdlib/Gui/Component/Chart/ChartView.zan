@@ -1046,6 +1046,9 @@ partial class ChartView {
         // 无系列才画空状态。图例关掉最后一条系列时仍按原类型
         // 分发，只是渲染器跳过隐藏序列（坐标轴/图例还在）。
         if (o.series.Count < 1) { return "empty"; }
+        // calendar 坐标系优先于系列类型分发：日历网格是面板骨架，
+        // 子系列（heatmap/scatter/graph/pie）都是叠在格上的装饰。
+        if (o.calendars.Count > 0) { return "calendar"; }
         ChartType t = ChartView.LeadType(o);
         ChartSeries leadS = ChartView.LeadSeries(o);
         if (t == ChartType.Pie && leadS != null && leadS.piePerPoint) {
@@ -1399,6 +1402,8 @@ partial class ChartView {
         Chart.legendBottomReserve = 0;
         if (kind == "pie") {
             ChartView.DrawPie(app, x, y, w, h, option, option.pieLabels, g);
+        } else if (kind == "calendar") {
+            ChartView.DrawCalendar(app, x, y, w, h, option, g);
         } else if (kind == "rose") {
             // 玫瑰图 = pie 系列 + roseType（ECharts2 无独立渲染器）：
             // 与 pie 同一条 DrawPie 路径（roseP 逐扇区半径、逐环

@@ -1,0 +1,278 @@
+using System;
+using System.Json;
+using System.IO;
+using Gui;
+using Gui.Component.Chart;
+
+/// Gui.Component.Chart calendar 坐标系的无窗口回归：官方 10 个
+/// calendar 示例（calendar-simple / heatmap / vertical / horizontal /
+/// graph / lunar / pie / charts / effectscatter / custom-calendar-icon）
+/// 在离屏 Canvas 上的几何与墨迹断言。
+///
+/// 覆盖三块此前"整类零实现"的能力：
+///   1. 分发：option.calendar[] 存在时 kind == "calendar"（日历网格
+///      是面板骨架，优先于 heatmap/scatter/pie 等子系列类型）。
+///   2. 几何：range 归一化（整年/整月/单日）后的天序范围、orient 决定
+///      的格数方向、单元格边长、首格星期偏移。
+///   3. 渲染：日历网格与子系列在画布上确实落墨（非空板）。
+///
+/// 断言全部是几何/定性判断（墨迹存在、范围单调、格数正确），
+/// 不依赖具体字体度量，在 GDI（Windows）与 FreeType（Linux）
+/// 两条栅格化路径上成立。
+class Program {
+    static int fails;
+
+    static void True(string what, bool got) {
+        if (got) { return; }
+        fails = fails + 1;
+        Console.WriteLine("FAIL " + what);
+    }
+
+    static void Eq(string what, int got, int want) {
+        if (got == want) { return; }
+        fails = fails + 1;
+        Console.WriteLine("FAIL " + what + ": got " + Convert.ToString(got)
+            + " want " + Convert.ToString(want));
+    }
+
+    static string optDir = "";
+
+    /// options 目录：优先取 argv[0]（run_case 传源树根，见 CMake 的
+    /// WORKDIR/RUN_ARGS），退化到相对当前目录。
+    static string OptDir() {
+        if (Program.optDir.Length > 0) {
+            if (Program.optDir.EndsWith("/")) { return Program.optDir; }
+            return Program.optDir + "/";
+        }
+        return "examples/gui_charts/options/";
+    }
+
+    static bool Has(string id) {
+        return File.Exists(Program.OptDir() + id + ".json");
+    }
+
+    /// 面板参数与 gallery 一致的离屏画布。
+    static ChartOption Load(string id) {
+        string txt = File.ReadAllText(Program.OptDir() + id + ".json");
+        return ChartOption.FromJson(txt);
+    }
+
+    /// 画布非空：任意像素非纯白即视为有墨。
+    static bool HasInk(Canvas c, int w, int h) {
+        for (int y = 0; y < h; y = y + 1) {
+            for (int x = 0; x < w; x = x + 1) {
+                if ((c.GetPixel(x, y) & 0x00FFFFFF) != 0x00FFFFFF) { return true; }
+            }
+        }
+        return false;
+    }
+
+    /// 统计墨迹像素数与包围盒，用于判断网格铺开范围。
+    static void InkStats(Canvas c, int w, int h,
+                         out int count, out int mnx, out int mny,
+                         out int mxx, out int mxy) {
+        count = 0; mnx = w; mny = h; mxx = 0 - 1; mxy = 0 - 1;
+        for (int y = 0; y < h; y = y + 1) {
+            for (int x = 0; x < w; x = x + 1) {
+                if ((c.GetPixel(x, y) & 0x00FFFFFF) == 0x00FFFFFF) { continue; }
+                count = count + 1;
+                if (x < mnx) { mnx = x; }
+                if (y < mny) { mny = y; }
+                if (x > mxx) { mxx = x; }
+                if (y > mxy) { mxy = y; }
+            }
+        }
+    }
+
+    /// 离屏渲染一个 calendar 示例，返回是否落墨 + 墨迹包围盒。
+    /// 用一个足够大的 App 面板渲染某示例，返回墨迹统计。
+    /// App 尺寸即面板尺寸（RenderOnce 按传入的 w/h 绘制）。
+    static bool Render(string id, int w, int h,
+                       out int count, out int mnx, out int mny,
+                       out int mxx, out int mxy) {
+        ChartOption o = Program.Load(id);
+        App app = new App("cal-" + id, w, h);
+        app.BeginFrame();
+        app.canvas.Clear(0xFFFFFFFF);
+        ChartView.RenderOnce(app, 0, 0, w, h, o, 0);
+        Program.InkStats(app.canvas, w, h,
+                         out count, out mnx, out mny, out mxx, out mxy);
+        return count > 0;
+    }
+
+    static void Main(string[] args) {
+        fails = 0;
+        if (args.Length >= 1) {
+            Program.optDir = args[0];
+        }
+        // 面板尺寸取 gallery 常见值（够放下多日历竖排）。
+        int W = 800; int H = 600;
+
+        // ---- 1. 分发：calendar[] 存在 -> kind == "calendar" ----
+        string[] ids = new string[] {
+            "calendar-simple", "calendar-heatmap", "calendar-vertical",
+            "calendar-horizontal", "calendar-graph", "calendar-lunar",
+            "calendar-pie", "calendar-charts", "calendar-effectscatter",
+            "custom-calendar-icon"
+        };
+        for (int i = 0; i < ids.Length; i = i + 1) {
+            if (!Program.Has(ids[i])) { continue; }
+            ChartOption o = Program.Load(ids[i]);
+            True("calendar[] parsed " + ids[i], o.calendars.Count >= 1);
+            True("dispatch " + ids[i],
+                 ChartView.DispatchKind(o) == "calendar");
+        }
+
+        // ---- 2. 几何：range 归一化 ----
+        // calendar-simple: range "2017" -> 2017-01-01 .. 2017-12-31
+        ChartOption os = Program.Load("calendar-simple");
+        ChartCalendarSpec cs0 = os.calendars[0];
+        Eq("simple range start", cs0.rangeT0,
+           DateTime.DaysFromCivil(2017, 1, 1));
+        Eq("simple range end", cs0.rangeT1,
+           DateTime.DaysFromCivil(2017, 12, 31));
+        Eq("simple horizontal", cs0.vertical ? 1 : 0, 0);
+        Eq("simple cellSize w", cs0.cellW, 20);
+        Eq("simple cellSize h", cs0.cellH, 20);
+
+        // calendar-lunar: range "2017-03" -> 整月，vertical，cellSize 70，
+        // firstDay 1（周一为首列）
+        ChartOption ol = Program.Load("calendar-lunar");
+        ChartCalendarSpec cl0 = ol.calendars[0];
+        Eq("lunar range start", cl0.rangeT0,
+           DateTime.DaysFromCivil(2017, 3, 1));
+        Eq("lunar range end", cl0.rangeT1,
+           DateTime.DaysFromCivil(2017, 3, 31));
+        Eq("lunar vertical", cl0.vertical ? 1 : 0, 1);
+        Eq("lunar cellSize w", cl0.cellW, 70);
+        Eq("lunar cellSize h", cl0.cellH, 70);
+        Eq("lunar dayFirstDay", cl0.dayFirstDay, 1);
+
+        // calendar-pie: range "2017-02-01" -> 单日（起=止）
+        ChartOption op = Program.Load("calendar-pie");
+        ChartCalendarSpec cp0 = op.calendars[0];
+        Eq("pie single-day start", cp0.rangeT0,
+           DateTime.DaysFromCivil(2017, 2, 1));
+        Eq("pie single-day end", cp0.rangeT1,
+           DateTime.DaysFromCivil(2017, 2, 1));
+
+        // calendar-heatmap: cellSize [auto, 13] -> 宽 auto(-1)、高 13
+        ChartOption oh = Program.Load("calendar-heatmap");
+        ChartCalendarSpec ch0 = oh.calendars[0];
+        Eq("heatmap cell auto w", ch0.cellW, 0 - 1);
+        Eq("heatmap cell h", ch0.cellH, 13);
+
+        // calendar-charts: 4 个日历，range 按官方顺序 02/01/03/04。
+        ChartOption oc = Program.Load("calendar-charts");
+        Eq("charts calendar count", oc.calendars.Count, 4);
+        Eq("charts cal0 = 2017-02-01", oc.calendars[0].rangeT0,
+           DateTime.DaysFromCivil(2017, 2, 1));
+        Eq("charts cal1 = 2017-01-01", oc.calendars[1].rangeT0,
+           DateTime.DaysFromCivil(2017, 1, 1));
+        Eq("charts cal2 = 2017-03-01", oc.calendars[2].rangeT0,
+           DateTime.DaysFromCivil(2017, 3, 1));
+        Eq("charts cal3 = 2017-04-01", oc.calendars[3].rangeT0,
+           DateTime.DaysFromCivil(2017, 4, 1));
+
+        // ---- 3. 子系列日期落格 ----
+        // calendar-lunar 两个 scatter 的农历日名来自 data 第 3 元。
+        True("lunar has 3 series", ol.series.Count >= 3);
+        bool anyLunarLabel = false;
+        for (int si = 0; si < ol.series.Count; si = si + 1) {
+            ChartSeries s = ol.series[si];
+            if (s.coordSys != "calendar") { continue; }
+            for (int j = 0; j < s.data.Count; j = j + 1) {
+                if (s.data[j].labelText.Length > 0) { anyLunarLabel = true; }
+            }
+        }
+        True("lunar day-name labels parsed", anyLunarLabel);
+
+        // 每条 calendar 子系列必须至少有一部分数据落在它绑定的日历
+        // range 内 —— ECharts 允许 data 超出 range（官方 lunar 示例给了
+        // 整年数据、只显示 3 月），越界项由渲染器裁剪，不算错误；
+        // 但一条都落不进 range 就是定位/绑定错了。
+        bool anyInRange = false;
+        for (int si = 0; si < ol.series.Count; si = si + 1) {
+            ChartSeries s = ol.series[si];
+            if (s.coordSys != "calendar") { continue; }
+            int cidx = s.calIndex;
+            if (cidx < 0 || cidx >= ol.calendars.Count) { cidx = 0; }
+            ChartCalendarSpec sc = ol.calendars[cidx];
+            for (int j = 0; j < s.data.Count; j = j + 1) {
+                int d = s.data[j].calDay;
+                if (d >= sc.rangeT0 && d <= sc.rangeT1) { anyInRange = true; }
+            }
+        }
+        True("lunar series has days within range", anyInRange);
+
+        // 裁剪语义：lunar 的 range 只有 31 天、data 是整年 -> 必须确有
+        // 越界项，证明 range 被正确解析成"整月"而非整年（若 range 误
+        // 解析为整年，越界数会是 0）。
+        int oorCount = 0;
+        for (int si = 0; si < ol.series.Count; si = si + 1) {
+            ChartSeries s = ol.series[si];
+            if (s.coordSys != "calendar") { continue; }
+            for (int j = 0; j < s.data.Count; j = j + 1) {
+                int d = s.data[j].calDay;
+                if (d < cl0.rangeT0 || d > cl0.rangeT1) { oorCount = oorCount + 1; }
+            }
+        }
+        True("lunar clamps year-data to month range", oorCount > 0);
+
+        // 且 range 天数是 31（2017-03 整月）。
+        Eq("lunar range length", cl0.rangeT1 - cl0.rangeT0 + 1, 31);
+
+        // ---- 4. 渲染：网格 + 子系列确实落墨 ----
+        // 每条 calendar 示例的整幅图至少要有一定数量的墨迹像素。
+        for (int i = 0; i < ids.Length; i = i + 1) {
+            if (!Program.Has(ids[i])) { continue; }
+            int cnt = 0; int bx0 = 0; int by0 = 0; int bx1 = 0; int by1 = 0;
+            bool ink = Program.Render(ids[i], W, H,
+                                      out cnt, out bx0, out by0, out bx1, out by1);
+            True("render ink " + ids[i], ink);
+            // 日历网格铺开：墨迹包围盒应占画布相当面积（非单点/单线）。
+            if (ink) {
+                int bw = bx1 - bx0 + 1;
+                int bh = by1 - by0 + 1;
+                True("render spread " + ids[i], bw > 40 && bh > 40);
+            }
+        }
+
+        // ---- 5. 子系列确实上色：heat/pie/scatter 的色块必须有非灰墨 ----
+        // 日历网格与刻度全是中性灰（R≈G≈B）；子系列的调色板色是彩色，
+        // 存在彩色像素即证明子系列真被画上去了（空板只会是灰网格）。
+        string[] colored = new string[] {
+            "calendar-simple", "calendar-heatmap", "calendar-lunar",
+            "calendar-pie", "calendar-charts", "calendar-effectscatter"
+        };
+        for (int i = 0; i < colored.Length; i = i + 1) {
+            if (!Program.Has(colored[i])) { continue; }
+            ChartOption o = Program.Load(colored[i]);
+            App app = new App("calc-" + colored[i], W, H);
+            app.BeginFrame();
+            app.canvas.Clear(0xFFFFFFFF);
+            ChartView.RenderOnce(app, 0, 0, W, H, o, 0);
+            int coloredPx = 0;
+            for (int y = 0; y < H; y = y + 1) {
+                for (int x = 0; x < W; x = x + 1) {
+                    int px = app.canvas.GetPixel(x, y) & 0x00FFFFFF;
+                    int r = (px >> 16) & 0xFF;
+                    int gg = (px >> 8) & 0xFF;
+                    int bb = px & 0xFF;
+                    int mx = r > gg ? r : gg;
+                    if (bb > mx) { mx = bb; }
+                    int mn = r < gg ? r : gg;
+                    if (bb < mn) { mn = bb; }
+                    if (mx - mn > 24) { coloredPx = coloredPx + 1; }
+                }
+            }
+            True("colored child series " + colored[i], coloredPx > 100);
+        }
+
+        if (fails > 0) {
+            Console.WriteLine("calendar:0");
+        } else {
+            Console.WriteLine("calendar:1");
+        }
+    }
+}
