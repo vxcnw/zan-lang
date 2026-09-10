@@ -540,7 +540,7 @@ partial class ChartView {
         Canvas c = app.canvas;
         Theme t = app.theme;
         int pad = t.paddingMedium;
-        int axisFs = Style.FontFallback(app, "small");
+        int axisFs = ChartFonts.AxisLabel(app);
         int plotTop = Chart.DrawPanelI(app, x, y, w, h, o.title, o.series,
                                       o.iwid, o.showLegend);
 
@@ -779,7 +779,7 @@ partial class ChartView {
             // ---- 横排：类目行在 Y，值在 X（HBarCore 的框架形态）----
             Theme th = app.theme;
             int pad = th.paddingMedium;
-            int axisFs = Style.FontFallback(app, "small");
+            int axisFs = ChartFonts.AxisLabel(app);
             List<string> labels = ChartView.BoxLabels(bxs[0].boxes);
             int leftGut = app.Scale(20);
             for (int li = 0; li < labels.Count; li = li + 1) {

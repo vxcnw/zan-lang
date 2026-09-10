@@ -1346,6 +1346,11 @@ class ChartSeries {
                       //   坐标，半径取 points[i].size，扇区值取各系列
                       //   points[i].z、各用系列色
     string custom;   // ChartType.Custom 的扩展渲染器："box" | "error" |
+    string emphasisFocus; // ECharts series.emphasis.focus："series" =
+                     //   悬停本系列时其余系列渐隐（ECharts 6 fadeFocus
+                     //   语义：非悬停系列描边/填充乘残alpha，本系列
+                     //   加粗），"" = 无高亮聚焦。渲染端读
+                     //   Chart.EmphHoverKey(iwid) 的悬停系列下标。
     string selectedMode; // ECharts map.selectedMode（Sanitized）：""/"single" | "multiple" | "false"
                      //   "sankey" | "waterfall" | "sunburst" | "radialBars" | "venn" | ""
     string mapName;  // ECharts series.map：注册表地图名（"" = 未用）；
@@ -1473,6 +1478,7 @@ class ChartSeries {
         s.treeLine.type = "";
         s.piePerPoint = false;
         s.custom = "";
+        s.emphasisFocus = "";
         s.selectedMode = "";
         s.mapName = "";
         s.geoIndex = 0;
@@ -1934,7 +1940,9 @@ class ChartSeries {
         s.pointG = src.pointG;
         s.showSymbol = src.showSymbol; s.showBackground = src.showBackground;
         s.backgroundColor = src.backgroundColor; s.innerPct = src.innerPct;
-        s.hbar = src.hbar; s.treeOrient = src.treeOrient; s.custom = src.custom;
+        s.hbar = src.hbar; s.treeOrient = src.treeOrient;
+        s.custom = src.custom;
+        s.emphasisFocus = src.emphasisFocus;
         s.treeLine = ChartLineStyle.Clone(src.treeLine);
         s.piePerPoint = src.piePerPoint;
         s.selectedMode = src.selectedMode; s.forceScaling = src.forceScaling;
@@ -2219,7 +2227,9 @@ class ChartAxis {
 class ChartOption {
     string title;
     string titleSub;   // ECharts title.subtext（标题下的小字副标题）
-    string titleAlign; // ECharts title.x："left"（默认）| "center" | "right"
+    string titleAlign; // ECharts title.left："center"（官方默认）| "left" | "right"
+    int titleColor;    // ECharts title.textStyle.color；0 = 官方默认 #3c3c41
+    int titleSubColor; // ECharts title.subtextStyle.color；0 = 官方默认 #86878c
     List<ChartAxis> xAxes;
     List<ChartJsonDataset> datasets; // ECharts dataset：id/source/transform
     List<ChartVisualMap> visualMaps; // ECharts visualMap：分段/连续视映射
@@ -2343,6 +2353,7 @@ class ChartOption {
         ChartOption o = ChartOption.Create();
         o.title = src.title; o.defaultType = src.defaultType;
         o.titleSub = src.titleSub; o.titleAlign = src.titleAlign;
+        o.titleColor = src.titleColor; o.titleSubColor = src.titleSubColor;
         o.showLegend = src.showLegend; o.showTooltip = src.showTooltip;
         o.tooltipTrigger = src.tooltipTrigger;
         o.toolboxShow = src.toolboxShow; o.roam = src.roam; o.mapSelect = src.mapSelect;
@@ -2475,6 +2486,8 @@ class ChartOption {
         o.legendData = null;
         o.titleSub = "";
         o.titleAlign = "";
+        o.titleColor = 0;
+        o.titleSubColor = 0;
         o.dataRangeShow = false;
         o.dataRangeLo = ChartOption.Auto();
         o.dataRangeHi = ChartOption.Auto();
@@ -3920,8 +3933,22 @@ class ChartOption {
         } else if (tj != null && tj.IsObject()) {
             o.title = tj.Str("text", "");
             o.titleSub = tj.Str("subtext", "");
-            // ECharts 5 键是 left（x 是 2.x 遗留别名）。
-            o.titleAlign = tj.Str("left", tj.Str("x", ""));
+            // ECharts 6 TitleModel.defaultOption: left 'center'（不是 left）。
+            // left/x 只是位置表达式，官方默认居中；"left"/"right" 才是
+            // 显式对齐。x 是 2.x 遗留别名，优先级低于 left。
+            string tv_left = tj.Str("left", "");
+            if (tv_left.Length == 0) { tv_left = tj.Str("x", ""); }
+            o.titleAlign = tv_left;
+            // 官方 title 字号/字重/颜色在 textStyle/subtextStyle 下；
+            // 颜色可显式覆盖（0 = 用官方默认）。
+            JsonValue ttsx = tj.Get("textStyle");
+            if (ttsx != null && ttsx.IsObject() && ttsx.Has("color")) {
+                o.titleColor = ChartOption.ParseColor(ttsx.Get("color"), 0);
+            }
+            JsonValue tssx = tj.Get("subtextStyle");
+            if (tssx != null && tssx.IsObject() && tssx.Has("color")) {
+                o.titleSubColor = ChartOption.ParseColor(tssx.Get("color"), 0);
+            }
         } else {
             o.title = v.Str("title", "");
         }

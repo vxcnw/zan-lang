@@ -1685,11 +1685,28 @@ class Chart {
         if (lo == null) { return ""; }
         return lo.titleSub;
     }
-    /// 本帧标题水平对齐："left"（默认）| "center" | "right"。
+    /// 本帧标题水平对齐："left" | "center"（官方默认）| "right"。
     static string TitleAlignMode() {
         ChartOption lo = Chart.legendOpt;
         if (lo == null) { return ""; }
         return lo.titleAlign;
+    }
+    /// 标题正文色。官方 tokens.color.primary = neutral80 = #3c3c41；
+    /// option.title.textStyle.color 显式给出时以它为准。
+    static int TitleColor() {
+        ChartOption lo = Chart.legendOpt;
+        if (lo != null && lo.titleColor != 0) { return lo.titleColor; }
+        return Chart.TitleNeutral(0x3c, 0x3c, 0x41);
+    }
+    /// 标题副文本色。官方 tokens.color.quaternary = neutral50 = #86878c。
+    static int TitleSubColor() {
+        ChartOption lo = Chart.legendOpt;
+        if (lo != null && lo.titleSubColor != 0) { return lo.titleSubColor; }
+        return Chart.TitleNeutral(0x86, 0x87, 0x8c);
+    }
+    /// 打包 RGB 为不透明 ARGB（alpha 0 在 DrawText 里视为不透明）。
+    static int TitleNeutral(int r, int g, int b) {
+        return (r << 16) | (g << 8) | b;
     }
     /// 本帧图例水平对齐："left" | "center"（默认）| "right"。
     static string LegendAlignX() {
@@ -1729,7 +1746,7 @@ class Chart {
 
     /// 单个图例色块占宽：色块 + 间隙 + 标签文本宽 + 右侧留白。
     static int LegendChipW(App app, string label) {
-        int lgFs = Style.FontFallback(app, "small");
+        int lgFs = ChartFonts.Legend(app);
         return app.Scale(12) + app.Scale(6)
             + Canvas.MeasureText(label, lgFs) + app.Scale(10);
     }
@@ -1789,7 +1806,7 @@ class Chart {
                 sw + app.Scale(2), sw + app.Scale(2), t.borderRadiusSmall,
                 t.primary, 1);
         }
-        int lgFs = Style.FontFallback(app, "small");
+        int lgFs = ChartFonts.Legend(app);
         c.DrawText(lx + sw + app.Scale(6), ly + app.Scale(1), label, lblColor, lgFs);
         if (hidden) {
             int my = ly + app.Scale(2) + Canvas.FontHeight(lgFs) / 2;
@@ -2071,7 +2088,7 @@ class Chart {
         if (Chart.LegendVertical()) { return prim.Count; }
         string fmt = Chart.LegendFmt();
         int pad = app.theme.paddingMedium;
-        int lgFs = Style.FontFallback(app, "small");
+        int lgFs = ChartFonts.Legend(app);
         int sw = app.Scale(12);
         bool below = Chart.toolReserve > 0;
         int extra = 0;
@@ -2162,12 +2179,16 @@ class Chart {
         c.SurfaceRoundRect(x, y, w, h, t.borderRadiusMedium, sPanel.BgOr(0), sPanel.BorderOr(0), 1);
 
         int top = y + pad;
-        int titleFs = Style.FontFallback(app, "large");
+        // ECharts 6 TitleModel.defaultOption：textStyle.fontSize 18 / bold /
+        // color tokens.color.primary(#3c3c41)；subtextStyle.fontSize 12 /
+        // color tokens.color.quaternary(#86878c)。按官方 px 值缩放，不跟随
+        // IDE 主题字号档（图表是契约兼容，默认值须与官方一致）。
+        int titleFs = app.Scale(18);
+        int titleSubFs = app.Scale(12);
         int titleH = Canvas.FontHeight(titleFs);
         string titleSub = Chart.TitleSubText();
         if (title.Length > 0 && titleSub.Length > 0) {
-            titleH = titleH + Canvas.FontHeight(Style.FontFallback(app, "small"))
-                + app.Scale(2);
+            titleH = titleH + Canvas.FontHeight(titleSubFs) + app.Scale(2);
         }
         int titleMax = x + w - pad - Chart.toolReserve - (x + pad) - app.Scale(8);
         if (title.Length > 0 && titleMax > 0) {
@@ -2178,18 +2199,17 @@ class Chart {
             else if (tal == "right") { tx = x + pad + titleMax - tW; }
             if (tx < x + pad) { tx = x + pad; }
             c.PushClip(x + pad, top, titleMax, titleH);
-            c.DrawText(tx, top, title, sPanel.FgOr(0), titleFs);
+            // 官方 title.textStyle.fontWeight 默认 'bold'。
+            c.DrawTextBold(tx, top, title, Chart.TitleColor(), titleFs);
             if (titleSub.Length > 0) {
-                int subFs = Style.FontFallback(app, "small");
+                int subFs = titleSubFs;
                 int subW = Canvas.MeasureText(titleSub, subFs);
                 int sx = tx;
                 if (tal == "center") { sx = x + pad + (titleMax - subW) / 2; }
                 else if (tal == "right") { sx = x + pad + titleMax - subW; }
                 if (sx < x + pad) { sx = x + pad; }
-                int subCol = Style.Part(app, "chart", "axis-title", "", "", "",
-                    Style.SNormal()).FgOr(0);
                 c.DrawText(sx, top + Canvas.FontHeight(titleFs), titleSub,
-                    subCol, subFs);
+                    Chart.TitleSubColor(), subFs);
             }
             c.PopClip();
         }
@@ -2216,7 +2236,7 @@ class Chart {
         StyleBox sLegendOff = Style.Part(app, "chart", "legend", "", "off", "",
                                          Style.SNormal());
         int sw = app.Scale(12);
-        int lgFs = Style.FontFallback(app, "small");
+        int lgFs = ChartFonts.Legend(app);
         int rowH = Canvas.FontHeight(lgFs) + app.Scale(6);
         string fmt = Chart.LegendFmt();
         int lmode = Chart.LegendSelMode();
@@ -2442,7 +2462,7 @@ class Chart {
         Canvas c = app.canvas;
         Theme t = app.theme;
         int pad = t.paddingMedium;
-        int axisFs = Style.FontFallback(app, "small");
+        int axisFs = ChartFonts.AxisLabel(app);
         if (ticks < 1) { ticks = 5; }
 
         int leftGut = Canvas.MeasureText(Chart.Commas(maxV), axisFs) + app.Scale(12);
@@ -2506,7 +2526,7 @@ class Chart {
         Canvas c = app.canvas;
         Theme t = app.theme;
         int pad = t.paddingMedium;
-        int axisFs = Style.FontFallback(app, "small");
+        int axisFs = ChartFonts.AxisLabel(app);
         if (hi <= lo) { hi = lo + 1; }
 
         int gw0 = Canvas.MeasureText(Chart.Commas(hi), axisFs);

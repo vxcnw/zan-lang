@@ -124,7 +124,7 @@ partial class ChartView {
         }
 
         // 时间轴端点标签（确定性整数时间）。
-        int axisFs = Style.FontFallback(app, "small");
+        int axisFs = ChartFonts.AxisLabel(app);
         string lt = Convert.ToString(layout.t0);
         string rt = Convert.ToString(layout.t1);
         StyleBox sAxis = Style.Part(app, "chart", "axis", "", "", "",

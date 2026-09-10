@@ -162,6 +162,9 @@ class Canvas {
     static extern void zan_gui_draw_text(int surfaceId, int x, int y, string text, int color, int fontSize);
 
     [DllImport("zan_gui")]
+    static extern void zan_gui_draw_text_bold(int surfaceId, int x, int y, string text, int color, int fontSize);
+
+    [DllImport("zan_gui")]
     static extern void zan_gui_draw_text_rot(int surfaceId, int x, int y, string text, int color, int fontSize, int angle);
 
     [DllImport("zan_gui")]
@@ -637,6 +640,12 @@ class Canvas {
     /// <summary>在指定位置绘制文本。</summary>
     void DrawText(int x, int y, string text, int color, int fontSize) {
         zan_gui_draw_text(surfaceId, x, y, text, color, fontSize);
+    }
+
+    /// <summary>粗体文本（ECharts title 默认 textStyle.fontWeight 'bold'）。
+    /// 字形图集按 (文本, 字号, 字重) 分键，与常规文本互不干扰。</summary>
+    void DrawTextBold(int x, int y, string text, int color, int fontSize) {
+        zan_gui_draw_text_bold(surfaceId, x, y, text, color, fontSize);
     }
 
     /// <summary>绘制绕锚点旋转的文本。`(x, y)` 是未旋转行盒的左上角，

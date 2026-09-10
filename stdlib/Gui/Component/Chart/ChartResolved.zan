@@ -244,6 +244,7 @@ class ResolvedChart {
         ChartOption s = this.source;
         o.title = s.title;
         o.titleSub = s.titleSub; o.titleAlign = s.titleAlign;
+        o.titleColor = s.titleColor; o.titleSubColor = s.titleSubColor;
         o.xAxes = new List<ChartAxis>();
         for (int xi = 0; xi < s.xAxes.Count; xi = xi + 1) { o.xAxes.Add(ChartAxis.Clone(s.xAxes[xi])); }
         o.datasets = new List<ChartJsonDataset>();

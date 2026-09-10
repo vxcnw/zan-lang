@@ -97,16 +97,18 @@ static void ensure_text_dc(void) {
 }
 
 static int g_font_sizes[16];
+static int g_font_bold[16];   /* 1 = FW_BOLD slot; the table is keyed by (size, weight) */
 /* Active text face (env-seeded, program-overridable via
  * zan_gui_set_text_family -- see the exports below get_or_create_font). */
 static wchar_t g_font_family[64] = L"Segoe UI";
 static int g_font_family_env_done = 0;
 static int g_font_family_explicit = 0;
 
-static HFONT get_or_create_font(int size) {
-    /* Cache by exact size match */
+static HFONT get_or_create_font(int size, int bold) {
+    /* Cache by exact (size, weight) match. Bold shares the 16-slot table with
+     * regular, so a slot that holds the wrong weight is not a hit. */
     for (int i = 0; i < 16; i++) {
-        if (g_font_sizes[i] == size && g_fonts[i]) {
+        if (g_font_sizes[i] == size && g_font_bold[i] == bold && g_fonts[i]) {
             if (g_text_stats_enabled) { g_text_font_hits++; }
             return g_fonts[i];
         }
@@ -137,7 +139,7 @@ static HFONT get_or_create_font(int size) {
     if (g_fonts[slot]) DeleteObject(g_fonts[slot]);
     g_fonts[slot] = CreateFontW(
         -size, 0, 0, 0,
-        FW_NORMAL, FALSE, FALSE, FALSE,
+        bold ? FW_BOLD : FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_TT_PRECIS,
         CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
         DEFAULT_PITCH | FF_SWISS,
@@ -145,6 +147,7 @@ static HFONT get_or_create_font(int size) {
     );
     if (g_text_stats_enabled) { g_text_font_creates++; }
     g_font_sizes[slot] = size;
+    g_font_bold[slot] = bold;
     return g_fonts[slot];
 }
 
@@ -163,6 +166,7 @@ EXPORT i32 zan_gui_set_text_family(const char *utf8_family) {
     for (int i = 0; i < 16; i++) {
         if (g_fonts[i]) { DeleteObject(g_fonts[i]); g_fonts[i] = NULL; }
         g_font_sizes[i] = 0;
+        g_font_bold[i] = 0;
     }
     return 1;
 }
@@ -208,6 +212,15 @@ static uint64_t zan_text_hash(const char *s, int size) {
     return h;
 }
 
+/* Runs are cached per (text, size, weight). `size` is the atlas key, so a bold
+ * run gets its own tile; the two weight spaces never collide because the
+ * regular space uses the raw size and bold adds ZAN_RUN_BOLD_FLAG (a high bit
+ * no real font size reaches). */
+#define ZAN_RUN_BOLD_FLAG 0x10000
+static int run_key_size(int size, int bold) {
+    return bold ? (size | ZAN_RUN_BOLD_FLAG) : size;
+}
+
 /* The coverage tile of a whole text run, rasterised by GDI on the first use of
  * that (text, size) and cached in the glyph atlas afterwards.
  *
@@ -219,10 +232,11 @@ static uint64_t zan_text_hash(const char *s, int size) {
  * White on black is what makes the result a mask: the draw colour is applied
  * when the run is composited, so it is not part of the key and one tile serves
  * every colour the same string is drawn in. */
-static const zan_glyph_tile *win_run_tile(const char *text, int size) {
+static const zan_glyph_tile *win_run_tile(const char *text, int size, int bold) {
     int key_len = (int)strlen(text);
+    int ksize = run_key_size(size, bold);
     const zan_glyph_tile *cached =
-        zan_atlas_find(ZAN_TILE_RUN, size, text, key_len);
+        zan_atlas_find(ZAN_TILE_RUN, ksize, text, key_len);
     if (cached) return cached;
 
     int wlen = MultiByteToWideChar(CP_UTF8, 0, text, -1, NULL, 0);
@@ -231,7 +245,7 @@ static const zan_glyph_tile *win_run_tile(const char *text, int size) {
     MultiByteToWideChar(CP_UTF8, 0, text, -1, wtext, wlen);
     int text_len = wlen - 1;
 
-    HFONT font = get_or_create_font(size);
+    HFONT font = get_or_create_font(size, bold);
     HFONT old_font = (HFONT)SelectObject(g_text_dc, font);
     SIZE ts;
     GetTextExtentPoint32W(g_text_dc, wtext, text_len, &ts);
@@ -258,7 +272,7 @@ static const zan_glyph_tile *win_run_tile(const char *text, int size) {
     GdiFlush();
 
     const zan_glyph_tile *tile =
-        zan_atlas_store(ZAN_TILE_RUN, size, text, key_len,
+        zan_atlas_store(ZAN_TILE_RUN, ksize, text, key_len,
                         tw, th, 0, 0, (int)ts.cx, dbits, 4);
 
     SelectObject(g_text_dc, old_bmp);
@@ -286,7 +300,7 @@ EXPORT void zan_gui_draw_text(
         t0 = text_qpc_us();
     }
 
-    const zan_glyph_tile *tile = win_run_tile(text, size);
+    const zan_glyph_tile *tile = win_run_tile(text, size, 0);
     if (tile) {
         zan_glyph_item item;
         item.tile = tile;
@@ -300,6 +314,34 @@ EXPORT void zan_gui_draw_text(
     }
     if (g_text_stats_enabled) {
         g_text_draw_us += text_qpc_us() - t0;
+    }
+}
+
+/* Bold variant of zan_gui_draw_text. ECharts' title default is
+ * textStyle.fontWeight 'bold', and the API kept the weight out of the
+ * draw call, so bold gets its own entry point rather than widening the
+ * existing signature (which every existing caller would have to touch). */
+EXPORT void zan_gui_draw_text_bold(
+    i32 surface_id, i32 x, i32 y, const char *text, i32 color, i32 font_size) {
+    if (surface_id < 0 || surface_id >= g_surface_count) return;
+    zan_surface_t *s = g_surfaces[surface_id];
+    if (!s || !text || !*text) return;
+
+    int size = (int)font_size;
+    if (size < 8) size = 8;
+
+    ensure_text_dc();
+    const zan_glyph_tile *tile = win_run_tile(text, size, 1);
+    if (tile) {
+        zan_glyph_item item;
+        item.tile = tile;
+        item.x = (int)x + tile->left;
+        item.y = (int)y + tile->top;
+        zan_glyph_run run;
+        run.color = (u32)color;
+        run.count = 1;
+        run.items = &item;
+        ZAN_IMPL(s, glyph_run)->glyph_run(s, &run);
     }
 }
 
@@ -358,7 +400,7 @@ EXPORT void zan_gui_draw_text_rot(
         MultiByteToWideChar(CP_UTF8, 0, text, -1, wtext, wlen);
         int text_len = wlen - 1;
 
-        HFONT font = get_or_create_font(size);
+        HFONT font = get_or_create_font(size, 0);
         HFONT old_font = (HFONT)SelectObject(g_text_dc, font);
         SIZE ts;
         GetTextExtentPoint32W(g_text_dc, wtext, text_len, &ts);
@@ -483,7 +525,7 @@ static int measure_text_gdi(const char *text, int size) {
     wchar_t *wtext = (wchar_t *)malloc((size_t)wlen * sizeof(wchar_t));
     if (!wtext) return 0;
     MultiByteToWideChar(CP_UTF8, 0, text, -1, wtext, wlen);
-    HFONT font = get_or_create_font(size);
+    HFONT font = get_or_create_font(size, 0);
     HFONT old_font = (HFONT)SelectObject(g_text_dc, font);
     SIZE text_size;
     GetTextExtentPoint32W(g_text_dc, wtext, wlen - 1, &text_size);
@@ -570,7 +612,7 @@ EXPORT i32 zan_gui_font_height(i32 font_size) {
     }
 
     ensure_text_dc();
-    HFONT font = get_or_create_font(size);
+    HFONT font = get_or_create_font(size, 0);
     HFONT old_font = (HFONT)SelectObject(g_text_dc, font);
     TEXTMETRICW tm;
     GetTextMetricsW(g_text_dc, &tm);

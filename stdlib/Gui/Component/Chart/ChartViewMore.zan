@@ -216,7 +216,7 @@ partial class ChartView {
 
         // 布局：标题/图例下方一块绘图区，轴间留端点标签。
         int pad = t.paddingMedium;
-        int axisFs = Style.FontFallback(app, "small");
+        int axisFs = ChartFonts.AxisLabel(app);
         int nameH = Canvas.FontHeight(axisFs);
         int plotX = x + pad + app.Scale(8);
         int plotY = plotTop + nameH + app.Scale(6);
@@ -343,7 +343,7 @@ partial class ChartView {
         }
         if (nCats > 0 && o.visualMaps[catVmIdx].show) {
             ChartVisualMap vm = o.visualMaps[catVmIdx];
-            int lgFs = Style.FontFallback(app, "small");
+            int lgFs = ChartFonts.Legend(app);
             int rowH = Canvas.FontHeight(lgFs) + app.Scale(4);
             int maxRows = plotH / rowH;
             if (maxRows < 1) { maxRows = 1; }
