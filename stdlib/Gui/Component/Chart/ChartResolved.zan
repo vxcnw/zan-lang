@@ -98,9 +98,17 @@ class ResolvedSeries {
     /// 把解析结果物化回一份源系列的深复制：外壳样式字段（主色/
     /// hidden/线色/线宽/面积色/标签色与字号）用解析值覆盖，数据
     /// 集合与其余字段原样保留。供仍按 ChartSeries 绘制的路径使用。
-    ChartSeries Materialize() {
+    /// allowShare（阶段 B 克隆税豁免）：本帧渲染路径对数据集合
+    /// 只读时，data/points/candles 等逐项大集合与源系列只读共享
+    /// （ChartSeries.Clone(src, true)），不逐项深拷。凡可能经
+    /// ApplyDataLegend 写 data[].hidden/selected 的系列（pie/rose/
+    /// funnel 面板与 pie/funnel 覆盖层）必须保持全量克隆，否则
+    /// 交互态会漏写进长寿缓存的源 option。
+    ChartSeries Materialize(bool allowShare) {
         ChartSeries src = this.source;
-        ChartSeries s = ChartSeries.Clone(src);
+        bool share = allowShare && src.type != ChartType.Pie
+            && src.type != ChartType.Funnel;
+        ChartSeries s = ChartSeries.Clone(src, share);
         if (s == null) { return null; }
         s.color = this.color; s.hidden = this.hidden;
         ChartItemStyle style = ChartItemStyle.Create();
@@ -218,10 +226,11 @@ class ResolvedChart {
     }
 
     /// 把全部解析快照物化为 ChartSeries 副本（顺序同源 option）。
+    /// pie/funnel 之外的类型数据集合只读共享（阶段 B）。
     List<ChartSeries> MaterializeSeries() {
         List<ChartSeries> outp = new List<ChartSeries>();
         for (int i = 0; i < this.series.Count; i = i + 1) {
-            outp.Add(this.series[i].Materialize());
+            outp.Add(this.series[i].Materialize(true));
         }
         return outp;
     }

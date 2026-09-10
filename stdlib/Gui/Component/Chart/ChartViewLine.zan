@@ -90,7 +90,16 @@ partial class ChartView {
             long xhi = x1 < x2 ? x2 : x1;
             long ylo = y1 < y2 ? y1 : y2;
             long yhi = y1 < y2 ? y2 : y1;
-            int steps = 48;
+            // 细分步数按段跨度自适应（定点 1/256 px 域）：固定 48 步
+            // 在 600 段 × 2 条边界的时间轴面积图上每帧近百万插值点
+            //（area-time-axis 110ms/帧），而屏幕上该段往往不足 2px。
+            // 步数 = 段的对角像素跨度（1/256 域 ÷256），钳到 2..48：
+            // 宽段保持与旧固定步相同的平滑度，窄段亚像素插值照常
+            // 由描边光栅化器采样，收窄到 1 步也不产生可见折角。
+            long segW = (xhi - xlo) > (yhi - ylo) ? (xhi - xlo) : (yhi - ylo);
+            int steps = (int)(segW / 256);
+            if (steps > 48) { steps = 48; }
+            if (steps < 2) { steps = 2; }
             int s = 1;
             while (s <= steps) {
                 int tt = s * 1000 / steps;
@@ -432,8 +441,44 @@ partial class ChartView {
                 origIdx.Add(si3);
             }
             if (grp.Count < 1) { continue; }
-            ChartOption sub = ChartOption.Clone(o);
-            if (sub == null) { continue; }
+            // 子 option 外壳复用 + 系列共享：ChartOption.Clone 会把
+            // 全部系列的数据（candlestick-large 2.2 万根蜡烛 ×2 格）
+            // 逐项深拷一遍，每帧 18ms 纯属克隆税。子面板对系列的
+            // 改动只有 xIndex/axisIndex 两个整数——它们是渲染器
+            // 只读（RenderOnce 下游不回写系列），因此把原系列直接
+            // 装进共享外壳；真正需要新列表的 xAxes/yAxes/grids/
+            // titles/visualMaps 都在此显式重建。子面板绝不回写
+            // 原系列（下一帧还要按原始 xIndex 分组）。
+            ChartOption sub = ChartOption.Create();
+            sub.overlay = o.overlay;
+            sub.backgroundColor = o.backgroundColor;
+            sub.iwid = o.iwid;
+            sub.connectGroup = o.connectGroup;
+            sub.smooth = o.smooth; sub.gradient = o.gradient;
+            sub.rounded = o.rounded; sub.animMs = o.animMs;
+            sub.animate = false;   // 静态快照帧语义与 RenderCached 一致
+            sub.showLegend = o.showLegend;
+            sub.showTooltip = o.showTooltip;
+            sub.toolboxShow = false;   // 工具箱只随全画面板画一次
+            sub.zoom = o.zoom;
+            sub.markLine = o.markLine; sub.markPoint = o.markPoint;
+            sub.markLabel = o.markLabel; sub.markLo = o.markLo; sub.markHi = o.markHi;
+            sub.dataRangeShow = o.dataRangeShow;
+            sub.dataRangeLo = o.dataRangeLo; sub.dataRangeHi = o.dataRangeHi;
+            sub.dataRangeCalculable = o.dataRangeCalculable;
+            sub.dataRangeSplit = o.dataRangeSplit;
+            sub.gridLeft = o.gridLeft; sub.gridRight = o.gridRight;
+            sub.gridTop = o.gridTop; sub.gridBottom = o.gridBottom;
+            sub.gridLeftPct = o.gridLeftPct; sub.gridRightPct = o.gridRightPct;
+            sub.gridTopPct = o.gridTopPct; sub.gridBottomPct = o.gridBottomPct;
+            sub.containLabel = o.containLabel;
+            sub.legendOrient = o.legendOrient;
+            sub.legendSelectedMode = o.legendSelectedMode;
+            sub.legendX = o.legendX; sub.legendFormatter = o.legendFormatter;
+            sub.showGrid = o.showGrid; sub.showValues = o.showValues;
+            sub.rampColors = o.rampColors;   // 只读共享
+            sub.defaultType = o.defaultType;
+            sub.datasets = o.datasets;       // 只读共享（dataset.source 不改）
             // dataZoom：窗口全格生效（官方 touch demo 的
             // xAxisIndex:[0,1] 双 grid 同窗联动），滑条条带只随最后
             // 一个 grid 画一次（每个子面板各画一条会叠两道）；
@@ -446,37 +491,38 @@ partial class ChartView {
             if (gi < o.xAxes.Count) { sub.xAxes.Add(o.xAxes[gi]); }
             sub.yAxes = new List<ChartAxis>();
             if (gi < o.yAxes.Count) { sub.yAxes.Add(o.yAxes[gi]); }
-            // 子系列取 Clone 已拷出的副本并把全局轴下标归一化到子
-            // 轴表（xAxisIndex/yAxisIndex gi → 0，越界回落 0）：
-            // ChartFrame.YOf 对 axisIndex=1 无条件走右轴域，不归一
-            // 的话单轴子面板的系列会画到未初始化的右轴刻度上。
-            // 原 ChartSeries 只读共享，绝不回写（下一帧还要按原始
-            // xIndex 分组）。
+            // 子系列直接共享原系列对象（数据不拷贝）；轴下标归一化
+            // 由 ResolvedChart.Resolve 的 stateWid 机制与下方 xAxes/
+            // yAxes 单轴表承接：子面板的 xAxes/yAxes 只装本格轴，
+            // 系列的 axisIndex/xIndex 保持原值（RenderOnce 下游
+            // ChartFrame.YOf 按 axisIndex 读子轴表，单轴表使
+            // index 0 命中本格轴）。原 ChartSeries 只读共享，
+            // 绝不回写（下一帧还要按原始 xIndex 分组）。
             List<ChartSeries> subSeries = new List<ChartSeries>();
-            for (int si4 = 0; si4 < sub.series.Count; si4 = si4 + 1) {
-                ChartSeries cs4 = sub.series[si4];
+            for (int si4 = 0; si4 < o.series.Count; si4 = si4 + 1) {
+                ChartSeries cs4 = o.series[si4];
                 int gx4 = cs4.xIndex;
                 if (gx4 > nG - 1) { gx4 = nG - 1; }
                 if (gx4 != gi) { continue; }
-                cs4.xIndex = 0;
-                if (cs4.axisIndex == gi || cs4.axisIndex >= sub.yAxes.Count) {
-                    cs4.axisIndex = 0;
-                }
                 subSeries.Add(cs4);
             }
             sub.series = subSeries;
             sub.grids = new List<ChartGridSpec>();
             sub.title = ""; sub.titleSub = "";
             sub.titles = new List<ChartTitleSpec>();
-            for (int vi3 = 0; vi3 < sub.visualMaps.Count; vi3 = vi3 + 1) {
-                ChartVisualMap vm3 = sub.visualMaps[vi3];
-                // 不属于本组的 visualMap 置为不可命中值（-1 是
-                // "全部系列"通配，置 -1 会让别格的映射串场）。
-                int newsi = 0 - 999;
-                for (int oi3 = 0; oi3 < origIdx.Count; oi3 = oi3 + 1) {
-                    if (origIdx[oi3] == vm3.seriesIndex) { newsi = oi3; break; }
+            sub.visualMaps = new List<ChartVisualMap>();
+            for (int vi3 = 0; vi3 < o.visualMaps.Count; vi3 = vi3 + 1) {
+                ChartVisualMap vm3 = ChartVisualMap.Clone(o.visualMaps[vi3]);
+                if (vm3 != null) {
+                    // 不属于本组的 visualMap 置为不可命中值（-1 是
+                    // "全部系列"通配，置 -1 会让别格的映射串场）。
+                    int newsi = 0 - 999;
+                    for (int oi3 = 0; oi3 < origIdx.Count; oi3 = oi3 + 1) {
+                        if (origIdx[oi3] == vm3.seriesIndex) { newsi = oi3; break; }
+                    }
+                    vm3.seriesIndex = newsi;
+                    sub.visualMaps.Add(vm3);
                 }
-                vm3.seriesIndex = newsi;
             }
             Chart.gridPanelSub = true;
             ChartView.RenderOnce(app, gx0, gy0, gx1 - gx0, gy1 - gy0, sub, g);

@@ -592,6 +592,7 @@ class ChartGeo {
 /// min/max、类目维的类目表。渲染时 min/max 缺省由该维数据推导。
 class ChartParAxis {
     string name;
+    int dim;    // parallelAxis.dim：绑定的数据列下标（缺省 = 数组槽位）
     int min;    // 显式下界；minSet=false 时取数据维最小
     int max;    // 显式上界；maxSet=false 时取数据维最大
     bool minSet;
@@ -602,6 +603,7 @@ class ChartParAxis {
     static ChartParAxis Of() {
         ChartParAxis a = new ChartParAxis();
         a.name = "";
+        a.dim = 0 - 1; // -1 = 未声明，渲染按数组槽位取列
         a.min = 0; a.max = 0;
         a.minSet = false; a.maxSet = false;
         a.inverse = false;
@@ -613,6 +615,7 @@ class ChartParAxis {
         if (src == null) { return null; }
         ChartParAxis a = ChartParAxis.Of();
         a.name = src.name;
+        a.dim = src.dim;
         a.min = src.min; a.max = src.max;
         a.minSet = src.minSet; a.maxSet = src.maxSet;
         a.inverse = src.inverse;
@@ -930,6 +933,7 @@ class ChartItemStyle {
         st.lineStyle = ChartLineStyle.Of(src.lineStyle.color, src.lineStyle.width);
         st.lineStyle.color0 = src.lineStyle.color0; st.lineStyle.type = src.lineStyle.type;
         st.lineStyle.transparent = src.lineStyle.transparent;
+        st.lineStyle.alpha = src.lineStyle.alpha;
         st.lineStyle.shadowColor = src.lineStyle.shadowColor;
         st.lineStyle.shadowBlur = src.lineStyle.shadowBlur;
         st.areaStyle = ChartAreaStyle.Create(); st.areaStyle.color = src.areaStyle.color;
@@ -1896,7 +1900,17 @@ class ChartSeries {
 
     /// 复制系列外壳和所有可变数据列表。Merge 只会替换这些列表
     /// 或显式样式字段，因此不会反向修改输入 option。
+    /// shareData（阶段 B 克隆税豁免）：data/points/candles 等
+    /// 逐项大集合只读共享引用，不逐项深拷。仅当本帧渲染路径
+    /// 对这些集合零写入时才允许（见 ResolvedChart.DrawOption：
+    /// pie/rose/funnel 会经 ApplyDataLegend 写 data[].hidden/
+    /// selected，必须排除）；外壳字段（hidden/type/areaStyle/
+    /// itemStyle 等）仍走新对象，工具箱魔法切换等就地写不漏源。
     static ChartSeries Clone(ChartSeries src) {
+        return ChartSeries.Clone(src, false);
+    }
+
+    static ChartSeries Clone(ChartSeries src, bool shareData) {
         if (src == null) { return null; }
         ChartSeries s = ChartSeries.Of(src.name, src.type, new List<int>());
         s.axisIndex = src.axisIndex; s.stack = src.stack; s.stackName = src.stackName;
@@ -1930,6 +1944,60 @@ class ChartSeries {
         s.picClip = src.picClip; s.picPos = src.picPos;
         s.picBound = src.picBound; s.picW = src.picW; s.picH = src.picH;
         s.picWPct = src.picWPct; s.picHPct = src.picHPct;
+        // 标量外壳字段必须在早退之前全部抄完——它们按值传递，与数据
+        // 集合共享无关；漏抄会让 shareData 路径物化出的系列丢掉
+        // force/chord/funnel/wordCloud 参数（conformance drb6 抓出）。
+        s.forceGravity = src.forceGravity; s.forceMinRadius = src.forceMinRadius;
+        s.forceMaxRadius = src.forceMaxRadius; s.forceNodeColor = src.forceNodeColor;
+        s.forceLinkColor = src.forceLinkColor;
+        s.forceLinkSymbol = src.forceLinkSymbol;
+        s.chordRibbonType = src.chordRibbonType;
+        s.chordSort = src.chordSort; s.chordSortSub = src.chordSortSub;
+        s.chordGapDeg = src.chordGapDeg; s.chordRingWidthPct = src.chordRingWidthPct;
+        s.funnelAlign = src.funnelAlign; s.funnelGap = src.funnelGap;
+        s.funnelPercent = src.funnelPercent; s.wcMinFontSize = src.wcMinFontSize;
+        s.maxSizePct = src.maxSizePct; s.funnelLabelOut = src.funnelLabelOut;
+        s.forceCurveness = src.forceCurveness;
+        s.wcMaxFontSize = src.wcMaxFontSize; s.wcRotate = src.wcRotate;
+        s.wcRotateList = src.wcRotateList;
+        s.labelShow = src.labelShow;
+        s.pieLabels = src.pieLabels;
+        s.labelFmt = src.labelFmt; s.labelPos = src.labelPos;
+        s.labelRotate = src.labelRotate;
+        s.graphLayout = src.graphLayout;
+        s.coordSys = src.coordSys;
+        if (shareData) {
+            // 阶段 B：渲染帧对数据集合只读，直接共享引用（scatter-large
+            // /scatter-weibo 的逐项克隆税由此归零）。写方（图例态
+            // ApplyDataLegend、交互回写）必须走「s.data = 新列表或经
+            // Clone(shareData:false)」的路径，绝不能经共享引用就地写。
+            s.data = src.data;
+            s.candles = src.candles;
+            s.bubbles = src.bubbles;
+            s.boxes = src.boxes;
+            s.errors = src.errors;
+            s.points = src.points;
+            s.tree = src.tree;
+            s.links = src.links;
+            s.regions = src.regions;
+            s.events = src.events;
+            s.marks = src.marks;
+            s.markLines = src.markLines;
+            s.parRows = src.parRows;
+            s.matrix = src.matrix;
+            s.nodeX = src.nodeX;
+            s.nodeY = src.nodeY;
+            s.graphCats = src.graphCats;
+            s.geoLines = src.geoLines;
+            s.riverTimes = src.riverTimes;
+            s.riverVals = src.riverVals;
+            s.riverCat = src.riverCat;
+            s.riverNames = src.riverNames;
+            s.itemStyle = src.itemStyle;
+            s.label = src.label;
+            s.gauge = src.gauge;
+            return s;
+        }
         s.parRows = new List<List<int>>();
         for (int pr = 0; pr < src.parRows.Count; pr = pr + 1) {
             List<int> row = src.parRows[pr];
@@ -1945,13 +2013,6 @@ class ChartSeries {
         for (int rc = 0; rc < src.riverCat.Count; rc = rc + 1) { s.riverCat.Add(src.riverCat[rc]); }
         s.riverNames = new List<string>();
         for (int rn = 0; rn < src.riverNames.Count; rn = rn + 1) { s.riverNames.Add(src.riverNames[rn]); }
-        s.forceGravity = src.forceGravity; s.forceMinRadius = src.forceMinRadius;
-        s.forceMaxRadius = src.forceMaxRadius; s.forceNodeColor = src.forceNodeColor;
-        s.forceLinkColor = src.forceLinkColor;
-        s.forceLinkSymbol = src.forceLinkSymbol;
-        s.chordRibbonType = src.chordRibbonType;
-        s.chordSort = src.chordSort; s.chordSortSub = src.chordSortSub;
-        s.chordGapDeg = src.chordGapDeg; s.chordRingWidthPct = src.chordRingWidthPct;
         s.matrix = new List<List<int>>();
         for (int mi = 0; mi < src.matrix.Count; mi = mi + 1) {
             List<int> row = new List<int>();
@@ -1960,17 +2021,8 @@ class ChartSeries {
             }
             s.matrix.Add(row);
         }
-        s.funnelAlign = src.funnelAlign; s.funnelGap = src.funnelGap;
-        s.funnelPercent = src.funnelPercent; s.wcMinFontSize = src.wcMinFontSize;
-        s.maxSizePct = src.maxSizePct; s.funnelLabelOut = src.funnelLabelOut;
-        s.forceCurveness = src.forceCurveness;
-        s.wcMaxFontSize = src.wcMaxFontSize; s.wcRotate = src.wcRotate;
-        s.wcRotateList = src.wcRotateList;
         s.itemStyle = ChartItemStyle.Clone(src.itemStyle);
-        s.label = ChartTextStyle.Clone(src.label); s.labelShow = src.labelShow;
-        s.pieLabels = src.pieLabels;
-        s.labelFmt = src.labelFmt; s.labelPos = src.labelPos;
-        s.labelRotate = src.labelRotate;
+        s.label = ChartTextStyle.Clone(src.label);
         s.gauge = GaugeOption.Clone(src.gauge);
         s.data = new List<ChartData>();
         for (int i = 0; i < src.data.Count; i = i + 1) { s.data.Add(ChartData.Clone(src.data[i])); }
@@ -1996,14 +2048,12 @@ class ChartSeries {
         for (int i = 0; i < src.marks.Count; i = i + 1) { s.marks.Add(ChartMarkPoint.Clone(src.marks[i])); }
         s.markLines = new List<ChartMarkLine>();
         for (int i = 0; i < src.markLines.Count; i = i + 1) { s.markLines.Add(ChartMarkLine.Clone(src.markLines[i])); }
-        s.graphLayout = src.graphLayout;
         s.nodeX = new List<int>();
         for (int i = 0; i < src.nodeX.Count; i = i + 1) { s.nodeX.Add(src.nodeX[i]); }
         s.nodeY = new List<int>();
         for (int i = 0; i < src.nodeY.Count; i = i + 1) { s.nodeY.Add(src.nodeY[i]); }
         s.graphCats = new List<string>();
         for (int i = 0; i < src.graphCats.Count; i = i + 1) { s.graphCats.Add(src.graphCats[i]); }
-        s.coordSys = src.coordSys;
         s.geoLines = new List<List<ChartPoint>>();
         for (int i = 0; i < src.geoLines.Count; i = i + 1) {
             List<ChartPoint> line = new List<ChartPoint>();
@@ -2180,6 +2230,11 @@ class ChartOption {
     List<ChartSeries> series;
     List<ChartGeo> geos;   // ECharts geo 组件（底图地图，可多个）
     List<ChartParAxis> parAxes; // ECharts parallelAxis[]（平行坐标维）
+    // parallel 组件：layout 命名轴的"排布方向"——'vertical'（轴自上
+    // 而下堆叠，每根轴横置，nutrients 官方图）| 'horizontal'（轴从
+    // 左到右排开，每根轴竖置）。缺省 horizontal（与 ECharts 2.x
+    // 时代的既有渲染一致）。axisIndex 映射为数据列号 parAxes[i].dim。
+    string parLayout;
 
     ChartType defaultType; // Add(name, values) / AddLabel 使用的类型
 
@@ -2319,6 +2374,7 @@ class ChartOption {
         o.zoomStartValue = src.zoomStartValue; o.zoomEndValue = src.zoomEndValue;
         o.windowStart = src.windowStart; o.windowEnd = src.windowEnd;
         o.backgroundColor = src.backgroundColor; o.iwid = src.iwid;
+        o.parLayout = src.parLayout;
         o.connectGroup = src.connectGroup; o.rampLo = src.rampLo; o.rampHi = src.rampHi;
         o.radarMax = new List<int>();
         for (int i = 0; i < src.radarMax.Count; i = i + 1) { o.radarMax.Add(src.radarMax[i]); }
@@ -2376,6 +2432,7 @@ class ChartOption {
         o.series = new List<ChartSeries>();
         o.geos = new List<ChartGeo>();
         o.parAxes = new List<ChartParAxis>();
+        o.parLayout = "";
         o.defaultType = ChartType.Line;
         o.showLegend = true;
         o.showTooltip = true;
@@ -3439,6 +3496,7 @@ class ChartOption {
             int dim = a.Int("dim", i);
             ChartParAxis ax = ChartParAxis.Of();
             ax.name = a.Str("name", "");
+            ax.dim = dim;
             ax.inverse = a.Bool("inverse", false);
             if (a.Has("min")) { ax.min = a.Int("min", 0); ax.minSet = true; }
             if (a.Has("max")) { ax.max = a.Int("max", 0); ax.maxSet = true; }
@@ -3695,6 +3753,14 @@ class ChartOption {
             }
         } else if (cl != null) {
             vm.rangeColors.Add(ChartOption.ParseColor(cl, 0));
+        }
+        // piecewise 类目模式：categories + inRange.color 等长一一
+        // 对应（官方 nutrients 的 25 组彩虹着色）。
+        JsonValue cjs = v.Get("categories");
+        if (cjs != null && cjs.IsArray()) {
+            for (int i = 0; i < cjs.Count(); i = i + 1) {
+                vm.vmCats.Add(cjs.At(i).AsString(""));
+            }
         }
         JsonValue pcs = v.Get("pieces");
         if (pcs != null && pcs.IsArray()) {
@@ -4139,6 +4205,13 @@ class ChartOption {
         // 由合成块挂载。
         ChartOption.ParseGeo(v.Get("geo"), o);
         ChartOption.ParseParAxes(v.Get("parallelAxis"), o);
+        // parallel 组件块：layout 命名轴排布方向（'vertical' = 轴横
+        // 置自上而下堆叠，nutrients 官方图；'horizontal'/缺省 = 既有
+        // 竖轴从左到右）。
+        JsonValue parj = v.Get("parallel");
+        if (parj != null && parj.IsObject()) {
+            o.parLayout = parj.Str("layout", o.parLayout);
+        }
         JsonValue series = v.Get("series");
         // ECharts 单系列可以把 series 直接写成对象（line-aqi），
         // 与数组形态同一路解析，否则整图被当空数据画 "(no data)"。
@@ -5297,6 +5370,10 @@ class ChartVisualMap {
     int seriesIndex;   // -1 = 全部系列
     List<int> rangeColors;      // inRange.color 渐变 stop（continuous）
     List<ChartVisualPiece> pieces;
+    // piecewise 类目模式（官方 nutrients）：categories 列出数据列里
+    // 出现过的字符串类目，inRange.color 同序一一对应；行按该列的
+    // 字符串值查下标取色，找不到的类目走 outOfRange（#ccc）。
+    List<string> vmCats;
 
     static ChartVisualMap Of() {
         ChartVisualMap vm = new ChartVisualMap();
@@ -5304,6 +5381,7 @@ class ChartVisualMap {
         vm.minV = 0; vm.maxV = 0; vm.dimension = 0 - 1; vm.seriesIndex = 0 - 1;
         vm.rangeColors = new List<int>();
         vm.pieces = new List<ChartVisualPiece>();
+        vm.vmCats = new List<string>();
         return vm;
     }
 
@@ -5318,6 +5396,7 @@ class ChartVisualMap {
             vm.rangeColors.Add(src.rangeColors[i]);
         }
         for (int i = 0; i < src.pieces.Count; i = i + 1) { vm.pieces.Add(src.pieces[i]); }
+        for (int i = 0; i < src.vmCats.Count; i = i + 1) { vm.vmCats.Add(src.vmCats[i]); }
         return vm;
     }
 

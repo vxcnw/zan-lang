@@ -26,6 +26,85 @@ partial class ChartView {
 
     // ---- parallel 平行坐标 ----
 
+    // visualMap 类目模式（官方 nutrients "Groups"）：行色 = 该行
+    // dimension 列的字符串类目在 categories 里的下标 → inRange 色。
+    // 列值由数据源以定点编码（字符串 AsInt 恒 0 无意义），所以
+    // 类目查表挂在渲染层，直接查 option 的原始 dataset；没有
+    // dataset 的形态（值列就是下标）按数值查 cats。
+    static List<string> parCatNames;
+    static List<int> parCatCols;
+    static string parCatSrcId;
+    static List<int> ParCatLookup(ChartOption o) {
+        ChartVisualMap vm = null;
+        for (int vi = 0; vi < o.visualMaps.Count; vi = vi + 1) {
+            if (o.visualMaps[vi].vmCats.Count > 0) { vm = o.visualMaps[vi]; break; }
+        }
+        if (vm == null) { return null; }
+        string srcId = o.datasets.Count > 0 ? o.datasets[0].id : "";
+        if (parCatNames == vm.vmCats && parCatSrcId == srcId) {
+            return parCatCols;
+        }
+        List<int> cols = new List<int>();
+        for (int ci = 0; ci < vm.vmCats.Count; ci = ci + 1) { cols.Add(0 - 1); }
+        if (o.datasets.Count > 0) {
+            ChartJsonDataset ds = o.datasets[0];
+            int col = vm.dimension >= 0 ? vm.dimension : 1;
+            for (int ri = 0; ri < ds.rows.Count; ri = ri + 1) {
+                JsonValue row = ds.source.At(ds.rows[ri]);
+                if (row == null || !row.IsArray() || col >= row.Count()) { continue; }
+                string gv = row.At(col).AsString("");
+                for (int ci = 0; ci < vm.vmCats.Count; ci = ci + 1) {
+                    if (cols[ci] == 0 - 1 && vm.vmCats[ci] == gv) {
+                        cols[ci] = ds.rows[ri];
+                        break;
+                    }
+                }
+            }
+        }
+        parCatNames = vm.vmCats;
+        parCatSrcId = srcId;
+        parCatCols = cols;
+        return cols;
+    }
+
+    // 行色判定：类目模式优先（行号查表，查不到走 outOfRange），
+    // 数值渐变其次（连续 visualMap），否则系列色。
+    static int ParRowColor(ChartOption o, List<int> catCols, int baseCol,
+                           int rowIdx, List<int> row) {
+        ChartVisualMap vm = null;
+        for (int vi = 0; vi < o.visualMaps.Count; vi = vi + 1) {
+            ChartVisualMap v = o.visualMaps[vi];
+            if (v.vmCats.Count > 0) { vm = v; break; }
+        }
+        if (vm != null && catCols != null) {
+            // 类目维的行值就是"行号"编码（渲染层把字符串 AsInt 恒
+            // 得 0）：先用行号查表，命中即取该类目色。
+            int hitR = rowIdx < catCols.Count ? catCols[rowIdx] : 0 - 1;
+            if (hitR >= 0 && hitR < vm.rangeColors.Count) {
+                return vm.rangeColors[hitR];
+            }
+            // 无 dataset 的形态：值列直接是类目下标。
+            int vd = vm.dimension >= 0 ? vm.dimension : 0;
+            if (vd < row.Count && row[vd] >= 0 && row[vd] < vm.rangeColors.Count) {
+                return vm.rangeColors[row[vd]];
+            }
+            return StyleSheet.ParseColor("#ccc");
+        }
+        for (int vi = 0; vi < o.visualMaps.Count; vi = vi + 1) {
+            ChartVisualMap v = o.visualMaps[vi];
+            if (v.rangeColors.Count < 2 || !v.hasMin || !v.hasMax
+                || v.maxV <= v.minV) { continue; }
+            int vd = v.dimension >= 0 ? v.dimension : 0;
+            if (vd >= row.Count) { continue; }
+            int tF = (int)(((long)row[vd] * 1000 - (long)v.minV) * 1000L
+                / (long)(v.maxV - v.minV));
+            if (tF < 0) { tF = 0; }
+            if (tF > 1000) { tF = 1000; }
+            return ChartVisualMap.Lerp(v.rangeColors, tF);
+        }
+        return baseCol;
+    }
+
     // 大数据渐进渲染状态。行折线的原版语义（官方 nutrients：
     // lineStyle.width 0.5 + opacity 0.05）是发丝线低透明密度叠加——
     // 每行一次独立 src-over，CPU 光栅器上 ~0.85ms/行，7637 行一次
@@ -62,10 +141,34 @@ partial class ChartView {
         }
         if (dims < 2) { return; }
 
+        // parallelAxis[].dim：6.1 语义，轴声明绑定数据列（official
+        // nutrients 的轴序是 [16,2,4,3,...]，不是数组槽位）。dim 未
+        // 声明（-1）时退回数组槽位本身（axis i ↔ 列 i）。
+        List<int> col = new List<int>();
+        for (int d = 0; d < dims; d = d + 1) {
+            int ci = d;
+            if (d < o.parAxes.Count && o.parAxes[d].dim >= 0
+                && o.parAxes[d].dim < 100000) {
+                ci = o.parAxes[d].dim;
+            }
+            col.Add(ci);
+        }
+        // 列值域包络（dim→[lo,hi]），与轴值域共用（轴值域按列查）。
+        int nCols = 0;
+        for (int d = 0; d < dims; d = d + 1) {
+            if (col[d] + 1 > nCols) { nCols = col[d] + 1; }
+        }
+        List<int> colLo = new List<int>();
+        List<int> colHi = new List<int>();
+        for (int ci2 = 0; ci2 < nCols; ci2 = ci2 + 1) {
+            colLo.Add(0); colHi.Add(0);
+        }
+
         int plotTop = Chart.DrawPanelI(app, x, y, w, h, o.title, series,
             o.iwid, o.showLegend);
 
-        // 每维值域：显式 min/max 优先，否则数据包络走 NiceRange。
+        // 每轴值域：显式 min/max 优先，否则按其数据列包络走
+        // NiceRange；类目维域 = [0, 类目数-1]（值存下标）。
         List<int> lo = new List<int>();
         List<int> hi = new List<int>();
         for (int d = 0; d < dims; d = d + 1) {
@@ -83,22 +186,28 @@ partial class ChartView {
                 }
             }
             if (!hasRng) {
-                dLo = int.MaxValue;
-                dHi = int.MinValue;
-                for (int si = 0; si < series.Count; si = si + 1) {
-                    ChartSeries s = series[si];
-                    if (s.hidden || s.custom != "parallel") { continue; }
-                    for (int ri = 0; ri < s.parRows.Count; ri = ri + 1) {
-                        List<int> row = s.parRows[ri];
-                        if (d >= row.Count) { continue; }
-                        if (row[d] < dLo) { dLo = row[d]; }
-                        if (row[d] > dHi) { dHi = row[d]; }
+                int dc = col[d];
+                if (dc >= colLo.Count) {
+                    dLo = int.MaxValue;
+                    dHi = int.MinValue;
+                    for (int si = 0; si < series.Count; si = si + 1) {
+                        ChartSeries s = series[si];
+                        if (s.hidden || s.custom != "parallel") { continue; }
+                        for (int ri = 0; ri < s.parRows.Count; ri = ri + 1) {
+                            List<int> row = s.parRows[ri];
+                            if (dc >= row.Count) { continue; }
+                            if (row[dc] < dLo) { dLo = row[dc]; }
+                            if (row[dc] > dHi) { dHi = row[dc]; }
+                        }
                     }
+                    if (dLo == int.MaxValue) { dLo = 0; dHi = 1; }
+                    ChartSpan sp = Chart.NiceRange(dLo, dHi);
+                    dLo = sp.lo;
+                    dHi = sp.hi;
+                } else {
+                    dLo = colLo[dc];
+                    dHi = colHi[dc];
                 }
-                if (dLo == int.MaxValue) { dLo = 0; dHi = 1; }
-                ChartSpan sp = Chart.NiceRange(dLo, dHi);
-                dLo = sp.lo;
-                dHi = sp.hi;
             }
             if (dHi <= dLo) { dHi = dLo + 1; }
             lo.Add(dLo);
@@ -121,6 +230,57 @@ partial class ChartView {
                                     Style.SNormal());
         int axCol = sAxis.FgOr(0);
 
+        // parallel.layout：'vertical' = 轴自上而下堆叠、每根轴横置
+        //（official nutrients 官方图：轴名 nameLocation:'end' 在右
+        // 端）；缺省/'horizontal' = 既有形态，竖轴从左到右排开。
+        bool horizAxes = o.parLayout == "vertical";
+
+        // 刻度文本（axisLabel：缺省沿轴内側，末轴外側避让）。
+        if (horizAxes) {
+            // 横轴自上而下等距：轴 0 贴顶、轴 N-1 贴底。轴名 name
+            // 在右端外側；刻度值画在轴下方（k=0 首轴在上方避让）。
+            for (int d = 0; d < dims; d = d + 1) {
+                int ay = plotY + (dims == 1 ? 0 : d * plotH / (dims - 1));
+                c.FillRect(plotX, ay, plotW, app.Scale(2), axCol);
+                int span = hi[d] - lo[d];
+                int sideY = ay + app.Scale(4);
+                if (d == 0) { sideY = ay - app.Scale(3) - nameH; }
+                if (sideY < plotY - nameH - app.Scale(3)) {
+                    sideY = ay + app.Scale(4);
+                }
+                for (int k = 0; k <= 4; k = k + 1) {
+                    int gx = plotX + k * plotW / 4;
+                    if (k > 0 && d == 0) {
+                        c.FillRect(gx, plotY, 1, plotH, sGrid.BgOr(0));
+                    }
+                    int val = lo[d] + span * k / 4;
+                    string vs;
+                    if (d < o.parAxes.Count && o.parAxes[d].cats.Count > 0) {
+                        int ci = val;
+                        if (ci < 0) { ci = 0; }
+                        if (ci >= o.parAxes[d].cats.Count) {
+                            ci = o.parAxes[d].cats.Count - 1;
+                        }
+                        vs = o.parAxes[d].cats[ci];
+                    } else {
+                        vs = Chart.Commas(val);
+                    }
+                    int vw = Canvas.MeasureText(vs, axisFs);
+                    int lx = gx - vw / 2;
+                    if (k == 0) { lx = gx; }
+                    if (k == 4) { lx = gx - vw; }
+                    if (lx < plotX) { lx = plotX; }
+                    c.DrawText(lx, sideY, vs, axCol, axisFs);
+                }
+                // 轴名：右端外側（nameLocation 'end' 语义）。
+                if (d < o.parAxes.Count && o.parAxes[d].name.Length > 0) {
+                    int nw = Canvas.MeasureText(o.parAxes[d].name, axisFs);
+                    c.DrawText(plotX + plotW + app.Scale(8),
+                        ay - nameH / 2 + app.Scale(1), o.parAxes[d].name,
+                        axCol, axisFs);
+                }
+            }
+        } else {
         // N 根垂直轴等距：轴 0 贴左缘、轴 N-1 贴右缘。
         for (int d = 0; d < dims; d = d + 1) {
             int ax = plotX + (dims == 1 ? 0 : d * plotW / (dims - 1));
@@ -166,6 +326,53 @@ partial class ChartView {
                 }
             }
         }
+        }
+
+        // visualMap piecewise 类目模式（official nutrients Groups）：
+        // 行色 = 行号 → 该行 dimension 列类目下标 → inRange 色；
+        // 控件面板画在绘图区左缘（top:20 语义，25 项超行数截断）。
+        List<int> catCols = ParCatLookup(o);
+        int nCats = 0;
+        int catVmIdx = 0 - 1;
+        for (int vi = 0; vi < o.visualMaps.Count; vi = vi + 1) {
+            if (o.visualMaps[vi].vmCats.Count > 0) {
+                nCats = o.visualMaps[vi].vmCats.Count;
+                catVmIdx = vi;
+                break;
+            }
+        }
+        if (nCats > 0 && o.visualMaps[catVmIdx].show) {
+            ChartVisualMap vm = o.visualMaps[catVmIdx];
+            int lgFs = Style.FontFallback(app, "small");
+            int rowH = Canvas.FontHeight(lgFs) + app.Scale(4);
+            int maxRows = plotH / rowH;
+            if (maxRows < 1) { maxRows = 1; }
+            int headH = Canvas.FontHeight(lgFs) + app.Scale(6);
+            int sw = app.Scale(10);
+            int lgX = plotX + app.Scale(4);
+            int lgY = plotY + app.Scale(16);
+            StyleBox sLegend = Style.Part(app, "chart", "legend", "", "", "",
+                                          Style.SNormal());
+            int txtCol = sLegend.FgOr(0);
+            c.DrawText(lgX, lgY, "Groups", txtCol, lgFs);
+            lgY = lgY + headH;
+            int shown = nCats < maxRows ? nCats : maxRows;
+            for (int ci = 0; ci < shown; ci = ci + 1) {
+                int cc = ci < vm.rangeColors.Count ? vm.rangeColors[ci]
+                    : vm.rangeColors.Count > 0
+                    ? vm.rangeColors[vm.rangeColors.Count - 1] : 0;
+                c.FillRoundRect(lgX, lgY + app.Scale(2), sw, sw,
+                    t.borderRadiusSmall, cc);
+                string nm = vm.vmCats[ci];
+                if (nm.Length > 22) { nm = nm.Substring(0, 22) + ".."; }
+                c.DrawText(lgX + sw + app.Scale(5), lgY, nm, txtCol, lgFs);
+                lgY = lgY + rowH;
+            }
+            if (shown < nCats) {
+                string more = "+" + (nCats - shown);
+                c.DrawText(lgX, lgY, more, txtCol, lgFs);
+            }
+        }
 
         // 行折线：一条行 = 跨 dims 根轴的 (ax, y) 折线。行色/线宽/
         // 透明度按 6.1 语义消费 lineStyle（官方 nutrients 是
@@ -195,6 +402,7 @@ partial class ChartView {
             fp = ParHash(fp, totalRows);
             fp = ParHash(fp, axCol);
             fp = ParHash(fp, sGrid.BgOr(0));
+            fp = ParHash(fp, horizAxes ? 1 : 0);
             for (int d = 0; d < dims; d = d + 1) {
                 fp = ParHash(fp, lo[d]); fp = ParHash(fp, hi[d]);
             }
@@ -210,8 +418,10 @@ partial class ChartView {
                 ChartSeries s = series[si];
                 if (s.hidden || s.custom != "parallel") { continue; }
                 fp = ParHash(fp, s.color);
-                fp = ParHash(fp, s.lineStyle != null ? s.lineStyle.width : 0);
-                fp = ParHash(fp, s.lineStyle != null ? s.lineStyle.alpha : 0);
+                fp = ParHash(fp, s.itemStyle != null && s.itemStyle.normal != null
+                    ? s.itemStyle.normal.lineStyle.width : 0);
+                fp = ParHash(fp, s.itemStyle != null && s.itemStyle.normal != null
+                    ? s.itemStyle.normal.lineStyle.alpha : 0);
                 fp = ParHash(fp, s.parRows.Count);
                 for (int ri = 0; ri < s.parRows.Count; ri = ri + 1) {
                     List<int> row = s.parRows[ri];
@@ -241,18 +451,19 @@ partial class ChartView {
         int newDone = stream ? parProgDone : totalRows;
         bool budgetOut = false;
         int rowBase = 0;
-        int th0dbg = 0;
         for (int si = 0; si < series.Count && !budgetOut; si = si + 1) {
             ChartSeries s = series[si];
             if (s.hidden || s.custom != "parallel") { continue; }
             int baseCol = s.color;
             if (baseCol == 0) { baseCol = Chart.Palette(t, slot); }
-            int th = s.lineStyle != null && s.lineStyle.width > 0
-                ? app.Scale(s.lineStyle.width) : app.Scale(2);
+            // series.lineStyle.width/opacity（6.1 语义，官方 nutrients
+            // 0.5 + 0.05）：width 经解析 round 进 itemStyle.normal.
+            // lineStyle.width，opacity 记 alpha；未声明按原缺省。
+            ChartLineStyle parLs = s.itemStyle != null && s.itemStyle.normal != null
+                ? s.itemStyle.normal.lineStyle : null;
+            int th = parLs != null && parLs.width > 0 ? app.Scale(parLs.width) : app.Scale(2);
             if (th < 1) { th = 1; }
-            th0dbg = th;
-            int rowAlpha = s.lineStyle != null && s.lineStyle.alpha > 0
-                ? s.lineStyle.alpha : 255;
+            int rowAlpha = parLs != null && parLs.alpha > 0 ? parLs.alpha : 255;
             // 生长淡入只对非流式小图；流式按原版 progressive 语义
             // 直接进终态密度，不叠加额外动画。
             int alpha = rowAlpha;
@@ -271,42 +482,38 @@ partial class ChartView {
                 newDone = gi + 1;
                 List<int> row = s.parRows[ri];
                 if (row.Count < 2) { continue; }
-                int col = baseCol;
-                // visualMap.dimension 命中：按该维值渐变取色（aqi）。
-                for (int vi = 0; vi < o.visualMaps.Count; vi = vi + 1) {
-                    ChartVisualMap vm = o.visualMaps[vi];
-                    if (vm.rangeColors.Count < 2 || !vm.hasMin || !vm.hasMax
-                        || vm.maxV <= vm.minV) { continue; }
-                    int vd = vm.dimension >= 0 ? vm.dimension : 0;
-                    if (vd >= row.Count) { continue; }
-                    int tF = (int)(((long)row[vd] * 1000 - (long)vm.minV) * 1000L
-                        / (long)(vm.maxV - vm.minV));
-                    if (tF < 0) { tF = 0; }
-                    if (tF > 1000) { tF = 1000; }
-                    col = ChartVisualMap.Lerp(vm.rangeColors, tF);
-                    break;
-                }
-                col = Chart.WithAlpha(col, alpha);
+                int colv = ParRowColor(o, catCols, baseCol, gi, row);
+                colv = Chart.WithAlpha(colv, alpha);
                 List<int> px = new List<int>();
                 List<int> py = new List<int>();
                 for (int d = 0; d < dims; d = di2(d, row, dims)) {
-                    int ax = plotX + d * plotW / (dims - 1);
+                    int dc = col[d];
                     int span = hi[d] - lo[d];
                     if (span < 1) { span = 1; }
-                    int v = d < row.Count ? row[d] : lo[d];
+                    int v = dc < row.Count ? row[dc] : lo[d];
                     if (d < o.parAxes.Count && o.parAxes[d].inverse
                         && !o.parAxes[d].minSet && !o.parAxes[d].maxSet) {
                         v = hi[d] - (v - lo[d]);
                     }
-                    int pyv = plotY + plotH - (v - lo[d]) * plotH / span;
-                    if (pyv < plotY) { pyv = plotY; }
-                    if (pyv > plotY + plotH) { pyv = plotY + plotH; }
-                    px.Add(ax);
-                    py.Add(pyv);
+                    if (horizAxes) {
+                        int xv = plotX + (v - lo[d]) * plotW / span;
+                        if (xv < plotX) { xv = plotX; }
+                        if (xv > plotX + plotW) { xv = plotX + plotW; }
+                        int ay = plotY + d * plotH / (dims - 1);
+                        px.Add(xv);
+                        py.Add(ay);
+                    } else {
+                        int ax = plotX + d * plotW / (dims - 1);
+                        int pyv = plotY + plotH - (v - lo[d]) * plotH / span;
+                        if (pyv < plotY) { pyv = plotY; }
+                        if (pyv > plotY + plotH) { pyv = plotY + plotH; }
+                        px.Add(ax);
+                        py.Add(pyv);
+                    }
                 }
                 // 每行一次独立 src-over：半透明行的逐行叠加累积
                 // 正是官方密度图的成因，不能合并成一次批量合成。
-                c.DrawPolyline(px, py, col, th);
+                c.DrawPolyline(px, py, colv, th);
                 if (stream && Window.GetTickMs() - frameStart >= 24) {
                     budgetOut = true;
                     break;
@@ -326,11 +533,6 @@ partial class ChartView {
             }
             if (parProgDone < totalRows) { app.RequestAnimationFrame(16); }
         }
-        System.IO.File.AppendAllText("D:/project/zan-lang/_scratch/dbg_par.txt",
-            "par ms=" + Convert.ToString(Window.GetTickMs() - frameStart)
-            + " done=" + Convert.ToString(stream ? parProgDone : -1)
-            + "/" + Convert.ToString(totalRows)
-            + " th=" + Convert.ToString(th0dbg) + "\n");
 
         // 命中：指针贴近某已画行在任一轴上的顶点。顶点重算代价
         // O(已画行×维)，指针在图外时整段跳过。
