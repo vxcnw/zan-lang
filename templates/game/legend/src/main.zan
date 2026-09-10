@@ -357,6 +357,15 @@ partial class LegendApp {
         return b;
     }
 
+    /// 定尺寸按钮（**设备像素**入参）。Spec 的 getter 给的就是设备像素，
+    /// 直接传进来即可——省掉「device → logical → 再 Px 回去」的整数取整
+    /// 损耗（`Spec.Px(w * 100 / 150)` 这种写法在非 150% 屏上还是错的）。
+    Button BtnDev(string s, string cls, int wDev, int hDev, Action fn) {
+        Button b = Btn(s, cls, fn);
+        b.Prefer(wDev, hDev);
+        return b;
+    }
+
     // =====================================================================
     //  页面路由
     // =====================================================================
@@ -379,6 +388,7 @@ partial class LegendApp {
         if (page == 12) { BuildSecret(); return; }
         if (page == 13) { BuildWorldBoss(); return; }
         if (page == 20) { BuildBag(); return; }
+        if (page == 27) { BuildShop(); return; }
         if (page == 31) { BuildMapInner(); return; }
         BuildPlaceholder();
     }

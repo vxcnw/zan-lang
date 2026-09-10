@@ -388,4 +388,67 @@ class Spec {
         if (i == 7) { return Px(171); }
         return Px(210);                             // 底行 y
     }
+
+    /* ---- 商店（页 27）实测（原图 1871×971）----
+       全部按**内容区顶/左**换算：内容区上沿 = 顶栏下边框 165 设备、
+       左沿 374、**右沿 1490**（聊天面板左沿）——商店的卡片阵一直排到聊天
+       面板，不是地图页那种窄区，这里最初按 1128 当右界量成了 2 列（错），
+       实测是 **3 列**。
+       货币行：4 个等宽 tab（398..517 / 526..644 / 653..772 / 781..899，每个
+       120 设备、间距 9、上下边框 183/225 → 高 42），距内容顶 18 设备 = 12
+       逻辑、距内容左 24 设备 = 16 逻辑；右端「激活码：」+ 输入框（1077..
+       1378 = 301 设备）+「使用」钮（1388..1466 = 78 设备），右内缩 24。
+       首行卡顶 244 → 货币行下沿到卡片 18 设备 = 12 逻辑。
+       卡片阵 3 列：卡 1 396..741、卡 2 762..1107、卡 3 1128..1473 → 卡宽
+       345 设备 = 230 逻辑、列距 21 = 14；行顶 244/342/439/537/634/732 →
+       行距 97.6 设备（卡高 79 + 缝 18.6 = 12 逻辑），一页 6 行 × 3 = 18 张。
+       左内缩 22 设备 = 15 逻辑（396−374），卡阵右端 1473 距内容右 17。
+       卡内：图标石框 411..471 × 247..320 → 60×73 设备 = 40×49 逻辑，左内缩
+       15 设备 = 10 逻辑；右列左缘 480（= 图标右 + 9 = 6 逻辑），
+       上行（24 设备）：名称 + 右端价格胶囊 626..721 × 254..278 = 95×24 设备
+       = 63×16 逻辑（金边圆角，右距卡右 20 设备）；
+       中缝 12 设备 = 8 逻辑；下行 y 290..313（24 设备 = 16 逻辑）= 数量(35)
+       [+] (23) [值](64) [−](32) … 购买(73)，右端距卡右 13 设备。
+       页脚 y 830..860（30 设备 = 20 逻辑）：左「元宝：0」（左缩 30 设备），
+       右 兑换元宝(135) + 上一页(81) + 1/2(60) + 下一页(83)，右内缩 33 设备；
+       页脚底距内容底 19 设备 = 13 逻辑。 */
+    static int ShopCurrW() { return Px(80); }        // 货币 tab 120 设备
+    static int ShopCurrH() { return Px(28); }        // 42 设备
+    static int ShopCurrGap() { return Px(6); }       // 9 设备
+    static int ShopTopPad() { return Px(12); }       // 内容顶到货币行 18 设备
+    static int ShopPadL() { return Px(15); }         // 内容左到卡片 22 设备
+    static int ShopCurrPadL() { return Px(16); }     // 内容左到货币行 24 设备
+    static int ShopCurrPadR() { return Px(16); }     // 货币行右端距内容右 24 设备
+    static int ShopCurrToCard() { return Px(12); }   // 货币行下沿到首行卡 18 设备
+    static int ShopCodeW() { return Px(200); }       // 激活码输入框 301 设备
+    static int ShopCodeKeyW() { return Px(52); }     // 「激活码：」4 字 ≈72 设备
+    static int ShopUseW() { return Px(52); }         // 「使用」钮 78 设备
+    static int ShopCardW() { return Px(230); }       // 345 设备
+    static int ShopCardH() { return Px(53); }        // 79 设备
+    static int ShopCardGapX() { return Px(14); }     // 21 设备
+    static int ShopCardGapY() { return Px(12); }     // 18 设备（行距 97.6−79）
+    static int ShopCardPadL() { return Px(10); }     // 卡左到图标 15 设备
+    static int ShopCardPadR() { return Px(9); }      // 右列右缘到卡右 13 设备
+    static int ShopIconW() { return Px(40); }        // 60 设备
+    static int ShopIconH() { return Px(49); }        // 73 设备
+    static int ShopIconGap() { return Px(6); }       // 图标到右列 9 设备
+    static int ShopNameH() { return Px(16); }        // 上行 24 设备
+    static int ShopQtyH() { return Px(16); }         // 下行 24 设备
+    static int ShopRowGap() { return Px(8); }        // 上下行之间 12 设备
+    static int ShopCoinW() { return Px(15); }        // 价签金币图 22 设备
+    static int ShopPillW() { return Px(63); }        // 价格胶囊 95 设备
+    static int ShopPillH() { return Px(16); }        // 24 设备
+    static int ShopPillPadR() { return Px(5); }      // 胶囊再右缩 7 设备
+    static int ShopQtyKeyW() { return Px(29); }      // 「数量」二字盒 43 设备
+    static int ShopNumW() { return Px(15); }         // +/− 钮 23 设备
+    static int ShopValW() { return Px(42); }         // 数量值框 64 设备
+    static int ShopBuyW() { return Px(48); }         // 购买钮 73 设备
+    static int ShopFootH() { return Px(20); }        // 页脚 30 设备
+    static int ShopFootPadL() { return Px(20); }     // 页脚左内缩 30 设备
+    static int ShopFootPadR() { return Px(22); }     // 页脚右内缩 33 设备
+    static int ShopFootPadB() { return Px(13); }     // 页脚底距内容底 19 设备
+    static int ShopExchW() { return Px(90); }        // 兑换元宝钮 135 设备
+    /// 一页 6 行 × 3 列（页脚再往下才到底部导航瓦片）。
+    static int ShopPerPage() { return 18; }
+    static int ShopCols() { return 3; }
 }

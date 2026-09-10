@@ -1,4 +1,4 @@
-param([string]$Compiler = '', [string]$Output = '')
+﻿param([string]$Compiler = '', [string]$Output = '')
 $ErrorActionPreference = 'Stop'
 $template = Split-Path $PSScriptRoot -Parent
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../..'))
@@ -10,7 +10,7 @@ New-Item -ItemType Directory -Force -Path $Output | Out-Null
 $sources = @(
     'main.zan', 'Spec.zan', 'Tables.zan', 'Data.zan', 'Game.zan',
     'Save.zan', 'Net.zan', 'Shell.zan', 'PageMap.zan', 'PageMapInner.zan',
-    'PageArena.zan', 'PageBag.zan', 'PageScene.zan', 'PageBossHome.zan', 'PageEscort.zan', 'Slots.zan'
+    'PageArena.zan', 'PageBag.zan', 'PageScene.zan', 'PageBossHome.zan', 'PageEscort.zan', 'PageShop.zan', 'Slots.zan'
 ) | ForEach-Object { "$template/src/$_" }
 # 并行会话在改 stdlib/Gui/Component/Chart（`Chart.StackExtentF` 等签名变化还没
 # 落完）；--auto-stdlib 看到 `using Gui;` 会把整张 Chart 拉进编译。legend 本身

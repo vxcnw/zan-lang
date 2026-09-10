@@ -236,6 +236,24 @@ CSS 里非 token 的长度由 `Style.ScaleLayout` 补乘,`StyleBox.IsPrescaled`
      { flex-direction: row }` 把 `Panel.Column()` 的下段压成横排(tab 行被拉满高、
      内容挤到右边)。Row/Column 混用时**一条规则只写一个方向**。
 
+8. **停靠容器的 `Gap` 连第一个子项也算一份——首尾对齐别用撑条**。
+   `Arrange` 的停靠分支在**每个**子项之后都扣一次 `StyleGap()`，包括第一个；
+   于是「首撑条 + 缝」= 内缩 + gap，整行/整列右移/下移一个 gap 的量。
+   实证(商店页):卡片行 `Gap(21)` + 首撑条 `Prefer(22,…)` → 卡阵整体右移 21
+   设备；货币行 `Gap(9)` + 首撑条 → 右移 9。**左右(上下)内缩一律走容器
+   `Padding(top, right, bottom, left)`，只有子项之间的缝用 `Gap()`**；确实
+   要在两端留白又不想动 padding 时，把首尾撑条的宽度减去一个 gap。
+   注意 `Padding()` 会被皮肤里声明的 `padding` 顶掉——那个类就别在 CSS 里
+   写 padding。
+
+9. **贴底元素用 `DockBottom()`(dock=2)，不要指望 `Grow()` 撑条把它推下去**。
+   停靠分支是「先按声明顺序摆 dock 1..4，再摆 dock 5」，而 `Grow()` 把子项
+   变成 dock=5。所以「内容 + 撑条(Grow) + 页脚」里，撑条排在页脚**之后**，
+   页脚被摆在内容正下方、页面底部留一大块空。要贴底必须
+   `footer.DockBottom(); body.Add(footer);`——**先 Add 的 dock=2 先占底**，
+   所以「页脚之下那条底缝」要在页脚之前 Add。实证(商店页):页脚原本落在
+   卡阵下 15 设备处，改 DockBottom 后才回到页底。
+
 这两道闸门随工具链走:安装版 SDK 是发布时刻的冻结副本——早于 2026-09-09
 的安装里没有它们,环境变量静默无效(skill 跑在工具链前面时先查工具链日期,
 如安装目录 zanc.exe/stdlib 的时间戳)。正确动作是升级工具链后用内建闸门;

@@ -397,6 +397,52 @@ button.tiny { font-size: var(--font-size-small); }
 .bag-skill-tp { color: var(--text-tertiary); }
 .bag-skill-lv { color: var(--game-cyan); font-weight: 700; }
 
+/* ===================== 商店（页 27）=====================
+   取色与几何来自 mir2/mir/商店.png 实测（REFERENCE_AUDIT §4.3 商店）。
+   同场景族：CSS 只管配色与边框，尺寸一律 Spec + 代码给，不写 padding。 */
+.shop-page { background: transparent; }
+.shop-curr-row, .shop-row, .shop-wall { background: transparent; }
+/* 货币 tab：底 #1f2936、1px #3b4552、字 #03a7fa（与背包功能钮同族）。 */
+.shop-curr { background: #1f2936; border: 1px #3b4552; }
+.shop-curr-text { color: #03a7fa; font-size: 12; text-align: center; }
+.shop-curr-on { background: #16324e; border: 1px #2a5580; }
+.shop-curr-on .shop-curr-text { color: #9cc8f0; font-weight: 700; }
+.shop-code-k { color: #03a7fa; font-size: 12; }
+/* 商品卡：截图实测卡底近黑 #0d1116、1px #354559、圆角 2px；图标石框
+   #0c0d0e / 1px #2b3a4a（原版图标框是石头凹槽图，这里用同色系扁框）。 */
+.shop-card { display: flex; flex-direction: row; align-items: center;
+    background: #0d1116; border: 1px #354559; border-radius: 2px; }
+.shop-icon { background: #0c0d0e; border: 1px #2b3a4a; }
+.shop-name-row, .shop-qty { display: flex; flex-direction: row;
+    align-items: center; background: transparent; }
+.shop-name { flex-grow: 1; overflow: hidden; color: #ffd21e; font-size: 13;
+    font-weight: 700; }
+.shop-qty-fill { flex-grow: 1; background: transparent; }
+/* 价格胶囊：原版是**金边圆角**小盒（#b98c3c 2px + #0c0d0e 底），
+   里面金币图 + 白字数值。 */
+.shop-price { background: #0c0d0e; border: 2px #b98c3c; border-radius: 3px;
+    align-items: center; }
+.shop-price-v { color: #f2f2ea; font-size: 12; text-align: right; }
+.shop-qty-k { color: #03a7fa; font-size: 12; }
+.shop-num { background: #1f2936; border: 1px #2a5580; color: #03a7fa;
+    font-size: 12; text-align: center; }
+.shop-num:hover { background: #16324e; border: 1px #4a90d0; color: #9cc8f0; }
+.shop-val { background: #10161c; border: 1px #2a5580; color: #ffffff;
+    font-size: 12; text-align: center; }
+.shop-buy { background: #1f2936; border: 1px #2a5580; color: #03a7fa;
+    font-size: 14; }
+.shop-buy:hover { background: #16324e; border: 1px #4a90d0; color: #9cc8f0; }
+/* 「使用」钮与页脚：同族配色；页脚左「元宝：N」为黄字（与左栏数值同色）。 */
+.shop-use { background: #1f2936; border: 1px #2a5580; color: #03a7fa;
+    font-size: 12; }
+.shop-use:hover { background: #16324e; border: 1px #4a90d0; color: #9cc8f0; }
+.shop-foot { display: flex; flex-direction: row; align-items: center;
+    background: transparent; }
+.shop-wallet { color: #ffd21e; font-size: 12; }
+.shop-exch { background: #1f2936; border: 1px #2a5580; color: #03a7fa;
+    font-size: 12; }
+.shop-exch:hover { background: #16324e; border: 1px #4a90d0; color: #9cc8f0; }
+
 /* ===================== 场景页家族（幻境 / BOSS之家 / 押镖 / 秘境 / 世界BOSS）=====
    取色与几何全部来自 REFERENCE_AUDIT.md §5.11（mir2/mir/幻境.png 实拍）。
    CSS 里的数字是**逻辑像素**（引擎按设备缩放乘回 150%），行高/尺寸一般由
