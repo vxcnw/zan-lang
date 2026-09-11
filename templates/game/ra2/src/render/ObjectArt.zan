@@ -44,6 +44,7 @@ class ObjectArt {
     List<string> bldRegNames;
     List<int> bldShadow;
     List<string> bldBuildup;
+    int conditionYellow = 50;  // cached [AudioVisual] ConditionYellow=%
 
     // SHP name + frame + palette -> decoded texture. The palette is part of
     // the key: unit sprites decode under a per-side palette (the remap
@@ -127,6 +128,11 @@ class ObjectArt {
         a.bldRegNames = new List<string>();
         a.bldShadow = new List<int>();
         a.bldBuildup = new List<string>();
+        IniSection av = db.Rules().Section("AudioVisual");
+        if (av != null) {
+            int cy = Rules.LeadingInt(av.GetOr("ConditionYellow", ""));
+            if (cy > 0) { a.conditionYellow = cy; }
+        }
         // Buildings use the same object palette the units do. The reference
         // renderer is explicit about it (ra-map/src/structure_paint.rs: the
         // object palette is unittem.pal, the iso theater palette only a
@@ -186,18 +192,17 @@ class ObjectArt {
             // wait rather than guess at unrelated frames.
             return this.ShapeTextureFrame(name, 0, pal);
         }
-        // Finished: frame 0 healthy, then the sprite's own damaged states.
-        // A sprite with three visible frames ships healthy/damaged/critical;
-        // with two, healthy and one damaged state.
+        // Finished: frame 0 healthy, frame 1 damaged. The retail mapping
+        // (Building.ts computeDamageType + updateMainObjFrame) is exactly
+        // two sprite states: intact above [AudioVisual] ConditionYellow,
+        // the damaged frame at or below it -- ConditionRed only drives the
+        // fires and smoke, red shares yellow's frame. Frame 2, where a
+        // sprite carries one, is the garrisoned state, not "critical".
         int frame = 0;
         if (maxHp > 0 && visible >= 2) {
             int pct = hp * 100 / maxHp;
             if (pct < 0) { pct = 0; }
-            if (visible >= 3) {
-                frame = pct <= 33 ? 2 : (pct <= 66 ? 1 : 0);
-            } else {
-                frame = pct <= 50 ? 1 : 0;
-            }
+            frame = pct <= this.conditionYellow ? 1 : 0;
             if (frame >= visible) { frame = visible - 1; }
         }
         return this.ShapeTextureFrame(name, frame, pal);

@@ -35,6 +35,8 @@ class WorldObject {
     bool selected;
     int smokeTicks;      // ticks spent venting damage smoke (80s cap)
     List<FxAnim> fires;  // the burning anims seeded while damaged
+    List<FxAnim> idles;  // the structure's constant IdleAnim loop
+    string idleName;     // which idle variant is live ("" none)
 
     // Movement (units only): the planned route as cells, and how far along it
     // the unit has walked this frame.
@@ -3285,13 +3287,63 @@ class World {
              && o.UnitType().ShpName().Length > 0) { continue; }
             if (o.MaxHp() <= 0) { continue; }
             bool damaged = o.Hp() * 2 < o.MaxHp();
+            // The reference's Building fire state keys off
+            // [AudioVisual] ConditionYellow, not the smoke plugin's
+            // hardcoded half -- at 50 retail they agree, per-mod they may
+            // not.
+            bool fireHurt = o.Hp() * 100
+                <= o.MaxHp() * this.Rules().ConditionYellowPct();
             // Structures also catch fire, the reference's Building fire
             // objects: one DamageFireTypes anim at each art-declared
             // DamageFireOffset spot, looping until the building repairs
             // or dies. The pick is the reference's random choice among
             // FIRE01..FIRE03, keyed off the clock here.
             if (o.Kind() == ObjKind.Structure()) {
-                if (!damaged || o.IsDead()) {
+                // The art's IdleAnim= loop runs whenever the structure
+                // stands finished: it swaps to IdleAnimDamaged= while
+                // damaged (keeping the healthy anim when no damaged art
+                // shipped, like the reference) and stops on death. Only
+                // BuiltTicks-done structures show it -- during the Buildup
+                // rise the reference hides the idle.
+                StructureType sti = this.TypeOf(o);
+                string idleWant = "";
+                if (sti != null && !o.IsDead()
+                 && o.BuiltTicks() >= sti.BuildTime()) {
+                    idleWant = this.Rules().IdleAnimName(sti.Reg());
+                    if (idleWant.Length > 0 && fireHurt) {
+                        string dn =
+                            this.Rules().IdleAnimDamagedName(sti.Reg());
+                        if (dn.Length > 0) { idleWant = dn; }
+                    }
+                }
+                if (o.idleName == null || idleWant != o.idleName) {
+                    if (o.idles != null) {
+                        for (int f = 0; f < o.idles.Count; f = f + 1) {
+                            o.idles[f].Kill();
+                        }
+                        o.idles.Clear();
+                    }
+                    o.idleName = idleWant;
+                    if (idleWant.Length > 0) {
+                        List<int> iofs =
+                            this.Rules().IdleAnimOffsets(sti.Reg());
+                        double ix = iofs.Count >= 2
+                            ? iofs[0] / 256.0 : 0.0;
+                        double iy = iofs.Count >= 2
+                            ? iofs[1] / 256.0 : 0.0;
+                        FxAnim ia = this.SpawnAnimLoop(idleWant,
+                            o.X() + ix, o.Y() + iy);
+                        if (ia != null) {
+                            // A never-assigned List field has no backing
+                            // list: Add must not be its first touch, so
+                            // (re)seeding always hands the object a fresh
+                            // list first.
+                            o.idles = new List<FxAnim>();
+                            o.idles.Add(ia);
+                        }
+                    }
+                }
+                if (!fireHurt || o.IsDead()) {
                     if (o.fires != null && o.fires.Count > 0) {
                         for (int f = 0; f < o.fires.Count; f = f + 1) {
                             o.fires[f].Kill();
@@ -3406,6 +3458,46 @@ class World {
     }
 
     FxAnim AnimFxAt(int i) { return this.anims[i]; }
+
+    /// <summary>Structures that should be showing an IdleAnim loop right
+    /// now -- finished, alive, and whose art ships the anim (with the
+    /// damaged variant when hurt and one exists). The selftest pairs this
+    /// with IdleLoopCount to prove every eligible structure stays covered.</summary>
+    int IdleEligibleCount() {
+        int n = 0;
+        for (int i = 0; i < this.objects.Count; i = i + 1) {
+            WorldObject o = this.objects[i];
+            if (o == null || o.Kind() != ObjKind.Structure()
+             || o.IsDead() || o.MaxHp() <= 0) { continue; }
+            StructureType st = this.TypeOf(o);
+            if (st == null || o.BuiltTicks() < st.BuildTime()) { continue; }
+            string want = this.Rules().IdleAnimName(st.Reg());
+            if (want.Length > 0
+             && o.Hp() * 100 <= o.MaxHp()
+                    * this.Rules().ConditionYellowPct()) {
+                string dn = this.Rules().IdleAnimDamagedName(st.Reg());
+                if (dn.Length > 0) { want = dn; }
+            }
+            // The anim must actually ship in this install (the reference
+            // gates on the animation object existing) -- some art sections
+            // name SHPs the player's mixes do not carry.
+            if (want.Length > 0 && this.ProbeAnimFrames(want) > 0) {
+                n = n + 1;
+            }
+        }
+        return n;
+    }
+
+    /// <summary>Idle loops actually live across all structures.</summary>
+    int IdleLoopCount() {
+        int n = 0;
+        for (int i = 0; i < this.objects.Count; i = i + 1) {
+            WorldObject o = this.objects[i];
+            if (o == null || o.idles == null) { continue; }
+            n = n + o.idles.Count;
+        }
+        return n;
+    }
 
     int BeamCount() { return this.beams.Count; }
 

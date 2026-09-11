@@ -3840,6 +3840,19 @@ class Ra2Loop : IGuiHostLoop {
                             + " damaged structure must burn at its"
                             + " DamageFireOffset spots");
                     }
+                    // Building idle anims: every finished structure whose
+                    // art ships IdleAnim must have its loop live (the
+                    // damaged variant where one ships and we wounded the
+                    // building above).
+                    int idlEl = this.world.IdleEligibleCount();
+                    int idlLive = this.world.IdleLoopCount();
+                    Console.WriteLine("selftest idles eligible="
+                        + Convert.ToString(idlEl)
+                        + " live=" + Convert.ToString(idlLive));
+                    if (idlLive != idlEl) {
+                        Console.WriteLine("selftest FAIL idles: every"
+                            + " IdleAnim structure must show its loop");
+                    }
                 } else {
                     Console.WriteLine("selftest FAIL proj: spawn refused");
                 }

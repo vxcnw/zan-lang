@@ -522,6 +522,11 @@ class Rules {
     bool alternateArcticArt;   // [General] AlternateArcticArt: A-suffix art
     List<string> fireTypes;    // [AudioVisual] DamageFireTypes: burning
                                // buildings pick one of these at random            // ini Gravity= (leptons/tick²), retail 6
+    int conditionYellow = 50;  // [AudioVisual] ConditionYellow=%: at or
+                               // below this share of health a building
+                               // shows its damaged frame (retail 50)
+    int conditionRed = 25;     // [AudioVisual] ConditionRed=%: drives the
+                               // fire state, not another sprite frame
     List<UnitDef> units;
     List<BuildingDef> buildings;   // both sides interleaved, menu order per side
     List<BuildingDef> civs;        // neutral structures from the map
@@ -809,6 +814,49 @@ class Rules {
     /// ObjectArt keys the same swap off inSnowTheater.</summary>
     bool AlternateArcticArt() { return this.alternateArcticArt; }
     List<string> FireTypes() { return this.fireTypes; }
+
+    /// <summary>[AudioVisual] ConditionYellow=% (retail 50): a building at
+    /// or below this share of health counts damaged.</summary>
+    int ConditionYellowPct() { return this.conditionYellow; }
+
+    /// <summary>[AudioVisual] ConditionRed=% (retail 25): the heavy damage
+    /// state. The sprite has no third damage frame -- red shares yellow's.</summary>
+    int ConditionRedPct() { return this.conditionRed; }
+
+    /// <summary>The building's constant IdleAnim= loop from its art section,
+    /// "" when the section or the anim's own art section is absent -- the
+    /// reference skips a building anim whose animation art never shipped.</summary>
+    string IdleAnimName(string reg) {
+        if (this.artIni == null || reg == null) { return ""; }
+        IniSection s = this.artIni.Section(reg);
+        if (s == null) { return ""; }
+        string name = s.Get("IdleAnim").Trim().ToUpper();
+        if (name.Length == 0) { return ""; }
+        return this.artIni.Section(name) != null ? name : "";
+    }
+
+    /// <summary>IdleAnimDamaged=: the damaged-state idle variant, gated the
+    /// same way. A building without one keeps its healthy idle while hurt,
+    /// exactly like the reference's missing-damaged-art fallback.</summary>
+    string IdleAnimDamagedName(string reg) {
+        if (this.artIni == null || reg == null) { return ""; }
+        IniSection s = this.artIni.Section(reg);
+        if (s == null) { return ""; }
+        string name = s.Get("IdleAnimDamaged").Trim().ToUpper();
+        if (name.Length == 0) { return ""; }
+        return this.artIni.Section(name) != null ? name : "";
+    }
+
+    /// <summary>IdleAnimX/Y= lepton offsets for the idle loop.</summary>
+    List<int> IdleAnimOffsets(string reg) {
+        List<int> offs = new List<int>();
+        if (this.artIni == null || reg == null) { return offs; }
+        IniSection s = this.artIni.Section(reg);
+        if (s == null) { return offs; }
+        offs.Add(Rules.LeadingInt(s.GetOr("IdleAnimX", "0")));
+        offs.Add(Rules.LeadingInt(s.GetOr("IdleAnimY", "0")));
+        return offs;
+    }
 
     /// <summary>DamageFireOffset0..N from a building's art section, as
     /// flat x,y pairs in 256ths of a cell (the ini's leptons). Empty when
@@ -1803,6 +1851,10 @@ class Rules {
             if (fires.Length > 0) {
                 this.fireTypes = Rules.Csv(fires.ToUpper());
             }
+            int cy = Rules.LeadingInt(av.GetOr("ConditionYellow", ""));
+            if (cy > 0) { this.conditionYellow = cy; }
+            int cr = Rules.LeadingInt(av.GetOr("ConditionRed", ""));
+            if (cr > 0) { this.conditionRed = cr; }
         }
         IniSection cd = ini.Section("CombatDamage");
         if (cd != null) {
