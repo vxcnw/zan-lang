@@ -720,4 +720,58 @@ class Spec {
     static int MkFootBtnW() { return Px(78); }       // 117（底 115 + 边）
     static int MkFootBtnH() { return Px(25); }       // 37（底 36 + 边）
     static int MkPages() { return 649; }
+
+    /* ---- 邮箱页（29）实测（设备像素 → 逻辑，窗口坐标）----
+       外框同交易市场 374..1491 × 164..879。左 376..1100：字段框 392..997 三行
+       （185/222/260，节距 37）+ 删除钮 1013..1084 × 185..290；正文 392..1085 ×
+       303..738；附件格 395 起 8 枚 66×66 节距 69，y 752..817；页脚 824..864。
+       右 1103..1489：头带 167..213，12 行 223 起节距 49.5（取 50），页脚 833..863。 */
+    static int MlFrameH() { return Px(477); }        // 715
+    static int MlFramePadT() { return Px(1); }       // 165 → 166
+    static int MlLeftW() { return Px(483); }         // 724
+    static int MlLeftPadT() { return Px(13); }       // 166 → 185
+    static int MlLeftPadL() { return Px(11); }       // 376 → 392
+    static int MlColGap() { return Px(2); }          // 1100 → 1103
+    static int MlFieldW() { return Px(404); }        // 392..997 = 606
+    static int MlFieldH() { return Px(22); }         // 33
+    static int MlInputH() { return Px(19); }         // 框内 28，不盖框线
+    static int MlFieldGap() { return Px(3); }        // 4 → 节距 37
+    static int MlLabelW() { return Px(69); }         // 392..496 = 104
+    static int MlLabelPadL() { return Px(5); }       // 392 → 400
+    static int MlDelGap() { return Px(11); }         // 997 → 1013
+    static int MlDelW() { return Px(48); }           // 72
+    static int MlDelH() { return Px(70); }           // 105
+    static int MlFieldToBody() { return Px(8); }     // 292 → 304
+    static int MlLeftPadR() { return Px(10); }       // 1085 → 1100（正文/附件行/页脚右沿）
+    static int MlBodyH() { return Px(291); }         // 436
+    static int MlBodyPad() { return Px(6); }
+    static int MlBodyToSlots() { return Px(8); }     // 740 → 752
+    static int MlSlotPadL() { return Px(2); }        // 392 → 395
+    static int MlSlotW() { return Px(44); }          // 66
+    static int MlSlotH() { return Px(44); }          // 66
+    static int MlSlotGap() { return Px(2); }         // 3 → 节距 69
+    static int MlTakeW() { return Px(88); }          // 953..1084 = 132
+    static int MlTakeH() { return Px(39); }          // 59
+    static int MlSlotsToFoot() { return Px(4); }     // 818 → 824
+    static int MlFootH() { return Px(27); }          // 824..864 = 41
+    static int MlHintPadL() { return Px(4); }        // 392 → 399
+    static int MlClearW() { return Px(87); }         // 817..947 = 131
+    static int MlBtnGap() { return Px(4); }          // 947 → 953
+    static int MlTakeAllW() { return Px(88); }       // 132
+    static int MlHeadH() { return Px(31); }          // 167..213 = 47
+    static int MlHeadToRow() { return Px(6); }       // 213 → 223
+    static int MlRowH() { return Px(31); }           // 46（原版 45/46 交替）
+    static int MlRowGap() { return Px(3); }          // 4 → 节距 50
+    static int MlRows() { return 12; }
+    static int MlRowPadL() { return Px(2); }         // 1103 → 1106
+    static int MlRowPadR() { return Px(1); }         // 1488 → 1489
+    static int MlIdW() { return Px(50); }            // 1106..1180 = 75
+    static int MlCellGap() { return Px(3); }         // 1181..1185
+    static int MlTitlePadL() { return Px(6); }
+    static int MlRowsToFoot() { return Px(11); }     // 817 → 833
+    static int MlRFootH() { return Px(21); }         // 833..863 = 31
+    static int MlRefreshPadL() { return Px(9); }     // 1103 → 1116
+    static int MlRefreshW() { return Px(64); }       // 96
+    static int MlRFootPadR() { return Px(6); }       // 1480 → 1489
+    static int MlPages() { return 1; }
 }
