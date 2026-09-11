@@ -3456,7 +3456,55 @@ class Ra2Loop : IGuiHostLoop {
         if (this.frames == 8 && Ra2App.mapSelOpened && !Ra2App.mapSelUsed) {
             Ra2App.mapSelUsed = true;
             this.shell.SetPickSearch("");
-            this.shell.SetPickMap(2, this.maps.Count);
+            // RA2_SELFTEST_MAP=SNOW (or TEMPERATE/URBAN, or a literal map
+            // name) pins the walk to a map of that theatre, so the winter
+            // palette and arctic art get exercised end to end.
+            int pickIdx = 2;
+            string want = Ra2App.getenv("RA2_SELFTEST_MAP");
+            if (want != null && want.Length > 0) {
+                want = want.ToUpper();
+                for (int mi = 0; mi < this.maps.Count; mi = mi + 1) {
+                    MapFile mf = this.db.MapNamed(this.maps[mi]);
+                    if (mf == null) { continue; }
+                    bool hit = this.maps[mi].ToUpper().IndexOf(want) >= 0
+                        || mf.Theater().ToUpper() == want;
+                    if (hit) { pickIdx = mi; break; }
+                }
+                // No skirmish map of that theatre in the pool: hunt the
+                // shipped campaign maps (the MIX ids are hashes, so the
+                // names must be guessed) and swap one in for the walk.
+                MapFile picked0 = this.db.MapNamed(this.maps[pickIdx]);
+                if (picked0 != null && picked0.Theater().ToUpper() != want) {
+                    string[] guesses = new string[] {
+                        "ALLIED01.MAP", "ALLIED02.MAP", "ALLIED03.MAP",
+                        "ALLIED04.MAP", "ALLIED05.MAP", "ALLIED06.MAP",
+                        "ALLIED07.MAP", "ALLIED08.MAP", "ALLIED09.MAP",
+                        "ALLIED10.MAP", "ALLIED11.MAP", "ALLIED12.MAP",
+                        "SOVIET01.MAP", "SOVIET02.MAP", "SOVIET03.MAP",
+                        "SOVIET04.MAP", "SOVIET05.MAP", "SOVIET06.MAP",
+                        "SOVIET07.MAP", "SOVIET08.MAP", "SOVIET09.MAP",
+                        "SOVIET10.MAP", "SOVIET11.MAP", "SOVIET12.MAP",
+                        "ALL01MD.MAP", "ALL02MD.MAP", "ALL03MD.MAP",
+                        "ALL04MD.MAP", "ALL05MD.MAP", "ALL06MD.MAP",
+                        "ALL07MD.MAP", "SOV01MD.MAP", "SOV02MD.MAP",
+                        "SOV03MD.MAP", "SOV04MD.MAP", "SOV05MD.MAP",
+                        "SOV06MD.MAP", "SOV07MD.MAP", "INT01.MAP",
+                        "INT02.MAP", "INT03.MAP", "MOR01.MAP", "MOR02.MAP",
+                        "MOR03.MAP", "MOR04.MAP", "BOOT.MAP", "LOBBY.MAP"};
+                    for (int gi = 0; gi < guesses.Length; gi = gi + 1) {
+                        MapFile cf = this.db.MapNamed(guesses[gi]);
+                        if (cf == null) { continue; }
+                        if (cf.Theater().ToUpper() == want) {
+                            this.maps[pickIdx] = guesses[gi];
+                            break;
+                        }
+                    }
+                }
+            }
+            this.shell.SetPickMap(pickIdx, this.maps.Count);
+            MapFile picked = this.db.MapNamed(this.maps[pickIdx]);
+            Console.WriteLine("selftest mapsel theatre="
+                + Convert.ToString(picked == null ? "?" : picked.Theater()));
             Console.WriteLine("selftest mapsel use="
                 + Convert.ToString(this.shell.PickMap()));
             this.shell.UseMap();
@@ -3660,9 +3708,21 @@ class Ra2Loop : IGuiHostLoop {
             int pa = 0 - 1;
             int qx = this.world.Width() / 2;
             int qy = this.world.Height() / 2;
-            for (int r = 0; r < 20 && pa < 0; r = r + 1) {
+            // Duel beside the player's start: the map center can be a
+            // lake or a forest on theater maps, but a spawn point is
+            // always buildable ground.
+            List<int> da = new List<int>();
+            if (this.map.StartCell(0, da) && da.Count >= 2) {
+                qx = da[0] + 6;
+                qy = da[1] + 4;
+            }
+            for (int r = 0; r < 24 && pa < 0; r = r + 1) {
                 pa = this.world.SpawnUnit(0, shId, qx + r, qy);
                 if (pa < 0) { pa = this.world.SpawnUnit(0, shId, qx, qy + r); }
+                if (pa < 0 && r > 0) {
+                    pa = this.world.SpawnUnit(0, shId, qx - r, qy);
+                }
+                if (pa < 0) { pa = this.world.SpawnUnit(0, shId, qx, qy - r); }
             }
             if (pa >= 0) {
                 WorldObject sh = this.world.ObjectAt(pa);

@@ -490,7 +490,8 @@ class Rules {
     List<Weapon> weapons;
     List<ProjectileType> projectiles;
     List<string> splashList;   // [CombatDamage] SplashList: water impact art
-    double gravity;            // ini Gravity= (leptons/tick²), retail 6
+    double gravity;
+    bool alternateArcticArt;   // [General] AlternateArcticArt: A-suffix art            // ini Gravity= (leptons/tick²), retail 6
     List<UnitDef> units;
     List<BuildingDef> buildings;   // both sides interleaved, menu order per side
     List<BuildingDef> civs;        // neutral structures from the map
@@ -745,6 +746,12 @@ class Rules {
     /// 256 leptons a cell puts the tank-shell arc at the shallow dome the
     /// original draws.</summary>
     double GravityCells() { return this.gravity / 256.0; }
+
+    /// <summary>The shipped rules carry AlternateArcticArt=yes: on snow
+    /// maps objects whose art ships an arctic variant (the image name with
+    /// an A before the extension) draw that variant. The reference's
+    /// ObjectArt keys the same swap off inSnowTheater.</summary>
+    bool AlternateArcticArt() { return this.alternateArcticArt; }
 
     /// <summary>The water-impact animation for damage tier damage/50 -- the
     /// reference's splashList pick for conventional warheads that burst in
@@ -1874,6 +1881,8 @@ class Rules {
         }
         IniSection general = ini.Section("General");
         if (general != null) {
+            this.alternateArcticArt = Rules.YesNo(
+                general.GetOr("AlternateArcticArt", "no"));
             this.oreGrows = Rules.YesNo(general.GetOr("TiberiumGrows", "yes"));
             this.oreSpreads = Rules.YesNo(general.GetOr("TiberiumSpreads",
                                                         "yes"));

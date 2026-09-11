@@ -213,23 +213,71 @@ class AssetDb {
         return MapFile.Parse(raw);
     }
 
-    /// <summary>The skirmish maps present in the install. RA2 stores them in
-    /// multi.mix under hashed names, so they can only be found by probing the
-    /// MPnnTk naming scheme rather than by listing the archive.</summary>
+    /// <summary>The multiplayer maps present in the install. Retail ships a
+    /// catalog INI beside the map archives -- missions.pkt in multi.mix, its
+    /// Yuri's Revenge counterpart in multimd.mix -- whose [MultiMaps] section
+    /// lists the official maps by key, each key's section naming the file
+    /// with File=. This is the enumeration the original engine uses; probing
+    /// the MPnnTk scheme stays only as a fallback for trimmed installs.</summary>
     List<string> SkirmishMaps() {
         List<string> found = new List<string>();
+        List<string> order = AssetDb.ArchiveOrder();
+        for (int i = 0; i < order.Count; i = i + 1) {
+            string stem = order[i];
+            int dot = stem.Length - 4;
+            if (dot > 0) {
+                AssetDb.AddPktMaps(this.vfs, found,
+                    stem.Substring(0, dot) + ".PKT");
+            }
+        }
+        AssetDb.AddPktMaps(this.vfs, found, "MISSIONS.PKT");
+        AssetDb.AddPktMaps(this.vfs, found, "MISSIONMD.PKT");
+        if (found.Count > 0) { return found; }
         int i = 1;
         while (i <= 40) {
             string num = Convert.ToString(i);
             if (i < 10) { num = "0" + num; }
+            AssetDb.ProbeMap(this.vfs, found, "MP" + num + "T1.MAP");
             AssetDb.ProbeMap(this.vfs, found, "MP" + num + "T2.MAP");
             AssetDb.ProbeMap(this.vfs, found, "MP" + num + "T3.MAP");
             AssetDb.ProbeMap(this.vfs, found, "MP" + num + "T4.MAP");
+            AssetDb.ProbeMap(this.vfs, found, "MP" + num + "T5.MAP");
             AssetDb.ProbeMap(this.vfs, found, "MP" + num + "T6.MAP");
+            AssetDb.ProbeMap(this.vfs, found, "MP" + num + "T7.MAP");
             AssetDb.ProbeMap(this.vfs, found, "MP" + num + "T8.MAP");
+            AssetDb.ProbeMap(this.vfs, found, "MP" + num + "T9.MAP");
             i = i + 1;
         }
         return found;
+    }
+
+    /// <summary>Reads one catalog: every value under [MultiMaps] is a map
+    /// stem whose section (when present) names the file with File=; the
+    /// stem itself plus ".map" otherwise. Catalogs repeat entries across
+    /// archives, so duplicates collapse.</summary>
+    static void AddPktMaps(Vfs vfs, List<string> found, string name) {
+        List<int> len = new List<int>();
+        len.Add(0);
+        byte[] raw = vfs.Read(name, len);
+        if (len[0] == 0) { return; }
+        int start = AssetDb.IniTextStart(raw, len[0]);
+        IniDocument pkt = IniParser.Parse(raw.ToStr(start, len[0] - start));
+        IniSection list = pkt.Section("MultiMaps");
+        if (list == null) { return; }
+        for (int i = 0; i < list.Count(); i = i + 1) {
+            string key = list.EntryAt(i).Value();
+            if (key == null || key.Length == 0) { continue; }
+            IniSection entry = pkt.Section(key);
+            string file = entry == null ? "" : entry.Get("File");
+            if (file.Length == 0) { file = key + ".map"; }
+            file = file.ToUpper();
+            if (file.IndexOf(".MAP") < 0) { file = file + ".MAP"; }
+            bool seen = false;
+            for (int k = 0; k < found.Count; k = k + 1) {
+                if (found[k] == file) { seen = true; break; }
+            }
+            if (!seen && vfs.Contains(file)) { found.Add(file); }
+        }
     }
 
     static void ProbeMap(Vfs vfs, List<string> found, string name) {

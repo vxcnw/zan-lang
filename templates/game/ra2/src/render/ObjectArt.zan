@@ -101,11 +101,20 @@ class ObjectArt {
         a.cameoPal = null;
         a.cameoNames = new List<string>();
         a.cameoTex = new List<Texture>();
-        // Unit palettes, best fit first: unittem.pal is the temperate unit
-        // palette the merged art expects; unit.pal and unitsno.pal share the
-        // same 256-slot layout, so either works as a fallback when the
-        // install is stripped.
-        a.unitPal = db.PaletteNamed("unittem.pal");
+        // The object palette follows the theatre, exactly as the reference
+        // keeps one unit palette per theatre (Theater.ts unitPalette):
+        // unitsno.pal is the cold ramp that reads as frost on armour and
+        // structures -- the shipped game's "snow on every unit" of winter
+        // maps -- uniturb.pal the urban one. Temperate stays the fallback
+        // for stripped installs (unit.pal / unitsno.pal share the layout).
+        string unitPalName = "unittem.pal";
+        if (a.theaterName == "SNOW") { unitPalName = "unitsno.pal"; }
+        else if (a.theaterName == "URBAN") { unitPalName = "uniturb.pal"; }
+        else if (a.theaterName == "NEWURBAN") { unitPalName = "unitubn.pal"; }
+        else if (a.theaterName == "DESERT") { unitPalName = "unitdes.pal"; }
+        else if (a.theaterName == "LUNAR") { unitPalName = "unitlun.pal"; }
+        a.unitPal = db.PaletteNamed(unitPalName);
+        if (a.unitPal == null) { a.unitPal = db.PaletteNamed("unittem.pal"); }
         if (a.unitPal == null) { a.unitPal = db.PaletteNamed("unit.pal"); }
         if (a.unitPal == null) { a.unitPal = db.PaletteNamed("unitsno.pal"); }
         a.alliedPal = null;
@@ -125,7 +134,7 @@ class ObjectArt {
         // yard used to draw as, while unittem.pal gives the grey-and-red
         // construction yard. The iso palette belongs to terrain tiles and
         // smears, not to object art.
-        a.theaterPal = db.PaletteNamed("unittem.pal");
+        a.theaterPal = a.unitPal;
         if (a.theaterPal == null) { a.theaterPal = db.PaletteNamed("isotem.pal"); }
         if (a.theaterPal == null) { a.theaterPal = db.PaletteNamed("isosno.pal"); }
         return a;
@@ -249,6 +258,24 @@ class ObjectArt {
     /// reads GAtcnst.shp -- with the plain name as the fallback when that
     /// theater's file is absent. Mirrors the reference engine's
     /// new_theater_shp_name.</summary>
+    /// <summary>The snow-theatre art swap: the shipped rules carry
+    /// AlternateArcticArt=yes, so on a snow map an object whose art ships an
+    /// arctic variant -- the image name with an A before the extension --
+    /// draws that variant, and everything else keeps the common art.
+    /// Mirrors the reference's inSnowTheater imageName suffix.</summary>
+    string ArcticName(string name) {
+        if (this.theaterName != "SNOW") { return name; }
+        IniSection general = this.db.Rules().Section("General");
+        if (general == null
+         || !Rules.YesNo(general.GetOr("AlternateArcticArt", "no"))) {
+            return name;
+        }
+        int dot = name.Length - 4;
+        if (dot < 1) { return name; }
+        string alt = name.Substring(0, dot) + "A" + name.Substring(dot);
+        return this.vfs.Contains(alt) ? alt : name;
+    }
+
     string NewTheaterName(string shpName) {
         int dot = shpName.Length - 4;
         if (dot < 2) { return shpName; }
@@ -289,7 +316,7 @@ class ObjectArt {
     Texture UnitTexture(UnitType ut, bool moving, int animFrame, int facing,
                         int side, bool deployed) {
         if (ut == null) { return null; }
-        string name = ut.ShpName();
+        string name = this.ArcticName(ut.ShpName());
         if (name == null || name.Length == 0) { return null; }
         if (ObjectArt.IsVxlName(name)) {
             return this.VehicleTexture(name, facing, side);
@@ -345,7 +372,7 @@ class ObjectArt {
     /// for infantry.</summary>
     Texture UnitIconTexture(UnitType ut, int side) {
         if (ut == null) { return null; }
-        string name = ut.ShpName();
+        string name = this.ArcticName(ut.ShpName());
         if (name == null || name.Length == 0) { return null; }
         if (ObjectArt.IsVxlName(name)) {
             return this.VehicleTexture(name, 5, side);
@@ -581,6 +608,7 @@ class ObjectArt {
     /// facings, rendered on first use and cached. The side picks the unit
     /// palette, so the remappable voxels bake in their owner's colour.</summary>
     Texture VehicleTexture(string name, int facing, int side) {
+        name = this.ArcticName(name);
         for (int i = 0; i < this.vehNames.Count; i = i + 1) {
             if (this.vehNames[i] == name && this.vehFacings[i] == facing
              && this.vehSides[i] == side) {
@@ -605,6 +633,7 @@ class ObjectArt {
     /// list serves both; the prefix keeps turret and hull entries apart even
     /// when a model shares its name with its hull.</summary>
     Texture TurretTexture(string turretVxl, int facing, int side) {
+        turretVxl = this.ArcticName(turretVxl);
         string key = "TUR:" + turretVxl;
         for (int i = 0; i < this.vehNames.Count; i = i + 1) {
             if (this.vehNames[i] == key && this.vehFacings[i] == facing
