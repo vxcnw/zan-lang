@@ -2616,6 +2616,17 @@ class Ra2Loop : IGuiHostLoop {
                                  rules.OreValue(ov));
                 }
             }
+            // Walls stand from the map's overlay planes: every cell whose
+            // overlay type declares Wall=yes becomes a live wall piece at
+            // its rules Strength (the reference's OverlayRules wall spawn),
+            // the connection masks rebuilt as each piece rises.
+            for (int oy = 0; oy < this.world.Height(); oy = oy + 1) {
+                for (int ox = 0; ox < this.world.Width(); ox = ox + 1) {
+                    int ov = this.map.OverlayAt(ox, oy);
+                    if (ov < 0 || !rules.IsWallOverlay(ov)) { continue; }
+                    this.world.SetWall(ox, oy, ov);
+                }
+            }
             this.objArt = ObjectArt.Create(this.vfs, this.db, this.map.Theater());
             int side = this.shell.SideIndex();
             // The shell art is per side: the allied set lives in
@@ -3949,6 +3960,66 @@ class Ra2Loop : IGuiHostLoop {
                         Console.WriteLine("selftest FAIL idles: every"
                             + " IdleAnim structure must show its loop");
                     }
+                    // Walls: stand a three-piece run, read the connection
+                    // masks (N + 2E + 4S + 8W), break the middle piece and
+                    // watch the ends reconnect to lone walls -- the
+                    // reference's wallTypes + WallTrait pairing.
+                    Rules wrules = this.world.Rules();
+                    int wallIdx = 0 - 1;
+                    for (int wi = 0; wi < wrules.OverlayTypeCount(); wi = wi + 1) {
+                        if (wrules.IsWallOverlay(wi)) { wallIdx = wi; break; }
+                    }
+                    if (wallIdx >= 0) {
+                        int wx = at[0] + 24;
+                        int wy = at[1] + 6;
+                        int wtries = 0;
+                        while (wtries < 16
+                         && (this.world.OccupantAt(wx, wy) >= 0
+                          || this.world.OccupantAt(wx + 1, wy) >= 0
+                          || this.world.OccupantAt(wx + 2, wy) >= 0)) {
+                            wx = wx + 1;
+                            wtries = wtries + 1;
+                        }
+                        this.world.SetWall(wx, wy, wallIdx);
+                        this.world.SetWall(wx + 1, wy, wallIdx);
+                        this.world.SetWall(wx + 2, wy, wallIdx);
+                        // A horizontal run: the west end grows a face
+                        // east (2), the middle both ways (E+W = 10), the
+                        // east end west (8).
+                        int wallOk = this.world.WallDataAt(wx, wy) == 2
+                                  && this.world.WallDataAt(wx + 1, wy) == 10
+                                  && this.world.WallDataAt(wx + 2, wy) == 8
+                                  ? 1 : 0;
+                        Console.WriteLine("selftest walls seeded="
+                            + Convert.ToString(this.world.WallCellCount())
+                            + " run=" + Convert.ToString(wallOk)
+                            + " art=" + wrules.OverlayName(wallIdx)
+                            + " frames=" + Convert.ToString(
+                                this.theater.OverlayFrameCount(
+                                    wrules.OverlayName(wallIdx))));
+                        // The middle piece takes a lethal hit; the ends
+                        // each soak half (WallTrait's linked damage) and
+                        // the run reconnects around the gap.
+                        int wstr = wrules.OverlayStrength(wallIdx);
+                        if (wstr <= 0) { wstr = 10; }
+                        this.world.DamageWallAt(wx + 1, wy, wstr);
+                        wallOk = wallOk == 1
+                              && this.world.WallOvAt(wx + 1, wy) < 0
+                              && this.world.WallDataAt(wx, wy) == 0
+                              && this.world.WallDataAt(wx + 2, wy) == 0
+                              ? 2 : wallOk;
+                        Console.WriteLine("selftest walls after break="
+                            + Convert.ToString(this.world.WallCellCount())
+                            + " run=" + Convert.ToString(wallOk));
+                        if (wallOk != 2) {
+                            Console.WriteLine("selftest FAIL walls: a"
+                                + " broken piece must drop out and its"
+                                + " neighbours reconnect their faces");
+                        }
+                    } else {
+                        Console.WriteLine("selftest walls: no wall"
+                            + " overlay in the rules, skipped");
+                    }
                 } else {
                     Console.WriteLine("selftest FAIL proj: spawn refused");
                 }
@@ -4438,6 +4509,31 @@ class Ra2Loop : IGuiHostLoop {
                     if (vb >= 0) {
                         this.world.SpawnBeam(a, this.world.ObjectAt(vb), tz);
                     }
+                }
+                // Pose the wall layer too: a run of the first shipped
+                // wall beside the duel -- intact faces east/west -- with
+                // one piece wounded under ConditionYellow so the damaged
+                // connection set shows in the same dump.
+                Rules srules = this.world.Rules();
+                int swo = 0 - 1;
+                for (int wi = 0; wi < srules.OverlayTypeCount(); wi = wi + 1) {
+                    if (srules.IsWallOverlay(wi)) { swo = wi; break; }
+                }
+                if (swo >= 0) {
+                    for (int wi = 0; wi < 12; wi = wi + 1) {
+                        this.world.SetWall(this.duelX + 2 + wi,
+                                           this.duelY + 1, swo);
+                    }
+                    int sstr = srules.OverlayStrength(swo);
+                    if (sstr > 3) {
+                        this.world.DamageWallAt(this.duelX + 3,
+                                                this.duelY + 6,
+                                                sstr - sstr / 4);
+                    }
+                    // Walls bake into the terrain layer: vote the recompose
+                    // now so the next frame's dump carries the art (the
+                    // ore refresh's 300ms coalesce would miss the dump).
+                    this.dirty = true;
                 }
                 // Pose the infantry death layer: two troopers fall at
                 // the duel site (one rifle death, one explosive), their

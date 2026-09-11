@@ -390,6 +390,48 @@ class MapRenderer {
             }
         }
 
+        // Walls stand on their cells like the ore under them: the world's
+        // live wall grid (seeded from the map, mutated by the battle) is
+        // the authority. The data plane is the connection mask -- N + 2E
+        // + 4S + 8W, the reference's wallTypes frame order -- and a hurt
+        // wall draws the damaged connection set: frame + 16, or + 1 when
+        // the art never shipped a full intact set (the reference's
+        // Overlay computeFrame).
+        if (this.world != null) {
+            Rules wrules = this.world.Rules();
+            for (int i = 0; i < this.order.Count; i = i + 1) {
+                IsoTile t = this.iso.TileAt(this.order[i]);
+                int ov = this.world.WallOvAt(t.X(), t.Y());
+                if (ov < 0) { continue; }
+                int sx = IsoProjection.ScreenX(t.X(), t.Y()) - this.originX
+                       - camX;
+                int sy = IsoProjection.ScreenY(t.X(), t.Y(), t.Level())
+                       - this.originY - camY;
+                if (sx <= 0 - IsoProjection.TileW() || sx >= cw
+                 || sy <= 0 - IsoProjection.TileH() || sy >= ch) {
+                    continue;
+                }
+                string name = wrules != null ? wrules.OverlayName(ov) : "";
+                if (name.Length == 0) { continue; }
+                int frames = this.theater.OverlayFrameCount(name);
+                if (frames <= 0) { continue; }
+                int frame = this.world.WallDataAt(t.X(), t.Y());
+                if (this.world.WallDamagedAt(t.X(), t.Y())) {
+                    frame = frame + (frames < 16 ? 1 : 16);
+                }
+                if (frame >= frames) { frame = frames - 1; }
+                Texture spr = this.theater.OverlaySprite(name, frame);
+                if (spr == null) { continue; }
+                // Overlay art sits bottom-aligned on the diamond (the ore
+                // loop's anchor): the wall base meets the tile's bottom
+                // corner.
+                int px = sx + IsoProjection.TileW() / 2 - spr.Width() / 2;
+                int py = sy + IsoProjection.TileH() - spr.Height();
+                canvas.Blit(spr, px, py);
+                drawn = drawn + 1;
+            }
+        }
+
         // Objects do NOT bake into this canvas: the terrain layer only
         // changes when the camera, the ore or a smudge does, so the
         // expensive full-frame recomposite+encode runs on those events

@@ -746,6 +746,61 @@ class Rules {
             && (name[2] & 0xDF) == 'M';
     }
 
+    // Overlay wall facts, read from the type's own rules section and
+    // cached: -1 not looked up, 0 no, 1 yes.
+    List<int> overlayWallCache;
+
+    /// <summary>How many [OverlayTypes] the rules name.</summary>
+    int OverlayTypeCount() { return this.overlayTypes.Count; }
+
+    /// <summary>Whether a map overlay index is a wall (its rules section
+    /// declares Wall=yes: the Allied/Soviet concrete walls, sandbags,
+    /// fences). The reference's OverlayRules reads the same key.</summary>
+    bool IsWallOverlay(int idx) {
+        if (idx < 0 || idx >= this.overlayTypes.Count) { return false; }
+        if (this.overlayWallCache == null) {
+            this.overlayWallCache = new List<int>();
+        }
+        while (this.overlayWallCache.Count <= idx) {
+            this.overlayWallCache.Add(0 - 1);
+        }
+        int cached = this.overlayWallCache[idx];
+        if (cached >= 0) { return cached == 1; }
+        bool wall = Rules.YesNo(this.SourceIniSection(
+            this.overlayTypes[idx]).GetOr("Wall", "no"));
+        this.overlayWallCache[idx] = wall ? 1 : 0;
+        return wall;
+    }
+
+    /// <summary>The overlay type's own section, or an empty one when the
+    /// rules never named it (the DUMMY filler types).</summary>
+    IniSection SourceIniSection(string name) {
+        if (this.sourceIni == null || name == null || name.Length == 0) {
+            return IniSection.Create("");
+        }
+        IniSection s = this.sourceIni.Section(name);
+        return s != null ? s : IniSection.Create("");
+    }
+
+    /// <summary>A wall overlay's hit points, from its rules Strength=
+    /// (the shipped concrete walls carry 300). The reference's
+    /// OverlayRules defaults 0, and so do we.</summary>
+    int OverlayStrength(int idx) {
+        if (idx < 0 || idx >= this.overlayTypes.Count) { return 0; }
+        return this.SourceIniSection(this.overlayTypes[idx])
+            .GetIntOr("Strength", 0);
+    }
+
+    /// <summary>A wall overlay's armour class, from its Armor= (the shipped
+    /// walls are concrete). The reference resolves unknown names to None.</summary>
+    int OverlayArmor(int idx) {
+        if (idx < 0 || idx >= this.overlayTypes.Count) {
+            return ArmorClass.None();
+        }
+        return ArmorClass.Parse(this.SourceIniSection(this.overlayTypes[idx])
+            .GetOr("Armor", ""));
+    }
+
     /// <summary>Credits one unit of an overlay's ore is worth. The first six
     /// GEM overlays are plain gold ore, the last six the sparkly crystal
     /// fields the original pays double for.</summary>

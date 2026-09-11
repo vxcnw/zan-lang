@@ -1230,6 +1230,14 @@ class World {
     int oreLeft;         // cells carrying ore, for the growth pass
     int oreVersion;      // bumped on every ore mutation: the terrain layer
                          // bakes ore art, so a change means recomposite
+    // Walls: the overlay pieces that stand and fight -- per-cell overlay
+    // type id (-1 none), remaining hit points, and the connection bitmask
+    // the reference's wallTypes builds (N + 2E + 4S + 8W). World owns the
+    // live state; the map file keeps only what shipped on disk. Every
+    // mutation bumps oreVersion: the terrain layer bakes the wall art in.
+    int[] wallOv;
+    int[] wallHp;
+    int[] wallData;
 
     // Map smudges: the craters and burn marks a map declares in its own
     // [Smudge] section. Name + cell, no owner and no occupancy -- a decal
@@ -1274,6 +1282,14 @@ class World {
         for (int i = 0; i < w.oreAmt.Length; i = i + 1) {
             w.oreAmt[i] = 0;
             w.oreVal[i] = 0;
+        }
+        w.wallOv = new int[w.width * w.height];
+        w.wallHp = new int[w.width * w.height];
+        w.wallData = new int[w.width * w.height];
+        for (int i = 0; i < w.wallOv.Length; i = i + 1) {
+            w.wallOv[i] = 0 - 1;
+            w.wallHp[i] = 0;
+            w.wallData[i] = 0;
         }
         w.oreLeft = 0;
         // Map smudges -- the battle scars the map itself ships ([Smudge]
@@ -1339,7 +1355,8 @@ class World {
         UnitType u = this.units.CivUnitType(civId);
         if (u == null) { return -1; }
         if (!this.InBounds(x, y)) { return -1; }
-        if (this.occupancy[this.CellSlot(x, y)] != 0) {
+        if (this.occupancy[this.CellSlot(x, y)] != 0
+         || this.IsWallCell(x, y)) {
             if (!this.InBounds(x + 1, y)
              || this.occupancy[this.CellSlot(x + 1, y)] != 0) {
                 return -1;
@@ -1442,6 +1459,136 @@ class World {
     }
 
     int OreVersion() { return this.oreVersion; }
+
+    // ---- Walls ----------------------------------------------------------
+
+    /// <summary>Stands a wall piece up at a cell: full Strength hit points
+    /// (the reference's OverlayRules wall spawn), then the piece and its
+    /// cardinal neighbours rebuild their connection masks.</summary>
+    void SetWall(int x, int y, int ovIdx) {
+        if (ovIdx < 0 || !this.InBounds(x, y)) { return; }
+        int slot = this.CellSlot(x, y);
+        this.wallOv[slot] = ovIdx;
+        this.wallHp[slot] = this.Rules().OverlayStrength(ovIdx);
+        this.wallData[slot] = 0;
+        this.oreVersion = this.oreVersion + 1;
+        this.ReconnectWallAt(x, y);
+        this.ReconnectWallAt(x + 1, y);
+        this.ReconnectWallAt(x - 1, y);
+        this.ReconnectWallAt(x, y + 1);
+        this.ReconnectWallAt(x, y - 1);
+    }
+
+    bool IsWallCell(int x, int y) {
+        return this.wallOv != null && this.InBounds(x, y)
+            && this.wallOv[this.CellSlot(x, y)] >= 0;
+    }
+
+    bool IsWallOfType(int x, int y, int ov) {
+        return this.IsWallCell(x, y)
+            && this.wallOv[this.CellSlot(x, y)] == ov;
+    }
+
+    /// <summary>The wall overlay type at a cell, -1 when none stands.</summary>
+    int WallOvAt(int x, int y) {
+        return this.IsWallCell(x, y) ? this.wallOv[this.CellSlot(x, y)]
+                                     : 0 - 1;
+    }
+
+    /// <summary>The wall's connection mask (N + 2E + 4S + 8W) -- the frame
+    /// the renderer draws.</summary>
+    int WallDataAt(int x, int y) {
+        return this.IsWallCell(x, y) ? this.wallData[this.CellSlot(x, y)] : 0;
+    }
+
+    int WallHpAt(int x, int y) {
+        return this.IsWallCell(x, y) ? this.wallHp[this.CellSlot(x, y)] : 0;
+    }
+
+    /// <summary>Whether the wall has slipped under ConditionYellow: the
+    /// reference's Overlay computeFrame then draws the damaged connection
+    /// set (frame + 16, or + 1 when the art never shipped a full intact
+    /// set).</summary>
+    bool WallDamagedAt(int x, int y) {
+        if (!this.IsWallCell(x, y)) { return false; }
+        int max = this.Rules().OverlayStrength(
+            this.wallOv[this.CellSlot(x, y)]);
+        if (max <= 0) { return false; }
+        return this.wallHp[this.CellSlot(x, y)] * 100
+            <= max * this.Rules().ConditionYellowPct();
+    }
+
+    /// <summary>Recomputes a wall's connection mask from its same-type
+    /// cardinal neighbours -- the reference's connectWall. A piece's mask
+    /// counts only walls of its own overlay type, so a concrete wall does
+    /// not grow a face toward a fence.</summary>
+    void ReconnectWallAt(int x, int y) {
+        if (!this.IsWallCell(x, y)) { return; }
+        int ov = this.wallOv[this.CellSlot(x, y)];
+        int conn = 0;
+        if (this.IsWallOfType(x, y - 1, ov)) { conn = conn + 1; }
+        if (this.IsWallOfType(x + 1, y, ov)) { conn = conn + 2; }
+        if (this.IsWallOfType(x, y + 1, ov)) { conn = conn + 4; }
+        if (this.IsWallOfType(x - 1, y, ov)) { conn = conn + 8; }
+        this.wallData[this.CellSlot(x, y)] = conn;
+    }
+
+    /// <summary>Hits the wall at a cell: the damage soaks into the piece
+    /// (already armoured by the caller), and -- the reference's WallTrait
+    /// linked damage -- each cardinal wall neighbour of the same type takes
+    /// half, one level, no chain. A piece at zero comes down and its
+    /// neighbours rebuild their faces around the gap.</summary>
+    void DamageWallAt(int x, int y, int dmg) {
+        this.DamageWallDepth(x, y, dmg, 0);
+    }
+
+    void DamageWallDepth(int x, int y, int dmg, int depth) {
+        if (dmg <= 0 || !this.IsWallCell(x, y)) { return; }
+        int slot = this.CellSlot(x, y);
+        int ov = this.wallOv[slot];
+        this.wallHp[slot] = this.wallHp[slot] - dmg;
+        if (this.wallHp[slot] <= 0) {
+            this.wallOv[slot] = 0 - 1;
+            this.wallHp[slot] = 0;
+            this.wallData[slot] = 0;
+        }
+        this.oreVersion = this.oreVersion + 1;
+        if (depth <= 0) {
+            int half = dmg / 2;
+            if (half > 0) {
+                if (this.IsWallOfType(x, y - 1, ov)) {
+                    this.DamageWallDepth(x, y - 1, half, 1);
+                }
+                if (this.IsWallOfType(x + 1, y, ov)) {
+                    this.DamageWallDepth(x + 1, y, half, 1);
+                }
+                if (this.IsWallOfType(x, y + 1, ov)) {
+                    this.DamageWallDepth(x, y + 1, half, 1);
+                }
+                if (this.IsWallOfType(x - 1, y, ov)) {
+                    this.DamageWallDepth(x - 1, y, half, 1);
+                }
+            }
+        }
+        // Faces: the piece (if it still stands) and its neighbours rebuild
+        // their connection masks around whatever just changed.
+        this.ReconnectWallAt(x, y);
+        this.ReconnectWallAt(x, y - 1);
+        this.ReconnectWallAt(x + 1, y);
+        this.ReconnectWallAt(x, y + 1);
+        this.ReconnectWallAt(x - 1, y);
+    }
+
+    /// <summary>Live wall pieces on the field -- the selftest's seed
+    /// check.</summary>
+    int WallCellCount() {
+        if (this.wallOv == null) { return 0; }
+        int n = 0;
+        for (int i = 0; i < this.wallOv.Length; i = i + 1) {
+            if (this.wallOv[i] >= 0) { n = n + 1; }
+        }
+        return n;
+    }
 
     /// <summary>Breadth-first path searches since the world was created --
     /// the selftest's perf line reports it so the search volume of a battle
@@ -1738,7 +1885,8 @@ class World {
         for (int dy = 0; dy < t.FootprintH(); dy = dy + 1) {
             for (int dx = 0; dx < t.FootprintW(); dx = dx + 1) {
                 if (!this.InBounds(x + dx, y + dy)) { return false; }
-                if (this.occupancy[this.CellSlot(x + dx, y + dy)] != 0) {
+                if (this.occupancy[this.CellSlot(x + dx, y + dy)] != 0
+                 || this.IsWallCell(x + dx, y + dy)) {
                     return false;
                 }
                 IsoTile c = this.iso.At(x + dx, y + dy);
@@ -1950,7 +2098,8 @@ class World {
         UnitType u = this.units.TypeFor(this, side, unitId);
         if (u == null) { return -1; }
         if (!this.InBounds(x, y)) { return -1; }
-        if (this.occupancy[this.CellSlot(x, y)] != 0) { return -1; }
+        if (this.occupancy[this.CellSlot(x, y)] != 0
+         || this.IsWallCell(x, y)) { return -1; }
         WorldObject o = WorldObject.CreateUnit(side, unitId, x, y, u.Hp(), u);
         return this.AddObject(o);
     }
@@ -1964,7 +2113,8 @@ class World {
     int SpawnMapUnitType(UnitType ut, int x, int y, int hp, int facing) {
         if (ut == null) { return -1; }
         if (!this.InBounds(x, y)) { return -1; }
-        if (this.occupancy[this.CellSlot(x, y)] != 0) {
+        if (this.occupancy[this.CellSlot(x, y)] != 0
+         || this.IsWallCell(x, y)) {
             if (!this.InBounds(x + 1, y)
              || this.occupancy[this.CellSlot(x + 1, y)] != 0) {
                 return -1;
@@ -1995,7 +2145,8 @@ class World {
                      UnitType ut) {
         if (ut == null) { return -1; }
         if (!this.InBounds(x, y)) { return -1; }
-        if (this.occupancy[this.CellSlot(x, y)] != 0) {
+        if (this.occupancy[this.CellSlot(x, y)] != 0
+         || this.IsWallCell(x, y)) {
             if (!this.InBounds(x + 1, y)
              || this.occupancy[this.CellSlot(x + 1, y)] != 0) {
                 return -1;
@@ -2227,7 +2378,8 @@ class World {
         for (int dy = 0; dy < t.FootprintH(); dy = dy + 1) {
             for (int dx = 0; dx < t.FootprintW(); dx = dx + 1) {
                 if (!this.InBounds(x + dx, y + dy)) { return false; }
-                if (this.occupancy[this.CellSlot(x + dx, y + dy)] != 0) {
+                if (this.occupancy[this.CellSlot(x + dx, y + dy)] != 0
+                 || this.IsWallCell(x + dx, y + dy)) {
                     return false;
                 }
                 if (!this.IsGround(this.iso.At(x + dx, y + dy))) { return false; }
@@ -3110,6 +3262,19 @@ class World {
         }
     }
 
+    /// <summary>A wall on the round's current cell stops it: the round
+    /// bursts on the wall, its aim snapped onto the wall cell so the
+    /// detonation soaks the piece. Lobbed arcs fly over -- only the flat
+    /// steppers call this.</summary>
+    bool WallStops(Projectile p) {
+        int cx = (int)Math.Round(p.px);
+        int cy = (int)Math.Round(p.py);
+        if (!this.IsWallCell(cx, cy)) { return false; }
+        p.ax = cx;
+        p.ay = cy;
+        return true;
+    }
+
     /// <summary>Straight flight: constant speed toward the locked aim. The
     /// reference snaps the last step onto a target that held still, which
     /// is what landing directly on the aim cell models.</summary>
@@ -3118,6 +3283,7 @@ class World {
         p.px = p.px + p.dirX * step;
         p.py = p.py + p.dirY * step;
         p.flown = p.flown + step;
+        if (this.WallStops(p)) { return true; }
         return p.flown >= p.total;
     }
 
@@ -3177,6 +3343,7 @@ class World {
         p.px = p.px + p.dirX * p.speed;
         p.py = p.py + p.dirY * p.speed;
         p.flown = p.flown + p.speed;
+        if (this.WallStops(p)) { return true; }
         return false;
     }
 
@@ -3219,6 +3386,16 @@ class World {
                 this.SplashAround(p.side, wh, gx, gy, direct, dmg);
             } else {
                 int dmg = w.Damage() * wh.Verse(4) / 100;
+                // A wall on the burst cell soaks the round first: its own
+                // armour class picks the verse (the shipped walls are
+                // concrete), and WallTrait's linked damage spreads half to
+                // the cardinal neighbours. The splash still spills past it.
+                if (this.IsWallCell(gx, gy)) {
+                    int warmor = this.Rules().OverlayArmor(
+                        this.WallOvAt(gx, gy));
+                    this.DamageWallAt(gx, gy,
+                        w.Damage() * wh.Verse(warmor) / 100);
+                }
                 this.SplashAround(p.side, wh, gx, gy, null, dmg);
             }
         }
@@ -3960,7 +4137,8 @@ class World {
                 bank = bank - Rules.CellMoveCost();
                 int nx = o.StepCellX();
                 int ny = o.StepCellY();
-                if (nx < 0 || this.occupancy[this.CellSlot(nx, ny)] != 0) { break; }
+                if (nx < 0 || this.occupancy[this.CellSlot(nx, ny)] != 0
+                 || this.IsWallCell(nx, ny)) { break; }
                 int oldX = o.X();
                 int oldY = o.Y();
                 this.occupancy[this.CellSlot(oldX, oldY)] = 0;
