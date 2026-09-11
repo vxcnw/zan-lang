@@ -135,6 +135,13 @@ class CookieJar {
             } else if (lower == "domain" && aval.Length > 0) {
                 string d = CookieJar.Lower(aval);
                 if ((d[0] & 255) == 46) { d = d.Substring(1, d.Length - 1); }
+                // RFC 6265 §5.3 第 6 步：Domain 与发起响应的请求主机
+                // 不域匹配就整条忽略（不是退回 host-only）。缺这一步时
+                // 攻击者可控的主机/子域可为主域或他域种 cookie——
+                // 会话固定、cookie 污染、超级 cookie。
+                if (!CookieJar.DomainAttributeOk(CookieJar.Lower(host), d)) {
+                    return;
+                }
                 c.domain = d;
                 c.hostOnly = false;
             } else if (lower == "secure") {
@@ -244,6 +251,36 @@ class CookieJar {
         if (hl <= dl) { return false; }
         if (host.Substring(hl - dl, dl) != domain) { return false; }
         return (host[hl - dl - 1] & 255) == 46;
+    }
+
+    /// RFC 6265 §5.3 第 6 步：带 Domain 属性的 Set-Cookie 仅当请求主机
+    /// 域匹配该属性时才可接受。在 DomainMatches（相等或父域）之上再要求
+    /// domain 不是单标签顶层域，并对 IP 主机一律拒绝——否则攻击者可控的
+    /// 主机/子域就能为主域或他域种 cookie（会话固定、cookie 污染、
+    /// 超级 cookie）。
+    static bool DomainAttributeOk(string host, string domain) {
+        if (domain.Length == 0 || host.Length == 0) { return false; }
+        // RFC 6265 §5.3：请求主机是 IP 字面量时，Domain 属性一律忽略。
+        if (CookieJar.IsIpHost(host)) { return false; }
+        if (!CookieJar.DomainMatches(host, domain, false)) { return false; }
+        // domain 至少要有一个点：拒绝 "com" 这类顶层域被当成可种域。
+        for (int i = 0; i < domain.Length; i = i + 1) {
+            if ((domain[i] & 255) == 46) { return true; }
+        }
+        return false;
+    }
+
+    /// host 是否是 IP 字面量：IPv4 四段全数字，或含 ':' 的 IPv6。
+    static bool IsIpHost(string host) {
+        int dots = 0;
+        bool numeric = host.Length > 0;
+        for (int i = 0; i < host.Length; i = i + 1) {
+            int c = host[i] & 255;
+            if (c == 46) { dots = dots + 1; continue; }
+            if (c == 58) { return true; }              // ':' -> IPv6
+            if (c < 48 || c > 57) { numeric = false; }
+        }
+        return numeric && dots == 3;
     }
 
     /// RFC 6265 的 path-match：相等、cookie 路径以 "/" 结尾的前缀，

@@ -155,6 +155,16 @@ State the command you ran and what it printed. Separate "compiled", "ran" and
   踩）：TLS 客户端对明文服务器握手会永久挂死——`TlsStream.PumpInAsync`
   对 `Recv<0` 不退出循环重挂 `ReadReady`，而 shutdown 后 readiness 只有一
   次；给 SDK 留 `PlainHttpMode` 之类的明文开关是防御性设计。
+* `HttpClient` 请求行的 `path` 会原样进报文：调用方可控的 path 里带
+  CR/LF 就能把一行撕成多行走私第二个请求（与 `SetHeader` 的头注入同一
+  族）。stdlib 已修（`BuildRequestHead` 拒 CR/LF/SP/NUL/DEL，下载通道
+  同步把关）；自建 HTTP 客户端或旧工具链要自己校验。
+* 并行会话共享工作树时，"测试+stdlib 成对"的修复批**必须核对 stdlib 侧
+  文件真的进了提交**：实测某提交只带上了三个 conformance 测试而配套的
+  stdlib 半（HttpFramer/CookieJar/HttpClient 防线）全部留在工作树，TASKS
+  却记"已修"——`git log -S "<新增符号>"` 全历史查一遍 + `git show
+  <commit>:<stdlib文件> | grep <符号>` 是 30 秒的事，漏了就是标准库
+  裸奔一个版本周期。
 * Do not hard-code hosts, ports, credentials or business limits: they belong in
   the project config (`config/app.json` for server projects), read at run time.
 * Do not hand-draw GUI widgets: use the standard library's components
