@@ -626,19 +626,34 @@ HTTP 解析、编码转换、路径处理这类纯逻辑，上移到 Zan。
 
 # A16 CSS 支持面（现状实测，参考）
 
-**选择器**：类型名、`.class`、`#id`，各自可带 `:state` 后缀（hover/active/focus/disabled），
-逗号列表。**没有**后代/子/兄弟组合器、属性选择器、`*`、伪元素、层叠优先级
-（`Apply` 按 类型 → `.class` → `#id` → 带状态 固定顺序覆盖）。
+> 2026-09-11 更新：本轮修掉 8 类「写了不报错、也没有效果」的值解析静默失败，
+> 并给 `StyleSheet` 加了 `Lint()`/`Audit()` 自查（被跳过的 at-rule 数、组合器
+> 选择器、一条声明都没被消费的规则、收下但无效果的属性）。三条承重项是：
+> at-rule 的块按括号配对整体跳过（以前「找下一个 `}`」会连带吃掉紧随的规则）、
+> `var(--x, fallback)` 的回退语义、`!important` 单独存并在普通级联之后统一再套。
+> 皮肤写法细则见 gui-design skill 的「CSS 方言」一节。
 
-**at-rule**：只有 `:root` 自定义属性 + `var(--x)`。没有 `@media`/`@import`/`@font-face`；
-`@keyframes` 不解析，`animation` 只能引用内置 8 条曲线。
+**选择器**：类型名、`.class`（可链式）、`#id`、`::part`，各自可带 `:state` 后缀
+（hover/active/focus/focus-visible/disabled/selected/checked，可叠加）、逗号列表，
+外加 `[class*="frag"]`。**没有**后代/子/兄弟组合器（`Selector.Parse` 返回 null，
+整条规则丢弃，由 Lint 报出）。层叠是固定顺序：类型 → `.class` → `#id` → 带状态，
+同权重按出现顺序；特异性 state ≫ id ≫ class/类链 ≫ type。
 
-**属性**（约 90 个）：盒模型、背景（含 linear-gradient 2~3 停靠点）、文本、flex 子集、
+**at-rule**：引擎没有媒体查询/关键帧的概念。整块 at-rule 按括号配对跳过并计数
+（`sheet.atRulesDropped`）；`@import "x.css";` 这种语句只剥掉该语句、紧随其后的
+规则仍生效。`animation` 只能引用内置 8 条曲线。`:root` 自定义属性 +
+`var(--x[, fallback])` 是唯一的变量机制。
+
+**属性**（约 90 个）：盒模型、背景（含 linear-gradient 2~3 停靠点，
+`to left`/`270deg` 靠交换首末停靠点实现）、文本（含 text-shadow）、flex 子集、
 定位、效果（box-shadow 含 inset/opacity/filter/transform/transition 三件套）、
-overflow/visibility/cursor/accent-color。
+overflow/visibility/cursor/accent-color。`box-sizing`/`float` 收下但无布局效果
+（Lint 标为 inert）。
 
-**取值**：颜色齐全。长度**只有像素**（`12px` = 12、`1.5rem` = 1、`50%` 被当 50；
-小数只在 opacity/scale/alpha 有效）。没有 `calc()`、没有 em/rem/vh/vw。
+**取值**：颜色齐全（8 位十六进制是 `AARRGGBB`，alpha 在前；4 位 `#RGBA` 前置展开）。
+长度**只有像素**（`12px` = 12、`1.5rem` = 1、`50%` 被当 50；小数只在
+opacity/scale/alpha 有效）。没有 `calc()`、没有 em/rem/vh/vw。`border` 的 style 词
+生效（dashed/dotted 走虚线，none 把宽度归零）。
 
 ---
 
