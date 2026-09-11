@@ -1,0 +1,18 @@
+// Regression (A276): a class with no constructor at all used to accept
+// `new C(args)` with zero diagnostics and silently discard the arguments
+// (only the field initializers ran). The "no constructor accepts N arguments"
+// check was gated on the class already having a constructor, so the case
+// with none slipped through.
+using System;
+
+class Pair {
+    public int A = 1;
+    public int B = 2;
+}
+
+class CtorArgCount {
+    static void Main() {
+        Pair p = new Pair(5, 6);
+        Console.WriteLine(p.A);
+    }
+}

@@ -1123,6 +1123,27 @@ static bool integral_conversion_is_safe(zan_type_t *target, zan_type_t *value,
         return true;
     if ((!vu || tu) && vmin >= tmin && vmax <= tmax) return true;
     if (!const_integral_value(expr, &constant)) return false;
+    /* An unsigned constant into a signed target: the int64 view of the
+     * constant is not the value written, so `long x = 18446744073709551615;`
+     * passed this check with constant == -1 and truncated at run time (C#
+     * rejects it; A275). Judge the raw bit pattern in that direction. */
+    if (vu && !tu) {
+        /* The one unsigned constant that may cross into a signed 64-bit target:
+         * C# singles out the literal 2^63 under unary minus as long.MinValue,
+         * so `long min = -9223372036854775808;` is legal while
+         * `long x = 9223372036854775808;` and `long y = 18446744073709551615;`
+         * are not. The lexer keeps the literal's bit pattern and the parser does
+         * not fold the negation (const_integral_value above relies on the same
+         * shape), so the unary-minus form is what distinguishes them. */
+        if (expr && expr->kind == AST_UNARY && expr->unary.op == TK_MINUS &&
+            expr->unary.operand && expr->unary.operand->kind == AST_INT_LITERAL &&
+            (uint64_t)expr->unary.operand->int_val == 0x8000000000000000ULL)
+            return constant >= tmin;
+        if (constant < 0) return false;
+        if (expr && expr->kind == AST_INT_LITERAL)
+            return (uint64_t)expr->int_val <= (uint64_t)tmax;
+        return (uint64_t)constant <= (uint64_t)tmax;
+    }
     if (constant < tmin) return false;
     if (tu) {
         if (constant < 0) return false;

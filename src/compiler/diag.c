@@ -20,6 +20,9 @@ zan_diag_t *zan_diag_new(zan_arena_t *arena) {
     d->entries = NULL;
     d->entry_count = 0;
     d->entry_cap = 0;
+    d->dup_file_id = 0;
+    d->dup_line = 0;
+    d->dup_line_errors = 0;
     return d;
 }
 
@@ -76,24 +79,31 @@ void zan_diag_free_buffers(zan_diag_t *diag) {
     diag->file_count = 0;
 }
 
-static void diag_capture_entry(zan_diag_t *diag, zan_diag_level_t level,
-                               zan_loc_t loc, const char *fmt, va_list args) {
+static zan_diag_entry_t *diag_capture_entry(zan_diag_t *diag, zan_diag_level_t level,
+                                            zan_loc_t loc) {
     if (diag->entry_count >= diag->entry_cap) {
         int new_cap = diag->entry_cap ? diag->entry_cap * 2 : 16;
         zan_diag_entry_t *grown = (zan_diag_entry_t *)realloc(
             diag->entries, sizeof(zan_diag_entry_t) * (size_t)new_cap);
-        if (!grown) return;
+        if (!grown) return NULL;
         diag->entries = grown;
         diag->entry_cap = new_cap;
     }
     zan_diag_entry_t *e = &diag->entries[diag->entry_count++];
     e->level = level;
     e->loc = loc;
-    vsnprintf(e->message, sizeof(e->message), fmt, args);
+    e->message[0] = '\0';
+    return e;
 }
 
 void zan_diag_emit(zan_diag_t *diag, zan_diag_level_t level, zan_loc_t loc,
                    const char *fmt, ...) {
+    char msgbuf[512];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(msgbuf, sizeof(msgbuf), fmt, args);
+    va_end(args);
+
     if (level == DIAG_ERROR) {
         diag->error_count++;
         if (diag->error_count > diag->max_errors) return;
@@ -101,12 +111,24 @@ void zan_diag_emit(zan_diag_t *diag, zan_diag_level_t level, zan_loc_t loc,
         diag->warning_count++;
     }
 
+    /* Collapse cascade noise: error recovery walks a malformed expression one
+     * token at a time re-reporting the same handful of failures at each
+     * successive column, which produced tens of megabytes for one
+     * pathological line (A280). Cap the errors printed per line; error_count
+     * has already counted them, so the compile still fails. */
+    if (level == DIAG_ERROR) {
+        if (diag->dup_line != loc.line || diag->dup_file_id != loc.file_id) {
+            diag->dup_file_id = loc.file_id;
+            diag->dup_line = loc.line;
+            diag->dup_line_errors = 0;
+        }
+        if (++diag->dup_line_errors > ZAN_DIAG_MAX_ERRORS_PER_LINE) return;
+    }
+
     /* structured capture path: store and skip stderr rendering */
     if (diag->capture) {
-        va_list args;
-        va_start(args, fmt);
-        diag_capture_entry(diag, level, loc, fmt, args);
-        va_end(args);
+        zan_diag_entry_t *e = diag_capture_entry(diag, level, loc);
+        if (e) snprintf(e->message, sizeof(e->message), "%s", msgbuf);
         return;
     }
 
@@ -126,14 +148,8 @@ void zan_diag_emit(zan_diag_t *diag, zan_diag_level_t level, zan_loc_t loc,
     }
 
     /* header: file:line:col: level: message */
-    fprintf(stderr, "%s:%u:%u: %s%s\033[0m: ", file_name, loc.line, loc.col,
-            color, level_str);
-
-    va_list args;
-    va_start(args, fmt);
-    vfprintf(stderr, fmt, args);
-    va_end(args);
-    fprintf(stderr, "\n");
+    fprintf(stderr, "%s:%u:%u: %s%s\033[0m: %s\n", file_name, loc.line, loc.col,
+            color, level_str, msgbuf);
 
     /* show source line if available */
     if (loc.file_id < (uint32_t)diag->file_count && diag->file_sources) {
@@ -141,9 +157,29 @@ void zan_diag_emit(zan_diag_t *diag, zan_diag_level_t level, zan_loc_t loc,
         if (source && loc.offset < strlen(source)) {
             const char *line_start = find_line_start(source, loc.offset);
             int line_len = find_line_len(line_start);
-            fprintf(stderr, " %4u | %.*s\n", loc.line, line_len, line_start);
+            /* Window the excerpt around the error column. Echoing the whole
+             * line is fine for hand-written code but a pathological one-liner
+             * (a 100k-character paren nest) repeats the full line for every
+             * diagnostic, which was the bulk of the tens of megabytes A280
+             * produced. Long lines are shown as an excerpt with a caret that
+             * lands on the right character. */
+            int col0 = loc.col > 0 ? (int)loc.col - 1 : 0;
+            int vis_start = 0;
+            if (line_len > ZAN_DIAG_MAX_SOURCE_ECHO) {
+                vis_start = col0 - ZAN_DIAG_MAX_SOURCE_ECHO / 2;
+                if (vis_start + ZAN_DIAG_MAX_SOURCE_ECHO > line_len)
+                    vis_start = line_len - ZAN_DIAG_MAX_SOURCE_ECHO;
+                if (vis_start < 0) vis_start = 0;
+            }
+            int vis_len = line_len - vis_start;
+            if (vis_len > ZAN_DIAG_MAX_SOURCE_ECHO) vis_len = ZAN_DIAG_MAX_SOURCE_ECHO;
+            fprintf(stderr, " %4u | %s%.*s%s\n", loc.line,
+                    vis_start > 0 ? "..." : "", vis_len, line_start + vis_start,
+                    vis_start + vis_len < line_len ? "..." : "");
             fprintf(stderr, "      | ");
-            for (uint32_t i = 1; i < loc.col; i++) fprintf(stderr, " ");
+            int indent = col0 - vis_start + (vis_start > 0 ? 3 : 0);
+            if (indent < 0) indent = 0;
+            for (int i = 0; i < indent; i++) fprintf(stderr, " ");
             fprintf(stderr, "%s^\033[0m\n", color);
         }
     }

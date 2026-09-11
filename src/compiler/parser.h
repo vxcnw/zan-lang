@@ -14,6 +14,17 @@ struct zan_parser {
     zan_token_t current;
     zan_token_t previous;
     int expr_depth; /* current expression recursion depth (stack-overflow guard) */
+    int expr_tail_depth; /* depth of the low-precedence right recursion
+                          * (assignment `a = a = ...`, conditional
+                          * `c ? a : c ? b : ...`); those re-enter
+                          * parse_expression directly, never through
+                          * parse_unary, so expr_depth alone left them
+                          * unguarded and a 100k-deep chain killed the
+                          * compiler with STATUS_STACK_OVERFLOW (A280) */
+    bool expr_depth_reported; /* the nesting guard reports once per unit: error
+                               * recovery re-parses the same deep expression and
+                               * would otherwise repeat it thousands of times
+                               * (30k parens printed 6 MB of one error) */
     int stmt_depth; /* current statement/block recursion depth (stack-overflow guard) */
     int type_depth; /* current type-reference recursion depth (stack-overflow guard) */
     int checked_depth; /* >0 while inside checked(...)/checked{...}: binary + - *

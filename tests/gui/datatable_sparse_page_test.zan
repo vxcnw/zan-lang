@@ -10,7 +10,7 @@ class SparseSource : SparseServerDataSource {
     static List<int> starts;
 
     static SparseSource Create(List<DataRow> rows, int pageSize) {
-        SparseSource s = new SparseSource(pageSize);
+        SparseSource s = new SparseSource();
         s.Setup(pageSize);
         SparseSource.all = rows;
         SparseSource.calls = 0;
@@ -39,7 +39,7 @@ class AsyncSparseSource : SparseServerDataSource {
     static int requestedPageId;
 
     static AsyncSparseSource Create(List<DataRow> rows, int pageSize) {
-        AsyncSparseSource s = new AsyncSparseSource(pageSize);
+        AsyncSparseSource s = new AsyncSparseSource();
         s.Setup(pageSize);
         AsyncSparseSource.all = rows;
         s.SetKnownTotal(rows.Count);

@@ -60,6 +60,10 @@ static LLVMValueRef coerce_to_frame_result(zan_irgen_t *g, LLVMValueRef v,
         return LLVMBuildZExt(g->builder, fb, i64, "res.slot");
     }
     default:
+        /* No encoding exists for this value in the one-word slot. The aggregate
+         * case is already reported once, at the declaration, by the async
+         * prologue (A273); this fallback only keeps the encoder from handing
+         * LLVM a wrong-typed value. */
         return LLVMConstInt(i64, 0, 0);
     }
 }

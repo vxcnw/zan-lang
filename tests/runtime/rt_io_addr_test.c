@@ -106,6 +106,21 @@ int main(void) {
     check_v6("::ffff:10.0.0.1", 1, 0);
     check_v6("::ffff:8.8.8.8", 1, 1);
 
+    /* Transition and deprecated forms embed an IPv4 destination too, so they
+     * must re-classify under the IPv4 table (A286): 6to4 (2002::/16) at bytes
+     * 2..5, NAT64 (64:ff9b::/96) and IPv4-compatible (::a.b.c.d) at 12..15,
+     * Teredo (2001::/32) with the server at 4..7 and the client at 12..15
+     * XOR 0xffffffff. Before this, each fell through to "safe". */
+    check_v6("2002:0a00:0001::1", 1, 0);                 /* 6to4 -> 10.0.0.1 */
+    check_v6("2002:0808:0808::1", 1, 1);                 /* 6to4 -> 8.8.8.8 */
+    check_v6("64:ff9b::a00:1", 1, 0);                    /* NAT64 -> 10.0.0.1 */
+    check_v6("64:ff9b::808:808", 1, 1);                  /* NAT64 -> 8.8.8.8 */
+    check_v6("::10.0.0.1", 1, 0);                        /* v4-compatible */
+    check_v6("::8.8.8.8", 1, 1);
+    /* RFC 4380 example: client 192.0.2.45 (documentation) is not usable. */
+    check_v6("2001:0000:4136:e378:8000:63bf:3fff:fdd2", 1, 0);
+    check_v6("2001:0000:4136:e378:8000:63bf:8787:8787", 1, 1);
+
     /* Resolver: full chain, stable records, stride padding zeroed. The
      * 0xa5 poison proves resolve_all never leaves stale caller bytes. */
     memset(records, 0xa5, sizeof(records));

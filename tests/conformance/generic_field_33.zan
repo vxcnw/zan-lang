@@ -1,0 +1,58 @@
+// Conformance: a generic class may declare more than 32 fields whose type is
+// the type parameter. The scan that remembers which members are T-typed had
+// fixed 32-entry tables, so the 33rd field was emitted erased and calling a
+// method on it failed with a misleading "unresolved call 'F32.ToString'".
+using System;
+
+class Box<T> {
+    public T F00;
+    public T F01;
+    public T F02;
+    public T F03;
+    public T F04;
+    public T F05;
+    public T F06;
+    public T F07;
+    public T F08;
+    public T F09;
+    public T F10;
+    public T F11;
+    public T F12;
+    public T F13;
+    public T F14;
+    public T F15;
+    public T F16;
+    public T F17;
+    public T F18;
+    public T F19;
+    public T F20;
+    public T F21;
+    public T F22;
+    public T F23;
+    public T F24;
+    public T F25;
+    public T F26;
+    public T F27;
+    public T F28;
+    public T F29;
+    public T F30;
+    public T F31;
+    public T F32;
+    public T F33;
+
+    public string Dump(int which) {
+        if (which == 0) { return F00.ToString(); }
+        if (which == 32) { return F32.ToString(); }
+        return F33.ToString();
+    }
+}
+
+class Program {
+    static void Main() {
+        Box<string> b = new Box<string>();
+        b.F00 = "first";
+        b.F32 = "mid";
+        b.F33 = "last";
+        Console.WriteLine(b.Dump(0) + " " + b.Dump(32) + " " + b.Dump(33));
+    }
+}

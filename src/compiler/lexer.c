@@ -297,6 +297,9 @@ static void pp_undef(zan_lexer_t *lex, const char *name) {
 }
 
 static int pp_active(zan_lexer_t *lex) {
+    /* an over-deep frame (nesting past ZAN_PP_MAX_COND_DEPTH) is reported as an
+     * error and treated as inactive, so tokens inside it are skipped */
+    if (lex->cond_overflow > 0) return 0;
     for (int i = 0; i < lex->cond_depth; i++) {
         if (!lex->cond_stack[i]) return 0;
     }
@@ -313,6 +316,51 @@ static void pp_skip_hspaces(zan_lexer_t *lex) {
     while (!lexer_at_end(lex) && (lexer_peek_ch(lex) == ' ' || lexer_peek_ch(lex) == '\t')) {
         lexer_advance(lex);
     }
+}
+
+/* 1 if the byte at `p` starts one of the conditional directives (endif/else/
+ * elif) as a whole word. */
+static int pp_word_is_conditional(const char *src, size_t len, size_t p) {
+    static const char *const words[] = { "endif", "else", "elif" };
+    for (int w = 0; w < 3; w++) {
+        size_t n = strlen(words[w]);
+        if (p + n > len) continue;
+        if (memcmp(src + p, words[w], n) != 0) continue;
+        char after = (p + n < len) ? src[p + n] : '\0';
+        if (!(isalnum((unsigned char)after) || after == '_')) return 1;
+    }
+    return 0;
+}
+
+/* Consume the tail of a directive's line. A directive whose own work ends
+ * before the newline must not swallow a second directive written on the same
+ * line: `#if 0 x #endif` consumed the #endif along with `x`, so the conditional
+ * stayed open and every later declaration was silently skipped (only an
+ * "unterminated #if" warning hinted at it). Stop at the first conditional
+ * directive in the remainder and leave the `#` for the next token pass; a line
+ * or block comment ends the search. #define/#error/#warning take the rest of the
+ * line as raw text and keep the plain skip. */
+static void pp_end_directive_line(zan_lexer_t *lex, int honor_conditional) {
+    if (!honor_conditional) { pp_skip_to_eol(lex); return; }
+    size_t stop = lex->pos;
+    int found = 0;
+    while (stop < lex->source_len && lex->source[stop] != '\n') {
+        char c = lex->source[stop];
+        if (c == '/' && stop + 1 < lex->source_len
+            && (lex->source[stop + 1] == '/' || lex->source[stop + 1] == '*'))
+            break;
+        if (c == '#') {
+            size_t p = stop + 1;
+            while (p < lex->source_len && (lex->source[p] == ' ' || lex->source[p] == '\t')) p++;
+            if (pp_word_is_conditional(lex->source, lex->source_len, p)) { found = 1; break; }
+        }
+        stop++;
+    }
+    if (found) {
+        while (lex->pos < stop) lexer_advance(lex);
+        return;
+    }
+    pp_skip_to_eol(lex);
 }
 
 static void pp_read_ident(zan_lexer_t *lex, char *buf, int maxlen) {
@@ -433,15 +481,14 @@ static void pp_handle_directive(zan_lexer_t *lex) {
             lex->cond_seen_true[lex->cond_depth] = active;
             lex->cond_depth++;
         } else {
-            /* Over the limit: push a constant-false frame anyway so the
-             * matching #endif pops OUR frame, not an enclosing one -- an
-             * unpushed #if desynced the stack and inverted outer branches. */
+            /* Over the limit: count the frame instead of pushing it. Writing
+             * cond_stack[MAX] is out of bounds and aliases cond_depth, which
+             * silently reset the stack; the matching #endif decrements this
+             * counter instead. */
             zan_diag_emit(lex->diag, DIAG_ERROR, lexer_loc(lex),
                           "conditional-compilation nesting too deep (max %d)",
                           ZAN_PP_MAX_COND_DEPTH);
-            lex->cond_stack[lex->cond_depth] = 0;
-            lex->cond_seen_true[lex->cond_depth] = 0;
-            lex->cond_depth++;
+            lex->cond_overflow++;
         }
     } else if (strcmp(dir, "ifndef") == 0) {
         pp_skip_hspaces(lex); char name[64]; pp_read_ident(lex, name, sizeof(name));
@@ -454,9 +501,7 @@ static void pp_handle_directive(zan_lexer_t *lex) {
             zan_diag_emit(lex->diag, DIAG_ERROR, lexer_loc(lex),
                           "conditional-compilation nesting too deep (max %d)",
                           ZAN_PP_MAX_COND_DEPTH);
-            lex->cond_stack[lex->cond_depth] = 0;
-            lex->cond_seen_true[lex->cond_depth] = 0;
-            lex->cond_depth++;
+            lex->cond_overflow++;
         }
     } else if (strcmp(dir, "if") == 0) {
         if (lex->cond_depth < ZAN_PP_MAX_COND_DEPTH) {
@@ -470,12 +515,14 @@ static void pp_handle_directive(zan_lexer_t *lex) {
             zan_diag_emit(lex->diag, DIAG_ERROR, lexer_loc(lex),
                           "conditional-compilation nesting too deep (max %d)",
                           ZAN_PP_MAX_COND_DEPTH);
-            lex->cond_stack[lex->cond_depth] = 0;
-            lex->cond_seen_true[lex->cond_depth] = 0;
-            lex->cond_depth++;
+            lex->cond_overflow++;
         }
     } else if (strcmp(dir, "elif") == 0) {
-        if (lex->cond_depth > 0) {
+        /* the directive belongs to an over-deep frame that was never pushed:
+         * leave the real stack alone */
+        if (lex->cond_overflow > 0) {
+            /* nothing to select on */
+        } else if (lex->cond_depth > 0) {
             int idx = lex->cond_depth - 1;
             if (lex->cond_seen_true[idx]) {
                 lex->cond_stack[idx] = 0;
@@ -489,7 +536,10 @@ static void pp_handle_directive(zan_lexer_t *lex) {
             }
         }
     } else if (strcmp(dir, "else") == 0) {
-        if (lex->cond_depth > 0) {
+        /* the directive belongs to an over-deep frame that was never pushed */
+        if (lex->cond_overflow > 0) {
+            /* nothing to flip */
+        } else if (lex->cond_depth > 0) {
             int idx = lex->cond_depth - 1;
             if (lex->cond_seen_true[idx]) {
                 lex->cond_stack[idx] = 0;
@@ -501,7 +551,8 @@ static void pp_handle_directive(zan_lexer_t *lex) {
             }
         }
     } else if (strcmp(dir, "endif") == 0) {
-        if (lex->cond_depth > 0) lex->cond_depth--;
+        if (lex->cond_overflow > 0) lex->cond_overflow--;
+        else if (lex->cond_depth > 0) lex->cond_depth--;
     } else if (strcmp(dir, "error") == 0) {
         if (pp_active(lex)) {
             pp_skip_hspaces(lex);
@@ -521,8 +572,13 @@ static void pp_handle_directive(zan_lexer_t *lex) {
             zan_diag_emit(lex->diag, DIAG_WARNING, lexer_loc(lex), "#warning %s", msg);
         }
     }
-    /* skip rest of line */
-    pp_skip_to_eol(lex);
+    /* End the directive's line (see pp_end_directive_line): the conditional
+     * directives keep a same-line trailing #endif/#else/#elif reachable. */
+    int honor_conditional =
+        strcmp(dir, "if") == 0 || strcmp(dir, "ifdef") == 0 ||
+        strcmp(dir, "ifndef") == 0 || strcmp(dir, "elif") == 0 ||
+        strcmp(dir, "else") == 0 || strcmp(dir, "endif") == 0;
+    pp_end_directive_line(lex, honor_conditional);
 }
 
 /* ---- skip whitespace and comments ---- */
@@ -656,12 +712,19 @@ static zan_token_t lexer_number(zan_lexer_t *lex) {
             /* parse hex value, ignoring underscores */
             char buf[64];
             size_t bi = 0;
-            for (size_t i = start + 2; i < lex->pos && bi < 63; i++) {
+            int lit_truncated = 0;
+            for (size_t i = start + 2; i < lex->pos; i++) {
                 if (lex->source[i] != '_' && lex->source[i] != 'L'
                     && lex->source[i] != 'l' && lex->source[i] != 'U'
-                    && lex->source[i] != 'u') buf[bi++] = lex->source[i];
+                    && lex->source[i] != 'u') {
+                    if (bi >= sizeof(buf) - 1) { lit_truncated = 1; break; }
+                    buf[bi++] = lex->source[i];
+                }
             }
             buf[bi] = '\0';
+            if (lit_truncated)
+                zan_diag_emit(lex->diag, DIAG_ERROR, loc,
+                              "integer literal is too long");
             tok.int_val = (int64_t)strtoull(buf, NULL, 16);
             return tok;
         }
@@ -681,12 +744,19 @@ static zan_token_t lexer_number(zan_lexer_t *lex) {
             tok.lit_radix = 2;
             char buf[128];
             size_t bi = 0;
-            for (size_t i = start + 2; i < lex->pos && bi < 127; i++) {
+            int lit_truncated = 0;
+            for (size_t i = start + 2; i < lex->pos; i++) {
                 if (lex->source[i] != '_' && lex->source[i] != 'L'
                     && lex->source[i] != 'l' && lex->source[i] != 'U'
-                    && lex->source[i] != 'u') buf[bi++] = lex->source[i];
+                    && lex->source[i] != 'u') {
+                    if (bi >= sizeof(buf) - 1) { lit_truncated = 1; break; }
+                    buf[bi++] = lex->source[i];
+                }
             }
             buf[bi] = '\0';
+            if (lit_truncated)
+                zan_diag_emit(lex->diag, DIAG_ERROR, loc,
+                              "integer literal is too long");
             tok.int_val = (int64_t)strtoull(buf, NULL, 2);
             return tok;
         }
@@ -706,12 +776,19 @@ static zan_token_t lexer_number(zan_lexer_t *lex) {
             tok.lit_radix = 8;
             char buf[64];
             size_t bi = 0;
-            for (size_t i = start + 2; i < lex->pos && bi < 63; i++) {
+            int lit_truncated = 0;
+            for (size_t i = start + 2; i < lex->pos; i++) {
                 if (lex->source[i] != '_' && lex->source[i] != 'L'
                     && lex->source[i] != 'l' && lex->source[i] != 'U'
-                    && lex->source[i] != 'u') buf[bi++] = lex->source[i];
+                    && lex->source[i] != 'u') {
+                    if (bi >= sizeof(buf) - 1) { lit_truncated = 1; break; }
+                    buf[bi++] = lex->source[i];
+                }
             }
             buf[bi] = '\0';
+            if (lit_truncated)
+                zan_diag_emit(lex->diag, DIAG_ERROR, loc,
+                              "integer literal is too long");
             tok.int_val = (int64_t)strtoull(buf, NULL, 8);
             return tok;
         }
@@ -769,14 +846,21 @@ static zan_token_t lexer_number(zan_lexer_t *lex) {
     /* build clean number string (no underscores, no suffixes) */
     char buf[128];
     size_t bi = 0;
-    for (size_t i = start; i < lex->pos && bi < 127; i++) {
+    int lit_truncated = 0;
+    for (size_t i = start; i < lex->pos; i++) {
         char ch = lex->source[i];
         if (ch != '_' && ch != 'f' && ch != 'F' && ch != 'm' && ch != 'M'
             && ch != 'L' && ch != 'l' && ch != 'U' && ch != 'u') {
+            if (bi >= sizeof(buf) - 1) { lit_truncated = 1; break; }
             buf[bi++] = ch;
         }
     }
     buf[bi] = '\0';
+    if (lit_truncated) {
+        /* Silently keeping the first 127 digits would make the literal a
+         * DIFFERENT number than the one written. */
+        zan_diag_emit(lex->diag, DIAG_ERROR, loc, "integer literal is too long");
+    }
 
     if (is_float) {
         zan_token_t tok = lexer_make(lex, TK_FLOAT_LIT, loc);
@@ -792,8 +876,26 @@ static zan_token_t lexer_number(zan_lexer_t *lex) {
         errno = 0;
         long long sv = strtoll(buf, NULL, 10);
         if (errno == ERANGE) {
+            /* Above long.MaxValue. C# types an unsuffixed literal as ulong, so
+             * wrapping the bit pattern into a negative int64 made the literal
+             * silently CHANGE VALUE (`long x = 18446744073709551615` read back
+             * as -1, and the checker then typed it int). An explicit long suffix
+             * cannot be satisfied at all, and a value above ulong.MaxValue is
+             * not representable either -- both are diagnostics. */
             errno = 0;
-            tok.int_val = (int64_t)strtoull(buf, NULL, 10);
+            unsigned long long uv = strtoull(buf, NULL, 10);
+            if (errno == ERANGE) {
+                zan_diag_emit(lex->diag, DIAG_ERROR, loc,
+                              "integer literal is too large for 'ulong'");
+                tok.int_val = 0;
+            } else if (lit_suffix == 1) {
+                zan_diag_emit(lex->diag, DIAG_ERROR, loc,
+                              "integer literal is too large for 'long'");
+                tok.int_val = (int64_t)uv;
+            } else {
+                tok.lit_suffix = 3;   /* unsuffixed decimal above long.MaxValue -> ulong */
+                tok.int_val = (int64_t)uv;
+            }
         } else {
             tok.int_val = (int64_t)sv;
         }
@@ -1369,6 +1471,19 @@ zan_token_t zan_lexer_peek(zan_lexer_t *lex) {
      * the parse backtracks (lexer.h documents restore-on-snapshot
      * semantics for the full-struct snapshots; peek helpers must match). */
     int dcount = lex->define_count;
+    /* A speculative peek can also cross a conditional directive: the next-token
+     * pass mutates cond_depth/cond_stack/cond_overflow, and leaving that behind
+     * permanently shifts every later #else/#endif (same restore-on-snapshot
+     * contract as the define table above). */
+    int cdep = lex->cond_depth;
+    int cover = lex->cond_overflow;
+    int cstack[ZAN_PP_MAX_COND_DEPTH];
+    int cseen[ZAN_PP_MAX_COND_DEPTH];
+    int csave = cdep < ZAN_PP_MAX_COND_DEPTH ? cdep : ZAN_PP_MAX_COND_DEPTH;
+    if (csave > 0) {
+        memcpy(cstack, lex->cond_stack, sizeof(cstack[0]) * (size_t)csave);
+        memcpy(cseen, lex->cond_seen_true, sizeof(cseen[0]) * (size_t)csave);
+    }
 
     zan_token_t tok = zan_lexer_next(lex);
 
@@ -1380,6 +1495,12 @@ zan_token_t zan_lexer_peek(zan_lexer_t *lex) {
     if (nsave > 0)
         memcpy(lex->interp_stack, istack, sizeof(istack[0]) * (size_t)nsave);
     lex->define_count = dcount;
+    lex->cond_depth = cdep;
+    lex->cond_overflow = cover;
+    if (csave > 0) {
+        memcpy(lex->cond_stack, cstack, sizeof(cstack[0]) * (size_t)csave);
+        memcpy(lex->cond_seen_true, cseen, sizeof(cseen[0]) * (size_t)csave);
+    }
 
     return tok;
 }

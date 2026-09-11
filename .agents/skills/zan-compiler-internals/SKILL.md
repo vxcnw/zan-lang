@@ -418,19 +418,33 @@ Log(q);                          // 打印 11 —— 闭包内外读写同一个
   改动）→ 属于那条车道。关键判据是**报错来自哪个阶段**：只改了 irgen/runtime
   时，checker/binder 的报错（"after type checking"、未解析调用、null 安全）不
   可能是你引入的——那些阶段在你的改动之前跑。
-- **陈旧产物导致的挂起/超时**：`tests/run_case.cmake` 只在 exe 不存在或比
-  `.zan` 源旧时才重编，**不看 stdlib 时间戳**。别的会话在你上次跑之后改了
+- **陈旧产物导致的挂起/超时**：`tests/run_case.cmake` 只在 exe 不存在、或比 `.zan` 源旧、或比
+  `-DSTDLIB_STAMP` 旧时才重编；而 `STDLIB_STAMP` 由**调用方**传入——glob 出来的
+  conformance 用例传了它，**gui 段的 `add_test()` 没传**，所以 gui 用例从不因
+  stdlib 变化而重编（下面那条 10 分钟挂死就是它的代价）。别的会话在你上次跑之后改了
   stdlib，ctest 仍会复用旧的 `build/conf_*.exe`，于是出现"单跑必挂、手编必过"
   的怪象（本次 `conformance_gui_listview_scrollbar_drag` 挂死在 5:09 的中间态
   产物上 10 分钟，`rm build/conf_<name>.exe` 重编即 PASS）。
 - **归因顺序（四步）**：单跑该用例 → 删 `build/conf_<name>.exe` 重编单跑 →
   手工 `zanc` 编译 + 直接跑 exe → 旧编译器快照（如 `_scratch/zanc_head.exe`）
   复现。四步都指向"不是我"再继续；否则停下来查自己。
+- 另一条会一次打红**整档**的：并行会话重链 `build/zanc.exe`（本轮实测 07:21:34，
+  而我这轮 ctest 是 07:20:58 起的）。编译器一换，所有 `conf_*.exe`/golden 产物
+  全部过期，逐条归因毫无意义；判据是 `ls -l build/zanc.exe` 的 mtime 落在你的运行
+  区间内 → 整档作废重跑。
+
 - 另一条常客：**端口/资源竞争与真 flaky**。判别法是把**同一个二进制**（不重编）
   连跑 5 次——通过/挂起交错就说明是被测代码里的竞争，单次的超时/失败不能当回归
   （本次 `conformance_gui_listview_scrollbar_drag` 同一 exe 3 过 2 挂，而它属
   Gui 车道在途改动；`conformance_http_client_keepalive` 则是全量并行 120s 超时、
   单跑 0.5s 过，属端口竞争）。并行档的超时值一律先单跑复核。
+
+- **两档 ctest 绝不能同时跑：它们共享同一批 `build/conf_*.exe`**（smoke 与 standard
+  的 label 大量重叠，`add_test` 的 `-DOUT_EXE` 是同一个路径）。本轮实测：我这轮
+  `-L standard -j 4` 起来后，另一会话的 `-L smoke -j 32` 也在跑，两条进程同时往同一个
+  `conf_*.exe` 写、又互相把它当「已是最新」复用，双方都开始冒出无法归因的红。**开工前
+  先查** `Get-CimInstance Win32_Process -Filter "Name='ctest.exe'"`，有别人的档就先等它
+  跑完（或另开 `git worktree` 用自己的 build 目录），别硬上。
 
 ## 编译器调试的 scratch 卫生（bisect / A-B 对照）
 
@@ -536,6 +550,43 @@ Log(q);                          // 打印 11 —— 闭包内外读写同一个
   基线**（find 定位 + 下标切，零转义），`git hash-object -w` +
   `git update-index --cacheinfo 100644,<blob>,<path>`，`git diff --cached`
   核对只剩自己的 hunk 再 commit；别人的在途改动原样留在工作树。
+
+## 改仓库文件的静默陷阱（2026-09-11 本轮实测，三个都真的浪费过时间）
+
+- **行尾**：本仓 `core.autocrlf=true`，多数 `.zan`/`CMakeLists.txt`/`parser.c` 在工作区
+  是 CRLF、blob 是 LF。**不要**用「读到字节里有 CRLF → 把换行全换成 CRLF」的整片
+  重放模板：源文本的换行本来就带 CR，重放后每行变成 CRCRLF，`git diff` 显示整个
+  文件被改写（本轮把 `tests/gui/datatable_sparse_page_test.zan` 135 行全改了）。
+  正确顺序：先 `replace(CRLF, LF)` 归一化 → 改内容 → 要保 CRLF 再整体重放；
+  验证靠 `git diff --numstat`：增删行数应等于你实际改的行数（本轮 2/2 才对）。
+- **工具传输会把双反斜杠折叠成单反斜杠**：替换片段里想要两个反斜杠，到执行时可能
+  只剩一个，于是 old == new、`str.replace()` 静默 no-op——脚本照样打印 "patched 5"，
+  文件一个字节没变（A290 的转义修复就这样空转 4 次，`zanc` 一直报同一个错，还以为
+  是别的会话在还原文件）。含反斜杠/引号的替换一律用 `chr(92)` / `chr(34)` 在脚本里
+  拼，写后做两件事：**md5 前后对比**、**断言 old 计数归零**。
+- **不止双反斜杠：\r / \n 这类同样会被折成真的 CR / LF**（本轮两处：
+  `Pinyin.zan` 的注释里落了 2 个裸 CR、`TASKS.md` A301 里落了 3 个裸 CR + 1 个裸 LF，
+  终端里那行字被 CR 吃掉半截才看出来）。所以写后自检不能只看 bare LF，要同时看
+  「裸 CR = CR 总数 − CRLF 数」和「bare LF」，两个都为 0 才算干净；带 \r / \n 的文本
+  一律用 `chr(92)` 拼。
+- **收紧诊断前先全仓编译一遍**：把「静默放行」改成「报错」时，仓内本来就有靠那个
+  静默行为才编过的代码。A276 去掉 `type_has_ctor` 门后，
+  `tests/gui/datatable_sparse_page_test.zan` 的 `new SparseSource(pageSize)`
+  （基类 `SparseServerDataSource(int)` 有 1 参 ctor、派生类没声明 ctor）由「悄悄
+  丢参」变成编译错。**Zan 不做 ctor 向基类转发**（探针 `ctor_inh1/2.zan`：
+  `new Derived()` 编过但基类 ctor 不执行、字段保持 0；`new Derived(5)` 在修复后报
+  "no constructor of 'Derived2' accepts 1 argument"），这类调用点本就该写无参构造 +
+  `Setup(...)`。改这类语义前先全档编译，连带修调用点，别把诊断再放回去。
+
+- **改 stdlib 源文件不会让产物过期**：`run_case.cmake` 的新旧判定只比 `.zan` 源、
+  `ZANC`、`STDLIB_STAMP` 三者对 exe 的 mtime，**不比 stdlib 源**。所以编辑完
+  `stdlib/**.zan` 直接重跑 ctest，用的还是旧 stdlib 编出来的 exe，修复「看起来没生效」，
+  很容易反过来怀疑自己的补丁。改完 stdlib 必须重打时间戳
+  （`cmake --build build --target stdlib_stamp`）或先删 `build/conf_<name>.exe` 再跑档。
+- **单行替换展开后会留下原来那一行**：把一行换成多行时，旧行本身还在（本轮把
+  `return JsonValue.NewDouble(d2);` 换成含 `return v;` 的多行，原行残留成重复返回），
+  替换后要回看上下文（`sed -n` 看几行），别只看工具回了 `replacements: 1`。
+
 - **bash heredoc 过工具层会咬转义**：`<<'PYEOF'` 引号 heredoc 里的 python
   `'\\n'` 到执行时可能已是真换行，`s.count(anchor)` 静默得 0——出现过
   "anchor count 0" 而文本明明在文件里（repr 都能看到了还 count 0，就是
@@ -543,3 +594,39 @@ Log(q);                          // 打印 11 —— 闭包内外读写同一个
   文件按锚切片、原样拼进基线**（find 定位 + 下标切），零转义零风险；
   写完断言 count==1/块内标记存在，再 md5 前后对比。
 
+## 解析器别丢 token 原文本：格式化输出 ≠ 无损（A295，2026-09-11 已修）
+
+- 场景：`JsonValue.ParseNumberToken` 为性能把「含 . / e 的数字」直接转 double 且不存原文本，
+  `AsString`/`ToJson` 回落到 `Convert.ToString(numD)`。后果不是「格式不同」而是**语义错误**：
+  `1e2` 输出成 `100`，于是 JWT 的数字日期校验（要求 token 逐字符都是数字）把
+  `{"nbf":1e2}` 当合法的 100 接受（conformance 期望 invalid nbf）；>18 位整数走 double
+  分支还会丢精度（输出 `1.23E19` 这种近似值）。
+- 规则：解析时把 token 转成数值只是读取侧优化；**只要还有 AsString/ToJson 这类文本出口，
+  就必须把原文本一起留下**，两者不能互相替代。
+- 零成本修法：该分支本来已为 `DoubleOf` 切过一次子串，复用它填 `numRaw` 即可（热路径
+  ≤18 位整数一行未动，分配次数不变）。
+
+## 静默截断的指纹：rc=0 但输出缺行（2026-09-11 实测）
+
+- Zan 调度器在**协程全部 parked** 时正常退出（rc=0）。所以「丢唤醒 / 某个 await 永不 resume」
+  不崩不报错，只会**少打印后面所有行**——conformance 报 output mismatch，人工看像「输出少
+  了几行」，容易误判成打印/缓冲问题。
+- 判据：mismatch 且行数变少、进程 rc=0、输出停在某个 await 之后 → 先怀疑 parked 协程
+  （IO 完成丢唤醒、对端没按用例假设建连），别去查 Console/缓冲。
+- 本轮实例（未修的 A298）：`http_forwarder_stream` 同一个 exe 跑 6 次得 3 种形态
+  （停在 stream-progressive 的 4 行 / 11 行但内容错 / 全空），**全部 rc=0**；线索是用例的
+  upstream 只 accept 2 个连接，转发器一旦复用连接就停在 accept 上，Main 的下一个 await 永不 resume。
+
+## async × 异常：嵌套非 async 函数里的 throw 会让 awaiter 局部归零（A293，未修）
+
+`_scratch/fixv/exc_local*.zan` 四组对照：
+
+- 在 await 的 async 方法体内直接 `throw`、由 awaiter `catch`：局部正常（len=20）。
+- `await` 真正挂起之后再 `throw`：正常。
+- **在嵌套的非 async 辅助函数里 `throw`、由 awaiter `catch`：awaiter 的所有局部
+  变成 NULL/0**（len=0）。辅助函数返回类或 int 都复现，用字面量局部也能复现，
+  与 StringBuilder / A279 无关。
+
+写「async + 异常 + 局部变量」的组合时，别依赖 catch 之后的局部值。怀疑点：
+`irgen_async.c` 的 EH trampoline（约 1442/1513——landing pad 只恢复了 resume 点，
+没恢复 awaiter frame 的 locals 槽）。已登记 TASKS.md A293。

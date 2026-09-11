@@ -823,6 +823,89 @@ add_test(NAME diag_delegate_combine
     -P ${CMAKE_SOURCE_DIR}/tests/run_compile_error.cmake)
 set_tests_properties(diag_delegate_combine PROPERTIES TIMEOUT 60)
 
+# Regression (A273): an async method returning an aggregate used to reduce the
+# value to 0 in the coroutine result slot; every field read back as 0/garbage
+# with no diagnostic. The declaration is now rejected.
+add_test(NAME diag_async_aggregate_return
+  COMMAND ${CMAKE_COMMAND}
+    -DZANC=$<TARGET_FILE:zanc>
+    -DSRC=${CMAKE_SOURCE_DIR}/tests/diag/async_aggregate_return.zan
+    -DOUT_EXE=${CMAKE_BINARY_DIR}/diag_async_aggregate_return${_exe_ext}
+    "-DEXPECT_REGEX=an async method cannot return an aggregate type"
+    -P ${CMAKE_SOURCE_DIR}/tests/run_compile_error.cmake)
+set_tests_properties(diag_async_aggregate_return PROPERTIES TIMEOUT 60)
+
+# Regression (A276): a class with no constructor silently discarded the
+# arguments of `new C(args)` instead of reporting the arity mismatch.
+add_test(NAME diag_ctor_arg_count
+  COMMAND ${CMAKE_COMMAND}
+    -DZANC=$<TARGET_FILE:zanc>
+    -DSRC=${CMAKE_SOURCE_DIR}/tests/diag/ctor_arg_count.zan
+    -DOUT_EXE=${CMAKE_BINARY_DIR}/diag_ctor_arg_count${_exe_ext}
+    "-DEXPECT_REGEX=no constructor of .Pair. accepts 2 arguments"
+    -P ${CMAKE_SOURCE_DIR}/tests/run_compile_error.cmake)
+set_tests_properties(diag_ctor_arg_count PROPERTIES TIMEOUT 60)
+
+# Regression (A277): the bare-name extern call path overflowed a 16-entry
+# parameter-type array with 17+ parameters, surfacing as a bogus LLVM
+# verification error. It must now reach the linker (which reports the missing
+# C symbol) instead.
+add_test(NAME diag_extern_many_params
+  COMMAND ${CMAKE_COMMAND}
+    -DZANC=$<TARGET_FILE:zanc>
+    -DSRC=${CMAKE_SOURCE_DIR}/tests/diag/extern_many_params.zan
+    -DOUT_EXE=${CMAKE_BINARY_DIR}/diag_extern_many_params${_exe_ext}
+    "-DEXPECT_REGEX=undefined reference to .big17."
+    -P ${CMAKE_SOURCE_DIR}/tests/run_compile_error.cmake)
+set_tests_properties(diag_extern_many_params PROPERTIES TIMEOUT 60)
+
+# Regression (A283): a 17-dimension array type dropped the rank silently and
+# the checker then reported a meaningless "array initializer has 1 element but
+# the dimensions describe 65536". The rank is rejected where it is written.
+add_test(NAME diag_mdarray_rank
+  COMMAND ${CMAKE_COMMAND}
+    -DZANC=$<TARGET_FILE:zanc>
+    -DSRC=${CMAKE_SOURCE_DIR}/tests/diag/mdarray_rank.zan
+    -DOUT_EXE=${CMAKE_BINARY_DIR}/diag_mdarray_rank${_exe_ext}
+    "-DEXPECT_REGEX=array rank specifier is too deep"
+    -P ${CMAKE_SOURCE_DIR}/tests/run_compile_error.cmake)
+set_tests_properties(diag_mdarray_rank PROPERTIES TIMEOUT 60)
+
+# Regression (A275): a decimal literal above 2^63-1 silently became a negative
+# long instead of being diagnosed as out of range.
+add_test(NAME diag_ulong_literal_narrowing
+  COMMAND ${CMAKE_COMMAND}
+    -DZANC=$<TARGET_FILE:zanc>
+    -DSRC=${CMAKE_SOURCE_DIR}/tests/diag/ulong_literal_narrowing.zan
+    -DOUT_EXE=${CMAKE_BINARY_DIR}/diag_ulong_literal_narrowing${_exe_ext}
+    "-DEXPECT_REGEX=narrowing conversion from .ulong. to .long."
+    -P ${CMAKE_SOURCE_DIR}/tests/run_compile_error.cmake)
+set_tests_properties(diag_ulong_literal_narrowing PROPERTIES TIMEOUT 60)
+
+# Regression (A280): the nesting guard missed the right-recursive assignment
+# and conditional forms and repeated the message per level. 300 parens must be
+# reported once, with the source echo windowed.
+add_test(NAME diag_expr_nesting_depth
+  COMMAND ${CMAKE_COMMAND}
+    -DZANC=$<TARGET_FILE:zanc>
+    -DSRC=${CMAKE_SOURCE_DIR}/tests/diag/expr_nesting_depth.zan
+    -DOUT_EXE=${CMAKE_BINARY_DIR}/diag_expr_nesting_depth${_exe_ext}
+    "-DEXPECT_REGEX=expression nesting too deep"
+    -P ${CMAKE_SOURCE_DIR}/tests/run_compile_error.cmake)
+set_tests_properties(diag_expr_nesting_depth PROPERTIES TIMEOUT 60)
+
+# Regression (A282): an over-deep conditional-compilation frame wrote past
+# cond_stack/cond_seen_true (cond_stack[32] aliases cond_depth). The frame is
+# counted, not pushed, and the guard still fires.
+add_test(NAME diag_pp_nesting_depth
+  COMMAND ${CMAKE_COMMAND}
+    -DZANC=$<TARGET_FILE:zanc>
+    -DSRC=${CMAKE_SOURCE_DIR}/tests/diag/pp_nesting_depth.zan
+    -DOUT_EXE=${CMAKE_BINARY_DIR}/diag_pp_nesting_depth${_exe_ext}
+    "-DEXPECT_REGEX=conditional-compilation nesting too deep"
+    -P ${CMAKE_SOURCE_DIR}/tests/run_compile_error.cmake)
+set_tests_properties(diag_pp_nesting_depth PROPERTIES TIMEOUT 60)
+
 # `new string(bytes)` used to pass the checker (the ctor availability check
 # only looked at classes) and irgen's fall-through returned literal 0 -- the
 # variable silently became null and failed far from the cause. Scalar
@@ -3513,6 +3596,15 @@ foreach(_t ${_all_tests})
     list(APPEND _labels "standard")
   endif()
   set_property(TEST ${_t} APPEND PROPERTY LABELS ${_labels})
+  # A Gui conformance case opens a real window, and on a contended desktop a
+  # pump can stop returning (observed: two 14-minute stalls on
+  # conformance_gui_listview_scrollbar_drag -- idle process, live window,
+  # no output). The globbed conformance cases above carry TIMEOUT 120, but the
+  # Gui add_test() calls set none, so one such stall costs the whole run
+  # instead of one failure. Bound them here, where gui names are matched.
+  if(_t MATCHES "^conformance_gui_")
+    set_tests_properties(${_t} PROPERTIES TIMEOUT 240)
+  endif()
   # Cases that drive the real desktop (tray icon, screen capture, UI
   # automation, mouse/keyboard, clipboard) contend for one machine-wide
   # resource, so they pass alone and fail at random under -j. One shared lock

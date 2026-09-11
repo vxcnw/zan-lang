@@ -94,6 +94,11 @@ class Pinyin {
         List<string> lines = data.Split("\n");
         for (int i = 0; i < lines.Count; i = i + 1) {
             string line = lines[i];
+            // CRLF 检出的工作区里 data 文件每行尾带 \r（blob 是 LF、autocrlf 检出成
+            // CRLF），不剥掉就会把 "yi\r" 当成拼音值，Windows 上全表查不中。
+            if (line.Length > 0 && (line[line.Length - 1] & 255) == 13) {
+                line = line.Substring(0, line.Length - 1);
+            }
             // "汉字拼音": 3-byte hanzi + ascii pinyin
             if (line.Length >= 4) {
                 d[line.Substring(0, 3)] = line.Substring(3, line.Length - 3);

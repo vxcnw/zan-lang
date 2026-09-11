@@ -476,6 +476,13 @@ long long zan_file_set_time(const char *path, int which, long long unix_sec) {
  * other invalid handle) as a no-op so a failed open cannot corrupt memory.
  * Table access is serialized; the captured FILE* is used outside the lock so
  * blocking I/O never holds it.
+ *
+ * Because the FILE* is used outside the lock, resolving it is not enough: a
+ * concurrent Close on the same handle used to fclose it while a reader was
+ * inside fread (A284). Every operation therefore *pins* its slot under the
+ * lock (inuse++), so Close hands the FILE* to the slot's `dying` field
+ * instead of closing it, and the last unpin performs the fclose. A slot with
+ * a dying FILE* is not claimable by a new open until then.
  */
 
 /* The table starts at ZAN_FH_CAP0 slots and doubles on demand up to
@@ -487,6 +494,9 @@ typedef struct {
     FILE *fp;
     uint32_t gen;   /* bumped on every close; stale handles stop matching */
     int open;
+    int inuse;      /* operations that pinned `fp` for use outside the lock */
+    FILE *dying;    /* a closed fp still pinned by an in-flight operation;
+                     * fclose'd by the last unpin (A284) */
 } zan_fh_slot;
 static zan_fh_slot *g_fh_table = NULL;
 static uint32_t g_fh_cap = 0;
@@ -560,6 +570,41 @@ static long zan_fh_index(long long handle) {
     return (long)idx;
 }
 
+/* Resolve `handle` and pin its slot so the FILE* stays valid while the caller
+ * uses it outside the lock. *idx_out receives the slot index to unpin, or -1.
+ * Call from the same thread that will unpin. */
+static FILE *zan_fh_pin(long long handle, long *idx_out) {
+    zan_fh_lock();
+    zan_fh_ensure();
+    long idx = zan_fh_index(handle);
+    FILE *f = NULL;
+    if (idx >= 0) {
+        f = g_fh_table[idx].fp;
+        g_fh_table[idx].inuse++;
+    }
+    *idx_out = idx;
+    zan_fh_unlock();
+    return f;
+}
+
+/* Drop a pin. The last pin on a slot whose handle was closed performs the
+ * deferred fclose, so the FILE* is never freed under an in-flight user. Call
+ * without the lock. */
+static void zan_fh_unpin(long idx) {
+    FILE *dying = NULL;
+    if (idx < 0) return;
+    zan_fh_lock();
+    if (g_fh_table && (uint32_t)idx < g_fh_cap) {
+        zan_fh_slot *s = &g_fh_table[idx];
+        if (s->inuse > 0 && --s->inuse == 0 && s->dying) {
+            dying = s->dying;
+            s->dying = NULL;
+        }
+    }
+    zan_fh_unlock();
+    if (dying) fclose(dying);
+}
+
 /* `mode` is a stdio mode string ("rb", "wb", "r+b", "ab", ...). */
 long long zan_file_open(const char *path, const char *mode) {
     if (!path || !path[0] || !mode || !mode[0]) return 0;
@@ -573,7 +618,10 @@ long long zan_file_open(const char *path, const char *mode) {
             uint32_t i = 0;
             while (i < g_fh_cap) {
                 zan_fh_slot *s = &g_fh_table[i];
-                if (!s->open) {
+                /* A slot holding a dying FILE* (a closed handle an operation
+                 * is still using) must not be claimed: the fclose still has
+                 * to happen and its reader still holds the old handle. */
+                if (!s->open && !s->dying) {
                     if (s->gen == 0) { s->gen = 1; }   /* keep slot 0's handle nonzero */
                     s->fp = f;
                     s->open = 1;
@@ -596,67 +644,61 @@ long long zan_file_open(const char *path, const char *mode) {
 
 long long zan_file_read(long long handle, long long buf, long long count) {
     if (!buf || count <= 0) return 0;
-    zan_fh_lock();
-    zan_fh_ensure();
-    long idx = zan_fh_index(handle);
-    FILE *f = idx >= 0 ? g_fh_table[idx].fp : NULL;
-    zan_fh_unlock();
+    long idx;
+    FILE *f = zan_fh_pin(handle, &idx);
     if (!f) return 0;
-    return (long long)fread((void *)(intptr_t)buf, 1, (size_t)count, f);
+    long long n = (long long)fread((void *)(intptr_t)buf, 1, (size_t)count, f);
+    zan_fh_unpin(idx);
+    return n;
 }
 
 long long zan_file_write(long long handle, long long buf, long long count) {
     if (!buf || count <= 0) return 0;
-    zan_fh_lock();
-    zan_fh_ensure();
-    long idx = zan_fh_index(handle);
-    FILE *f = idx >= 0 ? g_fh_table[idx].fp : NULL;
-    zan_fh_unlock();
+    long idx;
+    FILE *f = zan_fh_pin(handle, &idx);
     if (!f) return 0;
-    return (long long)fwrite((const void *)(intptr_t)buf, 1, (size_t)count, f);
+    long long n = (long long)fwrite((const void *)(intptr_t)buf, 1, (size_t)count, f);
+    zan_fh_unpin(idx);
+    return n;
 }
 
 /* `origin`: 0 = begin, 1 = current, 2 = end. Returns the new absolute
  * position, or -1 on failure. */
 long long zan_file_seek(long long handle, long long offset, int origin) {
-    zan_fh_lock();
-    zan_fh_ensure();
-    long idx = zan_fh_index(handle);
-    FILE *f = idx >= 0 ? g_fh_table[idx].fp : NULL;
-    zan_fh_unlock();
+    long idx;
+    FILE *f = zan_fh_pin(handle, &idx);
     if (!f) return -1;
     int whence = origin == 1 ? SEEK_CUR : (origin == 2 ? SEEK_END : SEEK_SET);
+    long long r;
 #ifdef _WIN32
-    if (_fseeki64(f, (__int64)offset, whence) != 0) return -1;
-    return (long long)_ftelli64(f);
+    r = _fseeki64(f, (__int64)offset, whence) != 0 ? -1 : (long long)_ftelli64(f);
 #else
-    if (fseeko(f, (off_t)offset, whence) != 0) return -1;
-    return (long long)ftello(f);
+    r = fseeko(f, (off_t)offset, whence) != 0 ? -1 : (long long)ftello(f);
 #endif
+    zan_fh_unpin(idx);
+    return r;
 }
 
 long long zan_file_tell(long long handle) {
-    zan_fh_lock();
-    zan_fh_ensure();
-    long idx = zan_fh_index(handle);
-    FILE *f = idx >= 0 ? g_fh_table[idx].fp : NULL;
-    zan_fh_unlock();
+    long idx;
+    FILE *f = zan_fh_pin(handle, &idx);
     if (!f) return -1;
 #ifdef _WIN32
-    return (long long)_ftelli64(f);
+    long long r = (long long)_ftelli64(f);
 #else
-    return (long long)ftello(f);
+    long long r = (long long)ftello(f);
 #endif
+    zan_fh_unpin(idx);
+    return r;
 }
 
 long long zan_file_flush(long long handle) {
-    zan_fh_lock();
-    zan_fh_ensure();
-    long idx = zan_fh_index(handle);
-    FILE *f = idx >= 0 ? g_fh_table[idx].fp : NULL;
-    zan_fh_unlock();
+    long idx;
+    FILE *f = zan_fh_pin(handle, &idx);
     if (!f) return -1;
-    return fflush(f) == 0 ? 1 : 0;
+    int rc = fflush(f);
+    zan_fh_unpin(idx);
+    return rc == 0 ? 1 : 0;
 }
 
 long long zan_file_close(long long handle) {
@@ -664,11 +706,21 @@ long long zan_file_close(long long handle) {
     zan_fh_ensure();
     long idx = zan_fh_index(handle);
     FILE *f = NULL;
+    int deferred = 0;
     if (idx >= 0) {
         zan_fh_slot *s = &g_fh_table[idx];
         s->open = 0;
-        f = s->fp;
-        s->fp = NULL;
+        if (s->inuse > 0) {
+            /* An operation is using this FILE* outside the lock: closing it
+             * now would be a use-after-free for that reader (A284). Hand it
+             * to `dying`; the last unpin fclose's it. */
+            s->dying = s->fp;
+            s->fp = NULL;
+            deferred = 1;
+        } else {
+            f = s->fp;
+            s->fp = NULL;
+        }
         /* Invalidate every outstanding copy of the handle -- except at
          * generation wrap: resetting to 1 there would revalidate surviving
          * handles from the previous cycle, because zan_file_open reuses
@@ -678,19 +730,19 @@ long long zan_file_close(long long handle) {
         if (next_gen != 0) s->gen = next_gen;
     }
     zan_fh_unlock();
-    if (!f) return 0;   /* unknown or already-closed handle */
+    if (deferred) return 1;   /* closed; the FILE* is freed when the pin drops */
+    if (!f) return 0;         /* unknown or already-closed handle */
     return fclose(f) == 0 ? 1 : 0;
 }
 
 /* 1 once a read hit end-of-file on this handle. */
 long long zan_file_eof(long long handle) {
-    zan_fh_lock();
-    zan_fh_ensure();
-    long idx = zan_fh_index(handle);
-    FILE *f = idx >= 0 ? g_fh_table[idx].fp : NULL;
-    zan_fh_unlock();
+    long idx;
+    FILE *f = zan_fh_pin(handle, &idx);
     if (!f) return 1;
-    return feof(f) ? 1 : 0;
+    int e = feof(f) ? 1 : 0;
+    zan_fh_unpin(idx);
+    return e;
 }
 
 /* ---- whole-file locks (System.IO.File.TryLock) ---------------------------

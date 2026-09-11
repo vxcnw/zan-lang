@@ -30,11 +30,19 @@ uint32_t zan_embed_rawlen(const void *payload, uint64_t len) {
  * raw_len bytes (corrupt embed = loud failure, not a truncated resource). */
 void *zan_embed_decode(const void *payload, uint64_t len) {
     if (!payload || !(len & 0x4000000000000000ULL)) return NULL;
+    /* The tag bit marks a managed-array header; the payload byte count is what
+     * remains. The bound below used the tagged `len` itself: comp_len is u32
+     * and the tag puts len at >= 2^62, so the comparison could never be true
+     * (dead check) and the deflate stream was read without any bound (A291).
+     * Payloads are compiler-baked today, so this is hardening, not a live
+     * hole -- but the check has to actually read the length. */
+    uint64_t total = len & ~0x4000000000000000ULL;
+    if (total < 8) return NULL;
     uint32_t raw_len, comp_len;
     memcpy(&raw_len, payload, 4);
     memcpy(&comp_len, (const char *)payload + 4, 4);
     const uint8_t *src = (const uint8_t *)payload + 8;
-    if ((uint64_t)comp_len + 8 > len) return NULL;
+    if ((uint64_t)comp_len > total - 8) return NULL;
     uint8_t *out = (uint8_t *)malloc((size_t)raw_len + 1);
     if (!out) return NULL;
     size_t out_len = raw_len;

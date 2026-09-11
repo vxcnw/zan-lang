@@ -1,0 +1,9 @@
+// Regression (A275): a decimal literal above 2^63-1 was lexed through
+// strtoull and its bit pattern handed to a signed long, so the value silently
+// became negative instead of being diagnosed as out of range for long.
+class UlongLiteralNarrowing {
+    static void Main() {
+        long x = 18446744073709551615;
+        System.Console.WriteLine(x);
+    }
+}

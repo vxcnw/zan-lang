@@ -1,0 +1,42 @@
+// Conformance: a Set-Cookie Domain attribute is honoured only when it
+// domain-matches the host that sent the response (RFC 6265 5.3 step 6).
+// Without that check any host could plant a cookie for a parent or unrelated
+// domain, and a shared jar would then replay it to the real site.
+using System;
+using System.Net.Http.Client;
+
+class Program {
+    static void Main() {
+        // Host that sets its own parent domain: accepted.
+        CookieJar jar = new CookieJar();
+        jar.SetCookie("www.example.com", "/", "a=1; Domain=example.com");
+        Console.WriteLine("parentScope=" + jar.HeaderValue("www.example.com", "/", false));
+
+        // Unrelated host claiming the domain: the whole cookie is ignored.
+        CookieJar j2 = new CookieJar();
+        j2.SetCookie("attacker.com", "/", "sid=evil; Domain=example.com");
+        Console.WriteLine("crossDomain=" + Convert.ToString(j2.Count()));
+        Console.WriteLine("crossReplay=" + j2.HeaderValue("www.example.com", "/", false));
+
+        // Suffix confusion: bank.com.evil.com is not a bank.com subdomain.
+        CookieJar j3 = new CookieJar();
+        j3.SetCookie("bank.com.evil.com", "/", "sid=evil; Domain=bank.com");
+        Console.WriteLine("suffixConfusion=" + Convert.ToString(j3.Count()));
+
+        // A bare top-level label is not an acceptable cookie domain.
+        CookieJar j4 = new CookieJar();
+        j4.SetCookie("example.com", "/", "t=1; Domain=com");
+        Console.WriteLine("tld=" + Convert.ToString(j4.Count()));
+
+        // An IP host never takes a Domain attribute.
+        CookieJar j5 = new CookieJar();
+        j5.SetCookie("10.0.0.1", "/", "i=1; Domain=10.0.0.1");
+        Console.WriteLine("ip=" + Convert.ToString(j5.Count()));
+
+        // A missing Domain attribute stays host-only, unaffected by the check.
+        CookieJar j6 = new CookieJar();
+        j6.SetCookie("shop.example.com", "/", "host=1");
+        Console.WriteLine("hostOnly=" + j6.HeaderValue("shop.example.com", "/", false)
+            + " near=" + Convert.ToString(j6.HeaderValue("other.example.com", "/", false).Length));
+    }
+}

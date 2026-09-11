@@ -586,8 +586,14 @@ class JsonValue {
             if (neg) { acc = 0 - acc; }
             return JsonValue.NewInt(acc);
         }
-        double d2 = JsonValue.DoubleOf(t.Substring(from, to - from));
-        return JsonValue.NewDouble(d2);
+        // 走 double 的只有 . / e 形态与 >18 位整数：这两类用格式化文本
+        // 还原会丢精度（1e2 → "100"、20 位整数 → "1.23E19"），把已经切出来
+        // 的 token 文本留下当 numRaw，AsString/ToJson 才是无损的。
+        string raw = t.Substring(from, to - from);
+        double d2 = JsonValue.DoubleOf(raw);
+        JsonValue v = JsonValue.NewDouble(d2);
+        v.numRaw = raw;
+        return v;
     }
 
     // ---- 解析 -----------------------------------------------------------

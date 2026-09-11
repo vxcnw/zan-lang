@@ -462,8 +462,20 @@ void __wrap_free(void *p) {
     uint32_t cls;
     if (zan_mem_hdr_check(p, &cls) != 0) return;
     zan_mem_hdr_t *h = (zan_mem_hdr_t *)((char *)p - ZAN_MEM_HDR);
+    /* Claim the block: exactly one freer sees MAGIC and flips it to FREED. The
+     * old load-then-store let two threads freeing the same pointer both pass
+     * the check and both push the block onto a free list (A291). The loser of
+     * the exchange must not touch the block at all. */
+    uint32_t expect = ZAN_MEM_MAGIC;
+    if (!__atomic_compare_exchange_n(&h->magic, &expect, ZAN_MEM_FREED, 0,
+                                     __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        if (expect == ZAN_MEM_FREED) {
+            fprintf(stderr, "zan runtime: double free of block %p\n", (void *)p);
+            abort();
+        }
+        return;   /* header no longer ours: not a block start */
+    }
     zan_mem_cache *owner = __atomic_load_n(&h->owner, __ATOMIC_RELAXED);
-    __atomic_store_n(&h->magic, ZAN_MEM_FREED, __ATOMIC_RELEASE);
 #if defined(_WIN32)
     zan_mem_cache *self = (g_fls == FLS_OUT_OF_INDEXES)
                           ? NULL : (zan_mem_cache *)FlsGetValue(g_fls);

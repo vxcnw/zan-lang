@@ -998,6 +998,15 @@ static LLVMValueRef emit_property_getter_call(zan_irgen_t *g,
     for (int fi = irgen_find_function(g, getter); fi >= 0; fi = -1) {
         if (g->functions[fi].sym == getter) {
             LLVMValueRef rval = recv;
+            /* An instance accessor reached with no receiver means the caller
+             * failed to resolve implicit `this`; LLVMTypeOf(NULL) crashed the
+             * compiler (A272). Report it instead. */
+            if (!is_static && !rval) {
+                zan_diag_emit(g->diag, DIAG_ERROR,
+                              obj_ast ? obj_ast->loc : zan_loc(0, 0, 0, 0),
+                              "property getter requires a receiver");
+                return LLVMConstInt(LLVMInt64TypeInContext(g->ctx), 0, 0);
+            }
             if (!is_static &&
                 LLVMGetTypeKind(LLVMTypeOf(rval)) == LLVMStructTypeKind) {
                 /* a struct receiver that arrived by value has no address;
@@ -1063,6 +1072,15 @@ static void emit_property_setter_call(zan_irgen_t *g, zan_symbol_t *setter,
     for (int fi = irgen_find_function(g, setter); fi >= 0; fi = -1) {
         if (g->functions[fi].sym == setter) {
             LLVMValueRef rval = recv;
+            /* Same NULL-receiver guard as the getter: an instance setter with
+             * no receiver would crash LLVMTypeOf and, if it got past, hand a
+             * NULL first argument to the call (A272). */
+            if (!is_static && !rval) {
+                zan_diag_emit(g->diag, DIAG_ERROR,
+                              obj_ast ? obj_ast->loc : zan_loc(0, 0, 0, 0),
+                              "property setter requires a receiver");
+                return;
+            }
             if (!is_static &&
                 LLVMGetTypeKind(LLVMTypeOf(rval)) == LLVMStructTypeKind) {
                 LLVMValueRef rslot = emit_entry_alloca(g, LLVMTypeOf(rval),
@@ -1087,8 +1105,13 @@ static void emit_property_setter_call(zan_irgen_t *g, zan_symbol_t *setter,
             unsigned argc = 0;
             if (!is_static) args[argc++] = rval;
             args[argc++] = v;
-            emit_dispatch_call(g, is_static ? NULL : recv_type->sym, setter,
-                mfn, mft, args, (int)argc, "");
+            /* recv_type == NULL is the bare-name `Prop = v` form (the caller
+             * has no instantiation type to hand over); the getter path already
+             * accepts it, and emit_dispatch_call only needs the class when it
+             * has a vtable to look through. Dereferencing it here crashed the
+             * compiler. */
+            emit_dispatch_call(g, (is_static || !recv_type) ? NULL : recv_type->sym,
+                setter, mfn, mft, args, (int)argc, "");
             emit_release_owned_call_temp(g, obj_ast, recv, locals);
             emit_release_owned_call_temp(g, rhs_ast, value, locals);
             return;
@@ -1143,6 +1166,16 @@ static LLVMValueRef emit_expr_identifier(zan_irgen_t *g, zan_ast_node_t *expr,
          * Works in both static and instance methods. */
         if (g->current_type_sym) {
             zan_symbol_t *fsym = get_field_sym(g->current_type_sym, expr->ident.name);
+            /* custom-getter static property read through the bare name: dispatch
+             * to the static get_Prop() (no receiver) instead of loading the
+             * synthetic backing slot, which is never written and read as 0.
+             * The `Class.Prop` member-access path (see the member emitter) has
+             * always done this; the bare-name path was missing it. */
+            zan_symbol_t *getter = property_getter_sym(g, fsym);
+            if (getter) {
+                return emit_property_getter_call(g, getter,
+                    g->current_type_sym->type, NULL, expr, locals);
+            }
             LLVMValueRef gv = get_static_field_global(g, g->current_type_sym, fsym, NULL);
             if (gv) {
                 LLVMTypeRef ft = fsym->type ? map_type(g, fsym->type)
@@ -3917,17 +3950,22 @@ static LLVMValueRef emit_incdec_expr(zan_irgen_t *g, zan_ast_node_t *expr,
             slot_ptr = lv->alloca;
             slot_ty = local_slot_type(g, lv);
         } else if (g->current_type_sym) {
-            /* bare-name static field of the enclosing class */
+            /* Bare name of the enclosing class. Static-ness decides the shape
+             * before anything else: a static property has no receiver (the
+             * accessor is a static method), an *instance* property reached by
+             * bare name is `this.Prop` and its getter/setter need the implicit
+             * `this` value. Testing the getter first sent instance properties
+             * down the static path with recv == NULL, which crashed the
+             * compiler inside LLVMTypeOf (A272). */
             zan_symbol_t *fs = get_field_sym(g->current_type_sym, operand->ident.name);
-            zan_symbol_t *getter = property_getter_sym(g, fs);
+            LLVMValueRef gv = get_static_field_global(g, g->current_type_sym, fs, NULL);
+            zan_symbol_t *getter = gv ? property_getter_sym(g, fs) : NULL;
             if (getter) {
                 prop_getter = getter;
                 prop_setter = property_setter_sym(g, fs);
                 prop_recv_type = g->current_type_sym->type;
                 prop_recv = NULL;
             } else {
-            LLVMValueRef gv = fs ? get_static_field_global(g, g->current_type_sym, fs, NULL)
-                                 : NULL;
             if (gv) {
                 slot_ptr = gv;
                 slot_ty = fs->type ? map_type(g, fs->type) : i64;
@@ -7277,9 +7315,11 @@ static LLVMValueRef emit_expr_new_expr(zan_irgen_t *g, zan_ast_node_t *expr,
                          * it came back half-formed. `new C()` keeps falling
                          * back to the field initializers, which is how a class
                          * with only a parameterised constructor is built from
-                         * an object initializer. */
+                         * an object initializer. Gating this on "the class has
+                         * at least one ctor" let `new C(5, 6)` on a class with
+                         * NO ctor drop the arguments silently. */
                         if (sym->type->kind == TYPE_CLASS &&
-                            ctor_arg_list.count > 0 && type_has_ctor(g, sym))
+                            ctor_arg_list.count > 0)
                             zan_diag_emit(g->diag, DIAG_ERROR, expr->loc,
                                 "no constructor of '%.*s' accepts %d argument%s",
                                 (int)sym->name.len, sym->name.str,

@@ -765,7 +765,20 @@ static LLVMValueRef emit_expr_call(zan_irgen_t *g, zan_ast_node_t *expr,
                         } else {
                             s = char_arg ? emit_char_to_cstr(g, v)
                                          : emit_value_as_cstr(g, v);
-                            slen = emit_cstr_len_of(g, s, arg0);
+                            /* A string argument appends its BYTE count, not a
+                             * strlen: a managed string carries its length in
+                             * the ARC header, and a payload with an embedded
+                             * NUL (UrlDecode's `%00`, binary frames) otherwise
+                             * shrank to the bytes before that NUL (A279). */
+                            int str_arg = !char_arg &&
+                                LLVMGetTypeKind(LLVMTypeOf(v)) == LLVMPointerTypeKind &&
+                                is_string_expr(g, arg0, locals);
+                            if (str_arg) {
+                                s = emit_str_nonnull(g, s);
+                                slen = emit_string_buffer_len(g, s, arg0->loc);
+                            } else {
+                                slen = emit_cstr_len_of(g, s, arg0);
+                            }
                         }
                         emit_sb_append_bytes(g, sbp, s, slen);
                         if (char_arg)
@@ -798,6 +811,11 @@ static LLVMValueRef emit_expr_call(zan_irgen_t *g, zan_ast_node_t *expr,
                         memcpy_fn, (LLVMValueRef[]){ buf, data, count }, 3, "");
                     LLVMValueRef endp = LLVMBuildGEP2(g->builder, i8, buf, &count, 1, "sbend");
                     LLVMBuildStore(g->builder, LLVMConstInt(i8, 0, 0), endp);
+                    /* The buffer count is the exact byte length; stamp it so a
+                     * receiver with an embedded NUL keeps its Length (without
+                     * this the first reader cached a strlen and `%00` content
+                     * still collapsed at the NUL, A279). */
+                    emit_string_len_set(g, buf, count);
                     return buf;
                 }
             }
@@ -5027,11 +5045,18 @@ static LLVMValueRef emit_expr_call(zan_irgen_t *g, zan_ast_node_t *expr,
                  * call operands match the declared signature exactly, so
                  * coerce each argument to the formal's type here. */
                 unsigned nparams = LLVMCountParamTypes(fn_type);
-                LLVMTypeRef ptypes[16];
-                if (nparams > 16) { nparams = 16; }
-                if (nparams > 0) {
-                    LLVMGetParamTypes(fn_type, ptypes);
-                }
+                /* LLVMGetParamTypes has no capacity argument: it writes
+                 * LLVMCountParamTypes entries. A fixed 16-slot array with a
+                 * "nparams = 16" clamp only clamped the coercion loop below,
+                 * so an extern declaring more than 16 formals wrote past the
+                 * array (60 params = 480 bytes into a 128-byte stack slot) and
+                 * then failed with a mismatched-signature verifier error far
+                 * from the cause. Size the array to the real count. */
+                LLVMTypeRef *ptypes = nparams > 0
+                    ? (LLVMTypeRef *)calloc(nparams, sizeof(LLVMTypeRef))
+                    : NULL;
+                if (!ptypes) nparams = 0;
+                else LLVMGetParamTypes(fn_type, ptypes);
                 for (int k = 0; k < argc; k++) {
                     call_args[k] = emit_expr(g, expr->call.args.items[k], locals);
                     if ((unsigned)k >= nparams) { continue; }
@@ -5096,6 +5121,7 @@ static LLVMValueRef emit_expr_call(zan_irgen_t *g, zan_ast_node_t *expr,
                             call_args[k], locals);
                     }
                 }
+                free(ptypes);
                 free(call_args);
                 return result;
             }

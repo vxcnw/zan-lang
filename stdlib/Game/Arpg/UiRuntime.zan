@@ -1913,12 +1913,14 @@ class ArpgControl {
         }
         ArpgRichTextRun run = this.document.RunAt(runIndex);
         if (!run.IsLink()) { return false; }
+        ArpgRichTextLink link = run.Link();
+        if (link == null) { return false; }
         if (this.prefabEvents != null) {
-            this.prefabEvents.RaiseLink(this.Id(), run.Link().Raw());
+            this.prefabEvents.RaiseLink(this.Id(), link.Raw());
         }
-        this.definition.Events().RaiseLink(this.Id(), run.Link().Raw());
+        this.definition.Events().RaiseLink(this.Id(), link.Raw());
         this.systemEvents.RaiseRichTextLink(
-            this.windowId, this.Id(), run.Link().Raw());
+            this.windowId, this.Id(), link.Raw());
         return true;
     }
 

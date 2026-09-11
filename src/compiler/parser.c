@@ -421,7 +421,17 @@ static zan_ast_node_t *parse_type_ref(zan_parser_t *p) {
             parser_advance(p);    /* [ */
             for (int c = 1; c < rank; c++) parser_advance(p); /* commas */
             parser_advance(p);    /* ] */
-            if (nranks < 16) ranks[nranks++] = rank;
+            if (rank <= 16 && nranks < 16) {
+                ranks[nranks++] = rank;
+            } else {
+                /* The bracket has already been consumed, so dropping the rank
+                 * would silently change the declared type: the checker then
+                 * compares it against the new-expression's full dimension list
+                 * and reports a meaningless "array initializer has 1 element but
+                 * the dimensions describe 65536". Say what actually happened. */
+                zan_diag_emit(p->diag, DIAG_ERROR, loc,
+                              "array rank specifier is too deep (max 16)");
+            }
             seen_array = true;
         } else {
             break;
@@ -1119,6 +1129,14 @@ static zan_ast_node_t *parse_primary(zan_parser_t *p) {
             parser_advance(p); /* [ */
             n->new_expr.is_array = true;
             while (!parser_check(p, TK_RBRACKET) && !parser_check(p, TK_EOF)) {
+                if (n->new_expr.array_rank >= 16) {
+                    /* The 17th dimension: irgen keeps the sizes in a fixed
+                     * `dims[16]` and hands `rank` to zan_mdarray_alloc, which
+                     * would read past the array. Reject here (reported once;
+                     * the extra dimension is still consumed to keep parsing). */
+                    zan_diag_emit(p->diag, DIAG_ERROR, p->current.loc,
+                                  "array rank specifier is too deep (max 16)");
+                }
                 zan_ast_node_t *dim = parse_expression(p);
                 zan_ast_list_push(&n->new_expr.args, dim, p->arena);
                 n->new_expr.array_rank++;
@@ -1783,14 +1801,25 @@ static zan_ast_node_t *parse_postfix(zan_parser_t *p) {
 
 static zan_ast_node_t *parse_unary_inner(zan_parser_t *p);
 
-/* unary: !x, -x, ~x, ++x, --x (with a recursion-depth guard) */
-static zan_ast_node_t *parse_unary(zan_parser_t *p) {
-    if (p->expr_depth >= ZAN_PARSER_MAX_EXPR_DEPTH) {
+/* Report one expression-nesting trip and return the placeholder error node.
+ * The report is emitted only once per translation unit: once the guard trips,
+ * error recovery keeps re-descending the same over-deep expression, and one
+ * report per descent turned a 30k-deep parenthesis nest into 6 MB of the same
+ * error (A280). */
+static zan_ast_node_t *parser_expr_too_deep(zan_parser_t *p) {
+    if (!p->expr_depth_reported) {
+        p->expr_depth_reported = true;
         zan_diag_emit(p->diag, DIAG_ERROR, p->current.loc,
                       "expression nesting too deep (max %d)",
                       ZAN_PARSER_MAX_EXPR_DEPTH);
-        return parser_error_node(p);
     }
+    return parser_error_node(p);
+}
+
+/* unary: !x, -x, ~x, ++x, --x (with a recursion-depth guard) */
+static zan_ast_node_t *parse_unary(zan_parser_t *p) {
+    if (p->expr_depth >= ZAN_PARSER_MAX_EXPR_DEPTH)
+        return parser_expr_too_deep(p);
     p->expr_depth++;
     zan_ast_node_t *n = parse_unary_inner(p);
     p->expr_depth--;
@@ -1965,7 +1994,25 @@ static bool is_assign_op(zan_token_kind_t kind) {
     }
 }
 
+static zan_ast_node_t *parse_expression_inner(zan_parser_t *p);
+
 static zan_ast_node_t *parse_expression(zan_parser_t *p) {
+    /* Guard the low-precedence right recursion here: `a = a = ... = 1` and
+     * `c ? a : c ? b : ...` re-enter this function directly (for the
+     * assignment RHS and the conditional's branches), never through
+     * parse_unary, so expr_depth alone left them unbounded and a 100k-deep
+     * chain killed the compiler with STATUS_STACK_OVERFLOW and no output
+     * (A280). The count is kept apart from expr_depth so the existing
+     * 256-level parenthesis/unary budget is unchanged. */
+    if (p->expr_tail_depth >= ZAN_PARSER_MAX_EXPR_DEPTH)
+        return parser_expr_too_deep(p);
+    p->expr_tail_depth++;
+    zan_ast_node_t *n = parse_expression_inner(p);
+    p->expr_tail_depth--;
+    return n;
+}
+
+static zan_ast_node_t *parse_expression_inner(zan_parser_t *p) {
     zan_ast_node_t *expr = parse_conditional(p);
 
     if (is_assign_op(p->current.kind)) {

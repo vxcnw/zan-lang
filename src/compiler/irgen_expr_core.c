@@ -1017,15 +1017,6 @@ static bool implicit_ctor_for_arg(zan_irgen_t *g, zan_type_t *target,
     return find_ctor(g, target->sym, &one, locals, NULL) != NULL;
 }
 
-/* Whether the type declares any constructor at all: a class that does, but
- * whose constructors all reject the arguments at a `new`, is a call site error
- * rather than a silent skip. */
-static bool type_has_ctor(zan_irgen_t *g, zan_symbol_t *type_sym) {
-    for (int i = 0; i < g->ctor_count; i++)
-        if (g->ctors[i].type_sym == type_sym) return true;
-    return false;
-}
-
 /* A constructor call that leaves trailing defaulted parameters out
  * (`A(int x, int y = 5)` invoked as `new A(1)`) matches no entry on arity, so
  * without this the object was left with its fields at zero and no constructor

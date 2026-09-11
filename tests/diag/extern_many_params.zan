@@ -1,0 +1,22 @@
+// Regression (A277): the bare-name call path sized its parameter-type array
+// at 16 entries but asked LLVM to write every parameter type, so a 17+
+// parameter extern wrote 480 bytes into a 128-byte stack array. The failure
+// surfaced as a bogus "LLVM verification failed ... Call parameter type does
+// not match function signature" far from the call. The lowering now sizes the
+// array from the real parameter count, so the corpus reaches the linker, which
+// reports the missing C symbol instead of a compiler-internal error.
+using System;
+
+class Decl {
+    [DllImport("crt")]
+    static extern int big17(int p0, int p1, int p2, int p3, int p4, int p5,
+                            int p6, int p7, int p8, int p9, int p10, int p11,
+                            int p12, int p13, int p14, int p15, int p16);
+}
+
+class ExternManyParams {
+    static void Main() {
+        int r = big17(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
+        Console.WriteLine(r.ToString());
+    }
+}

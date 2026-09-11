@@ -867,6 +867,21 @@ static void emit_async_method_ir(zan_irgen_t *g, method_body_work_t *w) {
                 ? zan_binder_resolve_type(g->binder, member->method_decl.return_type)
                 : g->binder->type_void);
         g->current_fn_zan_ret_type = g->current_async_ret_type;
+        /* A coroutine result crosses the fixed 64-bit ASYNC_FRAME_RESULT slot,
+         * whose encoding only covers scalars and pointers: an aggregate has no
+         * representation there, so `coerce_to_frame_result` would reduce it to
+         * 0 and the awaiter would read 0/garbage for every field (A273).
+         * Reject the declaration instead of corrupting the value, so the
+         * failure is a compile error naming the method rather than a wrong
+         * number at run time. */
+        if (g->current_async_ret_type && g->current_async_ret_type->kind != TYPE_VOID) {
+            LLVMTypeRef art = map_type(g, g->current_async_ret_type);
+            if (art && LLVMGetTypeKind(art) == LLVMStructTypeKind) {
+                zan_diag_emit(g->diag, DIAG_ERROR, member->loc,
+                              "an async method cannot return an aggregate type: "
+                              "the coroutine result slot is one machine word");
+            }
+        }
         g->current_async_next_state = 1;
         g->current_async_sub_base = w->sub_base;
         g->current_async_sub_next = 0;
@@ -1777,12 +1792,50 @@ static void emit_user_methods(zan_irgen_t *g, zan_ast_node_t *unit) {
 
 typedef struct {
     zan_ast_list_t *tps;
-    zan_istr_t      names[32];  /* locals/params whose declared type is a tp */
+    /* Locals/params and fields whose declared type is a type parameter. Both
+     * grow with the scan: fixed 32-entry tables silently stopped recording, so
+     * the 33rd T-typed field of a generic class was not recognised as one and
+     * the member was emitted erased -- which then failed with a misleading
+     * "unresolved call 'F32.ToString'". */
+    zan_istr_t     *names;
     int             count;
-    zan_istr_t      fields[32]; /* fields of the enclosing type, declared as a tp */
+    int             names_cap;
+    zan_istr_t     *fields;
     int             field_count;
+    int             fields_cap;
     bool            found;
 } tp_use_scan_t;
+
+static void tp_scan_bind(tp_use_scan_t *s, zan_istr_t name) {
+    if (s->count == s->names_cap) {
+        int nc = s->names_cap > 0 ? s->names_cap * 2 : 16;
+        zan_istr_t *grown = (zan_istr_t *)realloc(s->names,
+                                                 (size_t)nc * sizeof(*grown));
+        if (!grown) return;      /* OOM: keep what has been recorded so far */
+        s->names = grown;
+        s->names_cap = nc;
+    }
+    s->names[s->count++] = name;
+}
+
+static void tp_scan_add_field(tp_use_scan_t *s, zan_istr_t name) {
+    if (s->field_count == s->fields_cap) {
+        int nc = s->fields_cap > 0 ? s->fields_cap * 2 : 16;
+        zan_istr_t *grown = (zan_istr_t *)realloc(s->fields,
+                                                 (size_t)nc * sizeof(*grown));
+        if (!grown) return;
+        s->fields = grown;
+        s->fields_cap = nc;
+    }
+    s->fields[s->field_count++] = name;
+}
+
+static void tp_scan_free(tp_use_scan_t *s) {
+    free(s->names);
+    free(s->fields);
+    s->names = NULL;
+    s->fields = NULL;
+}
 
 static bool tp_istr_eq(zan_istr_t a, zan_istr_t b) {
     return a.len == b.len && a.str && b.str &&
@@ -1796,11 +1849,6 @@ static bool tp_typeref_is_tp(tp_use_scan_t *s, zan_ast_node_t *tref) {
         if (tp_istr_eq(s->tps->items[i]->ident.name, tref->type_ref.name))
             return true;
     return false;
-}
-
-static void tp_scan_bind(tp_use_scan_t *s, zan_istr_t name) {
-    if (s->count < (int)(sizeof(s->names) / sizeof(s->names[0])))
-        s->names[s->count++] = name;
 }
 
 static bool tp_scan_is_tp_field(tp_use_scan_t *s, zan_istr_t name) {
@@ -1954,9 +2002,13 @@ static bool method_is_tp_template(zan_ast_node_t *member) {
         zan_ast_node_t *p = member->method_decl.params.items[i];
         if (p && tp_typeref_is_tp(&s, p->param.type)) tp_scan_bind(&s, p->param.name);
     }
-    if (s.count == 0) return false;
-    tp_scan_stmt(&s, member->method_decl.body);
-    return s.found;
+    bool result = false;
+    if (s.count > 0) {
+        tp_scan_stmt(&s, member->method_decl.body);
+        result = s.found;
+    }
+    tp_scan_free(&s);
+    return result;
 }
 
 /* Same question for a member of a generic *class*: does its body reach through
@@ -1979,17 +2031,20 @@ static bool class_member_uses_tp(zan_ast_node_t *decl, zan_ast_node_t *member) {
     s.tps = tps;
     for (int i = 0; i < decl->type_decl.members.count; i++) {
         zan_ast_node_t *f = decl->type_decl.members.items[i];
-        if (f && f->kind == AST_FIELD_DECL && tp_typeref_is_tp(&s, f->field_decl.type) &&
-            s.field_count < (int)(sizeof(s.fields) / sizeof(s.fields[0])))
-            s.fields[s.field_count++] = f->field_decl.name;
+        if (f && f->kind == AST_FIELD_DECL && tp_typeref_is_tp(&s, f->field_decl.type))
+            tp_scan_add_field(&s, f->field_decl.name);
     }
     for (int i = 0; params && i < params->count; i++) {
         zan_ast_node_t *p = params->items[i];
         if (p && tp_typeref_is_tp(&s, p->param.type)) tp_scan_bind(&s, p->param.name);
     }
-    if (s.count == 0 && s.field_count == 0) return false;
-    tp_scan_stmt(&s, body);
-    return s.found;
+    bool result = false;
+    if (s.count > 0 || s.field_count > 0) {
+        tp_scan_stmt(&s, body);
+        result = s.found;
+    }
+    tp_scan_free(&s);
+    return result;
 }
 
 /* Two specializations share a declaring-type instantiation when they were

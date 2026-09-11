@@ -146,6 +146,14 @@ static int g_io_broken;
  * the pieces the platform backends must see. */
 static int32_t g_blocking_inflight;
 static int32_t g_dns_wake_fd = -1;    /* reactor-visible wake fd (POSIX) */
+#if defined(_WIN32)
+/* Set when a blocking/DNS completion packet could not be posted. That packet
+ * is the only notification that a worker's job finished, so a failed Post must
+ * not park the pool with the result sitting unread in g_blocking_done: the
+ * multi-worker wait loop takes one non-blocking drain pass when it sees this
+ * (A285). */
+static volatile LONG g_blocking_wake_lost;
+#endif
 #if !defined(__linux__) && !defined(_WIN32)
 static int32_t g_dns_wake_wfd = -1;   /* pipe write end (kqueue/select) */
 #endif
@@ -601,6 +609,41 @@ int32_t zan_io_sockaddr_is_safe(const void *sa, int32_t len,
             memcpy(&mapped4.sin_addr, b + 12, 4);
             return zan_io_sockaddr_is_safe(&mapped4,
                 (int32_t)sizeof(mapped4), allow_loopback);
+        }
+        /* Teredo (2001::/32, RFC 4380) carries two IPv4 addresses: the server
+         * at bytes 4..7 and the client at 12..15, the latter obfuscated with
+         * XOR 0xffffffff. Both must pass the IPv4 rules -- a Teredo answer that
+         * tunneled to 10.0.0.1 otherwise came back "safe" (A286). */
+        if (b[0] == 0x20u && b[1] == 0x01u && b[2] == 0x00u && b[3] == 0x00u) {
+            struct sockaddr_in t4;
+            unsigned char cli[4];
+            memset(&t4, 0, sizeof(t4));
+            t4.sin_family = AF_INET;
+            memcpy(&t4.sin_addr, b + 4, 4);
+            if (!zan_io_sockaddr_is_safe(&t4, (int32_t)sizeof(t4), allow_loopback))
+                return 0;
+            for (int i = 0; i < 4; i++) cli[i] = (unsigned char)(b[12 + i] ^ 0xffu);
+            memcpy(&t4.sin_addr, cli, 4);
+            return zan_io_sockaddr_is_safe(&t4, (int32_t)sizeof(t4), allow_loopback);
+        }
+        /* Transitional and IPv4-compatible forms embed an IPv4 destination:
+         * 6to4 (2002::/16) at bytes 2..5, NAT64 (64:ff9b::/96) and the
+         * deprecated IPv4-compatible (::a.b.c.d) at 12..15. Judging the
+         * embedded address by the IPv4 rules is what closes the private-range
+         * filter for them; falling through to `return 1` did not (A286). */
+        int v4_off = -1;
+        if (b[0] == 0x20u && b[1] == 0x02u)
+            v4_off = 2;
+        else if (b[0] == 0x00u && b[1] == 0x64u && b[2] == 0xffu && b[3] == 0x9bu)
+            v4_off = 12;
+        else if (mapped)
+            v4_off = 12;
+        if (v4_off >= 0) {
+            struct sockaddr_in e4;
+            memset(&e4, 0, sizeof(e4));
+            e4.sin_family = AF_INET;
+            memcpy(&e4.sin_addr, b + v4_off, 4);
+            return zan_io_sockaddr_is_safe(&e4, (int32_t)sizeof(e4), allow_loopback);
         }
         return 1;
     }
@@ -2595,9 +2638,11 @@ static void dns_wake_notify(void) {
      * (dns_drain is idempotent) rather than pick one whose worker may be parked
      * on a long timeout. Lookups are rare enough for the extra packets. */
     for (int i = 0; i < (int)g_shards; i++)
-        PostQueuedCompletionStatus(io_shard(i), 0, (ULONG_PTR)-2, NULL);
+        if (!PostQueuedCompletionStatus(io_shard(i), 0, (ULONG_PTR)-2, NULL))
+            InterlockedExchange(&g_blocking_wake_lost, 1);
 #else
-    PostQueuedCompletionStatus(g_iocp, 0, (ULONG_PTR)-2, NULL);
+    if (!PostQueuedCompletionStatus(g_iocp, 0, (ULONG_PTR)-2, NULL))
+        InterlockedExchange(&g_blocking_wake_lost, 1);
 #endif
 #elif defined(__linux__)
     uint64_t one = 1;
@@ -3687,6 +3732,13 @@ static void co_wait_io(zan_co_worker_t *w, long long timeout_ms) {
     OVERLAPPED_ENTRY entries[64];
     ULONG removed = 0;
     DWORD to = (timeout_ms < 0) ? INFINITE : (DWORD)timeout_ms;
+    /* A completion packet whose Post failed left a finished job in
+     * g_blocking_done with nothing to announce it. Drain before parking: if
+     * that re-readied a coroutine, return so the loop runs it; otherwise block
+     * normally (the timeout path below is the second delivery route). */
+    if (g_blocking_wake_lost && InterlockedExchange(&g_blocking_wake_lost, 0)) {
+        if (dns_drain() > 0) return;
+    }
     /* Own shard only: every socket this worker's connections use is bound to
      * it, so their completions arrive here and nowhere else. */
     BOOL ok = GetQueuedCompletionStatusEx(io_shard(co_worker_shard(w->index)),
@@ -3698,9 +3750,13 @@ static void co_wait_io(zan_co_worker_t *w, long long timeout_ms) {
     InterlockedExchange(&w->parked, 0);
     InterlockedDecrement(&g_co_parked);
     if (!ok) {
-        /* Timeout or error: deliver DNS timeouts so lookups past their
-         * deadline fail instead of parking their coroutines forever. */
+        /* Timeout or error. Deliver DNS timeouts so lookups past their
+         * deadline fail instead of parking their coroutines forever, and drain
+         * completed blocking jobs: this is the fallback delivery path for a
+         * lost wake packet (the single-threaded path did the same, the
+         * multi-worker one did not -- A285). */
         dns_timeout_scan();
+        dns_drain();
         return;
     }
     for (ULONG i = 0; i < removed; i++) {

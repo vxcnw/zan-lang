@@ -77,6 +77,11 @@ struct zan_lexer {
     int cond_depth;
     /* Track whether current #if group had a true branch (for #elif) */
     int cond_seen_true[ZAN_PP_MAX_COND_DEPTH];
+    /* Frames pushed past ZAN_PP_MAX_COND_DEPTH are counted here instead of
+     * writing cond_stack[MAX]: that index is out of bounds and its address
+     * aliases cond_depth, so the overflow write zeroed the depth and collapsed
+     * the whole stack to 1. pp_active() treats an overflow frame as inactive. */
+    int cond_overflow;
     int at_line_start; /* 1 if next non-ws char is at start of logical line */
 };
 

@@ -613,6 +613,7 @@ void zan_timer_delay(long long ms, void *frame, zan_timer_step_t step) {
          * ready it immediately (the delay elapses with zero remaining time
          * from the waiter's perspective; better than a lost coroutine). */
         timer_unlock();
+        free(entry);   /* the entry never entered the heap (A291) */
         step(frame);
         return;
     }

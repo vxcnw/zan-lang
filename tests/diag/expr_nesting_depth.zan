@@ -1,0 +1,11 @@
+// Regression (A280): the expression-nesting guard covered the primary/paren
+// path but not the right-recursive assignment and conditional forms, and the
+// diagnostic repeated itself for every level (a 30k-deep input produced 6 MB
+// of the same error). 300 parens exceed the 256 limit and must be reported
+// once, in bounded output.
+class ExprNestingDepth {
+    static void Main() {
+        int x = ((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((1))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))));
+        System.Console.WriteLine(x);
+    }
+}

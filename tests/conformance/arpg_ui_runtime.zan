@@ -158,9 +158,14 @@ class Program {
         Console.WriteLine(
             "run2=" + Convert.ToString(parsed.RunAt(2).Kind())
             + "," + parsed.RunAt(2).Resource());
-        Console.WriteLine(
-            "link=" + parsed.RunAt(3).Link().At(0)
-            + "," + parsed.RunAt(3).Link().At(1));
+        ArpgRichTextLink link = parsed.RunAt(3).Link();
+        if (link == null) {
+            Console.WriteLine("link=null");
+        } else {
+            Console.WriteLine(
+                "link=" + link.At(0)
+                + "," + link.At(1));
+        }
 
         ArpgNodeDefinition node = new ArpgNodeDefinition(
             "caption", ArpgNodeKind.Text(), 0, 0, 80, 20);

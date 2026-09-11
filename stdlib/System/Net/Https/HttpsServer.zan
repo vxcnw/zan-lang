@@ -132,7 +132,7 @@ class HttpsServer {
         // 释放统一交给 finally，正常与异常路径共用。
         this.activeConnections = this.activeConnections + 1;
         try {
-            await HttpsServer.HandleConnectionInner(clientSock);
+            await this.HandleConnectionInner(clientSock);
         } finally {
             this.activeConnections = this.activeConnections - 1;
         }
