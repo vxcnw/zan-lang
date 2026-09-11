@@ -164,3 +164,36 @@ python3 tools/chaos_probe.py 600         # CHAOS bot_err=0 + 后检
 
 注意：探针对 anon 限流敏感——串行跑、勿与其他压测并行；`e2e.py` 必须
 fresh-db（断言含注册成功）。
+
+## 9. 其余服务端模板抽测（2026-09-11 增补，A304）
+
+延续本报告五维口径，对其余 7 个服务端模板做同轮抽测（构建 → 起服 → 功能门
+→ 安全抽测 → 性能抽样 → 混沌），全部 linux-x64 侧起服。**结论：八模板全过，
+无 FAIL 级缺陷。** 抽测前先修了 HEAD 编译器暴露的 6 处模板 type-check 错
+（详见 TASKS A304）：四份 AppController 的 `__TxBegin/__TxCommit/__TxRollback`
+override 摘掉 `protected`（对齐基类公开契约，`__Bind/__SetView` 同），mvc/collab
+Users.zan 对可空的 `Cache()` 结果加 null 守卫。
+
+| 模板 | 协议面 | 功能门 | 安全抽测 | 性能/稳定 |
+|---|---|---|---|---|
+| server-mvc :8099 (count=4) | ZanWeb MVC 页面 + JSON API + admin | 首页/admin 登录 302 发 cookie/7 admin 页 200/blog、users 页 200 | 未登录访问 302→login；405；路径穿越 404；3MB body 413；失败登录入 sys_login_log（30 失败+1 成功复核）；cookie `HttpOnly; SameSite=Lax` | 4 并发页面 ~1300/s；RSS 11-16MB |
+| server-collab :8090 (count=4) | ZanWeb 多租户 admin（OA/CRM/ECBI/Flow/Wms） | 7 模块 admin 页全 200 | 同 mvc 栈 | **[Tx] 入库闭环**：submit→wms_stock_in 落行→inventory qty=5；RSS 13-15MB |
+| server-licensing :8096 (count=4) | ZanWeb 授权后台 + 激活 API | 4 admin 页 200；`/api/index/ping` 0000 | activate 错码语义正确（0003 参数缺、2001 产品不存在） | RSS 10-12MB |
+| server-iot MQTT :1883 + console :8080 | MQTT 3.1.1 broker（stdlib MqttBroker）+ HTTP console | CONNACK/SUBACK/PUBLISH 回显/PINGRESP 全过；console 登录发 64hex Bearer token；stats 计数正确（messages_in/out） | 敌意字节 RST 拒收、畸形 CONNECT 应答、badtoken 401 | PINGRESP RTT 0.039ms；双客户端 fanout 送达 |
+| server-ws :8097 | RFC 6455 WebSocket 网关聊天 | 握手 101 + Sec-WebSocket-Accept 正确；双客户端广播 `[#N] text` 双端送达 | plain GET 服务索引页 200 | 广播 RTT 0.058ms/1000 ops |
+| server-http :8083 | Worker 最小 HTTP 宿主 | `/ping` pong、`/` 模板页 | — | 8 并发 800 req 0.43s（~1900/s） |
+| server-tcp :9000 | Worker 最小 TCP 回显 | welcome banner/echo | — | 64KB 单帧完整回显；RTT 0.035ms |
+
+**稳定性抽样**：对 mvc 打 15s 混沌（二进制垃圾/30KB URI/RST 半包，22 连接）
+后八服务全部存活、功能复测通过、mvc RSS 平稳（11.2MB）、日志无异常增长。
+
+**与 A303 同源的观察项**：管理后台默认口令（mvc/collab/licensing 的
+admin/admin1234、iot console 的 admin/admin）生产首启必须改；限流/会话语义
+与 server-game 同一 ZanWeb/Worker 栈，A303 的建议同样适用。
+
+**模板修正**：server-http/src/main.zan 示例端口 8080→8083（与 iot console
+撞端口；两模板 README/示例本就各自选端口，8083 消除冲突）。
+
+**复现口径**：探针为一次性 Python 脚本（MQTT 最小 3.1.1 客户端、RFC 6455
+握手+掩码帧、Worker HTTP/TCP 直连），未沉淀进模板 tools/——七模板探针逻辑
+各不相同且体量小，口径已录 TASKS A304，需要时按本表逐项重打即可。

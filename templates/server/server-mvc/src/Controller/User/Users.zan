@@ -16,7 +16,8 @@ class Users : AppController {
     [Description("用户列表")]
     async void Index() {
         CacheContext cache = this.Cache();
-        string cached = await cache.GetAsync("users:all");
+        string cached = "";
+        if (cache != null) { cached = await cache.GetAsync("users:all"); }
         if (cached.Length > 0) {
             JsonValue o = JsonValue.NewObject();
             o.Put("code", JsonValue.NewStr("0000"));
@@ -41,7 +42,7 @@ class Users : AppController {
             rows.Add(b);
         }
         string data = Json.Serialize<List<UserBrief>>(rows);
-        await cache.SetTtlAsync("users:all", data, 5);
+        if (cache != null) { await cache.SetTtlAsync("users:all", data, 5); }
         this.Ok(data);
     }
 
