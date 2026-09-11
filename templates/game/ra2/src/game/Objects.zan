@@ -38,6 +38,9 @@ class WorldObject {
     List<FxAnim> idles;  // the structure's constant IdleAnim loop
     string idleName;     // which idle variant is live ("" none)
     int fireTicks;       // ticks left in the firing pose (infantry)
+    int suppTicks;       // suppression: the trooper stays prone while > 0
+    int poseTicks;       // ticks left in the Down/Up transition
+    int poseSeq;         // 0 dropping prone, 1 rising
     int infDeath = 1;    // the killing warhead's InfDeath (retail default
                          // Gunfire on the object; the warhead overwrites)
 
@@ -198,6 +201,30 @@ class WorldObject {
     bool IsDead() { return this.hp <= 0; }
     int FireTicks() { return this.fireTicks; }
     void SetFireTicks(int v) { this.fireTicks = v; }
+    int SuppTicks() { return this.suppTicks; }
+    int PoseTicks() { return this.poseTicks; }
+    int PoseSeq() { return this.poseSeq; }
+
+    /// <summary>Suppress the trooper: he drops prone for 30 ticks (the
+    /// reference's SuppressionTrait), playing the Down block first; a
+    /// trooper already down just stays down.</summary>
+    void SetSuppTicks(int v) {
+        if (v > this.suppTicks && this.suppTicks <= 0) {
+            this.poseSeq = 0;
+            this.poseTicks = this.PoseBlockFrames(0) * 2;
+        }
+        if (v > this.suppTicks) { this.suppTicks = v; }
+    }
+
+    /// <summary>Frames of a prone transition block: 0 the Down drop,
+    /// 1 the Up rise; 0 when the art omits it.</summary>
+    int PoseBlockFrames(int seq) {
+        if (this.unitType == null || !this.unitType.HasProne()) {
+            return 0;
+        }
+        return seq == 0 ? this.unitType.ProneAt(8)
+                        : this.unitType.ProneAt(11);
+    }
     int InfDeath() { return this.infDeath; }
 
     /// <summary>Damage that also records which warhead is killing the
@@ -664,6 +691,12 @@ class UnitType {
     int die2Mult;
     bool hasDie2;
     void SetCombatSequences(UnitDef d) {
+        if (d.HasProne()) {
+            this.proneSeqs = new List<int>();
+            for (int i = 0; i < 15; i = i + 1) {
+                this.proneSeqs.Add(d.ProneAt(i));
+            }
+        }
         this.hasFire = d.HasFire();
         this.fireStart = d.FireStart();
         this.fireFrames = d.FireFrames() < 1 ? 1 : d.FireFrames();
@@ -677,6 +710,10 @@ class UnitType {
         this.die2Frames = d.Die2Frames() < 1 ? 1 : d.Die2Frames();
         this.die2Mult = d.Die2Mult();
     }
+    List<int> proneSeqs;
+    bool HasProne() { return this.proneSeqs != null
+                   && this.proneSeqs.Count >= 15; }
+    int ProneAt(int i) { return this.proneSeqs[i]; }
     bool HasFire() { return this.hasFire; }
     int FireStart() { return this.fireStart; }
     int FireFrames() { return this.fireFrames; }
@@ -3563,6 +3600,18 @@ class World {
         return n;
     }
 
+    /// <summary>Troopers currently suppressed (prone).</summary>
+    int SuppressedCount() {
+        int n = 0;
+        for (int i = 0; i < this.objects.Count; i = i + 1) {
+            WorldObject o = this.objects[i];
+            if (o != null && !o.IsDead() && o.SuppTicks() > 0) {
+                n = n + 1;
+            }
+        }
+        return n;
+    }
+
     /// <summary>Play-once death fx currently alive -- the infantry death
     /// sequences and the corpse anims they morph into.</summary>
     int OnceFxCount() {
@@ -3895,6 +3944,16 @@ class World {
             WorldObject o = this.objects[i];
             if (o.Kind() != ObjKind.Unit()) { continue; }
             if (o.fireTicks > 0) { o.fireTicks = o.fireTicks - 1; }
+            if (o.poseTicks > 0) { o.poseTicks = o.poseTicks - 1; }
+            if (o.suppTicks > 0) {
+                o.suppTicks = o.suppTicks - 1;
+                if (o.suppTicks <= 0 && !o.IsDead()) {
+                    // Back on his feet: the rise plays before the stand
+                    // ring takes over again.
+                    o.poseSeq = 1;
+                    o.poseTicks = o.PoseBlockFrames(1) * 2;
+                }
+            }
             if (o.Frozen() > 0 || o.Deployed() || !o.HasRoute()) { continue; }
             int bank = o.MoveAccum() + o.UnitType().Speed();
             while (bank >= Rules.CellMoveCost() && o.HasRoute()) {
@@ -4142,9 +4201,38 @@ class World {
     /// verse like a direct shot, and skips friends and neutrals -- the
     /// original punishes careless artillery, it does not friendly-fire a
     /// whole squad. Special effects stay direct-hit only.</summary>
+    /// <summary>Whether the object is foot-soldier art (the infantry
+    /// checks ride the unit archetype's SHP name, like the renderer).</summary>
+    bool IsTrooper(WorldObject o) {
+        return o.Kind() == ObjKind.Unit() && o.UnitType() != null
+            && o.UnitType().ShpName().Length > 0;
+    }
+
+    /// <summary>The reference's suppression rule: a non-lethal warhead
+    /// hit suppresses infantry that is standing idle or already down --
+    /// moving troopers push through. Deployed and frozen men do not
+    /// budge.</summary>
+    void SuppressTrooper(WorldObject o) {
+        if (o.IsDead() || o.Kind() != ObjKind.Unit()
+         || o.UnitType() == null || o.UnitType().ShpName().Length == 0
+         || !o.UnitType().HasProne() || o.Deployed() || o.Frozen() > 0) {
+            return;
+        }
+        if (!o.HasRoute() || o.SuppTicks() > 0) {
+            o.SetSuppTicks(30);
+        }
+    }
+
     void SplashAround(int side, Warhead wh, int cx, int cy,
                       WorldObject t, int dmg) {
-        if (t != null) { t.TakeDamageAs(dmg, wh.InfDeath()); }
+        if (t != null) {
+            int pd = dmg;
+            if (this.IsTrooper(t) && t.SuppTicks() > 0) {
+                pd = dmg * this.Rules().ProneDamagePct() / 100;
+            }
+            t.TakeDamageAs(pd, wh.InfDeath());
+            this.SuppressTrooper(t);
+        }
         if (wh.Spread() <= 0) { return; }
         int radius = wh.Spread() + 2;   // cells around the impact point
         for (int i = 0; i < this.objects.Count; i = i + 1) {
@@ -4164,7 +4252,12 @@ class World {
             int scaled = dmg * half / 100;
             int damp = (radius - d) * scaled / radius;
             if (damp <= 0) { continue; }
-            o.TakeDamageAs(damp, wh.InfDeath());
+            int pd = damp;
+            if (this.IsTrooper(o) && o.SuppTicks() > 0) {
+                pd = damp * this.Rules().ProneDamagePct() / 100;
+            }
+            o.TakeDamageAs(pd, wh.InfDeath());
+            this.SuppressTrooper(o);
         }
     }
 

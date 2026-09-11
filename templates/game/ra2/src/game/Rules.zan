@@ -432,6 +432,18 @@ class UnitDef {
         this.die2Mult = mult;
         this.hasDie2 = true;
     }
+    // The prone family, flattened (Prone, Crawl, Down, Up, FireProne) --
+    // start,frames,mult per block, frames 0 for a block the art omits.
+    List<int> proneSeqs;
+    bool HasProne() { return this.proneSeqs != null
+                   && this.proneSeqs.Count >= 15; }
+    int ProneAt(int i) { return this.proneSeqs[i]; }
+    void SetProneSeqs(List<int> flat) {
+        this.proneSeqs = new List<int>();
+        for (int i = 0; i < 15; i = i + 1) {
+            this.proneSeqs.Add(i < flat.Count ? flat[i] : 0);
+        }
+    }
 
     /// <summary>Cells the unit covers per tick. RA2's speed classes map to
     /// foot soldiers at one cell and fast movers (dogs, terror drones) at
@@ -596,6 +608,8 @@ class Rules {
                                // shows its damaged frame (retail 50)
     int conditionRed = 25;     // [AudioVisual] ConditionRed=%: drives the
                                // fire state, not another sprite frame
+    int proneDamagePct = 100;  // [General] ProneDamage=, the damage share
+                               // a prone trooper takes (retail default 1.0)
     List<UnitDef> units;
     List<BuildingDef> buildings;   // both sides interleaved, menu order per side
     List<BuildingDef> civs;        // neutral structures from the map
@@ -787,10 +801,34 @@ class Rules {
     }
 
     Warhead WarheadNamed(string name) {
+        string key = name.ToUpper();
         for (int i = 0; i < this.warheads.Count; i = i + 1) {
-            if (this.warheads[i].Name() == name) { return this.warheads[i]; }
+            if (this.warheads[i].Name() == name
+             || this.warheads[i].Name() == key) {
+                return this.warheads[i];
+            }
         }
-        return null;
+        // Warheads outside the pre-seeded catalog (the absolute-damage
+        // [Super] among them) resolve from their own rules section, the
+        // way WeaponNamed resolves its roster-external guns.
+        IniDocument ini = this.sourceIni;
+        if (ini == null) { return null; }
+        IniSection s = ini.Section(name);
+        if (s == null) { s = ini.Section(key); }
+        if (s == null) { return null; }
+        Warhead w = Warhead.Create(key, s.Get("Verses"));
+        if (s.Contains("CellSpread")) {
+            w.SetSpread(s.GetIntOr("CellSpread", 0));
+        }
+        if (s.Contains("InfDeath")) {
+            w.SetInfDeath(Rules.LeadingInt(s.Get("InfDeath")));
+        }
+        string anims = s.Get("AnimList");
+        if (anims.Length > 0) {
+            w.SetAnimList(Rules.Csv(anims.ToUpper()));
+        }
+        this.warheads.Add(w);
+        return w;
     }
 
     Weapon WeaponNamed(string name) {
@@ -912,6 +950,9 @@ class Rules {
 
     /// <summary>A random DeadBodies corpse anim (DEATH_A..F), the pick
     /// keyed off a caller-supplied clock so runs stay deterministic.</summary>
+    /// <summary>The damage share (percent) a prone trooper takes.</summary>
+    int ProneDamagePct() { return this.proneDamagePct; }
+
     string DeathBodyName(int pick) {
         if (this.deadBodies == null || this.deadBodies.Count == 0) {
             return "";
@@ -1969,6 +2010,18 @@ class Rules {
             da = av.Get("InfantryBrute");
             if (da.Length > 0) { this.infantryBrute = da.ToUpper(); }
         }
+        // ProneDamage ships as a fixed number ("1.0") or a percent
+        // ("50%"); either way the shipped file leaves it commented out.
+        IniSection gen = ini.Section("General");
+        if (gen != null) {
+            string pd = gen.Get("ProneDamage");
+            if (pd.Length > 0) {
+                int pct = pd.Trim().EndsWith("%")
+                    ? Rules.LeadingInt(pd)
+                    : Rules.LeadingInt(pd) * 100;
+                if (pct > 0) { this.proneDamagePct = pct; }
+            }
+        }
         // The electro death anim is the [Animations] list's second entry
         // (the reference spreads the rules' animation table into a set and
         // takes names[1] -- retail's list starts TWLT100, ELECTRO).
@@ -2322,6 +2375,18 @@ class Rules {
             if (d2.Count >= 2) {
                 d.SetDie2Seq(d2[0], d2[1], d2.Count >= 3 ? d2[2] : 0);
             }
+            // The suppression family: still pose, prone walk, the drop
+            // and rise transitions, and the prone firing block.
+            List<int> pr = new List<int>();
+            string[] pkeys = new string[] { "Prone", "Crawl", "Down",
+                                            "Up", "FireProne" };
+            for (int k = 0; k < 5; k = k + 1) {
+                List<int> v = Rules.LeadingInts(seq.Get(pkeys[k]));
+                pr.Add(v.Count >= 1 ? v[0] : 0);
+                pr.Add(v.Count >= 2 ? v[1] : 0);
+                pr.Add(v.Count >= 3 ? v[2] : 0);
+            }
+            d.SetProneSeqs(pr);
         }
         // A projectile's smoke trail is art-ini data (Trailer= anim dropped
         // every SpawnDelay= ticks along the flight path), so it resolves

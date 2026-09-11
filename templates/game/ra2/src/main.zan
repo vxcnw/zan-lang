@@ -3900,6 +3900,42 @@ class Ra2Loop : IGuiHostLoop {
                         Console.WriteLine("selftest FAIL deaths: the"
                             + " corpse anim must finish and clear");
                     }
+                    // Suppression: a non-lethal warhead hit on a standing
+                    // trooper drops him prone for 30 ticks, then he
+                    // rises again.
+                    int prId = Ra2App.UnitIdOfReg(this.world, 0, "GGI");
+                    int proneOk = 0;
+                    Warhead prWh = this.world.Rules().WarheadNamed("Super");
+                    if (prId >= 0 && prWh != null && at.Count >= 2) {
+                        int pg = this.world.SpawnUnit(0, prId,
+                            at[0] + 20, at[1] + 6);
+                        if (pg < 0) {
+                            pg = this.world.SpawnUnit(0, prId,
+                                at[0] + 12, at[1] + 8);
+                        }
+                        if (pg >= 0) {
+                            WorldObject pw = this.world.ObjectAt(pg);
+                            this.world.SplashAround(1, prWh,
+                                pw.X(), pw.Y(), pw, pw.Hp() / 4);
+                            proneOk = pw.SuppTicks() > 0 ? 1 : 0;
+                            // A live battlefield may re-suppress him, so
+                            // the pass is "he rose at least once": a new
+                            // hit can only land after the 30 ticks ran
+                            // out.
+                            for (int t6 = 0; t6 < 60 && proneOk == 1;
+                                 t6 = t6 + 1) {
+                                this.world.Tick();
+                                if (pw.SuppTicks() <= 0) { proneOk = 2; }
+                            }
+                        }
+                    }
+                    Console.WriteLine("selftest prone dropped="
+                        + Convert.ToString(proneOk));
+                    if (proneOk != 2) {
+                        Console.WriteLine("selftest FAIL prone: a"
+                            + " suppressed trooper must go down and"
+                            + " rise again");
+                    }
                     // Building idle anims: every finished structure whose
                     // art ships IdleAnim must have its loop live (the
                     // damaged variant where one ships and we wounded the
@@ -4413,6 +4449,13 @@ class Ra2Loop : IGuiHostLoop {
                             this.duelX + 1 + di, this.duelY + 3);
                         if (g < 0) { continue; }
                         WorldObject gw = this.world.ObjectAt(g);
+                        if (di == 0) {
+                            // The first one only gets pinned: he lies
+                            // prone among the corpses, alive.
+                            gw.TakeDamageAs(gw.Hp() / 3, 1);
+                            this.world.SuppressTrooper(gw);
+                            continue;
+                        }
                         gw.TakeDamageAs(gw.Hp(), di % 2 == 0 ? 1 : 2);
                     }
                 }

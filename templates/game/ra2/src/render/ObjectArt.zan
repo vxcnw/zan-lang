@@ -326,14 +326,17 @@ class ObjectArt {
     Texture UnitTexture(UnitType ut, bool moving, int animFrame, int facing,
                         int side, bool deployed) {
         return this.UnitTexture(ut, moving, animFrame, facing, side,
-                                deployed, 0);
+                                deployed, 0, 0);
     }
 
     /// <summary>The firing pose: while fireTicks runs, the sequence's
     /// FireUp block plays once across the countdown, then the trooper
-    /// returns to his stand ring.</summary>
+    /// returns to his stand ring. proneState packs the suppression
+    /// layer: bit0 suppressed, bit1 the Down/Up pick, bit2 a transition
+    /// playing, bits 3+ its two-tick phase.</summary>
     Texture UnitTexture(UnitType ut, bool moving, int animFrame, int facing,
-                        int side, bool deployed, int fireTicks) {
+                        int side, bool deployed, int fireTicks,
+                        int proneState) {
         if (ut == null) { return null; }
         string name = this.ArcticName(ut.ShpName());
         if (name == null || name.Length == 0) { return null; }
@@ -347,6 +350,61 @@ class ObjectArt {
             if (sit < count) {
                 return this.ShapeTextureFrame(name, sit,
                                               this.UnitPalFor(side));
+            }
+        }
+        if (ut.HasProne() && (proneState & 1) != 0) {
+            // Suppressed: the drop/rise transition first, then the prone
+            // family -- the still pose, the crawl when moving, the prone
+            // firing block while his gun runs.
+            if ((proneState & 4) != 0) {
+                int seq = (proneState >> 1) & 1;
+                int ts = ut.ProneAt(seq == 0 ? 6 : 9);
+                int tf = ut.ProneAt(seq == 0 ? 7 : 10);
+                int tm = ut.ProneAt(seq == 0 ? 8 : 11);
+                if (tf > 0) {
+                    int idx = tf - 1 - ((proneState >> 3) & 63);
+                    if (idx < 0) { idx = 0; }
+                    int tfr = ts + ring * tm + idx;
+                    if (tfr < count) {
+                        return this.ShapeTextureFrame(name, tfr,
+                                                      this.UnitPalFor(side));
+                    }
+                }
+            }
+            if (fireTicks > 0) {
+                int ffs = ut.ProneAt(12);
+                int ffp = ut.ProneAt(13);
+                int ffm = ut.ProneAt(14);
+                if (ffp > 0) {
+                    int pf = ffs + ring * ffm
+                        + (ut.FireFrames() - 1 - fireTicks / 2);
+                    if (pf < count) {
+                        return this.ShapeTextureFrame(name, pf,
+                                                      this.UnitPalFor(side));
+                    }
+                }
+            }
+            if (moving) {
+                int cs = ut.ProneAt(3);
+                int cf = ut.ProneAt(4);
+                int cm = ut.ProneAt(5);
+                if (cf > 0) {
+                    int cfr = cs + ring * cm + (animFrame % cf);
+                    if (cfr < count) {
+                        return this.ShapeTextureFrame(name, cfr,
+                                                      this.UnitPalFor(side));
+                    }
+                }
+            }
+            int ps = ut.ProneAt(0);
+            int pp = ut.ProneAt(1);
+            int pm = ut.ProneAt(2);
+            if (pp > 0) {
+                int pfr = ps + ring * pm;
+                if (pfr < count) {
+                    return this.ShapeTextureFrame(name, pfr,
+                                                  this.UnitPalFor(side));
+                }
             }
         }
         if (fireTicks > 0 && ut.HasFire()) {
@@ -1223,15 +1281,21 @@ class ObjectRenderer {
                 // Identity: facing, walk frame, stance, side. AnimFrame only
                 // advances on a step, so a battle's steady state -- units
                 // standing or reloading -- rides the cache entirely.
+                int proneState = (o.SuppTicks() > 0 ? 1 : 0)
+                               | ((o.PoseSeq() & 1) << 1)
+                               | (o.PoseTicks() > 0 ? 4 : 0)
+                               | ((o.PoseTicks() / 2 & 63) << 3);
                 int stamp = (o.Facing() & 15)
                           | ((o.AnimFrame() & 65535) << 4)
                           | ((o.HasRoute() ? 1 : 0) << 20)
                           | ((o.Deployed() ? 1 : 0) << 21)
-                          | ((o.Side() & 3) << 22);
+                          | ((o.Side() & 3) << 22)
+                          | ((proneState & 255) << 24);
                 img = o.ArtStampA() == stamp ? o.ArtTexA() : null;
                 if (img == null) {
                     tex = art.UnitTexture(u, o.HasRoute(), o.AnimFrame(),
-                                          o.Facing(), o.Side(), o.Deployed());
+                                          o.Facing(), o.Side(), o.Deployed(),
+                                          o.FireTicks(), proneState);
                     if (tex != null) {
                         string key = "ra2:obj:u:" + u.Reg() + ":" + o.Side()
                             + ":" + Convert.ToString(o.Facing()) + ":"
