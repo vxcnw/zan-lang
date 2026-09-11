@@ -3810,6 +3810,36 @@ class Ra2Loop : IGuiHostLoop {
                         Console.WriteLine("selftest FAIL smoke: a unit"
                             + " under half health must vent SGRYSMK1");
                     }
+                    // Building fires: wound a player structure below half;
+                    // its DamageFireOffset spots must light up with the
+                    // shipped FIRE01..03 looping anims.
+                    int burnId = this.world.ProbeAnimFrames("FIRE01");
+                    int burned = 0;
+                    if (burnId > 0) {
+                        for (int bi = 0; bi < this.world.ObjectCount()
+                                      && burned < 3; bi = bi + 1) {
+                            WorldObject bo = this.world.ObjectAt(bi);
+                            if (bo.Kind() != ObjKind.Structure()
+                             || bo.Side() != 0 || bo.MaxHp() <= 0) {
+                                continue;
+                            }
+                            bo.TakeDamage(bo.MaxHp() * 3 / 4);
+                            burned = burned + 1;
+                        }
+                        for (int t3 = 0; t3 < 24; t3 = t3 + 1) {
+                            this.world.Tick();
+                        }
+                    }
+                    int blazes = this.world.LoopAnimCount();
+                    Console.WriteLine("selftest fires burned="
+                        + Convert.ToString(burned)
+                        + " fire01=" + Convert.ToString(burnId)
+                        + " blazes=" + Convert.ToString(blazes));
+                    if (burned > 0 && blazes < 1) {
+                        Console.WriteLine("selftest FAIL fires: a"
+                            + " damaged structure must burn at its"
+                            + " DamageFireOffset spots");
+                    }
                 } else {
                     Console.WriteLine("selftest FAIL proj: spawn refused");
                 }

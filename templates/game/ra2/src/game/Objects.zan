@@ -34,6 +34,7 @@ class WorldObject {
     int reload;          // ticks until the next shot
     bool selected;
     int smokeTicks;      // ticks spent venting damage smoke (80s cap)
+    List<FxAnim> fires;  // the burning anims seeded while damaged
 
     // Movement (units only): the planned route as cells, and how far along it
     // the unit has walked this frame.
@@ -3175,6 +3176,22 @@ class World {
         return true;
     }
 
+    /// <summary>Spawns a looping anim -- the damage fires, which cycle
+    /// their frames until killed. Null when the install lacks the shape.
+    /// </summary>
+    FxAnim SpawnAnimLoop(string name, double cx, double cy) {
+        int frames = this.ProbeAnimFrames(name);
+        if (frames <= 0) { return null; }
+        FxAnim a = new FxAnim();
+        a.name = name;
+        a.px = cx;
+        a.py = cy;
+        a.frames = frames;
+        a.loop = true;
+        this.anims.Add(a);
+        return a;
+    }
+
     int ProbeAnimFrames(string name) {
         for (int i = 0; i < this.animNames.Count; i = i + 1) {
             if (this.animNames[i] == name) { return this.animFrames[i]; }
@@ -3226,7 +3243,14 @@ class World {
         int i = 0;
         while (i < this.anims.Count) {
             FxAnim a = this.anims[i];
+            if (a.dead) { this.anims.RemoveAt(i); continue; }
             a.ticks = a.ticks + 1;
+            if (a.loop) {
+                // Damage fires cycle: frame 0 follows the last frame.
+                if (a.ticks >= a.frames * 2) { a.ticks = 0; }
+                i = i + 1;
+                continue;
+            }
             // One-shot: play every frame, hold the last briefly, drop.
             int life = a.frames * 2 + 4;
             if (a.ticks >= life) {
@@ -3253,20 +3277,83 @@ class World {
     void TickDamageSmoke() {
         this.smokeClock = this.smokeClock + 1;
         if (this.smokeClock % 8 != 1) { return; }
-        if (!this.Rules().HasDamageParticles()) { return; }
         for (int i = 0; i < this.objects.Count; i = i + 1) {
             WorldObject o = this.objects[i];
-            if (o == null || o.IsDead()) { continue; }
+            if (o == null) { continue; }
             // Infantry do not smoke; they have their own death anims.
             if (o.UnitType() != null
              && o.UnitType().ShpName().Length > 0) { continue; }
             if (o.MaxHp() <= 0) { continue; }
-            if (o.Hp() * 2 >= o.MaxHp()) { o.smokeTicks = 0; continue; }
+            bool damaged = o.Hp() * 2 < o.MaxHp();
+            // Structures also catch fire, the reference's Building fire
+            // objects: one DamageFireTypes anim at each art-declared
+            // DamageFireOffset spot, looping until the building repairs
+            // or dies. The pick is the reference's random choice among
+            // FIRE01..FIRE03, keyed off the clock here.
+            if (o.Kind() == ObjKind.Structure()) {
+                if (!damaged || o.IsDead()) {
+                    if (o.fires != null && o.fires.Count > 0) {
+                        for (int f = 0; f < o.fires.Count; f = f + 1) {
+                            o.fires[f].Kill();
+                        }
+                    }
+                    o.fires = null;
+                } else if (o.fires == null || o.fires.Count == 0) {
+                    StructureType st = this.TypeOf(o);
+                    List<string> fts = this.Rules().FireTypes();
+                    if (st != null && fts.Count > 0) {
+                        List<int> offs =
+                            this.Rules().DamageFireOffsets(st.Reg());
+                        if (offs.Count >= 2) {
+                            string fn = fts[(this.smokeClock + i)
+                                % fts.Count];
+                            List<FxAnim> fl = new List<FxAnim>();
+                            for (int f = 0; f + 1 < offs.Count; f = f + 2) {
+                                FxAnim fa = this.SpawnAnimLoop(fn,
+                                    o.X() + offs[f] / 256.0,
+                                    o.Y() + offs[f + 1] / 256.0);
+                                if (fa != null) { fl.Add(fa); }
+                            }
+                            if (fl.Count > 0) { o.fires = fl; }
+                        }
+                    }
+                }
+            }
+            if (o.IsDead()) { continue; }
+            if (!damaged) { o.smokeTicks = 0; continue; }
+            // The reference's smoke gate is per object: only the technos
+            // whose own rules section declares DamageParticleSystems vent
+            // smoke, from the section's DamageSmokeOffset.
+            List<string> dps = null;
+            int sox = 0;
+            int soy = 0;
+            if (o.Kind() == ObjKind.Structure()) {
+                StructureType stq = this.TypeOf(o);
+                if (stq != null) {
+                    BuildingDef bd =
+                        this.Rules().BuildingDefNamed(stq.Reg());
+                    if (bd != null) {
+                        dps = bd.DamageParticles();
+                        sox = bd.SmokeOffX();
+                        soy = bd.SmokeOffY();
+                    }
+                }
+            } else if (o.UnitType() != null) {
+                UnitDef ud = this.Rules().UnitDefNamed(
+                    o.UnitType().Reg());
+                if (ud != null) {
+                    dps = ud.DamageParticles();
+                    sox = ud.SmokeOffX();
+                    soy = ud.SmokeOffY();
+                }
+            }
+            if (dps == null || dps.Count == 0) { continue; }
             if (o.smokeTicks >= 5000) { continue; }
             o.smokeTicks = o.smokeTicks + 8;
             double jx = ((this.smokeClock * 13 + i * 37) % 7 - 3) / 16.0;
             double jy = ((this.smokeClock * 17 + i * 29) % 7 - 3) / 16.0;
-            this.SpawnAnim("SGRYSMK1", o.X() + jx, o.Y() + jy);
+            this.SpawnAnim("SGRYSMK1", o.X() + sox / 256.0 + jx,
+                           o.Y() + soy / 256.0 + jy);
         }
     }
 
@@ -3308,6 +3395,15 @@ class World {
     Projectile ProjectileAt(int i) { return this.projectiles[i]; }
 
     int AnimFxCount() { return this.anims.Count; }
+
+    /// <summary>Looping anims live right now -- the damage fires.</summary>
+    int LoopAnimCount() {
+        int n = 0;
+        for (int i = 0; i < this.anims.Count; i = i + 1) {
+            if (this.anims[i].loop) { n = n + 1; }
+        }
+        return n;
+    }
 
     FxAnim AnimFxAt(int i) { return this.anims[i]; }
 
@@ -4387,6 +4483,8 @@ class FxAnim {
     string name;
     int frames;    // from the SHP header; 0 = art missing (never drawn)
     int ticks;
+    bool loop;     // damage fires cycle their frames until killed
+    bool dead;     // swept by TickFx
 
     double Px() { return this.px; }
     double Py() { return this.py; }
@@ -4397,6 +4495,7 @@ class FxAnim {
         if (f > this.frames - 1) { f = this.frames - 1; }
         return f;
     }
+    void Kill() { this.dead = true; }
 }
 
 /// <summary>A beam gun's ray, in cell coordinates. kind: 0 laser (prism

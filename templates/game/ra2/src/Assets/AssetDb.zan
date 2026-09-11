@@ -262,12 +262,12 @@ class AssetDb {
         if (len[0] == 0) { return; }
         int start = AssetDb.IniTextStart(raw, len[0]);
         IniDocument pkt = IniParser.Parse(raw.ToStr(start, len[0] - start));
-        IniSection list = pkt.Section("MultiMaps");
+        Ra2.Formats.IniSection list = pkt.Section("MultiMaps");
         if (list == null) { return; }
         for (int i = 0; i < list.Count(); i = i + 1) {
             string key = list.EntryAt(i).Value();
             if (key == null || key.Length == 0) { continue; }
-            IniSection entry = pkt.Section(key);
+            Ra2.Formats.IniSection entry = pkt.Section(key);
             string file = entry == null ? "" : entry.Get("File");
             if (file.Length == 0) { file = key + ".map"; }
             file = file.ToUpper();

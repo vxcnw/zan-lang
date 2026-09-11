@@ -245,6 +245,11 @@ class UnitDef {
     // marks the infantry that toggles a deployed stance (the GI).
     string deploysInto;
     bool deployer;
+    // DamageParticleSystems=/DamageSmokeOffset= from the unit's own rules
+    // section: which wounded units vent smoke, and from where (256ths).
+    List<string> damageParticles;
+    int smokeOffX;
+    int smokeOffY;
 
     static UnitDef Create(string reg, string label, int cost, int hp,
                           int speed, int armor, Weapon primary,
@@ -301,6 +306,12 @@ class UnitDef {
     void SetLabel(string label) { this.label = label; }
     string DeploysInto() { return this.deploysInto; }
     void SetDeploysInto(string reg) { this.deploysInto = reg; }
+    List<string> DamageParticles() { return this.damageParticles; }
+    void SetDamageParticles(List<string> v) { this.damageParticles = v; }
+    int SmokeOffX() { return this.smokeOffX; }
+    void SetSmokeOffX(int v) { this.smokeOffX = v; }
+    int SmokeOffY() { return this.smokeOffY; }
+    void SetSmokeOffY(int v) { this.smokeOffY = v; }
     bool Deployer() { return this.deployer; }
     void SetDeployer(bool on) { this.deployer = on; }
 
@@ -388,6 +399,9 @@ class UnitRole {
 /// offers it. Refineries (and captured oil derricks) are the economy: they
 /// trickle credits every tick, replacing any passive income.</summary>
 class BuildingDef {
+    List<string> damageParticles; // DamageParticleSystems= (smoke gate)
+    int smokeOffX;                // DamageSmokeOffset= x, 256ths of a cell
+    int smokeOffY;                // DamageSmokeOffset= y
     string reg;        // GACNST, NAPOWR, ...
     string label;
     string shp;
@@ -462,6 +476,12 @@ class BuildingDef {
     bool IsRefinery() { return this.refinery; }
     bool WaterBound() { return this.waterBound; }
     void SetWaterBound(bool on) { this.waterBound = on; }
+    List<string> DamageParticles() { return this.damageParticles; }
+    void SetDamageParticles(List<string> v) { this.damageParticles = v; }
+    int SmokeOffX() { return this.smokeOffX; }
+    void SetSmokeOffX(int v) { this.smokeOffX = v; }
+    int SmokeOffY() { return this.smokeOffY; }
+    void SetSmokeOffY(int v) { this.smokeOffY = v; }
     int SideMask() { return this.sideMask; }
     List<string> Prereq() { return this.prereq; }
     /// <summary>Replaces the built-in prereq tokens with the install's own
@@ -500,8 +520,8 @@ class Rules {
     List<string> splashList;   // [CombatDamage] SplashList: water impact art
     double gravity;
     bool alternateArcticArt;   // [General] AlternateArcticArt: A-suffix art
-    List<string> damageParticles; // [General] DamageParticleSystems: the
-                                  // damage-smoke gate (empty list = no smoke)            // ini Gravity= (leptons/tick²), retail 6
+    List<string> fireTypes;    // [AudioVisual] DamageFireTypes: burning
+                               // buildings pick one of these at random            // ini Gravity= (leptons/tick²), retail 6
     List<UnitDef> units;
     List<BuildingDef> buildings;   // both sides interleaved, menu order per side
     List<BuildingDef> civs;        // neutral structures from the map
@@ -571,7 +591,7 @@ class Rules {
         r.weapons = new List<Weapon>();
         r.projectiles = new List<ProjectileType>();
         r.splashList = new List<string>();
-        r.damageParticles = new List<string>();
+        r.fireTypes = new List<string>();
         r.gravity = 6.0;
         r.units = new List<UnitDef>();
         r.buildings = new List<BuildingDef>();
@@ -788,13 +808,29 @@ class Rules {
     /// an A before the extension) draw that variant. The reference's
     /// ObjectArt keys the same swap off inSnowTheater.</summary>
     bool AlternateArcticArt() { return this.alternateArcticArt; }
+    List<string> FireTypes() { return this.fireTypes; }
 
-    /// <summary>True when the install declares damage particle systems:
-    /// the gate the reference's damage-smoke plugin checks before it
-    /// hangs smoke on a wounded unit.</summary>
-    bool HasDamageParticles() {
-        return this.damageParticles != null
-            && this.damageParticles.Count > 0;
+    /// <summary>DamageFireOffset0..N from a building's art section, as
+    /// flat x,y pairs in 256ths of a cell (the ini's leptons). Empty when
+    /// the art carries no fire spots -- the loop stops at the first
+    /// absent index, the way the reference walks them.</summary>
+    List<int> DamageFireOffsets(string reg) {
+        List<int> pairs = new List<int>();
+        if (this.artIni == null || reg == null) { return pairs; }
+        IniSection s = this.artIni.Section(reg);
+        if (s == null) { return pairs; }
+        int idx = 0;
+        for (;;) {
+            string raw = s.Get("DamageFireOffset"
+                + Convert.ToString(idx));
+            if (raw.Length == 0) { break; }
+            List<string> parts = Rules.Csv(raw);
+            if (parts.Count < 2) { break; }
+            pairs.Add(Rules.LeadingInt(parts[0]));
+            pairs.Add(Rules.LeadingInt(parts[1]));
+            idx = idx + 1;
+        }
+        return pairs;
     }
 
     /// <summary>The water-impact animation for damage tier damage/50 -- the
@@ -1762,6 +1798,12 @@ class Rules {
         if (av != null && av.Contains("Gravity")) {
             this.gravity = av.GetIntOr("Gravity", 6);
         }
+        if (av != null) {
+            string fires = av.Get("DamageFireTypes");
+            if (fires.Length > 0) {
+                this.fireTypes = Rules.Csv(fires.ToUpper());
+            }
+        }
         IniSection cd = ini.Section("CombatDamage");
         if (cd != null) {
             string spl = cd.Get("SplashList");
@@ -1827,6 +1869,14 @@ class Rules {
             if (s.Contains("Cost")) { d.SetCost(s.GetIntOr("Cost", d.Cost())); }
             if (s.Contains("Strength")) { d.SetHp(s.GetIntOr("Strength", d.Hp())); }
             if (s.Contains("Speed")) { d.SetSpeed(s.GetIntOr("Speed", d.Speed())); }
+            d.SetDamageParticles(Rules.Csv(
+                s.Get("DamageParticleSystems").ToUpper()));
+            List<int> offU = new List<int>();
+            Rules.ParseOffsetPair(s.Get("DamageSmokeOffset"), offU);
+            if (offU.Count >= 2) {
+                d.SetSmokeOffX(offU[0]);
+                d.SetSmokeOffY(offU[1]);
+            }
             string armor = s.Get("Armor");
             if (armor.Length > 0) { d.SetArmor(ArmorClass.Parse(armor)); }
             // The shipped tech tree, not a transcription of it: the rules
@@ -1922,13 +1972,19 @@ class Rules {
             if (wb.Length > 0) { d.SetWaterBound(Rules.YesNo(wb)); }
             string ntB = s.Get("NewTheater");
             if (ntB.Length > 0 && Rules.YesNo(ntB)) { d.SetNewTheater(true); }
+            d.SetDamageParticles(Rules.Csv(
+                s.Get("DamageParticleSystems").ToUpper()));
+            List<int> offB = new List<int>();
+            Rules.ParseOffsetPair(s.Get("DamageSmokeOffset"), offB);
+            if (offB.Count >= 2) {
+                d.SetSmokeOffX(offB[0]);
+                d.SetSmokeOffY(offB[1]);
+            }
         }
         IniSection general = ini.Section("General");
         if (general != null) {
             this.alternateArcticArt = Rules.YesNo(
                 general.GetOr("AlternateArcticArt", "no"));
-            this.damageParticles = Rules.Csv(
-                general.GetOr("DamageParticleSystems", ""));
             this.oreGrows = Rules.YesNo(general.GetOr("TiberiumGrows", "yes"));
             this.oreSpreads = Rules.YesNo(general.GetOr("TiberiumSpreads",
                                                         "yes"));
@@ -2132,6 +2188,37 @@ class Rules {
     }
 
     /// <summary>"a,b, c" into ["a","b","c"], dropping blanks.</summary>
+    /// <summary>First two comma ints of an offset triple, in raw ini
+    /// units (leptons). The values run negative -- LeadingInts stops at
+    /// the '-' -- so the parts parse one by one.</summary>
+    static void ParseOffsetPair(string raw, List<int> into) {
+        List<string> parts = Rules.Csv(raw == null ? "" : raw);
+        if (parts.Count < 2) { return; }
+        into.Add(Rules.LeadingInt(parts[0]));
+        into.Add(Rules.LeadingInt(parts[1]));
+    }
+
+    /// <summary>The unit rules section declared by <paramref name="reg"/>,
+    /// or null. Per-techno keys (DamageParticleSystems and friends) live
+    /// on the def, not on any global list.</summary>
+    UnitDef UnitDefNamed(string reg) {
+        if (reg == null) { return null; }
+        for (int i = 0; i < this.units.Count; i = i + 1) {
+            if (this.units[i].Reg() == reg) { return this.units[i]; }
+        }
+        return null;
+    }
+
+    /// <summary>The building rules section declared by
+    /// <paramref name="reg"/>, or null.</summary>
+    BuildingDef BuildingDefNamed(string reg) {
+        if (reg == null) { return null; }
+        for (int i = 0; i < this.buildings.Count; i = i + 1) {
+            if (this.buildings[i].Reg() == reg) { return this.buildings[i]; }
+        }
+        return null;
+    }
+
     static List<string> Csv(string s) {
         List<string> parts = new List<string>();
         int start = 0;
