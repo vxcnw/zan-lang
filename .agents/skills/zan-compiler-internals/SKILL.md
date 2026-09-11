@@ -506,3 +506,40 @@ Log(q);                          // 打印 11 —— 闭包内外读写同一个
   fsBackend 要有 statSync/readFileSync/writeFileSync（缺 writeFileSync 时
   path_open 创建文件会静默失败，别误判成编译问题——tests/wasm32 的断言本
   是"编译+链接"，端到端跑通要自备内存 fs）。
+
+## wasm32 回调地址跨界：(nint)Method 必须垫 C 形 thunk，w32adapt 表逐符号跟（2026-09-11）
+
+> wxprobe 在真浏览器首帧即陷 "null function or function signature mismatch"：
+> App.PumpGuarded 把 `(nint)App.GuardBody` 交给 C `zan_gui_guard_call`，C 侧
+> `void(*)(void*)` 的 call_indirect 只认一个 i32，而 Zan 函数表项还是 Zan
+> 形状——nint 参数在 wasm32 是 i64，参数没被用到时甚至整参被丢。
+
+- **两层各修各的，缺一即陷**：① irgen_expr.c 的 `(nint)Method` cast 点，
+  wasm32 先过 `emit_wasm_cb_thunk` 合成 `__zan_cb_thunk.<名>`——(i32)->void，
+  body 把 i32 ZExt 回 i64（callee 参数是 i32 则 Trunc）、0 参 callee 直接调，
+  每 callee 只合成一次——再把垫片地址交给 C；② w32adapt 签名表补
+  `{ "zan_gui_guard_call", "iii" }`，direct-call 层的 (nint,nint)→(iptr,iptr)
+  才有适配项。缺任何一层，wasm-ld 只给一条 signature-mismatch warning 并留
+  trap stub——**warning 不是噪音，是排期在首次调用那一刻的 trap**。
+- **为什么原生 x64 永远不暴露**：宽度差在寄存器里重叠、调用约定不查参数
+  个数，i64/i32 传参恰好等价。这族问题只在 wasm32 靶显形，native 全绿
+  ≠ wasm 安全；判别法就是 wasm-ld 的 signature mismatch 告警清单。
+- **async 未捕获 die 块具名**（irgen_async.c `emit_eh_rethrow_current`）：
+  原来只打裸行 "Unhandled exception"，设备控制台上没法归因。现在字符串
+  载荷直打消息、类异常经 tid-name 注册表打类名、无异常在飞维持裸行，与
+  同步 die 块对齐。探针实测：`await Boom()` 无 try 时打
+  `Unhandled exception: string-payload` / `Unhandled exception: Spark`
+  并 exit 1；conformance 无金样期待裸行（exc_uncaught_name 走 catch 路径）。
+- **并行会话下的选择性提交**：工作树文件 = HEAD + 我的 hunk + 别人在途
+  hunk 时，整文件 `git add` 是禁区。配方：`git show HEAD:<f>` 基线落
+  _scratch/stage3，用 python 把**我的新块从工作树文件按锚切片原样搬进
+  基线**（find 定位 + 下标切，零转义），`git hash-object -w` +
+  `git update-index --cacheinfo 100644,<blob>,<path>`，`git diff --cached`
+  核对只剩自己的 hunk 再 commit；别人的在途改动原样留在工作树。
+- **bash heredoc 过工具层会咬转义**：`<<'PYEOF'` 引号 heredoc 里的 python
+  `'\\n'` 到执行时可能已是真换行，`s.count(anchor)` 静默得 0——出现过
+  "anchor count 0" 而文本明明在文件里（repr 都能看到了还 count 0，就是
+  传输层改了脚本字节）。多行 C/Zan 块搬运别走字符串字面量：**从工作树
+  文件按锚切片、原样拼进基线**（find 定位 + 下标切），零转义零风险；
+  写完断言 count==1/块内标记存在，再 md5 前后对比。
+

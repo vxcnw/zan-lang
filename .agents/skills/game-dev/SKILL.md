@@ -258,6 +258,35 @@ Post 调用核对编码，别信二手注释。
 - 内嵌资源全程内存加载（ReadAllBytes→内存解码），不落盘解压。字节链要
   显式长度——**内嵌 NUL 会截断**，音频/图片"随机坏一块"先查这里。
 
+## 微信小游戏车道：4MB 主包定死，引擎 wasm 走 CDN；壳子坑先记（2026-09-11，进行中）
+
+> H5 画廊 wasm 模块 4.2MB 起，微信小游戏主包上限 4MB——引擎 wasm 永远进
+> 不了主包。定向（用户拍板）：主包只放壳子（game.js/game.json/配置），
+> 引擎 wasm + 字体走 CDN `wx.downloadFile` 落 USER_DATA_PATH 再
+> `WXWebAssembly.instantiate`；文本后续接宿主 fillText 后端后连字体也省。
+
+- **WASI fsBackend 五个方法一个不能少**：statSync/readFileSync/writeFileSync/
+  listDirSync/mkdirSync，缺任何一个，wasm 在首次对应调用处直接 unreachable
+  陷阱（node 里就是 "unreachable"，看似编译问题实则垫片缺方法）。fsData 用
+  path→base64 map（mkfsdata.json 格式），写入再叠 files 覆盖层。
+- **project.config.json 带 `"libVersion":"latest"` 会打不开项目**：touristappid
+  下报"模拟器启动失败 app.json 未找到"（game 项目根本没有 app.json，是
+  libVersion 解析带崩的）。删掉即好，compileType:"game" + appid
+  touristappid 即可开。
+- **miniprogram-automator 的 screenshot() 在小游戏项目上挂死**（连接成功、
+  40s+ 无返回）。截图走 Win32 PrintWindow + PW_RENDERFULLCONTENT(2) 按
+  PID 抓窗口（NW.js 窗口可抓）。CLI：`cli.bat open --project <dir>` /
+  `auto` / `close`。
+- **登录墙**：devtools cli close+open 会把会话打成 LOGOUT 弹登录窗，合成
+  鼠标点不动 NW.js 的"微信快捷登录"按钮——自动化止步于此，必须人点一次。
+- **壳子事件契约与 H5 worker 同构**（zan_env 8 槽事件 0 wake/1 move/2 down/
+  3 up/4 keydown/5 keyup/6 char/7 resize/14 attached；host 先喂 7+14 再
+  _start），差异只在泵：微信主线程没有 Worker+SAB 阻塞，用 JS 队列 +
+  `Atomics.wait` 回退 busy-wait，present 同步 BGRA→RGBA putImageData。
+  **devtools 实机验证还没过（登录墙）**，node 垫片跑到 frames=2 有一个
+  未定位的协程重抛崩溃（二进制在真浏览器同契约下干净，疑 node 时钟垫片
+  差异）——别把这条壳子当已验证。
+
 ## 验证仪式（每轮全做）
 
 - 编译零错误 → **无头仿真**：模拟一个"会连点的中等玩家"打关，多种子
