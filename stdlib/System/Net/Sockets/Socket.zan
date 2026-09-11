@@ -28,6 +28,12 @@ class Socket {
     [DllImport("crt", EntryPoint = "zan_io_socket_alive")]
     static extern int SocketAlive(nint sock);
 
+    /// <summary>关闭通知钩子：必须在 close 之前调用，把 reactor 中挂起
+    /// 在该 fd 上的就绪等待者以「对端关闭」形态唤醒并摘除注册，
+    /// 消除 fd 号复用后老等待者错投到新连接的窗口（A291⑤）。</summary>
+    [DllImport("crt", EntryPoint = "zan_io_close_notify")]
+    static extern void ReactorCloseNotify(nint sock);
+
     [DllImport("crt", EntryPoint = "zan_io_socket_peer_ip")]
     static extern string NativePeerIp(nint sock);
 
@@ -344,6 +350,7 @@ class Socket {
 
     /// <summary>关闭套接字。</summary>
     static void Close(nint sock) {
+        ReactorCloseNotify(sock);   // 先摘 reactor 注册（A291⑤），再关描述符
         SysClose(sock);
     }
 

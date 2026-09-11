@@ -394,6 +394,12 @@ int zan_io_socket_alive(long long sock) {
     return 0;
 }
 
+/* A291-5 close-notification hook: wasm32 has no reactor and no waiters to
+ * fail; Socket.Close still calls it, so provide the symbol. */
+void zan_io_close_notify(long long sock) {
+    (void)sock;
+}
+
 int zan_io_connect_status(long long sock) {
     (void)sock;
     return -1;

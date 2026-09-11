@@ -50,6 +50,17 @@ int32_t zan_io_connect_status(intptr_t fd);
  * was parked in accept -- the fd can never become ready again, and the loop
  * must report the failure instead of re-arming the watcher forever. */
 int32_t zan_io_socket_alive(intptr_t fd);
+
+/* Close-notification hook, called BEFORE the fd's close(2)/closesocket():
+ * fails every readiness waiter parked on `fd` with the end-of-stream shape
+ * (recv 0 / accept -1) and drops the fd from the readiness set. Closing an
+ * fd without this hook leaves its waiters parked on a slot keyed by the raw
+ * fd number; when the kernel recycles that number for a new socket the old
+ * waiter is served by (or delivers into) the new connection. With the hook,
+ * no waiter outlives the identity it registered against (A291-5). No-op on
+ * Windows, whose overlapped path already completes pending ops via
+ * CancelIoEx on shutdown. */
+void zan_io_close_notify(intptr_t fd);
 int64_t zan_io_socket_peer_ipv4(intptr_t fd);
 
 /* Resolve a hostname to an IPv4 address in the same byte order as inet_addr.

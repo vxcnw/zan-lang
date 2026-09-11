@@ -671,3 +671,22 @@ Log(q);                          // 打印 11 —— 闭包内外读写同一个
 - 判据：leak 行全指向服务端对象分配点、主输出全对 → 停服排水不足或 Stop 语义不
   可等待，不是真泄漏。修法方向：Stop 返回可等待句柄（服务端 join 自己的泵），
   而不是让每个用例猜排水时长。
+
+## reactor 关 fd 必须"先摘注册后 close"，且 Windows 上探针证不出差异（A291⑤，2026-09-12 已修）
+
+- rt_io 的等待者表按 fd 号索引（epoll/kqueue 槽位、select 链表都一样），close 后
+  OS 会把同一个 fd 号立刻复用给新连接：老 waiter 还挂在表里，新连接一有活动就被
+  唤醒，数据错投到上一条连接。修法不是句柄表重构，而是**关闭通知钩子**
+  `zan_io_close_notify(fd)`：Socket.Close 在 close/closesocket **之前**调用，把挂
+  在 fd 上的就绪等待者以「对端关闭」形态（recv 0 / accept -1）唤醒并摘除注册。
+  单一收口点覆盖 Close 全部调用点，不必逐个改 63 处。
+- 各后端形态差一眼看清：epoll/kqueue 走 EPOLL_CTL_DEL/EV_DELETE 后 io_take 双轮
+  收割；select 回退走 g_io_entries 链表 io_mark_dead + io_flush_dead；**Windows
+  无操作**——IOCP 的 CancelIoEx 已让挂起 overlapped 以 0 字节完成，钩子是给 POSIX
+  的；wasm32 空桩补符号。
+- 坑：在 Windows 上给这类修复做"红基线"是证不出的——fd 复用时序探针加不加钩子
+  输出完全一致（CancelIoEx 早兜住了）。别据此判定修复无效，可观察价值只在 POSIX
+  （epoll 侧至少编译验证：WSL gcc 编 rt_io.c 过即可），行为差异写进 TASKS.md 叙述。
+- stdlib 侧接运行时钩子的定式：`[DllImport("crt", EntryPoint="zan_io_*")]`
+  声明成 Socket 的私有静态 extern，在 Close 这类单一入口里先钩后关；运行时四个
+  后端 + wasm 桩都要有符号，否则任一目标平台链接就炸。
