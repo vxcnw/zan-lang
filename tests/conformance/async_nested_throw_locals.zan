@@ -1,0 +1,30 @@
+// A293: a throw from a plain (non-async) frame below an async frame must not
+// corrupt the awaiter's locals. The async $resume trampoline arms its handler
+// without recording the unwind-stack depth it was armed at, so the thrower's
+// unwind released every registered local of every frame between it and the
+// handler -- the awaiting frame's string came back null after the catch.
+using System;
+
+class Program {
+    // throws from one plain frame below the async frame
+    static void Deep() {
+        throw new ArgumentException("bad");
+    }
+
+    static async int Do() {
+        Program.Deep();
+        return 1;
+    }
+
+    static async void Main() {
+        string tmp = "plain-literal-string";
+        List<string> lst = new List<string>();
+        lst.Add("x");
+        try {
+            int r = await Program.Do();
+        } catch (ArgumentException e) {
+        }
+        Console.WriteLine("len=" + Convert.ToString(tmp.Length));
+        Console.WriteLine("cnt=" + Convert.ToString(lst.Count));
+    }
+}

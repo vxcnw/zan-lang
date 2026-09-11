@@ -294,8 +294,11 @@ class HttpClient {
         return this;
     }
 
-    /// <summary>为所有请求添加默认头。</summary>
+    /// <summary>为所有请求添加默认头。名字或值含 CR/LF/NUL/DEL
+    /// （会注入额外头字段或提前结束头部）、或名字含冒号（可夹带出
+    /// 第二个头字段）时不添加——与 HttpResponse.SetHeader 同一防线。</summary>
     HttpClient SetHeader(string name, string headerValue) {
+        if (!HttpResponse.IsValidHeader(name, headerValue)) { return this; }
         this.defaultHeaders.Add(name + ": " + headerValue);
         return this;
     }
@@ -499,9 +502,27 @@ class HttpClient {
     // 与旧 BuildRequest 的空正文行为一致。二进制正文的调用方
     // （SendBytesBodyAsync/SendBytesBodyTlsAsync）拿到头部后把
     // 文件字节单独按显式长度发送。
+    /// 请求目标（request-target）是否可安全写入请求行：CR/LF/NUL/DEL
+    /// 会把一行撕成两行（请求行注入/第二个请求），空格会把请求行切成
+    /// 多个 token。SetHeader 有同一防线；请求行是调用方字符串进入
+    /// 报文的另一入口，不能漏。
+    static bool IsRequestTargetSafe(string path) {
+        for (int i = 0; i < path.Length; i = i + 1) {
+            int c = path[i] & 255;
+            if (c == 0 || c == 10 || c == 13 || c == 127 || c == 32) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /// 构建请求头部半区；bodyLen<=0 时不写 Content-Length。
     string BuildRequestHead(string method, string path, int bodyLen,
                             bool close) {
+        if (!HttpClient.IsRequestTargetSafe(path)) {
+            throw new HttpRequestException(
+                "request target contains framing characters (CR/LF/space)");
+        }
         StringBuilder sb = new StringBuilder();
         sb.Append(method);
         sb.Append(" ");
@@ -2348,6 +2369,21 @@ class HttpClient {
         return HttpClient.AsciiNameEquals(s.Substring(sl - fl, fl), suf, fl);
     }
 
+    /// multipart 的 name/filename 原样进入 Content-Disposition 的引号内：
+    /// 含 CR/LF/NUL/DEL 会注入额外头字段或提前结束头部，含引号会逃出
+    /// 引号串。非法即抛，与 WebDavClient.ValidateHeader 同一防线。
+    static void ValidateMultipartToken(string what, string value) {
+        if (value.Length == 0) {
+            throw new ArgumentException("multipart " + what + " is empty");
+        }
+        for (int i = 0; i < value.Length; i = i + 1) {
+            int ch = value[i] & 255;
+            if (ch == 0 || ch == 10 || ch == 13 || ch == 127 || ch == 34) {
+                throw new ArgumentException("multipart " + what + " is invalid");
+            }
+        }
+    }
+
     /// 将文件后缀映射为 content type，默认 octet-stream。
     static string GuessMime(string name) {
         if (HttpClient.EndsWithCi(name, ".png")) { return "image/png"; }
@@ -2459,6 +2495,8 @@ class HttpClient {
             && fileLen > this.callPolicy.MaxRequestBytes()) {
             this.CheckRequestLimit(fileLen);
         }
+        HttpClient.ValidateMultipartToken("field name", field);
+        HttpClient.ValidateMultipartToken("file name", fileName);
         string fileData = File.ReadAllText(localPath);
         string boundary = "----ZanFormBoundary"
             + Convert.ToString(fileData.Length) + "z" + Convert.ToString(field.Length);
@@ -2504,6 +2542,8 @@ class HttpClient {
                 + localPath);
         }
         this.ArmTotalBudget();
+        HttpClient.ValidateMultipartToken("field name", field);
+        HttpClient.ValidateMultipartToken("file name", fileName);
         string boundary = "----ZanFormBoundary"
             + Convert.ToString(fileLen) + "z" + Convert.ToString(field.Length);
         string head = "--" + boundary + "\r\n"
@@ -2622,6 +2662,13 @@ class HttpClient {
         }
 
         HttpDeadlineToken watch = HttpDeadline.Arm(conn.Sock(), this.WriteBudget(), this.TotalBudget());
+        if (!HttpClient.IsRequestTargetSafe(path)) {
+            this.SetDownloadError("request target contains framing characters (CR/LF/space)");
+            HttpDeadline.Disarm(watch);
+            if (this.useTls) { stream.Close(); conn.Close(); ctx.Free(); }
+            else { conn.Close(); }
+            return 0 - 1;
+        }
         StringBuilder sb = new StringBuilder();
         sb.Append("GET ");
         sb.Append(path);
@@ -2978,6 +3025,13 @@ class HttpClient {
         }
 
         HttpDeadlineToken watch = HttpDeadline.Arm(conn.Sock(), this.WriteBudget(), this.TotalBudget());
+        if (!HttpClient.IsRequestTargetSafe(path)) {
+            this.SetDownloadError("request target contains framing characters (CR/LF/space)");
+            HttpDeadline.Disarm(watch);
+            if (this.useTls) { stream.Close(); conn.Close(); ctx.Free(); }
+            else { conn.Close(); }
+            return 0 - 1;
+        }
         StringBuilder sb = new StringBuilder();
         sb.Append("GET ");
         sb.Append(path);

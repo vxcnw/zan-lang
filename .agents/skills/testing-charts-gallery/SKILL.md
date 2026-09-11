@@ -134,6 +134,39 @@ option** 复算，逐字段 diff。
   中国地图/geo（`scatter-map-brush`/`effectScatter-map`）在 oracle 侧
   本身就跑不出来；标 `SKIP=原因` 而不是塞进对照。
 
+### 名字/文本类几何的 oracle：读 SSR 出来的 SVG，并**关掉启发式**
+
+轴名（`axis.name`）这类"文本放在哪"的问题没有数值钩子，只能读渲染产物。
+ECharts SSR（`{renderer:'svg', ssr:true}`）出来的 SVG 里每个 `<text>` 都带
+绝对 `transform="translate(x y)"`（或 `matrix(...)`）与 `text-anchor`，
+正则扫出来即页面像素——zrender 把组变换**烘进了元素自身**，没有嵌套 `<g>`
+可回溯（探针里写"向上找父组"是白费劲，`<g>` 只在少数元素上出现）。
+
+- **先关启发式再量**：`nameMoveOverlap` 缺省 **true**（`AxisBuilder.ts:522-525`），
+  轴名会被 `resolveAxisNameOverlapDefault` 从重合的刻度标签上推开——
+  实测 `yAxis.nameLocation:'end'` 带系列时从 `(axisX, plotY-gap)` 被推到
+  **绘图区水平中心**（`y@255,25` vs 无系列时 `y@50,25`）。要拿"基位"就
+  给该轴加 `nameMoveOverlap:false`，剩下的才是 `AxisBuilder.ts:855-880`
+  的纯数学。Zan 不移植这个启发式（确定性优先），只对基位。
+- **探针要跑三态，不要猜缺省**：对同一轴强制 `start|middle|end` 各渲一遍，
+  三态位置一次钉死；再用**不强制**的第四遍确认缺省落点与哪一态逐位相同
+  （`nameLocation` 官方缺省 `coord/axisDefault.ts:34` = `'end'`）。
+  骨架 `_scratch/chart_oracle/axisname.js`（输出即 `axisname.oracle.txt`）。
+- **别用最小 option**：`series: []` 会让 `axis.getAxesOnZeroOf()` 仍然
+  报 onZero（`canOnZeroToAxis` 只看对侧轴类型），但矩形/量程退化会把
+  中间结论带偏。**rect 一律用 `grid.getRect()` 打出来**，探针输出的
+  坐标必须能对着它念（expl: rect=100,100,400,200 ⇒ `x end` 页面 x =
+  100+400+15 = 515）。
+- **旋转态看 `matrix` 不看 `translate`**：y 轴 `middle` 是绕锚点
+  **−90°**（自下而上读），SVG 里是 `matrix(0,-1,1,0,cx,cy)`；正则只抓
+  `translate(...)` 会把它读成 `notranslate` 而整条漏掉（第一版探针就漏了，
+  差点把"y 轴 middle 竖排"这个语义漏掉）。`DrawTextRot(x, y, …)` 的
+  `(x,y)` 是未旋转行盒左上角、绕它刚性旋转，故 `matrix` 的 `(cx,cy)` 与
+  Zan 的 `(x,y)` **不是**同一个点——映射见 `Chart.AxisNameY`（锚点下移半
+  个文本宽）。
+- **`base` 是 Zan 保留字**（`src/compiler/lexer.c:28` 的 `TK_BASE`）：
+  写 `int base = …;` 报 `expected variable name`。改叫 `endY`/`startY`。
+
 ### 别用像素当"数据墨迹"的探针（本仓库无头 App 下不可用）
 
 想验量程紧不紧，直觉是"渲染两遍、diff 出数据像素的包围盒"。两条都

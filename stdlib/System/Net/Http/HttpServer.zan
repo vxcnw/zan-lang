@@ -80,8 +80,12 @@ class HttpServer {
     /// <summary>设置单个请求的最大可接受大小（字节，
     /// 请求头 + 请求体）。超过该大小的请求会返回 413，
     /// 并关闭连接，防止客户端用
-    /// 无限制的请求耗尽内存。</summary>
+    /// 无限制的请求耗尽内存。上限钳在 1 GiB：再大时帧解析里的
+    /// `headerEnd + bodyLen` 会 int 回绕，判限失效而放行超额请求；
+    /// 下限 1 KiB 避免 0/负数让每个请求都被 413。</summary>
     HttpServer SetMaxRequestBytes(int bytes) {
+        if (bytes < 1024) { bytes = 1024; }
+        if (bytes > 1073741824) { bytes = 1073741824; }
         this.maxRequestBytes = bytes;
         return this;
     }

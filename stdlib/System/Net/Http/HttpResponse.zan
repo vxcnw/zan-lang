@@ -78,6 +78,25 @@ class HttpResponse {
         return s.IndexOf("\r") >= 0 || s.IndexOf("\n") >= 0;
     }
 
+    /// <summary>头部名/值是否不含会破坏报文分帧的字符：NUL、CR、LF、
+    /// DEL。名字另禁冒号——否则可夹带出第二个头字段（头注入）。
+    /// <paramref name="isName"/> 为 true 时按名字判定。</summary>
+    static bool HeaderFramingSafe(bool isName, string s) {
+        for (int i = 0; i < s.Length; i = i + 1) {
+            int ch = s[i] & 255;
+            if (ch == 0 || ch == 10 || ch == 13 || ch == 127) { return false; }
+            if (isName && ch == 58) { return false; }
+        }
+        return true;
+    }
+
+    /// <summary>头部名与值是否可安全写入：名字非空且无冒号，两者都
+    /// 不含分帧字符。请求侧（HttpClient）与响应侧共用同一防线。</summary>
+    static bool IsValidHeader(string name, string value) {
+        return name.Length > 0 && HttpResponse.HeaderFramingSafe(true, name)
+            && HttpResponse.HeaderFramingSafe(false, value);
+    }
+
     /// <summary>创建重定向响应。Location 不允许注入折行；非法值
     /// 被保守拒绝，不产生一个可被下游解释的重定向头。</summary>
     static HttpResponse Redirect(string url) {
@@ -152,8 +171,7 @@ class HttpResponse {
     /// <summary>设置响应头。名称和值均禁止 CR/LF，避免注入
     /// 额外字段或响应体；非法输入保持响应可序列化但不添加该头。</summary>
     HttpResponse SetHeader(string name, string headerValue) {
-        if (name.Length == 0 || HttpResponse.HasCrlf(name)
-            || HttpResponse.HasCrlf(headerValue)) {
+        if (!HttpResponse.IsValidHeader(name, headerValue)) {
             return this;
         }
         this.headers.Add(name + ": " + headerValue);

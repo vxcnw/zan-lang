@@ -774,4 +774,24 @@ class Spec {
     static int MlRefreshW() { return Px(64); }       // 96
     static int MlRFootPadR() { return Px(6); }       // 1480 → 1489
     static int MlPages() { return 1; }
+
+    // ---- 成就（页 26）：外框/顶带/行/页脚几何复用 Mk*，只列差异（§5.3g）----
+    static int AcBandLabelW() { return Px(109); }    // 「成就分类」区 377..540 = 163，字居中 457
+    static int AcCol1W() { return Px(361); }         // 说明列 541..1083 = 541
+    static int AcHeadPadL() { return Px(20); }       // 表头「说明」字左锚 571
+    static int AcHead2PadL() { return Px(21); }      // 表头「领取」字左锚 1111（不居中于钮）
+    static int AcHead3PadR() { return Px(6); }       // 表头「奖励」字心 1333
+    static int AcCol2W() { return Px(59); }          // 领取列 1083..1171 = 88
+    static int AcCatH() { return Px(27); }           // 分类钮 40 高
+    static int AcCatGap() { return Px(6); }          // 9 → 节距 49（原版 47..50 不匀）
+    static int AcBoxPadB() { return Px(4); }         // 末行底 806 → 盒底 812
+    static int AcTextPadL() { return Px(7); }        // 行内字左锚 552（行内沿 542）
+    static int AcNamePadT() { return Px(4); }        // 成就行字心 233（行顶 209 + 1 边 + 6）
+    static int AcLineH() { return Px(17); }          // 两行字框各 25：字心 233 / 258
+    static int AcTakeW() { return Px(57); }          // 领取钮 1084..1169 = 86
+    static int AcTakeH() { return Px(24); }          // 227..262 = 36
+    static int AcSlotW() { return Px(44); }          // 奖励格 66 方
+    static int AcSlotGap() { return Px(6); }         // 9 → 节距 75
+    static int AcSlotPadL() { return Px(17); }       // 首格左沿 1193（奖励列起 1167）
+    static int AcPages() { return 3; }
 }

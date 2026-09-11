@@ -13,10 +13,10 @@ class Program {
         router.Get("/", "<h1>{{NAME}}</h1><p>Hello from Zan!</p>");
         router.Get("/ping", "pong");
 
-        Worker server = new Worker("http", "127.0.0.1", 8080);
+        Worker server = new Worker("http", "127.0.0.1", 8083);
         server.onHttpRequest = Program.Handle;
 
-        Console.WriteLine("{{NAME}} listening on http://127.0.0.1:8080");
+        Console.WriteLine("{{NAME}} listening on http://127.0.0.1:8083");
         await Worker.RunAll();            /* 永不返回 */
         return 0;
     }

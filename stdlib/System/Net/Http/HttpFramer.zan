@@ -267,7 +267,11 @@ class HttpFramer {
                 }
                 lf = this.IndexOfLf(pos);
             }
-            int size = 0;
+            // 长度用 64 位累积。32 位下 "100000000"（2^32）会在最后一位
+            // 回绕成 0，被误当成结束块，剩余字节随即按流水线解析成下一
+            // 条请求（框架错位/请求走私）。上限判定在每位累积之后，size
+            // 始终钳在 maxBodyBytes 内（至多约 2^35），64 位不会溢出。
+            long size = 0;
             int i = pos;
             bool any = false;
             bool bad = false;
@@ -277,8 +281,8 @@ class HttpFramer {
                 if (c == 59) { break; }          // ';' 块扩展，忽略其内容
                 int d = HttpFramer.HexVal(c);
                 if (d < 0) { bad = true; break; }
-                size = size * 16 + d;
-                if (size > maxBodyBytes) { acc.Free(); return 413; }
+                size = size * 16 + (long)d;
+                if (size > (long)maxBodyBytes) { acc.Free(); return 413; }
                 any = true;
                 i = i + 1;
             }
@@ -296,9 +300,11 @@ class HttpFramer {
                 int n = await this.Fill();
                 if (n == 0) { acc.Free(); return -1; }
             }
-            acc.WriteRaw(this.pend.Str(pos, size), size);
-            decoded = decoded + size;
-            pos = pos + size;
+            // size 已由上面的 maxBodyBytes 判定钳在 int 范围内。
+            int chunk = (int)size;
+            acc.WriteRaw(this.pend.Str(pos, chunk), chunk);
+            decoded = decoded + chunk;
+            pos = pos + chunk;
             // 块数据后必须紧跟 CRLF；缺失说明长度撒了谎。
             int c1 = this.pend.ByteAt(pos);
             int c2 = this.pend.ByteAt(pos + 1);

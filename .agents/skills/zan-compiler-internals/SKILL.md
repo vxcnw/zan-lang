@@ -345,6 +345,18 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
   平板（与算法无关=与 native 库无关=拷贝循环在扛），输出零拷贝后
   CBC 1267-1319 / GCM 2000-4413 MiB/s（raw 的 88-96%）。
 
+## 字符串字面量里的 `\xNN` 是码点，不是裸字节（2026-09-11 实测）
+
+- `"\xEF"` **不是** byte 0xEF，是码点 U+00EF，进字符串时编成两个 UTF-8 字节
+  `C3 AF`。于是 `"\xEF" + "\xBB" + "\xBF"` 不是 3 字节 BOM 而是 6 字节
+  `C3 AF C2 BB C2 BF`：同一份 82 字节的 CSS，拼上它读出 len 88、首字节 195，
+  写进文件得到的头是 `C3 AF C2 BB C2 BF`——「看起来像 BOM、其实不是」，
+  拿去验证 BOM 行为会得出错误结论（实测踩过一轮）。
+- 需要字节精确的内容（BOM、协议魔数、含高位字节的 fixture）一律从 `byte[]` 拼：
+  `byte[] raw = new byte[3]; raw[0] = (byte)0xEF; ...; string s = raw.ToStr(0, 3);`
+  ——`File.ReadAllText` 内部就是这样把 chunk 变字符串的。自检：`.Length` 等于
+  字节数（BOM 是 3 不是 6），首字节是你想要的码值。
+
 ## stdlib 按需拉入（demand-driven pull-in，2026-09-10）
 
 > 以前 `using Gui;` = 目录全量 glob + 传递 using 扫描到不动点，一个空窗口
@@ -617,19 +629,23 @@ Log(q);                          // 打印 11 —— 闭包内外读写同一个
   （停在 stream-progressive 的 4 行 / 11 行但内容错 / 全空），**全部 rc=0**；线索是用例的
   upstream 只 accept 2 个连接，转发器一旦复用连接就停在 accept 上，Main 的下一个 await 永不 resume。
 
-## async × 异常：嵌套非 async 函数里的 throw 会让 awaiter 局部归零（A293，未修）
+## async × 异常：unwind mark 是每个 handler 的义务，漏一个就殃及全部帧（A293，2026-09-11 已修）
 
-`_scratch/fixv/exc_local*.zan` 四组对照：
-
-- 在 await 的 async 方法体内直接 `throw`、由 awaiter `catch`：局部正常（len=20）。
-- `await` 真正挂起之后再 `throw`：正常。
-- **在嵌套的非 async 辅助函数里 `throw`、由 awaiter `catch`：awaiter 的所有局部
-  变成 NULL/0**（len=0）。辅助函数返回类或 int 都复现，用字面量局部也能复现，
-  与 StringBuilder / A279 无关。
-
-写「async + 异常 + 局部变量」的组合时，别依赖 catch 之后的局部值。怀疑点：
-`irgen_async.c` 的 EH trampoline（约 1442/1513——landing pad 只恢复了 resume 点，
-没恢复 awaiter frame 的 locals 槽）。已登记 TASKS.md A293。
+- 症状：async 方法内**嵌套的非 async 函数** throw、由 awaiter catch 后，awaiter 的
+  所有局部 NULL/0。最小红案：嵌套 sync throw + root catch + 一个 string 局部。
+- 根因（不在 trampoline 本身）：`emit_async_eh_prologue` 给 `$resume` arm trampoline
+  时**没写 handler 槽的 unwind mark（tmp 栈深度）**——mark 槽是 calloc 的 0。try 的
+  arm 写了 mark，trampoline 与 frame 内 try 的 re-arm 都漏了。thrower 是普通 sync 帧
+  时走 `emit_eh_unwind_to_handler(top)` → 读到 mark=0 → `__zan_eh_tmp_unwind(0)` 把
+  tmp 栈**从 0 起全部**注册槽释放并置 NULL——awaiter/root 帧的 owned 局部（string、
+  List）全部殃及。
+- 关键对照（定位时靠它剪枝）：throw 在 async 体内（走 trampoline land、rethrow 无
+  unwind）不坏；**嵌套 sync 帧才坏**；隔几个 sync 帧无关、await 是否真挂起无关。
+- 修：trampoline/rearm 两处 arm 补 `store tmp_top → mark_ptr(t1)`，与 try arm 对齐。
+- 教训：**handler 栈上每个写 top 的地方都必须同时写自己的 mark**——这是「谁 arm
+  谁负责记账」的契约，靠 calloc 0 兜底的槽 = 深度 0 = 「释放全世界」。新 handler
+  加进 EH 机制时，把「arm 三件套」写成一个小 helper（top++、写 mark、setjmp），
+  别让三步散在三处。
 
 ## 拉入闭包的链扫描：一个变量被两处清空 = 镜像全死（A300，2026-09-11 已修）
 
@@ -655,3 +671,22 @@ Log(q);                          // 打印 11 —— 闭包内外读写同一个
 - 判据：leak 行全指向服务端对象分配点、主输出全对 → 停服排水不足或 Stop 语义不
   可等待，不是真泄漏。修法方向：Stop 返回可等待句柄（服务端 join 自己的泵），
   而不是让每个用例猜排水时长。
+
+## reactor 关 fd 必须"先摘注册后 close"，且 Windows 上探针证不出差异（A291⑤，2026-09-12 已修）
+
+- rt_io 的等待者表按 fd 号索引（epoll/kqueue 槽位、select 链表都一样），close 后
+  OS 会把同一个 fd 号立刻复用给新连接：老 waiter 还挂在表里，新连接一有活动就被
+  唤醒，数据错投到上一条连接。修法不是句柄表重构，而是**关闭通知钩子**
+  `zan_io_close_notify(fd)`：Socket.Close 在 close/closesocket **之前**调用，把挂
+  在 fd 上的就绪等待者以「对端关闭」形态（recv 0 / accept -1）唤醒并摘除注册。
+  单一收口点覆盖 Close 全部调用点，不必逐个改 63 处。
+- 各后端形态差一眼看清：epoll/kqueue 走 EPOLL_CTL_DEL/EV_DELETE 后 io_take 双轮
+  收割；select 回退走 g_io_entries 链表 io_mark_dead + io_flush_dead；**Windows
+  无操作**——IOCP 的 CancelIoEx 已让挂起 overlapped 以 0 字节完成，钩子是给 POSIX
+  的；wasm32 空桩补符号。
+- 坑：在 Windows 上给这类修复做"红基线"是证不出的——fd 复用时序探针加不加钩子
+  输出完全一致（CancelIoEx 早兜住了）。别据此判定修复无效，可观察价值只在 POSIX
+  （epoll 侧至少编译验证：WSL gcc 编 rt_io.c 过即可），行为差异写进 TASKS.md 叙述。
+- stdlib 侧接运行时钩子的定式：`[DllImport("crt", EntryPoint="zan_io_*")]`
+  声明成 Socket 的私有静态 extern，在 Close 这类单一入口里先钩后关；运行时四个
+  后端 + wasm 桩都要有符号，否则任一目标平台链接就炸。

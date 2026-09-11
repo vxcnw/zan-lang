@@ -138,6 +138,33 @@ State the command you ran and what it printed. Separate "compiled", "ran" and
   type is part of the API: check it before assigning to anything but `var`
   (assigning an `int` to an object variable once crashed a port on its first
   request — silent at compile time, poison-value pointer at runtime).
+* `HttpClient.GetAsync/PostAsync` 只返回响应体，**拿不到 HTTP 状态码**——
+  把 403/429 映射成领域异常的 SDK 必须走 `SendAsync`（返回解析好的
+  `HttpResponse`，statusCode/body 一次拿全）。不要拿 body 再
+  `HttpResponse.Parse` 一次：GetAsync 返回的已经是剥掉头部的正文，
+  二次解析 statusCode 恒 200、body 变空。
+* `JsonValue.Get`/`PathGet` 可空性是编译期强制的：`x.Get(k) != null &&
+  x.Get(k).AsInt()` 这种"调两次"写法直接编译错误，必须先存局部变量再判
+  （每处一次 `Get` + null check）。
+* Steam 等 64 位 ID 的 JSON 约定是**字符串形态**（"76561197960287930"），
+  且个别字段文档写数字、线上回字符串（如 AuthenticateUserTicket 的
+  `result:"OK"`）——解析层两种形态都要接住。
+* 需要本地 HTTP 假网关自测的 SDK（微信/京东/Steam 同款套路）：
+  `HttpServer` 回放官方 JSON 形态 + `ExternalCallPolicy.Default()
+  .AllowLocalHttp()` 放行 loopback。曾有的坑（stdlib 已修，旧工具链仍会
+  踩）：TLS 客户端对明文服务器握手会永久挂死——`TlsStream.PumpInAsync`
+  对 `Recv<0` 不退出循环重挂 `ReadReady`，而 shutdown 后 readiness 只有一
+  次；给 SDK 留 `PlainHttpMode` 之类的明文开关是防御性设计。
+* `HttpClient` 请求行的 `path` 会原样进报文：调用方可控的 path 里带
+  CR/LF 就能把一行撕成多行走私第二个请求（与 `SetHeader` 的头注入同一
+  族）。stdlib 已修（`BuildRequestHead` 拒 CR/LF/SP/NUL/DEL，下载通道
+  同步把关）；自建 HTTP 客户端或旧工具链要自己校验。
+* 并行会话共享工作树时，"测试+stdlib 成对"的修复批**必须核对 stdlib 侧
+  文件真的进了提交**：实测某提交只带上了三个 conformance 测试而配套的
+  stdlib 半（HttpFramer/CookieJar/HttpClient 防线）全部留在工作树，TASKS
+  却记"已修"——`git log -S "<新增符号>"` 全历史查一遍 + `git show
+  <commit>:<stdlib文件> | grep <符号>` 是 30 秒的事，漏了就是标准库
+  裸奔一个版本周期。
 * Do not hard-code hosts, ports, credentials or business limits: they belong in
   the project config (`config/app.json` for server projects), read at run time.
 * Do not hand-draw GUI widgets: use the standard library's components

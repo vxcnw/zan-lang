@@ -1659,6 +1659,629 @@ class Program {
         }
     }
 
+    /// 这一批"静默失败"修复的定点：at-rule 的括号配对、`var()` 回退值、
+    /// `!important` 的真实权重、`border` 简写的线型、text-shadow、
+    /// `linear-gradient(to left)`，以及 Lint 报告。全部是原先
+    /// "写了不报错、也没有效果"的那一类，所以每一条都要在金标里留痕。
+    static void Coercion() {
+        // at-rule 的块必须整体跳过，且不吃掉紧随其后的规则。
+        StyleSheet at = Css.Parse(
+            "@media (max-width: 600px) { a { color: #ff0000; } }\n"
+            + "button { background: #00ff00; }\n"
+            + ".x { color: #0000ff; }");
+        StyleBox aa = new StyleBox(); at.ApplyBox(aa, "a");
+        StyleBox ab = new StyleBox(); at.ApplyBox(ab, "button");
+        StyleBox ax = new StyleBox(); at.ApplyBox(ax, ".x");
+        Console.WriteLine($"atrule a.fg {aa.fg} button.bg {ab.bg} x.fg {ax.fg}"
+                          + $" dropped {at.atRulesDropped}");
+
+        // `@import "x";` 这种语句式 at-rule 不得吞掉后续规则。
+        StyleSheet imp = Css.Parse(
+            "@import url(\"x.css\"); button { background: #00ff00; }");
+        StyleBox ib = new StyleBox(); imp.ApplyBox(ib, "button");
+        Console.WriteLine($"atimport button.bg {ib.bg} dropped {imp.atRulesDropped}");
+
+        // var() 回退值：未定义、空值、嵌套函数、#rgba 都要走回退。
+        List<string> names = new List<string>();
+        List<string> vals = new List<string>();
+        StyleSheet vr = Css.ParseWith(
+            "a { padding: var(--missing, 7); color: var(--c, #ff0000);"
+            + " background: var(--nope, rgba(0,0,0,.5)); }\n"
+            + "b { border: var(--nope, 1 solid) #123456;"
+            + " border-radius: var(--nope, #); }\n"
+            + "c { color: var(--nope, #f008); }\n"
+            + "d { color: var(--empty, #abcdef); }",
+            names, vals);
+        vals.Add("--empty"); vals.Add("");
+        names.Add("--empty");
+        StyleBox va = new StyleBox(); vr.ApplyBox(va, "a");
+        StyleBox vc = new StyleBox(); vr.ApplyBox(vc, "c");
+        StyleBox vd = new StyleBox(); vr.ApplyBox(vd, "d");
+        Console.WriteLine($"varfb padL {va.padL} fg {va.fg} bg {va.bg}");
+        Console.WriteLine($"varfb hex4 fg {vc.fg} empty {vd.fg}");
+
+        // !important：压过后写的普通声明，同一选择器内也成立。
+        StyleSheet im = Css.Parse(
+            "label { color: #ff0000 !important; }\n"
+            + "label { color: #0000ff; }\n"
+            + "other { padding: 3 !important; padding: 9; }");
+        StyleBox il = new StyleBox(); im.ApplyBox(il, "label");
+        StyleBox io = new StyleBox(); im.ApplyBox(io, "other");
+        Console.WriteLine($"important label.fg {il.fg} other.padL {io.padL}");
+        // 换肤合并：应用表（后合并）的普通声明不得压过皮肤的 important。
+        StyleSheet skin = Css.Parse("w { color: #ff0000 !important; }");
+        StyleSheet app = Css.Parse("w { color: #0000ff; }");
+        skin.MergeSheet(app);
+        StyleBox mw = new StyleBox(); skin.ApplyBox(mw, "w");
+        Console.WriteLine($"important merge fg {mw.fg}");
+
+        // border 简写的线型词。
+        StyleSheet bd = Css.Parse(
+            "a { border: 2 solid #ff0000; } b { border: 1 dashed #00ff00; }"
+            + " c { border: 3 dotted #0000ff; } d { border: none; }"
+            + " e { border-style: dashed; } f { border: 1 double #111111; }");
+        List<string> bs = new List<string>{ "a", "b", "c", "d", "e", "f" };
+        for (int i = 0; i < bs.Count; i = i + 1) {
+            StyleBox x = new StyleBox();
+            bd.ApplyBox(x, bs[i]);
+            Console.WriteLine($"border {bs[i]} style {x.borderStyle} w {x.borderW} col {x.borderColor}");
+        }
+
+        // text-shadow：单层偏移 / ≥3 层零模糊按描边 / none 复位。
+        StyleSheet ts = Css.Parse(
+            "a { text-shadow: 1px 1px 0 #000000; }\n"
+            + "b { text-shadow: 1px 1px 0 #000000, -1px -1px 0 #000000,"
+            + " 1px -1px 0 #000000, -1px 1px 0 #000000; }\n"
+            + "c { text-shadow: none; }\n"
+            + "d { text-shadow: 2px 3px 4px rgba(0,0,0,.5); }\n");
+        List<string> tsel = new List<string>{ "a", "b", "c", "d" };
+        for (int i = 0; i < tsel.Count; i = i + 1) {
+            StyleBox x = new StyleBox();
+            ts.ApplyBox(x, tsel[i]);
+            Console.WriteLine($"textshadow {tsel[i]} col {x.tsColor} dx {x.tsDx} dy {x.tsDy} outline {x.tsOutline}");
+        }
+
+        // `to left` / `270deg` 的横向镜像。
+        StyleSheet gl = Css.Parse(
+            "a { background: linear-gradient(to left, #ff0000, #0000ff); }\n"
+            + "b { background: linear-gradient(270deg, #ff0000, #0000ff); }\n"
+            + "c { background: linear-gradient(to right, #ff0000, #0000ff); }\n");
+        List<string> gsel = new List<string>{ "a", "b", "c" };
+        for (int i = 0; i < gsel.Count; i = i + 1) {
+            StyleBox x = new StyleBox();
+            gl.ApplyBox(x, gsel[i]);
+            Console.WriteLine($"gradleft {gsel[i]} dir {x.bgDir} bg {x.bg} to {x.bgTo}");
+        }
+
+        // Lint：不支持的选择器 / 一条都没消费的规则 / 收了但无效果的属性。
+        StyleSheet lint = Css.Parse(
+            ".a .b { color: #ff0000; }\n"
+            + "button > span { color: #00ff00; }\n"
+            + "card { wibble: 3; }\n"
+            + "z { float: right; color: #ff0000; }\n"
+            + ".fine { color: #0000ff; }");
+        List<string> audit = lint.Audit();
+        Console.WriteLine($"lint count {audit.Count}");
+        for (int i = 0; i < audit.Count; i = i + 1) {
+            Console.WriteLine($"lint   {audit[i]}");
+        }
+    }
+
+    /// 语法面本身的定点：通用选择器、属性选择器全部运算符、布尔属性
+    /// 到状态位的映射、`:not()`/`:is()`/`:where()` 的匹配与权重、伪元素、
+    /// `@supports` 守卫（含值级判定）、`@layer` 摊平，以及 Lint 对
+    /// "永不匹配"和"单位没解析"的点名。这些以前都是"写了没反应也
+    /// 不报错"的面，所以每一条都要在金标里留痕。
+    static void Syntax() {
+        // 通用选择器 `*`，以及 `[class]` 的存在性判断（class 属性空串
+        // 视为没有该属性）。
+        StyleSheet su = Css.Parse("* { padding: 2; }\n[class] { margin: 3; }");
+        Program.SynBox("univ cls", su, "button", "primary");
+        Program.SynBox("univ bare", su, "button", "");
+        Program.SynBox("univ multi", su, "div", "a b");
+
+        // 属性选择器各运算符：`^=` 前缀、`$=` 后缀、`~=` 整词、
+        // `|=` 整词或 `词-`、`*=` 子串，以及 `i` 大小写不敏感标志。
+        // 每个运算符都给命中/不命中两条，命中给 fg 上色。
+        Program.SynFg("caret hit",
+                      Css.Parse("[class^=\"btn\"] { color: #ff0000; }"),
+                      "button", "btn-primary");
+        Program.SynFg("caret miss",
+                      Css.Parse("[class^=\"btn\"] { color: #ff0000; }"),
+                      "button", "xbtn");
+        Program.SynFg("dollar hit",
+                      Css.Parse("[class$=\"primary\"] { color: #ff0000; }"),
+                      "button", "x primary");
+        Program.SynFg("dollar miss",
+                      Css.Parse("[class$=\"primary\"] { color: #ff0000; }"),
+                      "button", "primary-x");
+        Program.SynFg("tilde hit",
+                      Css.Parse("[class~=\"tab\"] { color: #ff0000; }"),
+                      "button", "a tab");
+        Program.SynFg("tilde miss",
+                      Css.Parse("[class~=\"tab\"] { color: #ff0000; }"),
+                      "button", "tabs");
+        Program.SynFg("pipe hit",
+                      Css.Parse("[class|=\"nav\"] { color: #ff0000; }"),
+                      "button", "nav-item");
+        Program.SynFg("pipe miss",
+                      Css.Parse("[class|=\"nav\"] { color: #ff0000; }"),
+                      "button", "navbar");
+        Program.SynFg("star case",
+                      Css.Parse("[class*=\"ICON\"] { color: #ff0000; }"),
+                      "button", "Icon-x");
+        Program.SynFg("star i hit",
+                      Css.Parse("[class*=\"icon\" i] { color: #ff0000; }"),
+                      "button", "Icon-x");
+        Program.SynFg("star i miss",
+                      Css.Parse("[class*=\"icon\" i] { color: #ff0000; }"),
+                      "button", "xyz");
+
+        // 布尔属性映射到已有状态位：`[disabled]` 就是 `:disabled`，
+        // `[disabled="false"]` 反过来（未禁用时命中）；`:enabled` 与
+        // `:disabled` 互补。属性取真时只上对应的状态位。
+        StyleSheet ss = Css.Parse(
+            "button[disabled] { opacity: 10; }\n"
+            + "button[disabled=\"false\"] { opacity: 20; }\n"
+            + "button[checked] { padding-left: 30; }\n"
+            + "button[selected] { padding-right: 40; }\n"
+            + "button:enabled { padding-top: 50; }");
+        Program.SynAttr("disabled", ss, Style.SDisabled());
+        Program.SynAttr("normal", ss, Style.SNormal());
+        Program.SynAttr("checked", ss, Style.SChecked());
+        Program.SynAttr("selected", ss, Style.SSelected());
+
+        // `:not()` / `:is()` / `:where()`。
+        StyleSheet sn = Css.Parse(
+            "p:not(.x) { color: #ff0000; }\n"
+            + "q:is(.a, .b) { color: #00ff00; }\n"
+            + "r:where(.c) { background: #0000ff; }\n"
+            + "s:not(.x):not(.y) { accent-color: #111111; }");
+        Program.SynPick("not hit", sn, "p", "z");
+        Program.SynPick("not miss", sn, "p", "x");
+        Program.SynPick("is a", sn, "q", "a");
+        Program.SynPick("is b", sn, "q", "b");
+        Program.SynPick("is miss", sn, "q", "c");
+        Program.SynPick("where hit", sn, "r", "c");
+        Program.SynPick("not not hit", sn, "s", "z");
+        Program.SynPick("not not miss", sn, "s", "x");
+
+        // `:where()` 计 0 权重：垫不住 `.w` 的类权重；与 type 同权重时
+        // 靠文档顺序取胜。`:is()` 取内层权重，能压过同权重的 `.w`。
+        Program.SynFg("where loses", Css.Parse(
+            "c { color: #ff0000; }\n"
+            + "c.w { color: #00ff00; }\n"
+            + "c:where(.w) { color: #0000ff; }"), "c", "w");
+        Program.SynFg("where ties", Css.Parse(
+            "c { color: #ff0000; }\n"
+            + "c:where(.w) { color: #0000ff; }"), "c", "w");
+        Program.SynFg("is ties", Css.Parse(
+            "c { color: #ff0000; }\n"
+            + "c.w { color: #00ff00; }\n"
+            + "c:is(.w) { color: #0000ff; }"), "c", "w");
+
+        // 伪元素当部件：`::placeholder` 与旧拼写 `:placeholder` 等价，
+        // 部件名对上就命中；`::before` 要生成内容，报永不匹配。
+        StyleSheet se = Css.Parse(
+            "input::placeholder { color: #ff0000; }\n"
+            + "input:placeholder { background: #00ff00; }\n"
+            + "p::before { color: #0000ff; }");
+        Program.SynPart("placeholder", se, "input", "placeholder");
+        Program.SynPart("input base", se, "input", "");
+        Program.SynPart("before", se, "p", "");
+
+        // `@supports`：值级判定（`display: grid` 引擎没有，守卫为假）、
+        // `not` / `and` / `or`，以及守卫假时按条件原文报出。
+        StyleSheet sap = Css.Parse(
+            "@supports (display: flex) { a { color: #ff0000; } }\n"
+            + "@supports (display: grid) { b { color: #00ff00; } }\n"
+            + "@supports not (display: grid) { c { color: #0000ff; } }\n"
+            + "@supports (display: flex) and (position: sticky) { d { color: #111111; } }\n"
+            + "@supports (display: grid) or (position: absolute) { e { color: #222222; } }\n"
+            + "f { color: #333333; }");
+        List<string> sapSel = new List<string>{ "a", "b", "c", "d", "e", "f" };
+        for (int i = 0; i < sapSel.Count; i = i + 1) {
+            StyleBox x = new StyleBox();
+            sap.ApplyBox(x, sapSel[i]);
+            Console.WriteLine($"syn supports {sapSel[i]} fg {x.fg}");
+        }
+        List<string> sapLint = sap.Audit();
+        Console.WriteLine($"syn supports skipped {sap.atGuardsSkipped}"
+                          + $" dropped {sap.atRulesDropped}");
+        for (int i = 0; i < sapLint.Count; i = i + 1) {
+            Console.WriteLine($"syn supports lint {sapLint[i]}");
+        }
+
+        // `@layer` 摊平：没有层叠优先级模型，按文档顺序应用（近似），
+        // 但不整块丢弃（含匿名层）。
+        StyleSheet sl = Css.Parse(
+            "@layer base { a { color: #ff0000; } }\n"
+            + "@layer theme { a { color: #00ff00; } }\n"
+            + "a { background: #0000ff; }\n"
+            + "@layer { b { padding-left: 7; } }");
+        StyleBox layA = new StyleBox();
+        sl.ApplyBox(layA, "a");
+        StyleBox layB = new StyleBox();
+        sl.ApplyBox(layB, "b");
+        Console.WriteLine($"syn layer a.fg {layA.fg} a.bg {layA.bg}"
+                          + $" b.padL {layB.padL} dropped {sl.atRulesDropped}");
+
+        // Lint：永不匹配的选择器逐条给原因、未解析单位点名，而 `0`
+        // 这种没有单位的零值不能误报。
+        StyleSheet ln = Css.Parse(
+            "li:first-child { color: #ff0000; }\n"
+            + "p::before { color: #00ff00; }\n"
+            + "tr:nth-child(2n) { color: #0000ff; }\n"
+            + "i:not(:first-child) { color: #111111; }\n"
+            + "[hidden] { color: #222222; }\n"
+            + "input[type=\"text\"] { color: #333333; }\n"
+            + ".pct { padding: 50%; font-size: 1.5rem; }\n"
+            + ".zero { margin: 0; }\n"
+            + "@supports (display: grid) { .g { color: #444444; } }\n"
+            + ".fine { color: #555555; }");
+        List<string> lnLint = ln.Audit();
+        Console.WriteLine($"synlint count {lnLint.Count}");
+        for (int i = 0; i < lnLint.Count; i = i + 1) {
+            Console.WriteLine($"synlint {lnLint[i]}");
+        }
+    }
+
+    /// 一条 `ApplyMatch`（universal / `[class]` 这类无类型选择器走真实
+    /// 匹配路径；`ApplyBox` 只是按选择器文本查表，测不出选择器模型）。
+    static void SynBox(string tag, StyleSheet s, string type, string cls) {
+        StyleBox b = new StyleBox();
+        s.ApplyMatch(b, type, cls, "", "", Style.SNormal());
+        Console.WriteLine($"syn {tag} padL {b.padL} marL {b.marL}");
+    }
+
+    /// 一条"命中就给 fg 上色"的选择器检查。
+    static void SynFg(string tag, StyleSheet s, string type, string cls) {
+        StyleBox b = new StyleBox();
+        s.ApplyMatch(b, type, cls, "", "", Style.SNormal());
+        Console.WriteLine($"syn {tag} [{cls}] fg {b.fg}");
+    }
+
+    /// 布尔属性 / 状态位映射检查。
+    static void SynAttr(string tag, StyleSheet s, int bits) {
+        StyleBox b = new StyleBox();
+        s.ApplyMatch(b, "button", "", "", "", bits);
+        Console.WriteLine($"syn attr {tag} opacity {b.opacity} padL {b.padL}"
+                          + $" padR {b.padR} padT {b.padT}");
+    }
+
+    /// `:not()`/`:is()`/`:where()` 的三种目标属性一起看。
+    static void SynPick(string tag, StyleSheet s, string type, string cls) {
+        StyleBox b = new StyleBox();
+        s.ApplyMatch(b, type, cls, "", "", Style.SNormal());
+        Console.WriteLine($"syn {tag} fg {b.fg} bg {b.bg} accent {b.accent}");
+    }
+
+    /// 部件选择器检查（`part` 走 ApplyMatch 的 part 参数）。
+    static void SynPart(string tag, StyleSheet s, string type, string part) {
+        StyleBox b = new StyleBox();
+        s.ApplyMatch(b, type, "", "", part, Style.SNormal());
+        Console.WriteLine($"syn part {tag} fg {b.fg} bg {b.bg}");
+    }
+
+    /// 在给定节点上跑一次真实匹配（带树上下文），打印 fg/accent。
+    static void TreeFg(string tag, StyleSheet s, Control node) {
+        StyleBox b = new StyleBox();
+        s.ApplyMatchCtx(b, node.StyleType(), node.Class, node.name, "",
+                        Style.SNormal(), node);
+        Console.WriteLine($"tree {tag} fg {b.fg} accent {b.accent}");
+    }
+
+    /// 组合器链与结构性伪类的树上下文匹配。手工搭一棵 retained 树，
+    /// 用 ApplyMatchCtx（真实匹配路径，非按文本查表）逐节点看声明：
+    /// 子/后代/相邻兄弟/通用兄弟组合器、:first/:last/:only/:nth(-of-type)、
+    /// :not(:first-child)、:empty；:has 仍不可判定（Lint 报 never）。
+    static void TreeCtx() {
+        StyleSheet s = Css.Parse(
+            "panel > title { color: #111111; }\n"
+            + "panel badge { color: #222222; }\n"
+            + "row > label + label { color: #333333; }\n"
+            + "row > label ~ label { accent-color: #444444; }\n"
+            + "list > item:first-child { color: #555555; }\n"
+            + "list > item:last-child { color: #666666; }\n"
+            + "list > item:nth-child(2) { color: #777777; }\n"
+            + "list > item:nth-child(odd) { background: #888888; }\n"
+            + "grid > button:nth-of-type(2n) { color: #999999; }\n"
+            + ".cards > card:only-child { color: #aaaaaa; }\n"
+            + "panel:has(title) { color: #bbbbbb; }\n"
+            + "grid > label:not(:first-child) { accent-color: #cccccc; }\n"
+            + "box:empty { color: #dddddd; }\n");
+        TNode panel = new TNode();
+        panel.InitTNode("panel", "p1");
+        TNode title = new TNode();
+        title.InitTNode("title", "t");
+        panel.Add(title);
+        TNode row = new TNode();
+        row.InitTNode("row", "r");
+        panel.Add(row);
+        TNode labelA = new TNode();
+        labelA.InitTNode("label", "la");
+        TNode labelB = new TNode();
+        labelB.InitTNode("label", "lb");
+        TNode badge = new TNode();
+        badge.InitTNode("badge", "bg");
+        row.Add(labelA);
+        row.Add(labelB);
+        row.Add(badge);
+        TNode list = new TNode();
+        list.InitTNode("list", "l");
+        panel.Add(list);
+        TNode item1 = new TNode();
+        item1.InitTNode("item", "i1");
+        TNode item2 = new TNode();
+        item2.InitTNode("item", "i2");
+        TNode item3 = new TNode();
+        item3.InitTNode("item", "i3");
+        list.Add(item1);
+        list.Add(item2);
+        list.Add(item3);
+        TNode grid = new TNode();
+        grid.InitTNode("grid", "g");
+        panel.Add(grid);
+        TNode btn1 = new TNode();
+        btn1.InitTNode("button", "b1");
+        TNode glabel1 = new TNode();
+        glabel1.InitTNode("label", "gl1");
+        TNode btn2 = new TNode();
+        btn2.InitTNode("button", "b2");
+        TNode glabel2 = new TNode();
+        glabel2.InitTNode("label", "gl2");
+        grid.Add(btn1);
+        grid.Add(glabel1);
+        grid.Add(btn2);
+        grid.Add(glabel2);
+        TNode cards = new TNode();
+        cards.InitTNode("cards", "cs");
+        cards.Class = "cards";
+        panel.Add(cards);
+        TNode card = new TNode();
+        card.InitTNode("card", "c");
+        cards.Add(card);
+        TNode box = new TNode();
+        box.InitTNode("box", "bx");
+
+        // panel > title：直接子代命中；后代规则 `panel badge` 对
+        // 隔代的 badge 也命中（panel > badge 才不该命中）。
+        Program.TreeFg("title", s, title);
+        Program.TreeFg("badge-descendant", s, badge);
+        // 相邻兄弟只打 labelB（前面紧邻一个 label）；通用兄弟打
+        // labelA 之后的 label，accent 落在 labelB。
+        Program.TreeFg("label-a", s, labelA);
+        Program.TreeFg("label-b", s, labelB);
+        // 结构性：first/last/nth(2)/nth(odd)。item1 同时吃到
+        // first-child(fg) 与 odd(bg)；item3 只有 odd 的 bg。
+        Program.TreeFg("item1", s, item1);
+        Program.TreeFg("item2", s, item2);
+        Program.TreeFg("item3", s, item3);
+        // nth-of-type 按类型计数：第 2 个 button 命中，第 1 个不命中；
+        // not(:first-child) 的 accent 打到两个 grid label。
+        Program.TreeFg("btn1", s, btn1);
+        Program.TreeFg("btn2", s, btn2);
+        Program.TreeFg("grid-label1", s, glabel1);
+        Program.TreeFg("grid-label2", s, glabel2);
+        // only-child / empty（box 没挂到树上也算：无父即无子）。
+        Program.TreeFg("card-only", s, card);
+        Program.TreeFg("box-empty", s, box);
+        // :has() 不可判定：panel 不得被上色，Lint 报 never。
+        Program.TreeFg("panel-no-has", s, panel);
+        List<string> relLint = s.Audit();
+        Console.WriteLine($"tree lint count {relLint.Count}");
+        for (int i = 0; i < relLint.Count; i = i + 1) {
+            Console.WriteLine($"tree lint   {relLint[i]}");
+        }
+
+        // 无树上下文（immediate 路径）：组合器/结构性选择器不命中，
+        // 同一张表里普通规则照常。
+        StyleBox flat = new StyleBox();
+        s.ApplyMatch(flat, "title", "", "", "", Style.SNormal());
+        Console.WriteLine($"tree flat-title fg {flat.fg}");
+    }
+
+    /// 长度单位与数学函数：em/rem/pt/vw/vh、ex/ch、
+    /// calc/min/max/clamp（可嵌套）、厂商前缀剥离。环境基准用
+    /// 裸盒缺省（根字号 16、视口 1280x720），预期值写在注释里。
+    static void Units() {
+        StyleSheet u = Css.Parse(
+            "a { padding-left: 1.5em; padding-top: 2rem; margin-left: 12pt;\n"
+            + "    width: 50vw; height: 25vh; }\n"
+            + "b { font-size: 20px; padding-right: calc(10px + 2em);\n"
+            + "    margin-top: clamp(10px, 5vw, 30px);\n"
+            + "    margin-bottom: min(40px, 3vw);\n"
+            + "    max-width: max(100px, 20vw); }\n"
+            + "c { font-size: 1.25em; letter-spacing: 0.5ch; }\n"
+            + "d { -webkit-box-shadow: 1 2 3 #ff0000;\n"
+            + "    -moz-transform: rotate(45deg);\n"
+            + "    -webkit-transition: 120ms; }\n"
+            + "e { padding: calc(2 * (6px + 4px)) 1pc; }\n");
+        // a：1.5em 在 font-size 未声明时用根字号 16 -> 24；2rem -> 32；
+        //    12pt 按 96dpi -> 16；50vw -> 640；25vh -> 180。
+        StyleBox ua = new StyleBox();
+        u.ApplyBox(ua, "a");
+        Console.WriteLine($"units a padL {ua.padL} padT {ua.padT} marL {ua.marL}"
+                          + $" w {ua.width} h {ua.height}");
+        // b：font 20；calc(10 + 2em=40) -> 50；clamp(10, 5vw=64, 30) -> 30；
+        //    min(40, 3vw=38) -> 38；max(100, 20vw=256) -> 256。
+        StyleBox ub = new StyleBox();
+        u.ApplyBox(ub, "b");
+        Console.WriteLine($"units b font {ub.fontPx} padR {ub.padR} marT {ub.marT}"
+                          + $" marB {ub.marB} maxW {ub.maxW}");
+        // c：1.25em -> 20；0.5ch 近似半字高 -> 4。
+        StyleBox uc = new StyleBox();
+        u.ApplyBox(uc, "c");
+        Console.WriteLine($"units c font {uc.fontPx} spacing {uc.letterSpacing}");
+        // d：前缀剥离后与无前缀声明同义。
+        StyleBox ud = new StyleBox();
+        u.ApplyBox(ud, "d");
+        Console.WriteLine($"units d shadow {ud.shadow} dx {ud.shadowDx}"
+                          + $" dy {ud.shadowDy} blur {ud.shadowBlur}"
+                          + $" rot {ud.rotate} trans {ud.transitionMs}");
+        // e：calc 嵌套括号与乘法 -> 20；1pc = 16px。
+        StyleBox ue = new StyleBox();
+        u.ApplyBox(ue, "e");
+        Console.WriteLine($"units e padT {ue.padT} padR {ue.padR}");
+        List<string> uLint = u.Audit();
+        Console.WriteLine($"units lint count {uLint.Count}");
+        for (int i = 0; i < uLint.Count; i = i + 1) {
+            Console.WriteLine($"units lint   {uLint[i]}");
+        }
+    }
+
+    /// @media 条件求值：min/max-width、暗色与减弱动效偏好、
+    /// orientation、逗号（或）、not all and、Level 4 范围语法
+    /// （`width >= n`、`n <= width <= m`）。媒体环境就是正在填充
+    /// 的 StyleBox（envVw/envVh/mediaDark/mediaReduced），测试直接
+    /// 改字段驱动不同设备画像；裸盒缺省 1280x720、亮色。
+    static void Media() {
+        StyleSheet s = Css.Parse(
+            ".m { color: #010101; }\n"
+            + "@media (min-width: 800px) { .m { color: #020202; } }\n"
+            + "@media (max-width: 640px) { .m { letter-spacing: 4px; } }\n"
+            + "@media (prefers-color-scheme: dark) { .m { accent-color: #040404; } }\n"
+            + "@media (prefers-reduced-motion: reduce) { .m { background: #050505; } }\n"
+            + "@media (orientation: landscape) { .m { border-top: 3px solid #060606; } }\n"
+            + "@media (max-width: 100px), (min-width: 2000px) { .m { color: #070707; } }\n"
+            + "@media not all and (min-width: 500px) { .m { margin-left: 8px; } }\n"
+            + "@media not all and (min-width: 5000px) { .m { margin-right: 9px; } }\n"
+            + "@media (width >= 800px) { .m { margin-top: 11px; } }\n"
+            + "@media (400px <= width <= 2000px) { .m { margin-bottom: 12px; } }\n");
+        // 宽视口亮色：min-width 命中（逗号那条两支都假，not 500px
+        // 也假），Level 4 两条都命中。
+        StyleBox wide = new StyleBox();
+        s.ApplyMatchCtx(wide, "box", "m", "", "", Style.SNormal(), null);
+        Console.WriteLine($"media wide fg {wide.fg} marL {wide.marL}"
+                          + $" marR {wide.marR} marT {wide.marT}"
+                          + $" marB {wide.marB} borderTop {wide.borderTopW}"
+                          + $" accent {wide.accent} spacing {wide.letterSpacing}");
+        // 窄视口：min-width 掉、max-width 640 命中、not 500px 命中。
+        StyleBox narrow = new StyleBox();
+        narrow.envVw = 500;
+        s.ApplyMatchCtx(narrow, "box", "m", "", "", Style.SNormal(), null);
+        Console.WriteLine($"media narrow fg {narrow.fg} spacing {narrow.letterSpacing}"
+                          + $" marL {narrow.marL} marT {narrow.marT}");
+        // 暗色 + 减弱动效：偏好特征命中。
+        StyleBox dark = new StyleBox();
+        dark.mediaDark = true;
+        dark.mediaReduced = true;
+        s.ApplyMatchCtx(dark, "box", "m", "", "", Style.SNormal(), null);
+        Console.WriteLine($"media dark accent {dark.accent} bg {dark.bg}");
+        List<string> mLint = s.Audit();
+        Console.WriteLine($"media lint count {mLint.Count}");
+        for (int i = 0; i < mLint.Count; i = i + 1) {
+            Console.WriteLine($"media lint   {mLint[i]}");
+        }
+    }
+
+    static int FgOf(StyleSheet s, string cls) {
+        StyleBox b = new StyleBox();
+        s.ApplyMatch(b, "box", cls, "", "", Style.SNormal());
+        return b.fg;
+    }
+
+    static int CountOf(string s, string sub) {
+        int n = 0;
+        int i = Css.IndexFrom(s, sub, 0);
+        while (i >= 0) {
+            n = n + 1;
+            i = Css.IndexFrom(s, sub, i + sub.Length);
+        }
+        return n;
+    }
+
+    /// @import 展开：相对路径按引入者目录解析、url() 形式、
+    /// 媒体限定导入（screen 保留 / print 丢弃）、环检测断链、
+    /// 缺文件静默跳过、跨目录多层链。临时文件建在系统临时
+    /// 目录，内容固定，可重复运行；断言走解析后的盒值，
+    /// 输出不含路径，golden 稳定。
+    static void Imports() {
+        string dir = Path.GetTempPath() + "zan_css_imp_test";
+        if (Directory.Exists(dir)) { Directory.Delete(dir); }
+        Directory.CreateDirectory(dir);
+        Directory.CreateDirectory(dir + "/nested");
+        File.WriteAllText(dir + "/main.css",
+            "@import \"tokens.css\";\n"
+            + "@import url(\"nested/deep.css\");\n"
+            + "@import \"loop1.css\";\n"
+            + "@import \"gone.css\";\n"
+            + "@import \"media.css\" screen;\n"
+            + "@import \"media.css\" print;\n"
+            + ".root { color: #101010; }\n");
+        File.WriteAllText(dir + "/tokens.css",
+            ":root { --imp-accent: #202020; }\n.tok { color: #303030; }\n");
+        File.WriteAllText(dir + "/extra.css", ".extra { color: #505050; }\n");
+        File.WriteAllText(dir + "/nested/deep.css",
+            "@import \"../extra.css\";\n.deep { color: #404040; }\n");
+        File.WriteAllText(dir + "/loop1.css",
+            "@import \"loop2.css\";\n.l1 { color: #606060; }\n");
+        File.WriteAllText(dir + "/loop2.css",
+            "@import \"loop1.css\";\n.l2 { color: #707070; }\n");
+        File.WriteAllText(dir + "/media.css", ".mq { color: #808080; }\n");
+        string text = Css.ResolveImports(dir + "/main.css");
+        StyleSheet s = Css.Parse(text);
+        Console.WriteLine($"imports tok fg {Program.FgOf(s, "tok")}"
+                          + $" extra {Program.FgOf(s, "extra")}"
+                          + $" deep {Program.FgOf(s, "deep")}"
+                          + $" l1 {Program.FgOf(s, "l1")}"
+                          + $" l2 {Program.FgOf(s, "l2")}"
+                          + $" mq {Program.FgOf(s, "mq")}"
+                          + $" root {Program.FgOf(s, "root")}");
+        // 不存在的文件静默跳过；print 限定的导入被丢弃。
+        Console.WriteLine($"imports var {s.Var("--imp-accent")}"
+                          + $" gone {Program.FgOf(s, "gone")}");
+        Console.WriteLine($"imports leftover {Css.IndexOfImport(text) >= 0}"
+                          + $" mq-once {Program.CountOf(text, ".mq") == 1}"
+                          + $" l1-once {Program.CountOf(text, ".l1") == 1}");
+    }
+
+    /// 现代颜色与 currentColor：空格语法 rgb()/hsl() + 斜杠 alpha、
+    /// hue 单位、hwb()、oklab()/oklch()、lab()/lch()、color-mix()、
+    /// currentColor 记账（级联后替换成最终前景色）、cursor 近似映射。
+    /// 白/黑/灰锚点的预期值写在注释里。
+    static void Modern() {
+        StyleSheet s = Css.Parse(
+            "a { color: rgb(0 128 255); }\n"
+            + "b { color: rgb(0 128 255 / 50%); }\n"
+            + "c { color: hsl(120 50% 50% / 0.5); }\n"
+            + "d { color: hsl(120, 50%, 50%); }\n"
+            + "e { color: hsl(0.5turn 50% 50%); }\n"
+            + "f { color: hwb(0 0% 0%); }\n"
+            + "g { color: hwb(120 20% 20%); }\n"
+            + "h { color: oklab(1 0 0); }\n"
+            + "i { color: oklch(0.5 0 0); }\n"
+            + "j { color: lab(100 0 0); }\n"
+            + "k { color: lch(50 60 40); }\n"
+            + "l { color: color-mix(in srgb, red, blue); }\n"
+            + "m { color: color-mix(in srgb, red 25%, blue); }\n"
+            + "n { color: #123456; background: currentcolor;\n"
+            + "    border-top-color: currentColor; accent-color: currentcolor; }\n"
+            + "o { color: currentColor; }\n"
+            + "p { cursor: grabbing; }\n"
+            + "q { cursor: e-resize; }\n"
+            + "r { cursor: n-resize; }\n"
+            + "s { cursor: crosshair; }\n");
+        string[] names = new string[19];
+        names[0] = "a"; names[1] = "b"; names[2] = "c"; names[3] = "d";
+        names[4] = "e"; names[5] = "f"; names[6] = "g"; names[7] = "h";
+        names[8] = "i"; names[9] = "j"; names[10] = "k"; names[11] = "l";
+        names[12] = "m"; names[13] = "n"; names[14] = "o"; names[15] = "p";
+        names[16] = "q"; names[17] = "r"; names[18] = "s";
+        for (int i = 0; i < 19; i = i + 1) {
+            StyleBox b = new StyleBox();
+            s.ApplyBox(b, names[i]);
+            Console.WriteLine($"modern {names[i]} fg {b.fg} bg {b.bg}"
+                              + $" borderTop {b.borderTopColor}"
+                              + $" accent {b.accent} cursor {b.cursor}");
+        }
+        List<string> sLint = s.Audit();
+        Console.WriteLine($"modern lint count {sLint.Count}");
+        for (int i = 0; i < sLint.Count; i = i + 1) {
+            Console.WriteLine($"modern lint   {sLint[i]}");
+        }
+    }
+
     static void Main() {
         StyleSheet sheet = Program.Sheet();
         string accent = sheet.Var("--accent");
@@ -1745,5 +2368,37 @@ class Program {
         Console.WriteLine("--- layout longhands");
         Program.Longhand();
         Program.FontSources();
+
+        Console.WriteLine("--- coercion (at-rules / var fallback / important / border style / text-shadow / to-left / lint)");
+        Program.Coercion();
+
+        Console.WriteLine("--- css syntax (selectors / attribute operators / not-is-where / parts / supports / layer / lint)");
+        Program.Syntax();
+
+        Console.WriteLine("--- tree context (combinators / structural pseudo-classes)");
+        Program.TreeCtx();
+
+        Console.WriteLine("--- units / math / vendor prefixes");
+        Program.Units();
+
+        Console.WriteLine("--- media queries");
+        Program.Media();
+
+        Console.WriteLine("--- imports");
+        Program.Imports();
+
+        Console.WriteLine("--- modern colors / currentColor / cursor");
+        Program.Modern();
     }
+}
+
+/// 树上下文测试用的参数化节点：Kind 可指定，从而在同一棵测试树里
+/// 混出 panel/title/row/item 等不同"元素类型"。
+class TNode : Control {
+    string kind;
+    void InitTNode(string k, string nodeName) {
+        this.InitControl(nodeName, 0);
+        kind = k;
+    }
+    override string Kind() { return kind; }
 }

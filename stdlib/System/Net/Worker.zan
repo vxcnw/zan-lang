@@ -450,6 +450,10 @@ class Worker {
     /// size (431 past it), whole-request size (413), and the time a single
     /// request may take before the connection is hung up (0 disables).</summary>
     Worker SetHttpLimits(int maxHeaderBytes, int maxRequestBytes, int timeoutMs) {
+        // 与 HttpServer.SetMaxRequestBytes 同一钳制：超出 1 GiB 会让
+        // 帧解析的 `headerEnd + bodyLen` int 回绕，判限失效。
+        if (maxRequestBytes < 1024) { maxRequestBytes = 1024; }
+        if (maxRequestBytes > 1073741824) { maxRequestBytes = 1073741824; }
         this.maxHeaderBytes = maxHeaderBytes;
         this.maxRequestBytes = maxRequestBytes;
         this.requestTimeout = timeoutMs;

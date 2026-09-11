@@ -1,0 +1,62 @@
+using System;
+using System.IO;
+using Gui;
+
+namespace CssBom;
+
+/// 以 UTF-8 BOM 保存的样式表（Windows 编辑器"另存为 UTF-8"默认会加
+/// BOM）必须与不带 BOM 的那份完全等价：BOM 是编码标记不是内容。
+/// 这里钉住两层——File.ReadAllText 去掉行首的 EF BB BF，以及 Css 的
+/// `:root` 变量块因此能被收集：BOM 会让选择器变成 "\uFEFF:root"，
+/// 不等于 ":root"，整块 token 被静默丢弃（皮肤所有颜色/尺寸归零）。
+/// 中间的 BOM 是内容，必须原样保留。
+class Program {
+    static void Main() {
+        string dir = "css_bom_case";
+        Directory.CreateDirectory(dir);
+        // 字面量转义写不出原始字节：`"\xEF"` 是码点 U+00EF，落到
+        // 字符串里是两个 UTF-8 字节（C3 AF）。BOM 必须是裸的
+        // EF BB BF，所以从 byte[] 拼。
+        byte[] raw = new byte[3];
+        raw[0] = (byte)0xEF;
+        raw[1] = (byte)0xBB;
+        raw[2] = (byte)0xBF;
+        string bom = raw.ToStr(0, 3);
+        string body = ":root { --accent: #d92b2b; }\n"
+            + "button { background: var(--accent); font-size: 15; }\n";
+        string withBom = dir + "/with-bom.css";
+        string plain = dir + "/plain.css";
+        string mid = dir + "/mid.css";
+        File.WriteAllText(withBom, bom + body);
+        File.WriteAllText(plain, body);
+        File.WriteAllText(mid, "A" + bom + "B");
+
+        string bomText = File.ReadAllText(withBom);
+        string plainText = File.ReadAllText(plain);
+        string midText = File.ReadAllText(mid);
+        Console.WriteLine("read bom len " + Convert.ToString(bomText.Length)
+                          + " first " + Convert.ToString((int)bomText[0]));
+        Console.WriteLine("read plain len " + Convert.ToString(plainText.Length)
+                          + " first " + Convert.ToString((int)plainText[0]));
+        Console.WriteLine("read mid len " + Convert.ToString(midText.Length)
+                          + " c1 " + Convert.ToString((int)midText[1]));
+
+        StyleSheet a = Css.Parse(bomText);
+        StyleSheet b = Css.Parse(plainText);
+        Console.WriteLine("parse bom vars " + Convert.ToString(a.vars.Count())
+                          + " accent " + a.Var("--accent"));
+        StyleBox ba = new StyleBox();
+        a.ApplyBox(ba, "button");
+        Console.WriteLine("parse bom button bg " + Convert.ToString(ba.bg)
+                          + " font " + Convert.ToString(ba.fontPx));
+        StyleBox bb = new StyleBox();
+        b.ApplyBox(bb, "button");
+        Console.WriteLine("parse plain button bg " + Convert.ToString(bb.bg)
+                          + " font " + Convert.ToString(bb.fontPx));
+
+        File.Delete(withBom);
+        File.Delete(plain);
+        File.Delete(mid);
+        Directory.Delete(dir);
+    }
+}

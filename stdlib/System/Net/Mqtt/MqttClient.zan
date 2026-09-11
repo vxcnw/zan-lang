@@ -229,6 +229,14 @@ class MqttClient {
         // body 的第 2 字节为连接返回码（0 = 已接受）。
         int b0 = await mqtt.ReadByteAsync();
         int remainLen = await mqtt.ReadRemainingLenAsync();
+        // 未认证的对端也能报出巨大的 remainLen（varint 上限 256 MiB），
+        // ReadBytesAsync 随即预分配两个 remainLen+1 的缓冲——单次连接
+        // 尝试约 512 MiB。套用与 DrainPacketAsync / broker 端一致的
+        // 16 MiB 上限，超过即判流不可信。
+        if (remainLen > 16777216) {
+            mqtt.connected = false;
+            return mqtt;
+        }
         byte[] body = await mqtt.ReadBytesAsync(remainLen);
         int packetType = (b0 >> 4) & 15;
         if (packetType == MqttPacketType.CONNACK && remainLen >= 2) {

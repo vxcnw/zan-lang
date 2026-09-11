@@ -1051,6 +1051,7 @@ static int io_sweep_slots(void) {
     }
     return woke;
 }
+
 #endif /* !_WIN32 */
 
 /* ---- platform backend ---- */
@@ -1092,7 +1093,9 @@ void zan_io_init(void) {
         epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, g_dns_wake_fd, &ev);
     }
     g_io_started = 1;
-}void zan_io_shutdown(void) {
+}
+
+void zan_io_shutdown(void) {
     if (g_slots) {
         for (int fd = 0; fd < g_slots_cap; fd++) {
             zan_io_slot_t *s = &g_slots[fd];
@@ -1286,6 +1289,42 @@ int32_t zan_io_poll(int64_t timeout_ms) {
     }
     return woke;
 }
+
+/* See rt_io.h: the close-notification hook (A291-5). Called by Socket.Close
+ * BEFORE the descriptor is closed, so no waiter can outlive the socket it
+ * registered against and be served by (or deliver into) a recycled fd. */
+static void io_close_notify_slots(intptr_t fdp) {
+    int fd = (int)fdp;
+    if (fd < 0 || fd >= g_slots_cap) return;
+    zan_io_slot_t *s = &g_slots[fd];
+    if (s->in_epoll) {
+        s->in_epoll = 0;
+#if defined(__linux__)
+        epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+#else
+        struct kevent ke;
+        EV_SET(&ke, fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
+        kevent(g_kq_fd, &ke, 1, NULL, 0, NULL);
+        EV_SET(&ke, fd, EVFILT_WRITE, EV_DELETE, 0, 0, NULL);
+        kevent(g_kq_fd, &ke, 1, NULL, 0, NULL);
+#endif
+        /* Errors ignored: the fd may never have been added, and we are about
+         * to close it either way. */
+    }
+    for (;;) {
+        zan_io_waiter_t ready[16];
+        int nr = io_take(s, fd, 1, ready, 16);
+        nr += io_take(s, fd, 0, ready + nr, 16 - nr);
+        if (nr == 0) break;
+        for (int k = 0; k < nr; k++) {
+            if (ready[k].out_accept)   *ready[k].out_accept = -1;
+            else if (ready[k].out_n)   *ready[k].out_n = 0;
+            g_io_count--;
+            io_wake(ready[k].co, ready[k].step);
+        }
+    }
+}
+void zan_io_close_notify(intptr_t fd) { io_close_notify_slots(fd); }
 
 #elif defined(__APPLE__) || defined(__FreeBSD__)
 /* ==================== KQUEUE ==================== */
@@ -1506,6 +1545,42 @@ int32_t zan_io_poll(int64_t timeout_ms) {
     }
     return woke;
 }
+
+/* See rt_io.h: the close-notification hook (A291-5). Called by Socket.Close
+ * BEFORE the descriptor is closed, so no waiter can outlive the socket it
+ * registered against and be served by (or deliver into) a recycled fd. */
+static void io_close_notify_slots(intptr_t fdp) {
+    int fd = (int)fdp;
+    if (fd < 0 || fd >= g_slots_cap) return;
+    zan_io_slot_t *s = &g_slots[fd];
+    if (s->in_epoll) {
+        s->in_epoll = 0;
+#if defined(__linux__)
+        epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+#else
+        struct kevent ke;
+        EV_SET(&ke, fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
+        kevent(g_kq_fd, &ke, 1, NULL, 0, NULL);
+        EV_SET(&ke, fd, EVFILT_WRITE, EV_DELETE, 0, 0, NULL);
+        kevent(g_kq_fd, &ke, 1, NULL, 0, NULL);
+#endif
+        /* Errors ignored: the fd may never have been added, and we are about
+         * to close it either way. */
+    }
+    for (;;) {
+        zan_io_waiter_t ready[16];
+        int nr = io_take(s, fd, 1, ready, 16);
+        nr += io_take(s, fd, 0, ready + nr, 16 - nr);
+        if (nr == 0) break;
+        for (int k = 0; k < nr; k++) {
+            if (ready[k].out_accept)   *ready[k].out_accept = -1;
+            else if (ready[k].out_n)   *ready[k].out_n = 0;
+            g_io_count--;
+            io_wake(ready[k].co, ready[k].step);
+        }
+    }
+}
+void zan_io_close_notify(intptr_t fd) { io_close_notify_slots(fd); }
 
 #elif defined(_WIN32)
 /* ==================== WINDOWS IOCP ==================== */
@@ -2180,6 +2255,13 @@ int32_t zan_io_poll(int64_t timeout_ms) {
     return woke;
 }
 
+/* See rt_io.h. Windows has no fd-numbered waiter slot: pending overlapped
+ * reads are completed (reported as 0 bytes) by the shutdown path's
+ * CancelIoEx + wakeup packet, so there is no stale-slot identity to clear. */
+void zan_io_close_notify(intptr_t fd) {
+    (void)fd;
+}
+
 #else
 /* ==================== FALLBACK SELECT (POSIX) ==================== */
 
@@ -2319,6 +2401,21 @@ int32_t zan_io_poll(int64_t timeout_ms) {
     return woke;
 }
 
+/* See rt_io.h: the close-notification hook (A291-5); select-backend form.
+ * The list is walked once; entries naming this fd are unlinked and failed. */
+void zan_io_close_notify(intptr_t fdp) {
+    int fd = (int)fdp;
+    zan_io_entry_t **pp = &g_io_entries;
+    while (*pp) {
+        zan_io_entry_t *cur = *pp;
+        if (cur->fd != fd) { pp = &cur->next; continue; }
+        *pp = cur->next;
+        io_mark_dead(cur->co, cur->step, cur->out_n, cur->out_accept);
+        free(cur);
+        g_io_count--;
+    }
+    io_flush_dead();
+}
 #endif /* platform */
 
 /* ================= ASYNC HOSTNAME RESOLUTION ================= */

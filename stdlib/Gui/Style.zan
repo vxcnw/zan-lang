@@ -122,20 +122,18 @@ class Style {
     // 变成 CPU 峰值。哈希表让命中是常数时间，容量也不再需要
     // 靠清空来控制（键的数量由界面里的 类型/类/id/状态 组合决定，
     // 本就有限，且皮肤代次一变就整体作废）。
-    static Dict<string, StyleBox> cache;
-    static int cacheGen;
+    // 存储在 App 实例上（app.styleCache / app.styleCacheGen）：缓存的是
+    // *那个窗口* 皮肤+appCss 的解析结果。曾经是 static 一张表、却拿
+    // 调用窗口自己的 bgThemeGen 当代次——多窗口应用里主窗/子窗交替
+    // 渲染，两边代次不同，每帧都把整张表作废重建，所有解析全部
+    // miss（子窗口每帧 40~120 次 miss，一次几十毫秒，即「子窗口
+    // 非常卡」的根源）。
 
     // 解析次数与命中次数（帧分析器读它们）。缓存命中不等于不花钱：
     // 命中一次也要拼一把键字符串、查一次哈希、克隆一个 StyleBox，
     // 所以“每帧解析了多少次”本身就是一个得盯的量。
     static int statResolve;
     static int statHit;
-
-    /// 重建解析缓存并记下主题代次 `gen`；旧代次的全部键作废。
-    static void CacheReset(int gen) {
-        Style.cache = new Dict<string, StyleBox>();
-        Style.cacheGen = gen;
-    }
 
     /// 读解析计数但不清零，供按帧算差值（0 = 解析次数，1 = 命中次数）。
     static int StatPeek(int idx) {
@@ -160,12 +158,13 @@ class Style {
     static StyleBox CacheGet(App app, string key) {
         Style.statResolve = Style.statResolve + 1;
         int gen = app.bgThemeGen;
-        if (Style.cache == null || Style.cacheGen != gen) {
-            Style.CacheReset(gen);
+        if (app.styleCache == null || app.styleCacheGen != gen) {
+            app.styleCache = new Dict<string, StyleBox>();
+            app.styleCacheGen = gen;
             return null;
         }
         StyleBox hit;
-        if (Style.cache.TryGetValue(key, out hit)) {
+        if (app.styleCache.TryGetValue(key, out hit)) {
             Style.statHit = Style.statHit + 1;
             return hit;
         }
@@ -173,10 +172,10 @@ class Style {
     }
 
     /// 把解析结果放入缓存；同键已存在时保留先到的。
-    static void CachePut(string key, StyleBox box) {
-        if (Style.cache == null) { return; }
-        if (Style.cache.ContainsKey(key)) { return; }
-        Style.cache.Add(key, box);
+    static void CachePut(App app, string key, StyleBox box) {
+        if (app.styleCache == null) { return; }
+        if (app.styleCache.ContainsKey(key)) { return; }
+        app.styleCache.Add(key, box);
     }
 
     // ---- resolution --------------------------------------------------------
@@ -188,9 +187,24 @@ class Style {
 
     /// 包含 id 选择器（`#name`）的解析，即特异性最高的一层。
     static StyleBox Full(App app, string type, string cls, string id, int state) {
+        StyleSheet basef = Style.BaseSheet(app);
+        StyleSheet chartf = app.chartSheet;
+        StyleSheet sheet = app.sheet;
+        // 组合器/结构性伪类的命中随节点在树里的位置变化：表里有这类
+        // 选择器且当前正处于 retained 渲染树中时，把位置签名并进缓存
+        // 键——不同容器里的同名控件才不会共用一份错误的缓存。
+        Control ctxNode = null;
+        if ((basef != null && basef.HasRelational())
+                || (chartf != null && chartf.HasRelational())
+                || (sheet != null && sheet.HasRelational())) {
+            ctxNode = app.styleCtx;
+        }
+        string sig = ctxNode == null ? "" : Style.CtxSig(ctxNode);
         string key = type + "|" + cls + "|" + id + "|" + Convert.ToString(state)
             + "@" + Convert.ToString(app.dpiScale)
             + "/" + Convert.ToString(app.metricsScale);
+        if (Style.AnyMedia(basef, chartf, sheet)) { key = key + "#" + Style.MediaSig(app); }
+        if (sig != "") { key = key + "#" + sig; }
         StyleBox hit = Style.CacheGet(app, key);
         if (hit != null) { return hit.Clone(); }
 
@@ -201,20 +215,21 @@ class Style {
         // 才需要再缩放，所以要保留 sheet 前的值来
         // 区分二者。
         StyleBox themed = b.Clone();
-        StyleSheet basef = Style.BaseSheet(app);
-        if (basef != null) { Style.ApplySheet(basef, b, type, cls, id, state); }
+        if (basef != null) {
+            Style.ApplySheetCtx(basef, b, type, cls, id, state, ctxNode);
+        }
         // 图表主题包（Gui.Component.Chart/themes）是独立的一块样式表，
         // 垫在内置基线之上、Gui 皮肤（app.sheet）之下：皮肤包对 chart
         // 写过的规则优先于主题包，主题包只补基线没定义的部分。
-        StyleSheet chartf = app.chartSheet;
-        if (chartf != null) { Style.ApplySheet(chartf, b, type, cls, id, state); }
-        StyleSheet sheet = app.sheet;
+        if (chartf != null) {
+            Style.ApplySheetCtx(chartf, b, type, cls, id, state, ctxNode);
+        }
         if (sheet != null) {
-            Style.ApplySheet(sheet, b, type, cls, id, state);
+            Style.ApplySheetCtx(sheet, b, type, cls, id, state, ctxNode);
         }
         Style.Shell(app, b, type, cls, state);
         Style.ScaleLayout(app, b, themed);
-        Style.CachePut(key, b);
+        Style.CachePut(app, key, b);
         return b.Clone();
     }
 
@@ -224,10 +239,23 @@ class Style {
     /// 结果同样按键缓存并返回克隆。
     static StyleBox Part(App app, string type, string part, string fallbackType,
                          string cls, string id, int state) {
+        StyleSheet basef = Style.BaseSheet(app);
+        StyleSheet chartf = app.chartSheet;
+        StyleSheet sheet = app.sheet;
+        // 同 Full：有树上下文选择器时把节点位置签名并进缓存键。
+        Control ctxNode = null;
+        if ((basef != null && basef.HasRelational())
+                || (chartf != null && chartf.HasRelational())
+                || (sheet != null && sheet.HasRelational())) {
+            ctxNode = app.styleCtx;
+        }
+        string sig = ctxNode == null ? "" : Style.CtxSig(ctxNode);
         string key = type + "::" + part + "|" + fallbackType + "|" + cls
             + "|" + id + "|" + Convert.ToString(state)
             + "@" + Convert.ToString(app.dpiScale)
             + "/" + Convert.ToString(app.metricsScale);
+        if (Style.AnyMedia(basef, chartf, sheet)) { key = key + "#" + Style.MediaSig(app); }
+        if (sig != "") { key = key + "#" + sig; }
         StyleBox hit = Style.CacheGet(app, key);
         if (hit != null) { return hit.Clone(); }
 
@@ -236,31 +264,28 @@ class Style {
             Style.Defaults(app, b, fallbackType, cls, state);
         }
         StyleBox themed = b.Clone();
-        StyleSheet basef = Style.BaseSheet(app);
         if (basef != null) {
             if (fallbackType != "") {
-                Style.ApplySheet(basef, b, fallbackType, cls, "", state);
+                Style.ApplySheetCtx(basef, b, fallbackType, cls, "", state, ctxNode);
             }
-            Style.ApplyPartSheet(basef, b, type, part, cls, id, state);
+            Style.ApplyPartSheetCtx(basef, b, type, part, cls, id, state, ctxNode);
         }
         // 图表主题包：独立一块，同样垫在 Gui 皮肤（app.sheet）之下。
-        StyleSheet chartf = app.chartSheet;
         if (chartf != null) {
             if (fallbackType != "") {
-                Style.ApplySheet(chartf, b, fallbackType, cls, "", state);
+                Style.ApplySheetCtx(chartf, b, fallbackType, cls, "", state, ctxNode);
             }
-            Style.ApplyPartSheet(chartf, b, type, part, cls, id, state);
+            Style.ApplyPartSheetCtx(chartf, b, type, part, cls, id, state, ctxNode);
         }
-        StyleSheet sheet = app.sheet;
         if (sheet != null) {
             if (fallbackType != "") {
-                Style.ApplySheet(sheet, b, fallbackType, cls, "", state);
+                Style.ApplySheetCtx(sheet, b, fallbackType, cls, "", state, ctxNode);
             }
-            Style.ApplyPartSheet(sheet, b, type, part, cls, id, state);
+            Style.ApplyPartSheetCtx(sheet, b, type, part, cls, id, state, ctxNode);
         }
         if (fallbackType != "") { Style.Shell(app, b, fallbackType, cls, state); }
         Style.ScaleLayout(app, b, themed);
-        Style.CachePut(key, b);
+        Style.CachePut(app, key, b);
         return b.Clone();
     }
 
@@ -383,9 +408,18 @@ class Style {
     /// 而不是把上百条按钮规则在 CSS 里复制一遍。
     static void ApplySheet(StyleSheet sheet, StyleBox b, string type, string cls,
                            string id, int state) {
+        Style.ApplySheetCtx(sheet, b, type, cls, id, state, null);
+    }
+
+    /// ApplySheet 的树上下文版本：`node` 是主体控件，组合器链与
+    /// 结构性伪类按真实树求值（immediate 路径传 null，规则不命中）。
+    static void ApplySheetCtx(StyleSheet sheet, StyleBox b, string type,
+                              string cls, string id, int state, Control node) {
         string alias = Style.SheetAlias(type);
-        if (alias != "") { sheet.ApplyMatch(b, alias, cls, id, "", state); }
-        sheet.ApplyMatch(b, type, cls, id, "", state);
+        if (alias != "") {
+            sheet.ApplyMatchCtx(b, alias, cls, id, "", state, node);
+        }
+        sheet.ApplyMatchCtx(b, type, cls, id, "", state, node);
     }
 
     /// 该控件族借用哪个类型的 CSS 规则（"" = 不借）。
@@ -397,7 +431,59 @@ class Style {
     /// 控件某个 `type::part` 的同样处理（`menu::item`、`card::title`）。
     static void ApplyPartSheet(StyleSheet sheet, StyleBox b, string type,
                                string part, string cls, string id, int state) {
-        sheet.ApplyMatch(b, type, cls, id, part, state);
+        Style.ApplyPartSheetCtx(sheet, b, type, part, cls, id, state, null);
+    }
+
+    /// ApplyPartSheet 的树上下文版本。
+    static void ApplyPartSheetCtx(StyleSheet sheet, StyleBox b, string type,
+                                  string part, string cls, string id, int state,
+                                  Control node) {
+        sheet.ApplyMatchCtx(b, type, cls, id, part, state, node);
+    }
+
+    /// 控件最近一次解析出的状态位（尚未解析过/处于过渡混合态时
+    /// 视为常态）。组合器链上左侧块的 `:hover` 等按它求值——
+    /// 不是完全实时，但比一律按常态更接近作者预期。
+    static int NodeState(Control c) {
+        if (c == null || c.computedStyle == null || c.computedStyleState < 0) {
+            return 0;
+        }
+        return c.computedStyleState;
+    }
+
+    /// 媒体环境的缓存键签名：媒体规则的求值结果随窗口尺寸/主题
+    /// 暗色/减少动效变化，任一活跃样式表带 @media 时把它并进键。
+    static string MediaSig(App app) {
+        return "m" + Convert.ToString(app.designW) + "x"
+            + Convert.ToString(app.designH)
+            + (app.isDark ? "d" : "l")
+            + (app.reducedMotion ? "r" : "n");
+    }
+
+    /// 活跃样式表里是否有需要运行期求值的 @media 规则。
+    static bool AnyMedia(StyleSheet basef, StyleSheet chartf, StyleSheet sheet) {
+        return (basef != null && basef.HasMedia())
+            || (chartf != null && chartf.HasMedia())
+            || (sheet != null && sheet.HasMedia());
+    }
+
+    /// 树上下文的缓存键签名：从根到 `node` 的 `类型.类/序号` 链。
+    /// 树的结构一变签名就变，样式缓存随之自然失效。
+    static string CtxSig(Control node) {
+        if (node == null) { return ""; }
+        string sig = "";
+        Control anc = node;
+        while (anc != null) {
+            string piece = anc.StyleType();
+            if (anc.Class != "") { piece = piece + "." + anc.Class; }
+            Control par = anc.parent;
+            if (par != null) {
+                piece = piece + "/" + Convert.ToString(par.IndexOf(anc));
+            }
+            sig = sig == "" ? piece : piece + ">" + sig;
+            anc = par;
+        }
+        return sig;
     }
 
     /// 拆分以空格分隔的类列表（"primary ghost" -> [primary, ghost]）。
@@ -675,6 +761,15 @@ class Style {
         // 就用 CSS 的，未声明时尺寸比例依然生效。
         b.transitionMs = t.animFastMs;
         b.fg = t.textPrimary;
+        // 单位环境：rem 相对主题正文字号，vw/vh 相对窗口逻辑尺寸。
+        // rem 基准取主题根字号（主题令牌恒正；这是 style 层
+        // 自身的合法消费，字体预算豁免这一行）。
+        int remBase = t.fontSizeMedium;
+        if (remBase > 0) { b.envRemPx = remBase; }
+        if (app.designW > 0) { b.envVw = app.designW; }
+        if (app.designH > 0) { b.envVh = app.designH; }
+        b.mediaDark = app.isDark;
+        b.mediaReduced = app.reducedMotion;
         // 禁用态的弱化文字放在默认层，CSS 因此还能改写它
         // （皮肤的 `x:disabled { color: ... }` 以前被 Style.Shell 抹掉）。
         if (disabled) { b.fg = t.textDisabled; }
@@ -893,6 +988,13 @@ class Style {
         int fieldBg = t.bgPrimary;
         if (glass) { fieldBg = App.ScaleAlpha(t.bgPrimary, 700); }
         s = s + Style.Tok("field-bg", fieldBg);
+        // 弹层底色（上下文菜单/下拉/富菜单）：不透明主题沿用次级
+        // 底色；玻璃主题下弹层浮在磨砂内容甚至壁纸之上，卡片那层
+        // 两成的表面色调会把文字压得融进背景，弹层取接近不透明的
+        // 底，配合 base.css 浮层规则的表面磨砂保证可读。
+        int popupBg = t.bgSecondary;
+        if (glass) { popupBg = App.ScaleAlpha(t.bgPrimary, 820); }
+        s = s + Style.Tok("popup-bg", popupBg);
         // 字段选区与滚动条：过去在 Input/TextArea 每帧现混
         // （LerpColor），现在导出为 token，混色只在主题切换时发生一次。
         s = s + Style.Tok("selection-bg",
