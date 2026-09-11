@@ -37,6 +37,9 @@ class WorldObject {
     List<FxAnim> fires;  // the burning anims seeded while damaged
     List<FxAnim> idles;  // the structure's constant IdleAnim loop
     string idleName;     // which idle variant is live ("" none)
+    int fireTicks;       // ticks left in the firing pose (infantry)
+    int infDeath = 1;    // the killing warhead's InfDeath (retail default
+                         // Gunfire on the object; the warhead overwrites)
 
     // Movement (units only): the planned route as cells, and how far along it
     // the unit has walked this frame.
@@ -193,6 +196,18 @@ class WorldObject {
     void TakeDamage(int dmg) { this.hp = this.hp - dmg; if (this.hp < 0) { this.hp = 0; } }
     void SetHp(int hp) { this.hp = hp; if (this.hp > this.maxHp) { this.hp = this.maxHp; } }
     bool IsDead() { return this.hp <= 0; }
+    int FireTicks() { return this.fireTicks; }
+    void SetFireTicks(int v) { this.fireTicks = v; }
+    int InfDeath() { return this.infDeath; }
+
+    /// <summary>Damage that also records which warhead is killing the
+    /// object, so an infantry death can pick its art the way the
+    /// reference's Warhead.inflictDamage does.</summary>
+    void TakeDamageAs(int dmg, int death) {
+        this.hp = this.hp - dmg;
+        if (this.hp < 0) { this.hp = 0; }
+        if (death > 0) { this.infDeath = death; }
+    }
     /// <summary>Drops the attack order. The route dies with it: a soldier
     /// whose target just fell keeps walking to the death cell otherwise --
     /// tgt gone, route still set -- instead of re-engaging what is around
@@ -634,6 +649,46 @@ class UnitType {
         this.deployedStart = start;
         this.deployedFrames = frames < 1 ? 1 : frames;
     }
+    // The firing pose and the two death sequences, copied from the
+    // rules-side UnitDef once its art section has been read.
+    int fireStart;
+    int fireFrames = 6;
+    int fireMult = 6;
+    bool hasFire;
+    int die1Start;
+    int die1Frames = 10;
+    int die1Mult;
+    bool hasDie1;
+    int die2Start;
+    int die2Frames = 10;
+    int die2Mult;
+    bool hasDie2;
+    void SetCombatSequences(UnitDef d) {
+        this.hasFire = d.HasFire();
+        this.fireStart = d.FireStart();
+        this.fireFrames = d.FireFrames() < 1 ? 1 : d.FireFrames();
+        this.fireMult = d.FireMult();
+        this.hasDie1 = d.HasDie1();
+        this.die1Start = d.Die1Start();
+        this.die1Frames = d.Die1Frames() < 1 ? 1 : d.Die1Frames();
+        this.die1Mult = d.Die1Mult();
+        this.hasDie2 = d.HasDie2();
+        this.die2Start = d.Die2Start();
+        this.die2Frames = d.Die2Frames() < 1 ? 1 : d.Die2Frames();
+        this.die2Mult = d.Die2Mult();
+    }
+    bool HasFire() { return this.hasFire; }
+    int FireStart() { return this.fireStart; }
+    int FireFrames() { return this.fireFrames; }
+    int FireMult() { return this.fireMult; }
+    bool HasDie1() { return this.hasDie1; }
+    int Die1Start() { return this.die1Start; }
+    int Die1Frames() { return this.die1Frames; }
+    int Die1Mult() { return this.die1Mult; }
+    bool HasDie2() { return this.hasDie2; }
+    int Die2Start() { return this.die2Start; }
+    int Die2Frames() { return this.die2Frames; }
+    int Die2Mult() { return this.die2Mult; }
 
     /// <summary>Primary-weapon damage for the info panel; 0 for the unarmed
     /// specialists.</summary>
@@ -702,6 +757,7 @@ class UnitCatalog {
                           d.WalkFrames());
             t.SetDeployedSequence(d.HasDeployedSeq(), d.DeployedStart(),
                                   d.DeployedFrames());
+            t.SetCombatSequences(d);
             t.SetArtKey(d.ArtKey());
             t.SetNewTheater(d.NewTheater());
             t.SetCameo(d.Cameo());
@@ -3253,6 +3309,25 @@ class World {
                 i = i + 1;
                 continue;
             }
+            if (a.once) {
+                if (a.ticks < a.frames * 2) { i = i + 1; continue; }
+                // The death sequence finished: morph into the corpse
+                // anim (DEATH_A..F) when one is queued, else drop.
+                if (a.then.Length > 0) {
+                    int nf = this.ProbeAnimFrames(a.then);
+                    if (nf > 0) {
+                        a.name = a.then;
+                        a.frames = nf;
+                        a.unitShp = "";
+                        a.then = "";
+                        a.ticks = 0;
+                        i = i + 1;
+                        continue;
+                    }
+                }
+                this.anims.RemoveAt(i);
+                continue;
+            }
             // One-shot: play every frame, hold the last briefly, drop.
             int life = a.frames * 2 + 4;
             if (a.ticks >= life) {
@@ -3488,6 +3563,16 @@ class World {
         return n;
     }
 
+    /// <summary>Play-once death fx currently alive -- the infantry death
+    /// sequences and the corpse anims they morph into.</summary>
+    int OnceFxCount() {
+        int n = 0;
+        for (int i = 0; i < this.anims.Count; i = i + 1) {
+            if (this.anims[i].once) { n = n + 1; }
+        }
+        return n;
+    }
+
     /// <summary>Idle loops actually live across all structures.</summary>
     int IdleLoopCount() {
         int n = 0;
@@ -3702,7 +3787,16 @@ class World {
                     // lands when the counter reaches zero.
                     int r = o.Reload();
                     if (r <= 0) {
-                        if (this.FireUnit(o, t)) { fired = fired + 1; }
+                        if (this.FireUnit(o, t)) {
+                            fired = fired + 1;
+                            // The firing pose: one pass through the art's
+                            // FireUp block per shot (two ticks a frame,
+                            // like every other sprite clock here).
+                            if (o.UnitType().HasFire()) {
+                                o.SetFireTicks(
+                                    o.UnitType().FireFrames() * 2);
+                            }
+                        }
                     } else {
                         o.SetReload(r - 1);
                     }
@@ -3800,6 +3894,7 @@ class World {
         for (int i = 0; i < this.objects.Count; i = i + 1) {
             WorldObject o = this.objects[i];
             if (o.Kind() != ObjKind.Unit()) { continue; }
+            if (o.fireTicks > 0) { o.fireTicks = o.fireTicks - 1; }
             if (o.Frozen() > 0 || o.Deployed() || !o.HasRoute()) { continue; }
             int bank = o.MoveAccum() + o.UnitType().Speed();
             while (bank >= Rules.CellMoveCost() && o.HasRoute()) {
@@ -4049,7 +4144,7 @@ class World {
     /// whole squad. Special effects stay direct-hit only.</summary>
     void SplashAround(int side, Warhead wh, int cx, int cy,
                       WorldObject t, int dmg) {
-        if (t != null) { t.TakeDamage(dmg); }
+        if (t != null) { t.TakeDamageAs(dmg, wh.InfDeath()); }
         if (wh.Spread() <= 0) { return; }
         int radius = wh.Spread() + 2;   // cells around the impact point
         for (int i = 0; i < this.objects.Count; i = i + 1) {
@@ -4069,7 +4164,7 @@ class World {
             int scaled = dmg * half / 100;
             int damp = (radius - d) * scaled / radius;
             if (damp <= 0) { continue; }
-            o.TakeDamage(damp);
+            o.TakeDamageAs(damp, wh.InfDeath());
         }
     }
 
@@ -4142,12 +4237,67 @@ class World {
     /// <summary>Clears destroyed objects: their occupancy (unit cell and
     /// structure footprint) is freed and the slots after them shift down, so
     /// object indices stay dense. A destroyed selection is cleared.</summary>
+    /// <summary>An infantry death, the reference's onRemove dance: Gunfire
+    /// plays the art's Die1 sequence and Explode Die2 -- once through the
+    /// frames, then a random [AudioVisual] DeadBodies corpse anim
+    /// (DEATH_A..F) -- while every other InfDeath plays its death anim
+    /// (S_BANG34, FLAMEGUY, ELECTRO, ...) over the spot. With none shipped
+    /// the trooper simply goes, exactly like the reference's missing-art
+    /// bail-outs.</summary>
+    void SpawnInfantryDeath(WorldObject o, int idx) {
+        int death = o.InfDeath();
+        UnitType ut = o.UnitType();
+        if (death == 1 || death == 2) {
+            bool d2 = death == 2;
+            int start = d2 ? ut.Die2Start() : ut.Die1Start();
+            int frames = d2 ? ut.Die2Frames() : ut.Die1Frames();
+            bool has = d2 ? ut.HasDie2() : ut.HasDie1();
+            if (!has || frames <= 0) { return; }
+            string shp = ut.ShpName();
+            if (ut.NewTheater() && this.Rules().AlternateArcticArt()
+             && this.theater != null
+             && this.theater.Name() == "SNOW") {
+                int dot = shp.Length - 4;
+                if (dot > 0) {
+                    string alt = shp.Substring(0, dot) + "A"
+                        + shp.Substring(dot);
+                    if (this.ProbeAnimFrames(alt) > 0) { shp = alt; }
+                }
+            }
+            FxAnim a = new FxAnim();
+            a.unitShp = shp;
+            a.unitSide = o.Side();
+            a.seqStart = start;
+            a.seqFrames = frames;
+            a.seqMult = d2 ? ut.Die2Mult() : ut.Die1Mult();
+            a.facing = o.Facing();
+            a.px = o.X();
+            a.py = o.Y();
+            a.frames = frames;
+            a.once = true;
+            a.then = this.Rules().DeathBodyName(this.smokeClock + idx);
+            this.anims.Add(a);
+            return;
+        }
+        string an = this.Rules().DeathAnimName(death);
+        if (an.Length > 0 && this.ProbeAnimFrames(an) > 0) {
+            this.SpawnAnim(an, o.X(), o.Y());
+        }
+    }
+
     void RemoveDead() {
         int i = 0;
         while (i < this.objects.Count) {
             WorldObject o = this.objects[i];
             if (!o.IsDead()) { i = i + 1; continue; }
-            this.SpawnExplosion(o.X(), o.Y());
+            // A trooper does not pop: the reference plays his death art
+            // (sequence or anim) and leaves the corpse.
+            if (o.Kind() == ObjKind.Unit() && o.UnitType() != null
+             && o.UnitType().ShpName().Length > 0) {
+                this.SpawnInfantryDeath(o, i);
+            } else {
+                this.SpawnExplosion(o.X(), o.Y());
+            }
             // Free the unit's cell or the structure's whole footprint.
             if (o.Kind() == ObjKind.Structure()) {
                 StructureType t = this.TypeOf(o);
@@ -4577,6 +4727,14 @@ class FxAnim {
     int ticks;
     bool loop;     // damage fires cycle their frames until killed
     bool dead;     // swept by TickFx
+    bool once;     // play the frames once and go (death sequences)
+    string unitShp;   // corpse mode: the fallen trooper's own SHP drawn
+    int unitSide;     // through its owner's remapped palette, the death
+    int seqStart;     // sequence's start/frames/mult picking the frames
+    int seqFrames;
+    int seqMult;
+    int facing;
+    string then;   // a follow-up anim to morph into (the DeadBodies art)
 
     double Px() { return this.px; }
     double Py() { return this.py; }
@@ -4588,6 +4746,13 @@ class FxAnim {
         return f;
     }
     void Kill() { this.dead = true; }
+    string UnitShp() { return this.unitShp; }
+    int UnitSide() { return this.unitSide; }
+    int SeqStart() { return this.seqStart; }
+    int SeqFrames() { return this.seqFrames; }
+    int SeqMult() { return this.seqMult; }
+    int Facing() { return this.facing; }
+    bool Once() { return this.once; }
 }
 
 /// <summary>A beam gun's ray, in cell coordinates. kind: 0 laser (prism

@@ -3840,6 +3840,66 @@ class Ra2Loop : IGuiHostLoop {
                             + " damaged structure must burn at its"
                             + " DamageFireOffset spots");
                     }
+                    // Infantry deaths: two troopers, one rifle-killed
+                    // (Die1 + corpse anim) and one explosively (Die2),
+                    // must both leave play-once death fx behind.
+                    int giId = Ra2App.UnitIdOfReg(this.world, 0, "GGI");
+                    int killed = 0;
+                    if (giId >= 0) {
+                        int gx = 12;
+                        int gy = 12;
+                        if (at.Count >= 2) {
+                            gx = at[0] + 5;
+                            gy = at[1] + 3;
+                        }
+                        for (int gi = 0; gi < 8 && killed < 2; gi = gi + 1) {
+                            int g = this.world.SpawnUnit(0, giId,
+                                gx + gi, gy);
+                            if (g < 0
+                             && (g = this.world.SpawnUnit(0, giId, gx,
+                                                          gy + gi)) < 0) {
+                                continue;
+                            }
+                            WorldObject gw = this.world.ObjectAt(g);
+                            gw.TakeDamageAs(gw.Hp(), killed == 0 ? 1 : 2);
+                            killed = killed + 1;
+                        }
+                        for (int t5 = 0; t5 < 12; t5 = t5 + 1) {
+                            this.world.Tick();
+                        }
+                    }
+                    int corpses = this.world.OnceFxCount();
+                    if (killed > 0) {
+                        for (int t5 = 0; t5 < 24; t5 = t5 + 1) {
+                            this.world.Tick();
+                        }
+                    }
+                    int bodies = this.world.OnceFxCount();
+                    if (killed > 0) {
+                        for (int t5 = 0; t5 < 9; t5 = t5 + 1) {
+                            this.world.Tick();
+                        }
+                    }
+                    int gone = this.world.OnceFxCount();
+                    Console.WriteLine("selftest deaths killed="
+                        + Convert.ToString(killed)
+                        + " corpses=" + Convert.ToString(corpses)
+                        + " bodies=" + Convert.ToString(bodies)
+                        + " gone=" + Convert.ToString(gone));
+                    if (killed > 0 && corpses < 1) {
+                        Console.WriteLine("selftest FAIL deaths: a"
+                            + " killed trooper must play his death"
+                            + " sequence");
+                    }
+                    if (killed > 0 && bodies < 1) {
+                        Console.WriteLine("selftest FAIL deaths: the"
+                            + " death sequence must hand over to a"
+                            + " DeadBodies corpse anim");
+                    }
+                    if (gone != 0) {
+                        Console.WriteLine("selftest FAIL deaths: the"
+                            + " corpse anim must finish and clear");
+                    }
                     // Building idle anims: every finished structure whose
                     // art ships IdleAnim must have its loop live (the
                     // damaged variant where one ships and we wounded the
@@ -4343,6 +4403,19 @@ class Ra2Loop : IGuiHostLoop {
                         this.world.SpawnBeam(a, this.world.ObjectAt(vb), tz);
                     }
                 }
+                // Pose the infantry death layer: two troopers fall at
+                // the duel site (one rifle death, one explosive), their
+                // die sequences crossing the next frames' dumps.
+                int ggi = Ra2App.UnitIdOfReg(this.world, 0, "GGI");
+                if (ggi >= 0) {
+                    for (int di = 0; di < 6; di = di + 1) {
+                        int g = this.world.SpawnUnit(0, ggi,
+                            this.duelX + 1 + di, this.duelY + 3);
+                        if (g < 0) { continue; }
+                        WorldObject gw = this.world.ObjectAt(g);
+                        gw.TakeDamageAs(gw.Hp(), di % 2 == 0 ? 1 : 2);
+                    }
+                }
                 int sx = IsoProjection.ScreenX(this.duelX, this.duelY)
                        - this.terrain.OriginX() - this.cam.X();
                 int sy = IsoProjection.ScreenY(this.duelX, this.duelY, 0)
@@ -4353,6 +4426,10 @@ class Ra2Loop : IGuiHostLoop {
             if (Ra2App.stressLeft == 34) {
                 // The posed blast, one frame on.
                 Ra2App.DumpScreen(Ra2App.ShotPath("ra2_shot_boom.bmp"), c);
+            }
+            if (Ra2App.stressLeft == 32) {
+                // The falling troopers, their die sequences mid-play.
+                Ra2App.DumpScreen(Ra2App.ShotPath("ra2_shot_deaths.bmp"), c);
             }
             if (Ra2App.stressLeft == 12) {
                 // Mid-melee: rounds in flight, arcs and impact art over

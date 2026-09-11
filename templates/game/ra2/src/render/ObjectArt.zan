@@ -325,6 +325,15 @@ class ObjectArt {
     /// frame per facing) instead of the standing ring.</summary>
     Texture UnitTexture(UnitType ut, bool moving, int animFrame, int facing,
                         int side, bool deployed) {
+        return this.UnitTexture(ut, moving, animFrame, facing, side,
+                                deployed, 0);
+    }
+
+    /// <summary>The firing pose: while fireTicks runs, the sequence's
+    /// FireUp block plays once across the countdown, then the trooper
+    /// returns to his stand ring.</summary>
+    Texture UnitTexture(UnitType ut, bool moving, int animFrame, int facing,
+                        int side, bool deployed, int fireTicks) {
         if (ut == null) { return null; }
         string name = this.ArcticName(ut.ShpName());
         if (name == null || name.Length == 0) { return null; }
@@ -337,6 +346,15 @@ class ObjectArt {
             int sit = ut.DeployedStart() + ring * ut.DeployedFrames();
             if (sit < count) {
                 return this.ShapeTextureFrame(name, sit,
+                                              this.UnitPalFor(side));
+            }
+        }
+        if (fireTicks > 0 && ut.HasFire()) {
+            int ff = ut.FireFrames() - 1 - fireTicks / 2;
+            if (ff < 0) { ff = 0; }
+            int fframe = ut.FireStart() + ring * ut.FireMult() + ff;
+            if (fframe < count) {
+                return this.ShapeTextureFrame(name, fframe,
                                               this.UnitPalFor(side));
             }
         }
@@ -361,7 +379,20 @@ class ObjectArt {
         return this.ShapeTextureFrame(name, 0, this.UnitPalFor(side));
     }
 
-    /// <summary>Whether a unit art name names a voxel model rather than an
+    /// <summary>A fallen trooper's frame: the death sequence block for
+    /// his facing, drawn through his owner's remapped palette. Blocks sit
+    /// at start + facing * facingMult (the sequence's stride -- 0 for the
+    /// shared death sequences, so they play the same frames whatever way
+    /// he faced).</summary>
+    Texture CorpseTexture(string shp, int side, int start, int frames,
+                          int mult, int idx, int facing) {
+        int ring = (8 - (facing % 8)) % 8;
+        int frame = start + ring * mult + idx;
+        if (frame >= this.ShapeFrameCount(shp)) { return null; }
+        return this.ShapeTextureFrame(shp, frame, this.UnitPalFor(side));
+    }
+
+    /// <summary>Whether a unit art name names a voxel model rather than
     /// SHP sprite. Case folded, so Image= overrides of any case match.</summary>
     static bool IsVxlName(string name) {
         int dot = name.Length - 4;
@@ -1334,10 +1365,25 @@ class ObjectRenderer {
             int sy = FxScreenY(a.Px(), a.Py(), 0, originY, camY);
             if (sx < 0 - 96 || sx > cw + 96 || sy < 0 - 96
              || sy > ch + 96) { continue; }
-            Texture tex = art.AnimTexture(a.Name(), a.Frame(), playerSide);
+            Texture tex;
+            string key;
+            if (a.UnitShp().Length > 0) {
+                tex = art.CorpseTexture(a.UnitShp(), a.UnitSide(),
+                                        a.SeqStart(), a.SeqFrames(),
+                                        a.SeqMult(), a.Frame(),
+                                        a.Facing());
+                key = "ra2:fx:corpse:" + a.UnitShp() + ":"
+                    + Convert.ToString(a.UnitSide()) + ":"
+                    + Convert.ToString(a.SeqStart()) + ":"
+                    + Convert.ToString(a.Frame()) + ":"
+                    + Convert.ToString(a.Facing());
+            } else {
+                tex = art.AnimTexture(a.Name(), a.Frame(), playerSide);
+                key = "ra2:fx:an:" + a.Name() + ":"
+                    + Convert.ToString(a.Frame());
+            }
             if (tex == null) { continue; }
-            R2Tex img = Ra2Ui.TexOf("ra2:fx:an:" + a.Name() + ":"
-                + Convert.ToString(a.Frame()), tex);
+            R2Tex img = Ra2Ui.TexOf(key, tex);
             // Impact art sits centred on the tile it detonated over.
             r.DrawTexture(img,
                 sx + IsoProjection.TileW() / 2 - tex.Width() / 2,

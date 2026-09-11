@@ -55,6 +55,8 @@ class Warhead {
     bool mindControl;     // converts a living unit to the shooter's side
     bool freeze;          // the hit unit stands frozen for a while
     bool plantsBomb;      // sticks a timed bomb on the target
+    int infDeath;         // InfDeath=: which infantry death art this
+                          // warhead triggers (InfDeathType)
     List<string> animList;  // impact art, small to large by damage tier
     bool conventional;      // Conventional=yes: bullets/shells (water splash)
 
@@ -67,6 +69,7 @@ class Warhead {
         w.mindControl = false;
         w.freeze = false;
         w.plantsBomb = false;
+        w.infDeath = 0;
         return w;
     }
 
@@ -90,6 +93,8 @@ class Warhead {
     void SetMindControl(bool on) { this.mindControl = on; }
     void SetFreeze(bool on) { this.freeze = on; }
     void SetPlantsBomb(bool on) { this.plantsBomb = on; }
+    int InfDeath() { return this.infDeath; }
+    void SetInfDeath(int v) { this.infDeath = v; }
 
     /// <summary>The damage percentage against an armour class, 0-200.</summary>
     int Verse(int armor) {
@@ -375,6 +380,58 @@ class UnitDef {
         this.deployedFrames = frames;
         this.hasDeployed = true;
     }
+    // Firing pose and the two death sequences, from the same section
+    // (GISequence FireUp=156,6,6, Die1=244,10,6, Die2=340,10,6): the fire
+    // block plays once per shot, the death block once, ending on the
+    // fallen pose the corpse keeps.
+    int fireStart;
+    int fireFrames = 6;
+    int fireMult = 6;
+    bool hasFire;
+    int die1Start;
+    int die1Frames = 10;
+    int die1Mult;
+    bool hasDie1;
+    int die2Start;
+    int die2Frames = 10;
+    int die2Mult;
+    bool hasDie2;
+    bool HasFire() { return this.hasFire; }
+    int FireStart() { return this.fireStart; }
+    int FireFrames() { return this.fireFrames; }
+    int FireMult() { return this.fireMult; }
+    bool HasDie1() { return this.hasDie1; }
+    int Die1Start() { return this.die1Start; }
+    int Die1Frames() { return this.die1Frames; }
+    int Die1Mult() { return this.die1Mult; }
+    bool HasDie2() { return this.hasDie2; }
+    int Die2Start() { return this.die2Start; }
+    int Die2Frames() { return this.die2Frames; }
+    int Die2Mult() { return this.die2Mult; }
+    // The sequence's third number is the facing multiplier: the frame
+    // block repeats per facing with this stride (6 for a walk cycle, 0
+    // for a shared sequence like Die1, 1 for the one-frame poses).
+    void SetFireSeq(int start, int frames, int mult) {
+        if (frames < 1) { frames = 1; }
+        this.fireStart = start;
+        this.fireFrames = frames;
+        this.fireMult = mult;
+        this.hasFire = true;
+    }
+    void SetDie1Seq(int start, int frames, int mult) {
+        if (frames < 1) { frames = 1; }
+        this.die1Start = start;
+        this.die1Frames = frames;
+        this.die1Mult = mult;
+        this.hasDie1 = true;
+    }
+    void SetDie2Seq(int start, int frames, int mult) {
+        if (frames < 1) { frames = 1; }
+        this.die2Start = start;
+        this.die2Frames = frames;
+        this.die2Mult = mult;
+        this.hasDie2 = true;
+    }
 
     /// <summary>Cells the unit covers per tick. RA2's speed classes map to
     /// foot soldiers at one cell and fast movers (dogs, terror drones) at
@@ -522,6 +579,18 @@ class Rules {
     bool alternateArcticArt;   // [General] AlternateArcticArt: A-suffix art
     List<string> fireTypes;    // [AudioVisual] DamageFireTypes: burning
                                // buildings pick one of these at random            // ini Gravity= (leptons/tick²), retail 6
+    List<string> deadBodies;   // [AudioVisual] DeadBodies: the corpse
+                               // anims a fallen trooper leaves (retail
+                               // DEATH_A..DEATH_F)
+    string infantryExplode = "S_BANG34";   // InfDeath ExplodeAlt
+    string flamingInfantry = "FLAMEGUY";   // InfDeath Fire
+    string infantryHeadPop = "YURIDIE";    // InfDeath HeadExplode
+    string infantryNuked = "NUKEDIE";      // InfDeath Nuke
+    string infantryVirus = "VIRUSD";       // InfDeath Virus
+    string infantryMutate = "GENDEATH";    // InfDeath Mutate
+    string infantryBrute = "BRUTDIE";      // InfDeath Brute
+    string electroAnim;        // the [Animations] list's 2nd entry: the
+                               // InfDeath Electro death anim (retail ELECTRO)
     int conditionYellow = 50;  // [AudioVisual] ConditionYellow=%: at or
                                // below this share of health a building
                                // shows its damaged frame (retail 50)
@@ -822,6 +891,33 @@ class Rules {
     /// <summary>[AudioVisual] ConditionRed=% (retail 25): the heavy damage
     /// state. The sprite has no third damage frame -- red shares yellow's.</summary>
     int ConditionRedPct() { return this.conditionRed; }
+
+    /// <summary>The death ANIM for a warhead's InfDeath value -- the
+    /// reference's getDeathAnim switch (sequenceMap.ts). Gunfire and
+    /// Explode play the trooper's own Die1/Die2 sprite sequence instead,
+    /// so they map to no anim here.</summary>
+    string DeathAnimName(int infDeath) {
+        if (infDeath == 3) { return this.infantryExplode; }
+        if (infDeath == 4) { return this.flamingInfantry; }
+        if (infDeath == 5) {
+            return this.electroAnim == null ? "" : this.electroAnim;
+        }
+        if (infDeath == 6) { return this.infantryHeadPop; }
+        if (infDeath == 7) { return this.infantryNuked; }
+        if (infDeath == 8) { return this.infantryVirus; }
+        if (infDeath == 9) { return this.infantryMutate; }
+        if (infDeath == 10) { return this.infantryBrute; }
+        return "";
+    }
+
+    /// <summary>A random DeadBodies corpse anim (DEATH_A..F), the pick
+    /// keyed off a caller-supplied clock so runs stay deterministic.</summary>
+    string DeathBodyName(int pick) {
+        if (this.deadBodies == null || this.deadBodies.Count == 0) {
+            return "";
+        }
+        return this.deadBodies[pick % this.deadBodies.Count];
+    }
 
     /// <summary>The building's constant IdleAnim= loop from its art section,
     /// "" when the section or the anim's own art section is absent -- the
@@ -1855,6 +1951,40 @@ class Rules {
             if (cy > 0) { this.conditionYellow = cy; }
             int cr = Rules.LeadingInt(av.GetOr("ConditionRed", ""));
             if (cr > 0) { this.conditionRed = cr; }
+            if (av.Contains("DeadBodies")) {
+                this.deadBodies = Rules.Csv(av.Get("DeadBodies").ToUpper());
+            }
+            string da = av.Get("InfantryExplode");
+            if (da.Length > 0) { this.infantryExplode = da.ToUpper(); }
+            da = av.Get("FlamingInfantry");
+            if (da.Length > 0) { this.flamingInfantry = da.ToUpper(); }
+            da = av.Get("InfantryHeadPop");
+            if (da.Length > 0) { this.infantryHeadPop = da.ToUpper(); }
+            da = av.Get("InfantryNuked");
+            if (da.Length > 0) { this.infantryNuked = da.ToUpper(); }
+            da = av.Get("InfantryVirus");
+            if (da.Length > 0) { this.infantryVirus = da.ToUpper(); }
+            da = av.Get("InfantryMutate");
+            if (da.Length > 0) { this.infantryMutate = da.ToUpper(); }
+            da = av.Get("InfantryBrute");
+            if (da.Length > 0) { this.infantryBrute = da.ToUpper(); }
+        }
+        // The electro death anim is the [Animations] list's second entry
+        // (the reference spreads the rules' animation table into a set and
+        // takes names[1] -- retail's list starts TWLT100, ELECTRO).
+        IniSection an = ini.Section("Animations");
+        if (an != null) {
+            List<string> vals = new List<string>();
+            for (int i = 0; i < an.Count(); i = i + 1) {
+                string v = an.EntryAt(i).Value().Trim().ToUpper();
+                if (v.Length == 0 || v[0] == 59) { continue; }
+                bool have = false;
+                for (int k = 0; k < vals.Count; k = k + 1) {
+                    if (vals[k] == v) { have = true; break; }
+                }
+                if (!have) { vals.Add(v); }
+            }
+            if (vals.Count > 1) { this.electroAnim = vals[1]; }
         }
         IniSection cd = ini.Section("CombatDamage");
         if (cd != null) {
@@ -1885,6 +2015,9 @@ class Rules {
             string anims = s.Get("AnimList");
             if (anims.Length > 0) {
                 w.SetAnimList(Rules.Csv(anims.ToUpper()));
+            }
+            if (s.Contains("InfDeath")) {
+                w.SetInfDeath(Rules.LeadingInt(s.Get("InfDeath")));
             }
         }
         for (int i = 0; i < this.weapons.Count; i = i + 1) {
@@ -2176,6 +2309,19 @@ class Rules {
             // so frame = start + facing.
             List<int> dep = Rules.LeadingInts(seq.Get("Deployed"));
             if (dep.Count >= 2) { d.SetDeployedSeq(dep[0], dep[1]); }
+            List<int> fire = Rules.LeadingInts(seq.Get("FireUp"));
+            if (fire.Count >= 2) {
+                d.SetFireSeq(fire[0], fire[1],
+                             fire.Count >= 3 ? fire[2] : fire[1]);
+            }
+            List<int> d1 = Rules.LeadingInts(seq.Get("Die1"));
+            if (d1.Count >= 2) {
+                d.SetDie1Seq(d1[0], d1[1], d1.Count >= 3 ? d1[2] : 0);
+            }
+            List<int> d2 = Rules.LeadingInts(seq.Get("Die2"));
+            if (d2.Count >= 2) {
+                d.SetDie2Seq(d2[0], d2[1], d2.Count >= 3 ? d2[2] : 0);
+            }
         }
         // A projectile's smoke trail is art-ini data (Trailer= anim dropped
         // every SpawnDelay= ticks along the flight path), so it resolves
