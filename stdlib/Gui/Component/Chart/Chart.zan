@@ -2045,6 +2045,102 @@ class Chart {
         if (lo == null) { return ""; }
         return lo.legendX;
     }
+    /// legend.left/right 的等效水平对齐（官方盒模型）：显式
+    /// left/right/center 关键字直接返回；数值/百分比锚返回 ""（走 px
+    /// 通路）；两锚都未声明时返回官方默认 "center"。
+    static string LegendBoxAlignX() {
+        ChartOption lo = Chart.legendOpt;
+        if (lo == null) { return "center"; }
+        if (lo.legendHasLeft) {
+            if (lo.legendLeft == "left" || lo.legendLeft == "center"
+                || lo.legendLeft == "right") { return lo.legendLeft; }
+            return "";
+        }
+        if (lo.legendHasRight) {
+            if (lo.legendRight == "right") { return "right"; }
+            if (lo.legendRight == "left") { return "left"; }
+            if (lo.legendRight == "center") { return "center"; }
+            return "";
+        }
+        return "center"; // 官方 LegendModel.defaultOption: left 'center'
+    }
+    /// legend.left 数值锚（px）；未声明数值锚返回 -1。
+    static int LegendAnchorLeftPx() {
+        ChartOption lo = Chart.legendOpt;
+        if (lo == null) { return 0 - 1; }
+        if (lo.legendHasLeft && lo.legendLeftPx >= 0) { return lo.legendLeftPx; }
+        return 0 - 1;
+    }
+    /// legend.right 数值锚（px）；未声明返回 -1。
+    static int LegendAnchorRightPx() {
+        ChartOption lo = Chart.legendOpt;
+        if (lo == null) { return 0 - 1; }
+        if (lo.legendHasRight && lo.legendRightPx >= 0) { return lo.legendRightPx; }
+        return 0 - 1;
+    }
+    /// legend.top 数值锚（px）；未声明返回 -1。
+    static int LegendAnchorTopPx() {
+        ChartOption lo = Chart.legendOpt;
+        if (lo == null) { return 0 - 1; }
+        if (lo.legendHasTop && lo.legendTopPx >= 0) { return lo.legendTopPx; }
+        return 0 - 1;
+    }
+    /// legend.bottom 数值锚（px）；未声明返回 -1（布局侧按官方默认
+    /// tokens.size.m = 15 处理）。
+    static int LegendAnchorBottomPx() {
+        ChartOption lo = Chart.legendOpt;
+        if (lo == null) { return 0 - 1; }
+        if (lo.legendHasBottom && lo.legendBottomPx >= 0) { return lo.legendBottomPx; }
+        return 0 - 1;
+    }
+    /// legend.top/bottom 是否声明为 top/middle/bottom 关键字。
+    static string LegendBoxAlignY() {
+        ChartOption lo = Chart.legendOpt;
+        if (lo == null) { return ""; }
+        if (lo.legendHasTop) {
+            if (lo.legendTop == "top" || lo.legendTop == "middle"
+                || lo.legendTop == "bottom") { return lo.legendTop; }
+        }
+        if (lo.legendHasBottom) {
+            if (lo.legendBottom == "top" || lo.legendBottom == "middle"
+                || lo.legendBottom == "bottom") { return lo.legendBottom; }
+        }
+        return "";
+    }
+
+    /// 图例浮层顶边 Y（官方盒模型，供各视图共用）：
+    /// 显式 top 锚贴顶、显式 bottom 锚贴底（值即距底 px）、关键字
+    /// top/middle/bottom 对应上/中/下，均未声明时按官方默认
+    /// bottom = tokens.size.m = 15 贴底。lgH = 图例整体高度。
+    static int LegendFloatTop(App app, int y, int h, int lgH, int pad) {
+        int vTop = Chart.LegendAnchorTopPx();
+        int vBot = Chart.LegendAnchorBottomPx();
+        string vAlign = Chart.LegendBoxAlignY();
+        if (vTop >= 0) { return y + app.Scale(vTop); }
+        if (vBot >= 0) { return y + h - app.Scale(vBot) - lgH; }
+        if (vAlign == "top") { return y + pad; }
+        if (vAlign == "middle") { return y + (h - lgH) / 2; }
+        return y + h - app.Scale(15) - lgH; // 官方默认 bottom 15
+    }
+
+    /// 图例浮层左边 X（官方盒模型）：显式 left/right 数值锚优先，其次
+    /// 关键字 left/center/right，均未声明时官方默认 center（在
+    /// [x0, maxX] 内居中）。contentW = 图例整行/整列宽度。
+    static int LegendFloatLeft(App app, int x, int w, int contentW,
+                               int pad, int x0, int maxX) {
+        int lAnc = Chart.LegendAnchorLeftPx();
+        int rAnc = Chart.LegendAnchorRightPx();
+        if (lAnc >= 0) { return x + app.Scale(lAnc); }
+        if (rAnc >= 0) { return maxX - app.Scale(rAnc) - contentW; }
+        string lax = Chart.LegendBoxAlignX();
+        if (lax == "left") { return x0; }
+        if (lax == "right") { return maxX - contentW; }
+        if (contentW > 0 && contentW <= maxX - x0) {
+            return x0 + (maxX - x0 - contentW) / 2;
+        }
+        return x0;
+    }
+
     /// 本帧图例点击模式：0 = multiple（现状）| 1 = single |
     /// -1 = false（不可点）。
     static int LegendSelMode() {
@@ -2360,13 +2456,214 @@ class Chart {
         }
     }
 
-    /// 右侧竖排图例的起始 y：工具箱占着标题行时下移，避免挡住色块。
+    /// 轴名几何：ECharts `AxisBuilder.ts:855-880` 的**基位**（即
+    /// nameMoveOverlap 求解之前的确定量）+ 官方缺省
+    /// `coord/axisDefault.ts:34 nameLocation:'end'`、`:47 nameGap:15`。
+    ///
+    /// 标准坐标系里的公式（sig = inverse ? -1 : 1、extent 沿轴方向）：
+    ///   start  -> pos.x = extent[0] - sig*gap（nameMoveDir.x = -sig）
+    ///   end    -> pos.x = extent[1] + sig*gap（nameMoveDir.x =  +sig）
+    ///   middle -> pos.x = (extent[0]+extent[1])/2
+    ///             pos.y = labelOffset + nameDirection*gap
+    /// 渲染到屏幕要再叠 transformGroup：
+    ///   x 轴：rotation 0，translate (plotX, 轴线 y)，nameDirection +1
+    ///   y 轴：rotation +90°，translate (轴线 x, plotBot)，
+    ///         nameDirection = left ? -1 : +1，映射 (a,b) -> (b, -a) + t
+    /// 把两式合成、代入 nameGap=15，实测（关掉 nameMoveOverlap，
+    /// `_scratch/chart_oracle/axisname.js`，rect=100,100,400,200）得到：
+    ///   x start  (85,300) 右对齐锚   x middle (300,315) 居中、字盒顶贴锚
+    ///   x end    (515,300) 左对齐锚  y start  (100,315) 居中、字盒顶贴锚
+    ///   y middle (85,200) 绕锚点逆时针 90°（自下而上读），贴轴线内侧
+    ///   y end    (100,85) 居中、字盒底贴锚
+    /// inverse 只翻 start/end 的端：yAxes[1].inverse 的 area-rainfall
+    /// 实测 start 落顶、end 落底（与不翻转相反）。
+    class ChartAxisName {
+        int ax;       // 行盒左上角 x（rot=-90 时是旋转锚点的 x）
+        int ay;       // 行盒左上角 y（rot=-90 时锚点置于文本垂直中心）
+        int rot;      // 0 | -90
+        int anchor;   // 0=left 1=center 2=right（rot=0 时生效）
+    }
+
+    /// nameGap 像素（官方缺省 15，已按 DPI 缩放）。
+    static int NameGapPx(App app, ChartAxis a) {
+        int g = 15;
+        if (a.nameGap >= 0) { g = a.nameGap; }
+        return app.Scale(g);
+    }
+
+    /// 轴名基位（纯整数几何，字体度量由调用方喂进来）——conformance
+    /// 用例据此在没有 App/Canvas 的情况下钉死三态落点。`fh` = 行盒高，
+    /// `centerTop` = 垂直居中一行文本时的行盒顶边偏移（= CenterTextYAt(0)）。
+    static ChartAxisName AxisNamePosPx(ChartAxis a, bool isX, int plotX,
+                                       int plotY, int plotW, int plotH,
+                                       bool far, int gap, int fh, int centerTop) {
+        return Chart.AxisNamePosPx(a, isX, plotX, plotY, plotW, plotH, far,
+            gap, fh, centerTop, 0 - 1);
+    }
+
+    /// 同上，另给轴线位置覆盖（page 坐标）：`axisLine` = x 轴的轴线 y /
+    /// y 轴的轴线 x，-1 = 按绘图区边界推（x 轴底边、y 轴左/右缘）。
+    /// T3b 的 axisLine.onZero 让轴线骑到零线上时从这条缝进来。
+    static ChartAxisName AxisNamePosPx(ChartAxis a, bool isX, int plotX,
+                                       int plotY, int plotW, int plotH,
+                                       bool far, int gap, int fh, int centerTop,
+                                       int axisLine) {
+        int sig = 1;
+        if (a.reversed) { sig = 0 - 1; }
+        int len = plotW;
+        if (!isX) { len = plotH; }
+        // extent[0] = 数据下界的 local 坐标；翻转时落在轴的远端。
+        int ext0 = 0;
+        if (a.reversed) { ext0 = len; }
+        int ext1 = len - ext0;
+        int plotBot = plotY + plotH;
+        if (axisLine < 0) {
+            axisLine = plotBot;
+            if (!isX) { axisLine = plotX; if (far) { axisLine = plotX + plotW; } }
+        }
+        string loc = a.nameLocation;
+        if (loc != "start" && loc != "middle") { loc = "end"; }
+        ChartAxisName n = new ChartAxisName();
+        n.rot = 0;
+        n.anchor = 1;
+        if (isX) {
+            if (loc == "middle") {
+                n.ax = plotX + len / 2;
+                n.ay = axisLine + gap;              // 字盒顶贴锚
+            } else if (loc == "start") {
+                n.ax = plotX + ext0 - sig * gap;
+                n.anchor = 2;                       // 右对齐
+                n.ay = axisLine + centerTop;
+            } else {
+                n.ax = plotX + ext1 + sig * gap;
+                n.anchor = 0;                       // 左对齐
+                n.ay = axisLine + centerTop;
+            }
+            return n;
+        }
+        if (loc == "middle") {
+            n.rot = 0 - 90;                         // 自下而上读
+            // 旋转 −90° 后文字盒占 x∈[ax, ax+行高]；ECharts 的实测是把这个
+            // 盒**以轴线内侧 gap 处为中心**（左轴实测盒 [79,93]，axisLine
+            // =100、gap=15 ⇒ 中心 86 ≈ axisLine−gap），故锚点回退半个行高。
+            n.ax = axisLine - gap - fh / 2;
+            if (far) { n.ax = axisLine + gap - fh / 2; }
+            n.ay = plotBot - len / 2;               // 锚点中线
+            return n;
+        }
+        n.ax = axisLine;
+        // 锚点（AxisBuilder.ts:855-864 的 pos.x 经 transformGroup 映射到
+        // 页面 y：page_y = plotBot - pos.x）。
+        int anchorY = plotBot - ext1 - sig * gap;
+        if (loc == "start") { anchorY = plotBot - ext0 + sig * gap; }
+        // 轴名恒在绘图区**外侧**：锚点落在下侧时字盒顶贴锚，落在上侧
+        // 时字盒底贴锚（`endTextLayout` 的 onLeft → verticalAlign
+        // bottom/top）。inverse 把 start/end 的落点对调，所以"是否在
+        // 下侧"= (loc == "start") != inverse。
+        bool below = (loc == "start");
+        if (a.reversed) { below = !below; }
+        n.ay = anchorY;
+        if (!below) { n.ay = anchorY - fh; }
+        return n;
+    }
+
+    /// App 版：换算 nameGap（缺省 15）并取字体度量。
+    static ChartAxisName AxisNamePos(App app, ChartAxis a, bool isX,
+                                    int plotX, int plotY, int plotW, int plotH,
+                                    bool far, int fs) {
+        return Chart.AxisNamePos(app, a, isX, plotX, plotY, plotW, plotH, far,
+            fs, 0 - 1);
+    }
+
+    /// App 版 + 轴线位置覆盖（onZero 让轴线离开绘图区边界时用）。
+    static ChartAxisName AxisNamePos(App app, ChartAxis a, bool isX,
+                                    int plotX, int plotY, int plotW, int plotH,
+                                    bool far, int fs, int axisLine) {
+        return Chart.AxisNamePosPx(a, isX, plotX, plotY, plotW, plotH, far,
+            Chart.NameGapPx(app, a), Canvas.FontHeight(fs),
+            Canvas.CenterTextYAt(0, fs), axisLine);
+    }
+
+    /// 轴名占据的像素盒（用于给绘图区让出上下栏）。rot=-90 的行盒
+    /// （tw x fh）绕 (ax, ay) 逆时针转 90° 后占 x∈[ax,ax+fh]、
+    /// y∈[ay-tw, ay]（见 AxisNameY 的推导），故 y 区间以 ay 为下界。
+    class ChartNameBox {
+        int left;
+        int top;
+        int right;
+        int bottom;
+    }
+
+    static ChartNameBox AxisNameBoxPx(ChartAxis a, bool isX, int plotX,
+                                      int plotY, int plotW, int plotH,
+                                      bool far, int gap, int fh, int centerTop,
+                                      int tw, int axisLine) {
+        ChartNameBox b = new ChartNameBox();
+        ChartAxisName n = Chart.AxisNamePosPx(a, isX, plotX, plotY, plotW,
+            plotH, far, gap, fh, centerTop, axisLine);
+        if (n.rot == 0) {
+            int l = n.ax;
+            if (n.anchor == 1) { l = n.ax - tw / 2; }
+            if (n.anchor == 2) { l = n.ax - tw; }
+            b.left = l; b.right = l + tw;
+            b.top = n.ay; b.bottom = n.ay + fh;
+        } else {
+            b.left = n.ax; b.right = n.ax + fh;
+            b.top = n.ay - tw / 2; b.bottom = n.ay + tw / 2;
+        }
+        return b;
+    }
+
+    /// 轴名行盒左缘（rot=0 时按 anchor 对齐）。
+    static int AxisNameX(App app, ChartAxis a, ChartAxisName n, int fs) {
+        if (n.rot != 0) { return n.ax; }
+        int tw = Canvas.MeasureText(a.title, fs);
+        if (n.anchor == 1) { return n.ax - tw / 2; }
+        if (n.anchor == 2) { return n.ax - tw; }
+        return n.ax;
+    }
+
+    /// 轴名行盒顶边：rot=-90 的行盒（tw x fh）绕 (ax, ay) 逆时针转 90°
+    /// 后占 y∈[ay-tw, ay]，故把锚点下移半个文本宽使文本以锚点为中心。
+    static int AxisNameY(App app, ChartAxis a, ChartAxisName n, int fs) {
+        if (n.rot == 0) { return n.ay; }
+        return n.ay + Canvas.MeasureText(a.title, fs) / 2;
+    }
+
+    /// 画一根轴的轴名（三态 + nameGap + inverse + y 轴 position=right）。
+    static void DrawAxisName(App app, Canvas c, ChartAxis a, bool isX,
+                            int plotX, int plotY, int plotW, int plotH, bool far,
+                            StyleBox sTitle, int fs) {
+        if (a == null || a.title.Length == 0 || !a.show) { return; }
+        ChartAxisName n = Chart.AxisNamePos(app, a, isX, plotX, plotY, plotW,
+            plotH, far, fs);
+        int ax = Chart.AxisNameX(app, a, n, fs);
+        int ay = Chart.AxisNameY(app, a, n, fs);
+        if (n.rot == 0) {
+            c.DrawText(ax, ay, a.title, sTitle.FgOr(0), fs);
+        } else {
+            c.DrawTextRot(ax, ay, a.title, sTitle.FgOr(0), fs, n.rot);
+        }
+    }
+
+    /// 右侧竖排图例的起始 y（官方盒模型）：先按 legend.top/bottom 锚
+    /// （未声明时官方默认 bottom 15）算贴底位置，再受工具箱避让约束
+    /// 下移。rowsH 为图例整列高度；<= 0 时退化为仅工具箱避让。
     static int LegendStartY(App app, int y, int proposed) {
-        if (Chart.toolReserve < 1) { return proposed; }
+        return Chart.LegendStartYRows(app, y, proposed, 0, 0, 0);
+    }
+
+    /// 带容器尺寸的版本：h/rowsH 给出时按官方 bottom 锚贴底。
+    static int LegendStartYRows(App app, int y, int proposed, int h, int rowsH, int pad) {
+        int startY = proposed;
+        if (h > 0 && rowsH > 0) {
+            startY = Chart.LegendFloatTop(app, y, h, rowsH, pad);
+        }
+        if (Chart.toolReserve < 1) { return startY; }
         int bandBot = y + app.theme.paddingMedium
             + ChartToolbox.Height(app) + app.Scale(4);
-        if (proposed < bandBot) { return bandBot; }
-        return proposed;
+        if (startY < bandBot) { return bandBot; }
+        return startY;
     }
 
     /// 图例占用的行数：有工具箱时整排下移到标题行之下（至少 1 行）；
@@ -2580,6 +2877,14 @@ class Chart {
         int lgY = y + pad;
         if (vert) {
             lgY = y + pad + headH + app.Scale(4);
+            // 官方盒模型：显式 top 数值锚贴顶，显式 bottom 数值锚贴底，
+            // 关键字 top/middle/bottom 对应上/中/下。竖排图例官方默认
+            // 仍是 left 'center' + bottom 15（LegendModel.defaultOption），
+            // 故未声明垂直锚时按 bottom 15 贴底。
+            int rowsV = prim.Count;
+            if (rowsV < 1) { rowsV = 1; }
+            lgY = Chart.LegendFloatTop(app, y, h, rowsV * rowH, pad);
+            Chart.legendBottomReserve = 0; // 竖排不占横带
         } else {
             // 底部：先用与绘制完全相同的换行规则量出行数，再从面板
             // 底边起排（绘图区一侧留 app.Scale(4) 间隙）。
@@ -2614,10 +2919,10 @@ class Chart {
                 }
                 if (prim.Count > 0) { totW = totW - app.Scale(14); }
                 if (totW > 0 && totW <= maxX - xCur) {
-                    int free = maxX - xCur - totW;
-                    string lax = Chart.LegendAlignX();
-                    if (lax == "right") { xCur = xCur + free; }
-                    else if (lax != "left") { xCur = xCur + free / 2; }
+                    // 官方盒模型：left/right/center 关键字，或 left/right
+                    // 数值锚（px）。两者都未声明时 = 官方默认 center。
+                    xCur = Chart.LegendFloatLeft(app, x, w, totW, pad,
+                        x + pad, maxX);
                 }
             }
             for (int pi = 0; pi < prim.Count; pi = pi + 1) {
@@ -3615,7 +3920,18 @@ class Chart {
             if (rw > rightGut) { rightGut = rw; }
         }
         int botGut = fh + app.Scale(12) + app.Scale(x0.labelMargin);
-        if (x0.title.Length > 0) { botGut = botGut + fh + app.Scale(2); }
+        // x 轴名的垂直落点随 nameLocation 变（AxisNamePos）：end/middle 在
+        // 轴线下方（middle 再多一整个 gap）、start 骑在轴线上。量出名字
+        // 盒底相对"轴线 + 半个行高"多出来的部分补进底栏，否则名字压住
+        // 刻度标签。start 态盒底高于轴线下缘，不补。
+        if (x0.title.Length > 0 && x0.show) {
+            int xTw = Canvas.MeasureText(x0.title, fs);
+            ChartNameBox xb = Chart.AxisNameBoxPx(x0, true, 0, 0, 100, 100,
+                false, Chart.NameGapPx(app, x0), fh, Canvas.CenterTextYAt(0, fs),
+                xTw, 0 - 1);
+            int below = xb.bottom - (fh + fh / 2);
+            if (below > 0) { botGut = botGut + below; }
+        }
         if (xValue) { botGut = botGut + fh + app.Scale(2); }
         // 旋转分类标签：按最宽标签的旋转后垂直跨度扩底栏（未旋转
         // 与旋转都成立——interval>=0 抽稀时贪心不再兜底防重叠）。
@@ -3631,8 +3947,25 @@ class Chart {
                 botGut = botGut - baseNeed + need;
             }
         }
+        // y 轴名 end 态落在绘图区上方、start/middle 在区内：量出名字盒顶
+        // 相对绘图区顶边高出多少，按最高的一根让出上栏。
         int topGut = 0;
-        if (y0.title.Length > 0 || y1.title.Length > 0) { topGut = fh + app.Scale(2); }
+        if (y0.title.Length > 0 && y0.show) {
+            int yTw = Canvas.MeasureText(y0.title, fs);
+            ChartNameBox yb = Chart.AxisNameBoxPx(y0, false, 0, 0, 100, 100,
+                false, Chart.NameGapPx(app, y0), fh, Canvas.CenterTextYAt(0, fs),
+                yTw, 0 - 1);
+            int above = (0 - yb.top) + app.Scale(2);
+            if (above > topGut) { topGut = above; }
+        }
+        if (hasRight && o.yAxes.Count > 1 && y1.title.Length > 0 && y1.show) {
+            int y1Tw = Canvas.MeasureText(y1.title, fs);
+            ChartNameBox yb2 = Chart.AxisNameBoxPx(y1, false, 0, 0, 100, 100,
+                y1.position == "right", Chart.NameGapPx(app, y1), fh,
+                Canvas.CenterTextYAt(0, fs), y1Tw, 0 - 1);
+            int above2 = (0 - yb2.top) + app.Scale(2);
+            if (above2 > topGut) { topGut = above2; }
+        }
 
         int plotX = x + pad + leftGut;
         if (o.gridLeft >= 0) {
@@ -3988,32 +4321,17 @@ class Chart {
             }
         }
 
-        // 轴标题：nameLocation（ECharts）——x 轴 start|middle|end 控
-        // 水平对齐；y 轴 middle（默认，= 现状顶部）|start(底)|end(顶)。
-        if (x0.title.Length > 0) {
-            int tw = Canvas.MeasureText(x0.title, fs);
-            int ty = plotBot + app.Scale(6) + fh;
-            if (x0.nameLocation == "start") {
-                c.DrawText(plotX, ty, x0.title, sAxisTitle.FgOr(0), fs);
-            } else if (x0.nameLocation == "end") {
-                c.DrawText(plotX + plotW - tw, ty, x0.title, sAxisTitle.FgOr(0), fs);
-            } else {
-                c.DrawTextCentered(plotX, ty, plotW, fh, x0.title, sAxisTitle.FgOr(0), fs);
-            }
-        }
-        if (y0.title.Length > 0) {
-            if (y0.nameLocation == "start") {
-                c.DrawText(plotX, plotBot - fh, y0.title, sAxisTitle.FgOr(0), fs);
-            } else {
-                // "middle"（默认）与 "end" 都留在绘图区左上。
-                c.DrawText(plotX, plotTop, y0.title, sAxisTitle.FgOr(0), fs);
-            }
-        }
-        // 右轴标题只在真的存在第二条轴时画（YAxis1 在单轴时会
-        // 回退到 YAxis0，不设防会把左轴标题镜像到右上角）。
-        if (hasRight && o.yAxes.Count > 1 && y1.title.Length > 0) {
-            int yw = Canvas.MeasureText(y1.title, fs);
-            c.DrawText(plotX + plotW - yw, plotTop, y1.title, sAxisTitle.FgOr(0), fs);
+        // 轴名：ECharts 三态（缺省 'end'）+ nameGap（缺省 15）。
+        // 几何与实测出处见 Chart.AxisNamePos。
+        Chart.DrawAxisName(app, c, x0, true, plotX, plotY, plotW, plotH, false,
+            sAxisTitle, fs);
+        Chart.DrawAxisName(app, c, y0, false, plotX, plotY, plotW, plotH,
+            y0.position == "right", sAxisTitle, fs);
+        // 右轴名只在真的存在第二条轴时画（YAxis1 在单轴时会回退
+        // 到 YAxis0，不设防会把左轴名镜像到右缘）。
+        if (hasRight && o.yAxes.Count > 1) {
+            Chart.DrawAxisName(app, c, y1, false, plotX, plotY, plotW, plotH,
+                y1.position == "right", sAxisTitle, fs);
         }
 
         return f;

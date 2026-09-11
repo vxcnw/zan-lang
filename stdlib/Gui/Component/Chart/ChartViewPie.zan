@@ -444,14 +444,25 @@ partial class ChartView {
             int x0 = x + pad;
             int maxX = x + w - pad;
             int xCur = x0;
-            int yCur = top;
+            // 官方盒模型（LegendModel.defaultOption: left 'center'、
+            // bottom tokens.size.m = 15）：图例浮层按 left/right/top/bottom
+            // 锚定，未声明时水平居中、贴底 15px。此前写死在内容顶部
+            // （yCur = top）导致 pie-simple 的竖排图例跑到左上角。
             bool legVert = o.legendOrient == "vertical";
+            int lgRows = candNm.Count;
+            if (!legVert) { lgRows = 1; }
+            int lgH = lgRows * rowH;
+            int yCur = Chart.LegendFloatTop(app, y, h, lgH, pad);
             if (!legVert && candNm.Count > 0) {
                 int rowW = 0 - gap;
                 for (int ci = 0; ci < candNm.Count; ci = ci + 1) {
                     rowW = rowW + Chart.LegendChipW(app, candNm[ci]) + gap;
                 }
-                if (rowW > 0 && rowW <= maxX - x0) { xCur = x0 + (maxX - x0 - rowW) / 2; }
+                xCur = Chart.LegendFloatLeft(app, x, w, rowW, pad, x0, maxX);
+            } else if (legVert) {
+                xCur = Chart.LegendFloatLeft(app, x, w,
+                    Chart.LegendChipW(app, candNm.Count > 0 ? candNm[0] : ""),
+                    pad, x0, maxX);
             }
             for (int ci = 0; ci < candNm.Count; ci = ci + 1) {
                 int si = candSi[ci];

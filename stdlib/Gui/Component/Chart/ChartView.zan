@@ -869,6 +869,7 @@ partial class ChartView {
             h = ChartView.FoldStr(h, ax.title, 3);
             h = (h * 31 + ax.labelRotate + ax.labelInterval) % 2000000000;
             h = ChartView.FoldStr(h, ax.nameLocation, 23);
+            h = (h * 31 + ax.nameGap + ax.labelMargin) % 2000000000;
             for (int cj = 0; cj < ax.categories.Count; cj = cj + 1) {
                 h = ChartView.FoldStr(h, ax.categories[cj], cj * 31);
             }
@@ -878,6 +879,8 @@ partial class ChartView {
             h = (h * 31 + ay.type + ay.min + ay.max + ay.ticks) % 2000000000;
             h = (h * 31 + (ay.reversed ? 1 : 0) + (ay.showGrid ? 1 : 0)) % 2000000000;
             h = ChartView.FoldStr(h, ay.title, 4);
+            h = ChartView.FoldStr(h, ay.nameLocation, 24);
+            h = (h * 31 + ay.nameGap + (ay.position == "right" ? 1 : 0)) % 2000000000;
         }
         h = (h * 31 + o.series.Count) % 2000000000;
         for (int s = 0; s < o.series.Count; s = s + 1) {

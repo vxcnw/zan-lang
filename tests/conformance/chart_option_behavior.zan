@@ -308,11 +308,19 @@ class Program {
         int a2 = ChartView.FingerprintCore(1, 0, 100, ax,
             ResolvedChart.Resolve(ax, Theme.Light(), null, 0));
         ax.xAxes[0].labelInterval = 0 - 1;
-        ax.xAxes[0].nameLocation = "end";
+        // nameLocation 缺省已是官方 'end'，这里改成 'start' 才能证明
+        // 三态真的进了指纹；nameGap 同理（缺省 15 -> 30）。
+        ax.xAxes[0].nameLocation = "start";
         int a3 = ChartView.FingerprintCore(1, 0, 100, ax,
             ResolvedChart.Resolve(ax, Theme.Light(), null, 0));
+        ax.xAxes[0].nameLocation = "end";
+        ax.xAxes[0].nameGap = 30;
+        int a4 = ChartView.FingerprintCore(1, 0, 100, ax,
+            ResolvedChart.Resolve(ax, Theme.Light(), null, 0));
+        ax.xAxes[0].nameGap = 0 - 1;
         Console.WriteLine("fpaxis:" + Convert.ToString(a0 != a1)
-            + ":" + Convert.ToString(a0 != a2) + ":" + Convert.ToString(a0 != a3));
+            + ":" + Convert.ToString(a0 != a2) + ":" + Convert.ToString(a0 != a3)
+            + ":" + Convert.ToString(a0 != a4));
         ChartOption mo = ChartOption.Single(ChartSeries.Line("S", new List<int>{1, 2}));
         int b0 = ChartView.FingerprintCore(1, 0, 100, mo,
             ResolvedChart.Resolve(mo, Theme.Light(), null, 0));
