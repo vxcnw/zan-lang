@@ -617,19 +617,23 @@ Log(q);                          // 打印 11 —— 闭包内外读写同一个
   （停在 stream-progressive 的 4 行 / 11 行但内容错 / 全空），**全部 rc=0**；线索是用例的
   upstream 只 accept 2 个连接，转发器一旦复用连接就停在 accept 上，Main 的下一个 await 永不 resume。
 
-## async × 异常：嵌套非 async 函数里的 throw 会让 awaiter 局部归零（A293，未修）
+## async × 异常：unwind mark 是每个 handler 的义务，漏一个就殃及全部帧（A293，2026-09-11 已修）
 
-`_scratch/fixv/exc_local*.zan` 四组对照：
-
-- 在 await 的 async 方法体内直接 `throw`、由 awaiter `catch`：局部正常（len=20）。
-- `await` 真正挂起之后再 `throw`：正常。
-- **在嵌套的非 async 辅助函数里 `throw`、由 awaiter `catch`：awaiter 的所有局部
-  变成 NULL/0**（len=0）。辅助函数返回类或 int 都复现，用字面量局部也能复现，
-  与 StringBuilder / A279 无关。
-
-写「async + 异常 + 局部变量」的组合时，别依赖 catch 之后的局部值。怀疑点：
-`irgen_async.c` 的 EH trampoline（约 1442/1513——landing pad 只恢复了 resume 点，
-没恢复 awaiter frame 的 locals 槽）。已登记 TASKS.md A293。
+- 症状：async 方法内**嵌套的非 async 函数** throw、由 awaiter catch 后，awaiter 的
+  所有局部 NULL/0。最小红案：嵌套 sync throw + root catch + 一个 string 局部。
+- 根因（不在 trampoline 本身）：`emit_async_eh_prologue` 给 `$resume` arm trampoline
+  时**没写 handler 槽的 unwind mark（tmp 栈深度）**——mark 槽是 calloc 的 0。try 的
+  arm 写了 mark，trampoline 与 frame 内 try 的 re-arm 都漏了。thrower 是普通 sync 帧
+  时走 `emit_eh_unwind_to_handler(top)` → 读到 mark=0 → `__zan_eh_tmp_unwind(0)` 把
+  tmp 栈**从 0 起全部**注册槽释放并置 NULL——awaiter/root 帧的 owned 局部（string、
+  List）全部殃及。
+- 关键对照（定位时靠它剪枝）：throw 在 async 体内（走 trampoline land、rethrow 无
+  unwind）不坏；**嵌套 sync 帧才坏**；隔几个 sync 帧无关、await 是否真挂起无关。
+- 修：trampoline/rearm 两处 arm 补 `store tmp_top → mark_ptr(t1)`，与 try arm 对齐。
+- 教训：**handler 栈上每个写 top 的地方都必须同时写自己的 mark**——这是「谁 arm
+  谁负责记账」的契约，靠 calloc 0 兜底的槽 = 深度 0 = 「释放全世界」。新 handler
+  加进 EH 机制时，把「arm 三件套」写成一个小 helper（top++、写 mark、setjmp），
+  别让三步散在三处。
 
 ## 拉入闭包的链扫描：一个变量被两处清空 = 镜像全死（A300，2026-09-11 已修）
 

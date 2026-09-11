@@ -1332,6 +1332,15 @@ static void emit_async_eh_prologue(zan_irgen_t *g) {
         LLVMValueRef t = LLVMBuildLoad2(g->builder, i32, top_g, "eh.t");
         LLVMValueRef t1 = zan_add(g->builder, t, LLVMConstInt(i32, 1, 0), "eh.t1");
         LLVMBuildStore(g->builder, t1, top_g);
+        /* record the unwind-stack depth this handler was armed at, like the
+         * try arm does (irgen_stmt.c): a throw from a plain frame below
+         * reads this mark to release only the temps stacked above it.
+         * Leaving it zero made __zan_eh_tmp_unwind(0) release *every*
+         * registered local of every frame between the thrower and here --
+         * the awaiter's locals came back null after its catch (A293). */
+        LLVMBuildStore(g->builder,
+            LLVMBuildLoad2(g->builder, i32, get_eh_tmp_top_global(g), "eh.t0"),
+            emit_eh_mark_ptr(g, t1));
         LLVMValueRef r = emit_eh_setjmp(g, emit_eh_buf_ptr(g, t1));
         LLVMValueRef took = zan_icmp(g->builder, LLVMIntEQ, r, zero, "eh.took");
         LLVMBuildCondBr(g->builder, took, head_bb, exc_bb);
@@ -1366,6 +1375,10 @@ static void emit_async_eh_prologue(zan_irgen_t *g) {
         LLVMValueRef t = LLVMBuildLoad2(g->builder, i32, top_g, "eh.t2");
         LLVMValueRef t1 = zan_add(g->builder, t, LLVMConstInt(i32, 1, 0), "eh.t3");
         LLVMBuildStore(g->builder, t1, top_g);
+        /* same mark contract as the trampoline arm above (A293) */
+        LLVMBuildStore(g->builder,
+            LLVMBuildLoad2(g->builder, i32, get_eh_tmp_top_global(g), "eh.t3m"),
+            emit_eh_mark_ptr(g, t1));
         LLVMValueRef r = emit_eh_setjmp(g, emit_eh_buf_ptr(g, t1));
         LLVMValueRef took = zan_icmp(g->builder, LLVMIntEQ, r, zero, "eh.took2");
         LLVMBuildCondBr(g->builder, took, init_bb, land_bb);
