@@ -138,6 +138,23 @@ State the command you ran and what it printed. Separate "compiled", "ran" and
   type is part of the API: check it before assigning to anything but `var`
   (assigning an `int` to an object variable once crashed a port on its first
   request — silent at compile time, poison-value pointer at runtime).
+* `HttpClient.GetAsync/PostAsync` 只返回响应体，**拿不到 HTTP 状态码**——
+  把 403/429 映射成领域异常的 SDK 必须走 `SendAsync`（返回解析好的
+  `HttpResponse`，statusCode/body 一次拿全）。不要拿 body 再
+  `HttpResponse.Parse` 一次：GetAsync 返回的已经是剥掉头部的正文，
+  二次解析 statusCode 恒 200、body 变空。
+* `JsonValue.Get`/`PathGet` 可空性是编译期强制的：`x.Get(k) != null &&
+  x.Get(k).AsInt()` 这种"调两次"写法直接编译错误，必须先存局部变量再判
+  （每处一次 `Get` + null check）。
+* Steam 等 64 位 ID 的 JSON 约定是**字符串形态**（"76561197960287930"），
+  且个别字段文档写数字、线上回字符串（如 AuthenticateUserTicket 的
+  `result:"OK"`）——解析层两种形态都要接住。
+* 需要本地 HTTP 假网关自测的 SDK（微信/京东/Steam 同款套路）：
+  `HttpServer` 回放官方 JSON 形态 + `ExternalCallPolicy.Default()
+  .AllowLocalHttp()` 放行 loopback；客户端**不要**对明文假网关发 TLS——
+  TLS 握手对明文服务器会挂死到 `TlsStream.HandshakeAsync` 的 30s 硬截止
+  （真实 HTTPS 目标不受影响，是握手对端不是 TLS 而已），给 SDK 留一个
+  PlainHttpMode 之类的明文开关。
 * Do not hard-code hosts, ports, credentials or business limits: they belong in
   the project config (`config/app.json` for server projects), read at run time.
 * Do not hand-draw GUI widgets: use the standard library's components
