@@ -699,3 +699,28 @@ font-source shadow px 16 physical 0
 font-source alias px 21 physical 1
 font-source cycle px 0 physical 0
 font-source inherited px 15 physical 0
+--- coercion (at-rules / var fallback / important / border style / text-shadow / to-left / lint)
+atrule a.fg 0 button.bg -16711936 x.fg -16776961 dropped 1
+atimport button.bg -16711936 dropped 0
+varfb padL 7 fg -65536 bg 2130706432
+varfb hex4 fg -1996554240 empty -5517841
+important label.fg -65536 other.padL 3
+important merge fg -65536
+border a style 0 w 2 col -65536
+border b style 1 w 1 col -16711936
+border c style 1 w 3 col -16776961
+border d style 0 w 0 col 0
+border e style 1 w -1 col 0
+border f style 0 w 1 col -15658735
+textshadow a col -16777216 dx 1 dy 1 outline 0
+textshadow b col -16777216 dx 1 dy 1 outline 1
+textshadow c col 0 dx 0 dy 0 outline 0
+textshadow d col 2130706432 dx 2 dy 3 outline 0
+gradleft a dir 1 bg -16776961 to -65536
+gradleft b dir 1 bg -16776961 to -65536
+gradleft c dir 1 bg -65536 to -16776961
+lint count 4
+lint   selector not modelled, rule ignored: .a .b
+lint   selector not modelled, rule ignored: button > span
+lint   no declaration consumed by the engine: card
+lint   accepted but has no effect here: z  [inert: float]

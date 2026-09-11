@@ -86,8 +86,12 @@ button.hud {
   border: 1 #8a6f33;
   border-radius: var(--radius);
 }
-button.hud:hover { background: #c9962f22; border-color: #c9962f; }
-button.hud:active { background: #c9962f44; }
+/* 引擎的八位十六进制是 AARRGGBB（见 StyleSheet.ParseColor），
+   所以"金色 #c9962f 带 0x22/0x44 alpha"要写成 alpha 在前。
+   原来 alpha 写在了末尾：引擎按 AARRGGBB 读成 alpha=c9（几乎不
+   透明）+ 暗红，hover/active 整块变成不透明暗红而不是浅金。 */
+button.hud:hover { background: #22c9962f; border-color: #c9962f; }
+button.hud:active { background: #44c9962f; }
 button.hud.primary {
   background: linear-gradient(#e0ae43, #a87b21);
   color: #1a1305;

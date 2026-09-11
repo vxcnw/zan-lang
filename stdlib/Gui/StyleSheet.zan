@@ -55,6 +55,8 @@ class StyleSheet {
     /// 每条规则的声明块，索引与上面的选择器表对齐：匹配后直接取，
     /// 不再按选择器文本回查 rules（一次首帧解析要按名字查上百次）。
     List<JsonValue> selBlock;
+    /// 每条规则里 `!important` 那部分声明（无则 null），与 selBlock 对齐。
+    List<JsonValue> selImportant;
     /// 按类型名分桶的规则下标（升序，因此与 anyType 归并后仍是级联顺序）。
     /// 一个控件只需看自己类型那一桶加上无类型的那些规则，
     /// 而不是每次解析都扫全表——冷解析（首帧、换肤）的主要成本在此。
@@ -62,12 +64,30 @@ class StyleSheet {
     /// 没有类型选择器的规则下标（`.primary`、`#save`、`::option`）。
     List<int> anyType;
 
+    /// 解析时被跳过的 at-rule 块数（`@media` / `@keyframes` / …）。
+    /// 跳过是浏览器行为，但"跳过了多少"必须能看见——否则一整块
+    /// 响应式样式消失时，皮肤作者只会以为引擎支持它。
+    int atRulesDropped;
+
+    /// 词法上认不出（选择器含组合器/伪元素等）而被丢弃的规则文本。
+    /// 与 atRulesDropped 一起供 StyleSheet.Lint 报告。
+    List<string> lintDropped;
+    /// 声明了、但 Decl 一条都没消费掉的规则文本。
+    List<string> lintUnused;
+    /// 规则里出现了"收了但不生效"的属性（box-sizing / float），
+    /// 形如 `sel  [inert: float]`。
+    List<string> lintInert;
+    /// lintDropped/lintUnused 已收集到的 rules 代数。
+    int lintGen;
+
     /// 构造空表（规则/变量为空 JSON 对象，索引延迟建立）。
     StyleSheet() {
         this.rules = JsonValue.NewObject();
         this.vars = JsonValue.NewObject();
         this.state = "";
         this.indexedCount = 0 - 1;
+        this.atRulesDropped = 0;
+        this.lintGen = 0 - 1;
     }
 
     /// 解析以 CSS 文本编写的样式表（见 Css）。皮肤以 `.css` 文件发布，
@@ -87,6 +107,8 @@ class StyleSheet {
         for (int j = 0; j < other.vars.Count(); j = j + 1) {
             vars.Set(other.vars.KeyAt(j), other.vars.ValAt(j));
         }
+        this.atRulesDropped = this.atRulesDropped + other.atRulesDropped;
+        this.indexedCount = 0 - 1;
     }
 
     /// 从 JSON 源字符串解析样式表。格式错误 / 非对象的
@@ -101,6 +123,12 @@ class StyleSheet {
     /// 样式表完全没有规则时为 true（应用未加载皮肤）。
     bool IsEmpty() {
         return rules == null || rules.Count() == 0;
+    }
+
+    /// 解析/合并这张表时丢掉了什么，人话列表；空 = 全部生效。
+    /// 见 CollectLint 的判定口径。
+    List<string> Audit() {
+        return this.Lint();
     }
 
     /// `:root` 自定义属性的值（`Var("--accent")`），不存在时返回“”。
@@ -123,16 +151,25 @@ class StyleSheet {
 
     /// 将一个选择器的声明叠加到已解析的样式盒上。未知
     /// 属性在此忽略（它们是控件属性，由
-    /// ApplySelector 处理）。
+    /// ApplySelector 处理）。`!important` 的声明放在最后再套一遍，
+    /// 与 StyleSheet.ApplyMatch 的级联顺序一致。
     void ApplyBox(StyleBox b, string selector) {
         JsonValue block = this.Block(selector);
         if (block == null) { return; }
         for (int i = 0; i < block.Count(); i = i + 1) {
             string k = block.KeyAt(i);
-            if (k == "__zan_prescaled") { continue; }
+            if (k == "__zan_prescaled" || k == "__zan_important") { continue; }
             JsonValue v = block.ValAt(i);
             StyleSheet.DeclSource(b, k, StyleSheet.ValStr(v),
                                   StyleSheet.IsPrescaled(block, k));
+        }
+        JsonValue imp = block.Get("__zan_important");
+        if (imp != null && imp.IsObject()) {
+            for (int j = 0; j < imp.Count(); j = j + 1) {
+                string k = imp.KeyAt(j);
+                StyleSheet.DeclSource(b, k, StyleSheet.ValStr(imp.ValAt(j)),
+                                      StyleSheet.IsPrescaled(block, k));
+            }
         }
     }
 
@@ -150,6 +187,13 @@ class StyleSheet {
     void ApplyMatch(StyleBox b, string type, string cls, string id, string part,
                     int stateBits) {
         this.Index();
+        this.ApplyCascade(b, type, cls, id, part, stateBits);
+        this.ApplyImportant(b, type, cls, id, part, stateBits);
+    }
+
+    /// 普通声明（不含 `!important`）的级联。
+    void ApplyCascade(StyleBox b, string type, string cls, string id, string part,
+                      int stateBits) {
         List<string> want = Style.Classes(cls);
         List<int> typed = null;
         if (type != "") { this.byType.TryGetValue(type, out typed); }
@@ -174,12 +218,50 @@ class StyleSheet {
         }
     }
 
-    /// 把已经取到的声明块叠加到样式盒上。
+    /// 把匹配规则里 `!important` 的声明再套一遍。`!important` 的
+    /// 权重高于一切——包括宿主写下的 inline 样式——所以它必须跑在
+    /// 普通级联（以及 inline）之后，而不是像以前那样被剥掉标记、
+    /// 混在普通声明里按顺序碰运气。
+    void ApplyImportant(StyleBox b, string type, string cls, string id,
+                        string part, int stateBits) {
+        List<string> want = Style.Classes(cls);
+        List<int> typed = null;
+        if (type != "") { this.byType.TryGetValue(type, out typed); }
+        int a = 0;
+        int c = 0;
+        bool more = true;
+        while (more) {
+            int ia = 0 - 1;
+            int ic = 0 - 1;
+            if (typed != null && a < typed.Count) { ia = typed[a]; }
+            if (c < anyType.Count) { ic = anyType[c]; }
+            if (ia < 0 && ic < 0) {
+                more = false;
+            } else {
+                int i;
+                if (ic < 0 || (ia >= 0 && ia < ic)) { i = ia; a = a + 1; }
+                else { i = ic; c = c + 1; }
+                if (!this.Matches(i, type, want, id, part, stateBits, cls)) {
+                    continue;
+                }
+                JsonValue imp = selImportant[i];
+                if (imp == null || !imp.IsObject()) { continue; }
+                for (int k = 0; k < imp.Count(); k = k + 1) {
+                    string key = imp.KeyAt(k);
+                    StyleSheet.DeclSource(b, key, StyleSheet.ValStr(imp.ValAt(k)),
+                                          StyleSheet.IsPrescaled(selBlock[i], key));
+                }
+            }
+        }
+    }
+
+    /// 把已经取到的声明块叠加到样式盒上（`!important` 由
+    /// ApplyImportant 另行处理，这里跳过）。
     void ApplyDecls(StyleBox b, JsonValue block) {
         if (block == null) { return; }
         for (int i = 0; i < block.Count(); i = i + 1) {
             string k = block.KeyAt(i);
-            if (k == "__zan_prescaled") { continue; }
+            if (k == "__zan_prescaled" || k == "__zan_important") { continue; }
             StyleSheet.DeclSource(b, k, StyleSheet.ValStr(block.ValAt(i)),
                                   StyleSheet.IsPrescaled(block, k));
         }
@@ -275,10 +357,13 @@ class StyleSheet {
         }
         // 分桶要等排序完成再做：上面的 Insert 会挪动下标。
         this.selBlock = new List<JsonValue>();
+        this.selImportant = new List<JsonValue>();
         this.byType = new Dict<string, List<int>>();
         this.anyType = new List<int>();
         for (int k = 0; k < selText.Count; k = k + 1) {
-            selBlock.Add(this.Block(selText[k]));
+            JsonValue blk = this.Block(selText[k]);
+            selBlock.Add(blk);
+            selImportant.Add(blk == null ? null : blk.Get("__zan_important"));
             string ty = selType[k];
             if (ty == "") {
                 anyType.Add(k);
@@ -292,6 +377,89 @@ class StyleSheet {
             }
         }
         indexedCount = rules.Count();
+    }
+
+    // ---- 诊断（lint）--------------------------------------------------------
+
+    /// 把这张样式表里"写了但没生效"的部分整理成可读报告：
+    ///
+    /// * 被跳过的 at-rule（`@media` 等）——引擎没有媒体查询；
+    /// * 选择器含组合同器/伪元素而被丢弃的规则——引擎的选择器模型
+    ///   只有 `type.class#id::part:state`，没有祖先链；
+    /// * 声明全部不被 Decl 消费的规则（`float`、`text-shadow` 之类
+    ///   拼错或未实现的属性）。
+    ///
+    /// 返回空列表表示这张表里的每一条都真的会生效。皮肤调试时
+    /// 调一次就能把"改了没反应"从猜测变成清单；正常渲染路径不
+    /// 调用它，因此不影响开销。
+    List<string> Lint() {
+        List<string> outR = new List<string>();
+        if (rules == null) { return outR; }
+        this.Index();
+        this.CollectLint();
+        if (atRulesDropped > 0) {
+            outR.Add("dropped " + Convert.ToString(atRulesDropped)
+                     + " at-rule block(s): @media/@keyframes are not supported");
+        }
+        for (int i = 0; i < lintDropped.Count; i = i + 1) {
+            outR.Add("selector not modelled, rule ignored: " + lintDropped[i]);
+        }
+        for (int j = 0; j < lintUnused.Count; j = j + 1) {
+            outR.Add("no declaration consumed by the engine: " + lintUnused[j]);
+        }
+        for (int m = 0; m < lintInert.Count; m = m + 1) {
+            outR.Add("accepted but has no effect here: " + lintInert[m]);
+        }
+        return outR;
+    }
+
+    /// 填充 lintDropped / lintUnused（按 rules 代次缓存，Lint 连调免费）。
+    void CollectLint() {
+        if (lintGen == rules.Count()) { return; }
+        lintDropped = new List<string>();
+        lintUnused = new List<string>();
+        lintInert = new List<string>();
+        // 未能进入选择器索引的规则 = Selector.Parse 返回 null 的那些。
+        // selText 是已索引子集，用一张名字集合反查缺了谁。
+        Dict<string, bool> indexed = new Dict<string, bool>();
+        if (selText != null) {
+            for (int s = 0; s < selText.Count; s = s + 1) {
+                if (!indexed.ContainsKey(selText[s])) { indexed.Add(selText[s], true); }
+            }
+        }
+        for (int i = 0; i < rules.Count(); i = i + 1) {
+            string sel = rules.KeyAt(i);
+            if (!indexed.ContainsKey(sel)) {
+                lintDropped.Add(sel);
+                continue;
+            }
+            JsonValue blk = rules.ValAt(i);
+            if (blk == null || !blk.IsObject()) { continue; }
+            int consumed = 0;
+            List<string> inert = new List<string>();
+            for (int k = 0; k < blk.Count(); k = k + 1) {
+                string key = blk.KeyAt(k);
+                if (key == "__zan_prescaled" || key == "__zan_important") { continue; }
+                if (StyleSheet.Known(key)) { consumed = consumed + 1; }
+                else if (StyleSheet.Inert(key)) { inert.Add(key); }
+            }
+            if (consumed == 0 && inert.Count == 0) { lintUnused.Add(sel); }
+            if (inert.Count > 0) {
+                lintInert.Add(sel + "  [inert: "
+                              + string.Join(", ", inert) + "]");
+            }
+        }
+        lintGen = rules.Count();
+    }
+
+    /// 属性名是否被 Decl 消费（用一次性探针盒判定，与真实的
+    /// 派发走同一条路径，因此新增属性不会和这份清单脱节）。
+    /// 会改到盒子的探针无妨：盒子是新建的，用完即弃。
+    static bool Known(string key) {
+        if (key == "" || key.Substring(0, 1) == "_") { return false; }
+        if (StyleSheet.Inert(key)) { return false; }
+        StyleBox probe = new StyleBox();
+        return StyleSheet.Decl(probe, key, "1");
     }
 
     /// 声明值的文本形式（数字转成字符串，因此 JSON 表中的 `radius: 8`
@@ -396,6 +564,7 @@ class StyleSheet {
         if (k == "font-weight") { b.fontWeight = StyleSheet.Weight(v); return true; }
         if (k == "line-height") { b.lineHeight = StyleSheet.Num(v); return true; }
         if (k == "letter-spacing") { b.letterSpacing = StyleSheet.Num(v); return true; }
+        if (k == "text-shadow") { StyleSheet.DeclTextShadow(b, v); return true; }
         if (k == "text-align") {
             b.align = 0;
             if (v == "center") { b.align = 1; }
@@ -665,7 +834,20 @@ class StyleSheet {
         // 之内），所以这条属性照收但不改任何东西——认下来是为了
         // 让作者照常写它，而不是让它掉到 Control.SetProp 里去。
         if (k == "box-sizing") { return true; }
+        // `float` 同理：引擎没有浮动布局（排版只有 dock 与 flex），
+        // 照收是为了不让它落到 SetProp 里被当成 class 加进控件
+        // （`float: right` 会凭空加一个 `.right` 类，撞上皮肤里
+        // 任何 `.right` 规则）。没有任何视觉效果，见 StyleSheet.Inert。
+        if (k == "float") { return true; }
         return false;
+    }
+
+    /// 被 Decl 收下、但不会产生任何视觉/布局效果的属性：认它们是
+    /// 为了不让键名漏到 Control.SetProp 变成 class，但作者以为
+    /// 写了就有用。StyleSheet.Lint 会把它们单独列出来。
+    static bool Inert(string key) {
+        string k = StyleSheet.Lower(StyleSheet.Trim(key));
+        return k == "box-sizing" || k == "float";
     }
 
     /// `justify-content` 的取值码：0 start，1 center，2 end，
@@ -768,6 +950,9 @@ class StyleSheet {
     }
 
     /// `background: <color> | linear-gradient([<dir>,] a, b[, c])`。
+    /// 停靠点上的位置（`#fff 40%`）在解析时被丢掉：运行时的
+    /// `grad_sample` 只采样 0/500/1000 三个位置，任意停靠点
+    /// 没有对应的绘制原语（见 StopColor）。
     static void DeclBackground(StyleBox b, string val) {
         string s = val;
         if (StyleSheet.StartsWith(s, "linear-gradient(")) {
@@ -776,11 +961,13 @@ class StyleSheet {
             string inner = s.Substring(16, close - 16);
             List<string> parts = Css.SplitTopTrim(inner, ",");
             List<string> stops = new List<string>();
+            bool leftward = false;
             int i = 0;
             while (i < parts.Count) {
                 string p = parts[i];
                 i = i + 1;
                 if (p == "") { continue; }
+                if (StyleSheet.IsLeftward(p)) { leftward = true; }
                 int dir = StyleSheet.GradientDir(p);
                 if (dir >= 0) { b.bgDir = dir; continue; }
                 stops.Add(p);
@@ -793,6 +980,11 @@ class StyleSheet {
                 } else {
                     b.bgVia = 0;
                     b.bgTo = StyleSheet.ParseColor(StyleSheet.StopColor(stops[1]));
+                }
+                // `to left` / `270deg`：方向码只有"向右"，把两端
+                // 停靠点对调，渲染出来就是向左。
+                if (leftward) {
+                    int cs = b.bg; b.bg = b.bgTo; b.bgTo = cs;
                 }
                 return;
             }
@@ -810,10 +1002,17 @@ class StyleSheet {
 
     /// 渐变方向关键字/角度作为 StyleBox.bgDir，当该
     /// token 是颜色停靠点（color stop）时返回 -1。
+    ///
+    /// 五个方向码（StyleBox.bgDir）：0 向下、1 向右、2 右下、
+    /// 3 向上、4 左下。CSS 的 `to left` 是横向的另一个朝向，没有
+    /// 独立的码——它等价于「向右的渐变把两端调过来」，所以这里
+    /// 返回 1 由 DeclBackground 交换首末停靠点（见那里的 sw）。
+    /// 以前 `to left` 落到 -1，整条 gradient 被当成纯色：背景不是渐变。
     static int GradientDir(string tok) {
         string s = StyleSheet.Lower(tok);
         if (s == "to bottom" || s == "180deg") { return 0; }
-        if (s == "to right" || s == "90deg") { return 1; }
+        if (s == "to right" || s == "90deg" || s == "to left"
+            || s == "270deg") { return 1; }
         if (s == "to bottom right" || s == "135deg" || s == "to right bottom") { return 2; }
         if (s == "to top" || s == "0deg" || s == "360deg") { return 3; }
         if (s == "to bottom left" || s == "225deg" || s == "to left bottom") { return 4; }
@@ -849,6 +1048,43 @@ class StyleSheet {
         return 0 - 1;
     }
 
+    /// 停靠点是不是镜像的横向渐变（`to left` / `270deg`）。
+    static bool IsLeftward(string tok) {
+        string s = StyleSheet.Lower(tok);
+        return s == "to left" || s == "270deg";
+    }
+
+    /// `text-shadow: <dx> <dy> [blur] <color>[, ...]`——只取第一层
+    /// （CSS 里它画在最上面），模糊半径无对应绘制原语、忽略几何
+    /// 只保留偏移；层数 ≥3 且偏移非零、`0` 模糊时按描边处理，
+    /// 这正是 `1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, …`
+    /// 那圈四向描边的意图。
+    static void DeclTextShadow(StyleBox b, string val) {
+        if (StyleSheet.Lower(StyleSheet.Trim(val)) == "none") {
+            b.tsColor = 0; b.tsDx = 0; b.tsDy = 0; b.tsOutline = 0;
+            return;
+        }
+        List<string> layers = Css.SplitTopTrim(val, ",");
+        List<string> toks = StyleSheet.Tokens(layers[0]);
+        List<int> nums = new List<int>();
+        int col = 0;
+        int i = 0;
+        while (i < toks.Count) {
+            string tk = toks[i];
+            i = i + 1;
+            if (StyleSheet.IsNumeric(tk)) { nums.Add(StyleSheet.Num(tk)); continue; }
+            col = StyleSheet.ParseColor(tk);
+        }
+        if (col != 0) { b.tsColor = col; }
+        if (nums.Count >= 1) { b.tsDx = nums[0]; }
+        if (nums.Count >= 2) { b.tsDy = nums[1]; }
+        // ≥3 层、零模糊、非零偏移 = 描边惯用法。
+        if (layers.Count >= 3 && b.tsColor != 0
+            && (b.tsDx != 0 || b.tsDy != 0)) {
+            b.tsOutline = 1;
+        }
+    }
+
     /// 去掉停靠点的位置（`#fff 40%` -> `#fff`）。
     static string StopColor(string stop) {
         string s = StyleSheet.Trim(stop);
@@ -863,17 +1099,28 @@ class StyleSheet {
     }
 
     /// `border[-side]: <width> [style] <color>`（顺序任意，宽度可选）。
+    ///
+    /// style 词（`dashed`/`dotted`）以前被 `continue` 掉、不落到任何
+    /// 字段上：`border: 1 dashed var(--border-secondary)` 解析成实线，
+    /// 作者看到的是「虚线写了没反应」。这里把它记进 borderStyle，
+    /// 绘制侧（StyleBox.PaintBorders）已经会据此走 Fx.DashedBorder。
     static void DeclBorder(StyleBox b, string val, int side) {
         List<string> toks = StyleSheet.Tokens(val);
         int w = 1;
         int col = 0;
         bool haveW = false;
+        bool haveStyle = false;
+        int style = 0;
         int i = 0;
         while (i < toks.Count) {
             string tk = toks[i];
             i = i + 1;
             string lo = StyleSheet.Lower(tk);
-            if (lo == "solid" || lo == "dashed" || lo == "dotted" || lo == "none") {
+            if (lo == "solid" || lo == "dashed" || lo == "dotted"
+                || lo == "double" || lo == "groove" || lo == "ridge"
+                || lo == "inset" || lo == "outset" || lo == "none") {
+                haveStyle = true;
+                if (lo == "dashed" || lo == "dotted") { style = 1; }
                 if (lo == "none") { w = 0; haveW = true; }
                 continue;
             }
@@ -885,6 +1132,10 @@ class StyleSheet {
             col = StyleSheet.ParseColor(tk);
         }
         if (!haveW) { w = 1; }
+        // 只有整盒简写才带 style 语义：`border-top: 1 dashed x` 里
+        // 引擎只画统一虚线框（各边线型没有独立字段），写成整体
+        // 比「悄悄变实线」更接近作者意图。
+        if (haveStyle) { b.borderStyle = style; }
         if (side == 0) {
             b.borderW = w;
             if (col != 0) { b.borderColor = col; }
@@ -1167,6 +1418,36 @@ class StyleSheet {
             if (cls != "") { ApplySelector(c, "." + cls + ":" + state); }
             if (id != "") { ApplySelector(c, "#" + id + ":" + state); }
         }
+        // `!important` 最后再套一遍：它要压过上面全部（以及宿主写下的
+        // inline 样式），所以必须排在整段级联之后，而不是混在普通声明里。
+        ApplyImportantSelector(c, type);
+        if (cls != "") { ApplyImportantSelector(c, "." + cls); }
+        if (id != "") { ApplyImportantSelector(c, "#" + id); }
+        if (state != "") {
+            ApplyImportantSelector(c, type + ":" + state);
+            if (cls != "") { ApplyImportantSelector(c, "." + cls + ":" + state); }
+            if (id != "") { ApplyImportantSelector(c, "#" + id + ":" + state); }
+        }
+    }
+
+    /// 把一个选择器里 `!important` 的声明套到控件上。
+    void ApplyImportantSelector(Control c, string selector) {
+        JsonValue block = this.Block(selector);
+        if (block == null) { return; }
+        JsonValue imp = block.Get("__zan_important");
+        if (imp == null || !imp.IsObject()) { return; }
+        StyleBox box = new StyleBox();
+        bool visual = false;
+        for (int j = 0; j < imp.Count(); j = j + 1) {
+            string k = imp.KeyAt(j);
+            if (StyleSheet.DeclSource(box, k, StyleSheet.ValStr(imp.ValAt(j)),
+                                      StyleSheet.IsPrescaled(block, k))) {
+                visual = true;
+            } else {
+                c.SetProp(k, StyleSheet.Scalar(imp.ValAt(j)));
+            }
+        }
+        if (visual) { StyleSheet.CopyToControl(box, c); }
     }
 
     /// 将一个选择器的声明应用到控件：layout 键落在
@@ -1178,11 +1459,15 @@ class StyleSheet {
         if (block == null) { return; }
         StyleBox box = new StyleBox();
         bool visual = false;
+        // `!important` 的声明先收进 box、最后套（与 StyleBox 路径同一
+        // 语义），不走 SetProp——否则它们会被当成 class 名加到控件上。
+        JsonValue imp = block.Get("__zan_important");
         int i = 0;
         while (i < block.Count()) {
             string k = block.KeyAt(i);
             JsonValue v = block.ValAt(i);
             i = i + 1;
+            if (k == "__zan_prescaled" || k == "__zan_important") { continue; }
             if (k == "pad" || k == "padding") {
                 c.Pad(StyleSheet.Num(StyleSheet.ValStr(v)));
                 continue;
@@ -1197,13 +1482,21 @@ class StyleSheet {
             if (k == "y") { c.my = v.AsInt(0); continue; }
             if (k == "width") { c.prefW = StyleSheet.Num(StyleSheet.ValStr(v)); continue; }
             if (k == "height") { c.prefH = StyleSheet.Num(StyleSheet.ValStr(v)); continue; }
-            if (k == "__zan_prescaled") { continue; }
             if (StyleSheet.DeclSource(box, k, StyleSheet.ValStr(v),
                                       StyleSheet.IsPrescaled(block, k))) {
                 visual = true;
                 continue;
             }
             c.SetProp(k, StyleSheet.Scalar(v));
+        }
+        if (imp != null && imp.IsObject()) {
+            for (int j = 0; j < imp.Count(); j = j + 1) {
+                string k = imp.KeyAt(j);
+                if (StyleSheet.DeclSource(box, k, StyleSheet.ValStr(imp.ValAt(j)),
+                                          StyleSheet.IsPrescaled(block, k))) {
+                    visual = true;
+                }
+            }
         }
         if (visual) { StyleSheet.CopyToControl(box, c); }
     }

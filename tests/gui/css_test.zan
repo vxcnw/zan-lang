@@ -1659,6 +1659,114 @@ class Program {
         }
     }
 
+    /// 这一批"静默失败"修复的定点：at-rule 的括号配对、`var()` 回退值、
+    /// `!important` 的真实权重、`border` 简写的线型、text-shadow、
+    /// `linear-gradient(to left)`，以及 Lint 报告。全部是原先
+    /// "写了不报错、也没有效果"的那一类，所以每一条都要在金标里留痕。
+    static void Coercion() {
+        // at-rule 的块必须整体跳过，且不吃掉紧随其后的规则。
+        StyleSheet at = Css.Parse(
+            "@media (max-width: 600px) { a { color: #ff0000; } }\n"
+            + "button { background: #00ff00; }\n"
+            + ".x { color: #0000ff; }");
+        StyleBox aa = new StyleBox(); at.ApplyBox(aa, "a");
+        StyleBox ab = new StyleBox(); at.ApplyBox(ab, "button");
+        StyleBox ax = new StyleBox(); at.ApplyBox(ax, ".x");
+        Console.WriteLine($"atrule a.fg {aa.fg} button.bg {ab.bg} x.fg {ax.fg}"
+                          + $" dropped {at.atRulesDropped}");
+
+        // `@import "x";` 这种语句式 at-rule 不得吞掉后续规则。
+        StyleSheet imp = Css.Parse(
+            "@import url(\"x.css\"); button { background: #00ff00; }");
+        StyleBox ib = new StyleBox(); imp.ApplyBox(ib, "button");
+        Console.WriteLine($"atimport button.bg {ib.bg} dropped {imp.atRulesDropped}");
+
+        // var() 回退值：未定义、空值、嵌套函数、#rgba 都要走回退。
+        List<string> names = new List<string>();
+        List<string> vals = new List<string>();
+        StyleSheet vr = Css.ParseWith(
+            "a { padding: var(--missing, 7); color: var(--c, #ff0000);"
+            + " background: var(--nope, rgba(0,0,0,.5)); }\n"
+            + "b { border: var(--nope, 1 solid) #123456;"
+            + " border-radius: var(--nope, #); }\n"
+            + "c { color: var(--nope, #f008); }\n"
+            + "d { color: var(--empty, #abcdef); }",
+            names, vals);
+        vals.Add("--empty"); vals.Add("");
+        names.Add("--empty");
+        StyleBox va = new StyleBox(); vr.ApplyBox(va, "a");
+        StyleBox vc = new StyleBox(); vr.ApplyBox(vc, "c");
+        StyleBox vd = new StyleBox(); vr.ApplyBox(vd, "d");
+        Console.WriteLine($"varfb padL {va.padL} fg {va.fg} bg {va.bg}");
+        Console.WriteLine($"varfb hex4 fg {vc.fg} empty {vd.fg}");
+
+        // !important：压过后写的普通声明，同一选择器内也成立。
+        StyleSheet im = Css.Parse(
+            "label { color: #ff0000 !important; }\n"
+            + "label { color: #0000ff; }\n"
+            + "other { padding: 3 !important; padding: 9; }");
+        StyleBox il = new StyleBox(); im.ApplyBox(il, "label");
+        StyleBox io = new StyleBox(); im.ApplyBox(io, "other");
+        Console.WriteLine($"important label.fg {il.fg} other.padL {io.padL}");
+        // 换肤合并：应用表（后合并）的普通声明不得压过皮肤的 important。
+        StyleSheet skin = Css.Parse("w { color: #ff0000 !important; }");
+        StyleSheet app = Css.Parse("w { color: #0000ff; }");
+        skin.MergeSheet(app);
+        StyleBox mw = new StyleBox(); skin.ApplyBox(mw, "w");
+        Console.WriteLine($"important merge fg {mw.fg}");
+
+        // border 简写的线型词。
+        StyleSheet bd = Css.Parse(
+            "a { border: 2 solid #ff0000; } b { border: 1 dashed #00ff00; }"
+            + " c { border: 3 dotted #0000ff; } d { border: none; }"
+            + " e { border-style: dashed; } f { border: 1 double #111111; }");
+        List<string> bs = new List<string>{ "a", "b", "c", "d", "e", "f" };
+        for (int i = 0; i < bs.Count; i = i + 1) {
+            StyleBox x = new StyleBox();
+            bd.ApplyBox(x, bs[i]);
+            Console.WriteLine($"border {bs[i]} style {x.borderStyle} w {x.borderW} col {x.borderColor}");
+        }
+
+        // text-shadow：单层偏移 / ≥3 层零模糊按描边 / none 复位。
+        StyleSheet ts = Css.Parse(
+            "a { text-shadow: 1px 1px 0 #000000; }\n"
+            + "b { text-shadow: 1px 1px 0 #000000, -1px -1px 0 #000000,"
+            + " 1px -1px 0 #000000, -1px 1px 0 #000000; }\n"
+            + "c { text-shadow: none; }\n"
+            + "d { text-shadow: 2px 3px 4px rgba(0,0,0,.5); }\n");
+        List<string> tsel = new List<string>{ "a", "b", "c", "d" };
+        for (int i = 0; i < tsel.Count; i = i + 1) {
+            StyleBox x = new StyleBox();
+            ts.ApplyBox(x, tsel[i]);
+            Console.WriteLine($"textshadow {tsel[i]} col {x.tsColor} dx {x.tsDx} dy {x.tsDy} outline {x.tsOutline}");
+        }
+
+        // `to left` / `270deg` 的横向镜像。
+        StyleSheet gl = Css.Parse(
+            "a { background: linear-gradient(to left, #ff0000, #0000ff); }\n"
+            + "b { background: linear-gradient(270deg, #ff0000, #0000ff); }\n"
+            + "c { background: linear-gradient(to right, #ff0000, #0000ff); }\n");
+        List<string> gsel = new List<string>{ "a", "b", "c" };
+        for (int i = 0; i < gsel.Count; i = i + 1) {
+            StyleBox x = new StyleBox();
+            gl.ApplyBox(x, gsel[i]);
+            Console.WriteLine($"gradleft {gsel[i]} dir {x.bgDir} bg {x.bg} to {x.bgTo}");
+        }
+
+        // Lint：不支持的选择器 / 一条都没消费的规则 / 收了但无效果的属性。
+        StyleSheet lint = Css.Parse(
+            ".a .b { color: #ff0000; }\n"
+            + "button > span { color: #00ff00; }\n"
+            + "card { wibble: 3; }\n"
+            + "z { float: right; color: #ff0000; }\n"
+            + ".fine { color: #0000ff; }");
+        List<string> audit = lint.Audit();
+        Console.WriteLine($"lint count {audit.Count}");
+        for (int i = 0; i < audit.Count; i = i + 1) {
+            Console.WriteLine($"lint   {audit[i]}");
+        }
+    }
+
     static void Main() {
         StyleSheet sheet = Program.Sheet();
         string accent = sheet.Var("--accent");
@@ -1745,5 +1853,8 @@ class Program {
         Console.WriteLine("--- layout longhands");
         Program.Longhand();
         Program.FontSources();
+
+        Console.WriteLine("--- coercion (at-rules / var fallback / important / border style / text-shadow / to-left / lint)");
+        Program.Coercion();
     }
 }

@@ -43,6 +43,15 @@ class StyleBox {
     int textCase;    // 0 无，1 大写，2 小写
     int ellipsis;    // 1 = text-overflow: ellipsis
     int nowrap;      // 1 = white-space: nowrap
+    /// `text-shadow`：文字底下的投影/描边色（0 = 无）。
+    /// 压在图片上的浅色小字（图名、地图标注）靠它保住可读性。
+    int tsColor;
+    int tsDx;
+    int tsDy;
+    /// 1 = 按四向描边绘制（原声明是 ≥3 层零模糊投影，
+    /// 如 `1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, …`，
+    /// 作者要的是文字描边而不是单侧投影）。
+    int tsOutline;
 
     // ---- border / corners ---------------------------------------------------
     int borderColor;
@@ -177,6 +186,7 @@ class StyleBox {
         this.fontPx = 0; this.fontWeight = 0; this.lineHeight = 0; this.letterSpacing = 0;
         this.align = 0 - 1; this.valign = 0 - 1; this.textCase = 0;
         this.ellipsis = 0; this.nowrap = 0;
+        this.tsColor = 0; this.tsDx = 0; this.tsDy = 0; this.tsOutline = 0;
         this.borderColor = 0; this.borderW = 0 - 1;
         this.borderTopW = 0 - 1;    this.borderTopColor = 0;
         this.borderRightW = 0 - 1;  this.borderRightColor = 0;
@@ -221,6 +231,8 @@ class StyleBox {
         d.lineHeight = lineHeight; d.letterSpacing = letterSpacing;
         d.align = align; d.valign = valign; d.textCase = textCase;
         d.ellipsis = ellipsis; d.nowrap = nowrap;
+        d.tsColor = tsColor; d.tsDx = tsDx; d.tsDy = tsDy;
+        d.tsOutline = tsOutline;
         d.borderColor = borderColor; d.borderW = borderW;
         d.borderTopW = borderTopW;       d.borderTopColor = borderTopColor;
         d.borderRightW = borderRightW;   d.borderRightColor = borderRightColor;
@@ -429,6 +441,9 @@ class StyleBox {
         d.borderBottomColor = StyleBox.MixColor(a.borderBottomColor, b.borderBottomColor, p);
         d.borderLeftColor = StyleBox.MixColor(a.borderLeftColor, b.borderLeftColor, p);
         d.shadow = StyleBox.MixColor(a.shadow, b.shadow, p);
+        d.tsColor = StyleBox.MixColor(a.tsColor, b.tsColor, p);
+        d.tsDx = App.Lerp(a.tsDx, b.tsDx, p);
+        d.tsDy = App.Lerp(a.tsDy, b.tsDy, p);
         d.opacity = App.Lerp(a.opacity, b.opacity, p);
         d.blur = App.Lerp(a.blur, b.blur, p);
         d.sheen = App.Lerp(a.sheen, b.sheen, p);
@@ -864,8 +879,15 @@ class StyleBox {
     }
 
     /// 在精确原点绘制一段文本（无盒子对齐），应用
-    /// 字间距以及 `font-weight >= 600` 的模拟加粗。
+    /// 字间距、`font-weight >= 600` 的模拟加粗，以及 `text-shadow`。
+    ///
+    /// text-shadow 必须在字形之前画：X11/Win32 的文字是直接覆盖
+    /// 合成，先画字再画影子会把影子盖在笔画上而不是垫在下面。
+    /// `tsOutline`（原声明是 ≥3 层零模糊投影）按四向描边绘制——
+    /// 那正是 `1px 1px 0 #000, -1px -1px 0 #000, …` 的意图，
+    /// 单侧偏移会让压在图片上的白字半边发糊。
     void DrawRun(Canvas c, int x, int y, string s, int color, int fs) {
+        if (tsColor != 0) { this.DrawTextShadow(c, x, y, s, fs); }
         if (letterSpacing == 0) {
             c.DrawText(x, y, s, color, fs);
             if (fontWeight >= 600) { c.DrawText(x + 1, y, s, color, fs); }
@@ -878,6 +900,30 @@ class StyleBox {
             if (fontWeight >= 600) { c.DrawText(cx + 1, y, ch, color, fs); }
             cx = cx + Canvas.MeasureText(ch, fs) + letterSpacing;
         }
+    }
+
+    /// 文字投影/描边：四向描边（tsOutline）或单侧偏移。
+    ///
+    /// `s` 是已经应用过 text-transform/ellipsis 的最终串，偏移按
+    /// 声明值原样使用（px，不随 DPI 放大——描边宽度 1px 是字形本身
+    /// 的观感，放大到 1.5px 反而糊）。
+    void DrawTextShadow(Canvas c, int x, int y, string s, int fs) {
+        int col = this.Fade(tsColor);
+        int dx = tsDx;
+        int dy = tsDy;
+        if (col == 0) { return; }
+        if (tsOutline == 1) {
+            int r = dx;
+            if (dy > r) { r = dy; }
+            if (r < 0) { r = 0 - r; }
+            if (r < 1) { r = 1; }
+            c.DrawText(x - r, y, s, col, fs);
+            c.DrawText(x + r, y, s, col, fs);
+            c.DrawText(x, y - r, s, col, fs);
+            c.DrawText(x, y + r, s, col, fs);
+            return;
+        }
+        c.DrawText(x + dx, y + dy, s, col, fs);
     }
 
     /// 文本宽度：MeasureText 加上 letter-spacing（每字符 spacing 像素）。
