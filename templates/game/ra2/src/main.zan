@@ -3789,10 +3789,26 @@ class Ra2Loop : IGuiHostLoop {
                         + " PIFFPIFF=" + Convert.ToString(
                             this.world.ProbeAnimFrames("PIFFPIFF"))
                         + " EXPLOSML=" + Convert.ToString(
-                            this.world.ProbeAnimFrames("EXPLOSML")));
+                            this.world.ProbeAnimFrames("EXPLOSML"))
+                        + " SGRYSMK1=" + Convert.ToString(
+                            this.world.ProbeAnimFrames("SGRYSMK1")));
                     if (!fired || hpMid != hp0 || hpEnd >= hp0) {
                         Console.WriteLine("selftest FAIL proj: shell must"
                             + " fly before it bites");
+                    }
+                    // Damage smoke: wound the shooter below half and give
+                    // the smoke cadence twenty ticks -- the grey column
+                    // must be up and live before the frame-14 dump.
+                    sh.TakeDamage(sh.MaxHp() * 3 / 4);
+                    for (int t2 = 0; t2 < 20; t2 = t2 + 1) {
+                        this.world.Tick();
+                    }
+                    int puffs = this.world.AnimFxCount();
+                    Console.WriteLine("selftest smoke puffs="
+                        + Convert.ToString(puffs));
+                    if (puffs < 1) {
+                        Console.WriteLine("selftest FAIL smoke: a unit"
+                            + " under half health must vent SGRYSMK1");
                     }
                 } else {
                     Console.WriteLine("selftest FAIL proj: spawn refused");
@@ -4270,6 +4286,19 @@ class Ra2Loop : IGuiHostLoop {
                 if (this.world.ProbeAnimFrames(boom) > 0
                  && this.world.SpawnAnim(boom, this.duelX, this.duelY)) {
                     this.world.AnimTick(this.world.AnimFxCount() - 1, 14);
+                }
+                // Pose the tesla layer too: a shipped CoilBolt arc from
+                // the parked grizzly to a victim parked beside it, live
+                // for the next frame's boom dump.
+                Weapon tz = this.world.Rules().WeaponNamed("CoilBolt");
+                int vuid = Ra2App.UnitIdOfReg(this.world, 1, "HTNK");
+                if (tz != null && this.tankIdx >= 0 && vuid >= 0) {
+                    WorldObject a = this.world.ObjectAt(this.tankIdx);
+                    int vb = this.world.SpawnUnit(1, vuid, a.X() + 4,
+                                                  a.Y() + 2);
+                    if (vb >= 0) {
+                        this.world.SpawnBeam(a, this.world.ObjectAt(vb), tz);
+                    }
                 }
                 int sx = IsoProjection.ScreenX(this.duelX, this.duelY)
                        - this.terrain.OriginX() - this.cam.X();

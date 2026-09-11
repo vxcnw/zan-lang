@@ -33,6 +33,7 @@ class WorldObject {
     int target;          // object index under attack, or -1
     int reload;          // ticks until the next shot
     bool selected;
+    int smokeTicks;      // ticks spent venting damage smoke (80s cap)
 
     // Movement (units only): the planned route as cells, and how far along it
     // the unit has walked this frame.
@@ -1044,6 +1045,7 @@ class World {
     int pathGen;
     int pathCalls;       // dev: selftest perf line reports the search volume
     int pathPopCap;      // 0 = unbounded; combat repaths bound their flood
+    int smokeClock;      // world-tick counter for the damage-smoke cadence
     int pathBestSlot;    // explored cell closest to the goal (cap fallback)
     int pathBestD;
     int pathGoalX;
@@ -2992,6 +2994,14 @@ class World {
             else if (p.type.Arcing()) { landed = this.StepArcing(p); }
             else { landed = this.StepStraight(p); }
             p.ticks = p.ticks + 1;
+            string tr = p.type.Trailer();
+            if (tr.Length > 0) {
+                p.trailerClock = p.trailerClock + 1;
+                if (p.trailerClock >= p.type.TrailerDelay()) {
+                    p.trailerClock = 0;
+                    this.SpawnAnim(tr, p.px, p.py);
+                }
+            }
             if (p.ticks > 300) { landed = true; }
             if (landed) {
                 this.DetonateProjectile(p);
@@ -3198,7 +3208,12 @@ class World {
         if (w.IsElectricBolt()) { kind = 1; }
         else if (w.IsRadBeam()) { kind = 2; }
         b.kind = kind;
-        b.life = w.IsLaser() ? w.LaserDuration() : 3;
+        // Laser holds for its own duration; tesla and rad flash for the
+        // reference's one second of logic time (15 ticks at the base rate).
+        b.life = w.IsLaser() ? w.LaserDuration() : 15;
+        b.age = 0;
+        b.seed = (shooter.X() * 31 + shooter.Y() * 17
+                  + this.beams.Count) * 0.371;
         this.beams.Add(b);
     }
 
@@ -3224,8 +3239,34 @@ class World {
         while (i < this.beams.Count) {
             FxBeam b = this.beams[i];
             b.life = b.life - 1;
+            b.age = b.age + 1;
             if (b.life <= 0) { this.beams.RemoveAt(i); }
             else { i = i + 1; }
+        }
+    }
+
+    /// <summary>Damage smoke, the reference's DamageSmokePlugin: every
+    /// vehicle or structure under half health vents the shipped grey
+    /// smoke column (SGRYSMK1) -- one puff every 8 ticks, each drifting
+    /// slightly off the object's centre -- until 80s of game time or a
+    /// repair ends it. Gated on [General] DamageParticleSystems.</summary>
+    void TickDamageSmoke() {
+        this.smokeClock = this.smokeClock + 1;
+        if (this.smokeClock % 8 != 1) { return; }
+        if (!this.Rules().HasDamageParticles()) { return; }
+        for (int i = 0; i < this.objects.Count; i = i + 1) {
+            WorldObject o = this.objects[i];
+            if (o == null || o.IsDead()) { continue; }
+            // Infantry do not smoke; they have their own death anims.
+            if (o.UnitType() != null
+             && o.UnitType().ShpName().Length > 0) { continue; }
+            if (o.MaxHp() <= 0) { continue; }
+            if (o.Hp() * 2 >= o.MaxHp()) { o.smokeTicks = 0; continue; }
+            if (o.smokeTicks >= 5000) { continue; }
+            o.smokeTicks = o.smokeTicks + 8;
+            double jx = ((this.smokeClock * 13 + i * 37) % 7 - 3) / 16.0;
+            double jy = ((this.smokeClock * 17 + i * 29) % 7 - 3) / 16.0;
+            this.SpawnAnim("SGRYSMK1", o.X() + jx, o.Y() + jy);
         }
     }
 
@@ -3688,6 +3729,7 @@ class World {
         this.TickProjectiles();
         this.TickEffects();
         this.TickFx();
+        this.TickDamageSmoke();
         List<int> result = new List<int>();
         result.Add(moved);
         result.Add(fired);
@@ -4325,6 +4367,7 @@ class Projectile {
     int side;             // the allegiance the round flies under
     int target;           // object index for guided rounds, -1 otherwise
     int ticks;
+    int trailerClock;     // ticks since the last smoke puff
 
     double Px() { return this.px; }
     double Py() { return this.py; }
@@ -4365,10 +4408,14 @@ class FxBeam {
     double y1;
     int kind;
     int life;
+    int age;           // ticks since the bolt fired, drives the flicker
+    double seed;       // per-bolt phase so strands never jitter alike
 
     double X0() { return this.x0; }
     double Y0() { return this.y0; }
     double X1() { return this.x1; }
     double Y1() { return this.y1; }
     int Kind() { return this.kind; }
+    int Age() { return this.age; }
+    double Seed() { return this.seed; }
 }

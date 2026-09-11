@@ -186,6 +186,8 @@ class ProjectileType {
     int rot;           // ini ROT, 0 = unguided
     int acceleration;  // leptons/tick gained per tick (default 3)
     bool subjectToWalls;
+    string trailer;    // art Trailer= anim dropped along the flight path
+    int trailerDelay;  // art SpawnDelay= ticks between puffs
 
     static ProjectileType Create(string name) {
         ProjectileType p = new ProjectileType();
@@ -194,6 +196,8 @@ class ProjectileType {
         p.rot = 0;
         p.acceleration = 3;
         p.subjectToWalls = true;
+        p.trailer = "";
+        p.trailerDelay = 3;
         return p;
     }
 
@@ -209,6 +213,10 @@ class ProjectileType {
     void SetRot(int rot) { this.rot = rot; }
     void SetAcceleration(int a) { this.acceleration = a; }
     bool Homing() { return this.rot > 0 && !this.arcing; }
+    string Trailer() { return this.trailer; }
+    int TrailerDelay() { return this.trailerDelay; }
+    void SetTrailer(string t) { this.trailer = t; }
+    void SetTrailerDelay(int d) { this.trailerDelay = d; }
 }
 
 /// <summary>What a soldier (or drone) is, straight out of RULES.INI: cost and
@@ -491,7 +499,9 @@ class Rules {
     List<ProjectileType> projectiles;
     List<string> splashList;   // [CombatDamage] SplashList: water impact art
     double gravity;
-    bool alternateArcticArt;   // [General] AlternateArcticArt: A-suffix art            // ini Gravity= (leptons/tick²), retail 6
+    bool alternateArcticArt;   // [General] AlternateArcticArt: A-suffix art
+    List<string> damageParticles; // [General] DamageParticleSystems: the
+                                  // damage-smoke gate (empty list = no smoke)            // ini Gravity= (leptons/tick²), retail 6
     List<UnitDef> units;
     List<BuildingDef> buildings;   // both sides interleaved, menu order per side
     List<BuildingDef> civs;        // neutral structures from the map
@@ -561,6 +571,7 @@ class Rules {
         r.weapons = new List<Weapon>();
         r.projectiles = new List<ProjectileType>();
         r.splashList = new List<string>();
+        r.damageParticles = new List<string>();
         r.gravity = 6.0;
         r.units = new List<UnitDef>();
         r.buildings = new List<BuildingDef>();
@@ -689,10 +700,35 @@ class Rules {
     }
 
     Weapon WeaponNamed(string name) {
+        string key = name.ToUpper();
         for (int i = 0; i < this.weapons.Count; i = i + 1) {
-            if (this.weapons[i].Name() == name) { return this.weapons[i]; }
+            if (this.weapons[i].Name() == key) { return this.weapons[i]; }
         }
-        return null;
+        // Weapons outside the roster catalog -- the base-defence bolts
+        // (CoilBolt, ElectricBolt) among them -- still resolve from their
+        // own rules section, built with the same defaults the shared
+        // catalog weapons start from.
+        IniDocument ini = this.sourceIni;
+        if (ini == null) { return null; }
+        IniSection s = ini.Section(name);
+        if (s == null) { s = ini.Section(key); }
+        if (s == null) { return null; }
+        Weapon w = Weapon.Create(key, s.GetIntOr("Damage", 0),
+                                 s.GetIntOr("ROF", 50),
+                                 Rules.ParseRange(s.Get("Range")),
+                                 this.WarheadNamed(s.Get("Warhead")));
+        this.weapons.Add(w);
+        string pj = s.Get("Projectile");
+        if (pj.Length > 0) {
+            w.SetProj(this.ProjectileFromIni(pj, ini));
+        }
+        bool laser = Rules.YesNo(s.Get("IsLaser"));
+        bool bolt = Rules.YesNo(s.Get("IsElectricBolt"));
+        bool rad = Rules.YesNo(s.Get("IsRadBeam"));
+        if (laser || bolt || rad) { w.SetBeamFlags(laser, bolt, rad); }
+        string spd = s.Get("Speed");
+        if (spd.Length > 0) { w.SetSpeed(s.GetIntOr("Speed", w.Speed())); }
+        return w;
     }
 
     /// <summary>Resolves a weapon's Projectile= to a projectile type, taking
@@ -752,6 +788,14 @@ class Rules {
     /// an A before the extension) draw that variant. The reference's
     /// ObjectArt keys the same swap off inSnowTheater.</summary>
     bool AlternateArcticArt() { return this.alternateArcticArt; }
+
+    /// <summary>True when the install declares damage particle systems:
+    /// the gate the reference's damage-smoke plugin checks before it
+    /// hangs smoke on a wounded unit.</summary>
+    bool HasDamageParticles() {
+        return this.damageParticles != null
+            && this.damageParticles.Count > 0;
+    }
 
     /// <summary>The water-impact animation for damage tier damage/50 -- the
     /// reference's splashList pick for conventional warheads that burst in
@@ -1883,6 +1927,8 @@ class Rules {
         if (general != null) {
             this.alternateArcticArt = Rules.YesNo(
                 general.GetOr("AlternateArcticArt", "no"));
+            this.damageParticles = Rules.Csv(
+                general.GetOr("DamageParticleSystems", ""));
             this.oreGrows = Rules.YesNo(general.GetOr("TiberiumGrows", "yes"));
             this.oreSpreads = Rules.YesNo(general.GetOr("TiberiumSpreads",
                                                         "yes"));
@@ -2022,6 +2068,22 @@ class Rules {
             // so frame = start + facing.
             List<int> dep = Rules.LeadingInts(seq.Get("Deployed"));
             if (dep.Count >= 2) { d.SetDeployedSeq(dep[0], dep[1]); }
+        }
+        // A projectile's smoke trail is art-ini data (Trailer= anim dropped
+        // every SpawnDelay= ticks along the flight path), so it resolves
+        // here, after the art document is in.
+        for (int i = 0; i < this.projectiles.Count; i = i + 1) {
+            ProjectileType p = this.projectiles[i];
+            IniSection psec = art.Section(p.Name());
+            if (psec == null && p.Image().Length > 0) {
+                psec = art.Section(p.Image());
+            }
+            if (psec == null) { continue; }
+            string tr = psec.Get("Trailer");
+            if (tr.Length > 0 && tr.ToLower() != "none") {
+                p.SetTrailer(tr.ToUpper());
+            }
+            p.SetTrailerDelay(psec.GetIntOr("SpawnDelay", p.TrailerDelay()));
         }
     }
 

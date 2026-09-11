@@ -77,6 +77,7 @@ class ObjectArt {
     // come through LoadCameoShp, so the palette no longer depends on which
     // one happened to draw first.
     Palette cameoPal;
+    Palette animPal;     // anim.pal: every impact/smoke anim's own palette
     List<string> cameoNames;
     List<Texture> cameoTex;
 
@@ -137,6 +138,10 @@ class ObjectArt {
         a.theaterPal = a.unitPal;
         if (a.theaterPal == null) { a.theaterPal = db.PaletteNamed("isotem.pal"); }
         if (a.theaterPal == null) { a.theaterPal = db.PaletteNamed("isosno.pal"); }
+        // Anims are baked against anim.pal (the theater loads it as its
+        // dedicated anim palette); rendering them through the side-remapped
+        // unit or theatre palette smears the greys into house colours.
+        a.animPal = db.PaletteNamed("anim.pal");
         return a;
     }
 
@@ -902,7 +907,9 @@ class ObjectArt {
         if (count <= 0) { return null; }
         if (frame < 0) { frame = 0; }
         if (frame >= count) { frame = count - 1; }
-        return this.ShapeTextureFrame(file, frame, this.TheaterPalFor(side));
+        Palette pal = this.animPal != null
+                    ? this.animPal : this.TheaterPalFor(side);
+        return this.ShapeTextureFrame(file, frame, pal);
     }
 
     /// <summary>How many frames a shape carries, 0 when absent. Drives the
@@ -1342,11 +1349,23 @@ class ObjectRenderer {
                    + IsoProjection.TileW() / 2;
             int y1 = FxScreenY(b.X1(), b.Y1(), 0, originY, camY)
                    + IsoProjection.TileH() / 2;
+            if (b.Kind() == 1) {
+                // Tesla: the reference's TeslaFx draws three jagged
+                // strands -- two inner, one brighter sheath -- each ten
+                // points down the line, midpoints swayed by a sine whose
+                // amplitude swells around the middle and whose phase
+                // races with age, so the bolt crackles per frame.
+                DrawTeslaBolt(r, x0, y0, x1, y1, b.Age(), b.Seed(), 0);
+                DrawTeslaBolt(r, x0, y0, x1, y1, b.Age(),
+                              b.Seed() + 2.1, 0);
+                DrawTeslaBolt(r, x0, y0, x1, y1, b.Age(),
+                              b.Seed() + 4.2, 1);
+                continue;
+            }
             int hr = 255;
             int hg = 40;
             int hb = 40;
-            if (b.Kind() == 1) { hr = 130; hg = 190; hb = 255; }
-            else if (b.Kind() == 2) { hr = 90; hg = 225; hb = 90; }
+            if (b.Kind() == 2) { hr = 90; hg = 225; hb = 90; }
             r.SetColor(hr, hg, hb, 230);
             int adx = x1 > x0 ? x1 - x0 : x0 - x1;
             int ady = y1 > y0 ? y1 - y0 : y0 - y1;
@@ -1359,6 +1378,64 @@ class ObjectRenderer {
             }
             r.SetColor(255, 255, 255, 255);
         }
+    }
+
+    /// <summary>One jagged lightning run. Ten points down the line; the
+    /// middle eight sway on the line's perpendicular by sin(phase) plus a
+    /// slower cos on top, both squeezed by a sin(t*pi) envelope that pins
+    /// the ends. Pass 1 is the brighter outer sheath.</summary>
+    static void DrawTeslaBolt(R2Canvas r, int x0, int y0, int x1, int y1,
+                              int age, double seed, int pass) {
+        double dx = x1 - x0;
+        double dy = y1 - y0;
+        double dist = Math.Sqrt(dx * dx + dy * dy);
+        if (dist < 1.0) { dist = 1.0; }
+        double px = (0.0 - dy) / dist;
+        double py = dx / dist;
+        double amp = dist * 0.02;
+        if (amp < 2.0) { amp = 2.0; }
+        if (pass == 1) {
+            r.SetColor(235, 245, 255, 210);
+        } else {
+            r.SetColor(130, 190, 255, 190);
+        }
+        int[] xs = new int[10];
+        int[] ys = new int[10];
+        for (int k = 0; k < 10; k = k + 1) {
+            double t = k / 9.0;
+            int x = x0 + (int)(dx * t);
+            int y = y0 + (int)(dy * t);
+            if (k > 0 && k < 9) {
+                double env = Math.Sin(t * 3.14159265);
+                double phase = age * 18.0 + seed + t * 12.5663706;
+                double off = Math.Sin(phase) * amp * env
+                           + Math.Cos(phase * 1.31) * amp * env * 0.6;
+                x = x + (int)(px * off);
+                y = y + (int)(py * off);
+            }
+            xs[k] = x;
+            ys[k] = y;
+        }
+        // Stroke the jag through: every pair of neighbouring points joins
+        // through interpolated dots so the bolt reads as one crackling
+        // line, the way the reference's line geometry renders.
+        int w = pass == 1 ? 1 : 0;
+        for (int k = 0; k < 9; k = k + 1) {
+            int ax = xs[k];
+            int ay = ys[k];
+            int bx = xs[k + 1];
+            int by = ys[k + 1];
+            int adx = bx > ax ? bx - ax : ax - bx;
+            int ady = by > ay ? by - ay : ay - by;
+            int steps = adx > ady ? adx : ady;
+            if (steps < 1) { steps = 1; }
+            for (int q = 0; q <= steps; q = q + 1) {
+                int x = ax + (bx - ax) * q / steps;
+                int y = ay + (by - ay) * q / steps;
+                r.FillRect(x - w / 2, y - w / 2, w + 1, w + 1);
+            }
+        }
+        r.SetColor(255, 255, 255, 255);
     }
 
     /// <summary>Float cell coordinates through the iso projection, the same
