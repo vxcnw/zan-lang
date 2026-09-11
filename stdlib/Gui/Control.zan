@@ -83,6 +83,13 @@ class Control {
     /// 首选尺寸，因此根据子节点自测量的容器
     /// 会保留给定的那个轴。
     bool prefSet;
+    /// 该轴的 prefW/prefH 是容器按内容补齐的（MeasureDocked /
+    /// MeasureFlexContent），不是作者或控件自定的。这类值每帧
+    /// 先清零再重算：首帧样式或缩放还没就位时算出的错值，靠
+    /// 「非零就不重算」的补齐规则会永远留在控件上（曾把徽标行
+    /// 钉死在 20px，33px 的徽标被行裁掉底部）。
+    bool fillW;
+    bool fillH;
     /// Sizes a document declares (UiDoc `width`/`height`/`gap`/`pad`/`x`/`y`)
     /// are logical pixels, written as they look at 100%. They are kept apart
     /// from the resolved ones and converted at measure time: taken as physical
@@ -173,6 +180,10 @@ class Control {
     /// 悬停/按下插值出的过渡态，不可复用）。测量按常态进行，
     /// 有了它，一帧里没有变化的节点就不必重新走一遍样式解析。
     int computedStyleState;
+    /// computedStyle 是在哪个树上下文签名（Style.CtxSig）下解析的：
+    /// 组合器/结构性伪类让样式随节点位置变化，控件被挪到别的容器后
+    /// 必须重解析。"" = 无树上下文（immediate 或表内无此类规则）。
+    string computedStyleCtx;
     /// Kind() 的小写形式（默认的类型选择器）。每帧每节点都要问
     /// 好几次，现算就是每次一个新字符串。
     string styleTypeLower;
@@ -252,6 +263,7 @@ class Control {
         computedStyleClass = "";
         computedStyleId = "";
         computedStyleState = 0 - 1;
+        computedStyleCtx = "";
         styleTypeLower = "";
         styleSurfaceOwned = false;
         styleBg = 0;
@@ -412,6 +424,7 @@ class Control {
         computedStyleClass = Class;
         computedStyleId = name;
         computedStyleState = state;
+        computedStyleCtx = Style.CtxSig(app.styleCtx);
         return box;
     }
 
@@ -422,7 +435,8 @@ class Control {
         if (computedStyle != null && computedStyleGen == app.bgThemeGen
             && computedStyleScale == app.metricsScale
             && computedStyleState == state && computedStyleType == type
-            && computedStyleClass == Class && computedStyleId == name) {
+            && computedStyleClass == Class && computedStyleId == name
+            && computedStyleCtx == Style.CtxSig(app.styleCtx)) {
             return computedStyle;
         }
         return this.ResolveStyleAs(app, type, cls, state);
@@ -442,6 +456,7 @@ class Control {
         computedStyleClass = Class;
         computedStyleId = name;
         computedStyleState = 0 - 1;
+        computedStyleCtx = Style.CtxSig(app.styleCtx);
         return box;
     }
 
@@ -460,6 +475,7 @@ class Control {
         computedStyleClass = Class;
         computedStyleId = name;
         computedStyleState = 0 - 1;
+        computedStyleCtx = Style.CtxSig(app.styleCtx);
         return box;
     }
 
@@ -480,6 +496,7 @@ class Control {
         computedStyleClass = Class;
         computedStyleId = name;
         computedStyleState = 0 - 1;
+        computedStyleCtx = Style.CtxSig(app.styleCtx);
         return box;
     }
 
@@ -501,6 +518,7 @@ class Control {
         computedStyleClass = Class;
         computedStyleId = name;
         computedStyleState = 0 - 1;
+        computedStyleCtx = Style.CtxSig(app.styleCtx);
         return box;
     }
 
@@ -566,7 +584,8 @@ class Control {
         return computedStyle != null && computedStyleGen == app.bgThemeGen
             && computedStyleScale == app.metricsScale
             && computedStyleType == type && computedStyleClass == Class
-            && computedStyleId == name;
+            && computedStyleId == name
+            && computedStyleCtx == Style.CtxSig(app.styleCtx);
     }
 
     /// 生效宽度：样式的声明宽度（px 或已解析的百分比）夹到
@@ -1068,6 +1087,10 @@ class Control {
     /// 补齐作者留空的轴（MeasureDocked/MeasureFlexContent）。
     void MeasureTree(App app) {
         this.ApplyDeclaredUnits(app);
+        // 上一帧按内容补齐的轴先归还，等子树测完再重新补齐——
+        // 补齐规则只在轴为空时生效，不清零的话首帧的错值就永久化了。
+        if (this.fillW) { prefW = 0; this.fillW = false; }
+        if (this.fillH) { prefH = 0; this.fillH = false; }
         // 常态样式只在它真的过期时才重新解析：解析一次要拼一条
         // 缓存键、查一次表并克隆一个 StyleBox，一屏几百个节点
         // 每帧一次就是白花的几十万纳秒。状态样式（悬停/按下的
@@ -1164,9 +1187,11 @@ class Control {
         if (sumW < maxW) { sumW = maxW; }
         if (prefH <= 0 && sumH > 0) {
             prefH = sumH + this.StylePadT() + this.StylePadB();
+            this.fillH = true;
         }
         if (prefW <= 0 && sumW > 0) {
             prefW = sumW + this.StylePadL() + this.StylePadR();
+            this.fillW = true;
         }
     }
 
@@ -1254,16 +1279,20 @@ class Control {
         if (row) {
             if (prefW <= 0 && mainMax > 0) {
                 prefW = mainMax + this.StylePadL() + this.StylePadR();
+                this.fillW = true;
             }
             if (prefH <= 0 && crossSum > 0) {
                 prefH = crossSum + this.StylePadT() + this.StylePadB();
+                this.fillH = true;
             }
         } else {
             if (prefH <= 0 && mainMax > 0) {
                 prefH = mainMax + this.StylePadT() + this.StylePadB();
+                this.fillH = true;
             }
             if (prefW <= 0 && crossSum > 0) {
                 prefW = crossSum + this.StylePadL() + this.StylePadR();
+                this.fillW = true;
             }
         }
 
@@ -2170,6 +2199,18 @@ class Control {
     /// RenderTree（而非 Paint），因为一些控件已声明了静态
     /// Paint，而编译器仅按名称解析方法调用。
     void RenderTree(App app) {
+        // 本节点渲染期间它是 CSS 组合器/结构性伪类的匹配上下文
+        // （app.styleCtx，Style.Full 读取）；退出时恢复，异常也不泄漏。
+        Control prevCtx = app.styleCtx;
+        app.styleCtx = this;
+        try {
+            this.RenderTreeInner(app);
+        } finally {
+            app.styleCtx = prevCtx;
+        }
+    }
+
+    void RenderTreeInner(App app) {
         if (!this.ComputedStyleCurrent(app)) {
             this.ResolveStyle(app, Style.SNormal());
         }

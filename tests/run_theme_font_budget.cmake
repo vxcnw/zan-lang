@@ -21,7 +21,7 @@
 cmake_policy(SET CMP0007 NEW)
 
 set(_budget
-  "stdlib/Gui/Style.zan=14"
+  "stdlib/Gui/Style.zan=15"
   "stdlib/Gui/Theme.zan=15"
   "stdlib/Gui/StyleBox.zan=1"
   "stdlib/Gui/Backend/UiDriver.zan=5"
@@ -29,7 +29,7 @@ set(_budget
   "stdlib/Gui/Component/CodeEditor/CodeEditor.zan=1"
 )
 set(_members "fontSizeTiny|fontSizeSmall|fontSizeMedium|fontSizeLarge|fontSizeHuge")
-set(_total_budget 37)
+set(_total_budget 38)
 file(GLOB_RECURSE _sources "${ROOT}/stdlib/Gui/*.zan")
 
 set(_fail "")

@@ -9,10 +9,16 @@ CSS 规范的百分之几"——后者的分母（MDN 约 570 条属性索引）
 
 三个层次都报，不合并成一个"支持度"：
 
-  选择器  接受且会匹配 / 语法接受但伪状态永不匹配 / 语法拒绝（整条规则丢弃）
+  选择器  接受且会匹配（含后代/组合器链与结构性伪类——它们在 retained
+          控件树内解析）/ 语法接受但永不匹配（:has()、生成内容的伪元素、
+          引擎观察不到的属性如 `[hidden]`）/ 语法拒绝（语法坏）
   声明    引擎认得（解析进样式盒）/ 认得但空转（Inert）/ 不认得
-  取值    认得但值被静默强转（`%`/`em`/`rem`/`calc()` 被当裸数字）——最危险
-          的一类：作者写对了、画面没变、也没有任何报错
+  取值    认得但值被静默强转——`%`/em/rem/vw/calc() 等都已有求值器，
+          只剩白名单外的单位（拼错的、冷门的）会被裸数字吞掉
+
+at-rule：`@supports`/`@layer`/`@media` 的内容引擎会解析（守卫/媒体条件的
+真假属于值语义，不在本脚本的判定范围），这里递归计入；`@import` 语句
+按展开成功计 accepted；`@keyframes` 等整块跳过，单独计数。
 
 引擎侧的真值全部从源码现取（`k == "..."` / `Inert()` / 伪状态名），不维护
 平行的手抄表：引擎加了属性，这里跟着变。
@@ -54,12 +60,29 @@ FLOW_ONLY = re.compile(
     r'|bottom$|inset|float$|clear$|white-space$|display$|vertical-align$)'
 )
 
-# 引擎会把长度/时间的单位后缀剥掉当整数用（`1.5rem` -> 1、`50%` -> 50），
-# 只有少数键对 `%` 有专门处理。值里出现这些就当"被静默强转"。
-COERCED_VALUE = re.compile(
-    r'\d\s*(%|em|rem|ex|ch|vh|vw|vmin|vmax|pt|pc|cm|mm|in\b)'
-    r'|\b(calc|min|max|clamp)\s*\('
-)
+# 有求值器的单位（StyleSheet.HasUnresolvedUnit 的白名单 + 角度补充）。
+# 数字后跟的单位不在名单里（拼错的、冷门的）才会被裸数字吞掉。
+RESOLVED_UNITS = {'px', 'em', 'rem', 'ex', 'ch', 'vw', 'vh', 'vmin', 'vmax',
+                  'pt', 'pc', 'cm', 'mm', 'in', 'q', 'ms', 's', 'deg',
+                  'turn', 'rad', 'grad', 'fr', 'hz', 'khz'}
+
+
+def coerced_value(val):
+    """值里是否有"数字 + 白名单外单位"（会被当裸数字吞掉）。
+
+    颜色（#hex、颜色函数）与 url()/var()/calc() 的内容不是单位，先剥掉；
+    这与引擎 HasUnresolvedUnit 的放行口径一致。"""
+    v = re.sub(r'"[^"]*"', '', val)
+    v = re.sub(r"'[^']*'", '', v)
+    v = re.sub(r'#[0-9a-fA-F]{3,8}\b', '', v)
+    v = re.sub(r'\b(rgb|rgba|hsl|hsla|hwb|oklab|oklch|lab|lch|color-mix|url|var|calc|min|max|clamp)\s*\([^)]*\)',
+               '', v)
+    # CSS 里单位紧跟数字（`1px`），中间不允许空白——`1 solid`、
+    # `0 1 auto` 的关键字不是单位。
+    for m in re.finditer(r'\d(?:\.\d+)?([a-zA-Z]+)', v):
+        if m.group(1).lower() not in RESOLVED_UNITS:
+            return True
+    return False
 
 # 引擎会匹配的伪状态（stdlib/Gui/Style.zan:92-97 的 name 分派）。
 STATE_NAMES = {'hover', 'active', 'focus', 'focus-visible', 'disabled',
@@ -79,7 +102,8 @@ def engine_surface():
     src = open(STYLESHEET, encoding='utf-8').read()
     keys = set(re.findall(r'\bk\s*==\s*"([a-z0-9-]+)"', src))
     at = src.index('static bool Inert')
-    inert = set(re.findall(r'\bk\s*==\s*"([a-z0-9-]+)"', src[at:at + 400]))
+    end = src.index('static', at + 10)
+    inert = set(re.findall(r'\bk\s*==\s*"([a-z0-9-]+)"', src[at:end]))
     ssrc = open(STYLE, encoding='utf-8').read()
     sb = ssrc.index('static int StateBit')
     states = set(re.findall(r'name\s*==\s*"([a-z-]+)"', ssrc[sb:sb + 700]))
@@ -139,48 +163,225 @@ def match_brace(text, open_at):
     return -1
 
 
-def classify_selector(sel, states):
-    """镜像 Css.Selector.Parse（stdlib/Gui/Css.zan:486）的接受条件，
-    再判断伪状态是否会匹配。返回 (kind, why)。"""
-    s = sel.strip()
+# 伪元素名（Css.Selector.IsPseudoElement）：能当部件名匹配。
+PSEUDO_ELEMENTS = {'placeholder', 'selection', 'marker', 'backdrop',
+                   'file-selector-button', 'caret', 'scrollbar', 'track', 'thumb'}
+# 需要生成内容/行盒的伪元素（Css.Selector.IsGenerated）：永不匹配。
+GENERATED = {'before', 'after', 'first-line', 'first-letter'}
+# 布尔属性 -> 已有状态位（Css.Selector.AttrState）。
+ATTR_STATE = {'disabled', 'checked', 'selected'}
+
+# 结构性伪类（Css.Selector.StructCode）：在 retained 控件树内匹配。
+STRUCT_PSEUDO = {'first-child', 'last-child', 'only-child', 'nth-child',
+                 'nth-last-child', 'first-of-type', 'last-of-type',
+                 'only-of-type', 'nth-of-type', 'nth-last-of-type',
+                 'empty'}
+
+
+def _skip_ws(s, i):
+    while i < len(s) and s[i].isspace():
+        i += 1
+    return i
+
+
+def _at_name(prelude):
+    """at-rule 名字（去掉 `@`，取到空白/`(`/`{` 为止，转小写）。"""
+    body = prelude[1:]
+    end = len(body)
+    for idx, ch in enumerate(body):
+        if ch.isspace() or ch in '({':
+            end = idx
+            break
+    return body[:end].strip().lower()
+
+
+def _name_char(ch):
+    """镜像 Css.Selector.NameChar。"""
+    if ch in '.#:*' or ch in ',>+~[' or ch in '()]=' or ch in '"\'':
+        return False
+    return not ch.isspace()
+
+
+def _match_paren(s, open_at):
+    """与 open_at 处的 `(` 配对的 `)`（按嵌套深度）。"""
+    depth = 0
+    for i in range(open_at, len(s)):
+        if s[i] == '(':
+            depth += 1
+        elif s[i] == ')':
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def _classify_attr(inner, states):
+    """镜像 Css.Selector.AddAttr：class / 布尔属性认，其余属性引擎观察
+    不到，语法接受但永不匹配（'attr:<name>'）。"""
+    k, m = 0, len(inner)
+    name = ''
+    while k < m and inner[k] not in '=~|^$*' and not inner[k].isspace():
+        name += inner[k]
+        k += 1
+    name = name.lower()
+    if name == '':
+        return 'dead', 'attribute'
+    while k < m and inner[k].isspace():
+        k += 1
+    if k < m:
+        c = inner[k]
+        if c == '=':
+            k += 1
+        elif c in '~|^$*' and k + 1 < m and inner[k + 1] == '=':
+            k += 2
+        else:
+            return 'dead', 'attribute'
+        while k < m and inner[k].isspace():
+            k += 1
+        val = ''
+        if k < m and inner[k] in '"\'':
+            q = inner[k]
+            e = inner.find(q, k + 1)
+            if e < 0:
+                return 'dead', 'attribute'
+            val = inner[k + 1:e]
+            k = e + 1
+        else:
+            while k < m and not inner[k].isspace():
+                val += inner[k]
+                k += 1
+        if val == '':
+            return 'dead', 'attribute'
+    if name == 'class' or name in ATTR_STATE:
+        return 'live', ''
+    return 'dead', 'attr:' + name
+
+
+def _classify(s, states):
+    """镜像 Css.Selector.Parse / ParseList。返回 (kind, why)：
+    live=会参与匹配，dead=语法接受但永不匹配，rejected=整条规则被丢弃。"""
     if s == '':
         return 'rejected', 'empty'
     if s == ':root':
         return 'root', ''      # 变量块，不是被丢弃的规则
+    never, why = False, ''
     i, n = 0, len(s)
-    while i < n and s[i] not in '.#:[ \t':
-        i += 1
+    if n and s[0] == '*':
+        i = 1                  # 通用选择器：现在支持
+    else:
+        while i < n and _name_char(s[i]):
+            i += 1
     while i < n:
         ch = s[i]
-        if ch in ' \t':
-            return 'rejected', 'descendant'
+        if ch.isspace():
+            i = _skip_ws(s, i)      # 后代组合器：树上下文内会匹配
+            continue
         if ch in '>+~':
-            return 'rejected', 'combinator'
-        if ch == '*':
-            return 'rejected', 'universal'
+            i += 1                  # 子/相邻/通用组合器：同上
+            i = _skip_ws(s, i)
+            continue
         if ch == '[':
             close = s.find(']', i)
             if close < 0:
                 return 'rejected', 'attribute'
-            if not re.match(r'class\*=["\'][^"\']+["\']$',
-                            s[i + 1:close].replace(' ', '').replace('\t', '')):
-                return 'rejected', 'attribute'
+            k, w = _classify_attr(s[i + 1:close], states)
+            if k == 'dead':
+                never = True
+                why = why or w
             i = close + 1
             continue
-        if ch not in '.#:':
-            return 'rejected', 'garbage'
-        part = ch == ':' and i + 1 < n and s[i + 1] == ':'
-        j = i + 2 if part else i + 1
-        name = ''
-        while j < n and s[j] not in '.#:[ \t>+~*':
-            name += s[j]
-            j += 1
-        if name == '':
-            return 'rejected', 'garbage'
-        if ch == ':' and not part and name not in states:
-            return 'dead', name
-        i = j
+        if ch == ':':
+            part = i + 1 < n and s[i + 1] == ':'
+            j = i + 2 if part else i + 1
+            name = ''
+            while j < n and _name_char(s[j]):
+                name += s[j]
+                j += 1
+            if name == '':
+                return 'rejected', 'garbage'
+            if part:
+                if name in GENERATED:
+                    never = True
+                    why = why or ('generated:' + name)
+                i = j
+                continue
+            if j < n and s[j] == '(':
+                close = _match_paren(s, j)
+                if close < 0:
+                    return 'rejected', 'garbage'
+                inner = s[j + 1:close]
+                lo = name.lower()
+                if lo == 'has':
+                    never = True    # 引擎对 :has() 判 never
+                    why = why or 'has'
+                    i = close + 1
+                    continue
+                if lo == 'not':
+                    ok = True
+                    subs = split_top(inner, ',')
+                    if not subs:
+                        ok = False
+                    for t in subs:
+                        if _classify(t.strip(), states)[0] != 'live':
+                            ok = False
+                    if not ok:
+                        never = True
+                        why = why or 'not'
+                elif lo in ('is', 'where'):
+                    if not any(_classify(t.strip(), states)[0] == 'live'
+                               for t in split_top(inner, ',')):
+                        never = True
+                        why = why or lo
+                elif lo in STRUCT_PSEUDO:
+                    pass            # 结构性伪类：树上下文内会匹配
+                else:
+                    never = True
+                    why = why or ('pseudo-func:' + name.lower())
+                i = close + 1
+                continue
+            if name in GENERATED:
+                never = True
+                why = why or ('generated:' + name)
+            elif name in PSEUDO_ELEMENTS:
+                pass               # 当部件
+            elif name in states or name == 'enabled':
+                pass
+            elif name.lower() in STRUCT_PSEUDO:
+                pass               # 结构性伪类：树上下文内会匹配
+            else:
+                never = True
+                why = why or ('pseudo:' + name)
+            i = j
+            continue
+        if ch == '*':
+            i += 1                  # 链中间的通用选择器（`.a *`）
+            continue
+        if ch in '.#':
+            j = i + 1
+            name = ''
+            while j < n and _name_char(s[j]):
+                name += s[j]
+                j += 1
+            if name == '':
+                return 'rejected', 'garbage'
+            i = j
+            continue
+        if _name_char(ch):
+            # 复合链延续的裸 type 名（`h1 small` 的 small、
+            # `> thead` 的 thead）：引擎按复合块链解析，会匹配。
+            while i < n and _name_char(s[i]):
+                i += 1
+            continue
+        return 'rejected', 'garbage'
+    if never:
+        return 'dead', why
     return 'live', ''
+
+
+def classify_selector(sel, states):
+    """镜像 Css.Selector.Parse（stdlib/Gui/Css.zan）的接受条件，
+    再判断伪状态/伪元素/属性是否会匹配。返回 (kind, why)。"""
+    return _classify(sel.strip(), states)
 
 
 def walk(css, keys, inert, states):
@@ -189,6 +390,7 @@ def walk(css, keys, inert, states):
     reasons = {}
     decl = {'ok': 0, 'inert': 0, 'unknown': 0, 'coerced': 0, 'custom': 0}
     ok_keys, unknown_keys, at_rules, at_stmts, rules = {}, {}, 0, 0, 0
+    imports = 0
     i, n = 0, len(text)
     while i < n:
         brace = text.find('{', i)
@@ -196,8 +398,11 @@ def walk(css, keys, inert, states):
         if brace < 0:
             break
         if 0 <= semi < brace:
-            if text[i:semi].strip().startswith('@'):
+            stmt = text[i:semi].strip()
+            if stmt.startswith('@'):
                 at_stmts += 1
+                if re.match(r'@import\s', stmt) or stmt.startswith('@import"'):
+                    imports += 1     # 引擎按文件展开（缺文件静默跳过）
             i = semi + 1
             continue
         prelude = text[i:brace].strip()
@@ -205,7 +410,26 @@ def walk(css, keys, inert, states):
         if close < 0:
             break
         if prelude.startswith('@'):
-            at_rules += 1
+            name = _at_name(prelude)
+            if name in ('supports', 'layer', 'media'):
+                # 引擎会递归解析这三种 at-rule 的内容（@supports 守卫成立时、
+                # @media 媒体条件成立时、@layer 一律摊平）。这里按"语法面"
+                # 统计：条件真假属于值语义，不在本脚本的判定范围。
+                sub = walk(text[brace + 1:close], keys, inert, states)
+                for k in st:
+                    st[k] += sub[0][k]
+                for k, v in sub[1].items():
+                    reasons[k] = reasons.get(k, 0) + v
+                for k in decl:
+                    decl[k] += sub[2][k]
+                for k, v in sub[3].items():
+                    ok_keys[k] = ok_keys.get(k, 0) + v
+                for k, v in sub[4].items():
+                    unknown_keys[k] = unknown_keys.get(k, 0) + v
+                at_stmts += sub[6]
+                rules += sub[7]
+            else:
+                at_rules += 1
             i = close + 1
             continue
         rules += 1
@@ -231,19 +455,24 @@ def walk(css, keys, inert, states):
                 if key.startswith('--'):
                     decl['custom'] += 1
                     continue
+                # 引擎 StripVendor：前缀剥离后按裸名分发。
+                for vp in ('-webkit-', '-moz-', '-ms-', '-o-'):
+                    if key.startswith(vp):
+                        key = key[len(vp):]
+                        break
                 if key in keys:
                     if key in inert:
                         decl['inert'] += 1
                     else:
                         decl['ok'] += 1
                         ok_keys[key] = ok_keys.get(key, 0) + 1
-                        if COERCED_VALUE.search(val):
+                        if coerced_value(val):
                             decl['coerced'] += 1
                 else:
                     decl['unknown'] += 1
                     unknown_keys[key] = unknown_keys.get(key, 0) + 1
         i = close + 1
-    return st, reasons, decl, ok_keys, unknown_keys, at_rules, at_stmts, rules
+    return st, reasons, decl, ok_keys, unknown_keys, at_rules, at_stmts, rules, imports
 
 
 def files_for(args):
@@ -279,10 +508,11 @@ def main():
     reasons = {}
     decl = {'ok': 0, 'inert': 0, 'unknown': 0, 'coerced': 0, 'custom': 0}
     ok_keys, unknown_keys, at_rules, at_stmts, rules, lines = {}, {}, 0, 0, 0, 0
+    imports = 0
     for p in files:
         css = open(p, encoding='utf-8', errors='replace').read()
         lines += css.count('\n') + 1
-        a, rs, b, oks, u, at, ats, r = walk(css, keys, inert, states)
+        a, rs, b, oks, u, at, ats, r, im = walk(css, keys, inert, states)
         for k in st:
             st[k] += a[k]
         for k, v in rs.items():
@@ -296,6 +526,7 @@ def main():
         at_rules += at
         at_stmts += ats
         rules += r
+        imports += im
 
     total = st['live'] + st['dead'] + st['rejected']
     dtotal = decl['ok'] + decl['inert'] + decl['unknown']
@@ -303,8 +534,8 @@ def main():
 
     print('corpus      : %s' % ('A (in-repo skins)' if args.corpus_a
                                 else ' '.join(args.dirs)))
-    print('files/lines : %d / %d   rules %d   at-rule blocks %d   at-statements %d'
-          % (len(files), lines, rules, at_rules, at_stmts))
+    print('files/lines : %d / %d   rules %d   at-rule blocks %d   at-statements %d   @imports %d'
+          % (len(files), lines, rules, at_rules, at_stmts, imports))
     print('engine      : %d keys (%d inert), %d pseudo-states'
           % (len(keys), len(inert), len(states)))
     print()
@@ -334,11 +565,11 @@ def main():
     print('      -> 这一档是"静默失败"：作者写对了、画面没变、也没有报错。')
     print()
     flow = sum(c for k, c in unknown_keys.items() if FLOW_ONLY.match(k))
-    applicable = dtotal - flow
+    applicable = dtotal - flow - decl['inert']
     effective = decl['ok'] - silent
     print('effective: %d / %d applicable = %.1f%%   (第 1 档里的数字；分母排掉'
           % (effective, applicable, pct(effective, applicable)))
-    print('           %d 条网页/打印专属属性)' % flow)
+    print('           %d 条网页/打印专属属性与 %d 条 inert)' % (flow, decl['inert']))
     print('top unknown keys:')
     for k, c in sorted(unknown_keys.items(), key=lambda kv: -kv[1])[:15]:
         mark = ' [flow-only]' if (not args.all and FLOW_ONLY.match(k)) else ''

@@ -700,7 +700,7 @@ font-source alias px 21 physical 1
 font-source cycle px 0 physical 0
 font-source inherited px 15 physical 0
 --- coercion (at-rules / var fallback / important / border style / text-shadow / to-left / lint)
-atrule a.fg 0 button.bg -16711936 x.fg -16776961 dropped 1
+atrule a.fg 0 button.bg -16711936 x.fg -16776961 dropped 0
 atimport button.bg -16711936 dropped 0
 varfb padL 7 fg -65536 bg 2130706432
 varfb hex4 fg -1996554240 empty -5517841
@@ -719,8 +719,112 @@ textshadow d col 2130706432 dx 2 dy 3 outline 0
 gradleft a dir 1 bg -16776961 to -65536
 gradleft b dir 1 bg -16776961 to -65536
 gradleft c dir 1 bg -65536 to -16776961
-lint count 4
-lint   selector not modelled, rule ignored: .a .b
-lint   selector not modelled, rule ignored: button > span
+lint count 3
 lint   no declaration consumed by the engine: card
 lint   accepted but has no effect here: z  [inert: float]
+lint   2 relational selector(s) (combinator/structural) match only inside a retained control tree
+--- css syntax (selectors / attribute operators / not-is-where / parts / supports / layer / lint)
+syn univ cls padL 2 marL 3
+syn univ bare padL 2 marL 0
+syn univ multi padL 2 marL 3
+syn caret hit [btn-primary] fg -65536
+syn caret miss [xbtn] fg 0
+syn dollar hit [x primary] fg -65536
+syn dollar miss [primary-x] fg 0
+syn tilde hit [a tab] fg -65536
+syn tilde miss [tabs] fg 0
+syn pipe hit [nav-item] fg -65536
+syn pipe miss [navbar] fg 0
+syn star case [Icon-x] fg 0
+syn star i hit [Icon-x] fg -65536
+syn star i miss [xyz] fg 0
+syn attr disabled opacity 10 padL -1 padR -1 padT -1
+syn attr normal opacity 20 padL -1 padR -1 padT 50
+syn attr checked opacity 20 padL 30 padR -1 padT 50
+syn attr selected opacity 20 padL -1 padR 40 padT 50
+syn not hit fg -65536 bg 0 accent 0
+syn not miss fg 0 bg 0 accent 0
+syn is a fg -16711936 bg 0 accent 0
+syn is b fg -16711936 bg 0 accent 0
+syn is miss fg 0 bg 0 accent 0
+syn where hit fg 0 bg -16776961 accent 0
+syn not not hit fg 0 bg 0 accent -15658735
+syn not not miss fg 0 bg 0 accent 0
+syn where loses [w] fg -16711936
+syn where ties [w] fg -16776961
+syn is ties [w] fg -16776961
+syn part placeholder fg -65536 bg -16711936
+syn part input base fg 0 bg 0
+syn part before fg 0 bg 0
+syn supports a fg -65536
+syn supports b fg 0
+syn supports c fg -16776961
+syn supports d fg 0
+syn supports e fg -14540254
+syn supports f fg -13421773
+syn supports skipped 2 dropped 0
+syn supports lint skipped 2 @supports block(s), guard false on this engine: (display: grid) x1, (display: flex) and (position: sticky) x1
+syn layer a.fg -16711936 a.bg -16776961 b.padL 7 dropped 0
+synlint count 6
+synlint skipped 1 @supports block(s), guard false on this engine: (display: grid) x1
+synlint selector can never match: p::before  [never: pseudo-element 'before' needs generated content]
+synlint selector can never match: [hidden]  [never: attribute '[hidden]' cannot be evaluated]
+synlint selector can never match: input[type="text"]  [never: attribute '[type]' cannot be evaluated]
+synlint value unit not resolved, used as a bare number: .pct  [padding: 50%]
+synlint 2 relational selector(s) (combinator/structural) match only inside a retained control tree
+--- tree context (combinators / structural pseudo-classes)
+tree title fg -15658735 accent 0
+tree badge-descendant fg -14540254 accent 0
+tree label-a fg 0 accent 0
+tree label-b fg -13421773 accent -12303292
+tree item1 fg -11184811 accent 0
+tree item2 fg -8947849 accent 0
+tree item3 fg -10066330 accent 0
+tree btn1 fg 0 accent 0
+tree btn2 fg -6710887 accent 0
+tree grid-label1 fg 0 accent -3355444
+tree grid-label2 fg 0 accent -3355444
+tree card-only fg -5592406 accent 0
+tree box-empty fg -2236963 accent 0
+tree panel-no-has fg 0 accent 0
+tree lint count 2
+tree lint   selector can never match: panel:has(title)  [never: functional pseudo-class ':has()' cannot be evaluated]
+tree lint   12 relational selector(s) (combinator/structural) match only inside a retained control tree
+tree flat-title fg 0
+--- units / math / vendor prefixes
+units a padL 24 padT 32 marL 16 w 640 h 180
+units b font 20 padR 50 marT 30 marB 38 maxW 256
+units c font 20 spacing 5
+units d shadow -65536 dx 1 dy 2 blur 3 rot 45 trans 120
+units e padT 20 padR 16
+units lint count 0
+--- media queries
+media wide fg -16645630 marL 0 marR 9 marT 11 marB 12 borderTop 3 accent 0 spacing 0
+media narrow fg -16711423 spacing 4 marL 0 marT 0
+media dark accent -16514044 bg -16448251
+media lint count 0
+--- imports
+imports tok fg -13619152 extra -11513776 deep -12566464 l1 -10461088 l2 -9408400 mq -8355712 root -15724528
+imports var #202020 gone 0
+imports leftover false mq-once true l1-once true
+--- modern colors / currentColor / cursor
+modern a fg -16744193 bg 0 borderTop 0 accent 0 cursor 0
+modern b fg 2130739455 bg 0 borderTop 0 accent 0 cursor 0
+modern c fg 2134884159 bg 0 borderTop 0 accent 0 cursor 0
+modern d fg -12599489 bg 0 borderTop 0 accent 0 cursor 0
+modern e fg -12599361 bg 0 borderTop 0 accent 0 cursor 0
+modern f fg -65536 bg 0 borderTop 0 accent 0 cursor 0
+modern g fg -13382605 bg 0 borderTop 0 accent 0 cursor 0
+modern h fg -1 bg 0 borderTop 0 accent 0 cursor 0
+modern i fg -10263709 bg 0 borderTop 0 accent 0 cursor 0
+modern j fg -1 bg 0 borderTop 0 accent 0 cursor 0
+modern k fg -3911368 bg 0 borderTop 0 accent 0 cursor 0
+modern l fg -8454017 bg 0 borderTop 0 accent 0 cursor 0
+modern m fg -11272022 bg 0 borderTop 0 accent 0 cursor 0
+modern n fg -15584170 bg -15584170 borderTop -15584170 accent -15584170 cursor 0
+modern o fg 0 bg 0 borderTop 0 accent 0 cursor 0
+modern p fg 0 bg 0 borderTop 0 accent 0 cursor 1
+modern q fg 0 bg 0 borderTop 0 accent 0 cursor 3
+modern r fg 0 bg 0 borderTop 0 accent 0 cursor 4
+modern s fg 0 bg 0 borderTop 0 accent 0 cursor 0
+modern lint count 0

@@ -107,11 +107,34 @@ token 定义在 `stdlib/Gui/Theme.zan`,由 `Style.zan` 导出为 `:root` 变量,
 - **八位十六进制是 `AARRGGBB`,alpha 在前**(`#22c9962f` = alpha 0x22 的金色)。
   按网页习惯写成 `#c9962f22` 会被读成 alpha=c9 的暗红——hover 一整块变不透明
   深色就是这么来的(2026-09-11 gamehud 皮肤实测)。四位 `#RGBA` 同理前置展开。
-- **at-rule 整块跳过**(`@media`/`@keyframes`/`@import`)——引擎没有媒体查询,
-  这是浏览器行为,但块里的规则一条都不会生效;`@import "x.css";` 只剥掉那条
-  语句,紧随其后的规则仍然生效。
-- **选择器只有 `type.class#id::part:state` 与 `[class*="frag"]`**,没有
-  祖先/子代/兄弟组合器(`.a .b`、`button > span` 整条规则被丢弃)。
+- **at-rule**:`@media` 现在运行期求值(min/max-width/height、orientation、
+  `prefers-color-scheme: dark`、`prefers-reduced-motion`、pointer/hover,Level 4
+  范围语法 `(width >= 800px)`/`(400px <= width <= 2000px)`;逗号=或、`not X and
+  Y`);媒体环境是设计视口(designW/designH)与主题暗色/减弱动效开关,不是
+  OS 窗口像素。`@import "x.css";` 按文件展开(相对路径按引入者目录、防环、
+  深度 8,皮肤包可以拆文件;磁盘皮肤加载已接线,内嵌资源里的 @import 指不到
+  磁盘文件)。`@supports (prop: value)` 是静态可判定的——条件成立把内层规则
+  照常解析,判假只跳过这一块并按条件原文报出;取值不在引擎取值表就判假
+  (`@supports (display: grid)` 为假),这是刻意的:作者写它的本意是"没有
+  grid 就用前面的 flex 兜底",守卫误判真会把兜底覆盖成 block 布局。
+  `@layer` 没有层叠优先级模型,按文档顺序摊平。`@keyframes`/`@font-face`
+  仍整块跳过并计数(`animation` 只能引用内置 8 条曲线)。
+- **选择器是复合块链**:type/`.class`/`#id`/`::part` 可用后代(空格)、`>`、`+`、
+  `~` 组合成链(`panel > title`、`row > label + label`),复合块内可带状态伪类、
+  结构性伪类(`:first-child`/`:last-child`/`:only-child`/`:nth-child(2)`/
+  `:nth-child(odd)`/`:nth-of-type(2n)` 含 an±b/`:empty`)、`*`、属性选择器
+  (`=`/`~=`/`|=`/`^=`/`$=`/`*=`,`class` 按 class 属性原文匹配,支持 `i`
+  大小写不敏感标志;`[disabled]`/`[checked]`/`[selected]` 映射状态位,另有
+  `:enabled`)、`:not()`/`:is()`/`:where()`(`:where()` 权重计 0,`:is()` 取
+  内层最大);`::placeholder` 这类伪元素当部件名匹配,单冒号旧拼写等价。
+  **组合器与结构性伪类只在 retained 控件树内命中**(渲染时注入树上下文);
+  手工调 `Style.Full` 的即时路径它们不命中(规则不丢,Lint 汇总报告)。
+  `:has()` 与 `::before`/`::after` 判 never 并由 Lint 点名。
+- **长度单位全套有求值器**:`em`/`rem`(当前字号/根字号,声明字号时的 em
+  按未缩放前的当前值)、`ex`/`ch`(近似半字宽/半字高)、`vw`/`vh`/`vmin`/
+  `vmax`(设计视口)、`pt`/`pc`/`in`/`cm`/`mm`/`q`(96dpi 换算)、`ms`/`s`/
+  `deg`/`turn`;`calc()/min()/max()/clamp()` 可嵌套(calc 里 `%` 按视口宽
+  近似)。长度不再需要写裸数字,`padding: 12px 1.5em` 这类网页写法直接抄。
 - **`var(--x, fallback)` 支持回退值**,未定义或空值时用回退;定义了就永远
   赢不了回退(CSS 语义)。所以"少给一个 token 整条声明消失"已经不是问题。
 - **`!important` 真的压得住 inline**:带标记的声明单独存、在普通级联
@@ -119,8 +142,17 @@ token 定义在 `stdlib/Gui/Theme.zan`,由 `Style.zan` 导出为 `:root` 变量,
 - **渐变只认两端+中间一档**(`linear-gradient([dir,] a, b[, c])`);停靠点上的
   百分比位置(`#fff 40%`)被丢掉,运行时只采样三档。`to left`/`270deg` 靠交换
   首末停靠点实现。
-- **`box-sizing`/`float` 收下但不生效**(引擎没有对应布局);写它们不会变成
-  class,但也没有视觉效果。
+- **`box-sizing`/`float` 收下但不生效**(引擎没有对应布局);网页布局属性
+  (content/quotes/counter-*/list-style*/user-select/outline* 等一批)进了
+  Inert 白名单:收下、不变成 class、Lint 报 inert,不会有"漏进 SetProp 变
+  class"的灵异效果。
+- **现代颜色函数**:`rgb(0 128 255)`/`rgb(0 128 255 / 50%)`(空格语法 + 斜杠
+  alpha,逗号旧语法也认)、hue 单位 `0.5turn`/`200grad`/`3.14rad`、
+  `hwb(h w% b%)`、`oklab()/oklch()`(Tailwind 调色板的缺省写法)、
+  `lab()/lch()`、`color-mix(in srgb, a, b)`(混合空间按 sRGB 近似,百分比
+  缺省 50%)。**`currentColor` 生效**:`border-color: currentColor` 记账后
+  在级联完成时替换成最终前景色(嵌在 `border: 1px solid currentcolor`
+  shorthand 里也认;写 `color: currentColor` 等于保持主题前景)。
 - **`text-shadow` 现在是真属性**(此前写了没反应):取第一层几何,≥3 层零模糊
   投影按四向描边绘制——压在图片上的白字用这个惯用法保可读性。
 - **`border` 的 style 词生效**:`dashed`/`dotted` 走虚线绘制,`none` 把宽度
@@ -131,15 +163,22 @@ token 定义在 `stdlib/Gui/Theme.zan`,由 `Style.zan` 导出为 `:root` 变量,
   46 个 token 的皮肤 vars 掉到 0,背景与字号全变 0,看起来就是"皮肤没生效")。
   自己拼 CSS 字符串(不经 `File.ReadAllText`)时仍要自己剥:解析器只认
   正好等于 `:root` 的选择器。
-- **改完皮肤用样式表的 `Lint()`/`Audit()` 自查**:返回"写了但没生效"的清单
-  (被跳过的 at-rule 数、组合器选择器、一条声明都没被消费的规则、
-  收下但无效果的属性)。返回空表 = 每条都真的会生效。正常渲染不调用它,
-  没开销。诊断皮肤"改了没反应"从这里开始,不要靠猜。
-- **评估"支持度"必须带语料**:同一个引擎,围着它写的皮肤接近满分,把外面的
-  网页 CSS 抄进来只有八成左右——**分母不同结论差一倍以上**。所以报"支持度"
-  必须写清是拿哪份 CSS 量的,并且分三层说:选择器(接受/伪状态永不匹配/整条
-  被丢弃)、声明(认得/认得但空转/不认得)、取值(被静默强转)。最危险的是
-  "解析成功但没有绘制消费者"那一档:作者写对了、画面没变、也不报错。
+- **改完皮肤用样式表的 `Lint()`/`Audit()` 自查**:返回"写了但没生效"的清单——
+  被跳过的 at-rule 数与名字、判假的 `@supports` 守卫(按条件原文)、语法拒绝的
+  选择器、永不匹配的选择器(:has()/生成内容伪元素/观察不到的属性,各带原因)、
+  值里白名单外单位的裸数字强转、一条声明都没被消费的规则、收下但无效果的
+  属性、只在树内匹配的组合器/结构性选择器条数。返回空表 = 每条都真的会生效。
+  正常渲染不调用它,没开销。诊断皮肤"改了没反应"从这里开始,不要靠猜。
+- **评估"支持度"必须带语料**:同一个引擎,围着它写的皮肤接近满分(选择器
+  99.9% 命中、声明 100% 认得、零强转),把外面的网页 CSS 抄进来,选择器被拒
+  已经是 0%,声明不认识约 0.7%,值静默强转 0%,剩约 29% "语法接受但永不匹配"
+  是 `[hidden]`/`[type=]` 这类 HTML 属性与 ::before 生成内容——需要 DOM
+  语义,合理保留。**分母不同结论差一倍以上**:报"支持度"必须写清是拿哪份
+  CSS 量的,并且分三层说:选择器(接受/语法接受但永不匹配/整条被丢弃)、
+  声明(认得/认得但空转/不认得)、取值(白名单外单位的静默强转)。
+  `@supports`/`@layer`/`@media` 的内容递归计入,厂商前缀按引擎行为剥掉后
+  计数。最危险的是"解析成功但没有绘制消费者"那一档:作者写对了、画面没变、
+  也不报错。
 
 ## 克制
 

@@ -64,7 +64,11 @@ class Skin {
         // 从磁盘读取 CSS（让用户覆盖内置的包），否则从
         // exe 内嵌的资源读取。
         string css = "";
-        if (s.dir != "") { css = Skin.ReadIfExists(s.dir + "/skin.css"); }
+        if (s.dir != "") {
+            // 磁盘读取走 @import 展开：皮肤包可以拆分文件
+            // （`@import "tokens.css";`），相对路径按包目录解析。
+            css = Css.ResolveImports(s.dir + "/skin.css");
+        }
         if (css == "") { css = Skin.EmbedRead("skins/" + name + "/skin.css"); }
         if (css != "") {
             s.loaded = true;

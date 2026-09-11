@@ -626,34 +626,51 @@ HTTP 解析、编码转换、路径处理这类纯逻辑，上移到 Zan。
 
 # A16 CSS 支持面（现状实测，参考）
 
-> 2026-09-11 更新：本轮修掉 8 类「写了不报错、也没有效果」的值解析静默失败，
-> 并给 `StyleSheet` 加了 `Lint()`/`Audit()` 自查（被跳过的 at-rule 数、组合器
-> 选择器、一条声明都没被消费的规则、收下但无效果的属性）。三条承重项是：
-> at-rule 的块按括号配对整体跳过（以前「找下一个 `}`」会连带吃掉紧随的规则）、
-> `var(--x, fallback)` 的回退语义、`!important` 单独存并在普通级联之后统一再套。
-> 皮肤写法细则见 gui-design skill 的「CSS 方言」一节。
+> 2026-09-11 第二次更新（第三轮 CSS 全面支持）：选择器引擎从"扁平表"升级为
+> 复合块链——后代/子/相邻/通用兄弟组合器与结构性伪类（:first/:last/:only-child、
+> :nth-child(-of-type) 含 odd/even/an±b、:empty）在 retained 控件树内真实匹配
+> （`App.styleCtx` 由 `Control.RenderTree` 推栈，缓存键拼 `CtxSig`），`:has()`
+> 按规范判 never 并由 Lint 点名。取值层补齐：长度单位 em/rem/ex/ch/vw/vh/vmin/
+> vmax/pt/pc/cm/mm/in/q + `calc()/min()/max()/clamp()`（可嵌套，% 按视口宽）、
+> 厂商前缀剥离（-webkit- 等）、空格语法 `rgb(0 128 255 / 50%)`、hue 单位
+> deg/grad/rad/turn、`hwb()/oklab()/oklch()/lab()/lch()/color-mix()`（矩阵换算）、
+> `currentColor`（ccMask 记账、级联后替换成最终前景色）。at-rule 层：`@media`
+> 运行期求值（min/max-width/height、orientation、prefers-color-scheme、
+> prefers-reduced-motion、pointer/hover、Level 4 范围语法 `400px <= width <=
+> 2000px`），媒体规则平行表存储、`Style.Resolve` 缓存键拼 MediaSig；`@import`
+> 按文件展开（相对路径按引入者目录、防环、深度 8、媒体限定导入现算）。bootstrap
+> 语料实测：选择器被拒 36.9%→0%、声明不认识 30.6%→0.7%、值被静默强转
+> 8.4%→0%、组合器/结构性伪类永不匹配 31.8%→29.1%（余下是 HTML 属性选择器与
+> ::before/::after 生成内容，需 DOM 语义，合理保留）。三条承重项（上轮）：
+> at-rule 的块按括号配对整体跳过、`var(--x, fallback)` 回退、`!important`
+> 级联之后统一再套。皮肤写法细则见 gui-design skill 的「CSS 方言」一节。
 
-**选择器**：类型名、`.class`（可链式）、`#id`、`::part`，各自可带 `:state` 后缀
-（hover/active/focus/focus-visible/disabled/selected/checked，可叠加）、逗号列表，
-外加 `[class*="frag"]`。**没有**后代/子/兄弟组合器（`Selector.Parse` 返回 null，
-整条规则丢弃，由 Lint 报出）。层叠是固定顺序：类型 → `.class` → `#id` → 带状态，
-同权重按出现顺序；特异性 state ≫ id ≫ class/类链 ≫ type。
+**选择器**：复合块链（引擎 `Css.Selector`）：type/`.class`/`#id`/`::part` 可用
+后代（空格）、`>`、`+`、`~` 组合成链，复合块内可带 `:state`（hover/active/
+focus/focus-visible/disabled/selected/checked）、结构性伪类、`[class*="frag"]`
+属性选择器、`:not(...)/:is(...)/:where(...)`、`*`；逗号列表。**树上下文**：
+组合器与结构性伪类只在 retained 树（`Control.RenderTree`）内命中，无树上下文
+的即时解析路径它们不命中（Lint 汇总报告条数）；特异性按复合块累加。
+`:has()` 与 `::before/::after` 判 never（Lint 点名）。层叠固定顺序：类型 →
+`.class` → `#id` → 带状态；同权重按出现顺序。
 
-**at-rule**：引擎没有媒体查询/关键帧的概念。整块 at-rule 按括号配对跳过并计数
-（`sheet.atRulesDropped`）；`@import "x.css";` 这种语句只剥掉该语句、紧随其后的
-规则仍生效。`animation` 只能引用内置 8 条曲线。`:root` 自定义属性 +
-`var(--x[, fallback])` 是唯一的变量机制。
+**at-rule**：`@media` 运行期求值（逗号=或、`not X and Y`、Level 4 范围），
+嵌套媒体条件取交；媒体环境 = 视口宽高（designW/designH）、暗色、减弱动效。
+`@supports`/`@layer` 同上轮（守卫成立时/摊平）。`@import "x.css";` 文件展开
+（Skin.zan 磁盘加载路径已接线）。`@keyframes` 仍整块跳过（`animation` 只能
+引用内置 8 条曲线）。`:root` 自定义属性 + `var(--x[, fallback])` 不变。
 
-**属性**（约 90 个）：盒模型、背景（含 linear-gradient 2~3 停靠点，
-`to left`/`270deg` 靠交换首末停靠点实现）、文本（含 text-shadow）、flex 子集、
-定位、效果（box-shadow 含 inset/opacity/filter/transform/transition 三件套）、
-overflow/visibility/cursor/accent-color。`box-sizing`/`float` 收下但无布局效果
-（Lint 标为 inert）。
+**属性**（211 个键，Inert 白名单 100 条收下无效果）：盒模型、背景（linear/
+radial/conic 渐变）、文本（text-shadow/letter-spacing/word-spacing）、flex 子集、
+定位（top/right/bottom/left/inset 有字段）、效果（box-shadow/opacity/filter/
+transform/transition）、cursor 关键词近似映射（grabbing→手型、e/w-resize→横调、
+n/s-resize→纵调）。`box-sizing`/`float` 等网页布局属性 Inert。
 
-**取值**：颜色齐全（8 位十六进制是 `AARRGGBB`，alpha 在前；4 位 `#RGBA` 前置展开）。
-长度**只有像素**（`12px` = 12、`1.5rem` = 1、`50%` 被当 50；小数只在
-opacity/scale/alpha 有效）。没有 `calc()`、没有 em/rem/vh/vw。`border` 的 style 词
-生效（dashed/dotted 走虚线，none 把宽度归零）。
+**取值**：颜色 `#RGB/#RGBA/#RRGGBB/#AARRGGBB`（alpha 在前）、命名色、
+`rgb()/hsl()` 逗号与空格两语法 + `/ alpha`、`hwb()/oklab()/oklch()/lab()/lch()/
+color-mix()`、`currentColor`。长度：像素或单位值（em/rem/ex/ch/vw/vh/vmin/vmax/
+pt/pc/cm/mm/in/q）+ `calc()/min()/max()/clamp()`；`%` 在各属性原有通道；单位
+缺失按裸数字。`border` 的 style 词生效（dashed/dotted 走虚线，none 归零宽度）。
 
 ---
 
@@ -1780,3 +1797,5 @@ null 解引用那半同理：普通 `obj.f` 直接 fault，加通用守卫是每
 * **A302 [P2/stdlib Net] leakcheck_http_forwarder_tunnel 退出时 29 对象仍可达（2026-09-11 续轮发现，未修）**：A300 修复解除了该用例的编译阻塞（此前 tunnel 测试里 `await Task.WhenAll` 拉不进 TaskJoin，conformance 与 leakcheck 双双编不过，故本项从未有机会暴露）。leak 报告（2/2 稳定复现）：`Proxy\HttpForwarder.zan:513`（TcpListener new）、`:38`（FwdChannel 构造 x4）、`:141`（FwdPool 的 List<FwdChannel>）、`:958`（PumpUntilClose 的 tasks List<long> x3）、`:394`、`:623`，加用例自身 `:102`（TcpClient）。测试尾部已有 `fwd.Stop()` + 20x10ms 让 accept 以 -1 复位退出的排水（注释明说为此目的），但 Stop 后仍有一条在途隧道的泵协程与服务端对象链在探测点前没走完/仍被持有——「可达」而非「丢失」，属停服生命周期记账问题，不是泄漏性缺陷；但 leakcheck 按仍可达计红。归 Net 车道：要么 Forwarder.Stop 把 channel 池与在途泵的收尾做成可等待（Stop 返回句柄或内部 join），要么测试加长排水并断言泵已退。未修原因：conformance 主测试 6/6 稳定绿、rc=0，修它要动 Forwarder 的 Stop 语义（Net 车道在途区域），且需要无负载环境复核排水时长。
 
 * **A304 [模板 server-*] 其余 7 个服务端模板五维抽测 + server-mvc 6 处 type-check 修复（2026-09-11，用户指令"mvc呢，其他的服务端模板呢"）**：延续 A303 五维口径对 server-mvc/collab/licensing/iot/ws/http/tcp 七模板做同轮实测（构建→起服→功能门→安全抽测→性能抽样→混沌），全部 linux-x64 linux 侧起服。**先修模板 6 处 type-check 错（server-mvc/collab/licensing/game 四份 AppController + mvc/collab Users.zan）**：HEAD 编译器（454c72f0 起 checker 检查 await 表达式内部）暴露 (a) 生成的 `__AttrRoutes` 蹦床调用 `__TxBegin/__TxCommit/__TxRollback` 而 AppController 把 override 标了 `protected`（基类 Controller.zan 这三个钩子是 unmarked=public，`__Bind/__SetView` 同为 public——模板标 protected 破坏编译器契约）；(b) `Cache()` 可返 null（AppServices.Use 前为 null）但 Users.zan 直接 `await cache.GetAsync/SetTtlAsync`。修法：四份 AppController 摘掉 `protected`（对齐基类公开契约）；Users.zan 两处加 `if (cache != null)` 守卫（Articles.zan Bust 本来就有）。归因记录：8/9 编译器（51d2f1e13）不报——当时 await 体内表达式从未被检查；9/9 起（454c72f0 `case AST_AWAIT_EXPR`）暴露的是模板潜伏缺陷，非编译器回归。**结果矩阵**（八模板全过，无 FAIL 级缺陷）：server-mvc（8099，count=4）首页/admin 登录 302+cookie 标志/7 admin 页 200/未登录 302→login/405/路径穿越 404/静态 200/3MB body 413/失败登录入 sys_login_log（30 失败+1 成功）/页面 4 并发 ~1300/s、RSS 11-16MB；server-collab（8090，count=4）7 模块 admin 页 200/[Tx] 入库闭环（submit→wms_stock_in 落行→inventory qty=5）/405；server-licensing（8096，count=4）4 admin 页 200/api/index/ping 0000/activate 错码 0003/2001 语义正确；server-iot（MQTT :1883 + console :8080）MQTT 3.1.1 CONNACK/SUBACK/PUB 回显/PINGRESP RTT 0.039ms/双客户端 fanout 送达/敌意字节 RST 拒收、console admin/admin 登录 Bearer token 64hex/badtoken 401/stats 吭口计数正确（messages_in=2）；server-ws（:8097 RFC6455）握手 101+Accept 正确/双客户端广播 `[#N] text` 双端送达/广播 RTT 0.058ms/1000 ops；server-http（改 8083）8 并发 800 req 0.43s（~1900/s）/ping pong；server-tcp（:9000）welcome/echo/64KB 单帧完整回显/RTT 0.035ms。**稳定性抽样**：mvc 15s 混沌（二进制垃圾/30KB URI/RST 半包）22 连接后八服务全存活、mvc RSS 平（11.2MB）、日志无增长；管理后台默认口令 admin/admin1234 同 A303 观察项 1（四模板都是），生产首启必须改。**模板修正**：server-http/src/main.zan 8080→8083（8080 与 iot console 冲突，模板各自示例端口本就不同）。探针方式：临时 Python 脚本（WSL 侧）逐模板打——MQTT 最小 3.1.1 客户端、RFC6455 握手+掩码帧、Worker HTTP/TCP 直连，脚本未入 tools/（一次性、无复用价值，口径已录本条）。
+
+* **A305 [stdlib/Gui] 导航后内容区间歇性整片不画——树在、像素空（2026-09-11 legend 复刻会话实测，未修，非页面代码缺陷）**：legend 模板（templates/game/legend）经 UiDriver 点击底部导航切页后，内容区**经常**只剩页面底色 `#1d2633`，再导航一次又可能画出来——同 build 同脚本一会画一会不画。已证与页面代码无关：连拍 `_scratch/legend-scene/multi.txt`（m1 画 / m2-m5 全空）里 m3/m4 是**已提交的成就页 26**（69d2bc58，常规 mk-frame 结构）同样空；图鉴 23 页的 LEGEND_DBG 探针（模板 main.zan 1000ms 刻度，`content.HitTest` 走可见性+矩形同一路径）显示 6 个采样点全部命中具名节点、navscan 扫出全部导航 tile、控件树实摆矩形正确；`Navigate` 已包 try/catch 挂 `nav-err` probe（随本次 legend 提交入库），空画时**从未触发**——不是布局塌陷也不是构建异常，是重绘/失效路径丢了请求。波及所有浮窗页（17/22/23/26/29 都中过），legend 验收只能靠「一次运行只做一次导航、不画就重启重试」的仪式绕行（REFERENCE_AUDIT §八）。**疑点与排查方向**：Gui 失效传播（rebuild+Refresh 后 dirty 标记被吞/重绘合并窗口错过）、Win32 后端 present 条件；本轮 stdlib/Gui 后端正被并行会话大面积修改（Native/Win32Shell/Css 在途 + 33b510e4 等 5 个 Gui 提交），无法在半成品 stdlib 上二分定根因——等 Gui 车道安静后用 `LEGEND_DBG=1` 起模板 + UiDriver 连拍复现（探针已固化在模板 main.zan），从 33b510e4 起对 Gui 提交逐个 A/B。另：初判「`mk-frame` 缺 `mk-fixed` 首子才中招」被 m3/m4 证伪，勿按该方向修。

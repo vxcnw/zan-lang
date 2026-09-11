@@ -180,6 +180,14 @@ class App {
     string chartThemeName;
     string skinName;
     StyleSheet useCssSheet;
+    // 用户偏好"减少动态效果"（对应 CSS `prefers-reduced-motion:
+    // reduce`）。默认 false；宿主可按系统无障碍设置打开。
+    bool reducedMotion;
+    // retained 渲染树正在绘制/解析样式的节点（RenderTree 进入时推入、
+    // 退出时恢复）。组合器链（`panel > button`）与结构性伪类
+    // （`:first-child`）用它作匹配上下文；immediate 路径为 null，
+    // 这类选择器不命中但规则不丢。
+    Control styleCtx;
     // 当操作系统正在合成真实的半透明背景（Win11
     // 亚克力 / macOS 毛玻璃 / Linux 合成器模糊）时为此窗口后面置 true。
     // 当玻璃皮肤激活时由 ApplyTheme 设置。开启时，帧被
@@ -561,11 +569,19 @@ class App {
     // 卡顿的原因。
     int bgThemeGen;
     int bgSnapGen;
+    // 本窗口的样式解析缓存（Style.CacheGet/CachePut 的存储）。
+    // 缓存的是这张窗口自己的皮肤+appCss 解析结果，所以它必须是
+    // 每窗口一份：曾经是 static 一张表、拿调用窗口的 bgThemeGen 当
+    // 代次，多窗口应用里主窗/子窗代次不同，交替渲染就把对方整表
+    // 作废，每帧全部重新走选择器匹配——子窗口因此每帧 40~120 次
+    // miss、一次几十毫秒（「子窗口非常卡」的根源）。
+    Dict<string, StyleBox> styleCache;
+    int styleCacheGen;
 
     // 主题度量（字号/高度/内边距/圆角……）当前被临时缩放到的千分比：
     // 1000 = 主题原始度量。设计器渲染真控件预览时按画布缩放整体改写
     // 主题度量（见 Designer.BeginCtrlZoom），解析出来的样式随之不同，
-    // 因此样式缓存（Style.cache / Style.baseSheet / Control.computedStyle）
+    // 因此样式缓存（app.styleCache / Style.baseSheet / Control.computedStyle）
     // 必须把它算进键里。它不是“代次”而是“状态”：在缩放与原始度量之间
     // 来回切换时两份缓存并存，不像递增 bgThemeGen 那样每个控件都把
     // 整张表连 base.css 的解析结果一起作废。
@@ -4424,13 +4440,18 @@ class App {
         bool typed = (kind == 4) || (kind == 5) || (kind == 6);
         backdropDirty = (kind != 0) && !hoverOnly && !typed;
 
-        // 多窗口应用（IDE 主窗 + 子窗 + 悬浮窗）共享线程事件队列：
-        // 泵出的原生事件可能属于其它窗口。不属于本窗口的事件留给
-        // 宿主在 FrameHook 里按 EventHwnd() 路由（App.ApplyEvent），
-        // 此处既不处理也不停止循环——否则子窗口的关闭（kind==8）
-        // 会结束主窗口的循环。
+        // 多窗口应用（主窗 + 子窗 + 悬浮窗 + 文件选择器）共享线程事件
+        // 队列：泵出的原生事件可能属于别的窗口。不属于本窗口的事件
+        // 在这里就地交给拥有它的那个顶层窗口，本窗口的交互状态一律
+        // 不动——否则子窗口的关闭（kind==8）会结束主窗口的循环，
+        // 兄弟窗口的点击也会被当成自己的。
+        // 路由职责收口在事件泵里：宿主循环（Form.Run、自带循环的
+        // 应用、外壳）只管调 ProcessEvent，不必知道 hwnd 这回事。
+        // 少了这一步，子窗口只会被 PumpAll 画出来、收不到任何输入
+        // ——点不动、拖不动、关不掉。
         nint evh = Window.EventHwnd();
         if (evh != 0 && evh != window.GetHandle()) {
+            ChildWindows.Route(evh);
             return true;
         }
 
@@ -5870,6 +5891,15 @@ class App {
     /// 客户区，只有滚轮还能滚动。角手柄保持优先，
     /// 保证对角缩放仍可操作。绘制期间每帧调用一次。
     void ReserveEdgeHit(int x, int y, int w, int h) {
+        window.AddHitGuard(x, y, w, h);
+    }
+
+    /// 为浮层（上下文菜单、下拉弹层）抢占 [x,y,w,h] 的系统命中，
+    /// 与 ReserveEdgeHit 同一机制、同一每帧清除节奏，画弹层时调用。
+    /// 无边框外壳的标题条整条按 HTCAPTION 交给 OS，弹层矩形伸进
+    /// 标题条时里面的按下会被当成拖拽标题吞掉——菜单行看得见
+    /// 点不到；登记后这部分命中还给客户区。
+    void ReservePopupHit(int x, int y, int w, int h) {
         window.AddHitGuard(x, y, w, h);
     }
 
