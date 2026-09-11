@@ -1217,6 +1217,37 @@ static void pi_seed_source(const char *source, size_t len) {
                         if (prev != TK_DOT) {
                             chain = name;
                             zan_token_t next = zan_lexer_peek(&lex);
+                            /* Mirror the parser's Task.WhenAll/WhenAny ->
+                             * TaskJoin rewrite (desugar_task_join): flag
+                             * TaskJoin when this bare `Task` is followed by
+                             * `.WhenAll`/`.WhenAny`. The chain-based mirror
+                             * further below is dead code -- `chain` is
+                             * cleared by the `default:` case on the dot
+                             * itself and again by the post-switch guard on
+                             * every non-dot token, so it is always NULL at
+                             * `prev == TK_DOT`; TaskJoin.zan was only ever
+                             * pulled when the program also spelled the
+                             * name out. Keep chain semantics untouched
+                             * (reviving them also revives the ns_root
+                             * branch, whose transitive pull breaks the
+                             * pullin_qualified_escape shadow contract). */
+                            if (name->len == 4 &&
+                                memcmp(name->str, "Task", 4) == 0 &&
+                                next.kind == TK_DOT) {
+                                zan_token_t meth =
+                                    zan_lexer_peek2(&lex);
+                                if (meth.kind == TK_IDENT &&
+                                    ((meth.str_val.len == 7 &&
+                                      memcmp(meth.str_val.str,
+                                             "WhenAll", 7) == 0) ||
+                                     (meth.str_val.len == 7 &&
+                                      memcmp(meth.str_val.str,
+                                             "WhenAny", 7) == 0))) {
+                                    pi_name_t *tj =
+                                        pi_intern("TaskJoin", 8);
+                                    if (tj) tj->flagged = 1;
+                                }
+                            }
                             if (depth >= 1 && pi_typeish(prev) &&
                                 (next.kind == TK_LPAREN ||
                                  next.kind == TK_LBRACE)) {

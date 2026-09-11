@@ -584,6 +584,7 @@ partial class Irgen {
     ExprVal LoadStaticField(Node cls, string name) {
         string owner = StaticFieldOwner(cls, name);
         Node sf = FindStaticField(cls, name);
+        if (sf == null) { throw new Exception("unknown static field " + owner + "." + name); }
         Node fty = sf.type;
         string lt = MapType(fty);
         string g = "@__zan_sf_" + owner + "_" + name;
@@ -594,6 +595,7 @@ partial class Irgen {
     void StoreStaticField(Node cls, string name, ExprVal v) {
         string owner = StaticFieldOwner(cls, name);
         Node sf = FindStaticField(cls, name);
+        if (sf == null) { throw new Exception("unknown static field " + owner + "." + name); }
         Node fty = sf.type;
         string lt = MapType(fty);
         string g = "@__zan_sf_" + owner + "_" + name;

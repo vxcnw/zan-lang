@@ -2690,6 +2690,7 @@ partial class Irgen {
         if (IndexOfStr(specSyms, sym) < 0) {
             specSyms.Add(sym);
             Node clone = CloneSubst(m, tns, trs);
+            if (clone == null) { throw new Exception("clone failed for " + m.sval); }
             clone.sval = sname;
             specMs.Add(clone);
             specClss.Add(binder.FindType(owner));

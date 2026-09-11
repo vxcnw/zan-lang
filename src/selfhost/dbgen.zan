@@ -352,7 +352,7 @@ class Dbgen {
             WfErr(fn + " expects x => x.<column>", e.line, e.col);
             return fn;
         }
-        int ci = FieldIndex(body.sval);
+        int ci = FieldFind(body.sval);
         if (ci < 0 || fKinds[ci] == Dbgen.DfNav()) {
             WfErr(fn + " expects a scalar column", e.line, e.col);
             return fn;
@@ -771,7 +771,7 @@ class Dbgen {
     }
 
     // The lambda body must be `p => p.<field>`; returns the field index.
-    int LambdaFieldIndex(Node call, string cls) {
+    int LambdaFieldFind(Node call, string cls) {
         Node lambda = call.kids[0];
         if (lambda.kind != AK.Lambda() || LambdaParamCount(lambda) != 1) { return 0 - 1; }
         Node body = lambda.a;
@@ -783,7 +783,7 @@ class Dbgen {
     }
 
     void RewriteOrderBy(Node call, string cls, bool desc) {
-        int col = LambdaFieldIndex(call, cls);
+        int col = LambdaFieldFind(call, cls);
         if (col < 0 || fKinds[col] == Dbgen.DfNav()) {
             diags.Error("OrderBy expects p => p.<scalar field>", call.line, call.col);
             return;
@@ -795,7 +795,7 @@ class Dbgen {
     }
 
     void RewriteInclude(Node call, string cls) {
-        int col = LambdaFieldIndex(call, cls);
+        int col = LambdaFieldFind(call, cls);
         if (col < 0 || fKinds[col] != Dbgen.DfNav()) {
             diags.Error("Include expects p => p.<navigation field>", call.line, call.col);
             return;
@@ -854,7 +854,7 @@ class Dbgen {
                 Node arg = body.kids[i];
                 int ci = -1;
                 if (arg.kind == AK.MemberAccess() && arg.a.kind == AK.Ident() && arg.a.sval == pname) {
-                    ci = FieldIndex(arg.sval);
+                    ci = FieldFind(arg.sval);
                 }
                 if (ci < 0 || fKinds[ci] == Dbgen.DfNav()) {
                     diags.Error("GroupBy member must be p => p.<scalar field>", arg.line, arg.col);
@@ -869,7 +869,7 @@ class Dbgen {
                 return;
             }
         } else {
-            int col = FieldIndex(body.sval);
+            int col = FieldFind(body.sval);
             if (body == null || body.kind != AK.MemberAccess() || body.a == null
                 || body.a.kind != AK.Ident() || body.a.sval != pname
                 || col < 0 || fKinds[col] == Dbgen.DfNav()) {

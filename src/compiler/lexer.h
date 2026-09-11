@@ -89,6 +89,8 @@ void zan_lexer_init(zan_lexer_t *lex, const char *source, size_t len,
                     uint32_t file_id, zan_arena_t *arena, zan_diag_t *diag);
 zan_token_t zan_lexer_next(zan_lexer_t *lex);
 zan_token_t zan_lexer_peek(zan_lexer_t *lex);
+/* Two tokens ahead without consuming (state fully restored, like peek). */
+zan_token_t zan_lexer_peek2(zan_lexer_t *lex);
 
 /* Preprocessor API: add a define before lexing begins */
 void zan_lexer_define(zan_lexer_t *lex, const char *name, const char *value);

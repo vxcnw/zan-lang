@@ -1456,7 +1456,7 @@ pp_retry:
     }
 }
 
-zan_token_t zan_lexer_peek(zan_lexer_t *lex) {
+static zan_token_t lexer_peek_n(zan_lexer_t *lex, int n) {
     /* save state */
     size_t pos = lex->pos;
     uint32_t line = lex->line;
@@ -1485,7 +1485,9 @@ zan_token_t zan_lexer_peek(zan_lexer_t *lex) {
         memcpy(cseen, lex->cond_seen_true, sizeof(cseen[0]) * (size_t)csave);
     }
 
-    zan_token_t tok = zan_lexer_next(lex);
+    zan_token_t tok;
+    for (int i = 0; i < n; i++)
+        tok = zan_lexer_next(lex);
 
     /* restore state */
     lex->pos = pos;
@@ -1503,4 +1505,11 @@ zan_token_t zan_lexer_peek(zan_lexer_t *lex) {
     }
 
     return tok;
+}
+zan_token_t zan_lexer_peek(zan_lexer_t *lex) {
+    return lexer_peek_n(lex, 1);
+}
+
+zan_token_t zan_lexer_peek2(zan_lexer_t *lex) {
+    return lexer_peek_n(lex, 2);
 }

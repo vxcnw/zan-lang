@@ -630,3 +630,28 @@ Log(q);                          // 打印 11 —— 闭包内外读写同一个
 写「async + 异常 + 局部变量」的组合时，别依赖 catch 之后的局部值。怀疑点：
 `irgen_async.c` 的 EH trampoline（约 1442/1513——landing pad 只恢复了 resume 点，
 没恢复 awaiter frame 的 locals 槽）。已登记 TASKS.md A293。
+
+## 拉入闭包的链扫描：一个变量被两处清空 = 镜像全死（A300，2026-09-11 已修）
+
+- 症状：`await Task.WhenAll(...)` 编不过（TaskJoin 拉不进来），但**没有 namespace 的
+  同款用例能过**、显式拼 `TaskJoin.X` 也能过——「形状相关」的假象差点把人引向
+  「namespace 影响解析」的邪路。真差异：能过的用例都在别处裸名拼写了 `TaskJoin`。
+- 根因：`pi_seed_source`（main.c）维护点号链 `chain`（链头=第一个段）。两处清空叠加：
+  switch 的 `default:` 对 `TK_DOT` 也执行 `chain=NULL`（点号自己抹链头），switch 后又有一行
+  「非 dot 就清 chain」把 `TK_IDENT` 分支刚设的链头**立即**抹掉。两者叠加 chain 恒 NULL，
+  ns_root 分支与 Task.WhenAll 镜像全是死代码——**靠一个从不生效的分支兜底的特性=不存在**。
+- 修法：三种 token 各司其职——TK_IDENT 设链头、default 清链头、`case TK_DOT: break` 保留；
+  删掉冗余的后置清除。教训：**「这个 fallback 分支最后一次真正生效是什么时候？」——
+  说不出来就去插桩验证（ZAN_SEED_DEBUG 打印 prev/chain），别信注释**。注释写得越笃定
+  （「mirror the rewrite or TaskJoin.zan is never pulled」）越没人怀疑它是死的。
+- 插桩小坑：往 C 源里加 `\n` 的 fprintf 时，工具传输会把 `\\n` 折成真换行直接
+  咬断字符串字面量（本轮踩中，编译错误 expected expression 才发现）；写完先看 repr。
+
+## leakcheck「仍可达」与停服排水（A302，未修）
+
+- Zan 的 leakcheck 对**仍可达**对象也报红（不区分丢失/仍被持有）。服务端对象
+  （listener、连接、池）在 Stop() 后需要泵协程自然走完（accept 返回 -1、EOF 关链路）
+  才不可达；测试里的固定排水（20x10ms）在负载下可能不够，`rc=0` 但 leakcheck 记红。
+- 判据：leak 行全指向服务端对象分配点、主输出全对 → 停服排水不足或 Stop 语义不
+  可等待，不是真泄漏。修法方向：Stop 返回可等待句柄（服务端 join 自己的泵），
+  而不是让每个用例猜排水时长。
