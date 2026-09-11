@@ -825,6 +825,12 @@ class TlsStream {
                 if (w != n) { return -1; }
                 return n;
             }
+            // n < 0：传输错误（对端 shutdown / CancelIoEx 唤醒后的
+            // WSAESHUTDOWN 等）。必须返回 -1 让 HandshakeAsync/Recv 的
+            // 截止路径收尾；若当作"再等一次"继续 await ReadReady，
+            // shutdown 后 readiness 是一次性的，第二次挂起永远无人唤醒
+            // ——HttpDeadline 扫描器只 shutdown 一次，握手就此挂死。
+            return -1;
         }
         return -1;
     }
