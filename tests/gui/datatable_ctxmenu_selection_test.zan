@@ -1,0 +1,227 @@
+using System;
+using Gui;
+using Gui.Widget;
+using Gui.Component.DataTable;
+
+/// datatable: 右键菜单不收窄既有选择（真实 App + 注入事件）。
+///
+/// 用户报告「多选以后右键菜单有问题，会取消原来选中的行变成
+/// 点击位置的行」。ea5781d9 已把右键语义对齐 DevExpress——
+/// 已有勾选/选中行时右键不收窄到本行、不清除既有选择（菜单
+/// 仍作用于原选择）。本用例用真实帧 + 合成鼠标事件把这条语义
+/// 锁进 conformance：勾选框多选、Ctrl 多选、拖范围多选三种
+/// 手势建立选择后，行体右键都必须保持选择且菜单打开；菜单
+/// 开着时表格体的左键按压被模态抑制，不得把选择改掉；
+/// Escape/点菜单项（复制）也不动选择。稳定键源（KeyBy）路径
+/// 与无选择时的预选语义一并覆盖。
+///
+/// 几何纪律（踩过的坑）：表高 300、行高 heightMedium——行 4 的
+/// 体坐标必须落在 bodyTop + bodyH 之内且是可见行，右键在表体
+/// 之外/不可见行上会被几何判定静默忽略，断言就会因"菜单没开"
+/// 假失败（早期版本表高 240，行 4 在表外，全部右键场景 0）。
+class KeyRowSource : DataSource {
+    List<DataRow> rows;
+    KeyRowSource(List<DataRow> values) { this.rows = values; }
+    override int RowCount() { return this.rows.Count; }
+    override string CellText(int row, int col) { return this.rows[row].At(col); }
+    override RowKey GetRowKey(int row) {
+        return RowKey.Of("id" + Convert.ToString(row));
+    }
+}
+
+class Program {
+    static App app;
+    static List<DataColumn> cols;
+    static DataSource src;
+    static DataTableState st;
+
+    static void Body() {
+        app.BeginFrame();
+        WidgetId.ResetFrame();
+        // Main 先出一帧事件才建状态，未建前不渲染表体。
+        if (st != null && cols != null && src != null) {
+            DataTable.RenderSource(app, 20, 20, 420, 300, cols, src, st);
+        }
+        app.RunOverlays();
+    }
+
+    static void PumpFrame() {
+        app.RequestRedraw();
+        app.PumpGuarded();
+        app.FrameGuarded(Body);
+    }
+
+    static void MoveTo(int x, int y) {
+        app.window.InjectEvent(1, x, y, 0, 0, 0);
+        PumpFrame();
+    }
+
+    static void Press(int x, int y, int button, int mods) {
+        app.window.InjectEvent(2, x, y, button, 0, mods);
+        PumpFrame();
+    }
+
+    static void Release(int x, int y, int button, int mods) {
+        app.window.InjectEvent(3, x, y, button, 0, mods);
+        PumpFrame();
+    }
+
+    /// 行中心 Y（表内行 index，可见范围 0..4）。
+    static int RowY(int row) {
+        return 20 + app.theme.heightMedium + row * app.theme.heightMedium
+            + app.theme.heightMedium / 2;
+    }
+
+    /// 点击某行勾选框（toggle 发生在释放帧）。
+    static void ClickRowCheck(int row) {
+        int numW = app.Scale(46);
+        int selW = app.Scale(40);
+        int x = 20 + numW + selW / 2;
+        int y = RowY(row);
+        MoveTo(x, y);
+        Press(x, y, 0, 0);
+        Release(x, y, 0, 0);
+    }
+
+    /// 点击某行行号列（PickRow 入口），可带 mods（1=Ctrl）。
+    static void ClickRowNum(int row, int mods) {
+        int numW = app.Scale(46);
+        int x = 20 + numW / 2;
+        int y = RowY(row);
+        MoveTo(x, y);
+        Press(x, y, 0, mods);
+        Release(x, y, 0, mods);
+    }
+
+    /// 行体（Name 列）右键。pointer 先移过去再 press+release。
+    static void RightClickBody(int row) {
+        int numW = app.Scale(46);
+        int selW = app.Scale(40);
+        int x = 20 + numW + selW + 10;
+        int y = RowY(row);
+        MoveTo(x, y);
+        Press(x, y, 1, 0);
+        Release(x, y, 1, 0);
+        // RichMenu 关闭信号镜像回 ctxOpen 需要一帧。
+        PumpFrame();
+    }
+
+    /// Escape 关菜单（第一帧置 openFlag=false，第二帧镜像 ctxOpen）。
+    static void EscapeMenu() {
+        app.window.InjectEvent(4, 200, 200, 0, 27, 0);
+        PumpFrame();
+        PumpFrame();
+    }
+
+    static int SelCount() {
+        int n = 0;
+        for (int i = 0; i < st.selected.Count; i = i + 1) {
+            if (st.selected[i]) { n = n + 1; }
+        }
+        return n;
+    }
+
+    static void Reset(string kind) {
+        if (kind == "key") { src = new KeyRowSource(Rows()); }
+        else { src = new RowListSource(Rows()); }
+        st = new DataTableState();
+        st.showSelect = true;
+        st.showRowNum = true;
+        cols = new List<DataColumn>();
+        cols.Add(DataColumn.Field(DataColumn.Text("Name", 140), "name"));
+        cols.Add(DataColumn.Field(DataColumn.Numeric("Qty", 90), "qty"));
+        // 单帧让引擎初始化。
+        PumpFrame();
+    }
+
+    static List<DataRow> Rows() {
+        List<DataRow> rows = new List<DataRow>();
+        string[] names = new string[] { "a", "b", "c", "d", "e", "f" };
+        for (int i = 0; i < names.Length; i = i + 1) {
+            DataRow r = new DataRow();
+            r.Push(names[i]);
+            r.Push(Convert.ToString(i * 10));
+            rows.Add(r);
+        }
+        return rows;
+    }
+
+    static void Main() {
+        app = new App("dt-ctxsel", 700, 560);
+        app.Show();
+        app.window.InjectEvent(1, 200, 200, 0, 0, 0);
+        PumpFrame();
+
+        // ---- 1. 勾选框多选（legacy 位置键源）：右键不收窄 ----
+        Reset("legacy");
+        ClickRowCheck(0);
+        ClickRowCheck(2);
+        bool checked2 = SelCount() == 2;
+        RightClickBody(4);
+        bool keptOpen = st.ctxOpen && SelCount() == 2;
+        Console.WriteLine("checkboxMultiRightClickKeepsSelection="
+            + (checked2 && keptOpen ? 1 : 0));
+
+        // ---- 2. Ctrl 多选（行号列）：右键不收窄 ----
+        EscapeMenu();
+        // 场景 1 的勾选还在（Escape 不清选择），Ctrl 点已选行号会把
+        // 那行 toggle 掉（行号选择的标准语义）。加选未勾选且可见的
+        // 行 1/3（表高 300 只能看到 0..3 行）——选择变成 {0,1,2,3}
+        // ——右键不收窄。
+        ClickRowNum(1, 1);
+        ClickRowNum(3, 1);
+        bool ctrl2 = SelCount() == 4;
+        RightClickBody(4);
+        bool ctrlKept = st.ctxOpen && SelCount() == 4;
+        Console.WriteLine("ctrlMultiRightClickKeepsSelection="
+            + (ctrl2 && ctrlKept ? 1 : 0));
+
+        // ---- 3. 菜单开着时表格体左键被模态抑制 ----
+        int bodyX = 20 + app.Scale(46) + app.Scale(40) + 10;
+        int cy = RowY(5);
+        MoveTo(bodyX, cy);
+        Press(bodyX, cy, 0, 0);
+        Release(bodyX, cy, 0, 0);
+        PumpFrame();
+        // 左键落在菜单遮罩上：选择必须仍是 4（点穿会把它改掉）。
+        bool modalKept = SelCount() == 4;
+        Console.WriteLine("bodyClickUnderMenuKeepsSelection="
+            + (modalKept ? 1 : 0));
+
+        // ---- 4. Escape 关菜单不动选择 ----
+        EscapeMenu();
+        Console.WriteLine("escapeKeepsSelection=" + (SelCount() == 4 ? 1 : 0));
+
+        // ---- 5. 拖范围多选（行号列拖动）：范围内右键保持 ----
+        Reset("legacy");
+        int numW = app.Scale(46);
+        int sx = 20 + numW / 2;
+        MoveTo(sx, RowY(1));
+        Press(sx, RowY(1), 0, 0);
+        MoveTo(sx, RowY(2));
+        MoveTo(sx, RowY(3));
+        Release(sx, RowY(3), 0, 0);
+        bool rangeSel = SelCount() >= 2;
+        RightClickBody(2);
+        Console.WriteLine("rangeRightClickKeepsSelection="
+            + (rangeSel && SelCount() >= 2 && st.ctxOpen ? 1 : 0));
+
+        // ---- 6. 稳定键源（KeyBy）：勾选多选 + 右键不收窄 ----
+        EscapeMenu();
+        Reset("key");
+        ClickRowCheck(0);
+        ClickRowCheck(2);
+        bool keyChecked = SelCount() == 2;
+        RightClickBody(4);
+        bool keyKept = st.ctxOpen && SelCount() == 2;
+        Console.WriteLine("stableKeyRightClickKeepsSelection="
+            + (keyChecked && keyKept ? 1 : 0));
+
+        // ---- 7. 无选择时右键预选点击行（复制/导出有对象）----
+        EscapeMenu();
+        Reset("legacy");
+        RightClickBody(1);
+        Console.WriteLine("noSelectionRightClickPreselects="
+            + (SelCount() == 1 && st.ctxOpen ? 1 : 0));
+    }
+}
