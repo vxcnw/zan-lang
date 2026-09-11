@@ -8623,6 +8623,47 @@ static LLVMValueRef emit_raw_fn_for_cb_cast(zan_irgen_t *g, zan_ast_node_t *e,
     return NULL;
 }
 
+/* A `(nint)Method` value crosses into C as a callback address the host code
+ * invokes through its own `void (*)(void *)` shape. On x64 the widths happen
+ * to overlap and native never notices; on wasm32 the callee keeps its Zan
+ * table signature (nint params are i64 there, or dropped entirely when
+ * unused) while C's call_indirect expects exactly one i32 -- the raw entry
+ * traps with "null function or function signature mismatch" on the first
+ * call (the GUI guard was the first wasm32 consumer). Synthesize, once per
+ * callee, a C-shaped (i32) -> void shim that widens and forwards; the shim's
+ * address is what crosses the boundary. */
+static LLVMValueRef emit_wasm_cb_thunk(zan_irgen_t *g, LLVMValueRef fn) {
+    char name[300];
+    snprintf(name, sizeof(name), "__zan_cb_thunk.%s", LLVMGetValueName(fn));
+    LLVMValueRef existing = LLVMGetNamedFunction(g->mod, name);
+    if (existing && LLVMIsAFunction(existing)) return existing;
+    LLVMTypeRef i32T = LLVMInt32TypeInContext(g->ctx);
+    LLVMTypeRef i64T = LLVMInt64TypeInContext(g->ctx);
+    LLVMTypeRef thunk_ty = LLVMFunctionType(LLVMVoidTypeInContext(g->ctx),
+                                            &i32T, 1, 0);
+    LLVMValueRef thunk = LLVMAddFunction(g->mod, name, thunk_ty);
+    LLVMBasicBlockRef saved_bb = LLVMGetInsertBlock(g->builder);
+    LLVMBasicBlockRef bb = LLVMAppendBasicBlockInContext(g->ctx, thunk, "entry");
+    LLVMPositionBuilderAtEnd(g->builder, bb);
+    LLVMValueRef arg64 = LLVMBuildZExt(g->builder, LLVMGetParam(thunk, 0),
+                                       i64T, "arg64");
+    unsigned nparams = LLVMCountParams(fn);
+    LLVMTypeRef fn_ty = LLVMGlobalGetValueType(fn);
+    if (nparams >= 1) {
+        LLVMValueRef args[1];
+        args[0] = (LLVMGetTypeKind(LLVMTypeOf(arg64)) == LLVMIntegerTypeKind &&
+                   LLVMGetIntTypeWidth(LLVMTypeOf(LLVMGetParam(fn, 0))) == 32)
+                      ? LLVMBuildTrunc(g->builder, arg64, i32T, "arg32")
+                      : arg64;
+        LLVMBuildCall2(g->builder, fn_ty, fn, args, 1, "");
+    } else {
+        LLVMBuildCall2(g->builder, fn_ty, fn, NULL, 0, "");
+    }
+    LLVMBuildRetVoid(g->builder);
+    LLVMPositionBuilderAtEnd(g->builder, saved_bb);
+    return thunk;
+}
+
 static LLVMValueRef emit_expr_cast_expr(zan_irgen_t *g, zan_ast_node_t *expr,
         local_scope_t *locals) {
         /* (Type)x — explicit numeric cast honoring the target type. */
@@ -8639,7 +8680,11 @@ static LLVMValueRef emit_expr_cast_expr(zan_irgen_t *g, zan_ast_node_t *expr,
             LLVMTypeRef tgt0 = map_type(g, tt0);
             if (LLVMGetTypeKind(tgt0) == LLVMIntegerTypeKind) {
                 LLVMValueRef raw = emit_raw_fn_for_cb_cast(g, expr->cast.expr, locals);
-                if (raw) return LLVMBuildPtrToInt(g->builder, raw, tgt0, "cast.fn");
+                if (raw) {
+                    if (target_is_wasm32(g))
+                        raw = emit_wasm_cb_thunk(g, raw);
+                    return LLVMBuildPtrToInt(g->builder, raw, tgt0, "cast.fn");
+                }
             }
         }
         LLVMValueRef val = emit_expr(g, expr->cast.expr, locals);

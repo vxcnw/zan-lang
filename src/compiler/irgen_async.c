@@ -1490,10 +1490,66 @@ static void emit_eh_rethrow_current(zan_irgen_t *g) {
         LLVMValueRef printf_fn = LLVMGetNamedFunction(g->mod, "printf");
         if (printf_fn) {
             LLVMTypeRef printf_ty = LLVMFunctionType(i32, &i8ptr, 1, 1);
-            /* interned: one copy per async fn otherwise, all the same text. */
-            LLVMValueRef fmt = zan_irgen_intern_string(g,
-                "Unhandled exception\n");
-            zan_call2(g->builder, printf_ty, printf_fn, &fmt, 1, "");
+            /* Mirror the sync die block (irgen_stmt.c): report WHAT escaped,
+             * not just that something did -- on a device console the bare
+             * line is unfollowable. Class throw: the tid-name registry;
+             * string throw: the message itself; nothing: the old text. */
+            LLVMValueRef exc = LLVMBuildLoad2(g->builder, i8ptr, exc_g, "aeh.exc");
+            LLVMValueRef tid = LLVMBuildLoad2(g->builder, i8ptr,
+                get_eh_exc_tid_global(g), "aeh.tid");
+            LLVMValueRef hasExc = zan_icmp(g->builder, LLVMIntNE, exc,
+                LLVMConstNull(i8ptr), "aeh.has");
+            LLVMValueRef isStr = zan_icmp(g->builder, LLVMIntEQ, tid,
+                LLVMConstNull(i8ptr), "aeh.isstr");
+            LLVMBasicBlockRef str_bb =
+                LLVMAppendBasicBlockInContext(g->ctx, fn, "aeh.str");
+            LLVMBasicBlockRef cls_bb =
+                LLVMAppendBasicBlockInContext(g->ctx, fn, "aeh.cls");
+            LLVMBasicBlockRef msg_bb =
+                LLVMAppendBasicBlockInContext(g->ctx, fn, "aeh.msg");
+            LLVMBasicBlockRef plain_bb =
+                LLVMAppendBasicBlockInContext(g->ctx, fn, "aeh.plain");
+            LLVMBasicBlockRef done_bb =
+                LLVMAppendBasicBlockInContext(g->ctx, fn, "aeh.done");
+            /* nothing in flight: legacy bare line */
+            LLVMBuildCondBr(g->builder, hasExc, str_bb, plain_bb);
+            LLVMPositionBuilderAtEnd(g->builder, plain_bb);
+            {
+                LLVMValueRef pfmt = zan_irgen_intern_string(g,
+                    "Unhandled exception\n");
+                zan_call2(g->builder, printf_ty, printf_fn, &pfmt, 1, "");
+                LLVMBuildBr(g->builder, done_bb);
+            }
+            /* tid == NULL marks a string throw: the payload IS the message */
+            LLVMPositionBuilderAtEnd(g->builder, str_bb);
+            LLVMBuildCondBr(g->builder, isStr, msg_bb, cls_bb);
+            LLVMPositionBuilderAtEnd(g->builder, msg_bb);
+            {
+                LLVMValueRef sfmt = zan_irgen_intern_string(g,
+                    "Unhandled exception: %s\n");
+                LLVMValueRef sargs[2] = { sfmt, exc };
+                zan_call2(g->builder, printf_ty, printf_fn, sargs, 2, "");
+                LLVMBuildBr(g->builder, done_bb);
+            }
+            /* class throw: resolve the type name through the registry */
+            LLVMPositionBuilderAtEnd(g->builder, cls_bb);
+            {
+                LLVMValueRef name_fn = get_eh_tid_name_fn(g);
+                LLVMValueRef cname = zan_call2(g->builder,
+                    LLVMFunctionType(i8ptr, (LLVMTypeRef[]){ i8ptr }, 1, 0),
+                    name_fn, (LLVMValueRef[]){ tid }, 1, "aeh.cname");
+                LLVMValueRef empty = LLVMBuildICmp(g->builder, LLVMIntEQ,
+                    cname, LLVMConstNull(i8ptr), "aeh.noname");
+                LLVMValueRef use = LLVMBuildSelect(g->builder, empty,
+                    zan_irgen_intern_string(g, "unknown"),
+                    cname, "aeh.use");
+                LLVMValueRef cfmt = zan_irgen_intern_string(g,
+                    "Unhandled exception: %s\n");
+                LLVMValueRef cargs[2] = { cfmt, use };
+                zan_call2(g->builder, printf_ty, printf_fn, cargs, 2, "");
+                LLVMBuildBr(g->builder, done_bb);
+            }
+            LLVMPositionBuilderAtEnd(g->builder, done_bb);
         }
         LLVMTypeRef exit_ty = LLVMFunctionType(LLVMVoidTypeInContext(g->ctx), &i32, 1, 0);
         LLVMValueRef exit_fn = get_libc_fn(g, "exit", exit_ty);

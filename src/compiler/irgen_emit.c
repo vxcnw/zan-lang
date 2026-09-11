@@ -2959,6 +2959,12 @@ zan_status_t zan_irgen_write_obj(zan_irgen_t *g, const char *path) {
             { "zan_gui_clear_hit_guards", "ii" },
             { "zan_gui_add_hit_guard", "iiiiii" },
             { "zan_gui_text_stat_read", "ji" },
+            /* App's guard trampoline: App.zan passes (nint, nint) call sites
+             * at the C (iptr, iptr) -> int definition in gui_runtime.c.
+             * Unadapted, the WeChat probe trapped on the first guarded pump
+             * -- wasm-ld kept a signature_mismatch stub for the entry and
+             * the RunLoop's guard call landed in it. */
+            { "zan_gui_guard_call", "iii" },
             /* NativeMemory.Copy/Find lower to memmove/memchr with a 64-bit
              * length (Zan int); wasm32 size_t is 32-bit. The coroutine
              * drivers declare zan_timer_cancel_delay as void while
