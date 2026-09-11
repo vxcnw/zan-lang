@@ -151,10 +151,10 @@ State the command you ran and what it printed. Separate "compiled", "ran" and
   `result:"OK"`）——解析层两种形态都要接住。
 * 需要本地 HTTP 假网关自测的 SDK（微信/京东/Steam 同款套路）：
   `HttpServer` 回放官方 JSON 形态 + `ExternalCallPolicy.Default()
-  .AllowLocalHttp()` 放行 loopback；客户端**不要**对明文假网关发 TLS——
-  TLS 握手对明文服务器会挂死到 `TlsStream.HandshakeAsync` 的 30s 硬截止
-  （真实 HTTPS 目标不受影响，是握手对端不是 TLS 而已），给 SDK 留一个
-  PlainHttpMode 之类的明文开关。
+  .AllowLocalHttp()` 放行 loopback。曾有的坑（stdlib 已修，旧工具链仍会
+  踩）：TLS 客户端对明文服务器握手会永久挂死——`TlsStream.PumpInAsync`
+  对 `Recv<0` 不退出循环重挂 `ReadReady`，而 shutdown 后 readiness 只有一
+  次；给 SDK 留 `PlainHttpMode` 之类的明文开关是防御性设计。
 * Do not hard-code hosts, ports, credentials or business limits: they belong in
   the project config (`config/app.json` for server projects), read at run time.
 * Do not hand-draw GUI widgets: use the standard library's components
