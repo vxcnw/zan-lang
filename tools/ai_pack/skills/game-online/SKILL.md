@@ -167,6 +167,24 @@ minLevel→BOSS 链、M2.DB 快照数值）。改了下面这些就要同步改 
    299-330/s p50 23ms，60s 持续 ~200/s。**已知预存缺陷**：高并发突发
    有 bistable 停摆（13-24s 自愈，单进程复现，根因=RecvAsync 轮询帧
    淹没就绪队列）——吞吐数字要在"飞起"轮次取。
+   soak harness 三坑：①threading.Lock 不可重入——推送机器人的 kick
+   分支在锁内调带锁的 drop()，第一次重登就全 harness 死锁（所有线程
+   停 futex，极易误判成 subprocess fork 死锁）；②多线程 python 里
+   subprocess 采样小概率 fork 死锁，RSS/fd 采样用纯 /proc 读（status
+   的 VmRSS + listdir fd 目录）；③推送机器人 attach 被拒要立刻断开
+   重试并把 attach 回复逐条记日志——gm/聊天送达数一掉，先看 attach
+   日志再看服务端。
+7. **顶号/换会话必须「先登记后拆通道」**：EnsureHttpSession 顶号若先
+   kick+Leave 再登记新会话，Leave 落库是一次几十 ms 的 DB 写——客户端
+   收到 kick 当场重连 attach（零延迟），掉进「旧会话已摘、新会话未
+   登记」的缝，attach 答「登录已过期」，这条推送连接从此静默聋（不
+   报错、收不到任何推送，直到客户端自己的超时）。负载越高 DB 写越慢
+   缝隙越宽（实测 12/12 必现）；无负载探针里前一步 HTTP RTT 恰好盖过
+   缝隙，复现不出——缝隙类缺陷以时序为变量，压测是唯一的复现手段。
+   修法=登记先行：建会话+byCid/byAccount 换绑+kicked 标记全部完成后
+   才 kick+close+Leave，两步之间不放 await（单线程调度下外部看不到
+   中间态），Leave 的 byAccount cid 守卫保证摘旧不误摘新。回归：e2e
+   的「kick 后零延迟 attach」断言。
 
 ## 8. 客户端首帧时序与富文本聊天（2026-09-11 legend 实测）
 

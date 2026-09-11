@@ -283,7 +283,6 @@ class World {
     static async int EnsureHttpSession(int accountId, string username,
                                        long now) {
         Session old = World.ByAccount(accountId);
-        if (old != null) { await World.Leave(old.cid); }
         Session s = new Session();
         s.cid = GameShared.NextHttpCid();
         s.httpOwned = true;
@@ -297,7 +296,30 @@ class World {
         s.kicked = false;
         s.lastSeen = now;
         s.loginAt = now;
-        await World.Enter(s, now);
+        /* 先登记新会话、再拆旧通道，顺序不能倒：客户端收到 kick 会
+            当场重连 attach，而 Leave 落库是一次几十 ms 的 DB 写——若
+            先踢后登记，重连恰好掉进「旧会话已摘、新会话未登记」的缝，
+            attach 答「登录已过期」，推送通道从此挂不上。登记与踢线
+            之间没有 await，单线程调度下外部看不到中间态。Leave 的
+            byAccount cid 守卫保证摘旧会话时不会误摘新登记。 */
+        World.byCid.Add(s.cid, s);
+        if (old != null) {
+            old.kicked = true;
+            World.byAccount.Remove(accountId);
+            World.byAccount.Add(accountId, s);
+            /* 顶号必须把旧会话挂着的推送通道一并拆掉：只 Leave 不通知，
+               旧 TCP 连接就成了收不到任何推送的孤儿——客户端要等自己的
+               空闲超时才能发现，期间的公告/聊天全丢。与 Enter/Kick/Sweep
+               三处的顶号形态保持一致。 */
+            Gateway.Send(old.conn, Gateway.Ev("kick", "该账号在别处登录"));
+            if (old.conn != null) { old.conn.Close(); }
+            await World.Leave(old.cid);
+        } else {
+            World.byAccount.Add(accountId, s);
+        }
+        Console.WriteLine("[world] login #" + Convert.ToString(s.cid)
+            + " " + s.username + " sessions="
+            + Convert.ToString(World.byCid.Count));
         return s.cid;
     }
 

@@ -10,8 +10,10 @@ exp/levelup/gold/drops, shop buy/sell, potion use, weapon equip/takeoff,
 per-tick auto-hunt events (auto pauses out of the mob's map and resumes
 back on it), death respawn in town, GM item gift (online push + offline
 grant), GM level change clamping hp, full-hp potion refusal, and DB
-persistence of hp/exp/equipped weapon/bag -- 114 assertions. Stdlib
-urllib/socket only.
+persistence of hp/exp/equipped weapon/bag, plus the HTTP-session push
+channel flow: attach, relogin kick, zero-delay re-attach after kick
+(register-before-kick regression), GM broadcast delivery -- 125
+assertions. Stdlib urllib/socket only.
 
 Run from the SERVER directory against a FRESH data/app.db:
   1. stop server, delete data/app.db*, start server
@@ -148,7 +150,16 @@ class Client:
             pass
 
 def tcp():
-    return Client()
+    # 世界 worker（带游戏 TCP 监听）要等建表+目录种子完成才开始收连，
+    # 比 HTTP 端口晚——多 worker/冷启动下轮询重连，别在启动缝里崩。
+    deadline = time.time() + 15
+    while True:
+        try:
+            return Client()
+        except OSError:
+            if time.time() > deadline:
+                raise
+            time.sleep(0.2)
 
 # ---------- 1. 落地页与公共页面 ----------
 st, html, _ = http("/")
@@ -196,14 +207,22 @@ ok("密码已重置" in html, "forgot resets with correct answer")
 
 # 密保答错限频：mallory 连错 5 次后锁定，正确答案也被拒
 mallory = tcp()
+mallory.recv()  # banner：不先吃掉会被 ok_for() 当成注册应答，注册落库未完成就去找回=账号不存在
 mallory.send({"op": "register", "user": "mallory", "pass": "mallory1",
               "question": "小学校名", "answer": "实验小学"})
 ok(mallory.ok_for() is not None, "TCP register mallory")
 mallory.drop()
+# TCP 注册的 ack 时 INSERT 已执行，但另一个 worker 的 SELECT 有
+# 几十 ms 到数秒读不到（跨 worker 读你写之缝，见 TASKS 挂账）——可见前
+# 重试；不可见的请求不落错误计数。
 for i in range(5):
-    st, html, _ = http("/forgot/reset", data={
-        "user": "mallory", "answer": "错误答案", "newpass": "pass123",
-        "newpass2": "pass123"})
+    for tries in range(200):
+        st, html, _ = http("/forgot/reset", data={
+            "user": "mallory", "answer": "错误答案", "newpass": "pass123",
+            "newpass2": "pass123"})
+        if "账号不存在" not in html:
+            break
+        time.sleep(0.05)
     ok("密保答案不正确" in html, f"mallory wrong answer #{i+1}")
 # 第 6 次（无论答案对错）都落在锁定窗口内
 st, html, _ = http("/forgot/reset", data={
@@ -217,7 +236,7 @@ ok("错误次数过多" in html, "lockout applies even to correct answer")
 
 # ---------- 4. TCP 账号/选区/建角 ----------
 bob = tcp()
-hello = bob.recv()
+hello = bob.recv(timeout=30)  # 世界 worker 起服要种子目录，banner 可能晚到
 # proto-2 握手：连接建立即收到 {"ok":1,"proto":2,...}；客户端可再发 hello 升密，
 # 明文 op 在 requireEnc=0 时照常可用（见 src/Game/Secure.zan 握手注释）。
 ok(hello is not None and (hello.get("ev") == "hello" or hello.get("proto") == 2),
@@ -745,5 +764,66 @@ bags = db.execute(
 ok(any(b[1] >= 1 for b in bags), "bag rows persisted")
 db.close()
 h.drop()
+
+# ---- HTTP 登录 + 推送通道重挂（回归：顶号必须「先登记后拆通道」）----
+# EnsureHttpSession 若先 kick+Leave（Leave 落库是一次几十 ms 的 DB 写）
+# 后登记新会话，客户端收到 kick 当场重连 attach 会掉进「旧会话已摘、
+# 新会话未登记」的缝，attach 答「登录已过期」，这条推送通道从此静默聋。
+# 本节在收到 kick 后零延迟重挂，正是该缝隙的复现形状。
+
+def api(path, obj):
+    req = urllib.request.Request(BASE + path)
+    req.add_header("Content-Type", "application/json")
+    try:
+        resp = opener.open(req, json.dumps(obj).encode(), timeout=10)
+        return json.loads(resp.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        try:
+            return json.loads(e.read().decode("utf-8", "replace"))
+        except Exception:
+            return {}
+
+def attach(token):
+    c = Client()
+    c.recv()  # banner
+    c.send({"op": "attach", "token": token})
+    while True:
+        m = c.recv()
+        if m is None or "push" in m or m.get("ok") == 0:
+            return c, m
+
+j = api("/api/game/register", {"user": "e2e_push", "pass": "pass123"})
+j = api("/api/game/login", {"user": "e2e_push", "pass": "pass123"})
+ok(j.get("ok") == 1 and j.get("token"), "HTTP login issues token")
+tok = j["token"]
+j = api("/api/game/create", {"op": "create", "token": tok, "realm": 1,
+                             "name": "推客", "job": 0})
+j = api("/api/game/enter", {"op": "enter", "token": tok, "realm": 1})
+ok(j.get("ok") == 1, "HTTP enter registers httpOwned session")
+
+p, m = attach(tok)
+ok(m is not None and "push" in m, "attach claims push channel for http session")
+
+j = api("/api/game/login", {"user": "e2e_push", "pass": "pass123"})
+ok(j.get("ok") == 1 and j.get("token") != tok, "relogin mints a fresh token")
+tok2 = j["token"]
+m = p.recv()
+ok(m is not None and m.get("ev") == "kick",
+   "old push channel receives relogin kick")
+p.drop()
+
+p2, m = attach(tok2)
+ok(m is not None and "push" in m,
+   "immediate re-attach after kick succeeds (register-before-kick)")
+
+st, j, _ = gm("/admin/game/online/broadcast", {"text": "e2e 推送回归"}, cookie)
+m = None
+for _ in range(10):
+    mm = p2.recv(timeout=5)
+    if mm and mm.get("ev") == "chat" and "e2e" in (mm.get("text") or ""):
+        m = mm
+        break
+ok(m is not None, "GM broadcast reaches re-attached push channel")
+p2.drop()
 
 print(f"ALL PASS checks={checks}")
