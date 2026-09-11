@@ -345,6 +345,18 @@ description: zanc 编译器内部（parser/checker/irgen）的实测定式与坑
   平板（与算法无关=与 native 库无关=拷贝循环在扛），输出零拷贝后
   CBC 1267-1319 / GCM 2000-4413 MiB/s（raw 的 88-96%）。
 
+## 字符串字面量里的 `\xNN` 是码点，不是裸字节（2026-09-11 实测）
+
+- `"\xEF"` **不是** byte 0xEF，是码点 U+00EF，进字符串时编成两个 UTF-8 字节
+  `C3 AF`。于是 `"\xEF" + "\xBB" + "\xBF"` 不是 3 字节 BOM 而是 6 字节
+  `C3 AF C2 BB C2 BF`：同一份 82 字节的 CSS，拼上它读出 len 88、首字节 195，
+  写进文件得到的头是 `C3 AF C2 BB C2 BF`——「看起来像 BOM、其实不是」，
+  拿去验证 BOM 行为会得出错误结论（实测踩过一轮）。
+- 需要字节精确的内容（BOM、协议魔数、含高位字节的 fixture）一律从 `byte[]` 拼：
+  `byte[] raw = new byte[3]; raw[0] = (byte)0xEF; ...; string s = raw.ToStr(0, 3);`
+  ——`File.ReadAllText` 内部就是这样把 chunk 变字符串的。自检：`.Length` 等于
+  字节数（BOM 是 3 不是 6），首字节是你想要的码值。
+
 ## stdlib 按需拉入（demand-driven pull-in，2026-09-10）
 
 > 以前 `using Gui;` = 目录全量 glob + 传递 using 扫描到不动点，一个空窗口
